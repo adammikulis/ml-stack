@@ -39,10 +39,10 @@ python scripts/check_tiers.py --live
 | `mainspring-gguf` | host | Converter/quantiser discovery, export, tokenizer-metadata repair |
 | `mainspring-speech` | host | *(planned)* ASR / TTS / VAD behind one resolver |
 | `mainspring-vision` | host | *(planned)* VLM, OCR, image generation |
-| `mainspring-backend` | lab | *(planned)* an array-ops seam over MLX and PyTorch |
-| `mainspring-graph` | lab | *(planned)* COO graph container and scatter/segment ops |
-| `mainspring-train` | lab | *(planned)* atomic checkpoint/rotate/resume, schedules, metrics |
-| `mainspring-testing` | lab | *(planned)* cross-backend parity harness |
+| `mainspring-backend` | lab | One array API over MLX and PyTorch, so math is written once |
+| `mainspring-graph` | lab | Graphs as tensors: message passing, DAG sweeps, topology |
+| `mainspring-train` | lab | Atomic checkpoints, schedules, guards, metrics, leak-safe splits |
+| `mainspring-testing` | lab | Cross-backend numerical parity harness |
 
 ## Using it
 
@@ -65,6 +65,30 @@ import psutil
 
 tier = largest_that_fits(psutil.virtual_memory().total)
 print(tier.id, tier.gguf_repo, tier.context)
+```
+
+Write model math once, against the array protocol, and run it on either framework:
+
+```python
+from mainspring.backend import get_backend
+
+def rms_norm(backend, x, weight, eps=1e-6):
+    ops = backend.ops
+    scale = ops.rsqrt(ops.mean(x * x, axis=-1, keepdims=True) + eps)
+    return x * scale * weight
+
+rms_norm(get_backend("mlx"), x, w)      # same function
+rms_norm(get_backend("torch"), x, w)    # same numbers
+```
+
+`mainspring.testing` proves the two agree, forward and backward:
+
+```python
+from mainspring.testing import needs_both, run_pair
+
+@needs_both
+def test_layer_matches():
+    run_pair(build_torch, build_mlx, forward_torch, forward_mlx, (6, 8))
 ```
 
 ## `contracts/` is data, not code
@@ -96,7 +120,16 @@ A few decisions that are easy to reverse by accident:
   coercing a vector turns a model mismatch into a store of garbage that still
   cosine-compares.
 - **Verify before the atomic rename.** A download lands in `.part` and only moves into
-  place once its size and digest check out.
+  place once its size and digest check out. A checkpoint is built in `.partial`, and the
+  state file that makes a directory *count* as a checkpoint is written **last** — so a
+  half-written save is ignored rather than resumed from.
+- **A resume restores everything or fails.** Weights without optimizer state is a warm
+  restart, not a resume, and it shows up as a loss spike that gets blamed on the LR.
+- **Schedules are plain functions returning floats.** A framework schedule object captured
+  by a compiled function freezes the learning rate for the rest of the run, silently.
+- **Graph algorithms are networkx's job.** `mainspring-graph` keeps a graph in the array
+  backend so it can go through a model; for shortest path or components, call
+  `Graph.to_networkx()`.
 
 ## Testing
 

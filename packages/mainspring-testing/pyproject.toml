@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mainspring-testing"
+version = "0.1.0"
+description = "Cross-backend numerical parity harness for MLX and PyTorch. Lab tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["numpy>=1.24", "pytest>=7"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mainspring"]

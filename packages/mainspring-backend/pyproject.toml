@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mainspring-backend"
+version = "0.1.0"
+description = "One array API over MLX and PyTorch, so model math is written once. Lab tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = []
+
+[project.optional-dependencies]
+torch = ["torch>=2.2"]
+mlx = ["mlx>=0.20"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mainspring"]
