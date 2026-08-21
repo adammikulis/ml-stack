@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mainspring-speech"
+version = "0.1.0"
+description = "ASR, TTS and VAD behind three protocols and one resolver. Host tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["mainspring-media"]
+
+[project.optional-dependencies]
+whisper = ["faster-whisper>=1.0"]
+transformers = ["transformers>=4.40", "torch>=2.2"]
+kokoro = ["kokoro-onnx>=0.3", "numpy>=1.24"]
+piper = ["piper-tts>=1.2"]
+silero = ["torch>=2.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mainspring"]

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mainspring-vision"
+version = "0.1.0"
+description = "Vision-language payloads and a gate that verifies the model can see. Host tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["mainspring-media", "mainspring-client"]
+
+[project.optional-dependencies]
+resize = ["pillow>=10.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mainspring"]

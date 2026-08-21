@@ -37,8 +37,8 @@ python scripts/check_tiers.py --live
 | `mainspring-client` | device | HTTP client: chat, completion, embeddings, health, token estimate |
 | `mainspring-serve` | host | Start, adopt and tear down a model server |
 | `mainspring-gguf` | host | Converter/quantiser discovery, export, tokenizer-metadata repair |
-| `mainspring-speech` | host | *(planned)* ASR / TTS / VAD behind one resolver |
-| `mainspring-vision` | host | *(planned)* VLM, OCR, image generation |
+| `mainspring-speech` | host | ASR / TTS / VAD behind three protocols and one resolver |
+| `mainspring-vision` | host | Image payloads, and a gate that verifies a model can see |
 | `mainspring-backend` | lab | One array API over MLX and PyTorch, so math is written once |
 | `mainspring-graph` | lab | Graphs as tensors: message passing, DAG sweeps, topology |
 | `mainspring-train` | lab | Atomic checkpoints, schedules, guards, metrics, leak-safe splits |
@@ -130,6 +130,13 @@ A few decisions that are easy to reverse by accident:
 - **Graph algorithms are networkx's job.** `mainspring-graph` keeps a graph in the array
   backend so it can go through a model; for shortest path or components, call
   `Graph.to_networkx()`.
+- **Constructing a provider proves nothing.** Speech auto-detection *starts* each
+  candidate, because the weights load in `start()` — which is where a missing model or a
+  wheel built for another architecture actually shows up.
+- **Verify a vision model can see.** A model served without its projector doesn't error;
+  it describes the picture from the prompt, fluently. `VisionGate` shows it a known image
+  first, using a palette that isn't primary colours precisely because those are what a
+  blind model guesses.
 
 ## Testing
 
