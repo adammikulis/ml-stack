@@ -1,0 +1,106 @@
+{
+  "$comment": [
+    "The RAM -> model ladder, largest first, so 'the first that fits' and 'the largest",
+    "that fits' are the same walk. Ordering is asserted by the test suite against",
+    "min_ram_gb; an entry inserted in the wrong place fails there rather than quietly",
+    "returning a smaller model than the machine could have run.",
+    "This file is DATA. No code lives here, so a non-Python host can read it directly."
+  ],
+
+  "version": 1,
+
+  "budget": {
+    "$comment": [
+      "Weights are the floor, not the total: KV cache, activations and the runtime's",
+      "arena sit on top. These fractions are rough figures and should be described as",
+      "such wherever they are shown to a user."
+    ],
+    "desktop": {
+      "usable_fraction_of_total": 0.7,
+      "overhead_fraction": 0.25,
+      "overhead_floor_bytes": 1073741824,
+      "$comment": [
+        "0.7 because a desktop has swap and no low-memory killer, and because the",
+        "default GPU wired limit on a large macOS machine is around 0.75 of total.",
+        "The 1 GiB overhead floor is sized for a 32k KV cache. Lower usable_fraction",
+        "if the machine runs other large processes."
+      ]
+    },
+    "mobile": {
+      "usable_fraction_of_total": 0.55,
+      "overhead_fraction": 0.25,
+      "overhead_floor_bytes": 536870912,
+      "$comment": [
+        "Stricter than desktop: a mobile low-memory killer takes the process rather",
+        "than swapping, so the headroom has to be real."
+      ]
+    }
+  },
+
+  "tiers": [
+    {
+      "id": "xl",
+      "min_ram_gb": 70,
+      "gguf": { "repo": "unsloth/gpt-oss-120b-GGUF", "file": null },
+      "ollama": "gpt-oss:120b",
+      "context": 32768
+    },
+    {
+      "id": "lg",
+      "min_ram_gb": 45,
+      "gguf": { "repo": "unsloth/Qwen3-32B-GGUF", "file": "Qwen3-32B-Q5_K_M.gguf" },
+      "ollama": "qwen3:32b",
+      "context": 32768
+    },
+    {
+      "id": "md",
+      "min_ram_gb": 28,
+      "gguf": { "repo": "unsloth/Qwen3-30B-A3B-GGUF", "file": null },
+      "ollama": "qwen3:30b-a3b",
+      "context": 32768
+    },
+    {
+      "id": "sm",
+      "min_ram_gb": 14,
+      "gguf": { "repo": "unsloth/gpt-oss-20b-GGUF", "file": null },
+      "ollama": "gpt-oss:20b",
+      "context": 16384
+    },
+    {
+      "id": "xs",
+      "min_ram_gb": 8,
+      "gguf": {
+        "repo": "unsloth/gemma-4-E4B-it-GGUF",
+        "file": "gemma-4-E4B-it-Q4_K_M.gguf"
+      },
+      "ollama": "hf.co/unsloth/gemma-4-E4B-it-GGUF:Q4_K_M",
+      "context": 8192
+    },
+    {
+      "id": "xxs",
+      "min_ram_gb": 4,
+      "gguf": {
+        "repo": "unsloth/gemma-4-E2B-it-GGUF",
+        "file": "gemma-4-E2B-it-Q4_K_M.gguf"
+      },
+      "ollama": "hf.co/unsloth/gemma-4-E2B-it-GGUF:Q4_K_M",
+      "context": 8192,
+      "$comment": [
+        "The text-only build, deliberately. A vision-fused variant of the same language",
+        "model can be more than twice the size, and some fused builds are packaged for",
+        "a different runtime and will not load in llama.cpp at all."
+      ]
+    },
+    {
+      "id": "device",
+      "min_ram_gb": 1,
+      "gguf": { "repo": null, "file": null },
+      "ollama": null,
+      "context": 2048,
+      "$comment": [
+        "The floor rung: whatever the target was built with. An embedded image supplies",
+        "its own GGUF, so there is no download and no network requirement."
+      ]
+    }
+  ]
+}

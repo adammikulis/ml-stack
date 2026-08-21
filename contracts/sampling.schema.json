@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/mainspring/contracts/sampling.schema.json",
+  "title": "Sampling parameters",
+  "$comment": [
+    "One declaration of the sampler surface, shared by the Python client and any",
+    "non-Python host that builds its own sampler chain. Names match",
+    "llama.cpp's sampler chain; the client translates to OpenAI names where they differ.",
+    "Adding a parameter here is the only place it needs adding."
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "temperature": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.8 },
+    "top_k": { "type": "integer", "minimum": 0, "default": 40, "$comment": "0 disables. Dropped for api.openai.com, which rejects it." },
+    "top_p": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.95 },
+    "min_p": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05 },
+    "typical_p": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 1.0 },
+    "repeat_penalty": { "type": "number", "minimum": 0.0, "default": 1.1 },
+    "repeat_last_n": { "type": "integer", "minimum": -1, "default": 64 },
+    "frequency_penalty": { "type": "number", "default": 0.0 },
+    "presence_penalty": { "type": "number", "default": 0.0 },
+    "mirostat": { "type": "integer", "enum": [0, 1, 2], "default": 0 },
+    "mirostat_tau": { "type": "number", "default": 5.0 },
+    "mirostat_eta": { "type": "number", "default": 0.1 },
+    "seed": { "type": "integer", "default": -1, "$comment": "-1 = random. Sentinel seeds are discarded when reading /props back." },
+    "n_predict": { "type": "integer", "minimum": -1, "default": 512 },
+    "stop": { "type": "array", "items": { "type": "string" }, "default": [] },
+    "grammar": { "type": "string", "$comment": "GBNF source. See contracts/grammars/." },
+    "cache_prompt": { "type": "boolean", "default": true },
+    "id_slot": { "type": "integer", "minimum": -1, "default": -1, "$comment": "llama.cpp extension: pin a conversation to one KV slot. -1 = any." }
+  }
+}

@@ -1,0 +1,9 @@
+# Workspace root. The installable packages are under packages/*; this file exists for
+# the dev tooling only and is deliberately not a distribution.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
