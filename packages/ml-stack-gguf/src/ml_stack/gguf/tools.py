@@ -25,6 +25,11 @@ SOURCE_DIRS = (
     LLAMA_CPP_SRC,
     Path.home() / ".local" / "opt" / "llama.cpp-src",
     Path.home() / "llama.cpp",
+    # unsloth vendors a llama.cpp checkout here as part of its own install, so
+    # this is a copy many machines already have without having chosen to. It is
+    # a source checkout, which is the only kind that carries the converter --
+    # brew and the release binaries do not ship it.
+    Path.home() / ".unsloth" / "llama.cpp",
     Path("/opt/homebrew/share/llama.cpp"),
     Path("/usr/local/share/llama.cpp"),
 )

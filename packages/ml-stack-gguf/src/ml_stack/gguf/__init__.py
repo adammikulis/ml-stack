@@ -50,4 +50,9 @@ __all__ = [
     "require_converter",
     "require_quantize",
     "set_metadata",
+    "Check", "FidelityReport", "verify_metadata", "verify_tokenizer_fidelity",
 ]
+
+from ml_stack.gguf.verify import (  # noqa: E402
+    Check, FidelityReport, verify_metadata, verify_tokenizer_fidelity,
+)

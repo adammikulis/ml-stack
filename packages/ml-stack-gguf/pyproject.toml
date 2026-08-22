@@ -11,5 +11,13 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = ["gguf>=0.10", "numpy>=1.24"]
 
+# verify_tokenizer_fidelity() serves the model and compares its /tokenize
+# against a reference tokenizer, so it needs these. Optional rather than
+# required because the metadata half (verify_metadata) is the common case and
+# needs neither -- but a bare `pip install ml-stack-gguf` otherwise gives you a
+# function that raises ImportError on its default path.
+[project.optional-dependencies]
+verify = ["ml-stack-serve", "ml-stack-client"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]
