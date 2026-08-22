@@ -361,3 +361,48 @@ class TestTokenEstimate:
         finally:
             set_token_counter(None)
         assert estimate_tokens("anything") != 99
+
+
+class TestTokenize:
+    """The server's tokenizer is the one the model actually reads with. When it
+    disagrees with the tokenizer the model was TRAINED with, nothing errors --
+    generation stays fluent while every sequence means something else."""
+
+    def test_returns_the_servers_ids(self, server):
+        instance = server(lambda m, p, b: json_reply({"tokens": [1, 2087, 9]}))
+        assert Client(instance.base_url).tokenize("go") == [1, 2087, 9]
+
+    def test_with_pieces_is_forwarded_so_a_mismatch_can_be_explained(self, server):
+        seen = {}
+
+        def handler(method, path, body):
+            seen["path"] = path
+            seen["body"] = json.loads(body)
+            return json_reply({"tokens": [{"id": 2087, "piece": "go"}]})
+
+        instance = server(handler)
+        out = Client(instance.base_url).tokenize("go", with_pieces=True)
+        assert seen["path"] == "/tokenize"
+        assert seen["body"]["with_pieces"] is True
+        assert out == [{"id": 2087, "piece": "go"}]
+
+    def test_a_response_without_tokens_is_empty_not_a_crash(self, server):
+        instance = server(lambda m, p, b: json_reply({}))
+        assert Client(instance.base_url).tokenize("go") == []
+
+    def test_detokenize_round_trips_through_content(self, server):
+        instance = server(lambda m, p, b: json_reply({"content": "<user> go"}))
+        assert Client(instance.base_url).detokenize([1, 2, 3]) == "<user> go"
+
+    def test_detokenize_posts_the_ids_it_was_given(self, server):
+        seen = {}
+
+        def handler(method, path, body):
+            seen["path"] = path
+            seen["body"] = json.loads(body)
+            return json_reply({"content": "x"})
+
+        instance = server(handler)
+        Client(instance.base_url).detokenize((4, 5))
+        assert seen["path"] == "/detokenize"
+        assert seen["body"]["tokens"] == [4, 5]

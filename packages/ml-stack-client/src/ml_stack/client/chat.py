@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 from typing import Any
 
 from ml_stack.client.http import ServerError, request_json
@@ -256,6 +257,45 @@ class Client:
                 f"grammar tripwire failed: constrained to the literal 'ok', "
                 f"{self.base_url} returned {answer!r}. Constrained decoding is not working."
             )
+
+    def tokenize(self, text: str, *, with_pieces: bool = False) -> list[Any]:
+        """Token ids the SERVER assigns to ``text``, via llama.cpp's /tokenize.
+
+        This is the only way to check that the tokenizer baked into a GGUF agrees
+        with the one the model was trained with. They diverge more easily than
+        anyone expects -- a converter that drops a metadata key, a special token
+        typed NORMAL instead of USER_DEFINED, an implicit space prefix applied on
+        one side only -- and every one of those failures is SILENT. The model
+        keeps generating fluent text; it is simply reading different sequences
+        than it was trained on.
+
+        ``with_pieces`` returns ``{"id", "piece"}`` objects instead of bare ids,
+        which is what you want when a mismatch has to be explained rather than
+        merely detected.
+        """
+        payload = request_json(
+            f"{self.base_url}/tokenize",
+            payload={"content": text, "with_pieces": with_pieces},
+            timeout=self.timeout,
+            tries=self.tries,
+            headers=self._headers(),
+        )
+        tokens = payload.get("tokens") if isinstance(payload, dict) else None
+        return list(tokens) if tokens is not None else []
+
+    def detokenize(self, tokens: Sequence[int]) -> str:
+        """The round trip. A tokenizer can encode consistently and still fail to
+        reproduce the original string -- which is what a wrong space-prefix
+        setting looks like from the outside."""
+        payload = request_json(
+            f"{self.base_url}/detokenize",
+            payload={"tokens": list(tokens)},
+            timeout=self.timeout,
+            tries=self.tries,
+            headers=self._headers(),
+        )
+        content = payload.get("content") if isinstance(payload, dict) else None
+        return str(content or "")
 
     # --------------------------------------------------------------- response shape
 
