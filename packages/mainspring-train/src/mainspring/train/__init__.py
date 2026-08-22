@@ -37,6 +37,15 @@ from mainspring.train.daemon import (
     safe_relpath,
     serve_forever,
 )
+from mainspring.train.discovery import (
+    Advertiser,
+    Beacon,
+    DiscoveryError,
+    create_cluster_key,
+    derive_token,
+    discover,
+    load_cluster_key,
+)
 from mainspring.train.remote import RemoteError, RemoteTrainer
 from mainspring.train.guard import (
     NonFiniteBudget,
@@ -69,6 +78,13 @@ __all__ = [
     "safe_relpath",
     "RemoteTrainer",
     "RemoteError",
+    "Advertiser",
+    "Beacon",
+    "DiscoveryError",
+    "create_cluster_key",
+    "derive_token",
+    "discover",
+    "load_cluster_key",
     "JobRunner",
     "Job",
     "DaemonError",

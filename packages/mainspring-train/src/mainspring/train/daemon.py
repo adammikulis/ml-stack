@@ -23,6 +23,14 @@ remote code execution: a token is mandatory, there is no anonymous mode, and
 this belongs on a trusted LAN and nowhere else. Path traversal is blocked on
 the file endpoints because "upload a dataset" and "overwrite /etc/passwd"
 otherwise differ only by how you spell the path.
+
+**It announces itself only to machines that already hold the cluster key.**
+With a key present at ``~/.mainspring/cluster.key`` the daemon advertises over
+UDP (see ``discovery``) and derives its bearer token from that key, so a client
+on the LAN finds it and authenticates to it with nothing configured. With no
+key it stays silent and falls back to a random token you copy by hand -- which
+is the old behaviour, and the right default for a machine that has not opted
+into a cluster.
 """
 
 from __future__ import annotations
@@ -31,6 +39,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import shlex
 import signal
 import subprocess
@@ -42,6 +51,17 @@ from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+
+from .discovery import DEFAULT_GROUP as DISCOVERY_GROUP
+from .discovery import DEFAULT_PORT as DISCOVERY_PORT
+from .discovery import (
+    Advertiser,
+    Beacon,
+    DiscoveryError,
+    derive_token,
+    key_path,
+    load_cluster_key,
+)
 
 DEFAULT_PORT = 8770
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -233,7 +253,8 @@ def device_report() -> dict[str, Any]:
     return out
 
 
-def make_handler(runner: JobRunner, files_root: Path, token: str):
+def make_handler(runner: JobRunner, files_root: Path, token: str,
+                 name: str = ""):
     class Handler(BaseHTTPRequestHandler):
         server_version = "mainspring-traind/0.1"
 
@@ -277,7 +298,7 @@ def make_handler(runner: JobRunner, files_root: Path, token: str):
                 # unauthenticated on purpose: liveness must be checkable
                 # without handing a probe the token.
                 busy = runner._current is not None
-                self._send(200, {"ok": True, "busy": busy,
+                self._send(200, {"ok": True, "name": name, "busy": busy,
                                  "queued": len(runner._queue),
                                  **device_report()})
                 return
@@ -400,8 +421,23 @@ def make_handler(runner: JobRunner, files_root: Path, token: str):
     return Handler
 
 
-def load_or_create_token(root: Path) -> str:
+def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
+    """The bearer token: derived from the cluster key, or random and local.
+
+    A cluster key deliberately overrides an existing random token rather than
+    deferring to it. The alternative -- keeping whatever the file says -- means
+    a box that joins a cluster keeps answering on a token no peer can compute,
+    and presents as "found but unauthorised", which is a far more confusing
+    failure than a token that changed when you asked it to change.
+    """
     p = root / "token"
+    if cluster_key is not None:
+        tok = derive_token(cluster_key)
+        root.mkdir(parents=True, exist_ok=True)
+        if not p.exists() or p.read_text().strip() != tok:
+            p.write_text(tok)
+        p.chmod(0o600)
+        return tok
     if p.exists():
         return p.read_text().strip()
     root.mkdir(parents=True, exist_ok=True)
@@ -412,18 +448,40 @@ def load_or_create_token(root: Path) -> str:
 
 
 def serve_forever(root: Path | str = "~/.mainspring/traind",
-                  host: str = "0.0.0.0", port: int = DEFAULT_PORT) -> None:
+                  host: str = "0.0.0.0", port: int = DEFAULT_PORT, *,
+                  name: str = "", announce: bool = True,
+                  cluster_key_path: Path | str | None = None) -> None:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
-    token = load_or_create_token(root)
+    name = name or os.environ.get("MAINSPRING_PEER_NAME") or socket.gethostname()
+    key = load_cluster_key(cluster_key_path)
+    token = load_or_create_token(root, key)
     runner = JobRunner(root)
     httpd = ThreadingHTTPServer((host, port),
-                                make_handler(runner, files_root, token))
+                                make_handler(runner, files_root, token, name))
+    advertiser: Advertiser | None = None
+    if announce and key is not None:
+        beacon = Beacon(name=name, port=port, device=device_report())
+        try:
+            advertiser = Advertiser(beacon, key).start()
+        except DiscoveryError as exc:
+            # Not fatal. A daemon nobody can find is still a daemon you can
+            # reach by address, and refusing to start would turn a flaky
+            # network into an outage.
+            print(f"  discovery OFF: {exc}")
     print(f"mainspring traind on http://{host}:{port}")
+    print(f"  name  {name}")
     print(f"  root  {root}")
-    print(f"  token {token}")
+    if advertiser is not None:
+        print(f"  peers announcing on {advertiser.group}:{advertiser.port} "
+              f"(key {key_path(cluster_key_path)})")
+        print("  token derived from the cluster key -- peers compute it themselves")
+    elif key is None:
+        print(f"  token {token}")
+        print(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
+        print("  run 'mainspring-peers init' to make this box discoverable")
     print(f"  device {json.dumps(device_report())}")
     print("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
     try:
@@ -431,6 +489,8 @@ def serve_forever(root: Path | str = "~/.mainspring/traind",
     except KeyboardInterrupt:
         pass
     finally:
+        if advertiser is not None:
+            advertiser.stop()
         runner.shutdown()
         httpd.server_close()
 
@@ -441,8 +501,16 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--root", default="~/.mainspring/traind")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
+    ap.add_argument("--name", default="",
+                    help="how this box identifies itself to peers "
+                         "(default: $MAINSPRING_PEER_NAME, else the hostname)")
+    ap.add_argument("--cluster-key", default=None,
+                    help="path to the cluster key (default: ~/.mainspring/cluster.key)")
+    ap.add_argument("--no-announce", action="store_true",
+                    help="serve, but stay invisible to peer discovery")
     a = ap.parse_args(argv)
-    serve_forever(a.root, a.host, a.port)
+    serve_forever(a.root, a.host, a.port, name=a.name,
+                  announce=not a.no_announce, cluster_key_path=a.cluster_key)
     return 0
 
 

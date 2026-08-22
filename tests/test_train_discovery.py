@@ -1,0 +1,296 @@
+"""Peer discovery: real UDP on a real interface, and a real daemon subprocess.
+
+Nothing is mocked, for the same reason the daemon tests aren't. The failures
+this module exists to prevent are network-shaped and adversary-shaped -- a
+beacon that a neighbour can forge, a reply that can be replayed an hour later,
+a multicast group a router quietly drops -- and a fake socket reproduces none
+of them.
+
+The ports are randomised per test so a run does not talk to, or get answers
+from, a daemon the developer actually has running on this LAN.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+import pytest
+from mainspring.train.discovery import (
+    Advertiser,
+    Beacon,
+    DiscoveryError,
+    _prefer,
+    _sign,
+    _verify,
+    create_cluster_key,
+    derive_token,
+    discover,
+    load_cluster_key,
+)
+from mainspring.train.remote import RemoteTrainer
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def _free_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
+def _free_tcp_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+@pytest.fixture
+def key(tmp_path) -> bytes:
+    create_cluster_key(tmp_path / "cluster.key")
+    return load_cluster_key(tmp_path / "cluster.key")
+
+
+@pytest.fixture
+def port() -> int:
+    return _free_udp_port()
+
+
+# -- the key -------------------------------------------------------------
+def test_key_is_created_once_and_not_silently_rotated(tmp_path):
+    p = tmp_path / "cluster.key"
+    first = create_cluster_key(p)
+    assert create_cluster_key(p) == first, "re-running init must not evict the cluster"
+    assert create_cluster_key(p, overwrite=True) != first
+
+
+def test_key_file_is_not_world_readable(tmp_path):
+    p = tmp_path / "cluster.key"
+    create_cluster_key(p)
+    assert oct(p.stat().st_mode)[-3:] == "600"
+
+
+def test_missing_key_reads_as_none(tmp_path):
+    assert load_cluster_key(tmp_path / "absent.key") is None
+
+
+def test_token_is_a_pure_function_of_the_key(tmp_path):
+    a = create_cluster_key(tmp_path / "a.key").encode()
+    b = create_cluster_key(tmp_path / "b.key").encode()
+    assert derive_token(a) == derive_token(a), "both ends must compute the same token"
+    assert derive_token(a) != derive_token(b)
+    assert a.decode() not in derive_token(a), "the token must not leak the key"
+
+
+# -- the round trip ------------------------------------------------------
+def test_advertiser_is_found_and_carries_its_device_report(key, port):
+    beacon = Beacon(name="rtx", port=8770, device={"cuda": True, "gpu": "RTX 3090 Ti"})
+    with Advertiser(beacon, key, port=port, interval_s=0.2):
+        found = discover(key, timeout_s=2.0, port=port)
+    names = [b.name for b in found]
+    assert "rtx" in names, f"advertiser not discovered; saw {names}"
+    peer = next(b for b in found if b.name == "rtx")
+    assert peer.device["gpu"] == "RTX 3090 Ti"
+    assert peer.port == 8770
+    assert peer.host, "host must be filled in from the packet source address"
+    assert peer.base_url == f"http://{peer.host}:8770"
+
+
+def test_nothing_is_found_when_nothing_is_advertising(key, port):
+    assert discover(key, timeout_s=0.6, port=port) == []
+
+
+def test_a_peer_with_a_different_key_is_invisible(key, port, tmp_path):
+    other = create_cluster_key(tmp_path / "other.key").encode()
+    with Advertiser(Beacon(name="stranger", port=8770), other, port=port,
+                    interval_s=0.2):
+        assert discover(key, timeout_s=1.0, port=port) == [], \
+            "a daemon keyed differently must not be discoverable"
+
+
+def test_two_peers_are_told_apart(key, port):
+    """Two daemons are two peers even when they share a host and a port."""
+    a = Beacon(name="rtx", port=8770, device={"cuda": True})
+    b = Beacon(name="mac", port=8771, device={"backends": ["mlx"]})
+    with Advertiser(a, key, port=port, interval_s=0.2), \
+         Advertiser(b, key, port=port, interval_s=0.2):
+        found = discover(key, timeout_s=2.5, port=port)
+    assert {p.name for p in found} == {"rtx", "mac"}, \
+        f"expected both, got {[p.name for p in found]}"
+    assert len({p.instance for p in found}) == 2, "instances must be distinct"
+
+
+def test_one_daemon_on_several_interfaces_is_one_peer():
+    """A box with a VPN up answers the same query from each address it holds.
+
+    Counting those as separate peers is how `find_one` starts reporting two
+    GPUs on a machine that has one, and how a run gets submitted to a route
+    rather than to a card.
+    """
+    same = "0123456789abcdef"
+    lan = Beacon(name="rtx", port=8770, host="192.168.2.9", instance=same)
+    vpn = Beacon(name="rtx", port=8770, host="10.8.0.3", instance=same)
+    assert lan.identity == vpn.identity
+    other = Beacon(name="rtx", port=8770, host="192.168.2.9", instance="beef")
+    assert other.identity != lan.identity, "different daemons must stay distinct"
+
+
+def test_loopback_wins_when_the_daemon_is_on_this_machine():
+    same = "0123456789abcdef"
+    lan = Beacon(name="rtx", port=8770, host="192.168.2.9", instance=same)
+    local = Beacon(name="rtx", port=8770, host="127.0.0.1", instance=same)
+    assert _prefer(lan, local).host == "127.0.0.1"
+    assert _prefer(local, lan).host == "127.0.0.1", "order must not decide it"
+
+
+def test_a_beacon_without_an_instance_still_has_an_identity():
+    """Tolerate a peer that predates instance ids rather than merging them all."""
+    a = Beacon(name="rtx", port=8770, hostname="boxa")
+    b = Beacon(name="rtx", port=8770, hostname="boxb")
+    assert a.identity != b.identity
+
+
+# -- the adversary -------------------------------------------------------
+def test_a_tampered_beacon_is_refused(key):
+    raw = _sign(key, {"v": 1, "kind": "beacon", "t": time.time(), "nonce": "",
+                      "beacon": {"name": "rtx", "port": 8770}})
+    assert _verify(key, raw, kind="beacon") is not None
+    tampered = raw.replace(b'"port":8770', b'"port":9999')
+    assert _verify(key, tampered, kind="beacon") is None, \
+        "a redirected port must not survive verification"
+
+
+def test_a_beacon_signed_with_another_key_is_refused(key, tmp_path):
+    other = create_cluster_key(tmp_path / "other.key").encode()
+    raw = _sign(other, {"v": 1, "kind": "beacon", "t": time.time(), "nonce": "",
+                        "beacon": {"name": "evil", "port": 8770}})
+    assert _verify(key, raw, kind="beacon") is None
+
+
+def test_a_stale_beacon_is_refused(key):
+    raw = _sign(key, {"v": 1, "kind": "beacon", "t": time.time() - 3600,
+                      "nonce": "", "beacon": {"name": "rtx", "port": 8770}})
+    assert _verify(key, raw, kind="beacon") is None
+
+
+def test_a_replayed_reply_is_refused(key):
+    """A recorded answer must not satisfy a later question."""
+    raw = _sign(key, {"v": 1, "kind": "beacon", "t": time.time(),
+                      "nonce": "the-old-nonce",
+                      "beacon": {"name": "rtx", "port": 8770}})
+    assert _verify(key, raw, kind="beacon", nonce="the-old-nonce") is not None
+    assert _verify(key, raw, kind="beacon", nonce="a-fresh-nonce") is None
+
+
+def test_garbage_on_the_port_does_not_kill_the_listener(key, port):
+    """An unrelated service on the group must not take discovery down."""
+    with Advertiser(Beacon(name="rtx", port=8770), key, port=port, interval_s=0.2):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            for junk in (b"", b"not json", b'{"v":1}', b"\xff\xfe\x00"):
+                s.sendto(junk, ("127.0.0.1", port))
+        time.sleep(0.2)
+        assert any(b.name == "rtx" for b in discover(key, timeout_s=2.0, port=port))
+
+
+# -- end to end: a real daemon process ----------------------------------
+@pytest.fixture
+def traind(tmp_path):
+    """Boot the actual daemon the way a machine would, and find it."""
+    keyfile = tmp_path / "cluster.key"
+    create_cluster_key(keyfile)
+    disco_port = _free_udp_port()
+    http_port = _free_tcp_port()
+    env = {**os.environ,
+           "MAINSPRING_DISCOVERY_PORT": str(disco_port),
+           "PYTHONPATH": os.pathsep.join(
+               str(p) for p in sorted((REPO / "packages").glob("*/src"))),
+           "PYTHONUNBUFFERED": "1"}
+    # To a file, not a pipe: a test that fails because discovery was off should
+    # say so with the daemon's own words, and a pipe nobody drains can only be
+    # read after the process is gone.
+    log = tmp_path / "traind.out"
+    fh = log.open("wb")
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "mainspring.train.daemon",
+         "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
+         "--port", str(http_port), "--name", "testbox",
+         "--cluster-key", str(keyfile)],
+        env=env, stdout=fh, stderr=subprocess.STDOUT)
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        try:
+            with socket.create_connection(("127.0.0.1", http_port), timeout=0.5):
+                break
+        except OSError:
+            if proc.poll() is not None:
+                pytest.fail(f"traind died:\n{log.read_text(errors='replace')}")
+            time.sleep(0.1)
+    else:
+        proc.kill()
+        pytest.fail("traind never listened")
+    try:
+        yield keyfile, disco_port, http_port, log
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        fh.close()
+
+
+def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, tmp_path):
+    """The whole point: nobody typed a host, a port, or a token anywhere."""
+    keyfile, disco_port, http_port, log = traind
+    try:
+        rtx = RemoteTrainer.find_one(cluster_key_path=keyfile, timeout_s=3.0,
+                                     port=disco_port)
+    except DiscoveryError as exc:
+        pytest.fail(f"{exc}\n--- traind said ---\n{log.read_text(errors='replace')}")
+    assert rtx.beacon.name == "testbox"
+    assert rtx.beacon.port == http_port
+
+    health = rtx.health()
+    assert health["ok"] is True and health["name"] == "testbox"
+
+    # Authenticated route: proves the derived token matches what the daemon
+    # computed independently, which is the claim discovery rests on.
+    assert rtx.jobs() == []
+    out = tmp_path / "proof.txt"
+    job = rtx.submit([sys.executable, "-c",
+                      f"open({str(out)!r}, 'w').write('ran')"], name="probe")
+    final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
+    assert final["state"] == "done", rtx.log(job["id"])
+    assert out.read_text() == "ran"
+
+
+def test_find_one_says_why_when_no_peer_matches(traind):
+    keyfile, disco_port, _, log = traind
+    with pytest.raises(DiscoveryError, match="no peer matches"):
+        RemoteTrainer.find_one(name="not-this-box", cluster_key_path=keyfile,
+                               timeout_s=3.0, port=disco_port)
+
+
+def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
+    """Silence and 'you have no key' are different facts and must read that way."""
+    with pytest.raises(DiscoveryError, match="no cluster key"):
+        RemoteTrainer.find_one(cluster_key_path=tmp_path / "absent.key")
+
+
+def test_peers_ls_reports_the_running_daemon(traind):
+    keyfile, disco_port, http_port, log = traind
+    env = {**os.environ, "MAINSPRING_DISCOVERY_PORT": str(disco_port),
+           "PYTHONPATH": os.pathsep.join(
+               str(p) for p in sorted((REPO / "packages").glob("*/src")))}
+    r = subprocess.run([sys.executable, "-m", "mainspring.train.peers",
+                        "--cluster-key", str(keyfile), "ls", "--json",
+                        "--timeout", "3"],
+                       env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    peers = json.loads(r.stdout)
+    assert any(p["name"] == "testbox" and p["port"] == http_port for p in peers)

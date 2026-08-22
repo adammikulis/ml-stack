@@ -9,6 +9,10 @@
     rtx.wait(job["id"], on_metric=print)
     rtx.pull(f"jobs/{job['id']}/ckpt/best/model.safetensors", "local/model.safetensors")
 
+Or, with a cluster key in place, without knowing where it is:
+
+    rtx = RemoteTrainer.find_one(require="cuda")
+
 stdlib only. Uploads and downloads resume, because a 2GB dataset over a home
 network will be interrupted eventually and restarting from zero each time
 turns a five-minute transfer into an afternoon.
@@ -26,6 +30,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
+
 CHUNK = 8 << 20          # 8MB: big enough to be fast, small enough to resume cheaply
 
 
@@ -34,10 +40,76 @@ class RemoteError(RuntimeError):
 
 
 class RemoteTrainer:
-    def __init__(self, base_url: str, token: str, *, timeout: float = 60.0) -> None:
+    def __init__(self, base_url: str, token: str, *, timeout: float = 60.0,
+                 beacon: Beacon | None = None) -> None:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
+        #: Set when this client came from discovery; carries the peer's name
+        #: and device report so a caller can choose between several.
+        self.beacon = beacon
+
+    @property
+    def name(self) -> str:
+        return self.beacon.name if self.beacon else self.base_url
+
+    # -- discovery -------------------------------------------------------
+    @classmethod
+    def discover(cls, *, timeout_s: float = 2.0, key: bytes | None = None,
+                 cluster_key_path: Path | str | None = None,
+                 timeout: float = 60.0, group: str | None = None,
+                 port: int | None = None) -> list["RemoteTrainer"]:
+        """Every daemon on the LAN that proves it holds the cluster key.
+
+        No token argument: it is derived from the same key that authenticated
+        the peer, so a peer you can find is a peer you can already drive.
+        """
+        key = key or load_cluster_key(cluster_key_path)
+        if key is None:
+            raise DiscoveryError(
+                f"no cluster key at {key_path(cluster_key_path)} -- "
+                "run 'mainspring-peers init' here and copy the key to each box")
+        token = derive_token(key)
+        return [cls(b.base_url, token, timeout=timeout, beacon=b)
+                for b in discover(key, timeout_s=timeout_s, group=group, port=port)]
+
+    @classmethod
+    def find_one(cls, *, require: str = "", name: str = "",
+                 timeout_s: float = 2.0, key: bytes | None = None,
+                 cluster_key_path: Path | str | None = None,
+                 timeout: float = 60.0, group: str | None = None,
+                 port: int | None = None) -> "RemoteTrainer":
+        """The one peer to use, or an error saying exactly why there isn\'t one.
+
+        ``require`` filters on a backend the peer reports ("cuda", "mps"), and
+        ``name`` on its advertised name. Ambiguity is an error rather than a
+        silent pick: two GPU boxes on one LAN and a coin-flip between them is
+        how a run ends up on the wrong card without anyone noticing.
+        """
+        peers = cls.discover(timeout_s=timeout_s, key=key,
+                             cluster_key_path=cluster_key_path, timeout=timeout,
+                             group=group, port=port)
+        if not peers:
+            raise DiscoveryError(
+                "no peers answered -- is traind running there, is it on this "
+                "LAN, and does it hold the same cluster key?")
+        pool = peers
+        if name:
+            pool = [p for p in pool if p.beacon and p.beacon.name == name]
+        if require:
+            pool = [p for p in pool
+                    if p.beacon and (p.beacon.device.get(require)
+                                     or require in (p.beacon.device.get("backends") or []))]
+        if not pool:
+            seen = ", ".join(f"{p.name} {sorted(p.beacon.device.get('backends') or [])}"
+                             for p in peers if p.beacon)
+            raise DiscoveryError(
+                f"no peer matches name={name!r} require={require!r}; found: {seen}")
+        if len(pool) > 1:
+            raise DiscoveryError(
+                "several peers match, name one: "
+                + ", ".join(p.name for p in pool))
+        return pool[0]
 
     # -- plumbing --------------------------------------------------------
     def _request(self, method: str, path: str, *, data: bytes | None = None,

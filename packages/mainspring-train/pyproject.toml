@@ -13,6 +13,7 @@ dependencies = ["mainspring-backend"]
 
 [project.scripts]
 mainspring-traind = "mainspring.train.daemon:main"
+mainspring-peers = "mainspring.train.peers:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mainspring"]
