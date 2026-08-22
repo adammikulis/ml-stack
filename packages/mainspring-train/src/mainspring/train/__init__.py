@@ -30,6 +30,14 @@ from mainspring.train.checkpoint import (
     rotate,
     save,
 )
+from mainspring.train.daemon import (
+    DaemonError,
+    Job,
+    JobRunner,
+    safe_relpath,
+    serve_forever,
+)
+from mainspring.train.remote import RemoteError, RemoteTrainer
 from mainspring.train.guard import (
     NonFiniteBudget,
     RunLock,
@@ -57,6 +65,13 @@ from mainspring.train.schedule import (
 )
 
 __all__ = [
+    "serve_forever",
+    "safe_relpath",
+    "RemoteTrainer",
+    "RemoteError",
+    "JobRunner",
+    "Job",
+    "DaemonError",
     "GUARD",
     "CheckpointError",
     "CheckpointState",

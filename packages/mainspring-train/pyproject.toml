@@ -11,5 +11,8 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = ["mainspring-backend"]
 
+[project.scripts]
+mainspring-traind = "mainspring.train.daemon:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mainspring"]
