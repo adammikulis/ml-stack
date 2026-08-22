@@ -8,6 +8,7 @@ mocked socket or a fake Popen reproduces none of them.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import socket
@@ -27,7 +28,7 @@ from ml_stack.train.daemon import (
     make_handler,
     safe_relpath,
 )
-from ml_stack.train.remote import RemoteError, RemoteTrainer
+from ml_stack.train.remote import RemoteError, RemoteTrainer, sha256_file
 
 
 def _free_port() -> int:
@@ -346,3 +347,90 @@ def test_a_suffix_range_is_refused_rather_than_mis_served(daemon):
     (files / "s.bin").write_bytes(b"abcdefghij")
     with pytest.raises(RemoteError, match="suffix ranges"):
         client._request("GET", "/files/s.bin", headers={"Range": "bytes=-5"})
+
+
+# -- integrity -----------------------------------------------------------
+def test_a_round_trip_declares_and_confirms_a_digest(daemon, tmp_path):
+    client, root, files, _ = daemon
+    src = tmp_path / "data.npy"
+    src.write_bytes(os.urandom(1 << 20))
+    reply = client.push(src, "data.npy")
+    assert reply["sha256"] == sha256_file(src), "upload must report what it stored"
+    out = client.pull("data.npy", tmp_path / "back.npy")
+    assert out.read_bytes() == src.read_bytes()
+
+
+def test_an_upload_that_does_not_match_its_digest_is_discarded(daemon, tmp_path):
+    """The bytes arrived intact by luck or not at all -- either way, refuse."""
+    client, root, files, _ = daemon
+    payload = b"the real payload" * 64
+    with pytest.raises(RemoteError, match="checksum mismatch"):
+        client._request("PUT", "/files/bad.bin", data=payload, headers={
+            "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
+            "X-ML-Stack-Complete": "1",
+            "X-ML-Stack-SHA256": "00" * 32,
+        })
+    assert not (files / "bad.bin").exists(), "a rejected upload must leave nothing"
+    assert not (files / "bad.bin.part").exists(), \
+        "the partial must go too: resuming from corrupt bytes keeps them forever"
+
+
+def test_a_correct_digest_on_upload_is_accepted(daemon, tmp_path):
+    client, root, files, _ = daemon
+    payload = b"the real payload" * 64
+    status, body, _ = client._request("PUT", "/files/good.bin", data=payload, headers={
+        "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
+        "X-ML-Stack-Complete": "1",
+        "X-ML-Stack-SHA256": hashlib.sha256(payload).hexdigest().upper(),
+    })
+    assert status == 200, body
+    assert (files / "good.bin").read_bytes() == payload
+
+
+def test_a_download_whose_bytes_do_not_match_the_digest_is_discarded(daemon, tmp_path):
+    """Corruption the length check cannot see: right size, wrong bytes.
+
+    Rewritten in place with size and mtime preserved, so the daemon still
+    advertises the digest of the original -- which is exactly the shape of a
+    file that rotted on disk, or of bytes mangled in transit.
+    """
+    client, root, files, _ = daemon
+    target = files / "ckpt.bin"
+    original = os.urandom(4096)
+    target.write_bytes(original)
+
+    first = client.pull("ckpt.bin", tmp_path / "first.bin")
+    assert first.read_bytes() == original
+
+    st = target.stat()
+    target.write_bytes(b"\x00" * len(original))       # same length, different bytes
+    os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+
+    out = tmp_path / "second.bin"
+    with pytest.raises(RemoteError, match="checksum mismatch"):
+        client.pull("ckpt.bin", out)
+    assert not out.exists(), "a corrupt download must not be promoted"
+    assert not out.with_suffix(".bin.part").exists()
+
+
+def test_a_resumed_download_verifies_the_bytes_it_did_not_fetch(daemon, tmp_path):
+    """The prefix came from an earlier call; no single response vouches for it."""
+    client, root, files, _ = daemon
+    payload = os.urandom(8192)
+    (files / "resume.bin").write_bytes(payload)
+    out = tmp_path / "resume.bin"
+    # A .part whose length is plausible but whose content is wrong.
+    out.with_suffix(".bin.part").write_bytes(b"\xff" * 2048)
+    with pytest.raises(RemoteError, match="checksum mismatch"):
+        client.pull("resume.bin", out)
+    assert not out.exists()
+
+
+def test_the_digest_cache_notices_a_rewritten_file(daemon, tmp_path):
+    client, root, files, _ = daemon
+    target = files / "moving.bin"
+    target.write_bytes(b"a" * 100)
+    assert client.pull("moving.bin", tmp_path / "a.bin").read_bytes() == b"a" * 100
+    time.sleep(0.01)
+    target.write_bytes(b"b" * 200)           # different size and mtime
+    assert client.pull("moving.bin", tmp_path / "b.bin").read_bytes() == b"b" * 200

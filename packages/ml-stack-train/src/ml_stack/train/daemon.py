@@ -35,6 +35,7 @@ into a cluster.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -68,6 +69,51 @@ _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 #: How much of a file is held in memory at once while serving it. Fixed, and
 #: unrelated to the file's size -- that is the entire point.
 FILE_CHUNK = 1 << 20
+DIGEST_HEADER = "X-ML-Stack-SHA256"
+
+#: Digests are cached because a resumed download asks for the same one over and
+#: over, and hashing a gigabyte checkpoint on every attempt would cost more
+#: than the transfer. Keyed on size and mtime as well as path, so rewriting a
+#: file invalidates its entry rather than serving a digest for bytes that are
+#: no longer there. Bounded: this is a cache, not a record.
+_DIGESTS: dict[tuple[str, int, int], str] = {}
+_DIGEST_LOCK = threading.Lock()
+_DIGEST_CACHE_MAX = 256
+
+
+def file_digest(path: Path) -> str:
+    """sha256 of a file, read in fixed pieces and cached by (path, size, mtime)."""
+    st = path.stat()
+    key = (str(path), st.st_size, st.st_mtime_ns)
+    with _DIGEST_LOCK:
+        hit = _DIGESTS.get(key)
+    if hit is not None:
+        return hit
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        while True:
+            block = fh.read(FILE_CHUNK)
+            if not block:
+                break
+            h.update(block)
+    digest = h.hexdigest()
+    with _DIGEST_LOCK:
+        if len(_DIGESTS) >= _DIGEST_CACHE_MAX:
+            _DIGESTS.pop(next(iter(_DIGESTS)))
+        _DIGESTS[key] = digest
+    return digest
+
+
+def remember_digest(path: Path, digest: str) -> None:
+    """Record a digest already known, so the next download need not recompute it."""
+    try:
+        st = path.stat()
+    except OSError:
+        return
+    with _DIGEST_LOCK:
+        if len(_DIGESTS) >= _DIGEST_CACHE_MAX:
+            _DIGESTS.pop(next(iter(_DIGESTS)))
+        _DIGESTS[(str(path), st.st_size, st.st_mtime_ns)] = digest
 
 
 class DaemonError(RuntimeError):
@@ -315,6 +361,10 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(length))
             self.send_header("Accept-Ranges", "bytes")
+            # Always the digest of the WHOLE file, never of the range being
+            # sent: the client is reassembling a file across resumes and can
+            # only check the thing it ends up with.
+            self.send_header(DIGEST_HEADER, file_digest(target))
             if ranged:
                 self.send_header("Content-Range", f"bytes {start}-{last}/{size}")
             self.end_headers()
@@ -469,9 +519,23 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
                     fh.write(chunk)
                     remaining -= len(chunk)
             if self.headers.get("X-ML-Stack-Complete", "1") == "1":
+                want = self.headers.get(DIGEST_HEADER, "").strip().lower()
+                got = file_digest(partial) if want else ""
+                if want and not secrets.compare_digest(got, want):
+                    # Delete rather than keep for resume. A length mismatch is
+                    # a short transfer and resuming fixes it; a digest mismatch
+                    # means some byte already written is wrong, and resuming
+                    # from it preserves the corruption forever.
+                    partial.unlink(missing_ok=True)
+                    self._send(422, {"error": "checksum mismatch, upload discarded",
+                                     "expected": want, "got": got})
+                    return
                 os.replace(partial, target)
                 size = target.stat().st_size
-                self._send(200, {"ok": True, "path": str(target), "bytes": size})
+                if got:
+                    remember_digest(target, got)
+                self._send(200, {"ok": True, "path": str(target), "bytes": size,
+                                 "sha256": got or file_digest(target)})
             else:
                 self._send(200, {"ok": True, "partial": str(partial),
                                  "bytes": partial.stat().st_size})

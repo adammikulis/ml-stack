@@ -20,6 +20,8 @@ turns a five-minute transfer into an afternoon.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import time
@@ -33,6 +35,18 @@ from typing import Any
 from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
 
 CHUNK = 8 << 20          # 8MB: big enough to be fast, small enough to resume cheaply
+DIGEST_HEADER = "X-ML-Stack-SHA256"
+
+
+def sha256_file(path: Path, chunk: int = CHUNK) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as fh:
+        while True:
+            block = fh.read(chunk)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()
 
 
 class RemoteError(RuntimeError):
@@ -189,16 +203,23 @@ class RemoteTrainer:
         local = Path(local).expanduser()
         total = local.stat().st_size
         sent = 0
+        # Hashed from the same bytes being sent, in the same pass. Reading the
+        # file twice would be wasteful and would also miss the case worth
+        # catching: a file that changes underneath a long upload.
+        digest = hashlib.sha256()
         with local.open("rb") as fh:
             while True:
                 chunk = fh.read(CHUNK)
                 if not chunk:
                     break
+                digest.update(chunk)
                 last = fh.tell() >= total
                 headers = {
                     "Content-Range": f"bytes {sent}-{sent+len(chunk)-1}/{total}",
                     "X-ML-Stack-Complete": "1" if last else "0",
                 }
+                if last:
+                    headers[DIGEST_HEADER] = digest.hexdigest()
                 _, body, _ = self._request("PUT", f"/files/{remote}", data=chunk,
                                            headers=headers, timeout=300)
                 sent += len(chunk)
@@ -253,6 +274,7 @@ class RemoteTrainer:
             raise RemoteError(f"GET /files/{remote} -> unreachable: {e.reason}") from None
 
         with resp:
+            want = (resp.headers.get(DIGEST_HEADER) or "").strip().lower()
             expected = resp.headers.get("Content-Length")
             total = start + int(expected) if expected is not None else None
             done = start
@@ -270,6 +292,16 @@ class RemoteTrainer:
             raise RemoteError(
                 f"{remote}: got {got} of {total} bytes; left {partial.name} "
                 "in place to resume from")
+        if want:
+            # The whole reassembled file, not just this response: on a resume
+            # most of these bytes arrived in an earlier call, and those are
+            # exactly the ones no single response could have vouched for.
+            actual = sha256_file(partial)
+            if not hmac.compare_digest(actual, want):
+                partial.unlink(missing_ok=True)
+                raise RemoteError(
+                    f"{remote}: checksum mismatch (expected {want[:16]}..., "
+                    f"got {actual[:16]}...); discarded the download")
         os.replace(partial, local)
         return local
 
