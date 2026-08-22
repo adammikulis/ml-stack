@@ -65,6 +65,9 @@ from .discovery import (
 
 DEFAULT_PORT = 8770
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
+#: How much of a file is held in memory at once while serving it. Fixed, and
+#: unrelated to the file's size -- that is the entire point.
+FILE_CHUNK = 1 << 20
 
 
 class DaemonError(RuntimeError):
@@ -284,6 +287,55 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             if self.command != "HEAD":
                 self.wfile.write(body)
 
+        def _send_file(self, target: Path, start: int = 0,
+                       end: int | None = None) -> None:
+            """Send a file without ever holding more than FILE_CHUNK of it.
+
+            The obvious version -- read_bytes() then slice for the Range --
+            costs one full copy of the file, and two if a Range is present.
+            Checkpoints here run to a gigabyte, so serving a resumed download
+            of one cost about 2GB on the machine that is also running the
+            training job it came from. Seek and stream instead: memory is now
+            a function of the buffer, not of the file.
+            """
+            size = target.stat().st_size
+            if start and start >= size:
+                # The caller's .part is at or past the end. Saying so with 416
+                # matters: the alternative is a 206 carrying zero bytes and a
+                # nonsensical Content-Range, which a client reasonably reads as
+                # "you already have it all" and promotes a stale file.
+                self._send(416, {"error": "range beyond end of file",
+                                 "size": size},
+                           headers={"Content-Range": f"bytes */{size}"})
+                return
+            last = size - 1 if end is None else min(end, size - 1)
+            length = max(0, last - start + 1)
+            ranged = start > 0 or (end is not None and last < size - 1)
+            self.send_response(206 if ranged else 200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(length))
+            self.send_header("Accept-Ranges", "bytes")
+            if ranged:
+                self.send_header("Content-Range", f"bytes {start}-{last}/{size}")
+            self.end_headers()
+            if self.command == "HEAD":
+                return
+            remaining = length
+            with target.open("rb") as fh:
+                fh.seek(start)
+                while remaining > 0:
+                    chunk = fh.read(min(FILE_CHUNK, remaining))
+                    if not chunk:
+                        break
+                    try:
+                        self.wfile.write(chunk)
+                    except (BrokenPipeError, ConnectionResetError):
+                        # The client hung up mid-download. Its .part is intact
+                        # and it will resume; there is nothing to clean up and
+                        # nothing worth logging.
+                        return
+                    remaining -= len(chunk)
+
         def _guard(self) -> bool:
             if not self._authed():
                 self._send(401, {"error": "bad or missing bearer token"})
@@ -339,17 +391,23 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
                     self._send(400, {"error": str(e)}); return
                 if not target.is_file():
                     self._send(404, {"error": "not found"}); return
-                data = target.read_bytes()
-                rng = self.headers.get("Range")
-                if rng and rng.startswith("bytes="):
-                    start = int(rng.split("=", 1)[1].split("-")[0] or 0)
-                    chunk = data[start:]
-                    self._send(206, None, raw=chunk, headers={
-                        "Content-Range": f"bytes {start}-{len(data)-1}/{len(data)}",
-                        "Accept-Ranges": "bytes"})
-                    return
-                self._send(200, None, raw=data,
-                           headers={"Accept-Ranges": "bytes"})
+                start, end = 0, None
+                rng = self.headers.get("Range", "")
+                if rng.startswith("bytes="):
+                    spec = rng.split("=", 1)[1].split(",")[0].strip()
+                    head, _, tail = spec.partition("-")
+                    if not head:
+                        # "bytes=-500" means the LAST 500 bytes. Nothing here
+                        # sends it, and guessing wrong would serve the wrong
+                        # part of a checkpoint, so refuse rather than mis-serve.
+                        self._send(400, {"error": "suffix ranges not supported"})
+                        return
+                    try:
+                        start = int(head)
+                        end = int(tail) if tail else None
+                    except ValueError:
+                        self._send(400, {"error": f"bad Range: {rng!r}"}); return
+                self._send_file(target, start, end)
                 return
             self._send(404, {"error": "no such route"})
 

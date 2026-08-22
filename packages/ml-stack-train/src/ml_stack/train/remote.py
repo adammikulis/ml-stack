@@ -207,23 +207,77 @@ class RemoteTrainer:
         return json.loads(body or b"{}")
 
     def pull(self, remote: str, local: Path | str, *,
-             on_progress: Callable[[int, int], None] | None = None) -> Path:
+             on_progress: Callable[[int, int], None] | None = None,
+             timeout: float = 600.0) -> Path:
         """Download, resuming a partial file rather than restarting it.
 
-        Lands in ``.part`` and is moved with os.replace only when complete, so
-        an interrupted pull never leaves a truncated file that a later step
-        mistakes for a whole one.
+        Streamed to disk in CHUNK-sized pieces. Reading the whole response
+        first would hold a gigabyte checkpoint in memory on both ends at once,
+        and would make ``on_progress`` a single call at the end -- a progress
+        callback that fires once when the work is already done.
+
+        Lands in ``.part`` and is moved with os.replace only when the byte
+        count matches what the server said it was sending, so an interrupted
+        pull never leaves a truncated file that a later step mistakes for a
+        whole one. On a short read the ``.part`` is left alone: it is exactly
+        what the next call needs to resume from.
         """
         local = Path(local).expanduser()
         local.parent.mkdir(parents=True, exist_ok=True)
         partial = local.with_suffix(local.suffix + ".part")
         start = partial.stat().st_size if partial.exists() else 0
-        headers = {"Range": f"bytes={start}-"} if start else {}
-        status, body, hdrs = self._request("GET", f"/files/{remote}",
-                                           headers=headers, timeout=600)
-        with partial.open("ab" if start else "wb") as fh:
-            fh.write(body)
-        if on_progress:
-            on_progress(partial.stat().st_size, partial.stat().st_size)
+
+        req = urllib.request.Request(f"{self.base_url}/files/{remote}",
+                                     method="GET")
+        req.add_header("Authorization", f"Bearer {self.token}")
+        if start:
+            req.add_header("Range", f"bytes={start}-")
+        try:
+            resp = urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError as e:
+            if e.code == 416:
+                # The server holds fewer bytes than we already have. Equal
+                # means a previous pull got everything and died before the
+                # rename; larger means this .part belongs to some other,
+                # bigger file and resuming from it would splice two files.
+                size = self._range_total(e.headers.get("Content-Range", ""))
+                if size is not None and start == size:
+                    os.replace(partial, local)
+                    return local
+                raise RemoteError(
+                    f"{partial} is {start} bytes but the remote file is "
+                    f"{size}; delete it and pull again") from None
+            body = e.read().decode(errors="replace")
+            raise RemoteError(f"GET /files/{remote} -> {e.code}: {body[:400]}") from None
+        except urllib.error.URLError as e:
+            raise RemoteError(f"GET /files/{remote} -> unreachable: {e.reason}") from None
+
+        with resp:
+            expected = resp.headers.get("Content-Length")
+            total = start + int(expected) if expected is not None else None
+            done = start
+            with partial.open("ab" if start else "wb") as fh:
+                while True:
+                    buf = resp.read(CHUNK)
+                    if not buf:
+                        break
+                    fh.write(buf)
+                    done += len(buf)
+                    if on_progress:
+                        on_progress(done, total if total is not None else done)
+        got = partial.stat().st_size
+        if total is not None and got != total:
+            raise RemoteError(
+                f"{remote}: got {got} of {total} bytes; left {partial.name} "
+                "in place to resume from")
         os.replace(partial, local)
         return local
+
+    @staticmethod
+    def _range_total(content_range: str) -> int | None:
+        """Total size out of a ``bytes */N`` or ``bytes a-b/N`` header."""
+        _, _, tail = content_range.partition("/")
+        try:
+            return int(tail)
+        except ValueError:
+            return None

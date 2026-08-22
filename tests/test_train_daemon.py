@@ -9,6 +9,7 @@ mocked socket or a fake Popen reproduces none of them.
 from __future__ import annotations
 
 import json
+import os
 import socket
 import sys
 import threading
@@ -230,3 +231,118 @@ def test_upload_cannot_escape_the_file_root(daemon, tmp_path):
     with pytest.raises(RemoteError):
         client.push(src, "../escaped.bin")
     assert not (files.parent / "escaped.bin").exists()
+
+
+# -- file transfer: memory must not track file size ----------------------
+def _peak_rss_mb(fn):
+    """Run fn while sampling this process's RSS. Returns (result, delta_MB)."""
+    import subprocess
+    import threading
+
+    def rss_mb() -> float:
+        out = subprocess.run(["ps", "-o", "rss=", "-p", str(os.getpid())],
+                             capture_output=True, text=True).stdout.strip()
+        return int(out) / 1024
+
+    base = rss_mb()
+    peak = [base]
+    stop = threading.Event()
+
+    def watch():
+        while not stop.is_set():
+            peak[0] = max(peak[0], rss_mb())
+            time.sleep(0.02)
+
+    t = threading.Thread(target=watch, daemon=True)
+    t.start()
+    try:
+        result = fn()
+    finally:
+        stop.set()
+        t.join(timeout=2)
+    return result, peak[0] - base
+
+
+BIG_MB = 64
+
+
+def test_downloading_does_not_load_the_file_into_memory(daemon, tmp_path):
+    """A gigabyte checkpoint must not cost a gigabyte to serve.
+
+    read_bytes() made memory a function of file size; on a resumed pull the
+    extra slice made it twice the file size, on the same box that was running
+    the training job the checkpoint came from.
+    """
+    client, root, files, _ = daemon
+    big = files / "big.bin"
+    big.write_bytes(os.urandom(1 << 20) * BIG_MB)
+
+    out = tmp_path / "fresh.bin"
+    _, grew = _peak_rss_mb(lambda: client.pull("big.bin", out))
+    assert out.stat().st_size == BIG_MB << 20
+    assert grew < BIG_MB / 2, f"a {BIG_MB}MB download grew RSS by {grew:.0f}MB"
+
+
+def test_a_resumed_download_does_not_cost_twice_the_file(daemon, tmp_path):
+    client, root, files, _ = daemon
+    big = files / "big.bin"
+    payload = os.urandom(1 << 20) * BIG_MB
+    big.write_bytes(payload)
+
+    out = tmp_path / "resumed.bin"
+    # Interrupted at 1MB, exactly as a dropped transfer leaves things.
+    part = out.with_suffix(out.suffix + ".part")
+    part.write_bytes(payload[: 1 << 20])
+
+    _, grew = _peak_rss_mb(lambda: client.pull("big.bin", out))
+    assert out.read_bytes() == payload, "resume must reassemble the exact file"
+    assert grew < BIG_MB / 2, f"a resumed {BIG_MB}MB download grew RSS by {grew:.0f}MB"
+
+
+def test_progress_is_reported_while_downloading_not_after(daemon, tmp_path):
+    """A callback that fires once, at the end, is not progress."""
+    client, root, files, _ = daemon
+    (files / "big.bin").write_bytes(os.urandom(1 << 20) * 32)
+    seen: list[tuple[int, int]] = []
+    client.pull("big.bin", tmp_path / "out.bin", on_progress=lambda d, t: seen.append((d, t)))
+    assert len(seen) > 1, f"progress fired {len(seen)} time(s)"
+    assert [d for d, _ in seen] == sorted(d for d, _ in seen), "must not go backwards"
+    assert seen[-1][0] == seen[-1][1] == 32 << 20
+
+
+def test_a_stale_oversized_part_is_refused_not_spliced(daemon, tmp_path):
+    """A .part bigger than the remote file belongs to a different file."""
+    client, root, files, _ = daemon
+    (files / "small.bin").write_bytes(b"x" * 1000)
+    out = tmp_path / "small.bin"
+    out.with_suffix(".bin.part").write_bytes(b"y" * 5000)
+    with pytest.raises(RemoteError, match="delete it and pull again"):
+        client.pull("small.bin", out)
+    assert not out.exists(), "a refused pull must not produce a file"
+
+
+def test_a_part_that_is_already_complete_finishes_without_redownloading(daemon, tmp_path):
+    client, root, files, _ = daemon
+    payload = b"z" * 4096
+    (files / "done.bin").write_bytes(payload)
+    out = tmp_path / "done.bin"
+    out.with_suffix(".bin.part").write_bytes(payload)
+    assert client.pull("done.bin", out).read_bytes() == payload
+    assert not out.with_suffix(".bin.part").exists()
+
+
+def test_an_explicit_range_end_is_honoured(daemon, tmp_path):
+    """bytes=start-end must return that window, not everything after start."""
+    client, root, files, _ = daemon
+    (files / "r.bin").write_bytes(bytes(range(256)))
+    status, body, _ = client._request("GET", "/files/r.bin",
+                                      headers={"Range": "bytes=10-19"})
+    assert status == 206
+    assert body == bytes(range(10, 20)), f"got {len(body)} bytes"
+
+
+def test_a_suffix_range_is_refused_rather_than_mis_served(daemon):
+    client, root, files, _ = daemon
+    (files / "s.bin").write_bytes(b"abcdefghij")
+    with pytest.raises(RemoteError, match="suffix ranges"):
+        client._request("GET", "/files/s.bin", headers={"Range": "bytes=-5"})
