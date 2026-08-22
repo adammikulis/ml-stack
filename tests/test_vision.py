@@ -298,3 +298,153 @@ class TestBuildMessage:
 def test_gate_result_is_falsy_when_it_failed():
     assert not GateResult(False, ("teal",), ())
     assert GateResult(True, ("teal",), ("teal",))
+
+
+class TestGeometry:
+    """Pixels to angles, for a robot that has to drive at what it saw.
+
+    Two things here fail silently and cost a whole behaviour: the SIGN (drive
+    away from the target instead of toward it) and the SCALE (a wrong field of
+    view, so every turn is proportionally short). Both look like a broken
+    detector from the outside.
+    """
+
+    @staticmethod
+    def _room(w=320, h=240, person=None, wall=0.45, floor=90, wall_v=150, person_v=40):
+        """A ROOM, not a void: floor at the bottom and a back wall above it.
+
+        The distinction is the whole reason these tests exist. An earlier
+        detector was tested against a uniform floor filling the entire frame
+        with a bar drawn on it, passed everything, and returned "dead ahead,
+        confidence 1.00" for an EMPTY room -- because a back wall is not floor,
+        spans every column, and wins any widest-not-floor search.
+        """
+        import numpy as np
+        f = np.full((h, w, 3), floor, np.uint8)
+        f[: int(h * wall)] = wall_v
+        if person:
+            f[int(h * 0.30):int(h * 0.95), person[0]:person[1]] = person_v
+        return f
+
+    def test_the_frame_edges_span_exactly_the_field_of_view(self):
+        from ml_stack.vision import column_to_deg
+        assert column_to_deg(0, 320, 62.2) == pytest.approx(-31.1, abs=0.01)
+        assert column_to_deg(319, 320, 62.2) == pytest.approx(31.1, abs=0.01)
+
+    def test_the_centre_is_dead_ahead(self):
+        from ml_stack.vision import column_to_deg
+        assert column_to_deg(160, 321, 62.2) == pytest.approx(0.0, abs=0.01)
+
+    def test_the_mapping_is_tangent_not_linear(self):
+        """arctan is concave, so mid-frame angles are LARGER than a linear map
+        gives. Reversing this makes a robot under-turn on every command."""
+        from ml_stack.vision import column_to_deg
+        mid = column_to_deg(240, 320, 62.2)
+        assert mid > (62.2 / 2 * 0.5) + 1.0, f"{mid} looks linear"
+
+    def test_a_degenerate_width_does_not_divide_by_zero(self):
+        from ml_stack.vision import column_to_deg
+        assert column_to_deg(0, 1, 62.2) == 0.0
+        assert column_to_deg(0, 0, 62.2) == 0.0
+
+    def test_hfov_is_required_rather_than_guessed(self):
+        """A defaulted field of view is a silent calibration everybody inherits."""
+        import inspect
+
+        from ml_stack.vision import column_to_deg, nearest_obstacle
+        assert inspect.signature(column_to_deg).parameters["hfov_deg"].default \
+            is inspect.Parameter.empty
+        assert inspect.signature(nearest_obstacle).parameters["hfov_deg"].default \
+            is inspect.Parameter.empty
+
+    def test_the_scale_follows_the_field_of_view(self):
+        from ml_stack.vision import column_to_deg
+        narrow = column_to_deg(319, 320, 40.0)
+        wide = column_to_deg(319, 320, 90.0)
+        assert wide > narrow, "a wider lens must map the same column further off-axis"
+
+    def test_an_empty_room_is_not_a_person(self):
+        """THE regression. A back wall spans every column and is not floor, so
+        a naive not-floor mask reports it as a full-width object dead ahead with
+        maximum confidence -- identical to a room with someone standing in it."""
+        from ml_stack.vision import nearest_obstacle
+        assert nearest_obstacle(self._room(), hfov_deg=62.2).confidence == 0.0
+
+    def test_an_empty_room_and_an_occupied_one_do_not_look_alike(self):
+        from ml_stack.vision import nearest_obstacle
+        empty = nearest_obstacle(self._room(), hfov_deg=62.2)
+        occupied = nearest_obstacle(self._room(person=(250, 285)), hfov_deg=62.2)
+        assert occupied.confidence > 0.2 > empty.confidence
+
+    def test_it_points_at_where_the_person_actually_is(self):
+        from ml_stack.vision import nearest_obstacle
+        assert nearest_obstacle(self._room(person=(250, 285)), hfov_deg=62.2).deg > 10
+        assert nearest_obstacle(self._room(person=(45, 80)), hfov_deg=62.2).deg < -10
+        assert abs(nearest_obstacle(self._room(person=(150, 175)),
+                                    hfov_deg=62.2).deg) < 5
+
+    def test_a_textured_wall_is_wide_but_flat_and_so_is_rejected(self):
+        """Width alone is not evidence. The wall has structure at every column
+        and still ends at the same distance everywhere."""
+        import numpy as np
+
+        from ml_stack.vision import nearest_obstacle
+        rng = np.random.default_rng(1)
+        f = self._room()
+        f[: int(240 * 0.45)] = rng.integers(120, 190, (int(240 * 0.45), 320, 3),
+                                            dtype=np.uint8)
+        assert nearest_obstacle(f, hfov_deg=62.2).confidence < 0.2
+
+    def test_a_uniform_void_yields_nothing(self):
+        import numpy as np
+
+        from ml_stack.vision import nearest_obstacle
+        b = nearest_obstacle(np.full((240, 320, 3), 128, np.uint8), hfov_deg=62.2)
+        assert b.confidence == 0.0
+
+    def test_speckle_noise_does_not_become_a_bearing(self):
+        import numpy as np
+
+        from ml_stack.vision import nearest_obstacle
+        rng = np.random.default_rng(0)
+        f = self._room()
+        f[rng.integers(120, 230, 60), rng.integers(0, 320, 60)] = 255
+        assert nearest_obstacle(f, hfov_deg=62.2).confidence < 0.2
+
+    def test_a_nearer_object_beats_a_further_one(self):
+        """Two objects: the one whose floor ends lower in the frame is closer,
+        and closer is what 'come here' should walk toward."""
+        from ml_stack.vision import nearest_obstacle
+        import numpy as np
+        f = self._room()
+        f[int(240 * 0.30):int(240 * 0.60), 40:80] = 40      # far: ends higher
+        f[int(240 * 0.30):int(240 * 0.95), 250:290] = 40    # near: ends lower
+        assert nearest_obstacle(f, hfov_deg=62.2).deg > 10
+
+    def test_the_floor_boundary_is_flat_for_an_empty_room(self):
+        import numpy as np
+
+        from ml_stack.vision import floor_boundary
+        prof = floor_boundary(self._room())
+        assert float(np.std(prof)) < 2.0, "an empty room should have a flat horizon"
+
+    def test_the_floor_boundary_dips_nearer_where_someone_stands(self):
+        import numpy as np
+
+        from ml_stack.vision import floor_boundary
+        prof = floor_boundary(self._room(person=(250, 285)))
+        assert prof[265] > np.median(prof) + 10
+
+    def test_to_gray_channel_order_is_not_silently_reversed(self):
+        import numpy as np
+
+        from ml_stack.vision import to_gray
+        blue_first = np.array([[[255, 0, 0]]], np.uint8)
+        assert to_gray(blue_first, bgr=True)[0, 0] == pytest.approx(0.114 * 255, abs=0.5)
+        assert to_gray(blue_first, bgr=False)[0, 0] == pytest.approx(0.299 * 255, abs=0.5)
+
+    def test_to_gray_passes_through_an_already_gray_frame(self):
+        import numpy as np
+
+        from ml_stack.vision import to_gray
+        assert to_gray(np.full((8, 8), 100, np.uint8))[0, 0] == pytest.approx(100.0)
