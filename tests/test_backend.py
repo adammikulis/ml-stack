@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from mainspring.backend import (
+from ml_stack.backend import (
     ArrayBackend,
     BackendUnavailable,
     available,
@@ -17,8 +17,8 @@ from mainspring.backend import (
     get_backend,
     set_seeds,
 )
-from mainspring.backend.registry import reset
-from mainspring.testing import assert_forward_parity, needs_both, needs_mlx, needs_torch
+from ml_stack.backend.registry import reset
+from ml_stack.testing import assert_forward_parity, needs_both, needs_mlx, needs_torch
 
 BACKENDS = available()
 each_backend = pytest.mark.parametrize("name", BACKENDS)
@@ -39,13 +39,13 @@ def test_env_override_is_honoured(monkeypatch):
     """So a comparison run can pin a backend without editing code."""
     if "torch" not in BACKENDS:
         pytest.skip("torch not available")
-    monkeypatch.setenv("MAINSPRING_BACKEND", "torch")
+    monkeypatch.setenv("ML_STACK_BACKEND", "torch")
     assert detect_backend() == "torch"
 
 
 def test_a_bogus_override_raises_rather_than_falling_back(monkeypatch):
     """Falling back would silently run on a backend the operator did not ask for."""
-    monkeypatch.setenv("MAINSPRING_BACKEND", "jax")
+    monkeypatch.setenv("ML_STACK_BACKEND", "jax")
     with pytest.raises(BackendUnavailable, match="jax"):
         detect_backend()
 
@@ -85,7 +85,7 @@ def test_backend_is_fully_populated(name):
 def test_every_protocol_operation_exists(name):
     """The protocol is the contract that stops the backends diverging. A missing method
     should fail here, not deep inside somebody's forward pass."""
-    from mainspring.backend.ops import ArrayOps
+    from ml_stack.backend.ops import ArrayOps
 
     ops = get_backend(name).ops
     required = [

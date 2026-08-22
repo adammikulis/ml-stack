@@ -1,4 +1,4 @@
-# mainspring
+# ml-stack
 
 Primitives for running local AI models: serving them, talking to them, converting them,
 and training them.
@@ -32,23 +32,23 @@ python scripts/check_tiers.py --live
 
 | Package | Tier | What it is |
 |---|---|---|
-| `mainspring-contracts` | device | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
-| `mainspring-media` | device | WAV containers, image format sniffing, resumable asset download |
-| `mainspring-client` | device | HTTP client: chat, completion, embeddings, health, token estimate |
-| `mainspring-serve` | host | Start, adopt and tear down a model server |
-| `mainspring-gguf` | host | Converter/quantiser discovery, export, tokenizer-metadata repair |
-| `mainspring-speech` | host | ASR / TTS / VAD behind three protocols and one resolver |
-| `mainspring-vision` | host | Image payloads, and a gate that verifies a model can see |
-| `mainspring-backend` | lab | One array API over MLX and PyTorch, so math is written once |
-| `mainspring-graph` | lab | Graphs as tensors: message passing, DAG sweeps, topology |
-| `mainspring-train` | lab | Atomic checkpoints, schedules, guards, metrics, leak-safe splits |
-| `mainspring-testing` | lab | Cross-backend numerical parity harness |
+| `ml-stack-contracts` | device | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
+| `ml-stack-media` | device | WAV containers, image format sniffing, resumable asset download |
+| `ml-stack-client` | device | HTTP client: chat, completion, embeddings, health, token estimate |
+| `ml-stack-serve` | host | Start, adopt and tear down a model server |
+| `ml-stack-gguf` | host | Converter/quantiser discovery, export, tokenizer-metadata repair |
+| `ml-stack-speech` | host | ASR / TTS / VAD behind three protocols and one resolver |
+| `ml-stack-vision` | host | Image payloads, and a gate that verifies a model can see |
+| `ml-stack-backend` | lab | One array API over MLX and PyTorch, so math is written once |
+| `ml-stack-graph` | lab | Graphs as tensors: message passing, DAG sweeps, topology |
+| `ml-stack-train` | lab | Atomic checkpoints, schedules, guards, metrics, leak-safe splits |
+| `ml-stack-testing` | lab | Cross-backend numerical parity harness |
 
 ## Using it
 
 ```python
-from mainspring.serve import serve
-from mainspring.client import Client
+from ml_stack.serve import serve
+from ml_stack.client import Client
 
 with serve("model.gguf", port=8899) as server:
     client = Client(server.base_url)
@@ -60,7 +60,7 @@ with serve("model.gguf", port=8899) as server:
 and leaves an adopted server alone on exit. It only stops what it started.
 
 ```python
-from mainspring.contracts import largest_that_fits
+from ml_stack.contracts import largest_that_fits
 import psutil
 
 tier = largest_that_fits(psutil.virtual_memory().total)
@@ -70,7 +70,7 @@ print(tier.id, tier.gguf_repo, tier.context)
 Write model math once, against the array protocol, and run it on either framework:
 
 ```python
-from mainspring.backend import get_backend
+from ml_stack.backend import get_backend
 
 def rms_norm(backend, x, weight, eps=1e-6):
     ops = backend.ops
@@ -81,10 +81,10 @@ rms_norm(get_backend("mlx"), x, w)      # same function
 rms_norm(get_backend("torch"), x, w)    # same numbers
 ```
 
-`mainspring.testing` proves the two agree, forward and backward:
+`ml_stack.testing` proves the two agree, forward and backward:
 
 ```python
-from mainspring.testing import needs_both, run_pair
+from ml_stack.testing import needs_both, run_pair
 
 @needs_both
 def test_layer_matches():
@@ -97,10 +97,10 @@ def test_layer_matches():
 agree on: the RAM→model tier ladder, the sampler surface, GBNF grammars. It contains no
 code, so a native or scripting host can read it directly.
 
-There is exactly one copy on disk. `mainspring-contracts` pulls it into its wheel at build time,
+There is exactly one copy on disk. `ml-stack-contracts` pulls it into its wheel at build time,
 so there is no synced duplicate in the source tree to drift.
 
-Resolution order at runtime: `$MAINSPRING_CONTRACTS` → the copy inside the installed wheel → a
+Resolution order at runtime: `$ML_STACK_CONTRACTS` → the copy inside the installed wheel → a
 `contracts/` found by walking up from the source file. The walk-up is last on purpose: if a
 wheel is installed *and* a repo happens to be an ancestor, the wheel's own data should win,
 because that is what its version was tested against.
@@ -127,7 +127,7 @@ A few decisions that are easy to reverse by accident:
   restart, not a resume, and it shows up as a loss spike that gets blamed on the LR.
 - **Schedules are plain functions returning floats.** A framework schedule object captured
   by a compiled function freezes the learning rate for the rest of the run, silently.
-- **Graph algorithms are networkx's job.** `mainspring-graph` keeps a graph in the array
+- **Graph algorithms are networkx's job.** `ml-stack-graph` keeps a graph in the array
   backend so it can go through a model; for shortest path or components, call
   `Graph.to_networkx()`.
 - **Constructing a provider proves nothing.** Speech auto-detection *starts* each

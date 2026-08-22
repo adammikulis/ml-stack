@@ -11,8 +11,8 @@ from __future__ import annotations
 import io
 
 import pytest
-from mainspring.media import from_data_url, kind, probe_png
-from mainspring.vision import (
+from ml_stack.media import from_data_url, kind, probe_png
+from ml_stack.vision import (
     PALETTE,
     GateResult,
     NormalizationReport,
@@ -225,7 +225,7 @@ class TestFormatConversion:
             assert not converted and out is data
 
     def test_unrecognised_bytes_raise(self):
-        from mainspring.media import ImageError
+        from ml_stack.media import ImageError
 
         with pytest.raises(ImageError):
             to_supported_format(b"<html>not an image</html>")
@@ -267,7 +267,7 @@ class TestNormalize:
 
     def test_load_bytes_accepts_a_data_url(self):
         original = png_of((8, 8))
-        from mainspring.media import to_data_url
+        from ml_stack.media import to_data_url
 
         assert load_bytes(to_data_url(original)) == original
 

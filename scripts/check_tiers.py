@@ -36,7 +36,7 @@ PACKAGES = REPO / "packages"
 
 TIER_ORDER = {"device": 0, "host": 1, "lab": 2}
 
-# The tier each mainspring subpackage belongs to. Adding a package means adding it here --
+# The tier each ml-stack subpackage belongs to. Adding a package means adding it here --
 # an unlisted package fails the check rather than defaulting to permissive.
 TIERS: dict[str, str] = {
     "contracts": "device",
@@ -60,7 +60,7 @@ def tier_of(package: str) -> str:
         return TIERS[package]
     except KeyError:
         raise SystemExit(
-            f"package 'mainspring.{package}' has no tier in scripts/check_tiers.py. "
+            f"package 'ml_stack.{package}' has no tier in scripts/check_tiers.py. "
             "Add it to TIERS -- an unlisted package is a design decision that was "
             "never made, not a package that is exempt."
         ) from None
@@ -85,8 +85,8 @@ def imports_of(path: Path) -> set[str]:
     return found
 
 
-def mainspring_subpackages_of(path: Path) -> set[str]:
-    """Which ``mainspring.<x>`` subpackages a file imports."""
+def ml_stack_subpackages_of(path: Path) -> set[str]:
+    """Which ``ml_stack.<x>`` subpackages a file imports."""
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     except SyntaxError:
@@ -94,13 +94,13 @@ def mainspring_subpackages_of(path: Path) -> set[str]:
 
     found: set[str] = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("mainspring."):
+        if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("ml_stack."):
             parts = node.module.split(".")
             if len(parts) >= 2:
                 found.add(parts[1])
         elif isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name.startswith("mainspring."):
+                if alias.name.startswith("ml_stack."):
                     parts = alias.name.split(".")
                     if len(parts) >= 2:
                         found.add(parts[1])
@@ -110,20 +110,20 @@ def mainspring_subpackages_of(path: Path) -> set[str]:
 def check_static() -> list[str]:
     problems: list[str] = []
 
-    for source in sorted(PACKAGES.glob("*/src/mainspring/*/**/*.py")):
+    for source in sorted(PACKAGES.glob("*/src/ml_stack/*/**/*.py")):
         package = source.relative_to(PACKAGES).parts[3]
         tier = tier_of(package)
         rank = TIER_ORDER[tier]
         where = source.relative_to(REPO)
 
-        for other in sorted(mainspring_subpackages_of(source)):
+        for other in sorted(ml_stack_subpackages_of(source)):
             if other == package:
                 continue
             other_rank = TIER_ORDER[tier_of(other)]
             if other_rank > rank:
                 problems.append(
-                    f"{where}: {tier} package 'mainspring.{package}' imports "
-                    f"{tier_of(other)} package 'mainspring.{other}'. "
+                    f"{where}: {tier} package 'ml_stack.{package}' imports "
+                    f"{tier_of(other)} package 'ml_stack.{other}'. "
                     f"A {tier} package may not depend on a {tier_of(other)} one."
                 )
 
@@ -131,11 +131,11 @@ def check_static() -> list[str]:
             external = {
                 name
                 for name in imports_of(source)
-                if name not in STDLIB and name != "mainspring" and not name.startswith("_")
+                if name not in STDLIB and name != "ml_stack" and not name.startswith("_")
             }
             for name in sorted(external):
                 problems.append(
-                    f"{where}: device package 'mainspring.{package}' imports "
+                    f"{where}: device package 'ml_stack.{package}' imports "
                     f"non-stdlib module '{name}'. Device packages must import on a "
                     f"machine with nothing installed."
                 )
@@ -153,7 +153,7 @@ def check_live() -> list[str]:
     device = [name for name, tier in TIERS.items() if tier == "device"]
 
     for name in sorted(device):
-        src = PACKAGES / f"mainspring-{name}" / "src"
+        src = PACKAGES / f"ml-stack-{name}" / "src"
         if not src.is_dir():
             continue
 
@@ -162,7 +162,7 @@ def check_live() -> list[str]:
             "sys.path = [p for p in sys.path if 'site-packages' not in p "
             "and 'dist-packages' not in p]\n"
             f"sys.path.insert(0, {str(src)!r})\n"
-            f"import mainspring.{name} as m\n"
+            f"import ml_stack.{name} as m\n"
             "print(sorted(getattr(m, '__all__', []))[:3])\n"
         )
         result = subprocess.run(
@@ -174,7 +174,7 @@ def check_live() -> list[str]:
         if result.returncode != 0:
             tail = (result.stderr or result.stdout).strip().splitlines()
             problems.append(
-                f"mainspring.{name} does not import without site-packages:\n    "
+                f"ml_stack.{name} does not import without site-packages:\n    "
                 + "\n    ".join(tail[-6:])
             )
 

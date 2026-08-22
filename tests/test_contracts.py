@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from mainspring.contracts import Budget, contracts_dir, fits, largest_that_fits, tiers
+from ml_stack.contracts import Budget, contracts_dir, fits, largest_that_fits, tiers
 
 GIB = 1024**3
 
@@ -63,7 +63,7 @@ def test_overhead_floor_dominates_for_small_models():
     """Weights are the floor, not the total. A 200 MB model does not cost 250 MB -- the
     KV cache alone is bigger than that, which is what the 1 GiB floor encodes."""
     budget = Budget(0.7, 0.25, 1 * GIB)
-    from mainspring.contracts import weights_plus_overhead_bytes
+    from ml_stack.contracts import weights_plus_overhead_bytes
 
     assert weights_plus_overhead_bytes(200 * 1024**2, budget) == 200 * 1024**2 + 1 * GIB
 
@@ -105,7 +105,7 @@ def test_budget_profiles_exist_and_mobile_is_stricter():
 
 
 def test_unknown_profile_raises():
-    from mainspring.contracts import ContractError
+    from ml_stack.contracts import ContractError
 
     with pytest.raises(ContractError, match="no budget profile"):
         Budget.for_profile("toaster")  # type: ignore[arg-type]

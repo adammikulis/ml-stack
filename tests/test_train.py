@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 import pytest
-from mainspring.train import (
+from ml_stack.train import (
     CheckpointError,
     CheckpointState,
     LeakageError,

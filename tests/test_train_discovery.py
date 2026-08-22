@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
-from mainspring.train.discovery import (
+from ml_stack.train.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
@@ -33,7 +33,7 @@ from mainspring.train.discovery import (
     discover,
     load_cluster_key,
 )
-from mainspring.train.remote import RemoteTrainer
+from ml_stack.train.remote import RemoteTrainer
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -206,7 +206,7 @@ def traind(tmp_path):
     disco_port = _free_udp_port()
     http_port = _free_tcp_port()
     env = {**os.environ,
-           "MAINSPRING_DISCOVERY_PORT": str(disco_port),
+           "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": os.pathsep.join(
                str(p) for p in sorted((REPO / "packages").glob("*/src"))),
            "PYTHONUNBUFFERED": "1"}
@@ -216,7 +216,7 @@ def traind(tmp_path):
     log = tmp_path / "traind.out"
     fh = log.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "mainspring.train.daemon",
+        [sys.executable, "-m", "ml_stack.train.daemon",
          "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", "testbox",
          "--cluster-key", str(keyfile)],
@@ -284,10 +284,10 @@ def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
 
 def test_peers_ls_reports_the_running_daemon(traind):
     keyfile, disco_port, http_port, log = traind
-    env = {**os.environ, "MAINSPRING_DISCOVERY_PORT": str(disco_port),
+    env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": os.pathsep.join(
                str(p) for p in sorted((REPO / "packages").glob("*/src")))}
-    r = subprocess.run([sys.executable, "-m", "mainspring.train.peers",
+    r = subprocess.run([sys.executable, "-m", "ml_stack.train.peers",
                         "--cluster-key", str(keyfile), "ls", "--json",
                         "--timeout", "3"],
                        env=env, capture_output=True, text=True)

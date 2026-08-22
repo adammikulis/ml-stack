@@ -19,14 +19,14 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from mainspring.train.daemon import (
+from ml_stack.train.daemon import (
     DaemonError,
     JobRunner,
     load_or_create_token,
     make_handler,
     safe_relpath,
 )
-from mainspring.train.remote import RemoteError, RemoteTrainer
+from ml_stack.train.remote import RemoteError, RemoteTrainer
 
 
 def _free_port() -> int:

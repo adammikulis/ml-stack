@@ -7,7 +7,7 @@ import struct
 import zlib
 
 import pytest
-from mainspring.media import (
+from ml_stack.media import (
     DownloadError,
     ImageError,
     WavError,
@@ -43,7 +43,7 @@ class TestWav:
         canonical = encode(pcm, sample_rate=16000)
         head, tail = canonical[:36], canonical[36:]  # split at the `data` chunk
 
-        software = b"mainspring\x00\x00"  # NUL-terminated, word-aligned
+        software = b"ml_stack\x00\x00"  # NUL-terminated, word-aligned
         info_body = b"INFOISFT" + struct.pack("<I", len(software)) + software
         listed = head + b"LIST" + struct.pack("<I", len(info_body)) + info_body + tail
 

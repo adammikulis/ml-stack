@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-stack-train"
+version = "0.1.0"
+description = "Training scaffolding: atomic checkpoints, schedules, guards, metrics, leak-safe splits. Lab tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["ml-stack-backend"]
+
+[project.scripts]
+ml-stack-traind = "ml_stack.train.daemon:main"
+ml-stack-peers = "ml_stack.train.peers:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_stack"]

@@ -12,8 +12,8 @@ import math
 import struct
 
 import pytest
-from mainspring.media import wav
-from mainspring.speech import (
+from ml_stack.media import wav
+from ml_stack.speech import (
     ASRProvider,
     EnergyVAD,
     NoProviderAvailable,
@@ -27,7 +27,7 @@ from mainspring.speech import (
     pcm_to_floats,
     rms,
 )
-from mainspring.speech.vad import _merge_regions
+from ml_stack.speech.vad import _merge_regions
 
 
 def tone(seconds: float, *, rate: int = 16000, amplitude: float = 0.5, hz: float = 220.0) -> bytes:

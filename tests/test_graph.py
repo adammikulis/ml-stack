@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from mainspring.backend import available, get_backend
-from mainspring.graph import (
+from ml_stack.backend import available, get_backend
+from ml_stack.graph import (
     Graph,
     NotADAG,
     batch_graphs,
@@ -22,7 +22,7 @@ from mainspring.graph import (
     resolvent_sweep,
     topological_order,
 )
-from mainspring.testing import assert_forward_parity, needs_both
+from ml_stack.testing import assert_forward_parity, needs_both
 
 BACKENDS = available()
 each_backend = pytest.mark.parametrize("name", BACKENDS)

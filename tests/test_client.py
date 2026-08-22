@@ -13,7 +13,7 @@ import time
 
 import pytest
 from conftest import json_reply
-from mainspring.client import (
+from ml_stack.client import (
     Client,
     EmbeddingError,
     GrammarUnsupportedError,
@@ -327,12 +327,12 @@ class TestEmbeddings:
         assert not instance.requests
 
     def test_cosine_of_identical_vectors_is_one(self):
-        from mainspring.client import cosine
+        from ml_stack.client import cosine
 
         assert cosine([1.0, 2.0, 3.0], [1.0, 2.0, 3.0]) == pytest.approx(1.0)
 
     def test_cosine_rejects_a_dimension_mismatch(self):
-        from mainspring.client import cosine
+        from ml_stack.client import cosine
 
         with pytest.raises(EmbeddingError):
             cosine([1.0], [1.0, 2.0])
@@ -352,7 +352,7 @@ class TestTokenEstimate:
         assert heuristic_tokens("!!!???<<<>>>...") > heuristic_tokens("aaaaaaaaaaaaaaa")
 
     def test_an_installed_counter_is_used_and_can_be_removed(self):
-        from mainspring.client import set_token_counter
+        from ml_stack.client import set_token_counter
 
         try:
             set_token_counter(lambda _: 99)

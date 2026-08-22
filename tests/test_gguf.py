@@ -11,7 +11,7 @@ import os
 
 import pytest
 
-from mainspring.gguf import (
+from ml_stack.gguf import (
     ADD_SPACE_PREFIX,
     ConversionError,
     ToolNotFound,
@@ -69,7 +69,7 @@ class TestToolDiscovery:
         """An error that only says 'not found' makes the reader go hunting."""
         monkeypatch.delenv("LLAMA_CPP_ROOT", raising=False)
         monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
-        monkeypatch.setenv("MAINSPRING_CACHE", str(tmp_path / "cache"))
+        monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
 
         with pytest.raises(ToolNotFound) as excinfo:
             require_converter(tmp_path / "absent.py")

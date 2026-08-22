@@ -16,7 +16,7 @@ import time
 
 import pytest
 from conftest import json_reply
-from mainspring.serve import (
+from ml_stack.serve import (
     LlamaServerBackend,
     ServerFailed,
     ServerInfo,
@@ -245,7 +245,7 @@ class TestAdoption:
         manager.release(info)
 
         assert instance.base_url  # still answering; nothing was killed
-        from mainspring.client import is_healthy
+        from ml_stack.client import is_healthy
 
         assert is_healthy(instance.base_url)
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://example.invalid/mainspring/contracts/sampling.schema.json",
+  "$id": "https://example.invalid/ml_stack/contracts/sampling.schema.json",
   "title": "Sampling parameters",
   "$comment": [
     "One declaration of the sampler surface, shared by the Python client and any",

@@ -1,0 +1,18 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ml-stack-graph"
+version = "0.1.0"
+description = "Graphs as tensors: container, message passing, DAG sweeps, topology construction. Lab tier."
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["ml-stack-backend", "numpy>=1.24"]
+
+[project.optional-dependencies]
+algorithms = ["networkx>=3.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ml_stack"]
