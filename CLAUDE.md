@@ -65,3 +65,34 @@ is going away.
 
 An empty HANDOFF.md is a good state. Delete the file rather than leaving headings with
 nothing under them.
+
+## Worktrees
+
+Every agent works in its own worktree on its own branch. That means the main session as
+much as any subagent it spawns — "I am the one driving" is not an exemption. Nobody edits
+the primary checkout, and no two agents share a branch.
+
+Make one before the first edit, branching from `main`:
+
+```
+git worktree add -b <branch> ../ml-stack-<branch> main
+```
+
+Whoever made it finishes it. Merge into `main`, then take the worktree and the branch
+away:
+
+```
+git worktree remove ../ml-stack-<branch>
+git branch -d <branch>
+git worktree prune
+```
+
+If the branch was pushed, delete it on the remote too. A branch nobody is working on
+still shows up in every list of branches, and the next person has to work out whether it
+matters.
+
+A subagent merges and prunes its own work. A session that spawns three agents gets three
+merges done by three agents, not three branches handed back for it to sort out.
+
+Do not remove a worktree you did not create — another agent may still be in it. Leave it
+and say so.
