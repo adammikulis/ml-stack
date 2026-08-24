@@ -378,7 +378,7 @@ class TestPassphrase:
         assert (key_from_passphrase(self.WORDS, group="home")
                 != key_from_passphrase(self.WORDS, group="lab"))
 
-    @pytest.mark.parametrize("bad", ["", "short", "1234567"])
+    @pytest.mark.parametrize("bad", ["", "abc", "1234"])
     def test_a_passphrase_too_short_to_survive_guessing_is_refused(self, bad):
         from ml_stack.fleet.discovery import key_from_passphrase
 
@@ -553,7 +553,7 @@ class TestBelongingToSeveralClusters:
 
         anchor = tmp_path / "cluster.key"
         with pt.raises(DiscoveryError, match="at least"):
-            join("short", group="home", path=anchor)
+            join("abc", group="home", path=anchor)
         assert memberships(anchor) == []
 
     def test_two_machines_in_the_same_cluster_derive_the_same_key(self, tmp_path):

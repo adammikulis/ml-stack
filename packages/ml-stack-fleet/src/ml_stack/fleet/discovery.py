@@ -67,7 +67,7 @@ def create_cluster_key(path: Path | str | None = None, *,
 
 
 # -- joining by password -------------------------------------------------
-MIN_PASSPHRASE = 8
+MIN_PASSPHRASE = 5
 """Shortest passphrase accepted. Low, because a refusal people work around by typing"""
 
 SCRYPT_N = 1 << 16

@@ -65,11 +65,11 @@ def _():
     return "each sees only its own"
 
 
-@check("Setup", "a passphrase shorter than 8 characters is refused")
+@check("Setup", "a passphrase shorter than the minimum is refused")
 def _():
-    from ml_stack.fleet import DiscoveryError, key_from_passphrase
+    from ml_stack.fleet import DiscoveryError, MIN_PASSPHRASE, key_from_passphrase
     try:
-        key_from_passphrase("short")
+        key_from_passphrase("x" * (MIN_PASSPHRASE - 1))
     except DiscoveryError as exc:
         return str(exc)[:60]
     raise AssertionError("accepted a short passphrase")
