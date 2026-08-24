@@ -201,6 +201,11 @@ button.ghost { background: transparent; border: 1px solid var(--line-bright); co
   background: color-mix(in srgb, var(--good) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--good) 32%, transparent); color: var(--good);
 }
+button.back {
+  margin: 0 0 10px -8px; width: auto; padding: 5px 8px; background: transparent;
+  border: 0; color: var(--muted); font-size: 13px; font-weight: 500;
+}
+button.back:hover:not(:disabled) { color: var(--text); filter: none; }
 .steps { display: flex; gap: 6px; margin-bottom: 22px; }
 .steps i { height: 3px; flex: 1; border-radius: 2px; background: var(--line); transition: background .3s; }
 .steps i.on { background: var(--accent); }

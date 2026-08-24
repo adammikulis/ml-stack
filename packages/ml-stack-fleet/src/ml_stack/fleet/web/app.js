@@ -4,6 +4,7 @@
 
 const root = document.getElementById("root");
 const H = { "X-ML-Stack-UI": "1", "Content-Type": "application/json" };
+const MIN_PASS = 5;
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
@@ -229,9 +230,9 @@ async function fleet() {
     const add = el("button", { class: "ghost small" }, "Join");
     add.onclick = async () => {
       const said = words.value.trim();
-      if (said.length < 8) {
+      if (said.length < MIN_PASS) {
         note.replaceChildren(el("div", { class: "err" },
-          "A passphrase needs at least 8 characters."));
+          `A passphrase needs at least ${MIN_PASS} characters.`));
         return;
       }
       add.disabled = true;
@@ -970,26 +971,27 @@ async function signOut(e) {
 }
 
 // ---------------------------------------------------------------- wizard
-const state = { step: 0, mode: "", name: "", group: "ml-stack", prefs: null };
+const state = { step: 0, mode: "", name: "", group: "ml-stack", pass: "",
+                libraries: null, suggest: null, prefs: null, install: null };
 
-function steps(n) {
-  return el("div", { class: "steps" },
-    [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" })));
+function steps(n, back) {
+  return el("div", {},
+    back ? el("button", { class: "back", onclick: back }, "\u2190 Back") : null,
+    el("div", { class: "steps" },
+      [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" }))));
 }
 
 // Step 4: what this machine should be able to run. Asked here rather than left in
 // Settings, because a machine that can do nothing yet is the state everyone starts in
 // and nobody goes looking for.
-async function installStep(next) {
-  const L = await api("/ui/libraries");
-  const offered = L.libraries || [];
-  const want = new Set(offered.filter((x) => x.default || x.installed)
-                              .map((x) => x.name));
-  let chat = true;
-  let context = 8192;
-  let updates = true;
-  let getModels = true;
-  let onClose = "";
+async function installStep(next, back) {
+  if (!state.libraries) state.libraries = await api("/ui/libraries");
+  const offered = state.libraries.libraries || [];
+  const kept = state.install || (state.install = {
+    want: offered.filter((x) => x.default || x.installed).map((x) => x.name),
+    chat: true, context: 8192, updates: true, getModels: true, onClose: "",
+  });
+  const want = new Set(kept.want);
 
   const note = el("div");
   const go = el("button", {}, "Install and continue");
@@ -1006,12 +1008,13 @@ async function installStep(next) {
   go.onclick = async () => {
     go.disabled = true; later.disabled = true;
     await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
-      context, auto_update: updates, autodownload_models: getModels,
-      on_close: onClose, autostart: state.autostart || "manual" }) });
+      context: kept.context, auto_update: kept.updates,
+      autodownload_models: kept.getModels, on_close: kept.onClose,
+      autostart: (state.prefs || {}).autostart || "manual" }) });
     const doing = (what) => note.replaceChildren(
       el("div", { class: "hint" }, el("span", { class: "spin" }), " " + what));
     try {
-      if (chat) {
+      if (kept.chat) {
         doing("Getting the model server…");
         const got = await api("/ui/serving/install", { method: "POST" });
         if (got.error) {
@@ -1043,33 +1046,36 @@ async function installStep(next) {
                              .reduce((a, x) => a + (x.size_mb || 0), 0);
 
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(4),
+    steps(4, back),
     el("h1", {}, "What should it be able to do?"),
     el("p", { class: "sub" },
       "Ticked from what this machine is. Anything here can be changed later in "
       + "Settings."),
     el("div", { class: "cap" }, el("span", {}, "CHATTING")),
-    box("chat", true, "Run models and chat with them",
+    box("chat", kept.chat, "Run models and chat with them",
       "downloads llama.cpp, about 20 MB; models come later and are your choice",
-      (on) => { chat = on; }),
-    contextPicker(8192, (n) => { context = n; }),
+      (on) => { kept.chat = on; }),
+    contextPicker(kept.context, (n) => { kept.context = n; }),
     offered.length
       ? el("div", { class: "cap" }, el("span", {}, "TRAINING"))
       : null,
     ...offered.map((lib) =>
       box(`lib_${lib.name}`, want.has(lib.name), lib.title,
         `${lib.blurb || ""}${lib.size_mb ? ` — about ${lib.size_mb} MB` : ""}`,
-        (on) => { on ? want.add(lib.name) : want.delete(lib.name); })),
+        (on) => {
+          on ? want.add(lib.name) : want.delete(lib.name);
+          kept.want = [...want];
+        })),
     el("div", { class: "hint" },
       "Installed alongside ml-stack, not into your system Python."),
 
     el("div", { class: "cap" }, el("span", {}, "KEEPING UP TO DATE")),
-    box("upd", true, "Download and install updates automatically",
+    box("upd", kept.updates, "Download and install updates automatically",
       "checked once a day, put on when no job is running, and it restarts itself",
-      (on) => { updates = on; }),
-    box("getm", true, "Get models automatically",
+      (on) => { kept.updates = on; }),
+    box("getm", kept.getModels, "Get models automatically",
       "from another machine on your network if one has it, otherwise the internet",
-      (on) => { getModels = on; }),
+      (on) => { kept.getModels = on; }),
 
     el("div", { class: "cap" }, el("span", {}, "CLOSING THE WINDOW")),
     ...[["", "Ask me each time"],
@@ -1077,8 +1083,8 @@ async function installStep(next) {
         ["quit", "Quit and leave the cluster"]].map(([value, label]) => {
       const id = `close_${value || "ask"}`;
       const input = el("input", { type: "radio", name: "onclose", id,
-                                  ...(value === "" ? { checked: "1" } : {}) });
-      input.onchange = () => { if (input.checked) onClose = value; };
+                                  ...(value === kept.onClose ? { checked: "1" } : {}) });
+      input.onchange = () => { if (input.checked) kept.onClose = value; };
       return el("label", { class: "opt", for: id }, input, row(label, ""));
     }),
 
@@ -1087,17 +1093,18 @@ async function installStep(next) {
 
 // Step 3: what this machine should do. Every box is pre-ticked from what the machine
 // actually is, and every one shows why, so a wrong guess is visible rather than silent.
-async function prefsStep(next) {
-  const r = await api("/ui/setup/suggest");
+async function prefsStep(next, back) {
+  if (!state.suggest) state.suggest = await api("/ui/setup/suggest");
+  const r = state.suggest;
   const s = r.suggest || {};
   const m = r.machine || {};
-  const pick = {
+  const pick = state.prefs || (state.prefs = {
     labels: (s.labels?.value || []).join(","),
     slots: s.slots?.value ?? 1,
     autostart: s.autostart?.value || "manual",
     work_hours: !!s.work_hours?.value,
     on_paused: s.on_paused?.value || "stop",
-  };
+  });
 
   const spec = (label, why) => el("span", {},
     el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
@@ -1139,7 +1146,7 @@ async function prefsStep(next) {
   };
 
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(3),
+    steps(3, back),
     el("h1", {}, "What should this machine do?"),
     el("p", { class: "sub" },
       m.gpu ? `Found ${m.gpu}. These are set from that — change any of them.`
@@ -1197,33 +1204,36 @@ function wizard(setup, err) {
   if (state.step === 1) {
     const pick = (mode) => { state.mode = mode; next(2); };
     return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(1),
+      steps(1, () => next(0)),
       el("h1", {}, "Is this your first machine?"),
       el("p", { class: "sub" }, "Both roads lead to the same passphrase — this just changes what happens next."),
       el("div", { class: "choices" },
-        el("button", { class: "choice", onclick: () => pick("first") },
+        el("button", { class: `choice${state.mode === "first" ? " on" : ""}`,
+                       onclick: () => pick("first") },
           el("span", { class: "t" }, "This is my first machine"),
           el("span", { class: "d" }, "You will choose a passphrase, then type the same one on the others.")),
-        el("button", { class: "choice", onclick: () => pick("join") },
+        el("button", { class: `choice${state.mode === "join" ? " on" : ""}`,
+                       onclick: () => pick("join") },
           el("span", { class: "t" }, "Another machine is already set up"),
           el("span", { class: "d" }, "Type the passphrase you used there and this one joins it."))))));
   }
 
   if (state.step === 2) {
-    const p1 = el("input", { type: "password", id: "p1", autofocus: "1" });
-    const p2 = el("input", { type: "password", id: "p2" });
+    const p1 = el("input", { type: "password", id: "p1", value: state.pass,
+                             autofocus: "1" });
+    const p2 = el("input", { type: "password", id: "p2", value: state.pass });
     const grp = el("input", { type: "text", value: state.group, id: "g" });
     const go = el("button", {}, state.mode === "first" ? "Create the cluster" : "Join");
     const note = el("div", { class: "hint" });
 
     const check = () => {
       const a = p1.value, b = p2.value;
-      if (a.trim().length && a.trim().length < 8) {
-        note.textContent = "At least 8 characters. A few words you will remember beats a short complicated one.";
+      if (a.trim().length && a.trim().length < MIN_PASS) {
+        note.textContent = `At least ${MIN_PASS} characters. A few words you will remember beats a short complicated one.`;
       } else if (a && b && a !== b) {
         note.textContent = "These do not match yet.";
       } else { note.textContent = "Everyone who knows this can run commands on every machine in the group."; }
-      go.disabled = !(a.trim().length >= 8 && a === b);
+      go.disabled = !(a.trim().length >= MIN_PASS && a === b);
     };
     p1.oninput = p2.oninput = check;
     check();
@@ -1234,12 +1244,17 @@ function wizard(setup, err) {
       const r = await api("/ui/setup/join", { method: "POST",
         body: JSON.stringify({ passphrase: p1.value, group: grp.value.trim() || "ml-stack" }) });
       if (!r.ok) return wizard(setup, r.error || "Could not set up.");
+      state.pass = p1.value;
       state.group = grp.value.trim() || "ml-stack";
       next(3);
     };
 
     return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(2),
+      steps(2, () => {
+        state.pass = p1.value;
+        state.group = grp.value.trim() || "ml-stack";
+        next(1);
+      }),
       el("h1", {}, state.mode === "first" ? "Choose a passphrase" : "Type the passphrase"),
       el("p", { class: "sub" },
         state.mode === "first"
@@ -1256,8 +1271,8 @@ function wizard(setup, err) {
       err ? el("div", { class: "err" }, err) : null)));
   }
 
-  if (state.step === 3) return prefsStep(() => next(4));
-  if (state.step === 4) return installStep(() => next(5));
+  if (state.step === 3) return prefsStep(() => next(4), () => next(2));
+  if (state.step === 4) return installStep(() => next(5), () => next(3));
 
   // step 5: joined — what next. Deliberately not a command: telling someone to open a
   // terminal is the same wall as telling them to paste a 32-byte key, one layer up.
@@ -1290,7 +1305,7 @@ function wizard(setup, err) {
       el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
   show(el("div", { class: "centre" }, el("div", { class: "card" },
-    steps(3),
+    steps(5),
     el("h1", {}, `Joined “${state.group}”`),
     el("p", { class: "sub" }, "Now add your other machines. On each one:"),
     el("ol", { class: "howto" },
