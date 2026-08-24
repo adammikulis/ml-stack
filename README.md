@@ -17,6 +17,9 @@ pi-rack          http://192.168.2.51:8770     5/6     busy +2    16 cpu
 ```
 
 Everything runs on your own hardware. Nothing leaves the network.
+
+![The cluster view](docs/images/cluster.jpg)
+
 [Full list of what it does](docs/FEATURES.md).
 
 - **Nothing to configure.** A passphrase is the whole setup. Two households on one
@@ -46,13 +49,16 @@ irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/instal
 ```
 
 It works out which machine it is on, fetches the right download, and opens it. You get a
-window that asks what to call the machine and what passphrase to use.
+window that asks what to call the machine and what passphrase to use, then sets the rest
+from the hardware it finds:
+
+![Setting up a machine](docs/images/setup.jpg)
 
 **Or download it yourself** from the [latest release](../../releases/latest):
 
 | | |
 |---|---|
-| macOS | `ml-stack-macos-arm64.zip` (Apple silicon) or `ml-stack-macos-x86_64.zip` (Intel) |
+| macOS | `ml-stack-macos-arm64.zip` — Apple silicon (M1 or later) |
 | Windows | `ml-stack-windows-x86_64.zip` |
 | Linux | `ml-stack-linux-x86_64.zip` |
 
@@ -76,6 +82,10 @@ Building from source needs `pip install build`, then:
 python packaging/build.py            # wheels into dist/
 python packaging/build.py --bundle   # and a standalone app for this platform
 ```
+
+Everything is adjustable later:
+
+![Settings](docs/images/settings.jpg)
 
 ## Driving it from Python
 

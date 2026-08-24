@@ -26,6 +26,9 @@ case "$(uname -m)" in
   x86_64|amd64)  ARCH=x86_64 ;;
   *)             die "unsupported processor: $(uname -m)" ;;
 esac
+if [ "$OS" = macos ] && [ "$ARCH" != arm64 ]; then
+  die "ml-stack needs an Apple silicon Mac (M1 or later)."
+fi
 [ "$OS" = linux ] && ARCH=x86_64
 KEY="ml-stack-$OS-$ARCH"
 

@@ -1,9 +1,21 @@
 name: ci
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "docs/**", "packaging/install.*"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "packaging/install.*"]
+  workflow_dispatch:
+
+# A newer push makes an older run pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
