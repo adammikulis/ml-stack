@@ -142,6 +142,40 @@ class TestRegistry:
         model.close()
         assert s.live() == []
 
+    def test_a_hung_server_does_not_stall_the_beacon(self, tmp_path):
+        """A port that accepts and then says nothing is the slow case: every health
+        path waits the full timeout. The beacon rebuilds this every 10s."""
+        import socket as sk
+        import time as clock
+
+        listener = sk.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(8)
+        s = Serving(tmp_path / "s.json")
+        s.register(listener.getsockname()[1], ["hung.gguf"])
+        try:
+            began = clock.monotonic()
+            assert s.live(force=True) == []
+            spent = clock.monotonic() - began
+        finally:
+            listener.close()
+        assert spent < 5.0, f"one dead server cost {spent:.1f}s of a 10s beacon"
+
+    def test_the_answer_is_reused_briefly_rather_than_reprobed(self, tmp_path, model):
+        s = Serving(tmp_path / "s.json")
+        s.register(model.port, ["a.gguf"])
+        assert [x.port for x in s.live()] == [model.port]
+        model.close()
+        # Still cached: the beacon asked moments ago.
+        assert [x.port for x in s.live()] == [model.port]
+        assert s.live(force=True) == []
+
+    def test_registering_clears_what_was_cached(self, tmp_path, model):
+        s = Serving(tmp_path / "s.json")
+        assert s.live() == []
+        s.register(model.port, ["a.gguf"])
+        assert [x.port for x in s.live()] == [model.port]
+
     def test_registering_the_same_port_twice_does_not_duplicate_it(self, tmp_path, model):
         s = Serving(tmp_path / "s.json")
         s.register(model.port, ["a.gguf"])

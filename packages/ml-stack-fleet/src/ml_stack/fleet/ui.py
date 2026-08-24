@@ -43,6 +43,12 @@ def asset_bytes(name: str) -> tuple[bytes, str] | None:
     return path.read_bytes(), kind or "application/octet-stream"
 
 
+def _can_serve() -> bool:
+    """Whether this install has the code to run a model server itself."""
+    from importlib.util import find_spec
+    return find_spec("ml_stack.serve") is not None
+
+
 class UI:
     """Route handling for ``/ui/*``. Holds the session store and the login throttle."""
 
@@ -58,6 +64,10 @@ class UI:
         self.environment: Any = None
         self.serving: Any = None
         self.models: Any = None
+        self.conversations: Any = None
+        self.root: Any = None
+        self.servers: Any = None
+        self._leases: dict[int, Any] = {}
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -190,6 +200,28 @@ class UI:
         if self.settings_path is not None:
             settings.save(self.settings_path)
         return out
+
+    def start_serving(self, model: Any) -> Any:
+        """Run ``model`` on this machine and tell the network it is here."""
+        from ml_stack.serve import (
+            LlamaServerBackend, ServerManager, ServerSpec, free_port)
+
+        from .llama import ensure_server
+
+        if self.servers is None:
+            self.servers = ServerManager(
+                backend=LlamaServerBackend(binary=ensure_server(self.root)))
+        port = free_port()
+        self._leases[port] = self.servers.lease(ServerSpec(model=model.path,
+                                                           port=port))
+        return self.serving.register(port, [model.name])
+
+    def stop_serving(self, port: int) -> None:
+        """Stop a model server this machine started."""
+        held = self._leases.pop(port, None)
+        if held is not None and self.servers is not None:
+            self.servers.release(held)
+        self.serving.unregister(port)
 
     def install_update(self) -> dict[str, Any]:
         """Download the newest release for this machine and put it in place."""
@@ -480,6 +512,127 @@ def routes(ui: UI, handler: Any) -> bool:
                 send(400, {"error": str(exc)})
                 return True
             send(200, got.public())
+            return True
+
+    if path == "/ui/serving":
+        if ui.serving is None:
+            send(501, {"error": "nothing on this daemon can run a model"})
+            return True
+        if method == "GET":
+            send(200, {"running": [x.public() for x in ui.serving.live(force=True)],
+                       "can_serve": _can_serve()})
+            return True
+        if method == "POST":
+            if not _can_serve():
+                send(501, {"error": "this install cannot run a model itself; a "
+                                    "machine on your network can serve one instead"})
+                return True
+            req = body()
+            found = ui.models.find(str(req.get("name") or "")) if ui.models else None
+            if found is None:
+                send(404, {"error": "no such model on this machine"})
+                return True
+            try:
+                served = ui.start_serving(found)
+            except (OSError, RuntimeError, ValueError) as exc:
+                send(400, {"error": str(exc)})
+                return True
+            send(201, served.public())
+            return True
+        if method == "DELETE":
+            ui.stop_serving(int(body().get("port") or 0))
+            send(200, {"running": [x.public() for x in ui.serving.live(force=True)]})
+            return True
+
+    if path.startswith("/ui/conversations"):
+        if ui.conversations is None:
+            send(501, {"error": "no chat store on this daemon"})
+            return True
+        rest = path[len("/ui/conversations"):].strip("/")
+        if not rest:
+            if method == "GET":
+                query = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
+                send(200, {"conversations": [
+                    c.public(full=False) for c in ui.conversations.search(query)]})
+                return True
+            if method == "POST":
+                req = body()
+                made = ui.conversations.start(model=str(req.get("model") or ""),
+                                              title=str(req.get("title") or ""))
+                send(201, made.public())
+                return True
+        else:
+            found = ui.conversations.get(rest)
+            if found is None:
+                send(404, {"error": "no such chat"})
+                return True
+            if method == "GET":
+                send(200, found.public())
+                return True
+            if method == "DELETE":
+                ui.conversations.remove(rest)
+                send(200, {"removed": rest})
+                return True
+            if method == "POST":
+                renamed = ui.conversations.rename(rest, str(body().get("title") or ""))
+                send(200, renamed.public(full=False))
+                return True
+
+    if path == "/ui/chat":
+        from .chat import ChatError, find, reply_text, stream, targets
+        from .discovery import derive_token, load_cluster_key
+        key = load_cluster_key(ui.cluster_key_path)
+        available = targets(ui.peers() if key is not None else [],
+                            ui.serving, derive_token(key) if key else "")
+        if method == "GET":
+            send(200, {"models": [t.public() for t in available]})
+            return True
+        if method == "POST":
+            req = body()
+            target = find(available, str(req.get("model") or ""))
+            if target is None:
+                send(503, {"error": "no machine on this network is serving a model"})
+                return True
+            messages = [m for m in (req.get("messages") or [])
+                        if isinstance(m, dict) and m.get("content")]
+            if not messages:
+                send(400, {"error": "nothing to send"})
+                return True
+            payload = {"model": target.model, "messages": messages, "stream": True}
+            if req.get("temperature") is not None:
+                payload["temperature"] = float(req["temperature"])
+            try:
+                pieces = stream(target, payload)
+                first = next(pieces, b"")
+            except ChatError as exc:
+                send(502, {"error": str(exc)})
+                return True
+
+            cid = str(req.get("conversation") or "")
+            if ui.conversations is not None and cid:
+                ui.conversations.append(cid, "user", str(messages[-1]["content"]))
+
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/event-stream")
+            handler.send_header("Cache-Control", "no-store")
+            handler.send_header("X-ML-Stack-Peer", target.peer or "")
+            handler.send_header("X-ML-Stack-Model", target.model)
+            handler.send_header("Connection", "close")
+            handler.end_headers()
+            said = bytearray(first)
+            try:
+                handler.wfile.write(first)
+                handler.wfile.flush()
+                for block in pieces:
+                    said += block
+                    handler.wfile.write(block)
+                    handler.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            if ui.conversations is not None and cid:
+                spoken = reply_text(bytes(said))
+                if spoken:
+                    ui.conversations.append(cid, "assistant", spoken)
             return True
 
     if path == "/ui/updates" and method == "GET":

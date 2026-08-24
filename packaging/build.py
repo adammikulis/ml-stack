@@ -14,8 +14,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-BUNDLED = ("ml-stack-fleet", "ml-stack-contracts", "ml-stack-client", "ml-stack-media")
-EXTERNAL = ("pyinstaller", "pywebview")
+BUNDLED = ("ml-stack-fleet", "ml-stack-contracts", "ml-stack-client",
+           "ml-stack-media", "ml-stack-serve")
+EXTERNAL = ("pyinstaller", "pywebview", "psutil")
 
 
 def run(argv: list[str], **kw) -> None:
@@ -26,6 +27,9 @@ def run(argv: list[str], **kw) -> None:
 
 def wheels() -> list[Path]:
     DIST.mkdir(exist_ok=True)
+    # The bundle carries every wheel it finds here, including a previous version's.
+    for old in DIST.glob("*.whl"):
+        old.unlink()
     for package in sorted((ROOT / "packages").iterdir()):
         if not (package / "pyproject.toml").exists():
             continue

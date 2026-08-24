@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import tempfile
 import time
 import urllib.error
@@ -14,7 +15,10 @@ from typing import Any
 
 __all__ = ["Endpoint", "Served", "Serving", "discover_serving"]
 
-PROBE_TIMEOUT = 3.0
+# Each health path waits this long, and the beacon rebuilds the list every 10s.
+PROBE_TIMEOUT = 1.0
+CONNECT_TIMEOUT = 0.25
+LIVE_CACHE_S = 5.0
 HEALTH_PATHS = ("/health", "/v1/models", "/props")
 
 
@@ -36,6 +40,7 @@ class Serving:
 
     def __init__(self, path: Path | str) -> None:
         self.path = Path(path).expanduser()
+        self._live: tuple[float, list[Served]] = (0.0, [])
 
     def register(self, port: int, models: list[str] | None = None,
                  slots: int = 1) -> Served:
@@ -66,13 +71,18 @@ class Serving:
                 continue
         return out
 
-    def live(self) -> list[Served]:
-        """Only the ones answering right now.
+    def live(self, *, force: bool = False) -> list[Served]:
+        """Only the ones answering, rechecked at most every ``LIVE_CACHE_S``.
 
         Registration is a claim; a server that died leaves its entry behind, and a
         beacon advertising a model nobody can reach sends work to a dead port.
         """
-        return [s for s in self.all() if answers(s.port)]
+        age, cached = self._live
+        if not force and time.time() - age < LIVE_CACHE_S:
+            return cached
+        found = [s for s in self.all() if answers(s.port)]
+        self._live = (time.time(), found)
+        return found
 
     def port_for(self, model: str = "") -> int | None:
         for served in self.live():
@@ -84,6 +94,7 @@ class Serving:
         return [s.public() for s in self.live()]
 
     def _write(self, rows: list[Served]) -> None:
+        self._live = (0.0, [])
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:
@@ -96,6 +107,12 @@ class Serving:
 
 
 def answers(port: int, *, timeout: float = PROBE_TIMEOUT) -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", port),
+                                      timeout=min(timeout, CONNECT_TIMEOUT)):
+            pass
+    except OSError:
+        return False
     for path in HEALTH_PATHS:
         try:
             with urllib.request.urlopen(

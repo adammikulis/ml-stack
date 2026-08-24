@@ -311,3 +311,38 @@ main > button { max-width: 240px; }
 .row b { font-weight: 600; font-size: 13.5px; display: block; }
 .row .why { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
 button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
+
+/* chat: a list of past chats beside the one open now */
+.chatmain {
+  display: grid; grid-template-columns: 220px 1fr; gap: var(--gap);
+  align-items: start; height: calc(100vh - 120px);
+}
+@media (max-width: 720px) { .chatmain { grid-template-columns: 1fr; height: auto; } }
+.chats { display: flex; flex-direction: column; gap: 4px; overflow-y: auto;
+         max-height: 100%; }
+.chatrow {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px;
+  padding: 6px 8px; border-radius: 8px; font-size: 13px;
+}
+.chatrow.on { background: var(--bg-sunken); border: 1px solid var(--line); }
+.chatrow a { color: var(--text); text-decoration: none; overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+.chatrow button { opacity: 0; }
+.chatrow:hover button { opacity: 1; }
+
+.talk { display: flex; flex-direction: column; gap: 10px; height: 100%; min-width: 0; }
+.pickrow { display: flex; align-items: center; gap: 10px; }
+.pickrow select { width: auto; margin: 0; flex: 1; }
+.messages {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;
+  padding: 12px; border-radius: var(--radius);
+  background: var(--bg-sunken); border: 1px solid var(--line); min-height: 220px;
+}
+.msg { padding: 9px 12px; border-radius: 10px; max-width: 78%; font-size: 13.5px;
+       line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; background: var(--accent-dim); color: #fff; }
+.msg.assistant { align-self: flex-start; background: var(--bg-raised);
+                 border: 1px solid var(--line); }
+.askrow { display: flex; gap: 8px; align-items: flex-end; }
+.askrow textarea { flex: 1; margin: 0; resize: vertical; }
+.askrow button { width: auto; margin: 0; }

@@ -29,6 +29,20 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const show = (...nodes) => { root.replaceChildren(...nodes); };
 
+const TABS = [["Chat", () => chat()], ["Cluster", () => fleet()],
+              ["Models", () => models()], ["Settings", () => settings()]];
+
+const top = (current, group = "") =>
+  el("header", { class: "top" },
+    el("div", { class: "brand" },
+      el("span", { class: "dot" }), "ml-stack",
+      el("span", { class: "group" }, group ? `· ${group}` : "")),
+    el("nav", { class: "tabs" },
+      ...TABS.map(([label, go]) => (label === current
+        ? el("a", { class: "on", href: "#" }, label)
+        : el("a", { href: "#", onclick: (e) => { e.preventDefault(); go(); } }, label))),
+      el("a", { href: "#", onclick: signOut }, "Sign out")));
+
 // ---------------------------------------------------------------- vendors
 // The badge has to be right: torch's ROCm build answers True to every CUDA question,
 // so the daemon reports vendor separately and this only renders what it is told.
@@ -137,17 +151,7 @@ async function fleet() {
         el("div", {}, "Type the same passphrase, and it appears here on its own."));
 
   show(el("div", { class: "app" },
-    el("header", { class: "top" },
-      el("div", { class: "brand" },
-        el("span", { class: "dot" }), "ml-stack",
-        el("span", { class: "group" }, r.group ? `· ${r.group}` : "")),
-      el("nav", { class: "tabs" },
-        el("a", { class: "on", href: "#" }, "Cluster"),
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); models(); } },
-          "Models"),
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); settings(); } },
-          "Settings"),
-        el("a", { href: "#", onclick: signOut }, "Sign out"))),
+    top("Cluster", r.group),
     el("main", {},
       el("h1", {}, "Cluster"),
       el("p", { class: "sub" },
@@ -164,6 +168,141 @@ async function fleet() {
   timer = setTimeout(fleet, 4000);
 }
 
+// ---------------------------------------------------------------- chat
+let openChat = null;
+
+function say(list, role, text) {
+  const node = el("div", { class: `msg ${role}` }, text);
+  list.append(node);
+  list.scrollTop = list.scrollHeight;
+  return node;
+}
+
+async function chat(cid) {
+  clearTimeout(timer);
+  const where = await api("/ui/chat");
+  if (where.status === 401) return signIn();
+  const saved = await api("/ui/conversations");
+  const available = where.models || [];
+  openChat = cid || openChat;
+
+  const picker = el("select", { id: "model" },
+    ...available.map((m) => el("option", { value: m.model },
+      m.local ? m.model : `${m.model} — on ${m.peer}`)));
+
+  const list = el("div", { class: "messages" });
+  const box = el("textarea", { id: "ask", rows: "3",
+    placeholder: available.length ? "Ask it something" : "" });
+  const sendIt = el("button", {}, "Send");
+  const note = el("div");
+
+  const load = async (id) => {
+    openChat = id;
+    const one = await api(`/ui/conversations/${id}`);
+    list.replaceChildren();
+    for (const m of one.messages || []) say(list, m.role, m.content);
+    if (one.model) picker.value = one.model;
+  };
+
+  const ask = async () => {
+    const text = box.value.trim();
+    if (!text) return;
+    box.value = "";
+    note.replaceChildren();
+    if (!openChat) {
+      const made = await api("/ui/conversations", { method: "POST",
+        body: JSON.stringify({ model: picker.value }) });
+      openChat = made.id;
+    }
+    say(list, "user", text);
+    const reply = say(list, "assistant", "");
+    sendIt.disabled = true;
+    try {
+      const r = await fetch("/ui/chat", { method: "POST", headers: H,
+        body: JSON.stringify({ conversation: openChat, model: picker.value,
+          messages: [{ role: "user", content: text }] }) });
+      if (!r.ok) {
+        const why = await r.json().catch(() => ({}));
+        reply.remove();
+        note.replaceChildren(el("div", { class: "err" },
+          why.error || "That did not go through."));
+        return;
+      }
+      const reader = r.body.getReader();
+      const decode = new TextDecoder();
+      let pending = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decode.decode(value, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const frame = line.slice(5).trim();
+          if (!frame || frame === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(frame);
+            for (const c of parsed.choices || []) {
+              const piece = c.delta?.content || c.message?.content;
+              if (piece) {
+                reply.append(document.createTextNode(piece));
+                list.scrollTop = list.scrollHeight;
+              }
+            }
+          } catch { /* a half-arrived frame catches up next read */ }
+        }
+      }
+    } finally {
+      sendIt.disabled = false;
+      chatList();
+    }
+  };
+  sendIt.onclick = ask;
+  box.onkeydown = (e) => {
+    if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ask(); }
+  };
+
+  const sidebar = el("div", { class: "chats" });
+  const paint = (rows) => {
+    sidebar.replaceChildren(
+      el("button", { class: "ghost small",
+        onclick: () => { openChat = null; list.replaceChildren(); paint(rows); } },
+        "New chat"),
+      ...rows.map((c) =>
+        el("div", { class: `chatrow${c.id === openChat ? " on" : ""}` },
+          el("a", { href: "#",
+            onclick: (e) => { e.preventDefault(); load(c.id).then(chatList); } },
+            c.title || "New chat"),
+          el("button", { class: "ghost small",
+            onclick: async () => {
+              await api(`/ui/conversations/${c.id}`, { method: "DELETE" });
+              if (openChat === c.id) { openChat = null; list.replaceChildren(); }
+              chatList();
+            } }, "Delete"))));
+  };
+  const chatList = async () =>
+    paint((await api("/ui/conversations")).conversations || []);
+  paint(saved.conversations || []);
+
+  show(el("div", { class: "app" },
+    top("Chat"),
+    el("main", { class: "chatmain" },
+      sidebar,
+      el("div", { class: "talk" },
+        available.length
+          ? el("div", { class: "pickrow" },
+              el("label", { for: "model" }, "Model"), picker)
+          : el("div", { class: "hint" },
+              "No model is running yet. Start one on the Models screen, or leave "
+              + "another machine on your network serving one."),
+        list,
+        note,
+        available.length ? el("div", { class: "askrow" }, box, sendIt) : null))));
+
+  if (openChat) load(openChat);
+}
+
 // ---------------------------------------------------------------- models
 const fileSize = (n) =>
   (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
@@ -172,8 +311,29 @@ async function models(message) {
   clearTimeout(timer);
   const m = await api("/ui/models");
   if (m.status === 401) return signIn();
+  const run = await api("/ui/serving");
+  const running = new Set((run.running || []).flatMap((x) => x.models || []));
+  const portOf = (name) =>
+    (run.running || []).find((x) => (x.models || []).includes(name))?.port;
 
   const note = el("div");
+
+  const serve = async (name) => {
+    note.replaceChildren(el("div", { class: "hint" },
+      el("span", { class: "spin" }), ` Starting ${name}…`));
+    const r = await api("/ui/serving", { method: "POST",
+      body: JSON.stringify({ name }) });
+    note.replaceChildren(r.error
+      ? el("div", { class: "err" }, r.error)
+      : el("div", { class: "ok" }, `${name} is running. Open Chat to use it.`));
+    if (!r.error) setTimeout(() => models(), 600);
+  };
+
+  const halt = async (name) => {
+    await api("/ui/serving", { method: "DELETE",
+      body: JSON.stringify({ port: portOf(name) }) });
+    models();
+  };
   const get = async (name, source) => {
     note.replaceChildren(el("div", { class: "hint" },
       el("span", { class: "spin" }), ` Getting ${name}…`));
@@ -188,8 +348,13 @@ async function models(message) {
   const here = (m.here || []).map((x) =>
     el("div", { class: "row" },
       el("span", {}, el("b", {}, x.name),
-        el("span", { class: "why" }, fileSize(x.size))),
-      el("span", { class: "label" }, "here")));
+        el("span", { class: "why" },
+          running.has(x.name) ? `${fileSize(x.size)} · running` : fileSize(x.size))),
+      run.can_serve
+        ? (running.has(x.name)
+            ? el("button", { class: "ghost small", onclick: () => halt(x.name) }, "Stop")
+            : el("button", { class: "ghost small", onclick: () => serve(x.name) }, "Run"))
+        : el("span", { class: "label" }, "here")));
 
   const elsewhere = (m.elsewhere || []).map((x) => {
     const b = el("button", { class: "ghost small", onclick: () => get(x.name, "") },
@@ -208,15 +373,7 @@ async function models(message) {
   };
 
   show(el("div", { class: "app" },
-    el("header", { class: "top" },
-      el("div", { class: "brand" },
-        el("span", { class: "dot" }), "ml-stack",
-        el("span", { class: "group" }, "")),
-      el("nav", { class: "tabs" },
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); fleet(); } }, "Cluster"),
-        el("a", { class: "on", href: "#" }, "Models"),
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); settings(); } }, "Settings"),
-        el("a", { href: "#", onclick: signOut }, "Sign out"))),
+    top("Models"),
     el("main", {},
       el("h1", {}, "Models"),
       el("p", { class: "sub" }, `${m.free_gb} GB free on this machine.`),
@@ -390,15 +547,7 @@ async function settings(message) {
   })();
 
   show(el("div", { class: "app" },
-    el("header", { class: "top" },
-      el("div", { class: "brand" },
-        el("span", { class: "dot" }), "ml-stack",
-        el("span", { class: "group" }, s.group ? `· ${s.group}` : "")),
-      el("nav", { class: "tabs" },
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); fleet(); } }, "Cluster"),
-        el("a", { href: "#", onclick: (e) => { e.preventDefault(); models(); } }, "Models"),
-        el("a", { class: "on", href: "#" }, "Settings"),
-        el("a", { href: "#", onclick: signOut }, "Sign out"))),
+    top("Settings", s.group),
     el("main", {},
       el("h1", {}, "Settings"),
       el("p", { class: "sub" },

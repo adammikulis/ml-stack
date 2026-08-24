@@ -536,6 +536,57 @@ class TestSettingsScreen:
         assert Settings.load(serving.ui.settings_path).autodownload_models is False
 
 
+class TestTheInterfaceAndTheDaemonAgree:
+    """Every address the page calls must be one the daemon answers.
+
+    A screen calling a route nobody wrote returns "no such route" and shows an empty
+    panel; no Python test notices, because no Python test asks for that address.
+    """
+
+    @pytest.fixture
+    def signed_in(self, serving):
+        serving.call("/ui/setup/join", method="POST",
+                     body={"passphrase": WORDS, "group": "home"})
+        _, _, headers = serving.call("/ui/session", method="POST",
+                                     body={"passphrase": WORDS})
+        return serving, headers["Set-Cookie"].split(";")[0]
+
+    def called_paths(self):
+        import re
+
+        asset = asset_bytes("app.js")
+        assert asset is not None
+        source = asset[0].decode()
+        found = set(re.findall(r"""api\(\s*[`"']([^`"']+)""", source))
+        found |= set(re.findall(r"""fetch\(\s*[`"']([^`"']+)""", source))
+        # Template holes stand for an id; any id will do for asking whether the
+        # route exists at all.
+        return sorted(pp.replace("${c.id}", "x").replace("${id}", "x")
+                      for pp in found if pp.startswith("/ui"))
+
+    def test_the_page_calls_nothing_the_daemon_does_not_answer(self, signed_in):
+        serving, cookie = signed_in
+        from ml_stack.fleet.conversations import Conversations
+        from ml_stack.fleet.models import Models
+        serving.ui.conversations = Conversations(serving.files.parent / "chats")
+        serving.ui.models = Models([serving.files], serving.files)
+
+        called = self.called_paths()
+        assert "/ui/chat" in called and "/ui/models" in called, called
+
+        missing = []
+        for path in called:
+            for method in ("GET", "POST"):
+                status, body, _ = serving.call(path, method=method, cookie=cookie,
+                                               body={} if method == "POST" else None)
+                if status == 404 and body.get("error") == "no such route":
+                    missing.append(f"{method} {path}")
+        # A route may refuse a method; it may not be absent for both.
+        both = [p for p in called
+                if f"GET {p}" in missing and f"POST {p}" in missing]
+        assert both == [], f"the page calls addresses nobody answers: {both}"
+
+
 class TestUpdates:
     def test_versions_compare_numerically(self):
         from ml_stack.fleet.updates import Release
