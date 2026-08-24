@@ -7,6 +7,8 @@ from ml_stack.contracts.loader import (
     contracts_dir,
     grammar,
     load,
+    recipe,
+    recipes,
     sampling_schema,
 )
 from ml_stack.contracts.tiers import (
@@ -27,6 +29,8 @@ __all__ = [
     "grammar",
     "largest_that_fits",
     "load",
+    "recipe",
+    "recipes",
     "sampling_schema",
     "tiers",
     "weights_plus_overhead_bytes",

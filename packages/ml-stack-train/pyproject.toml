@@ -11,6 +11,9 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = ["ml-stack-backend", "ml-stack-fleet"]
 
+[project.scripts]
+ml-stack-train-run = "ml_stack.train.run:main"
+
 [project.optional-dependencies]
 # Temperature, clocks and throttle state on Apple silicon, without sudo. Optional:
 # a box without it advertises less rather than failing to advertise.

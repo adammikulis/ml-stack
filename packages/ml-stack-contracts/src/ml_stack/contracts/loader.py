@@ -88,6 +88,29 @@ def grammar(name: str) -> str:
         raise ContractError(f"cannot read grammar {path}: {exc}") from exc
 
 
+def recipes() -> list[dict[str, Any]]:
+    """Every recipe contract, sorted by id."""
+    folder = contracts_dir() / "recipes"
+    if not folder.is_dir():
+        return []
+    out = []
+    for path in sorted(folder.glob("*.json")):
+        try:
+            out.append(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ContractError(f"cannot read recipe {path}: {exc}") from exc
+    return out
+
+
+def recipe(recipe_id: str) -> dict[str, Any]:
+    """One recipe contract by id."""
+    for found in recipes():
+        if found.get("id") == recipe_id:
+            return found
+    known = ", ".join(sorted(r.get("id", "?") for r in recipes())) or "none"
+    raise ContractError(f"no recipe {recipe_id!r}; have {known}")
+
+
 def reset_cache() -> None:
     """Drop the parse cache. For tests that point ML_STACK_CONTRACTS somewhere else."""
     _CACHE.clear()

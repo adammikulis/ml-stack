@@ -1,0 +1,26 @@
+{
+  "id": "classify-text",
+  "title": "Sort my documents into categories",
+  "blurb": "Give it examples that are already labelled and it learns to label new ones.",
+  "data": {
+    "formats": [".jsonl"],
+    "fields": ["text", "label"],
+    "needs_split": true,
+    "min_rows": 100
+  },
+  "requires": {"backend": "", "min_ram_gb": 2},
+  "sizes": {
+    "small":  {"layers": 2, "d_model": 128, "heads": 4, "params_m": 1, "needs_gb": 1},
+    "medium": {"layers": 4, "d_model": 256, "heads": 8, "params_m": 6, "needs_gb": 2}
+  },
+  "fields": [
+    {"name": "steps", "type": "int", "default": 1000, "min": 20, "max": 200000,
+     "label": "How long to train"},
+    {"name": "context", "type": "int", "default": 128, "min": 32, "max": 2048,
+     "label": "How much of each document it reads"},
+    {"name": "batch_size", "type": "int", "default": 32, "min": 1, "max": 512,
+     "label": "Examples per step"},
+    {"name": "learning_rate", "type": "float", "default": 0.001, "min": 0.00001, "max": 0.1,
+     "label": "Learning rate"}
+  ]
+}

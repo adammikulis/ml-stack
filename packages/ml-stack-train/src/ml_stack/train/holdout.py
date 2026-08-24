@@ -71,6 +71,36 @@ def by_group(
     return Split(train=train, holdout=holdout)
 
 
+def stratified(rows: Sequence[T], labels: Sequence[Any], fraction: float = 0.2,
+               *, seed: int = 0) -> Split:
+    """Split keeping each label's proportion. For classification, where by_group on the
+    label would put a whole class in the holdout and none of it in training."""
+    if len(rows) != len(labels):
+        raise LeakageError(
+            f"{len(rows)} rows but {len(labels)} labels; they must line up")
+    import random
+
+    rng = random.Random(seed)
+    buckets: dict[Any, list[int]] = {}
+    for i, label in enumerate(labels):
+        buckets.setdefault(label, []).append(i)
+
+    held: set[int] = set()
+    for label, index in buckets.items():
+        rng.shuffle(index)
+        take = int(round(len(index) * fraction))
+        if len(index) >= 2:
+            take = max(1, min(take, len(index) - 1))
+        held.update(index[:take])
+
+    train = [rows[i] for i in range(len(rows)) if i not in held]
+    holdout = [rows[i] for i in sorted(held)]
+    if not train or not holdout:
+        raise LeakageError(
+            f"a {fraction:.0%} split of {len(rows)} rows leaves one side empty")
+    return Split(train=train, holdout=holdout)
+
+
 def assert_no_duplicates(rows: Sequence[Any], *, key=repr, label: str = "dataset") -> None:
     """Fail if the data contains repeated examples."""
     seen: dict[str, int] = {}

@@ -47,6 +47,7 @@ from ml_stack.train.holdout import (
     by_group,
     contiguous_tail,
     spread_order,
+    stratified,
 )
 from ml_stack.train.metrics import MetricsLog, Throughput, read
 from ml_stack.train.step import MLXStep, Step, TorchStep, step_for
@@ -111,6 +112,7 @@ __all__ = [
     "rotate",
     "save",
     "spread_order",
+    "stratified",
     "warmup_cosine",
     "warmup_stable_decay",
     "Fertility", "embedding_params", "measure", "report_markdown",

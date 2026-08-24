@@ -162,6 +162,7 @@ class Trainer:
             keep_last: int = 3,
             milestone_every: int = 0,
             resume: bool = True,
+            write_checkpoints: bool = True,
             log_every: int = 1,
             max_skipped: int = 50,
             stall_factor: float = 3.0,
@@ -236,6 +237,7 @@ class Trainer:
                     if best is None or score < best:
                         best = score
                         report.best_metric = best
+                    if write_checkpoints and report.best_metric == score:
                         report.best_checkpoint = self.save_checkpoint(
                             step + 1,
                             state=CheckpointState(step=step + 1, best_metric=best,
@@ -250,11 +252,13 @@ class Trainer:
                     rotate(self.out, keep_last=keep_last,
                            milestone_every=milestone_every)
 
-            report.last_checkpoint = self.save_checkpoint(
-                report.steps,
-                state=CheckpointState(step=report.steps, best_metric=best,
-                                      config=dict(config or {})))
-            rotate(self.out, keep_last=keep_last, milestone_every=milestone_every)
+            if write_checkpoints:
+                report.last_checkpoint = self.save_checkpoint(
+                    report.steps,
+                    state=CheckpointState(step=report.steps, best_metric=best,
+                                          config=dict(config or {})))
+                rotate(self.out, keep_last=keep_last,
+                       milestone_every=milestone_every)
             report.best_metric = best
             report.seconds = time.time() - started_at
             log.finish(step=report.steps, loss=report.final_loss,

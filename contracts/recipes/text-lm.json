@@ -1,0 +1,30 @@
+{
+  "id": "text-lm",
+  "title": "Teach a model to write text like my documents",
+  "blurb": "Give it a pile of writing and it learns to continue it. Good for a house style, a character voice, or a domain's jargon.",
+  "data": {
+    "formats": [".jsonl", ".txt"],
+    "fields": ["text"],
+    "needs_split": true,
+    "min_rows": 200
+  },
+  "requires": {"backend": "", "min_ram_gb": 4},
+  "sizes": {
+    "small":  {"layers": 4,  "d_model": 256, "heads": 4,  "params_m": 6,   "needs_gb": 1},
+    "medium": {"layers": 8,  "d_model": 512, "heads": 8,  "params_m": 32,  "needs_gb": 4},
+    "large":  {"layers": 12, "d_model": 768, "heads": 12, "params_m": 100, "needs_gb": 12}
+  },
+  "fields": [
+    {"name": "steps", "type": "int", "default": 2000, "min": 20, "max": 1000000,
+     "label": "How long to train",
+     "help": "More is usually better up to a point. Watch the held-out score."},
+    {"name": "context", "type": "int", "default": 256, "min": 32, "max": 4096,
+     "label": "How much it reads at once",
+     "help": "Characters of context. Longer costs memory and time."},
+    {"name": "batch_size", "type": "int", "default": 16, "min": 1, "max": 512,
+     "label": "Examples per step"},
+    {"name": "learning_rate", "type": "float", "default": 0.003, "min": 0.00001, "max": 0.1,
+     "label": "Learning rate",
+     "help": "How big a step it takes. Too high and the loss goes to NaN."}
+  ]
+}
