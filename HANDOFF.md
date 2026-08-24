@@ -57,6 +57,11 @@ the commit subject rule in `CLAUDE.md` is load-bearing.
   A real fleet is unaffected. It shows up when simulating a cluster on one box, which is
   why the peer-copy check in `verify_release.py` is given an address rather than
   discovering one.
+- **A fresh worktree has no `dist/`, and one test needs it.**
+  `test_fleet_environment.py` builds a real environment, and `Environment.wheels`
+  finds the ml-stack packages by walking up for a `dist/` holding wheels. `dist/` is
+  ignored by git, so a new worktree has none and that test fails on its own. Run
+  `python packaging/build.py` there first, or link the one you already have.
 - **The full suite takes longer than the 120s Bash timeout.** Run it backgrounded and
   poll the output.
 - **`node --check web/app.js` before trusting the interface.** A duplicate top-level

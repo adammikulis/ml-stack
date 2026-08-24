@@ -96,3 +96,6 @@ merges done by three agents, not three branches handed back for it to sort out.
 
 Do not remove a worktree you did not create — another agent may still be in it. Leave it
 and say so.
+
+A new worktree has no `dist/`, and one test builds a real environment out of it. Run
+`python packaging/build.py` in the worktree before trusting a full test run there.
