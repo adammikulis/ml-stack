@@ -19,9 +19,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import math
+
 import numpy as np
 
-__all__ = ["Bearing", "column_to_deg", "floor_boundary", "nearest_obstacle", "to_gray"]
+__all__ = ["Bearing", "column_to_deg", "find_color_blob", "floor_boundary",
+           "hfov_from_known_width", "nearest_obstacle", "to_gray"]
 
 
 @dataclass(frozen=True)
@@ -194,3 +197,86 @@ def nearest_obstacle(frame: np.ndarray, *, hfov_deg: float,
                    column=int(round(centre)), width=best_len,
                    reason=f"obstacle {best_len}px wide, "
                           f"{nearness*100:.0f}% of frame nearer than background")
+
+
+def find_color_blob(frame: np.ndarray, *, hue: str = "orange",
+                    min_px: int = 200, bgr: bool = True) -> tuple[int, int, int]:
+    """Find a strongly-coloured object. Returns (left_col, right_col, pixels).
+
+    A saturated single-colour target is enormously easier to locate than a
+    person: measured on real frames from this class of robot, a floor-geometry
+    detector scored 0.01-0.03 confidence on a human standing 2m away, while a
+    colour threshold finds a drinks can immediately. For CALIBRATION that is the
+    right trade -- the target only has to be findable and of known size, and
+    nobody has to hold still.
+
+    Deliberately ratio-based rather than a fixed RGB box, so it survives the
+    lighting actually available: a room measuring mean 20/255 and one measuring
+    mean 100/255 both preserve the RATIO between channels even though every
+    absolute value moves.
+    """
+    a = np.asarray(frame).astype(np.float32)
+    if a.ndim != 3:
+        return (0, 0, 0)
+    b, g, r = (a[..., 0], a[..., 1], a[..., 2]) if bgr else (a[..., 2], a[..., 1], a[..., 0])
+    total = r + g + b + 1e-6
+    if hue == "orange":
+        mask = (r > 60) & (r / total > 0.45) & (b / total < 0.28) & (r > g * 1.15)
+    elif hue == "red":
+        mask = (r > 60) & (r / total > 0.50) & (g / total < 0.30) & (b / total < 0.30)
+    elif hue == "green":
+        mask = (g > 50) & (g / total > 0.42) & (r / total < 0.35)
+    elif hue == "blue":
+        mask = (b > 50) & (b / total > 0.42) & (r / total < 0.33)
+    else:
+        raise ValueError(f"unknown hue {hue!r}")
+
+    cols = mask.sum(axis=0)
+    if int(mask.sum()) < min_px:
+        return (0, 0, int(mask.sum()))
+    # The widest contiguous run of columns that contain the colour, so a
+    # reflection somewhere else in the frame does not widen the answer.
+    # `>=`, not `>`: a one-pixel-tall streak puts cols.max() at 1 and the floor at 1
+    # too, and a strict test then excludes every column of the only blob there is --
+    # reporting a zero-length run for a mask that plainly cleared min_px.
+    hot = cols >= max(1, int(0.05 * cols.max()))
+    best_s = best_l = run_s = run_l = 0
+    for i, v in enumerate(hot):
+        if v:
+            run_s = i if run_l == 0 else run_s
+            run_l += 1
+            if run_l > best_l:
+                best_l, best_s = run_l, run_s
+        else:
+            run_l = 0
+    if best_l == 0:
+        # Nothing survived the run threshold. Say so as an empty span rather than as
+        # (0, -1): a caller subtracting those gets a negative width, and a negative
+        # width becomes a bearing pointing somewhere the target is not.
+        return (0, 0, int(mask.sum()))
+    return (best_s, best_s + best_l - 1, int(mask.sum()))
+
+
+def hfov_from_known_width(pixel_width: int, frame_width: int,
+                          object_width_mm: float, distance_mm: float) -> float:
+    """Solve the horizontal field of view from one frame of a known object.
+
+    No rotation, no second frame, no assumption about the commanded angle -- and
+    critically, no need to know anything about the object except its WIDTH,
+    which is why a drinks can works and a person does not.
+
+    The object subtends 2*atan(W/2 / d). It covers `pixel_width` of
+    `frame_width`, and the tangent relation maps that back to the full field:
+
+        tan(half_object) / tan(HFOV/2) = pixel_width / frame_width
+
+    exactly, for an object centred in frame; close enough off-centre that the
+    error is far below the distance measurement's own.
+    """
+    if pixel_width <= 0 or frame_width <= 0 or distance_mm <= 0:
+        return 0.0
+    half_obj = math.atan((object_width_mm / 2.0) / distance_mm)
+    frac = pixel_width / float(frame_width)
+    if not 0 < frac < 1:
+        return 0.0
+    return 2.0 * math.degrees(math.atan(math.tan(half_obj) / frac))

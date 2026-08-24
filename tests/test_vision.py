@@ -448,3 +448,149 @@ class TestGeometry:
 
         from ml_stack.vision import to_gray
         assert to_gray(np.full((8, 8), 100, np.uint8))[0, 0] == pytest.approx(100.0)
+
+
+class TestColourBlob:
+    """Finding a saturated target, which is the only thing a calibration rig can rely on.
+
+    A floor-geometry detector scores 0.01-0.03 on a person standing two metres away; a
+    colour threshold finds a drinks can immediately. For calibration that is the right
+    trade -- the target only has to be findable and of known size.
+    """
+
+    @staticmethod
+    def _frame(w=320, h=240, bgr=(0, 0, 0), light=1.0):
+        import numpy as np
+        f = np.zeros((h, w, 3), np.uint8)
+        f[:, :] = [int(c * light) for c in bgr]
+        return f
+
+    @staticmethod
+    def _with_can(w=320, h=240, cols=(140, 180), light=1.0, can=(20, 90, 230)):
+        """A dim room with an orange can in it. BGR, because that is what a camera gives."""
+        import numpy as np
+        f = np.zeros((h, w, 3), np.uint8)
+        f[:, :] = [int(60 * light), int(60 * light), int(60 * light)]
+        f[80:200, cols[0]:cols[1]] = [int(c * light) for c in can]
+        return f
+
+    def test_an_orange_can_is_found_where_it_actually_is(self):
+        from ml_stack.vision import find_color_blob
+        left, right, px = find_color_blob(self._with_can(cols=(140, 180)))
+        assert px > 200
+        assert 135 <= left <= 145, left
+        assert 175 <= right <= 185, right
+
+    def test_the_answer_survives_the_lights_being_turned_down(self):
+        """Ratio-based rather than a fixed RGB box, so a room measuring mean 20/255 and
+        one measuring 100/255 give the same answer -- the channels keep their ratio even
+        though every absolute value moves."""
+        from ml_stack.vision import find_color_blob
+        bright = find_color_blob(self._with_can(light=1.0))
+        dim = find_color_blob(self._with_can(light=0.35))
+        assert dim[0] == pytest.approx(bright[0], abs=3)
+        assert dim[1] == pytest.approx(bright[1], abs=3)
+
+    def test_an_empty_room_finds_nothing(self):
+        from ml_stack.vision import find_color_blob
+        left, right, px = find_color_blob(self._frame(bgr=(60, 60, 60)))
+        assert px < 200
+        assert (left, right) == (0, 0)
+
+    def test_a_reflection_elsewhere_does_not_widen_the_answer(self):
+        """The widest contiguous run of columns, not the full extent of the mask: a
+        glint across the room would otherwise make one can read as a metre wide."""
+        import numpy as np
+        from ml_stack.vision import find_color_blob
+        f = self._with_can(cols=(140, 180))
+        f[10:16, 300:306] = [20, 90, 230]              # a small glint, far right
+        left, right, _ = find_color_blob(f)
+        assert right - left < 60, f"{left}..{right} spans the glint too"
+
+    def test_a_spread_out_mask_never_reports_a_backwards_span(self):
+        """The specific failure, and it is reachable: a one-pixel-tall streak clears
+        min_px, but every column holds exactly one pixel, so cols.max() is 1, the run
+        threshold is also 1, and `cols > 1` is false everywhere. The widest run is then
+        length zero and the span comes back (0, -1) -- a right edge left of the left
+        edge, which a caller turns into a negative width and then a nonsense bearing."""
+        import numpy as np
+        from ml_stack.vision import find_color_blob
+        f = np.zeros((240, 320, 3), np.uint8)
+        f[:, :] = [60, 60, 60]
+        f[100:101, 40:300] = [20, 90, 230]
+
+        left, right, px = find_color_blob(f, min_px=10)
+
+        assert px >= 10, "this frame must clear min_px for the case to arise"
+        assert right >= left, f"({left}, {right}) is backwards"
+
+    def test_a_2d_frame_is_not_mistaken_for_a_colour_image(self):
+        import numpy as np
+        from ml_stack.vision import find_color_blob
+        assert find_color_blob(np.zeros((240, 320), np.uint8)) == (0, 0, 0)
+
+    def test_an_unknown_hue_is_refused_rather_than_guessed(self):
+        from ml_stack.vision import find_color_blob
+        with pytest.raises(ValueError, match="chartreuse"):
+            find_color_blob(self._with_can(), hue="chartreuse")
+
+    def test_rgb_and_bgr_are_not_silently_interchangeable(self):
+        """Getting this backwards finds blue where the orange is, which reads as a
+        detector that cannot see rather than as a channel-order bug."""
+        import numpy as np
+        from ml_stack.vision import find_color_blob
+        bgr = self._with_can(cols=(140, 180))
+        as_bgr = find_color_blob(bgr, bgr=True)
+        as_rgb = find_color_blob(bgr, bgr=False)
+        assert as_bgr[2] > 200
+        assert as_rgb[2] < as_bgr[2]
+
+
+class TestFieldOfViewFromKnownWidth:
+    """Solving HFOV from one frame of an object whose width you know.
+
+    The scale error this prevents is the expensive one: a wrong field of view makes every
+    commanded turn proportionally short, which looks like a sticky motor.
+    """
+
+    def test_an_object_spanning_the_whole_frame_subtends_the_whole_field(self):
+        from ml_stack.vision import hfov_from_known_width
+        # A 1000mm object at 1000mm subtends 2*atan(0.5) = 53.13 degrees.
+        got = hfov_from_known_width(319, 320, 1000.0, 1000.0)
+        assert got == pytest.approx(53.13, abs=0.5)
+
+    def test_a_half_width_object_implies_a_wider_field_than_twice_its_angle(self):
+        """Tangent, not linear. Treating it as linear under-reports the field, and every
+        turn then comes up short by the same proportion."""
+        from ml_stack.vision import hfov_from_known_width
+        import math
+        half = hfov_from_known_width(160, 320, 100.0, 1000.0)
+        obj = 2 * math.degrees(math.atan(50.0 / 1000.0))
+        assert half > obj * 2 * 0.99
+        assert half < obj * 2 * 1.02
+
+    def test_a_known_camera_is_recovered_from_its_own_geometry(self):
+        """Round trip: place an object, compute the pixels a 62.2-degree camera would see
+        it across, and check the solver gives 62.2 back."""
+        import math
+        from ml_stack.vision import hfov_from_known_width
+        hfov, width_px, obj_mm, dist_mm = 62.2, 320, 66.0, 500.0
+        half_obj = math.atan((obj_mm / 2) / dist_mm)
+        px = width_px * math.tan(half_obj) / math.tan(math.radians(hfov / 2))
+        assert hfov_from_known_width(round(px), width_px, obj_mm, dist_mm) == \
+            pytest.approx(hfov, abs=0.5)
+
+    @pytest.mark.parametrize("px, fw, obj, dist", [
+        (0, 320, 66.0, 500.0),        # nothing detected
+        (-5, 320, 66.0, 500.0),
+        (100, 0, 66.0, 500.0),
+        (100, 320, 66.0, 0.0),        # no distance measurement
+        (320, 320, 66.0, 500.0),      # fills the frame: the field is at least this
+        (400, 320, 66.0, 500.0),      # wider than the frame
+    ])
+    def test_an_unusable_measurement_returns_zero_rather_than_a_number(self, px, fw, obj, dist):
+        """Zero reads as "not calibrated". A plausible-looking angle from a measurement
+        that could not support one is the failure worth avoiding: it calibrates the robot
+        to a lie and nothing downstream can tell."""
+        from ml_stack.vision import hfov_from_known_width
+        assert hfov_from_known_width(px, fw, obj, dist) == 0.0

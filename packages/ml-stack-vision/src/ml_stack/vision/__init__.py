@@ -52,9 +52,11 @@ __all__ = [
     "normalize",
     "resize_to_fit",
     "to_supported_format",
-    "Bearing", "column_to_deg", "floor_boundary", "nearest_obstacle", "to_gray",
+    "Bearing", "column_to_deg", "find_color_blob", "floor_boundary",
+    "hfov_from_known_width", "nearest_obstacle", "to_gray",
 ]
 
 from ml_stack.vision.geometry import (  # noqa: E402
-    Bearing, column_to_deg, floor_boundary, nearest_obstacle, to_gray,
+    Bearing, column_to_deg, find_color_blob, floor_boundary,
+    hfov_from_known_width, nearest_obstacle, to_gray,
 )

@@ -13,6 +13,7 @@ dependencies = ["ml-stack-media", "ml-stack-client", "numpy>=1.24"]
 
 [project.optional-dependencies]
 resize = ["pillow>=10.0"]
+heic = ["pillow>=10.0", "pillow-heif>=0.13"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

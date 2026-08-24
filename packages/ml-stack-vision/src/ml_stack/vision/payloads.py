@@ -49,6 +49,42 @@ def load_bytes(source: Path | str | bytes) -> bytes:
     return Path(text).read_bytes()
 
 
+def _pillow():
+    """Pillow, or an ``ImageError`` naming the extra that installs it.
+
+    Pillow is an optional dependency because the vision *gate* needs nothing to run, but
+    every path that changes pixels needs it. A bare ``ImportError`` escaping from inside
+    ``normalize`` would abort the whole batch over one image; an ``ImageError`` is what
+    the per-image handler there already knows how to report and carry on from.
+    """
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ImageError(
+            "Pillow is needed to convert or resize images -- "
+            "install it with 'pip install ml-stack-vision[resize]'"
+        ) from exc
+    return Image
+
+
+def _open_heif_too() -> None:
+    """Teach Pillow to read HEIC, if the plugin for it is installed.
+
+    Stock Pillow cannot decode HEIC at all, and iPhones produce it by default -- so the
+    format the docstring below calls "the case that matters" is exactly the one that fails
+    without ``pillow-heif``. Best effort: a box without the plugin gets a clear
+    ``ImageError`` from the caller rather than an exception from here.
+    """
+    try:
+        import pillow_heif
+    except ImportError:
+        return
+    try:
+        pillow_heif.register_heif_opener()
+    except Exception:                                 # noqa: BLE001
+        pass
+
+
 def resize_to_fit(
     data: bytes,
     *,
@@ -61,10 +97,16 @@ def resize_to_fit(
     re-encoding a JPEG is lossy every time, so doing it for no reason degrades the image
     the model sees.
     """
-    from PIL import Image
     import io
 
-    with Image.open(io.BytesIO(data)) as image:
+    Image = _pillow()
+    try:
+        image = Image.open(io.BytesIO(data))
+    except OSError as exc:
+        # UnidentifiedImageError subclasses OSError, so this is also the "Pillow does not
+        # have a decoder for this" case -- which normalize must report, not crash on.
+        raise ImageError(f"could not decode image for resizing: {exc}") from exc
+    with image:
         width, height = image.size
         longest = max(width, height)
         if longest <= max_edge:
@@ -96,10 +138,17 @@ def to_supported_format(data: bytes) -> tuple[bytes, bool]:
     if detected is None:
         raise ImageError("unrecognised image format")
 
-    from PIL import Image
     import io
 
-    with Image.open(io.BytesIO(data)) as image:
+    Image = _pillow()
+    _open_heif_too()
+    try:
+        image = Image.open(io.BytesIO(data))
+    except OSError as exc:
+        hint = ("; HEIC needs 'pip install ml-stack-vision[heic]'"
+                if detected == "heic" else "")
+        raise ImageError(f"cannot convert {detected}: {exc}{hint}") from exc
+    with image:
         buffer = io.BytesIO()
         image.convert("RGB").save(buffer, format="PNG")
     return buffer.getvalue(), True
