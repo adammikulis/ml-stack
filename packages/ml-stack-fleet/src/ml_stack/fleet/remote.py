@@ -157,6 +157,16 @@ class Peer:
         with urllib.request.urlopen(req, timeout=10) as r:
             return json.loads(r.read())
 
+    def availability(self, action: str = "", **fields: Any) -> dict:
+        """Read or change when this peer takes work.
+
+        Actions: ``pause``, ``resume``, ``reserve``, ``release``, ``window``,
+        ``clear_windows``. No action reads the current state.
+        """
+        if not action:
+            return self._json("GET", "/availability")
+        return self._json("POST", "/availability", {"action": action, **fields})
+
     def jobs(self) -> list[dict]:
         return self._json("GET", "/jobs")["jobs"]
 

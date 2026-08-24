@@ -56,6 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .availability import Availability, parse_window
 from .discovery import (
     Advertiser,
     Beacon,
@@ -180,7 +181,7 @@ class JobRunner:
     """
 
     def __init__(self, root: Path, files_root: Path | None = None, *,
-                 slots: int = 1) -> None:
+                 slots: int = 1, gate: "Callable[[], tuple[bool, str]] | None" = None) -> None:
         if slots < 1:
             raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
@@ -190,6 +191,10 @@ class JobRunner:
         #: path nothing creates and 404s, which is a confusing way to discover that
         #: the artifact you waited three hours for is unreachable.
         self.files_root = Path(files_root) if files_root is not None else root / "files"
+        #: Asked before a queued job is STARTED, never before it is queued. "Come back
+        #: at six" is something a scheduler can act on; a rejection is not, and work
+        #: submitted at 3pm to a box that frees up at 5pm should simply run at 5pm.
+        self.gate = gate
         self.slots = slots
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
@@ -278,6 +283,10 @@ class JobRunner:
         while not self._stop.is_set():
             self._wake.wait(timeout=1.0)
             self._wake.clear()
+            if self.gate is not None:
+                allowed, _why = self.gate()
+                if not allowed:
+                    continue
             with self._lock:
                 if not self._queue:
                     continue
@@ -322,6 +331,29 @@ class JobRunner:
             (self.job_dir(job.id) / "job.json").write_text(
                 json.dumps(job.public(), indent=2))
             self._wake.set()
+
+    def stop_running(self, *, grace_s: float = 30.0) -> list[str]:
+        """TERM everything in flight and put it back on the queue.
+
+        Used when someone takes their machine back. TERM rather than KILL because a loop
+        that checkpoints on TERM loses nothing, which the daemon already relies on --
+        and requeueing rather than failing means the work resumes when the box does.
+        """
+        with self._lock:
+            running = list(self._running)
+        for job_id in running:
+            job = self.jobs.get(job_id)
+            try:
+                self.stop(job_id, grace_s=grace_s)
+            except DaemonError:
+                continue
+            if job is not None:
+                job.state = "queued"
+                job.pid = job.returncode = None
+                with self._lock:
+                    self._queue.insert(0, job_id)
+        self._wake.set()
+        return running
 
     def shutdown(self) -> None:
         self._stop.set()
@@ -546,7 +578,11 @@ without losing the default."""
 def make_handler(runner: JobRunner, files_root: Path, token: str,
                  name: str = "",
                  report: Callable[[], dict[str, Any]] = device_report,
-                 fetcher: "Fetcher | None" = None):
+                 fetcher: "Fetcher | None" = None,
+                 ui: "Any | None" = None,
+                 schedule: "Availability | None" = None,
+                 on_paused: str = "stop",
+                 schedule_path: "Path | None" = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -563,12 +599,16 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             return False
 
         def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
-                  headers: dict[str, str] | None = None) -> None:
+                  headers: dict[str, str] | None = None,
+                  content_type: str = "") -> None:
             body = raw if raw is not None else json.dumps(payload).encode()
             self.send_response(code)
-            self.send_header("Content-Type",
-                             "application/octet-stream" if raw is not None
-                             else "application/json")
+            # One Content-Type, chosen here. Passing another through `headers` sends the
+            # header twice, and a browser takes the FIRST -- so an HTML page announced
+            # second arrives as application/octet-stream and is offered as a download
+            # rather than rendered.
+            self.send_header("Content-Type", content_type or (
+                "application/octet-stream" if raw is not None else "application/json"))
             self.send_header("Content-Length", str(len(body)))
             for k, v in (headers or {}).items():
                 self.send_header(k, v)
@@ -636,17 +676,33 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             return True
 
         # -- routes --
+        def _ui(self) -> bool:
+            if ui is None or not self.path.startswith("/ui"):
+                return False
+            from .ui import routes
+            return routes(ui, self)
+
         def do_GET(self) -> None:                      # noqa: N802
+            if self._ui():
+                return
             parsed = urllib.parse.urlparse(self.path)
             path, q = parsed.path, urllib.parse.parse_qs(parsed.query)
             if path == "/health":
                 # unauthenticated on purpose: liveness must be checkable
                 # without handing a probe the token.
-                self._send(200, {"ok": True, "name": name,
-                                 **runner.status(), **report()})
+                status = runner.status()
+                sched = schedule.public() if schedule is not None else None
+                if sched is not None and not sched["available"]:
+                    status = {**status, "free": 0}
+                self._send(200, {"ok": True, "name": name, **status, **report(),
+                                 **({"availability": sched} if sched else {})})
                 return
             if not self._guard():
                 return
+            if path == "/availability":
+                if schedule is None:
+                    self._send(501, {"error": "no schedule on this daemon"}); return
+                self._send(200, schedule.public()); return
             if path == "/jobs":
                 self._send(200, {"jobs": runner.snapshot()})
                 return
@@ -725,6 +781,8 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
         do_HEAD = do_GET
 
         def do_POST(self) -> None:                     # noqa: N802
+            if self._ui():
+                return
             if not self._guard():
                 return
             parsed = urllib.parse.urlparse(self.path)
@@ -742,6 +800,43 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)}); return
                 self._send(201, job.public()); return
+            if parsed.path == "/availability":
+                if schedule is None:
+                    self._send(501, {"error": "no schedule on this daemon"}); return
+                req = json.loads(body or b"{}")
+                action = str(req.get("action") or "")
+                try:
+                    if action == "pause":
+                        minutes = req.get("minutes")
+                        schedule.pause(minutes=float(minutes) if minutes else None,
+                                       reason=str(req.get("reason") or ""))
+                        if on_paused == "stop":
+                            # The point of pausing is to get the machine back. Leaving
+                            # the current job holding the GPU would make the toggle mean
+                            # "no NEW work", which is not what someone reaching for it
+                            # in the middle of a game is asking for.
+                            runner.stop_running()
+                    elif action == "resume":
+                        schedule.resume()
+                    elif action == "reserve":
+                        schedule.reserve(str(req.get("holder") or "someone"),
+                                         float(req.get("seconds") or 3600),
+                                         str(req.get("reason") or ""))
+                    elif action == "release":
+                        schedule.release(str(req.get("holder") or ""))
+                    elif action == "window":
+                        schedule.windows.append(
+                            parse_window(str(req.get("spec") or ""),
+                                         busy=bool(req.get("busy", True))))
+                    elif action == "clear_windows":
+                        schedule.windows.clear()
+                    else:
+                        raise DaemonError(f"unknown action {action!r}")
+                except (DaemonError, ValueError, PermissionError) as e:
+                    self._send(400, {"error": str(e)}); return
+                if schedule_path is not None:
+                    schedule.save(schedule_path)
+                self._send(200, schedule.public()); return
             if parsed.path == "/fetch":
                 if fetcher is None:
                     self._send(501, {"error": "peer-to-peer fetch is not enabled"})
@@ -775,7 +870,14 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
                 self._send(200, job.public()); return
             self._send(404, {"error": "no such route"})
 
+        def do_DELETE(self) -> None:                   # noqa: N802
+            if self._ui():
+                return
+            self._send(404, {"error": "no such route"})
+
         def do_PUT(self) -> None:                      # noqa: N802
+            if self._ui():
+                return
             if not self._guard():
                 return
             parsed = urllib.parse.urlparse(self.path)
@@ -873,7 +975,10 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   cluster_key_path: Path | str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
                   slots: int = 1, labels: Iterable[str] = (),
-                  fetch_slots: int = 2) -> None:
+                  fetch_slots: int = 2, web: bool = True,
+                  setup_from_lan: bool = False,
+                  busy_hours: Iterable[str] = (), free_hours: Iterable[str] = (),
+                  on_paused: str = "stop") -> None:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     files_root = root / "files"
@@ -881,10 +986,33 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     name = name or os.environ.get("ML_STACK_PEER_NAME") or socket.gethostname()
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
-    runner = JobRunner(root, files_root, slots=slots)
+    schedule_path = root / "availability.json"
+    schedule = Availability.load(schedule_path)
+    for spec in busy_hours:
+        schedule.windows.append(parse_window(spec))
+    for spec in free_hours:
+        schedule.windows.append(parse_window(spec, busy=False))
+    if busy_hours or free_hours:
+        schedule.save(schedule_path)
+
+    runner = JobRunner(root, files_root, slots=slots,
+                       gate=lambda: schedule.may_start())
     fetcher = Fetcher(files_root, key, slots=fetch_slots)
+    interface = None
+    setup_token = ""
+    if web:
+        from .ui import UI
+        if key is None and setup_from_lan:
+            # Printed to the console below. Someone who can read this machine's console
+            # is someone who is already on the machine, which is the property that makes
+            # relaxing the loopback rule safe to offer at all.
+            setup_token = secrets.token_urlsafe(9)
+        interface = UI(name=name, cluster_key_path=cluster_key_path, peer_port=port,
+                       setup_token=setup_token)
     base_report = device_report or _DEFAULT_REPORT
-    labels = sorted(set(labels))
+    # Filtered: an unset $ML_STACK_LABELS splits to [""], and an empty label would be
+    # advertised, shown in the UI, and matchable by Requires(labels=("",)).
+    labels = sorted({s.strip() for s in labels if s and s.strip()})
 
     def report() -> dict[str, Any]:
         # Declared, not detected. A box cannot prove it has no GPU, so "keep prep off the
@@ -893,16 +1021,40 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         return {**base_report(), "labels": labels}
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(runner, files_root, token, name, report,
-                                             fetcher))
+                                             fetcher, interface, schedule, on_paused,
+                                             schedule_path))
     advertiser: Advertiser | None = None
-    if announce and key is not None:
-        def refresh(b: Beacon) -> None:
-            """Bring the beacon's mutable half up to date before it goes on the wire."""
-            status = runner.status()
-            b.busy, b.queued = status["busy"], status["queued"]
-            b.slots, b.free = status["slots"], status["free"]
-            b.device = report()
 
+    def refresh(b: Beacon) -> None:
+        """Bring the beacon's mutable half up to date before it goes on the wire."""
+        status = runner.status()
+        available = schedule.public()
+        b.busy, b.queued = status["busy"], status["queued"]
+        b.slots, b.free = status["slots"], status["free"]
+        if not available["available"]:
+            # Advertised as having no capacity rather than as absent: the box is still
+            # there, still reachable, and still worth showing -- it just will not take
+            # work right now, and placement should say so rather than silently skip it.
+            b.free = 0
+        b.device = {**report(), "availability": available}
+
+    def start_announcing() -> None:
+        """Begin advertising, now that there is a key to sign beacons with."""
+        nonlocal advertiser, key
+        if advertiser is not None or not announce:
+            return
+        key = load_cluster_key(cluster_key_path)
+        if key is None:
+            return
+        fetcher.key = key
+        beacon = Beacon(name=name, port=port, device=report(),
+                        slots=runner.slots, free=runner.slots)
+        advertiser = Advertiser(beacon, key, refresh=refresh).start()
+
+    if interface is not None:
+        interface.on_join = start_announcing
+
+    if announce and key is not None:
         beacon = Beacon(name=name, port=port, device=report(),
                         slots=runner.slots, free=runner.slots)
         try:
@@ -916,6 +1068,12 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     print(f"  name  {name}")
     print(f"  root  {root}")
     print(f"  slots {slots}")
+    state = schedule.public()
+    for window in schedule.windows:
+        print(f"  busy  {window.describe()}" if window.busy
+              else f"  free  {window.describe()}")
+    if not state["available"]:
+        print(f"  NOT TAKING WORK -- {state['unavailable_because']}")
     if labels:
         print(f"  labels {' '.join(labels)}")
     if advertiser is not None:
@@ -925,7 +1083,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     elif key is None:
         print(f"  token {token}")
         print(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
-        print("  run 'ml-stack-peers init' to make this box discoverable")
+        print("  run 'ml-stack-peers setup' to join one")
     print(f"  device {json.dumps(report())}")
     if slots > 1:
         # Said out loud next to the other warning, because --slots on a box with a card
@@ -933,6 +1091,14 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         # contend for memory and both get slower, and nothing in the logs says so.
         print(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
               "this makes every job slower.")
+    if interface is not None:
+        shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
+        print(f"  open   http://{shown}:{port}/ui/")
+        if key is None:
+            print("  this machine has not joined a cluster yet -- open the address "
+                  "above ON THIS MACHINE to set it up")
+            if setup_token:
+                print(f"  setup from the LAN with this one-time code: {setup_token}")
     print("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
     try:
         httpd.serve_forever()
@@ -958,6 +1124,24 @@ def main(argv: list[str] | None = None) -> int:
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
     ap.add_argument("--no-announce", action="store_true",
                     help="serve, but stay invisible to peer discovery")
+    ap.add_argument("--busy", action="append", default=[], metavar="WHEN",
+                    help="when this machine is NOT available for work, e.g. "
+                         "'mon-fri 09:00-17:00' or '22:00-06:00'. Repeatable. Queued "
+                         "work waits for the window to close rather than failing.")
+    ap.add_argument("--free", action="append", default=[], metavar="WHEN",
+                    help="carve an exception out of a busy window, e.g. "
+                         "'mon-fri 12:00-13:00'")
+    ap.add_argument("--on-paused", choices=("stop", "finish"), default="stop",
+                    help="what happens to work already running when the machine is "
+                         "paused: stop it (default -- SIGTERM, so a loop that "
+                         "checkpoints keeps its progress, and it is requeued) or let "
+                         "it finish")
+    ap.add_argument("--no-web", action="store_true",
+                    help="serve the API but not the web interface")
+    ap.add_argument("--setup-from-lan", action="store_true",
+                    help="on a machine that has not joined a cluster, allow first-run "
+                         "setup from another machine using the one-time code printed "
+                         "at startup. For a headless box you cannot open a browser on.")
     ap.add_argument("--fetch-slots", type=int, default=2,
                     help="concurrent peer-to-peer file transfers (default 2). Not job "
                          "slots: a transfer is I/O against another box, not compute, "
@@ -991,7 +1175,9 @@ def main(argv: list[str] | None = None) -> int:
                   announce=not a.no_announce, cluster_key_path=a.cluster_key,
                   slots=a.slots, device_report=report if probes else None,
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
-                  fetch_slots=a.fetch_slots)
+                  fetch_slots=a.fetch_slots, web=not a.no_web,
+                  setup_from_lan=a.setup_from_lan,
+                  busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused)
     return 0
 
 

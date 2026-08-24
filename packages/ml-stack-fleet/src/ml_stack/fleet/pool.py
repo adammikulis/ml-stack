@@ -103,6 +103,14 @@ class Requires:
 
         if self.exclusive and free < slots:
             return f"is not idle ({free}/{slots} free) and this work wants the whole box"
+
+        # Last, and reported rather than silently skipped. A box that is somebody's desk
+        # between nine and five is not misconfigured and not broken -- it is unavailable
+        # for a stated reason and at a knowable time, and "nothing could run this" is a
+        # far worse thing to read than "the AMD box is in use until 17:00".
+        schedule = report.get("availability") or {}
+        if schedule and not schedule.get("available", True):
+            return schedule.get("unavailable_because") or "is not taking work right now"
         return ""
 
     def admits(self, peer_name: str, report: Mapping[str, Any],

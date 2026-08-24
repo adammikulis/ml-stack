@@ -15,6 +15,7 @@ import argparse
 import getpass
 import json
 import sys
+from typing import Any
 
 from .discovery import (
     MIN_PASSPHRASE,
@@ -178,6 +179,63 @@ def cmd_ls(args: argparse.Namespace) -> int:
     return 0
 
 
+def _peer(args: argparse.Namespace) -> Any:
+    from .remote import Peer
+    key = _require_key(args.cluster_key)
+    if args.name:
+        return Peer.find_one(name=args.name, key=key)
+    return Peer(f"http://127.0.0.1:{args.port}", derive_token(key))
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    """Take this machine back, now."""
+    peer = _peer(args)
+    out = peer.availability("pause", minutes=args.minutes, reason=args.reason)
+    print(out["unavailable_because"])
+    if args.minutes:
+        print(f"  it will start taking work again on its own in {args.minutes:.0f} min")
+    else:
+        print("  run 'ml-stack-peers resume' when you are done with it")
+    return 0
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    peer = _peer(args)
+    out = peer.availability("resume")
+    print("taking work again" if out["available"]
+          else f"still not taking work: {out['unavailable_because']}")
+    return 0
+
+
+def cmd_when(args: argparse.Namespace) -> int:
+    """What this machine's schedule looks like."""
+    peer = _peer(args)
+    out = peer.availability()
+    print("available now" if out["available"] else f"NOT available: {out['unavailable_because']}")
+    for window in out.get("windows", []):
+        print(f"  busy  {window}")
+    if out.get("reserved"):
+        r = out["reserved"]
+        print(f"  held by {r['holder']} for another {r['seconds_left']:.0f}s")
+    if not out.get("windows") and not out.get("reserved") and out["available"]:
+        print("  no schedule set -- it will take work at any hour")
+    return 0
+
+
+def cmd_busy(args: argparse.Namespace) -> int:
+    """Block out hours when this machine is somebody's desk."""
+    peer = _peer(args)
+    if args.clear:
+        peer.availability("clear_windows")
+        print("cleared; it will take work at any hour")
+        return 0
+    out = peer.availability("window", spec=args.when, busy=not args.free)
+    print("schedule now:")
+    for window in out.get("windows", []):
+        print(f"  busy  {window}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="ml-stack-peers")
     ap.add_argument("--cluster-key", default=None,
@@ -199,14 +257,45 @@ def main(argv: list[str] | None = None) -> int:
     ls = sub.add_parser("ls", help="list daemons on this LAN")
     ls.add_argument("--timeout", type=float, default=2.0)
     ls.add_argument("--json", action="store_true")
+
+    for verb, helptext in (
+        ("pause", "stop taking work now -- for when you want the machine back"),
+        ("resume", "start taking work again"),
+        ("when", "show this machine's schedule"),
+    ):
+        sp = sub.add_parser(verb, help=helptext)
+        sp.add_argument("--name", default="",
+                        help="another machine on the LAN (default: this one)")
+        sp.add_argument("--port", type=int, default=8770)
+        if verb == "pause":
+            sp.add_argument("--minutes", type=float, default=0,
+                            help="pause for this long, then resume on its own "
+                                 "(default: until you say otherwise)")
+            sp.add_argument("--reason", default="",
+                            help="shown to anyone looking at the fleet")
+
+    busy = sub.add_parser("busy", help="block out hours, e.g. 'mon-fri 09:00-17:00'")
+    busy.add_argument("when", nargs="?", default="")
+    busy.add_argument("--free", action="store_true",
+                      help="carve an exception out of a busy window instead")
+    busy.add_argument("--clear", action="store_true", help="remove every window")
+    busy.add_argument("--name", default="")
+    busy.add_argument("--port", type=int, default=8770)
     args = ap.parse_args(argv)
     args.group_given = "--group" in (argv if argv is not None else sys.argv)
     fn = {"setup": cmd_setup, "init": cmd_init, "key": cmd_key,
-          "token": cmd_token, "ls": cmd_ls}[args.cmd]
+          "token": cmd_token, "ls": cmd_ls, "pause": cmd_pause,
+          "resume": cmd_resume, "when": cmd_when, "busy": cmd_busy}[args.cmd]
     try:
         return fn(args)
-    except DiscoveryError as exc:
+    except (DiscoveryError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:                          # noqa: BLE001
+        # A daemon that is not running is the overwhelmingly likely cause, and a
+        # traceback is a poor way to say "nothing is listening on 8770".
+        print(f"error: {exc}", file=sys.stderr)
+        print("  is 'ml-stack-traind' running on that machine?", file=sys.stderr)
         return 2
 
 

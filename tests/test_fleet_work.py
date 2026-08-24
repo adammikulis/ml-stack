@@ -359,3 +359,33 @@ class TestVendorsAreNotInterchangeable:
 
     def test_any_gpu_still_refuses_a_box_with_none(self):
         assert not Requires(backend="accelerator").admits("pi", self.PI, 1, 1)
+
+
+class TestABoxThatIsSomebodysDesk:
+    """A machine someone works on is not misconfigured when it refuses work, and the
+    refusal has to say so -- "nothing could run this" reads as a broken fleet."""
+
+    BUSY = {"backends": ["torch"], "cuda": True, "labels": [], "availability": {
+        "available": False,
+        "unavailable_because": "this machine is in use (mon tue wed thu fri "
+                               "09:00-17:00); work resumes Mon 17:00"}}
+    PAUSED = {"backends": ["torch"], "cuda": True, "labels": [], "availability": {
+        "available": False, "paused": True,
+        "unavailable_because": "paused: gaming, until it is switched back on"}}
+    FREE = {"backends": ["torch"], "cuda": True, "labels": [], "availability": {
+        "available": True, "unavailable_because": ""}}
+
+    def test_a_box_inside_its_working_hours_is_refused_with_the_hours(self):
+        why = Requires(backend="cuda").why_not("amd", self.BUSY, 1, 1)
+        assert "17:00" in why
+
+    def test_a_paused_box_says_it_was_paused_not_that_it_is_broken(self):
+        why = Requires(backend="cuda").why_not("amd", self.PAUSED, 1, 1)
+        assert "paused" in why and "gaming" in why
+
+    def test_the_same_box_outside_its_hours_takes_work(self):
+        assert Requires(backend="cuda").admits("amd", self.FREE, 1, 1)
+
+    def test_a_box_with_no_schedule_is_available(self):
+        """Most machines never set one, and absence must not read as unavailable."""
+        assert Requires().admits("pi", {"backends": [], "labels": []}, 1, 1)
