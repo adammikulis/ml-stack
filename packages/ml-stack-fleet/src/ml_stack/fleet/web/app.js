@@ -32,6 +32,40 @@ const show = (...nodes) => { root.replaceChildren(...nodes); };
 const row = (label, why) => el("span", {},
   el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
 
+// What a conversation costs to keep in memory. Two tensors per layer, per token, at
+// two bytes each; the shape below is a 27B-class model, which is what most people end
+// up running. A smaller model costs proportionally less.
+const CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+const KV_MB_PER_TOKEN = 2 * 48 * 8 * 128 * 2 / (1024 * 1024);
+
+const ctxRam = (tokens) => {
+  const mb = tokens * KV_MB_PER_TOKEN;
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+};
+
+const ctxWords = (n) => (n >= 1024 ? `${Math.round(n / 1024)}k tokens` : `${n} tokens`);
+
+const contextPicker = (start, onPick) => {
+  let at = Math.max(0, CTX_STEPS.indexOf(start));
+  if (at < 0) at = 2;
+  const out = el("b", {});
+  const slider = el("input", { type: "range", min: "0",
+    max: String(CTX_STEPS.length - 1), value: String(at), id: "ctx" });
+  const paint = () => {
+    const n = CTX_STEPS[Number(slider.value)];
+    out.textContent = `${ctxWords(n)} · about ${ctxRam(n)} of memory`;
+    onPick(n);
+  };
+  slider.oninput = paint;
+  paint();
+  return el("div", { class: "meter" },
+    el("div", { class: "cap" }, el("span", {}, "how much it reads"), out),
+    slider,
+    el("div", { class: "hint" },
+      "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
+      + "smaller one costs less."));
+};
+
 const TABS = [["Chat", () => chat()], ["Cluster", () => fleet()],
               ["Models", () => models()], ["Settings", () => settings()]];
 
@@ -586,6 +620,7 @@ async function settings(message) {
     on_close: cur.on_close || "",
     auto_update: cur.auto_update !== false,
     autodownload_models: cur.autodownload_models !== false,
+    context: cur.context || 8192,
   };
 
   const radio = (group, value, label, why) => {
@@ -674,6 +709,10 @@ async function settings(message) {
   })();
 
   // updates
+  const chatting = el("div", { class: "group" },
+    el("h2", {}, "Chatting"),
+    contextPicker(cur.context || 8192, (n) => { pick.context = n; }));
+
   const updates = el("div", { class: "group" },
     el("h2", {}, "Updates"),
     el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
@@ -801,6 +840,7 @@ async function settings(message) {
 
         el("div", {},
           libs,
+          chatting,
           updates,
 
           el("div", { class: "group" },
@@ -861,7 +901,115 @@ const state = { step: 0, mode: "", name: "", group: "ml-stack", prefs: null };
 
 function steps(n) {
   return el("div", { class: "steps" },
-    [0, 1, 2, 3, 4].map((i) => el("i", { class: i <= n ? "on" : "" })));
+    [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" })));
+}
+
+// Step 4: what this machine should be able to run. Asked here rather than left in
+// Settings, because a machine that can do nothing yet is the state everyone starts in
+// and nobody goes looking for.
+async function installStep(next) {
+  const L = await api("/ui/libraries");
+  const offered = L.libraries || [];
+  const want = new Set(offered.filter((x) => x.default || x.installed)
+                              .map((x) => x.name));
+  let chat = true;
+  let context = 8192;
+  let updates = true;
+  let getModels = true;
+  let onClose = "";
+
+  const note = el("div");
+  const go = el("button", {}, "Install and continue");
+  const later = el("button", { class: "ghost", onclick: () => next() },
+    "Not now");
+
+  const box = (id, on, label, why, flip) => {
+    const input = el("input", { type: "checkbox", id,
+                                ...(on ? { checked: "1" } : {}) });
+    input.onchange = () => flip(input.checked);
+    return el("label", { class: "opt", for: id }, input, row(label, why));
+  };
+
+  go.onclick = async () => {
+    go.disabled = true; later.disabled = true;
+    await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+      context, auto_update: updates, autodownload_models: getModels,
+      on_close: onClose, autostart: state.autostart || "manual" }) });
+    const doing = (what) => note.replaceChildren(
+      el("div", { class: "hint" }, el("span", { class: "spin" }), " " + what));
+    try {
+      if (chat) {
+        doing("Getting the model server…");
+        const got = await api("/ui/serving/install", { method: "POST" });
+        if (got.error) {
+          note.replaceChildren(el("div", { class: "err" }, got.error));
+          go.disabled = false; later.disabled = false;
+          return;
+        }
+      }
+      const add = [...want];
+      if (add.length) {
+        doing(`Installing ${add.join(", ")}… this can take a few minutes.`);
+        const r = await api("/ui/libraries", { method: "POST",
+          body: JSON.stringify({ install: add }) });
+        if (r.error) {
+          note.replaceChildren(el("div", { class: "err" }, r.error));
+          go.disabled = false; later.disabled = false;
+          return;
+        }
+      }
+    } catch (e) {
+      note.replaceChildren(el("div", { class: "err" }, String(e)));
+      go.disabled = false; later.disabled = false;
+      return;
+    }
+    next();
+  };
+
+  const total = () => offered.filter((x) => want.has(x.name))
+                             .reduce((a, x) => a + (x.size_mb || 0), 0);
+
+  show(el("div", { class: "centre" }, el("div", { class: "card wide" },
+    steps(4),
+    el("h1", {}, "What should it be able to do?"),
+    el("p", { class: "sub" },
+      "Ticked from what this machine is. Anything here can be changed later in "
+      + "Settings."),
+    el("div", { class: "cap" }, el("span", {}, "CHATTING")),
+    box("chat", true, "Run models and chat with them",
+      "downloads llama.cpp, about 20 MB; models come later and are your choice",
+      (on) => { chat = on; }),
+    contextPicker(8192, (n) => { context = n; }),
+    offered.length
+      ? el("div", { class: "cap" }, el("span", {}, "TRAINING"))
+      : null,
+    ...offered.map((lib) =>
+      box(`lib_${lib.name}`, want.has(lib.name), lib.title,
+        `${lib.blurb || ""}${lib.size_mb ? ` — about ${lib.size_mb} MB` : ""}`,
+        (on) => { on ? want.add(lib.name) : want.delete(lib.name); })),
+    el("div", { class: "hint" },
+      "Installed alongside ml-stack, not into your system Python."),
+
+    el("div", { class: "cap" }, el("span", {}, "KEEPING UP TO DATE")),
+    box("upd", true, "Download and install updates automatically",
+      "checked once a day, put on when no job is running, and it restarts itself",
+      (on) => { updates = on; }),
+    box("getm", true, "Get models automatically",
+      "from another machine on your network if one has it, otherwise the internet",
+      (on) => { getModels = on; }),
+
+    el("div", { class: "cap" }, el("span", {}, "CLOSING THE WINDOW")),
+    ...[["", "Ask me each time"],
+        ["background", "Keep running so the others can still reach it"],
+        ["quit", "Quit and leave the cluster"]].map(([value, label]) => {
+      const id = `close_${value || "ask"}`;
+      const input = el("input", { type: "radio", name: "onclose", id,
+                                  ...(value === "" ? { checked: "1" } : {}) });
+      input.onchange = () => { if (input.checked) onClose = value; };
+      return el("label", { class: "opt", for: id }, input, row(label, ""));
+    }),
+
+    go, later, note)));
 }
 
 // Step 3: what this machine should do. Every box is pre-ticked from what the machine
@@ -1036,8 +1184,9 @@ function wizard(setup, err) {
   }
 
   if (state.step === 3) return prefsStep(() => next(4));
+  if (state.step === 4) return installStep(() => next(5));
 
-  // step 4: joined — what next. Deliberately not a command: telling someone to open a
+  // step 5: joined — what next. Deliberately not a command: telling someone to open a
   // terminal is the same wall as telling them to paste a 32-byte key, one layer up.
   const looking = el("div", { class: "watching" },
     el("span", { class: "spin" }), " Watching for other machines…");
@@ -1080,8 +1229,9 @@ function wizard(setup, err) {
     el("p", { class: "hint" },
       "They find each other on their own. Nothing else to configure."),
     looking, found,
-    el("details", { class: "aside" },
-      el("summary", {}, "Already installed it, and happy with a terminal?"),
+    el("div", { class: "aside" },
+      el("div", { class: "hint" },
+        "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
       el("pre", { class: "cmd" }, "ml-stack-peers setup")),
     skip)));
 }

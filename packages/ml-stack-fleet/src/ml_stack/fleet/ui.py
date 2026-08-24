@@ -185,6 +185,8 @@ class UI:
             settings.auto_update = bool(req["auto_update"])
         if "autodownload_models" in req:
             settings.autodownload_models = bool(req["autodownload_models"])
+        if "context" in req:
+            settings.context = max(512, min(1 << 20, int(req["context"])))
 
         if req.get("work_hours") and self.schedule is not None:
             spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
@@ -232,8 +234,10 @@ class UI:
         if draft is not None:
             # -md is what this build calls --spec-draft-model.
             extra = ("-md", str(draft), "-ngld", "99")
+        context = int(getattr(self.settings, "context", 0) or 8192)
         self._leases[port] = self.servers.lease(ServerSpec(model=model.path,
                                                            port=port,
+                                                           context=context,
                                                            extra_args=extra))
         return self.serving.register(port, [model.name])
 
@@ -568,6 +572,23 @@ def routes(ui: UI, handler: Any) -> bool:
                                          draft=str(req.get("draft") or ""))
             send(202, started.public())
             return True
+
+    if path == "/ui/serving/install" and method == "POST":
+        if ui.root is None:
+            send(501, {"error": "this daemon does not know where to keep it"})
+            return True
+        if not _can_serve():
+            send(501, {"error": "this install cannot run a model itself; a machine "
+                                "on your network can serve one instead"})
+            return True
+        from .llama import LlamaError, ensure_server
+        try:
+            got = ensure_server(ui.root)
+        except LlamaError as exc:
+            send(400, {"error": str(exc)})
+            return True
+        send(200, {"ok": True, "server": str(got)})
+        return True
 
     if path == "/ui/serving":
         if ui.serving is None:
