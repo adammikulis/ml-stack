@@ -1,11 +1,12 @@
 # ml-stack
 
-**Train across every machine in your house.**
+**Run and train models across every machine in your house.**
 
 Install it on each one and type the same passphrase. They find each other on their own —
-no addresses, no keys to copy, no config file. Work then goes to whichever machine is
-free and fastest: the box with the card trains, the spare CPUs prepare data, and any of
-them can be taken back the moment you want it.
+no addresses, no keys to copy, no config file. Chat with a model from any machine,
+whichever one is actually running it. Work goes to whichever machine is free and fastest:
+the box with the card trains, the spare CPUs prepare data, and any of them can be taken
+back the moment you want it.
 
 ```
 $ ml-stack-peers ls
@@ -22,6 +23,9 @@ Everything runs on your own hardware. Nothing leaves the network.
 
 [Full list of what it does](docs/FEATURES.md).
 
+- **Chat from any machine.** The one with the card runs the model; the laptop talks to
+  it. A machine that installs nothing extra still gets to use it, and conversations are
+  kept.
 - **Nothing to configure.** A passphrase is the whole setup. Two households on one
   network stay separate without either of them being told to.
 - **Work lands where it fits.** Placement is by what a machine reports and how fast it

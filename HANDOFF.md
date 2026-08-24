@@ -1,131 +1,78 @@
 # Handoff
 
-State as of the last commit on `main`, `b5f37b8 Version 0.1.3`.
+Pending work on `main`. Read `CLAUDE.md` first.
 
-Read `CLAUDE.md` first. It has two rules, both from the owner, both non-negotiable:
-no rationale prose in code, and commit subjects that say what changed and nothing else.
+## Before tagging v0.1.4
 
-## Released
+The suite and `docs/verify_release.py` both pass, but neither has run a real
+`llama-server`. Two things need a real machine:
 
-`v0.1.3` is published with bundles for macOS (Apple silicon), Linux and Windows, plus
-the twelve wheels and the two network installers. Verified by installing the published
-artifact and training with it.
+- **`llama.py` asset names.** `_tokens()` guesses what the ggml-org release calls a
+  build for each platform. Verified against a stubbed release, not a real one. Check the
+  names on macOS arm64, Linux x64 and Windows x64 before trusting the Run button.
+- **macOS quarantine.** A binary downloaded from the internet may refuse to run until
+  the quarantine attribute is cleared. Not handled.
 
-macOS Intel is not supported and its runner is out of the release matrix.
+Then the release gate, which is two machines:
 
-## Uncommitted work in progress
+1. **The machine that installs nothing.** From the bundle only — no `llama-server`, no
+   sidecar venv, no model store. Type the passphrase, open Chat, pick a model the other
+   machine is serving, hold a conversation, reload, confirm it is still there. Check
+   afterwards that no `llama-server` was fetched and no venv was built: hosting costs
+   belong to the host.
+2. **The machine that hosts.** From the bundle: fetch a model, press Run, confirm it
+   appears to the first machine.
 
-Four new files and seven modified, none committed. The full suite is green with all of
-it: **736 passing**. Two features, both nearly done.
+Then commit, `git tag v0.1.4`, push the tag. `release.yml` builds twelve wheels and three
+bundles and publishes only on a `refs/tags/` ref. It sets `generate_release_notes: true`,
+so GitHub builds the notes from commit subjects and the app shows that text to users —
+the commit subject rule in `CLAUDE.md` is load-bearing.
 
-### 1. Inference proxy — working, tested, ready to commit
+## Asked for, not built
 
-`packages/ml-stack-fleet/src/ml_stack/fleet/serving.py` (new) and a `_proxy` handler in
-`daemon.py`.
+1. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; there is no
+   index of what datasets each machine holds. Browse every dataset on every machine,
+   deduplicated by content digest, so three copies of one path that do not match show as
+   three that do not match.
+2. **Two more recipes** — image classification, and fine-tuning from an existing model.
+   `text-lm` and `classify-text` work; the shape is the same.
+3. **Local-SGD.** One training run split across machines, averaging safetensors with
+   numpy so a Mac and an AMD box contribute to one model.
+4. **Progress for long downloads** in the interface, and pruning abandoned `.part`
+   files. Both are listed under Known limits in `docs/FEATURES.md`.
+5. **Semantic search over conversations.** Today the search is keyword. `embed()`,
+   `cosine()` and `top_k()` in `ml-stack-client` are ready, and the cost is underneath
+   them: llama-server cannot serve embeddings and chat at once, so it needs a second
+   server, a second model download, and a vectors sidecar recording the model and
+   dimension it was built with.
+6. **Sharing conversations across machines.** They stay on the machine they were held
+   on.
 
-A machine registers the port its llama.cpp server is on. The daemon forwards
-`/infer/*` to `127.0.0.1:<port>`, so the model server stays on loopback and the only
-LAN-exposed port is the one that already demands a token. Beacons carry which models a
-machine is serving; `discover_serving(key)` returns `Endpoint`s, and
-`Client(**endpoint.client_kwargs())` works with **no change to `Client`** — it already
-accepts `api_key` and sends it as a bearer token.
+## Things that will bite you
 
-`tests/test_fleet_serving.py` — 14 tests, all passing. The one that matters is
-`test_a_streamed_completion_arrives_as_it_is_generated`: it caught a real bug where
-`response.read(8192)` blocked until it had 8192 bytes, so a whole completion arrived at
-once. Fixed with `read1`. Verified the test goes red against the old code.
-
-### 2. Model catalog — working, one route missing
-
-`packages/ml-stack-fleet/src/ml_stack/fleet/models.py` (new).
-
-`Models.ensure(name)` gets a model, **preferring the network**: if a peer advertises it,
-pull it peer-to-peer; otherwise download from `hf:owner/repo/file.gguf` or a URL.
-Verified end to end — a 6 MB model pulled from one daemon to another over the LAN in
-2.0s, and the internet fallback separately.
-
-Daemon routes `GET /models`, `GET /models/{name}`, `POST /models/get` are wired.
-`Peer.models()` and `Peer.get_model()` exist. `Peer.pull` gained a `route=` parameter so
-it can pull from `/models/` as well as `/files/`.
-
-`tests/test_fleet_models.py` — 17 tests, all passing.
-
-**What is missing:** the `/ui/models` route in `ui.py`. Two attempts to insert it failed
-silently because the anchor string had already changed. The Models screen in
-`web/app.js` is written and calls `/ui/models`, so the screen currently returns
-`{"error": "no such route"}`. Insert the handler before the `/ui/updates` route
-(around line 445 of `ui.py`); the body was drafted and is straightforward:
-`GET` returns `{here, elsewhere, free_gb, autodownload}`, `POST` calls
-`ui.models.ensure(...)`. `ui.models` is already wired in `serve_forever`.
-
-`Settings.autodownload_models` exists and defaults to True; the checkbox is in the
-Settings screen.
-
-### Unanswered question from the owner
-
-**"How do we handle partial downloads?"** — asked, not yet answered. The honest state:
-
-- **Peer-to-peer** (`Peer.pull`): lands in `.part`, resumes with `Range`, verifies the
-  whole reassembled file against a sha256 header, `os.replace` only when complete. On a
-  digest mismatch it deletes the `.part`, because resuming would preserve the
-  corruption. A `.part` larger than the remote file is refused rather than spliced.
-- **Internet** (`Models._from_internet`): lands in `.part`, sends `Range` if one exists,
-  keeps the `.part` on a short read. **But** there is no digest to check against, and
-  unlike `Peer.pull` it does not guard against resuming a `.part` that belongs to a
-  different file of the same name. That is a real gap and the likely next fix.
-- Nothing prunes abandoned `.part` files, and a long download reports no progress to the
-  UI.
+- **`packaging/build.py` used to ship stale code.** It reuses a build venv and pip skips
+  reinstalling an unchanged version. `--force-reinstall` handles it, but if a bundle
+  behaves like code you already fixed, suspect this first.
+- **Lazy imports are invisible to PyInstaller.** `ml_stack.serve` is reached only through
+  a lazy import and is listed in `hidden` in both spec files. Anything else imported
+  inside a function needs the same.
+- **Several daemons on one machine share the discovery UDP port and only one answers.**
+  A real fleet is unaffected. It shows up when simulating a cluster on one box, which is
+  why the peer-copy check in `verify_release.py` is given an address rather than
+  discovering one.
+- **The full suite takes longer than the 120s Bash timeout.** Run it backgrounded and
+  poll the output.
+- **`node --check web/app.js` before trusting the interface.** A duplicate top-level
+  `const` stops the whole page loading and no Python test catches it. There is a test for
+  this, and another that checks every address the page calls is one the daemon answers.
+- **The bundle cannot train without the sidecar environment.** `Environment` builds a
+  venv, downloading a standalone Python when the machine has none new enough — macOS
+  ships 3.9.
 
 ## Verifying
 
 ```
-python -m pytest tests/ -q          # 736 tests, ~2m16s; exceeds a 120s Bash timeout
-python docs/verify_release.py       # 29 checks against real daemons and real training
-python packaging/build.py --bundle  # wheels plus a standalone app
+python -m pytest tests/ -q                    # exceeds a 120s Bash timeout
+PYTHONPATH=$(ls -d packages/*/src | tr '\n' ':') python docs/verify_release.py
+python packaging/build.py --bundle            # wheels plus a standalone app
 ```
-
-`docs/FEATURES.md` describes every shipped feature and each has a check in
-`verify_release.py`. It has a "Known limits" section — keep it honest.
-
-## Things that will bite you
-
-- **`packaging/build.py` used to ship stale code.** It reuses a build venv, and pip
-  skips reinstalling an unchanged version. Fixed with `--force-reinstall`, but if a
-  bundle behaves like code you already fixed, suspect this first.
-- **Several daemons on one machine share the discovery UDP port and only one answers.**
-  A real fleet is unaffected. It only shows up when simulating a cluster on one box,
-  which every local demo does.
-- **The full test suite takes longer than the 120s Bash timeout.** Run it with
-  `run_in_background: true` and poll the output file.
-- **`node --check` on `web/app.js` before trusting the UI.** A duplicate `const` at the
-  top level stops the whole page loading and no Python test will catch it. There is now
-  a test for this.
-- **The bundle cannot train without the sidecar environment.** `Environment` builds a
-  venv, downloading a standalone Python if the machine has none new enough — macOS ships
-  3.9. `ml-stack-train` needs `ml-stack-contracts` and `numpy` declared; that was a real
-  missing dependency, fixed.
-
-## What the owner has asked for that is not built
-
-In roughly the order it came up:
-
-1. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer already;
-   there is no index of what datasets each machine holds. The owner asked for this
-   specifically: browse every dataset on every machine, deduplicated by content digest
-   so three copies of the same path that do not match show as three that do not match.
-2. **Two more recipes** — image classification and fine-tuning from an existing model.
-   `text-lm` and `classify-text` work; the shape is the same.
-3. **Local-SGD.** Splitting one training run across machines, averaging safetensors with
-   numpy so a Mac and an AMD box can contribute to one model. This was the original ask
-   and is still not built.
-4. **Progress for long downloads** in the UI, and pruning abandoned `.part` files.
-
-## Owner preferences worth knowing
-
-- Wants zero command line for end users. Any instruction that says "run this command"
-  is a bug unless it is behind an "already have a terminal?" disclosure.
-- Dislikes being told what used to be broken. Write for someone seeing it for the first
-  time.
-- Wants decisions surfaced as choices, not defaults chosen on their behalf — the wizard
-  pre-ticks boxes and shows the reason beside each.
-- Asked to keep fake device reports for testing. They exist only in test fixtures.

@@ -46,3 +46,22 @@ Describe what the thing does. Not what it no longer does wrong, not what changed
 long it took. "Trains across every machine on your network", never "training now works".
 
 Before/after belongs in a commit message, where the reader came looking for it.
+
+## HANDOFF.md
+
+It lists what is still pending. Nothing else.
+
+When something is done, **delete its entry**. Do not strike it through, do not mark it
+`[x]`, do not move it to a "completed" section, do not leave a line saying it was
+finished. A reader opens this file to find out what is left; anything already dealt with
+is noise they have to read past to get there.
+
+The same goes for anything that turned out to be wrong: delete it. A note explaining that
+an earlier entry was mistaken is another thing to read past.
+
+If a finished piece leaves something behind — a limit, a gap, a follow-up — write that as
+its own pending entry, in its own words. Do not write it as a postscript to the item that
+is going away.
+
+An empty HANDOFF.md is a good state. Delete the file rather than leaving headings with
+nothing under them.

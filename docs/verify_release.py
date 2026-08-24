@@ -1,4 +1,4 @@
-"""Run every claim in RELEASE.md and report whether it holds.
+"""Run every claim in FEATURES.md and report whether it holds.
 
     python docs/verify_release.py
 """
@@ -459,6 +459,176 @@ def _():
         line = next(x for x in text.splitlines() if x.startswith("dependencies ="))
         assert line.split("=", 1)[1].strip() == "[]", f"{name}: {line}"
     return "fleet, client, media, contracts"
+
+
+# -- models --------------------------------------------------------------
+@check("Models", "a model is copied from another machine rather than downloaded again")
+def _():
+    import os
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from ml_stack.fleet import JobRunner, Models, join_cluster, make_handler
+    from ml_stack.fleet.daemon import load_or_create_token
+
+    key = join_cluster(WORDS, path=TMP / "models.key")
+    shelf = TMP / "haver"
+    shelf.mkdir(parents=True, exist_ok=True)
+    payload = os.urandom(3 * 1024 * 1024)
+    (shelf / "tiny-test.gguf").write_bytes(payload)
+
+    root = TMP / "haver-daemon"
+    files = root / "files"
+    files.mkdir(parents=True, exist_ok=True)
+    runner = JobRunner(root, files)
+    port = free_port()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+        runner, files, load_or_create_token(root, key), "haver",
+        models=Models([shelf], shelf), cluster_key_path=TMP / "models.key"))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        want = TMP / "wanter"
+        want.mkdir(parents=True, exist_ok=True)
+        # Several daemons on one box share the discovery port, so the address that
+        # discovery would supply is given directly.
+        got = Models([want], want)._from_peer(
+            "tiny-test.gguf", f"http://127.0.0.1:{port}", key, None)
+        assert got.path.read_bytes() == payload, "the copy does not match"
+        assert got.path.parent == want
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+    return f"{len(payload) // 1024} KB over the network"
+
+
+@check("Models", "a part-file left by a different download is discarded, not resumed")
+def _():
+    import http.server
+    import json as js
+    import threading
+
+    from ml_stack.fleet import Models
+
+    store = TMP / "parts"
+    store.mkdir(parents=True, exist_ok=True)
+    part = store / "m.gguf.part"
+    part.write_bytes(b"\x00" * 8192)
+    (store.parent / "parts" / "m.gguf.part.from").write_text(
+        js.dumps({"url": "http://elsewhere.invalid/other.gguf", "validator": "x"}))
+    payload = b"R" * 4096
+    asked = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            asked.append(self.headers.get("Range"))
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        got = Models([store], store).ensure(
+            "m.gguf", source=f"http://127.0.0.1:{srv.server_address[1]}/m.gguf")
+    finally:
+        srv.shutdown()
+    assert asked == [None], f"asked to resume another file's part: {asked}"
+    assert got.path.read_bytes() == payload
+    return "the stale part was thrown away"
+
+
+# -- chat ----------------------------------------------------------------
+@check("Chat", "a machine that can run nothing itself still talks to a peer's model")
+def _():
+    """The install with no model server is the common one. If this fails, the
+    product does not work for the people it is for."""
+    import json as js
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    from ml_stack.fleet import JobRunner, Serving, join_cluster, make_handler
+    from ml_stack.fleet.chat import find, reply_text, stream, targets
+    from ml_stack.fleet.daemon import load_or_create_token
+    from ml_stack.fleet.discovery import derive_token
+
+    class Model(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", "2")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            for piece in ("It ", "works"):
+                self.wfile.write(
+                    f"data: {js.dumps({'choices': [{'delta': {'content': piece}}]})}\n\n"
+                    .encode())
+                self.wfile.flush()
+            self.wfile.write(b"data: [DONE]\n\n")
+
+    model = ThreadingHTTPServer(("127.0.0.1", free_port()), Model)
+    threading.Thread(target=model.serve_forever, daemon=True).start()
+
+    key = join_cluster(WORDS, path=TMP / "chat.key")
+    root = TMP / "host-daemon"
+    files = root / "files"
+    files.mkdir(parents=True, exist_ok=True)
+    serving = Serving(root / "serving.json")
+    serving.register(model.server_address[1], ["tiny-test.gguf"])
+    runner = JobRunner(root, files)
+    port = free_port()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
+        runner, files, load_or_create_token(root, key), "host", serving=serving))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+    try:
+        # This machine: no model store, nothing serving, no way to run one.
+        beacon = {"name": "host", "base_url": f"http://127.0.0.1:{port}",
+                  "is_self": False, "device": {"serving": serving.public()}}
+        reachable = targets([beacon], serving=None, token=derive_token(key))
+        assert reachable, "a peer is serving and this machine cannot see it"
+        target = find(reachable, "tiny-test.gguf")
+        assert target is not None and not target.local
+        said = b"".join(stream(target, {"model": target.model, "stream": True,
+                                        "messages": [{"role": "user", "content": "hi"}]}))
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+        model.shutdown()
+
+    assert reply_text(said) == "It works", reply_text(said)
+    return "no model store, nothing serving, still answered"
+
+
+@check("Chat", "a conversation is still there after a restart")
+def _():
+    from ml_stack.fleet import Conversations
+
+    where = TMP / "chats"
+    first = Conversations(where)
+    made = first.start(model="tiny-test.gguf")
+    first.append(made.id, "user", "how tall is everest")
+    first.append(made.id, "assistant", "8849 metres")
+
+    again = Conversations(where).get(made.id)
+    assert [m.content for m in again.messages] == ["how tall is everest",
+                                                   "8849 metres"]
+    assert again.title == "how tall is everest"
+    assert [c.id for c in Conversations(where).search("everest")] == [made.id]
+    return "kept and found again by what was said in it"
 
 
 # -- report --------------------------------------------------------------

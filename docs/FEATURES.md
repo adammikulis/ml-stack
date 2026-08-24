@@ -76,6 +76,40 @@ a row is set aside for a growing cooldown rather than draining the queue.
 - **Reservations.** One machine can hold another for a while, with a ceiling so a
   forgotten reservation cannot take a machine out of the cluster permanently.
 
+## Models
+
+Every model file this machine holds, and every one held by the others.
+
+- **Getting one** takes a Hugging Face reference or a link. If another machine on your
+  network already has that file, it is copied across the network instead of downloaded
+  again.
+- **A copy in progress** resumes where it stopped. A part-file is only finished into a
+  real model once its length matches what the far end says the file is, and a part left
+  behind by a different file is discarded rather than continued.
+- **Between machines**, the reassembled file is checked against a digest the sending
+  machine computed, so a copy that arrived wrong is thrown away rather than kept.
+- **Automatic downloading** can be turned off in Settings, leaving the network as the
+  only source.
+
+## Chat
+
+Talk to a model from the interface, whichever machine is running it.
+
+- **The model list** covers models running here and models running on any machine on
+  your network. One that a different machine is serving is used exactly like a local
+  one.
+- **A machine that installs nothing extra can still chat**, as long as something on the
+  network is serving. Reaching another machine needs no address and no key exchange —
+  the passphrase both machines already share is enough.
+- **Replies arrive as they are written**, not in one piece at the end.
+- **Conversations are kept** between runs and searched by anything said in them.
+- **Running a model here** is a button beside it in the Models list. The llama.cpp
+  server is downloaded the first time and checked against the digest GitHub publishes
+  for it.
+
+The model server itself listens only on this machine. The one address exposed to the
+network is the daemon's, which already requires the shared credential.
+
 ## Training
 
 `Trainer` runs the loop on PyTorch or MLX. The framework comes from the model, so the
@@ -190,7 +224,12 @@ python packaging/build.py --bundle   # and a standalone app for this platform
   cluster on a single box.
 - **The native window is verified on macOS.** Windows and Linux use different webview
   backends, and a window cannot be tested without a display.
-- **No dataset browser yet.** Peer-to-peer transfer exists; a fleet-wide catalogue does
-  not.
+- **No dataset browser yet.** Models are catalogued across the network; datasets are
+  not. Peer-to-peer transfer of them exists, but nothing indexes what each machine has.
+- **A long download reports no progress.** It says it is working, not how far along.
+- **Nothing clears abandoned part-files.** A download given up on leaves one behind
+  until the next attempt at the same file resumes or discards it.
+- **Conversations stay on the machine they were held on.** They are not shared across
+  the network.
 - **Training is one machine per run.** Splitting a single run across machines is not
   built.
