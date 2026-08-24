@@ -359,6 +359,20 @@ class TestReadingWhatAModelIs:
 
         assert family_of(name) == family
 
+    def test_a_model_named_after_no_family_goes_under_the_one_it_came_from(self):
+        """Gemmable 4 12B is Gemma 4 12B fine-tuned, and the hub says nothing about
+        that: the repository carries no base_model tag."""
+        from ml_stack.fleet.models import family_of
+
+        assert family_of("Gemmable-4-12B-MTP") == "Gemma"
+        assert family_of("Mia-AiLab/Gemmable-4-12B-MTP-GGUF") == "Gemma"
+
+    def test_a_name_that_merely_starts_the_same_is_not_folded_in(self):
+        from ml_stack.fleet.models import family_of
+
+        assert family_of("Gemstone-7B") == "Gemstone"
+        assert family_of("Llamafile-3B") == "Llamafile"
+
     def test_a_family_nobody_has_heard_of_still_groups(self):
         from ml_stack.fleet.models import family_of
 

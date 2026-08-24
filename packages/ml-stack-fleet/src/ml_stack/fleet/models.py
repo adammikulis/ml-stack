@@ -443,6 +443,13 @@ KNOWN = {
     "phi": "Phi", "olmo": "OLMo", "yi": "Yi", "glm": "GLM", "lfm": "LFM",
 }
 SPELLING = KNOWN
+
+# Models published under a name of their own that are a fine-tune or an export of
+# something else. The hub carries a base_model tag only sometimes -- Gemmable has
+# none at all -- so a known lineage is written down rather than guessed at.
+ALIAS = {
+    "gemmable": "Gemma",
+}
 HUB = "https://huggingface.co/api/models"
 POPULAR_TTL_S = 6 * 3600
 SCAN = 40
@@ -473,6 +480,9 @@ def family_of(name: str) -> str:
         bare = bare.removesuffix(tail)
 
     low = bare.lower()
+    for needle in sorted(ALIAS, key=len, reverse=True):
+        if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z])", low):
+            return ALIAS[needle]
     for needle in sorted(KNOWN, key=len, reverse=True):
         if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z])", low):
             return KNOWN[needle]
