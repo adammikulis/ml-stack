@@ -256,3 +256,24 @@ details.aside summary:hover { color: var(--muted); }
 .label.temp.hot::after { content: " ▲"; }
 .label.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
 .fill.util { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }
+
+/* preferences step */
+.card.wide { max-width: 560px; }
+.group { margin-top: 20px; }
+.group h2 { font-size: 11px; margin-bottom: 8px; }
+label.opt {
+  display: flex; gap: 10px; align-items: flex-start; margin: 0 0 8px;
+  padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  background: var(--bg-sunken); border: 1px solid var(--line);
+  transition: border-color .15s;
+}
+label.opt:hover { border-color: var(--line-bright); }
+label.opt:has(input:checked) { border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-sunken)); }
+label.opt input[type=radio], label.opt input[type=checkbox] {
+  margin: 2px 0 0; accent-color: var(--accent); width: 15px; height: 15px; flex: 0 0 auto;
+}
+label.opt b { font-weight: 600; font-size: 13.5px; display: block; }
+label.opt .why { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
+label.opt.inline { align-items: center; }
+input.num { width: 64px; padding: 6px 8px; text-align: center; font-family: var(--mono); }

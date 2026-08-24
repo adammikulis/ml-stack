@@ -116,14 +116,13 @@ def suggest(report: dict[str, Any] | None = None) -> dict[str, Suggestion]:
     if portable:
         out["autostart"] = Suggestion(
             "login", "this looks like a laptop, so it starts when you log in rather "
-                     "than running while the lid is shut")
+                     "than running with the lid shut")
         out["work_hours"] = Suggestion(
             True, "and it will not take work during the day, since you are probably "
                   "using it")
     else:
         out["autostart"] = Suggestion(
-            "boot", "it starts with the computer, so the machine rejoins on its own "
-                    "after a restart or a power cut")
+            "login", "starts when you log in, which needs no permission from you")
         out["work_hours"] = Suggestion(False, "")
 
     out["on_paused"] = Suggestion(

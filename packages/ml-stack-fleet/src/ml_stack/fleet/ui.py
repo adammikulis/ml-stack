@@ -49,6 +49,12 @@ class UI:
     def __init__(self, *, name: str = "", cluster_key_path: Path | str | None = None,
                  peer_port: int = 8770, setup_token: str = "",
                  on_join: "Any | None" = None) -> None:
+        self.runner: Any = None
+        self.schedule: Any = None
+        self.settings: Any = None
+        self.settings_path: Any = None
+        self.schedule_path: Any = None
+        self.report: Any = None
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -128,6 +134,53 @@ class UI:
             except Exception:                         # noqa: BLE001
                 pass
         return self.state(), self.sessions.open("setup").sid
+
+    def apply_prefs(self, req: dict[str, Any]) -> dict[str, Any]:
+        """Apply the wizard's preference step. Everything takes effect now."""
+        from . import autostart as auto
+
+        out: dict[str, Any] = {"applied": [], "manual": ""}
+        settings = self.settings
+        if settings is None:
+            return out
+
+        if "slots" in req and self.runner is not None:
+            settings.slots = self.runner.set_slots(max(1, int(req["slots"])))
+            out["applied"].append(f"{settings.slots} job(s) at a time")
+        if "labels" in req:
+            settings.labels = [str(s) for s in req["labels"] if str(s).strip()]
+            out["applied"].append("this machine is for " + (
+                " and ".join(settings.labels) or "anything"))
+        if "on_paused" in req and req["on_paused"] in ("stop", "finish"):
+            settings.on_paused = req["on_paused"]
+
+        if req.get("work_hours") and self.schedule is not None:
+            spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
+            from .availability import parse_window
+            try:
+                self.schedule.windows.append(parse_window(spec))
+                out["applied"].append(f"not taking work {spec}")
+            except ValueError as exc:
+                out["error"] = str(exc)
+        if self.schedule is not None and self.schedule_path is not None:
+            self.schedule.save(self.schedule_path)
+
+        mode = str(req.get("autostart") or "")
+        if mode in auto.MODES:
+            settings.autostart = mode
+            done = auto.install(mode, slots=settings.slots,
+                                labels=tuple(settings.labels))
+            if done.installed:
+                out["applied"].append({"boot": "starts with the computer",
+                                       "login": "starts when you log in",
+                                       "manual": "starts only when you open it"}[mode])
+            else:
+                out["manual"] = done.command
+                out["manual_why"] = done.note
+
+        if self.settings_path is not None:
+            settings.save(self.settings_path)
+        return out
 
     def login(self, source: str, *, passphrase: str = "", group: str = "",
               token: str = "", ticket: str = "") -> str | None:
@@ -251,6 +304,28 @@ def routes(ui: UI, handler: Any) -> bool:
         session = ui.sessions.get(sid)
         send(200, state,
              {"Set-Cookie": ui.sessions.cookie_header(session)} if session else None)
+        return True
+
+    if path == "/ui/setup/suggest" and method == "GET":
+        from .settings import suggest
+        report = ui.report() if callable(ui.report) else {}
+        send(200, {
+            "machine": {k: report.get(k) for k in
+                        ("gpu", "vendor", "cpus", "ram_gb", "accelerator",
+                         "vram_total_gb", "temp_c")},
+            "suggest": {k: {"value": s.value, "why": s.why}
+                        for k, s in suggest(report).items()},
+            "current": ui.settings.public() if ui.settings else {},
+        })
+        return True
+
+    if path == "/ui/setup/prefs" and method == "POST":
+        if in_cluster(ui.cluster_key_path) and not ui.authed(cookie):
+            send(401, {"error": "sign in first"})
+            return True
+        req = body()
+        applied = ui.apply_prefs(req)
+        send(200, applied)
         return True
 
     if path == "/ui/setup/peers" and method == "GET":

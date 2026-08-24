@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .availability import Availability, parse_window
+from .settings import Settings
 from .discovery import (
     Advertiser,
     Beacon,
@@ -819,6 +820,15 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     live_token[0] = token
+    settings_path = root / "settings.json"
+    settings = Settings.load(settings_path)
+    if slots == 1 and settings.slots != 1:
+        slots = settings.slots
+    if not labels and settings.labels:
+        labels = settings.labels
+    if on_paused == "stop" and settings.on_paused != "stop":
+        on_paused = settings.on_paused
+
     schedule_path = root / "availability.json"
     schedule = Availability.load(schedule_path)
     for spec in busy_hours:
@@ -877,6 +887,12 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     if interface is not None:
         interface.on_join = start_announcing
+        interface.runner = runner
+        interface.schedule = schedule
+        interface.settings = settings
+        interface.settings_path = settings_path
+        interface.schedule_path = schedule_path
+        interface.report = report
 
     if announce and key is not None:
         beacon = Beacon(name=name, port=port, device=report(),

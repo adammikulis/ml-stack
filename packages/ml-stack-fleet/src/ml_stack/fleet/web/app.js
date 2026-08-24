@@ -191,11 +191,101 @@ async function signOut(e) {
 }
 
 // ---------------------------------------------------------------- wizard
-const state = { step: 0, mode: "", name: "", group: "ml-stack", autostart: "login" };
+const state = { step: 0, mode: "", name: "", group: "ml-stack", prefs: null };
 
 function steps(n) {
   return el("div", { class: "steps" },
-    [0, 1, 2, 3].map((i) => el("i", { class: i <= n ? "on" : "" })));
+    [0, 1, 2, 3, 4].map((i) => el("i", { class: i <= n ? "on" : "" })));
+}
+
+// Step 3: what this machine should do. Every box is pre-ticked from what the machine
+// actually is, and every one shows why, so a wrong guess is visible rather than silent.
+async function prefsStep(next) {
+  const r = await api("/ui/setup/suggest");
+  const s = r.suggest || {};
+  const m = r.machine || {};
+  const pick = {
+    labels: (s.labels?.value || []).join(","),
+    slots: s.slots?.value ?? 1,
+    autostart: s.autostart?.value || "manual",
+    work_hours: !!s.work_hours?.value,
+    on_paused: s.on_paused?.value || "stop",
+  };
+
+  const spec = (label, why) => el("span", {},
+    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+
+  const radio = (group, value, label, why) => {
+    const id = `${group}-${value}`;
+    const input = el("input", { type: "radio", name: group, id,
+                                ...(pick[group] === value ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[group] = value; };
+    return el("label", { class: "opt", for: id }, input, spec(label, why));
+  };
+
+  const check = (key, label, why) => {
+    const input = el("input", { type: "checkbox", id: key,
+                                ...(pick[key] ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[key] = input.checked; };
+    return el("label", { class: "opt", for: key }, input, spec(label, why));
+  };
+
+  const slots = el("input", { type: "number", min: "1", max: "64", value: String(pick.slots),
+                              class: "num" });
+  slots.oninput = () => { pick.slots = Math.max(1, parseInt(slots.value || "1", 10)); };
+
+  const go = el("button", {}, "Continue");
+  const outcome = el("div");
+  go.onclick = async () => {
+    go.disabled = true; go.innerHTML = '<span class="spin"></span> Applying…';
+    const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+      ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
+    if (res.manual) {
+      go.disabled = false; go.textContent = "Continue";
+      outcome.replaceChildren(
+        el("div", { class: "err" }, res.manual_why || "This part needs administrator rights."),
+        el("pre", { class: "cmd" }, res.manual),
+        el("button", { class: "ghost", onclick: () => next() }, "Skip this — continue"));
+      return;
+    }
+    next();
+  };
+
+  show(el("div", { class: "centre" }, el("div", { class: "card wide" },
+    steps(3),
+    el("h1", {}, "What should this machine do?"),
+    el("p", { class: "sub" },
+      m.gpu ? `Found ${m.gpu}. These are set from that — change any of them.`
+            : "These are set from what this machine is — change any of them."),
+
+    el("div", { class: "group" },
+      el("h2", {}, "Its job"),
+      radio("labels", "train", "Train models", s.labels?.why),
+      radio("labels", "prep", "Prepare data", "tokenizing and packing, while others train"),
+      radio("labels", "train,prep", "Both", "")),
+
+    el("div", { class: "group" },
+      el("h2", {}, "At once"),
+      el("label", { class: "opt inline" }, slots,
+        spec("jobs at a time", s.slots?.why))),
+
+    el("div", { class: "group" },
+      el("h2", {}, "Starting up"),
+      radio("autostart", "login", "When I log in",
+        s.autostart?.value === "login" ? s.autostart.why : ""),
+      radio("autostart", "boot", "When the computer starts",
+        "even before anyone logs in — your Mac will ask for your password"),
+      radio("autostart", "manual", "Only when I open it", "")),
+
+    el("div", { class: "group" },
+      el("h2", {}, "When I need the machine"),
+      check("work_hours", "Don't take work on weekdays, 9 to 5",
+        s.work_hours?.why || "for a machine somebody works on"),
+      el("label", { class: "opt" },
+        el("input", { type: "checkbox", checked: "1", disabled: "1" }),
+        spec("Pausing stops what is running", s.on_paused?.why))),
+
+    go, outcome)));
 }
 
 function wizard(setup, err) {
@@ -253,7 +343,7 @@ function wizard(setup, err) {
 
     go.onclick = async () => {
       go.disabled = true;
-      go.innerHTML = '<span class="spin"></span> Setting up — this takes a moment on purpose';
+      go.innerHTML = '<span class="spin"></span> Setting up — this takes a moment';
       const r = await api("/ui/setup/join", { method: "POST",
         body: JSON.stringify({ passphrase: p1.value, group: grp.value.trim() || "ml-stack" }) });
       if (!r.ok) return wizard(setup, r.error || "Could not set up.");
@@ -279,7 +369,9 @@ function wizard(setup, err) {
       err ? el("div", { class: "err" }, err) : null)));
   }
 
-  // step 3: joined — what next. Deliberately not a command: telling someone to open a
+  if (state.step === 3) return prefsStep(() => next(4));
+
+  // step 4: joined — what next. Deliberately not a command: telling someone to open a
   // terminal is the same wall as telling them to paste a 32-byte key, one layer up.
   const looking = el("div", { class: "watching" },
     el("span", { class: "spin" }), " Watching for other machines…");

@@ -1,4 +1,4 @@
-"""Make the daemon come back on its own, or deliberately not."""
+"""Install the daemon to start at boot or at login, per platform."""
 
 from __future__ import annotations
 
@@ -54,6 +54,23 @@ def _mac_path(mode: str) -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 
+def _ask_and_run(command: str, prompt: str) -> tuple[bool, str]:
+    """Run a privileged command through the OS's own password dialog."""
+    if sys.platform == "darwin":
+        script = (f'do shell script "{command}" with administrator privileges '
+                  f'with prompt "{prompt}"')
+        argv = ["osascript", "-e", script]
+    elif sys.platform.startswith("linux") and shutil.which("pkexec"):
+        argv = ["pkexec", "sh", "-c", command]
+    else:
+        return False, ""
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    return done.returncode == 0, (done.stderr or "").strip()
+
+
 def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     path = _mac_path(mode)
     plist = {
@@ -71,11 +88,13 @@ def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     if mode == "boot":
         staged = log_dir / f"{LABEL}.plist"
         staged.write_bytes(body)
+        command = f"cp '{staged}' '{path}' && launchctl load -w '{path}'"
+        ok, why = _ask_and_run(command, "ml-stack needs permission to start at boot")
+        if ok:
+            return Autostart(mode, installed=True, path=path)
         return Autostart(
-            mode, installed=False, path=path,
-            command=f"sudo cp {staged} {path} && sudo launchctl load -w {path}",
-            note="Starting at boot needs administrator rights. The file is written; "
-                 "this one command puts it in place.")
+            mode, installed=False, path=path, command=f"sudo {command}",
+            note=why or "Permission was not given, so it will not start at boot yet.")
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(body)
@@ -115,12 +134,14 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
         staged = log_dir / f"{SERVICE}.service"
         staged.write_text(body)
         target = Path("/etc/systemd/system") / f"{SERVICE}.service"
+        command = (f"cp '{staged}' '{target}' && systemctl daemon-reload && "
+                   f"systemctl enable --now {SERVICE}")
+        ok, why = _ask_and_run(command, "ml-stack needs permission to start at boot")
+        if ok:
+            return Autostart(mode, installed=True, path=target)
         return Autostart(
-            mode, installed=False, path=target,
-            command=(f"sudo cp {staged} {target} && sudo systemctl daemon-reload && "
-                     f"sudo systemctl enable --now {SERVICE}"),
-            note="Starting at boot needs administrator rights. The unit is written; "
-                 "this one command puts it in place.")
+            mode, installed=False, path=target, command=f"sudo sh -c \"{command}\"",
+            note=why or "Permission was not given, so it will not start at boot yet.")
 
     path = Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,10 +163,19 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
 def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     quoted = " ".join(f'"{a}"' if " " in a else a for a in argv)
     if mode == "boot":
-        return Autostart(
-            mode, installed=False,
-            command=f'schtasks /Create /TN "{LABEL}" /TR "{quoted}" /SC ONSTART /RL HIGHEST /RU SYSTEM',
-            note="Starting at boot needs an administrator Command Prompt.")
+        command = (f'schtasks /Create /F /TN "{LABEL}" /TR "{quoted}" '
+                   f'/SC ONSTART /RL HIGHEST /RU SYSTEM')
+        try:
+            done = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"Start-Process -Verb RunAs -Wait -FilePath cmd -ArgumentList '/c {command}'"],
+                capture_output=True, text=True, timeout=120)
+            if done.returncode == 0:
+                return Autostart(mode, installed=True)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return Autostart(mode, installed=False, command=command,
+                         note="Permission was not given, so it will not start at boot.")
     startup = (Path(os.environ.get("APPDATA", Path.home()))
                / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup")
     startup.mkdir(parents=True, exist_ok=True)

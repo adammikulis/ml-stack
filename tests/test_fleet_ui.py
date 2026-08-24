@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 import socket
+import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
@@ -48,6 +50,11 @@ class Serving:
         self.runner = JobRunner(root, self.files)
         self.ui = UI(name=name, cluster_key_path=self.keyfile,
                      setup_token=setup_token)
+        from ml_stack.fleet.settings import Settings
+        self.ui.runner = self.runner
+        self.ui.settings = Settings()
+        self.ui.settings_path = tmp_path / "settings.json"
+        self.ui.report = lambda: {"cpus": 8, "accelerator": False}
         self.port = _free_port()
         self.httpd = ThreadingHTTPServer(
             ("0.0.0.0", self.port),
@@ -306,3 +313,91 @@ class TestThrottle:
         assert not t.acquire(), "a second derivation ran concurrently"
         t.release()
         assert t.acquire()
+
+
+class TestPreferences:
+    """The wizard's settings step: suggested from the machine, applied live."""
+
+    @pytest.fixture
+    def joined(self, serving):
+        serving.call("/ui/setup/join", method="POST",
+                     body={"passphrase": WORDS, "group": "home"})
+        return serving
+
+    def test_a_gpu_machine_is_suggested_for_training(self):
+        from ml_stack.fleet.settings import suggest
+
+        got = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
+        assert got["labels"].value == ["train"]
+        assert got["slots"].value == 1
+        assert "RTX 4090" in got["labels"].why
+
+    def test_a_machine_with_no_gpu_is_suggested_for_data(self):
+        from ml_stack.fleet.settings import suggest
+
+        got = suggest({"accelerator": False, "cpus": 12})
+        assert got["labels"].value == ["prep"]
+        assert 1 < got["slots"].value <= 8
+
+    def test_a_small_machine_is_not_given_more_jobs_than_cores(self):
+        from ml_stack.fleet.settings import suggest
+
+        assert suggest({"accelerator": False, "cpus": 2})["slots"].value == 1
+
+    def test_every_suggestion_carries_a_reason(self):
+        from ml_stack.fleet.settings import suggest
+
+        for key, s in suggest({"accelerator": True, "cpus": 8}).items():
+            if key == "work_hours" and not s.value:
+                continue
+            assert s.why, f"{key} was pre-selected with no reason shown"
+
+    def test_settings_survive_a_restart(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        Settings(slots=6, labels=["prep"], on_paused="finish").save(tmp_path / "s.json")
+        back = Settings.load(tmp_path / "s.json")
+
+        assert back.slots == 6 and back.labels == ["prep"]
+        assert back.on_paused == "finish"
+
+    def test_a_corrupt_settings_file_costs_preferences_not_the_daemon(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        (tmp_path / "s.json").write_text("{ not json")
+        assert Settings.load(tmp_path / "s.json").slots == 1
+
+    def test_the_suggestions_describe_the_machine_asking(self, joined):
+        status, body, _ = joined.call("/ui/setup/suggest")
+        assert status == 200
+        assert "machine" in body and "suggest" in body
+        assert body["suggest"]["slots"]["value"] >= 1
+
+    def test_choosing_more_jobs_takes_effect_without_a_restart(self, joined):
+        _, _, headers = joined.call("/ui/session", method="POST",
+                                    body={"passphrase": WORDS})
+        cookie = headers["Set-Cookie"].split(";")[0]
+
+        status, body, _ = joined.call("/ui/setup/prefs", method="POST", cookie=cookie,
+                                      body={"slots": 4, "labels": ["prep"],
+                                            "autostart": "manual"})
+
+        assert status == 200, body
+        assert joined.runner.slots == 4
+        health = joined.call("/health")[1]
+        assert health["slots"] == 4
+
+    def test_lowering_the_count_does_not_interrupt_running_work(self, joined):
+        _, _, headers = joined.call("/ui/session", method="POST",
+                                    body={"passphrase": WORDS})
+        cookie = headers["Set-Cookie"].split(";")[0]
+        joined.call("/ui/setup/prefs", method="POST", cookie=cookie,
+                    body={"slots": 4, "autostart": "manual"})
+        joined.runner.submit("keep", [sys.executable, "-c", "import time;time.sleep(3)"],
+                             cwd="")
+        time.sleep(1.0)
+
+        joined.call("/ui/setup/prefs", method="POST", cookie=cookie,
+                    body={"slots": 1, "autostart": "manual"})
+
+        assert joined.runner.status()["running"], "a running job was cut off by a setting"
