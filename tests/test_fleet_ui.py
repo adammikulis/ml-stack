@@ -474,3 +474,133 @@ class TestClosingTheWindow:
         assert "mlStackAskOnClose" in js
         assert "close_choice" in js
         assert 'id: "remember", checked: "1"' in js, "the box must start ticked"
+
+
+class TestSettingsScreen:
+    @pytest.fixture
+    def signed_in(self, serving):
+        serving.call("/ui/setup/join", method="POST",
+                     body={"passphrase": WORDS, "group": "home"})
+        _, _, headers = serving.call("/ui/session", method="POST",
+                                     body={"passphrase": WORDS})
+        return serving, headers["Set-Cookie"].split(";")[0]
+
+    def test_it_reports_what_the_daemon_is_doing(self, signed_in):
+        serving, cookie = signed_in
+        status, body, _ = serving.call("/ui/settings", cookie=cookie)
+        assert status == 200
+        assert body["settings"]["slots"] == serving.runner.slots
+        assert body["group"] == "home"
+        assert "autostart" in body and "version" in body
+
+    def test_settings_need_a_session(self, serving):
+        serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
+        assert serving.call("/ui/settings")[0] == 401
+
+    def test_changing_the_job_count_takes_effect_and_persists(self, signed_in):
+        from ml_stack.fleet.settings import Settings
+
+        serving, cookie = signed_in
+        serving.call("/ui/settings", method="POST", cookie=cookie,
+                     body={"slots": 5, "labels": ["prep"], "autostart": "manual"})
+
+        assert serving.runner.slots == 5
+        assert serving.call("/health")[1]["slots"] == 5
+        saved = Settings.load(serving.ui.settings_path)
+        assert saved.slots == 5 and saved.labels == ["prep"]
+
+    def test_the_close_preference_can_be_set_from_settings(self, signed_in):
+        from ml_stack.fleet.settings import Settings
+
+        serving, cookie = signed_in
+        serving.call("/ui/settings", method="POST", cookie=cookie,
+                     body={"on_close": "background", "autostart": "manual"})
+        assert Settings.load(serving.ui.settings_path).on_close == "background"
+
+    def test_automatic_updates_are_on_unless_turned_off(self, signed_in):
+        from ml_stack.fleet.settings import Settings
+
+        serving, cookie = signed_in
+        assert Settings().auto_update is True
+        serving.call("/ui/settings", method="POST", cookie=cookie,
+                     body={"auto_update": False, "autostart": "manual"})
+        assert Settings.load(serving.ui.settings_path).auto_update is False
+
+
+class TestUpdates:
+    def test_versions_compare_numerically(self):
+        from ml_stack.fleet.updates import Release
+
+        r = Release(version="0.2.0", url="", notes="", assets=(), checked_at=0)
+        assert r.newer_than("0.1.9")
+        assert r.newer_than("v0.1.9")
+        assert not r.newer_than("0.2.0")
+        assert not r.newer_than("1.0.0")
+
+    def test_two_digit_parts_do_not_sort_as_text(self):
+        from ml_stack.fleet.updates import Release
+
+        assert Release("0.10.0", "", "", (), 0).newer_than("0.9.0")
+
+    def test_the_download_for_this_machine_is_picked(self):
+        from ml_stack.fleet.updates import Release, asset_for, platform_key
+
+        key = platform_key()
+        release = Release("9.9.9", "", "", (
+            {"name": "ml-stack-somewhere-else.zip"},
+            {"name": f"ml-stack-{key}.zip"},
+        ), 0)
+        assert asset_for(release)["name"] == f"ml-stack-{key}.zip"
+
+    def test_a_release_with_nothing_for_this_machine_returns_none(self):
+        from ml_stack.fleet.updates import Release, asset_for
+
+        assert asset_for(Release("9.9.9", "", "", ({"name": "source.tar.gz"},), 0)) is None
+
+    def test_a_download_whose_digest_is_wrong_is_discarded(self, tmp_path):
+        import http.server
+        import threading
+
+        from ml_stack.fleet.updates import UpdateError, download
+
+        payload = b"not the right bytes"
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, *a):
+                pass
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            asset = {"name": "x.zip", "size": len(payload),
+                     "browser_download_url": f"http://127.0.0.1:{srv.server_address[1]}/x",
+                     "digest": "sha256:" + "0" * 64}
+            with pytest.raises(UpdateError, match="digest"):
+                download(asset, tmp_path)
+            assert not list(tmp_path.iterdir())
+        finally:
+            srv.shutdown()
+
+    def test_an_archive_that_escapes_its_directory_is_refused(self, tmp_path):
+        import zipfile
+
+        from ml_stack.fleet.updates import UpdateError, install
+
+        bad = tmp_path / "bad.zip"
+        with zipfile.ZipFile(bad, "w") as zf:
+            zf.writestr("../escaped.txt", "no")
+        with pytest.raises(UpdateError, match="refusing"):
+            install(bad, app_path=tmp_path / "app")
+
+    def test_a_pip_install_is_told_to_update_with_pip(self, tmp_path):
+        from ml_stack.fleet.ui import UI
+
+        ui = UI(name="x", cluster_key_path=tmp_path / "k")
+        got = ui.install_update()
+        assert not got["ok"] and "pip" in got["error"]

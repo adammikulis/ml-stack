@@ -26,8 +26,6 @@ jobs:
         include:
           - os: macos-14
             asset: ml-stack-macos-arm64
-          - os: macos-13
-            asset: ml-stack-macos-x86_64
           - os: ubuntu-latest
             asset: ml-stack-linux-x86_64
           - os: windows-latest
@@ -68,7 +66,9 @@ jobs:
 
   publish:
     needs: [wheels, bundle]
-    if: startsWith(github.ref, 'refs/tags/')
+    # Publishes whatever built. A platform whose runner was unavailable should
+    # not hold back the ones that are ready.
+    if: always() && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: write

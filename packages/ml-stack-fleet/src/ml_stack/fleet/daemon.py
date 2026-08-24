@@ -841,6 +841,12 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     if busy_hours or free_hours:
         schedule.save(schedule_path)
 
+    # What the screen shows has to be what the daemon is doing, so the effective
+    # values go back into the settings object whether they came from a flag or a file.
+    settings.slots = slots
+    settings.labels = [s.strip() for s in labels if s and s.strip()]
+    settings.on_paused = on_paused
+
     runner = JobRunner(root, files_root, slots=slots,
                        gate=lambda: schedule.may_start())
     fetcher = Fetcher(files_root, key, slots=fetch_slots)

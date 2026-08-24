@@ -296,3 +296,8 @@ input.num { width: 64px; padding: 6px 8px; text-align: center; font-family: var(
 .sheet-card h1 { font-size: 18px; margin-bottom: 6px; }
 .sheet-card .sub { font-size: 13.5px; margin-bottom: 18px; }
 .sheet-card button.ghost { margin-top: 10px; }
+
+/* settings: two columns on a wide window, one on a narrow one */
+.two { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+       align-items: start; }
+main > button { max-width: 240px; }

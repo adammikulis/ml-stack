@@ -24,6 +24,8 @@ class Settings:
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
     on_close: str = ""
+    auto_update: bool = True
+    update_channel: str = "stable"
     fetch_slots: int = 2
 
     @classmethod

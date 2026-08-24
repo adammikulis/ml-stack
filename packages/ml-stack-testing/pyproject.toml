@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-testing"
-version = "0.1.1"
+version = "0.1.2"
 description = "Cross-backend numerical parity harness for MLX and PyTorch. "
 requires-python = ">=3.11"
 license = "Apache-2.0"

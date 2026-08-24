@@ -32,7 +32,7 @@ app = BUNDLE(
     info_plist={
         "CFBundleName": "ml-stack",
         "CFBundleDisplayName": "ml-stack",
-        "CFBundleShortVersionString": "0.1.1",
+        "CFBundleShortVersionString": "0.1.2",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
     },

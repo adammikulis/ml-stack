@@ -143,6 +143,8 @@ async function fleet() {
         el("span", { class: "group" }, r.group ? `· ${r.group}` : "")),
       el("nav", { class: "tabs" },
         el("a", { class: "on", href: "#" }, "Cluster"),
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); settings(); } },
+          "Settings"),
         el("a", { href: "#", onclick: signOut }, "Sign out"))),
     el("main", {},
       el("h1", {}, "Cluster"),
@@ -158,6 +160,152 @@ async function fleet() {
 
   clearTimeout(timer);
   timer = setTimeout(fleet, 4000);
+}
+
+// ---------------------------------------------------------------- settings
+async function settings(message) {
+  clearTimeout(timer);
+  const s = await api("/ui/settings");
+  if (s.status === 401) return signIn();
+  const cur = s.settings || {};
+  const pick = {
+    labels: (cur.labels || []).join(","),
+    slots: cur.slots ?? 1,
+    autostart: (s.autostart || {}).mode || cur.autostart || "manual",
+    on_paused: cur.on_paused || "stop",
+    on_close: cur.on_close || "",
+    auto_update: cur.auto_update !== false,
+  };
+
+  const row = (label, why) => el("span", {},
+    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+
+  const radio = (group, value, label, why) => {
+    const id = `${group}-${value}`;
+    const input = el("input", { type: "radio", name: group, id,
+                                ...(pick[group] === value ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[group] = value; };
+    return el("label", { class: "opt", for: id }, input, row(label, why));
+  };
+  const check = (key, label, why) => {
+    const input = el("input", { type: "checkbox", id: key,
+                                ...(pick[key] ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[key] = input.checked; };
+    return el("label", { class: "opt", for: key }, input, row(label, why));
+  };
+
+  const slots = el("input", { type: "number", min: "1", max: "64",
+                              value: String(pick.slots), class: "num" });
+  slots.oninput = () => { pick.slots = Math.max(1, parseInt(slots.value || "1", 10)); };
+
+  const save = el("button", {}, "Save");
+  const note = el("div");
+  save.onclick = async () => {
+    save.disabled = true; save.innerHTML = '<span class="spin"></span> Saving…';
+    const r = await api("/ui/settings", { method: "POST", body: JSON.stringify({
+      ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
+    save.disabled = false; save.textContent = "Save";
+    note.replaceChildren(r.manual
+      ? el("div", {}, el("div", { class: "err" }, r.manual_why || "Needs permission."),
+          el("pre", { class: "cmd" }, r.manual))
+      : el("div", { class: "ok" }, "Saved."));
+  };
+
+  // updates
+  const updates = el("div", { class: "group" },
+    el("h2", {}, "Updates"),
+    el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
+    check("auto_update", "Download and install updates automatically",
+      "checked once a day, and applied the next time you open it"));
+  const status = el("div", { class: "hint", style: "margin-top:10px" },
+    el("span", { class: "spin" }), " Checking for updates…");
+  updates.append(status);
+
+  (async () => {
+    const u = await api("/ui/updates");
+    if (!u.checked) {
+      status.replaceChildren(document.createTextNode(
+        "Could not check for updates right now."));
+      return;
+    }
+    if (!u.newer) {
+      status.replaceChildren(document.createTextNode("This is the newest version."));
+      return;
+    }
+    const go = el("button", {}, `Update to ${u.latest}`);
+    go.onclick = async () => {
+      go.disabled = true; go.innerHTML = '<span class="spin"></span> Downloading…';
+      const r = await api("/ui/updates/install", { method: "POST" });
+      status.replaceChildren(r.ok
+        ? el("div", { class: "ok" },
+            r.installed ? `Updated to ${r.version}. Restart to use it.`
+                        : "Already up to date.")
+        : el("div", { class: "err" }, r.error || "Could not install the update."));
+    };
+    status.replaceChildren(
+      el("div", {}, `Version ${u.latest} is available`
+        + (u.size ? ` (${(u.size / 1e6).toFixed(0)} MB)` : "") + "."),
+      go);
+  })();
+
+  show(el("div", { class: "app" },
+    el("header", { class: "top" },
+      el("div", { class: "brand" },
+        el("span", { class: "dot" }), "ml-stack",
+        el("span", { class: "group" }, s.group ? `· ${s.group}` : "")),
+      el("nav", { class: "tabs" },
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); fleet(); } }, "Cluster"),
+        el("a", { class: "on", href: "#" }, "Settings"),
+        el("a", { href: "#", onclick: signOut }, "Sign out"))),
+    el("main", {},
+      el("h1", {}, "Settings"),
+      el("p", { class: "sub" },
+        `${s.name}${s.machine?.gpu ? " — " + s.machine.gpu : ""}`),
+      message ? el("div", { class: "ok" }, message) : null,
+
+      el("div", { class: "two" },
+        el("div", {},
+          el("div", { class: "group" },
+            el("h2", {}, "What this machine does"),
+            radio("labels", "train", "Train models", ""),
+            radio("labels", "prep", "Prepare data", ""),
+            radio("labels", "train,prep", "Both", "")),
+
+          el("div", { class: "group" },
+            el("h2", {}, "At once"),
+            el("label", { class: "opt inline" }, slots,
+              row("jobs at a time", "one on a card; more on a machine preparing data"))),
+
+          el("div", { class: "group" },
+            el("h2", {}, "Starting up"),
+            radio("autostart", "login", "When I log in", ""),
+            radio("autostart", "boot", "When the computer starts",
+              "your computer will ask for your password"),
+            radio("autostart", "manual", "Only when I open it", ""))),
+
+        el("div", {},
+          updates,
+
+          el("div", { class: "group" },
+            el("h2", {}, "When you need the machine"),
+            radio("on_paused", "stop", "Pausing stops what is running",
+              "the run picks up from its last checkpoint"),
+            radio("on_paused", "finish", "Pausing lets the current job finish", "")),
+
+          el("div", { class: "group" },
+            el("h2", {}, "Closing the window"),
+            radio("on_close", "", "Ask me each time", ""),
+            radio("on_close", "background", "Keep running in the background",
+              "stays in the cluster"),
+            radio("on_close", "quit", "Quit", "leaves the cluster")),
+
+          (s.schedule?.windows || []).length
+            ? el("div", { class: "group" },
+                el("h2", {}, "Not available"),
+                ...s.schedule.windows.map((w) =>
+                  el("div", { class: "label", style: "display:block;margin-bottom:4px" }, w)))
+            : null)),
+      save, note)));
 }
 
 // ---------------------------------------------------------------- sign in

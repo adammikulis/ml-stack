@@ -153,6 +153,10 @@ class UI:
                 " and ".join(settings.labels) or "anything"))
         if "on_paused" in req and req["on_paused"] in ("stop", "finish"):
             settings.on_paused = req["on_paused"]
+        if "on_close" in req and req["on_close"] in ("", "background", "quit"):
+            settings.on_close = req["on_close"]
+        if "auto_update" in req:
+            settings.auto_update = bool(req["auto_update"])
 
         if req.get("work_hours") and self.schedule is not None:
             spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
@@ -181,6 +185,30 @@ class UI:
         if self.settings_path is not None:
             settings.save(self.settings_path)
         return out
+
+    def install_update(self) -> dict[str, Any]:
+        """Download the newest release for this machine and put it in place."""
+        from .updates import (UpdateError, asset_for, check, current_version,
+                              download, install, running_path)
+        if running_path() is None:
+            return {"ok": False,
+                    "error": "this copy was installed with pip; update it with pip"}
+        try:
+            release = check()
+            if not release.newer_than(current_version()):
+                return {"ok": True, "installed": False, "version": current_version()}
+            asset = asset_for(release)
+            if asset is None:
+                return {"ok": False,
+                        "error": f"release {release.version} has no download for "
+                                 "this machine"}
+            import tempfile
+            archive = download(asset, tempfile.mkdtemp(prefix="ml-stack-update-"))
+            install(archive)
+        except UpdateError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "installed": True, "version": release.version,
+                "restart": True}
 
     def login(self, source: str, *, passphrase: str = "", group: str = "",
               token: str = "", ticket: str = "") -> str | None:
@@ -366,6 +394,49 @@ def routes(ui: UI, handler: Any) -> bool:
     # -- everything else needs a session ---------------------------------
     if not ui.authed(cookie):
         send(401, {"error": "sign in first"})
+        return True
+
+    if path == "/ui/settings":
+        if method == "GET":
+            from . import autostart as auto
+            from .updates import current_version
+            send(200, {
+                "settings": ui.settings.public() if ui.settings else {},
+                "name": ui.name,
+                "group": cluster_group(ui.cluster_key_path),
+                "version": current_version(),
+                "autostart": auto.status(),
+                "schedule": ui.schedule.public() if ui.schedule else {},
+                "machine": ui.report() if callable(ui.report) else {},
+            })
+            return True
+        if method == "POST":
+            send(200, ui.apply_prefs(body()))
+            return True
+
+    if path == "/ui/updates" and method == "GET":
+        from .updates import UpdateError, asset_for, check, current_version
+        now = current_version()
+        try:
+            release = check()
+        except UpdateError as exc:
+            send(200, {"version": now, "checked": False, "error": str(exc)})
+            return True
+        asset = asset_for(release)
+        send(200, {
+            "version": now,
+            "latest": release.version,
+            "newer": release.newer_than(now),
+            "checked": True,
+            "notes": release.notes[:2000],
+            "url": release.url,
+            "download": (asset or {}).get("name"),
+            "size": (asset or {}).get("size"),
+        })
+        return True
+
+    if path == "/ui/updates/install" and method == "POST":
+        send(200, ui.install_update())
         return True
 
     if path == "/ui/peers" and method == "GET":
