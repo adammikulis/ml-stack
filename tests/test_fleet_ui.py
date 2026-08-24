@@ -407,14 +407,27 @@ class TestClosingTheWindow:
     """Asked once, then remembered if the box was left ticked."""
 
     class FakeWindow:
+        """Records what was asked of it, and on which thread."""
+
         def __init__(self):
             self.hidden = self.destroyed = False
+            self.evaluated = []
+            self.threads = []
+
+        def _mark(self):
+            self.threads.append(threading.current_thread().name)
 
         def hide(self):
+            self._mark()
             self.hidden = True
 
         def destroy(self):
+            self._mark()
             self.destroyed = True
+
+        def evaluate_js(self, script):
+            self._mark()
+            self.evaluated.append(script)
 
     def bridge(self, tmp_path):
         from ml_stack.fleet.app import Bridge
@@ -465,6 +478,39 @@ class TestClosingTheWindow:
         b = self.bridge(tmp_path)
         assert b.close_choice("explode", True) == {"ok": False}
         assert not b.window.hidden and not b.window.destroyed
+
+    def test_the_question_is_asked_off_the_drawing_thread(self, tmp_path):
+        b = self.bridge(tmp_path)
+        assert b.on_closing() is False
+        b.pending.join(5)
+        assert b.window.evaluated == [
+            "window.mlStackAskOnClose && window.mlStackAskOnClose()"]
+        assert b.window.threads == ["ml-stack-close"]
+
+    def test_keeping_it_running_hides_off_the_drawing_thread(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        b = self.bridge(tmp_path)
+        Settings(on_close="background").save(tmp_path / "settings.json")
+        assert b.on_closing() is False
+        b.pending.join(5)
+        assert b.window.hidden and b.window.threads == ["ml-stack-close"]
+
+    def test_a_saved_quit_closes_without_asking(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        b = self.bridge(tmp_path)
+        Settings(on_close="quit").save(tmp_path / "settings.json")
+        assert b.on_closing() is True
+        assert b.window.evaluated == []
+
+    def test_quitting_does_not_ask_the_question_again(self, tmp_path):
+        """Closing the window runs the handler a second time."""
+        b = self.bridge(tmp_path)
+        b.close_choice("quit", remember=False)
+        assert b.window.destroyed
+        assert b.on_closing() is True
+        assert b.window.evaluated == []
 
     def test_the_page_offers_the_question(self):
         """The native window calls this by name when the close button is clicked."""
