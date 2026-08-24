@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-graph"
-version = "0.1.2"
+version = "0.1.3"
 description = "Graphs as tensors: container, message passing, DAG sweeps, topology construction. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
