@@ -1,5 +1,6 @@
 # The app people double-click: a native window on the interface.
 import importlib.util
+import sys
 from pathlib import Path
 
 def package_dir(name):
@@ -32,17 +33,27 @@ app_hidden = hidden + ["webview", "webview.platforms.cocoa", "webview.platforms.
 a = Analysis(["launcher.py"], datas=datas, hiddenimports=app_hidden,
              excludes=["tkinter", "test", "unittest", "pydoc_data"])
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="ml-stack", console=False)
-coll = COLLECT(exe, a.binaries, a.datas, name="ml-stack")
-app = BUNDLE(
-    coll,
-    name="ml-stack.app",
-    bundle_identifier="com.ml-stack.app",
-    info_plist={
-        "CFBundleName": "ml-stack",
-        "CFBundleDisplayName": "ml-stack",
-        "CFBundleShortVersionString": "0.1.4",
-        "LSMinimumSystemVersion": "12.0",
-        "NSHighResolutionCapable": True,
-    },
-)
+
+# Everywhere but macOS this is one file, sitting beside ml-stack-headless. A folder
+# holding the executable with its runtime alongside is a folder someone drags the
+# executable out of, and it then cannot find the Python it needs; and an installer
+# copying "the binary" copies a directory, or nothing.
+if sys.platform == "darwin":
+    exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="ml-stack",
+              console=False)
+    coll = COLLECT(exe, a.binaries, a.datas, name="ml-stack")
+    app = BUNDLE(
+        coll,
+        name="ml-stack.app",
+        bundle_identifier="com.ml-stack.app",
+        info_plist={
+            "CFBundleName": "ml-stack",
+            "CFBundleDisplayName": "ml-stack",
+            "CFBundleShortVersionString": "0.1.4",
+            "LSMinimumSystemVersion": "12.0",
+            "NSHighResolutionCapable": True,
+        },
+    )
+else:
+    exe = EXE(pyz, a.scripts, a.binaries, a.datas, [], name="ml-stack",
+              console=False)

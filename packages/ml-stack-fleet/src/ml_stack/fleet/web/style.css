@@ -364,3 +364,10 @@ button.danger:hover:not(:disabled) { filter: brightness(1.1); }
 .searchrow { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
 .searchrow input { flex: 1; margin: 0; }
 .searchrow button { margin: 0; }
+
+/* how much of a conversation a model reads */
+input[type="range"] {
+  width: 100%; margin: 8px 0 4px; accent-color: var(--accent);
+  background: transparent;
+}
+.card.wide { max-width: 560px; }
