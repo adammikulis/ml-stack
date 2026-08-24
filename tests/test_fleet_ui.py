@@ -401,3 +401,76 @@ class TestPreferences:
                     body={"slots": 1, "autostart": "manual"})
 
         assert joined.runner.status()["running"], "a running job was cut off by a setting"
+
+
+class TestClosingTheWindow:
+    """Asked once, then remembered if the box was left ticked."""
+
+    class FakeWindow:
+        def __init__(self):
+            self.hidden = self.destroyed = False
+
+        def hide(self):
+            self.hidden = True
+
+        def destroy(self):
+            self.destroyed = True
+
+    def bridge(self, tmp_path):
+        from ml_stack.fleet.app import Bridge
+
+        b = Bridge(tmp_path / "settings.json")
+        b.window = self.FakeWindow()
+        return b
+
+    def test_a_fresh_machine_has_no_saved_answer(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        assert Settings.load(tmp_path / "settings.json").on_close == ""
+
+    def test_keeping_it_running_hides_the_window(self, tmp_path):
+        b = self.bridge(tmp_path)
+        b.close_choice("background", remember=False)
+        assert b.window.hidden and not b.window.destroyed
+
+    def test_quitting_destroys_it(self, tmp_path):
+        b = self.bridge(tmp_path)
+        b.close_choice("quit", remember=False)
+        assert b.window.destroyed
+
+    def test_unticking_the_box_asks_again_next_time(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        b = self.bridge(tmp_path)
+        b.close_choice("quit", remember=False)
+        assert Settings.load(tmp_path / "settings.json").on_close == ""
+
+    def test_leaving_the_box_ticked_remembers(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        b = self.bridge(tmp_path)
+        b.close_choice("background", remember=True)
+        assert Settings.load(tmp_path / "settings.json").on_close == "background"
+
+    def test_the_answer_can_be_changed_later(self, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        b = self.bridge(tmp_path)
+        b.close_choice("background", remember=True)
+        b.window = self.FakeWindow()
+        b.close_choice("quit", remember=True)
+        assert Settings.load(tmp_path / "settings.json").on_close == "quit"
+
+    def test_an_answer_that_is_neither_is_refused(self, tmp_path):
+        b = self.bridge(tmp_path)
+        assert b.close_choice("explode", True) == {"ok": False}
+        assert not b.window.hidden and not b.window.destroyed
+
+    def test_the_page_offers_the_question(self):
+        """The native window calls this by name when the close button is clicked."""
+        from ml_stack.fleet.ui import asset_bytes
+
+        js = asset_bytes("app.js")[0].decode()
+        assert "mlStackAskOnClose" in js
+        assert "close_choice" in js
+        assert 'id: "remember", checked: "1"' in js, "the box must start ticked"

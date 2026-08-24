@@ -4,16 +4,20 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-fleet"
-version = "0.1.0"
+version = "0.1.1"
 description = "Find the other machines on the LAN and run work on them. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = []
 
+[project.optional-dependencies]
+app = ["pywebview>=5.0"]
+
 [project.scripts]
 # The one people double-click: starts the daemon and opens the browser on it.
 ml-stack = "ml_stack.fleet.launch:main"
+ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 

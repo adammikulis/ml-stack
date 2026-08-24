@@ -23,6 +23,7 @@ class Settings:
     on_paused: str = "stop"
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
+    on_close: str = ""
     fetch_slots: int = 2
 
     @classmethod

@@ -42,10 +42,12 @@ jobs:
       - run: python packaging/build.py --bundle
 
       # The bundle has to run on a machine with no Python and no source tree.
+      # The window needs a display, so CI checks the headless binary instead: same
+      # daemon, same interface, and it is the half that can be tested without one.
       - name: it starts and serves the interface
         shell: bash
         run: |
-          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack' -type f -perm -u+x | head -1)
+          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
           "$BIN" --port 8899 --no-browser &
           for _ in $(seq 1 40); do
             curl -sf http://127.0.0.1:8899/health >/dev/null && break || sleep 1
@@ -59,9 +61,9 @@ jobs:
         run: |
           cd dist/bundle
           if [ -d ml-stack.app ]; then
-            zip -qry "../${{ matrix.asset }}.zip" ml-stack.app
+            zip -qry "../${{ matrix.asset }}.zip" ml-stack.app ml-stack-headless
           else
-            zip -qry "../${{ matrix.asset }}.zip" ml-stack
+            zip -qry "../${{ matrix.asset }}.zip" ml-stack ml-stack-headless
           fi
       - uses: actions/upload-artifact@v4
         with:

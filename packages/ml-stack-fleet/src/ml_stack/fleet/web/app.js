@@ -132,9 +132,9 @@ async function fleet() {
   const cards = peers.length
     ? el("div", { class: "grid" }, peers.map(peerCard))
     : el("div", { class: "empty" },
-        el("div", { class: "big" }, "No machines are answering yet"),
-        el("div", {}, "Run ml-stack-peers setup on another machine, with the same passphrase,"),
-        el("div", {}, "then start ml-stack-traind there. It will appear here on its own."));
+        el("div", { class: "big" }, "Just this machine so far"),
+        el("div", {}, "Install ml-stack on another machine and open it."),
+        el("div", {}, "Type the same passphrase, and it appears here on its own."));
 
   show(el("div", { class: "app" },
     el("header", { class: "top" },
@@ -427,3 +427,40 @@ function wizard(setup, err) {
   const s = await api("/ui/session");
   return s.signed_in ? fleet() : signIn();
 })();
+
+
+// ---------------------------------------------------------------- closing
+// Asked once, by the native window, when someone clicks the close button.
+window.mlStackAskOnClose = () => {
+  if (document.querySelector(".sheet")) return;
+
+  const remember = el("input", { type: "checkbox", id: "remember", checked: "1" });
+  const choose = (mode) => async () => {
+    sheet.remove();
+    if (window.pywebview) await window.pywebview.api.close_choice(mode, remember.checked);
+  };
+
+  const sheet = el("div", { class: "sheet" },
+    el("div", { class: "sheet-card" },
+      el("h1", {}, "Close ml-stack?"),
+      el("p", { class: "sub" },
+        "This machine is part of your cluster. Keeping it running lets the others "
+        + "send it work while the window is shut."),
+      el("div", { class: "choices" },
+        el("button", { class: "choice", onclick: choose("background") },
+          el("span", { class: "t" }, "Keep running in the background"),
+          el("span", { class: "d" }, "Stays in the cluster. Open it again any time.")),
+        el("button", { class: "choice", onclick: choose("quit") },
+          el("span", { class: "t" }, "Quit"),
+          el("span", { class: "d" },
+            "Leaves the cluster until you open it again."))),
+      el("label", { class: "opt", for: "remember", style: "margin-top:16px" },
+        remember,
+        el("span", {},
+          el("b", {}, "Save my setting and don't ask again"),
+          el("span", { class: "why" },
+            "You can change it later under this machine's settings."))),
+      el("button", { class: "ghost", onclick: () => sheet.remove() }, "Cancel")));
+
+  document.body.append(sheet);
+};

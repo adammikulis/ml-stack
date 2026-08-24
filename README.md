@@ -1,23 +1,50 @@
 # ml-stack
 
-Primitives for running local AI models: serving them, talking to them, converting them,
-and training them.
+**Train across every machine in your house.**
 
-The packages are small and separately installable, so a project takes only what it needs.
-A voice assistant on a single-board computer should not have to install PyTorch to say a
-sentence, and a training script should not have to reimplement checkpoint rotation.
+Install it on each one and type the same passphrase. They find each other on their own —
+no addresses, no keys to copy, no config file. Work then goes to whichever machine is
+free and fastest: the box with the card trains, the spare CPUs prepare data, and any of
+them can be taken back the moment you want it.
+
+```
+$ ml-stack-peers ls
+NAME             URL                          FREE    STATE      DEVICE
+gpubox           http://192.168.2.27:8770     0/1     busy       NVIDIA GeForce RTX 4090  6.2/24.0 GB free
+radeon           http://192.168.2.31:8770     1/1     idle       AMD Radeon RX 7900 XTX  22.1/24.0 GB free
+mac-studio       http://192.168.2.44:8770     1/2     idle       Apple M2 Ultra  96.0/128.0 GB free
+pi-rack          http://192.168.2.51:8770     5/6     busy +2    16 cpu
+```
+
+Everything runs on your own hardware. Nothing leaves the network.
+
+- **Nothing to configure.** A passphrase is the whole setup. Two households on one
+  network stay separate without either of them being told to.
+- **Work lands where it fits.** Placement is by what a machine reports and how fast it
+  has actually been measured, per kind of work. A machine nobody has measured is tried,
+  not skipped.
+- **Your machine stays yours.** Block out working hours, or hit pause when you start a
+  game — the run stops, requeues, and picks up from its last checkpoint.
+- **Train without writing code.** Pick what you want it to learn, point it at your
+  files, and it runs. Or drive it from Python if you would rather.
+- **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
+  in one cluster, each reporting its own temperature, clocks and throttle state.
 
 ## Installing
 
 **If you just want to use it**, download the file for your machine from the
-[latest release](../../releases/latest) and open it. It starts, opens your browser, and
-asks you what to call the machine and what passphrase to use. Nothing else to set up.
+[latest release](../../releases/latest) and open it. It is an app, not a web page: a real
+window that asks what to call the machine and what passphrase to use. Nothing else to
+set up.
 
 | | |
 |---|---|
 | macOS | `ml-stack-macos-arm64.zip` (Apple silicon) or `ml-stack-macos-x86_64.zip` (Intel) |
 | Windows | `ml-stack-windows-x86_64.zip` |
 | Linux | `ml-stack-linux-x86_64.zip` |
+
+Each download also contains `ml-stack-headless`, for a machine with no screen — it runs
+the daemon and serves the same interface to a browser on your network.
 
 Do the same on every machine you want to train with, typing the same passphrase. They
 find each other on their own.
@@ -37,6 +64,81 @@ python packaging/build.py            # wheels into dist/
 python packaging/build.py --bundle   # and a standalone app for this platform
 ```
 
+## Driving it from Python
+
+`ml-stack-fleet` has no dependencies, so the machine you drive from needs no CUDA, no
+MLX and no training stack.
+
+```python
+from ml_stack.fleet import Peer, Requires, Unit, run
+
+peers = Peer.discover()
+report = run(
+    [Unit(id=f"shard{i}",
+          argv=["python", "-m", "ml_stack.train.run", "--recipe", "text-lm",
+                "--data", f"shards/{i}.jsonl", "--out", f"out/{i}"],
+          requires=Requires(labels=("train",), min_vram_gb=8))
+     for i in range(8)],
+    peers, kind="text-lm")
+
+for place in report:
+    print(place.unit_id, place.peer, place.state, f"{place.elapsed_s:.0f}s")
+```
+
+Work waits for capacity rather than failing, is retried on a *different* machine if it
+fails, and a machine that fails several in a row is set aside rather than draining the
+queue. A unit no machine can run fails at once, naming every machine and why:
+
+```
+gpubox: has 23.0 GB VRAM, needs 80.0
+pi-rack: does not report 'cuda'; has no backends
+radeon: this machine is in use (mon tue wed thu fri 09:00-17:00); work resumes Mon 17:00
+```
+
+One machine at a time, when that is what you want:
+
+```python
+rtx = Peer.find_one(require="cuda")     # refuses to guess between two
+rtx.push("data/train.jsonl", "data/train.jsonl")
+job = rtx.submit(["python", "-m", "ml_stack.train.run", "--recipe", "text-lm",
+                  "--data", "data/train.jsonl", "--out", "out/lm"])
+rtx.wait(job["id"], on_metric=print)
+rtx.pull("out/lm/step_000010000/model.safetensors", "local/model.safetensors")
+```
+
+Uploads and downloads resume and are verified by digest.
+
+## Training
+
+`Trainer` runs the loop on PyTorch or MLX — the framework is taken from the model, so
+the same call works on a Mac and on a CUDA box:
+
+```python
+from ml_stack.train import Trainer, warmup_cosine
+
+report = Trainer(model, optimizer, loss, out="runs/small").fit(
+    batches, steps=100_000,
+    schedule=warmup_cosine(3e-4, total_steps=100_000, warmup_steps=2_000),
+    eval_data=holdout, eval_every=1_000, checkpoint_every=1_000)
+```
+
+Checkpoints are atomic and resumes are exact — weights *and* optimizer state, or it
+refuses. `steps` is a total, so re-running the same call after a crash finishes the run
+rather than doubling it. A run that goes non-finite is stopped before it writes a
+checkpoint of a model that is already NaN.
+
+Every piece is usable on its own for a loop you write yourself: `CheckpointState`,
+`MetricsLog`, `RunLock`, the schedules, the guards, the leak-safe splits.
+
+Or skip the code entirely and use a recipe:
+
+```
+ml-stack-train-run --recipe text-lm --data corpus.jsonl --out runs/lm --dry-run
+```
+
+`--dry-run` trains twenty steps and writes nothing, so a bad setting costs forty seconds
+instead of six hours.
+
 ## Packages
 
 | Package | What it is |
@@ -54,7 +156,7 @@ python packaging/build.py --bundle   # and a standalone app for this platform
 | `ml-stack-train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
 | `ml-stack-testing` | Cross-backend numerical parity harness |
 
-## Using it
+## Serving a model
 
 ```python
 from ml_stack.serve import serve
@@ -68,87 +170,6 @@ with serve("model.gguf", port=8899) as server:
 
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
-
-## The cluster
-
-Training happens on whatever box has the card, which is usually not the one you are
-working on. `ml-stack-fleet` is how you reach it. It has no dependencies.
-
-Run this on every machine, and type the same passphrase into each:
-
-```
-ml-stack-peers setup
-```
-
-That is the whole join story. Machines that derived their key from the same words find
-each other; machines that did not are invisible to each other, so several groups share a
-network without any of them being configured to. There is no key to copy and no address
-to write down anywhere.
-
-Anyone who knows the passphrase can run commands on every machine in the group, so it is
-closer to the password to your house than to a wifi password. It is stretched with scrypt
-before it becomes a key, because everyone on the network can hear the beacons and grind
-guesses against them offline.
-
-Then run the daemon on each box, telling it what it is:
-
-```
-ml-stack-traind                                            # a box with one card
-ml-stack-traind --slots 8                                  # a box that preps data
-ml-stack-traind --report ml_stack.train.accelerator:report  # ...and can see its GPU
-```
-
-```
-$ ml-stack-peers ls
-NAME             URL                          FREE    STATE      DEVICE
-gpubox           http://192.168.2.27:8770     1/1     idle       RTX 4090  23.1/24.0 GB free
-prepbox          http://192.168.2.31:8770     6/8     busy +2    16 cpu
-```
-
-A peer you can find is a peer you can already drive: the bearer token is derived from
-the cluster key rather than transmitted, so discovery and authentication are one step.
-
-```python
-from ml_stack.fleet import Peer
-
-rtx = Peer.find_one(require="cuda")
-rtx.push("data/packed/train.npy", "data/train.npy")
-job = rtx.submit(["python", "-m", "train.run", "--steps", "30000"])
-rtx.wait(job["id"], on_metric=print)
-rtx.pull(f"jobs/{job['id']}/ckpt/best/model.safetensors", "local/model.safetensors")
-```
-
-```python
-from ml_stack.contracts import largest_that_fits
-import psutil
-
-tier = largest_that_fits(psutil.virtual_memory().total)
-print(tier.id, tier.gguf_repo, tier.context)
-```
-
-Write model math once, against the array protocol, and run it on either framework:
-
-```python
-from ml_stack.backend import get_backend
-
-def rms_norm(backend, x, weight, eps=1e-6):
-    ops = backend.ops
-    scale = ops.rsqrt(ops.mean(x * x, axis=-1, keepdims=True) + eps)
-    return x * scale * weight
-
-rms_norm(get_backend("mlx"), x, w)      # same function
-rms_norm(get_backend("torch"), x, w)    # same numbers
-```
-
-`ml_stack.testing` proves the two agree, forward and backward:
-
-```python
-from ml_stack.testing import needs_both, run_pair
-
-@needs_both
-def test_layer_matches():
-    run_pair(build_torch, build_mlx, forward_torch, forward_mlx, (6, 8))
-```
 
 ## `contracts/` is data, not code
 

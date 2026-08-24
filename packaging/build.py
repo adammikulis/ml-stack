@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
 BUNDLED = ("ml-stack-fleet", "ml-stack-contracts", "ml-stack-client", "ml-stack-media")
+EXTERNAL = ("pyinstaller", "pywebview")
 
 
 def run(argv: list[str], **kw) -> None:
@@ -38,14 +39,14 @@ def bundle(built: list[Path]) -> Path:
     if not env.exists():
         run([sys.executable, "-m", "venv", str(env)])
     pip = env / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
-    run([str(pip), "install", "-q", "--upgrade", "pyinstaller"])
+    run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST), *BUNDLED])
 
-    spec = "ml-stack-app.spec" if sys.platform == "darwin" else "ml-stack.spec"
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
-    run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
-         "--workpath", str(ROOT / ".build-work"), spec],
-        cwd=ROOT / "packaging")
+    for spec in ("ml-stack-app.spec", "ml-stack.spec"):
+        run([str(tool), "--clean", "--noconfirm", "--distpath", str(DIST / "bundle"),
+             "--workpath", str(ROOT / ".build-work"), spec],
+            cwd=ROOT / "packaging")
     made = DIST / "bundle"
     print(f"\nbundle: {made}")
     for item in sorted(made.iterdir()):
