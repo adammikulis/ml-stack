@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 908 passing, `docs/verify_release.py` is 40/40.
+The suite is 923 passing, `docs/verify_release.py` is 40/40.
 
 ## In flight
 
@@ -60,7 +60,8 @@ The suite and the release checks do not cover these.
   for. `verify_release.py` asserts it against two daemons on one box; nobody has done it
   across a network.
 - **The interface on Windows or Linux.** CI proves the bundle starts and every screen
-  answers on all three platforms. The wizard has only been clicked on macOS.
+  answers on all three platforms. Every screen has been clicked only on macOS: the
+  wizard, going back through it, and the question the close button asks.
 - **Run, on Windows or Linux.** The llama.cpp asset names resolve for all six platform
   and architecture pairs against a real release, and macOS arm64 is verified the whole
   way — downloaded, unpacked, executable, `--version` answers. No other platform has
@@ -85,7 +86,11 @@ The suite and the release checks do not cover these.
    `--embeddings` is set — so it needs a second server, a second model download, and a
    vectors sidecar recording the model and dimension it was built with.
 5. **Sharing conversations across machines.** They stay where they were held.
-6. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
+6. **A machine holding only a draft model is never asked for it.** Drafts are left out
+   of the listing a beacon carries, so `ensure_draft` asks the machines that hold the
+   model itself, and falls back to the internet. A machine with the draft and not the
+   model is invisible.
+7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
 
@@ -113,6 +118,11 @@ The suite and the release checks do not cover these.
   screen and used from another parses fine and throws at runtime. There is a test that
   extracts every address `app.js` calls and asks the daemon for each; there is nothing
   equivalent for identifiers.
+- **`window.events.closing` runs on the thread that draws the window.** Anything that
+  waits for the page to answer — `evaluate_js` above all — deadlocks there: the reply is
+  delivered by the thread that is blocked waiting for it, and the window freezes with no
+  way out but killing it. `Bridge.on_closing` hands that work to another thread. The same
+  applies to `before_load`, `before_show` and `initialized`.
 - **The windowed app is one file outside macOS**, beside `ml-stack-headless`. It was a
   directory holding the executable with its runtime alongside, which `install.sh` skipped
   entirely — the test was `-f` against a directory — and `install.ps1` launched a path
