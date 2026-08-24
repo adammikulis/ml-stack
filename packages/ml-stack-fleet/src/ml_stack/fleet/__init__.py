@@ -45,6 +45,8 @@ from ml_stack.fleet.pool import (
 )
 from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer, PeerError, sha256_file
+from ml_stack.fleet.models import Model, ModelError, Models, default_roots
+from ml_stack.fleet.serving import Endpoint, Served, Serving, discover_serving
 from ml_stack.fleet.work import Placement, Unit, run
 
 __all__ = [
@@ -58,10 +60,16 @@ __all__ = [
     "DiscoveryError",
     "Job",
     "JobRunner",
+    "Endpoint",
+    "Model",
+    "ModelError",
+    "Models",
     "Peer",
     "PeerError",
     "Placement",
     "Rates",
+    "Served",
+    "Serving",
     "Requires",
     "Score",
     "Unit",
@@ -69,9 +77,11 @@ __all__ = [
     "candidates",
     "choose",
     "create_cluster_key",
+    "default_roots",
     "derive_token",
     "device_report",
     "discover",
+    "discover_serving",
     "eligible",
     "check_passphrase",
     "cluster_group",

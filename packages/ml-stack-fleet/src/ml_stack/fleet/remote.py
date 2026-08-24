@@ -131,6 +131,14 @@ class Peer:
             return self._json("GET", "/availability")
         return self._json("POST", "/availability", {"action": action, **fields})
 
+    def models(self) -> list[dict]:
+        """Model files this peer holds."""
+        return self._json("GET", "/models")["models"]
+
+    def get_model(self, name: str, *, source: str = "") -> dict:
+        """Have this peer obtain a model, from the network or the internet."""
+        return self._json("POST", "/models/get", {"name": name, "source": source})
+
     def jobs(self) -> list[dict]:
         return self._json("GET", "/jobs")["jobs"]
 
@@ -202,14 +210,14 @@ class Peer:
 
     def pull(self, remote: str, local: Path | str, *,
              on_progress: Callable[[int, int], None] | None = None,
-             timeout: float = 600.0) -> Path:
+             timeout: float = 600.0, route: str = "/files/") -> Path:
         """Download, resuming a partial file rather than restarting it."""
         local = Path(local).expanduser()
         local.parent.mkdir(parents=True, exist_ok=True)
         partial = local.with_suffix(local.suffix + ".part")
         start = partial.stat().st_size if partial.exists() else 0
 
-        req = urllib.request.Request(f"{self.base_url}/files/{remote}",
+        req = urllib.request.Request(f"{self.base_url}{route}{remote}",
                                      method="GET")
         req.add_header("Authorization", f"Bearer {self.token}")
         if start:
@@ -226,9 +234,9 @@ class Peer:
                     f"{partial} is {start} bytes but the remote file is "
                     f"{size}; delete it and pull again") from None
             body = e.read().decode(errors="replace")
-            raise PeerError(f"GET /files/{remote} -> {e.code}: {body[:400]}") from None
+            raise PeerError(f"GET {route}{remote} -> {e.code}: {body[:400]}") from None
         except urllib.error.URLError as e:
-            raise PeerError(f"GET /files/{remote} -> unreachable: {e.reason}") from None
+            raise PeerError(f"GET {route}{remote} -> unreachable: {e.reason}") from None
 
         with resp:
             want = (resp.headers.get(DIGEST_HEADER) or "").strip().lower()

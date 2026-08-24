@@ -604,3 +604,18 @@ class TestUpdates:
         ui = UI(name="x", cluster_key_path=tmp_path / "k")
         got = ui.install_update()
         assert not got["ok"] and "pip" in got["error"]
+
+
+def test_the_interface_script_parses():
+    """A duplicate declaration anywhere in this file stops the whole page loading."""
+    import shutil
+    import subprocess
+
+    from ml_stack.fleet.ui import ASSETS
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("no node to parse with")
+    done = subprocess.run([node, "--check", str(ASSETS / "app.js")],
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-400:]

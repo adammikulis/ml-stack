@@ -301,3 +301,13 @@ input.num { width: 64px; padding: 6px 8px; text-align: center; font-family: var(
 .two { display: grid; gap: 26px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
        align-items: start; }
 main > button { max-width: 240px; }
+
+/* model list */
+.row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 10px 12px; border-radius: 8px; margin-bottom: 6px;
+  background: var(--bg-sunken); border: 1px solid var(--line);
+}
+.row b { font-weight: 600; font-size: 13.5px; display: block; }
+.row .why { color: var(--muted); font-size: 12px; display: block; margin-top: 2px; }
+button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }

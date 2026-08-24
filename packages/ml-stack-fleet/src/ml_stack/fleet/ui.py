@@ -56,6 +56,8 @@ class UI:
         self.schedule_path: Any = None
         self.report: Any = None
         self.environment: Any = None
+        self.serving: Any = None
+        self.models: Any = None
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -438,6 +440,43 @@ def routes(ui: UI, handler: Any) -> bool:
                 send(400, {"error": str(exc)})
                 return True
             send(200, {"changed": out, **ui.environment.state(vendor)})
+            return True
+
+    if path == "/ui/models":
+        if ui.models is None:
+            send(501, {"error": "no model store on this daemon"})
+            return True
+        from .discovery import load_cluster_key
+        from .models import ModelError
+        key = load_cluster_key(ui.cluster_key_path)
+        if method == "GET":
+            here = {m.name for m in ui.models.all()}
+            elsewhere: dict[str, list[str]] = {}
+            for beacon in (ui.peers() if key is not None else []):
+                if beacon.get("is_self"):
+                    continue
+                for row in (beacon.get("device", {}).get("models") or []):
+                    elsewhere.setdefault(str(row.get("name")), []).append(
+                        str(beacon.get("name")))
+            send(200, {
+                "here": [m.public() for m in ui.models.all()],
+                "elsewhere": [{"name": n, "peers": p}
+                              for n, p in sorted(elsewhere.items()) if n not in here],
+                "free_gb": ui.models.free_gb(),
+                "autodownload": bool(getattr(ui.settings, "autodownload_models", True)),
+            })
+            return True
+        if method == "POST":
+            req = body()
+            try:
+                got = ui.models.ensure(
+                    str(req.get("name") or ""), source=str(req.get("source") or ""),
+                    key=key,
+                    autodownload=bool(getattr(ui.settings, "autodownload_models", True)))
+            except (ModelError, ValueError) as exc:
+                send(400, {"error": str(exc)})
+                return True
+            send(200, got.public())
             return True
 
     if path == "/ui/updates" and method == "GET":

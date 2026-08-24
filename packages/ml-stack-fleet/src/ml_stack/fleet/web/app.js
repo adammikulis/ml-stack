@@ -143,6 +143,8 @@ async function fleet() {
         el("span", { class: "group" }, r.group ? `· ${r.group}` : "")),
       el("nav", { class: "tabs" },
         el("a", { class: "on", href: "#" }, "Cluster"),
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); models(); } },
+          "Models"),
         el("a", { href: "#", onclick: (e) => { e.preventDefault(); settings(); } },
           "Settings"),
         el("a", { href: "#", onclick: signOut }, "Sign out"))),
@@ -162,6 +164,88 @@ async function fleet() {
   timer = setTimeout(fleet, 4000);
 }
 
+// ---------------------------------------------------------------- models
+const fileSize = (n) =>
+  (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+
+async function models(message) {
+  clearTimeout(timer);
+  const m = await api("/ui/models");
+  if (m.status === 401) return signIn();
+
+  const note = el("div");
+  const get = async (name, source) => {
+    note.replaceChildren(el("div", { class: "hint" },
+      el("span", { class: "spin" }), ` Getting ${name}…`));
+    const r = await api("/ui/models", { method: "POST",
+      body: JSON.stringify({ name, source }) });
+    note.replaceChildren(r.error
+      ? el("div", { class: "err" }, r.error)
+      : el("div", { class: "ok" }, `${r.name} is on this machine.`));
+    if (!r.error) setTimeout(() => models(), 800);
+  };
+
+  const here = (m.here || []).map((x) =>
+    el("div", { class: "row" },
+      el("span", {}, el("b", {}, x.name),
+        el("span", { class: "why" }, fileSize(x.size))),
+      el("span", { class: "label" }, "here")));
+
+  const elsewhere = (m.elsewhere || []).map((x) => {
+    const b = el("button", { class: "ghost small", onclick: () => get(x.name, "") },
+      "Copy here");
+    return el("div", { class: "row" },
+      el("span", {}, el("b", {}, x.name),
+        el("span", { class: "why" }, `on ${x.peers.join(", ")}`)), b);
+  });
+
+  const ref = el("input", { type: "text", id: "src",
+    placeholder: "hf:Qwen/Qwen3-4B-GGUF/qwen3-4b-q4_k_m.gguf" });
+  const fetchIt = el("button", {}, "Get it");
+  fetchIt.onclick = () => {
+    const v = ref.value.trim();
+    if (v) get(v.split("/").pop(), v);
+  };
+
+  show(el("div", { class: "app" },
+    el("header", { class: "top" },
+      el("div", { class: "brand" },
+        el("span", { class: "dot" }), "ml-stack",
+        el("span", { class: "group" }, "")),
+      el("nav", { class: "tabs" },
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); fleet(); } }, "Cluster"),
+        el("a", { class: "on", href: "#" }, "Models"),
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); settings(); } }, "Settings"),
+        el("a", { href: "#", onclick: signOut }, "Sign out"))),
+    el("main", {},
+      el("h1", {}, "Models"),
+      el("p", { class: "sub" }, `${m.free_gb} GB free on this machine.`),
+      message ? el("div", { class: "ok" }, message) : null,
+
+      el("div", { class: "group" },
+        el("h2", {}, "On this machine"),
+        here.length ? here : el("div", { class: "hint" }, "None yet.")),
+
+      elsewhere.length
+        ? el("div", { class: "group" },
+            el("h2", {}, "On your other machines"),
+            el("div", { class: "hint" },
+              "Copied over your network rather than downloaded again."),
+            ...elsewhere)
+        : null,
+
+      el("div", { class: "group" },
+        el("h2", {}, "Get one"),
+        el("label", { for: "src" }, "Hugging Face reference, or a link"),
+        ref,
+        el("div", { class: "hint" },
+          m.autodownload
+            ? "Checked first on your other machines, then downloaded."
+            : "Automatic downloading is off in Settings."),
+        fetchIt),
+      note)));
+}
+
 // ---------------------------------------------------------------- settings
 async function settings(message) {
   clearTimeout(timer);
@@ -175,6 +259,7 @@ async function settings(message) {
     on_paused: cur.on_paused || "stop",
     on_close: cur.on_close || "",
     auto_update: cur.auto_update !== false,
+    autodownload_models: cur.autodownload_models !== false,
   };
 
   const row = (label, why) => el("span", {},
@@ -269,6 +354,8 @@ async function settings(message) {
   const updates = el("div", { class: "group" },
     el("h2", {}, "Updates"),
     el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
+    check("autodownload_models", "Get models automatically",
+      "from another machine on your network if one has it, otherwise the internet"),
     check("auto_update", "Download and install updates automatically",
       "checked once a day, and applied the next time you open it"));
   const status = el("div", { class: "hint", style: "margin-top:10px" },
@@ -309,6 +396,7 @@ async function settings(message) {
         el("span", { class: "group" }, s.group ? `· ${s.group}` : "")),
       el("nav", { class: "tabs" },
         el("a", { href: "#", onclick: (e) => { e.preventDefault(); fleet(); } }, "Cluster"),
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); models(); } }, "Models"),
         el("a", { class: "on", href: "#" }, "Settings"),
         el("a", { href: "#", onclick: signOut }, "Sign out"))),
     el("main", {},

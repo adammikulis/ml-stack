@@ -25,6 +25,8 @@ from typing import Any
 
 from .availability import Availability, parse_window
 from .environment import Environment
+from .models import Models, ModelError, default_roots
+from .serving import Serving
 from .settings import Settings
 from .discovery import (
     Advertiser,
@@ -39,6 +41,8 @@ from .discovery import (
 DEFAULT_PORT = 8770
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
 FILE_CHUNK = 1 << 20
+INFER_CHUNK = 1 << 13
+INFER_TIMEOUT = 600.0
 DIGEST_HEADER = "X-ML-Stack-SHA256"
 
 _DIGESTS: dict[tuple[str, int, int], str] = {}
@@ -469,6 +473,17 @@ _DEFAULT_REPORT = device_report
 """Bound here so ``serve_forever``'s ``device_report=`` parameter can shadow the name"""
 
 
+def _range(header: str) -> tuple[int, int | None]:
+    """Start and end from a Range header, or (0, None)."""
+    if not header.startswith("bytes="):
+        return 0, None
+    head, _, tail = header.split("=", 1)[1].split(",")[0].strip().partition("-")
+    try:
+        return int(head or 0), (int(tail) if tail else None)
+    except ValueError:
+        return 0, None
+
+
 def make_handler(runner: JobRunner, files_root: Path,
                  token: "str | Callable[[], str]",
                  name: str = "",
@@ -477,7 +492,9 @@ def make_handler(runner: JobRunner, files_root: Path,
                  ui: "Any | None" = None,
                  schedule: "Availability | None" = None,
                  on_paused: str = "stop",
-                 schedule_path: "Path | None" = None):
+                 schedule_path: "Path | None" = None,
+                 serving: "Serving | None" = None,
+                 models: "Models | None" = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -551,6 +568,75 @@ def make_handler(runner: JobRunner, files_root: Path,
             return True
 
         # -- routes --
+
+        # -- inference proxy --
+        def _proxy(self) -> bool:
+            """Forward /infer/* to a model server on this machine's loopback.
+
+            The model server stays on 127.0.0.1. This route is the only LAN-exposed
+            one, and it already requires the bearer token.
+            """
+            if serving is None or not self.path.startswith("/infer"):
+                return False
+            if not self._guard():
+                return True
+            rest = self.path[len("/infer"):] or "/"
+            parsed = urllib.parse.urlparse(rest)
+            model = urllib.parse.parse_qs(parsed.query).get("ml_stack_model", [""])[0]
+            port = serving.port_for(model)
+            if port is None:
+                self._send(503, {"error": "no model server is running on this machine"})
+                return True
+
+            length = int(self.headers.get("Content-Length", "0"))
+            body = self.rfile.read(length) if length else None
+            upstream = urllib.request.Request(
+                f"http://127.0.0.1:{port}{rest}", data=body, method=self.command)
+            for name, value in self.headers.items():
+                if name.lower() in ("authorization", "host", "content-length",
+                                    "connection", "x-ml-stack-ui"):
+                    continue
+                upstream.add_header(name, value)
+            if body is not None:
+                upstream.add_header("Content-Length", str(len(body)))
+
+            try:
+                response = urllib.request.urlopen(upstream, timeout=INFER_TIMEOUT)
+            except urllib.error.HTTPError as exc:
+                raw = exc.read()
+                self._send(exc.code, None, raw=raw,
+                           content_type=exc.headers.get("Content-Type",
+                                                        "application/json"))
+                return True
+            except (urllib.error.URLError, OSError) as exc:
+                self._send(502, {"error": f"the model server did not answer: {exc}"})
+                return True
+
+            self.send_response(response.status)
+            self.send_header("Content-Type",
+                             response.headers.get("Content-Type", "application/json"))
+            # No Content-Length and close framing: a streamed completion must reach the
+            # caller as it is generated, not after the last token.
+            self.send_header("Connection", "close")
+            self.end_headers()
+            # read1, not read: read(n) blocks until it has n bytes, and a token is
+            # tens of bytes, so the whole completion would arrive at once.
+            read = getattr(response, "read1", response.read)
+            try:
+                while True:
+                    block = read(INFER_CHUNK)
+                    if not block:
+                        break
+                    self.wfile.write(block)
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                # The caller hung up. Closing the upstream is what tells llama.cpp to
+                # stop generating; without it the card keeps working for nobody.
+                pass
+            finally:
+                response.close()
+            return True
+
         def _ui(self) -> bool:
             if ui is None or not self.path.startswith("/ui"):
                 return False
@@ -558,6 +644,8 @@ def make_handler(runner: JobRunner, files_root: Path,
             return routes(ui, self)
 
         def do_GET(self) -> None:                      # noqa: N802
+            if self._proxy():
+                return
             if self._ui():
                 return
             parsed = urllib.parse.urlparse(self.path)
@@ -571,6 +659,22 @@ def make_handler(runner: JobRunner, files_root: Path,
                                  **({"availability": sched} if sched else {})})
                 return
             if not self._guard():
+                return
+            if path == "/models":
+                if models is None:
+                    self._send(501, {"error": "no model store on this daemon"}); return
+                self._send(200, {"models": [m.public() for m in models.all()],
+                                 "free_gb": models.free_gb(),
+                                 "store": str(models.store)})
+                return
+            if path.startswith("/models/"):
+                if models is None:
+                    self._send(501, {"error": "no model store on this daemon"}); return
+                wanted = urllib.parse.unquote(path[len("/models/"):])
+                found = models.find(wanted)
+                if found is None:
+                    self._send(404, {"error": f"no model called {wanted!r}"}); return
+                self._send_file(found.path, *_range(self.headers.get("Range", "")))
                 return
             if path == "/availability":
                 if schedule is None:
@@ -648,6 +752,8 @@ def make_handler(runner: JobRunner, files_root: Path,
         do_HEAD = do_GET
 
         def do_POST(self) -> None:                     # noqa: N802
+            if self._proxy():
+                return
             if self._ui():
                 return
             if not self._guard():
@@ -670,6 +776,18 @@ def make_handler(runner: JobRunner, files_root: Path,
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)}); return
                 self._send(201, job.public()); return
+            if parsed.path == "/models/get":
+                if models is None:
+                    self._send(501, {"error": "no model store on this daemon"}); return
+                req = json.loads(body or b"{}")
+                try:
+                    got = models.ensure(str(req.get("name") or ""),
+                                        source=str(req.get("source") or ""),
+                                        key=load_cluster_key(cluster_key_path),
+                                        autodownload=bool(req.get("autodownload", True)))
+                except (ModelError, ValueError) as e:
+                    self._send(400, {"error": str(e)}); return
+                self._send(200, got.public()); return
             if parsed.path == "/availability":
                 if schedule is None:
                     self._send(501, {"error": "no schedule on this daemon"}); return
@@ -858,6 +976,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     settings.on_paused = on_paused
 
     environment = Environment(root)
+    serving = Serving(root / "serving.json")
+    models = Models(default_roots(root), root / "models")
     runner = JobRunner(root, files_root, slots=slots,
                        gate=lambda: schedule.may_start(),
                        environment=environment)
@@ -879,7 +999,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                 make_handler(runner, files_root,
                                              lambda: live_token[0], name, report,
                                              fetcher, interface, schedule, on_paused,
-                                             schedule_path))
+                                             schedule_path, serving, models))
     advertiser: Advertiser | None = None
 
     def refresh(b: Beacon) -> None:
@@ -890,7 +1010,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         b.slots, b.free = status["slots"], status["free"]
         if not available["available"]:
             b.free = 0
-        b.device = {**report(), "availability": available}
+        b.device = {**report(), "availability": available,
+                    "serving": serving.public(), "models": models.public()}
 
     def start_announcing() -> None:
         """Begin advertising, now that there is a key to sign beacons with."""
@@ -915,6 +1036,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         interface.schedule_path = schedule_path
         interface.report = report
         interface.environment = environment
+        interface.serving = serving
+        interface.models = models
 
     if announce and key is not None:
         beacon = Beacon(name=name, port=port, device=report(),
