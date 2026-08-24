@@ -693,7 +693,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   name: str = "", announce: bool = True,
                   cluster_key_path: Path | str | None = None,
                   device_report: Callable[[], dict[str, Any]] | None = None,
-                  slots: int = 1) -> None:
+                  slots: int = 1, labels: Iterable[str] = ()) -> None:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     files_root = root / "files"
@@ -702,7 +702,14 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     runner = JobRunner(root, slots=slots)
-    report = device_report or _DEFAULT_REPORT
+    base_report = device_report or _DEFAULT_REPORT
+    labels = sorted(set(labels))
+
+    def report() -> dict[str, Any]:
+        # Declared, not detected. A box cannot prove it has no GPU, so "keep prep off the
+        # training boxes" has to be something an operator says rather than something the
+        # daemon infers -- see stdlib_device_report.
+        return {**base_report(), "labels": labels}
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(runner, files_root, token, name, report))
     advertiser: Advertiser | None = None
@@ -727,6 +734,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     print(f"  name  {name}")
     print(f"  root  {root}")
     print(f"  slots {slots}")
+    if labels:
+        print(f"  labels {' '.join(labels)}")
     if advertiser is not None:
         print(f"  peers announcing on {advertiser.group}:{advertiser.port} "
               f"(key {key_path(cluster_key_path)})")
@@ -767,6 +776,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
     ap.add_argument("--no-announce", action="store_true",
                     help="serve, but stay invisible to peer discovery")
+    ap.add_argument("--label", action="append", default=[], metavar="LABEL",
+                    help="a role this box declares, e.g. 'prep'. Repeatable. Work can "
+                         "require or exclude labels; nothing is inferred from them.")
     ap.add_argument("--report", action="append", default=[], metavar="MODULE:CALLABLE",
                     help="a richer device probe, e.g. "
                          "'ml_stack.train.accelerator:report' on a box with a card. "
@@ -791,7 +803,8 @@ def main(argv: list[str] | None = None) -> int:
 
     serve_forever(a.root, a.host, a.port, name=a.name,
                   announce=not a.no_announce, cluster_key_path=a.cluster_key,
-                  slots=a.slots, device_report=report if probes else None)
+                  slots=a.slots, device_report=report if probes else None,
+                  labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","))
     return 0
 
 
