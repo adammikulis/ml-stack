@@ -258,6 +258,156 @@ class TestResuming:
         assert not part.exists()
 
 
+class TestChoosingAQuant:
+    """Naming a repository and no file should land on the Q4 build."""
+
+    @pytest.mark.parametrize("names,want", [
+        (["m-Q8_0.gguf", "m-Q4_K_M.gguf", "m-Q5_K_M.gguf"], "m-Q4_K_M.gguf"),
+        (["m-Q8_0.gguf", "m-Q5_K_M.gguf"], "m-Q5_K_M.gguf"),
+        (["m-Q4_K_S.gguf", "m-Q8_0.gguf"], "m-Q4_K_S.gguf"),
+        (["m-Q4_0.gguf", "m-Q8_0.gguf"], "m-Q4_0.gguf"),
+        (["only-f16.gguf"], "only-f16.gguf"),
+    ])
+    def test_it_prefers_q4(self, names, want, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_read_repo_files", lambda o, r: names)
+        assert mod._quant_in("o", "r") == want
+
+    def test_a_sharded_model_is_not_offered_as_one_file(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_read_repo_files", lambda o, r: [
+            "big-Q4_K_M-00001-of-00003.gguf", "big-Q4_K_M-00002-of-00003.gguf",
+            "small-Q8_0.gguf"])
+        assert mod._quant_in("o", "r") == "small-Q8_0.gguf"
+
+    def test_a_repository_with_no_gguf_says_so(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_read_repo_files", lambda o, r: ["README.md"])
+        with pytest.raises(ModelError, match="no single-file gguf"):
+            mod._quant_in("o", "r")
+
+    def test_naming_a_file_still_takes_that_file(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        def refuse(*a):
+            raise AssertionError("went to the network for a reference that named a file")
+
+        monkeypatch.setattr(mod, "_read_repo_files", refuse)
+        url = mod._resolve("hf:owner/repo/exact-Q8_0.gguf")
+        assert url.endswith("exact-Q8_0.gguf?download=true")
+
+
+class TestReadingWhatAModelIs:
+    @pytest.mark.parametrize("name,total,active", [
+        ("Qwen3-Coder-30B-A3B-Instruct", 30.0, 3.0),
+        ("Ornith-1.5-35B-A3B", 35.0, 3.0),
+        ("Ornith-1.0-9B", 9.0, 0.0),
+        ("LFM2.5-2.6B", 2.6, 0.0),
+        ("something-with-no-size", 0.0, 0.0),
+    ])
+    def test_it_reads_the_sizes_out_of_a_name(self, name, total, active):
+        from ml_stack.fleet.models import _params_in
+
+        assert _params_in(name) == (total, active)
+
+    @pytest.mark.parametrize("bad", [
+        "Bonsai-27B-mmproj-BF16.gguf", "DeepSeek-V4-Flash-MTP-Q4K.gguf",
+        "model-draft-Q4_K_M.gguf", "imatrix_unsloth.gguf", "adapter-Q4.gguf",
+    ])
+    def test_a_file_that_sits_beside_a_model_is_not_the_model(self, bad):
+        from ml_stack.fleet.models import _is_beside
+
+        assert _is_beside(bad) is True
+
+    @pytest.mark.parametrize("good", [
+        "Qwen3-8B-Q4_K_M.gguf", "Bonsai-27B-dspark-Q4_1.gguf",
+    ])
+    def test_a_real_build_is_not_mistaken_for_an_accessory(self, good):
+        from ml_stack.fleet.models import _is_beside
+
+        assert _is_beside(good) is False
+
+    def test_a_vision_projector_means_it_reads_pictures(self):
+        from ml_stack.fleet.models import Suggestion
+
+        seeing = Suggestion("m", "hf:o/r/m.gguf", 1.0, "", takes=("text", "image"))
+        assert seeing.public()["takes"] == ["\U0001f4ac", "\U0001f5bc"]
+
+    def test_modalities_come_from_how_the_hub_files_it(self):
+        from ml_stack.fleet.models import _modalities
+
+        assert _modalities({"pipeline_tag": "text-generation"}) == (
+            ("text",), ("text",))
+        takes, gives = _modalities({"pipeline_tag": "image-text-to-text"})
+        assert "image" in takes and gives == ("text",)
+        takes, _ = _modalities({"tags": ["audio-text-to-text"]})
+        assert "audio" in takes
+
+    @pytest.mark.parametrize("name,family", [
+        ("Qwen3-Coder-30B-A3B-Instruct", "Qwen"),
+        ("Ornith-1.5-9B", "Ornith"),
+        ("deepseek-v4", "DeepSeek"),
+        ("gpt-oss-20b", "GPT-OSS"),
+        ("LFM2.5-2.6B", "LFM"),
+        ("Bonsai-27B-gguf", "Bonsai"),
+    ])
+    def test_the_family_is_read_off_the_name(self, name, family):
+        from ml_stack.fleet.models import family_of
+
+        assert family_of(name) == family
+
+    def test_a_family_nobody_has_heard_of_still_groups(self):
+        from ml_stack.fleet.models import family_of
+
+        assert family_of("Zarquon-9000-70B-Instruct") == "Zarquon"
+        assert family_of("owner/Zarquon-9000-70B-GGUF") == "Zarquon"
+
+
+class TestSuggestions:
+    def test_every_one_is_a_reference_this_code_can_resolve(self):
+        from ml_stack.fleet.models import SUGGESTED, _resolve
+
+        for pick in SUGGESTED:
+            assert pick.ref.startswith("hf:"), pick.ref
+            url = _resolve(pick.ref)
+            assert url.startswith("https://huggingface.co/"), url
+            assert pick.file.endswith(".gguf"), pick.file
+            assert pick.gb > 0 and pick.what and pick.name
+
+    def test_names_and_files_do_not_repeat(self):
+        from ml_stack.fleet.models import SUGGESTED
+
+        assert len({p.name for p in SUGGESTED}) == len(SUGGESTED)
+        assert len({p.file for p in SUGGESTED}) == len(SUGGESTED)
+
+    def test_what_will_not_fit_is_not_offered(self):
+        from ml_stack.fleet.models import suggestions
+
+        small = suggestions(free_gb=3.0, ram_gb=64.0)
+        assert small, "nothing offered on a machine with 3 GB free"
+        assert all(p.gb <= 3.0 for p in small)
+        assert not suggestions(free_gb=0.001, ram_gb=64.0)
+
+    def test_a_machine_short_of_memory_is_not_offered_a_big_one(self):
+        from ml_stack.fleet.models import suggestions
+
+        assert all(p.gb <= 4.0 for p in suggestions(free_gb=999.0, ram_gb=4.0))
+
+    def test_the_smallest_comes_first(self):
+        from ml_stack.fleet.models import suggestions
+
+        got = suggestions(free_gb=999.0, ram_gb=999.0)
+        assert [p.gb for p in got] == sorted(p.gb for p in got)
+
+    def test_with_no_limits_known_everything_is_offered(self):
+        from ml_stack.fleet.models import SUGGESTED, suggestions
+
+        assert len(suggestions()) == len(SUGGESTED)
+
+
 class TestProgress:
     def test_the_two_kinds_of_progress_do_not_share_a_callback(self, store):
         """ensure() reports a stage as text and bytes as two numbers. One callback

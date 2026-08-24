@@ -623,6 +623,51 @@ def _():
     return f"{len(payload) // 1024 // 1024} MB, counted as it arrived"
 
 
+@check("Models", "the model list is what Hugging Face says is popular now")
+def _():
+    """A list written into the code is out of date the day it ships."""
+    from ml_stack.fleet.models import SUGGESTED, popular
+
+    got = popular(free_gb=1024.0, ram_gb=1024.0, limit=12)
+    assert len(got) >= 5, f"only {len(got)} came back"
+    shipped = {s.name for s in SUGGESTED}
+    assert not {p.name for p in got} <= shipped, (
+        "the list matches the one written into the code, so it is not live")
+    for pick in got:
+        assert pick.gb > 0, f"{pick.name} has no size"
+        assert pick.ref.startswith("hf:") and pick.file.endswith(".gguf")
+        assert pick.family, f"{pick.name} has no family"
+        assert "mmproj" not in pick.file.lower(), f"{pick.name} is a vision projector"
+        assert "mtp" not in pick.file.lower(), f"{pick.name} is a draft head"
+    families = sorted({p.family for p in got})
+    return f"{len(got)} models across {len(families)}: {', '.join(families)}"
+
+
+@check("Models", "the list it falls back to when offline still downloads")
+def _():
+    """A reference that stopped resolving is a button that does nothing."""
+    import urllib.error
+    import urllib.request
+
+    from ml_stack.fleet.models import SUGGESTED, _resolve
+
+    checked = []
+    for pick in SUGGESTED:
+        req = urllib.request.Request(_resolve(pick.ref), method="HEAD",
+                                     headers={"User-Agent": "ml-stack"})
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                size = int(r.headers.get("Content-Length") or 0)
+        except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+            raise AssertionError(f"{pick.name}: {pick.ref} -> {exc}") from None
+        assert size > 0, f"{pick.name}: {pick.ref} is empty"
+        claimed = pick.gb * 2**30
+        assert abs(size - claimed) < max(claimed * 0.25, 64 * 2**20), (
+            f"{pick.name} is {size / 2**30:.2f} GB, listed as {pick.gb} GB")
+        checked.append(pick.name)
+    return f"{len(checked)} live: {', '.join(checked)}"
+
+
 # -- chat ----------------------------------------------------------------
 @check("Chat", "a machine that can run nothing itself still talks to a peer's model")
 def _():

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -18,7 +19,8 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
-           "default_roots"]
+           "Suggestion", "default_roots", "family_of", "popular",
+           "suggestions"]
 
 SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
@@ -319,6 +321,236 @@ class Models:
             return 0.0
 
 
+@dataclass(frozen=True, slots=True)
+class Suggestion:
+    """A model worth offering without anyone having to go looking for one."""
+
+    name: str
+    ref: str
+    gb: float
+    what: str
+    family: str = ""
+    params_b: float = 0.0
+    active_b: float = 0.0
+    takes: tuple[str, ...] = ("text",)
+    gives: tuple[str, ...] = ("text",)
+
+    @property
+    def file(self) -> str:
+        return self.ref.rsplit("/", 1)[-1]
+
+    @property
+    def moe(self) -> bool:
+        return self.active_b > 0
+
+    def public(self) -> dict[str, Any]:
+        return {"name": self.name, "ref": self.ref, "gb": self.gb,
+                "what": self.what, "file": self.file,
+                "family": self.family or family_of(self.name),
+                "params_b": self.params_b, "active_b": self.active_b,
+                "moe": self.moe,
+                "takes": [MODALITY.get(m, m) for m in self.takes],
+                "gives": [MODALITY.get(m, m) for m in self.gives]}
+
+
+MODALITY = {"text": "💬", "image": "🖼", "audio": "🔊", "video": "🎬"}
+
+
+# What to fall back on when Hugging Face cannot be reached. Anything shipped here is
+# out of date the day it is written, so it is a backstop, not the list.
+SUGGESTED: tuple[Suggestion, ...] = (
+    Suggestion("Qwen3 4B", "hf:Qwen/Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf", 2.4,
+               "Fast, and good on a laptop."),
+    Suggestion("Qwen3 8B", "hf:Qwen/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf", 4.7,
+               "Better answers, still comfortable on 16 GB."),
+    Suggestion("Qwen3 14B", "hf:unsloth/Qwen3-14B-GGUF/Qwen3-14B-Q4_K_M.gguf", 8.4,
+               "For a machine with room to spare."),
+    Suggestion("Gemma 3 4B",
+               "hf:ggml-org/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf", 2.3,
+               "Google's small one."),
+    Suggestion("Llama 3.2 3B",
+               "hf:bartowski/Llama-3.2-3B-Instruct-GGUF/"
+               "Llama-3.2-3B-Instruct-Q4_K_M.gguf", 1.9,
+               "Small and widely used."),
+    Suggestion("Tiny stories 15M",
+               "hf:ggml-org/models/tinyllamas/stories15M-q4_0.gguf", 0.02,
+               "Twenty megabytes, for seeing that all this works."),
+)
+
+
+def suggestions(free_gb: float = 0.0, ram_gb: float = 0.0) -> list[Suggestion]:
+    """Models worth offering here, smallest first, leaving out what will not fit."""
+    out = []
+    for pick in SUGGESTED:
+        if free_gb and pick.gb > free_gb:
+            continue
+        if ram_gb and pick.gb > ram_gb:
+            continue
+        out.append(pick)
+    return sorted(out, key=lambda s: s.gb)
+
+
+# Spelling only. Which families exist is read off what the hub returns, because a
+# list of families written here would go out of date the same way a list of models does.
+SPELLING = {"gpt-oss": "GPT-OSS", "lfm": "LFM", "smollm": "SmolLM",
+            "deepseek": "DeepSeek", "qwen": "Qwen", "llama": "Llama"}
+HUB = "https://huggingface.co/api/models"
+POPULAR_TTL_S = 6 * 3600
+SCAN = 40
+WANT = 24
+_popular: tuple[float, list[Suggestion]] = (0.0, [])
+
+
+def family_of(name: str) -> str:
+    """The family a model name belongs to: what comes before the size or version.
+
+    ``Qwen3-Coder-30B`` is Qwen, ``Ornith-1.5-9B`` is Ornith, ``gpt-oss-20b`` is
+    GPT-OSS. Read from the name so a family nobody has heard of yet still groups.
+    """
+    bare = name.split("/")[-1]
+    for tail in ("-GGUF", "-gguf", ".gguf"):
+        bare = bare.removesuffix(tail)
+    head = re.match(r"[A-Za-z][A-Za-z\-_]*", bare)
+    if not head:
+        return "Other"
+    word = head.group(0).rstrip("-_").replace("_", "-")
+    while word and not word.split("-")[-1]:
+        word = word.rsplit("-", 1)[0]
+    low = word.lower()
+    if low in SPELLING:
+        return SPELLING[low]
+    # A trailing word like "-Coder" or "-Instruct" is a variant, not a family.
+    first = word.split("-")[0]
+    return SPELLING.get(first.lower(), first[:1].upper() + first[1:])
+
+
+def _hub(url: str, timeout: float = 25.0) -> Any:
+    req = urllib.request.Request(url, headers={"User-Agent": "ml-stack"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read())
+
+
+def _params_in(name: str) -> tuple[float, float]:
+    """Total and active billions read off a name like ``Qwen3-Coder-30B-A3B``."""
+    active = re.search(r"[-_]A(\d+(?:\.\d+)?)B\b", name, re.I)
+    total = re.search(r"[-_](\d+(?:\.\d+)?)B\b", name, re.I)
+    return (float(total.group(1)) if total else 0.0,
+            float(active.group(1)) if active else 0.0)
+
+
+def _modalities(facts: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """What a model reads and what it writes, from how the hub files it."""
+    tags = {str(t).lower() for t in facts.get("tags") or ()}
+    pipeline = str(facts.get("pipeline_tag") or "").lower()
+    marks = tags | {pipeline}
+
+    takes = ["text"]
+    if any("image-text-to-text" in m or "vision" in m or "multimodal" in m
+           for m in marks):
+        takes.append("image")
+    if any("audio" in m or "speech" in m for m in marks):
+        takes.append("audio")
+    if any("video" in m for m in marks):
+        takes.append("video")
+
+    gives = ["text"]
+    if "text-to-image" in marks:
+        gives = ["image"]
+    elif "text-to-speech" in marks:
+        gives = ["audio"]
+    return tuple(takes), tuple(gives)
+
+
+def _repo_facts(repo: str) -> dict[str, Any]:
+    try:
+        return _hub(f"{HUB}/{repo}")
+    except (urllib.error.URLError, OSError, ValueError):
+        return {}
+
+
+def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
+    """The Q4 build, its size, and whether the repository ships a vision projector."""
+    try:
+        tree = _hub(f"{HUB}/{repo}/tree/main?recursive=1")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    whole = []
+    sees = False
+    for row in tree if isinstance(tree, list) else []:
+        path = str(row.get("path", ""))
+        if not path.lower().endswith(".gguf"):
+            continue
+        if "mmproj" in path.rsplit("/", 1)[-1].lower():
+            sees = True
+        if _is_a_piece(path) or _is_beside(path):
+            continue
+        size = int(row.get("size") or (row.get("lfs") or {}).get("size") or 0)
+        if size:
+            whole.append((path, size))
+    if not whole:
+        return None
+    # A file at the top level is the model; one in a subdirectory is a variant.
+    flat = [x for x in whole if "/" not in x[0]] or whole
+    for want in QUANTS:
+        for path, size in sorted(flat):
+            if want in path.lower():
+                return path, size, sees
+    path, size = sorted(flat)[0]
+    return path, size, sees
+
+
+def popular(free_gb: float = 0.0, ram_gb: float = 0.0, *, limit: int = 12,
+            sort: str = "downloads") -> list[Suggestion]:
+    """What people are actually running, asked of Hugging Face rather than remembered.
+
+    Falls back to ``suggestions`` when the hub cannot be reached.
+    """
+    global _popular
+    age, cached = _popular
+    if time.time() - age > POPULAR_TTL_S or not cached:
+        try:
+            listed = _hub(f"{HUB}?filter=gguf&pipeline_tag=text-generation"
+                          f"&sort={sort}&direction=-1&limit={SCAN}")
+        except (urllib.error.URLError, OSError, ValueError):
+            return suggestions(free_gb, ram_gb)
+        found: list[Suggestion] = []
+        for row in listed if isinstance(listed, list) else []:
+            repo = str(row.get("id") or "")
+            if not repo or "/" not in repo:
+                continue
+            best = _best_gguf(repo)
+            if best is None:
+                continue
+            path, size, sees = best
+            short = repo.split("/")[-1].removesuffix("-GGUF").removesuffix("-gguf")
+            facts = _repo_facts(repo)
+            total_b, active_b = _params_in(short)
+            exact = int((facts.get("gguf") or {}).get("total") or 0)
+            if exact:
+                total_b = round(exact / 1e9, 1)
+            if not active_b and "moe" in str(
+                    (facts.get("gguf") or {}).get("architecture") or "").lower():
+                active_b = 0.0
+            takes, gives = _modalities(facts)
+            if sees and "image" not in takes:
+                takes = (*takes, "image")
+            found.append(Suggestion(
+                name=short, ref=f"hf:{repo}/{path}", gb=round(size / 2**30, 2),
+                what=f"from {repo.split('/')[0]}", family=family_of(short),
+                params_b=total_b, active_b=active_b, takes=takes, gives=gives))
+            if len(found) >= WANT:
+                break
+        if not found:
+            return suggestions(free_gb, ram_gb)
+        _popular = (time.time(), found)
+        cached = found
+
+    # Kept in the order the hub gave them: that order is the popularity.
+    out = [p for p in cached
+           if (not free_gb or p.gb <= free_gb) and (not ram_gb or p.gb <= ram_gb)]
+    return out[:limit]
+
+
 @dataclass
 class Getting:
     """One model being fetched, and how far it has got."""
@@ -398,12 +630,21 @@ class Downloads:
         return rows
 
 
+QUANTS = ("q4_k_m", "q4_k_s", "q4_1", "q4_0", "q5_k_m", "q8_0")
+
+
 def _resolve(source: str) -> str:
-    """``hf:owner/repo/file.gguf`` or a plain URL."""
+    """``hf:owner/repo/file.gguf``, ``hf:owner/repo``, or a plain URL.
+
+    A reference naming only a repository is answered with its Q4 build, which is the
+    one worth having on a machine that has to fit the model in memory.
+    """
     source = source.strip()
     if source.startswith("hf:"):
         ref = source[3:].strip("/")
         parts = ref.split("/")
+        if len(parts) == 2:
+            parts = [parts[0], parts[1], _quant_in(parts[0], parts[1])]
         if len(parts) < 3:
             raise ModelError(f"{source!r} should look like hf:owner/repo/file.gguf")
         owner, repo, path = parts[0], parts[1], "/".join(parts[2:])
@@ -411,3 +652,47 @@ def _resolve(source: str) -> str:
     if source.startswith(("http://", "https://")):
         return source
     raise ModelError(f"{source!r} is not a URL or an hf: reference")
+
+
+def _read_repo_files(owner: str, repo: str) -> list[str]:
+    """Every file Hugging Face lists in a repository."""
+    try:
+        req = urllib.request.Request(
+            f"https://huggingface.co/api/models/{owner}/{repo}",
+            headers={"User-Agent": "ml-stack"})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            listed = json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        raise ModelError(f"could not read hf:{owner}/{repo}: {exc}") from None
+    return [str(f.get("rfilename", "")) for f in listed.get("siblings") or []]
+
+
+def _quant_in(owner: str, repo: str) -> str:
+    """The file to take from a repository nobody named a file in."""
+    files = _read_repo_files(owner, repo)
+    whole = [f for f in files
+             if f.lower().endswith(".gguf") and not _is_a_piece(f)
+             and not _is_beside(f)]
+    if not whole:
+        raise ModelError(f"hf:{owner}/{repo} holds no single-file gguf")
+    for want in QUANTS:
+        for name in sorted(whole):
+            if want in name.lower():
+                return name
+    return sorted(whole)[0]
+
+
+# Files that sit beside a model rather than being one: a vision projector, a
+# multi-token-prediction head, a draft model, an importance matrix.
+BESIDE = ("mmproj", "mtp", "draft", "imatrix", "vocab", "lora", "adapter")
+
+
+def _is_a_piece(name: str) -> bool:
+    """A shard such as ``model-00001-of-00003.gguf``, which is no use on its own."""
+    return bool(re.search(r"-\d{5}-of-\d{5}", name))
+
+
+def _is_beside(name: str) -> bool:
+    """Whether a file is an accessory rather than the model itself."""
+    stem = name.rsplit("/", 1)[-1].lower()
+    return any(word in stem for word in BESIDE)

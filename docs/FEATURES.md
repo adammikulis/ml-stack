@@ -80,7 +80,15 @@ a row is set aside for a growing cooldown rather than draining the queue.
 
 Every model file this machine holds, and every one held by the others.
 
-- **Getting one** takes a Hugging Face reference or a link. If another machine on your
+- **Popular models are listed for you**, asked of Hugging Face each time rather than
+  written into the app, so the list is what people are downloading now and not what was
+  current when it shipped. Only builds that fit this machine appear.
+- **Each one shows** its download size, how many parameters it has, how many are active
+  if it is a mixture of experts, and what it reads and writes: 💬 text, 🖼 images,
+  🔊 audio, 🎬 video.
+- **Families are checkboxes**, all ticked, so a family you do not want goes away.
+- **Getting one** takes a Hugging Face reference or a link. Naming a repository and no
+  file gets its Q4 build, which is the one that fits in memory. If another machine on your
   network already has that file, it is copied across the network instead of downloaded
   again.
 - **Getting a model happens in the background**, so a large one does not hold the

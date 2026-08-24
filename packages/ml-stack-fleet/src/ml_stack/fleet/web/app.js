@@ -370,6 +370,52 @@ async function models(message) {
         : el("span", { class: "spin" }));
   };
 
+  // Its own request: the hub is asked about every repository, and a slow answer
+  // must not hold up the rest of the screen.
+  const popularBox = el("div", { class: "group" },
+    el("h2", {}, "Popular models"),
+    el("div", { class: "hint" }, el("span", { class: "spin" }),
+      " Asking Hugging Face what people are running…"));
+  (async () => {
+    const pop = await api("/ui/models/popular");
+    if (pop.error || !(pop.models || []).length) {
+      popularBox.replaceChildren(el("h2", {}, "Popular models"),
+        el("div", { class: "hint" },
+          pop.error || "Nothing that fits on this machine."));
+      return;
+    }
+    const on = new Set(pop.families || []);
+    const paint = () => {
+      const rows = pop.models.filter((x) => on.has(x.family));
+      popularBox.replaceChildren(
+        el("h2", {}, "Popular models"),
+        el("div", { class: "hint" },
+          "What is most downloaded right now, in a Q4 build that fits this machine. "
+          + "💬 text · 🖼 images · 🔊 audio · 🎬 video."),
+        el("div", { class: "chips" }, (pop.families || []).map((f) => {
+          const box = el("input", { type: "checkbox", id: `fam_${f}`,
+                                    ...(on.has(f) ? { checked: "1" } : {}) });
+          box.onchange = () => { box.checked ? on.add(f) : on.delete(f); paint(); };
+          return el("label", { class: "opt inline", for: `fam_${f}` }, box, f);
+        })),
+        ...(rows.length
+          ? rows.map((x) => {
+              const bits = [`${x.gb} GB`];
+              if (x.params_b) bits.push(`${x.params_b}B`);
+              if (x.moe) bits.push(`${x.active_b}B active`);
+              bits.push(`${x.takes.join("")} → ${x.gives.join("")}`);
+              bits.push(x.what);
+              return el("div", { class: "row" },
+                el("span", {}, el("b", {}, x.name),
+                  el("span", { class: "why" }, bits.join(" · "))),
+                el("button", { class: "ghost small",
+                  onclick: () => get(x.file, x.ref) }, "Get"));
+            })
+          : [el("div", { class: "hint" }, "No family is ticked.")]));
+    };
+    paint();
+  })();
+
   const getting = (m.getting || []).filter((g) => g.state !== "done").map(bar);
   if ((m.getting || []).some((g) => g.state === "getting")) {
     timer = setTimeout(() => models(), 1000);
@@ -446,8 +492,10 @@ async function models(message) {
             ...unfinished)
         : null,
 
+      popularBox,
+
       el("div", { class: "group" },
-        el("h2", {}, "Get one"),
+        el("h2", {}, "Something else"),
         el("label", { for: "src" }, "Hugging Face reference, or a link"),
         ref,
         el("div", { class: "hint" },
@@ -631,6 +679,12 @@ async function settings(message) {
     if (!u.checked) {
       status.replaceChildren(document.createTextNode(
         "Could not check for updates right now."));
+      return;
+    }
+    if (!u.known) {
+      status.replaceChildren(document.createTextNode(
+        "This copy does not say which version it is, so it will not update itself. "
+        + `The newest is ${u.latest}.`));
       return;
     }
     if (!u.newer) {

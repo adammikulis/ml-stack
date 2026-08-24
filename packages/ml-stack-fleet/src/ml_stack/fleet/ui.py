@@ -489,6 +489,18 @@ def routes(ui: UI, handler: Any) -> bool:
             send(200, {"changed": out, **ui.environment.state(vendor)})
             return True
 
+    if path == "/ui/models/popular" and method == "GET":
+        if ui.models is None:
+            send(501, {"error": "no model store on this daemon"})
+            return True
+        from .models import popular
+        ram = float((ui.report() if ui.report else {}).get("ram_gb") or 0)
+        here = {m.name for m in ui.models.all()}
+        found = [x for x in popular(ui.models.free_gb(), ram) if x.file not in here]
+        send(200, {"models": [x.public() for x in found],
+                   "families": sorted({x.public()["family"] for x in found})})
+        return True
+
     if path == "/ui/models":
         if ui.models is None:
             send(501, {"error": "no model store on this daemon"})
@@ -499,6 +511,7 @@ def routes(ui: UI, handler: Any) -> bool:
         auto_models = ui.settings is None or ui.settings.autodownload_models
         if method == "GET":
             here = {m.name for m in ui.models.all()}
+            free = ui.models.free_gb()
             elsewhere: dict[str, list[str]] = {}
             for beacon in (ui.peers() if key is not None else []):
                 if beacon.get("is_self"):
@@ -510,11 +523,12 @@ def routes(ui: UI, handler: Any) -> bool:
                 "here": [m.public() for m in ui.models.all()],
                 "elsewhere": [{"name": n, "peers": p}
                               for n, p in sorted(elsewhere.items()) if n not in here],
-                "free_gb": ui.models.free_gb(),
+                "free_gb": free,
                 "autodownload": auto_models,
                 "unfinished": ui.models.unfinished(),
                 "getting": [g.public() for g in ui.downloads.active()]
                            if ui.downloads is not None else [],
+
             })
             return True
         if method == "DELETE":
@@ -697,6 +711,7 @@ def routes(ui: UI, handler: Any) -> bool:
             "version": now,
             "latest": release.version,
             "newer": release.newer_than(now),
+            "known": bool(now),
             "checked": True,
             "notes": release.notes[:2000],
             "url": release.url,
