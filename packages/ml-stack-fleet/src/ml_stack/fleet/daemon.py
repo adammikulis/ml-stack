@@ -575,7 +575,8 @@ _DEFAULT_REPORT = device_report
 without losing the default."""
 
 
-def make_handler(runner: JobRunner, files_root: Path, token: str,
+def make_handler(runner: JobRunner, files_root: Path,
+                 token: "str | Callable[[], str]",
                  name: str = "",
                  report: Callable[[], dict[str, Any]] = device_report,
                  fetcher: "Fetcher | None" = None,
@@ -590,12 +591,23 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             pass
 
         # -- helpers --
+        def _token(self) -> str:
+            """Read at request time, not captured at startup.
+
+            A daemon started before its box had joined a cluster minted a random token.
+            When someone then joins through the setup wizard, the derived token is what
+            every peer will compute -- so a token frozen at startup means the machine
+            appears in the fleet, answers /health, and rejects every job with a 401
+            until somebody restarts it. Which is not a setup wizard.
+            """
+            return token() if callable(token) else token
+
         def _authed(self) -> bool:
             got = self.headers.get("Authorization", "")
             if got.startswith("Bearer "):
                 # compare_digest: token comparison should not leak length or
                 # prefix through timing, cheap to get right.
-                return secrets.compare_digest(got[7:], token)
+                return secrets.compare_digest(got[7:], self._token())
             return False
 
         def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
@@ -981,11 +993,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   on_paused: str = "stop") -> None:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
+    live_token: list[str] = [""]
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
     name = name or os.environ.get("ML_STACK_PEER_NAME") or socket.gethostname()
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
+    live_token[0] = token
     schedule_path = root / "availability.json"
     schedule = Availability.load(schedule_path)
     for spec in busy_hours:
@@ -1020,7 +1034,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         # daemon infers -- see stdlib_device_report.
         return {**base_report(), "labels": labels}
     httpd = ThreadingHTTPServer((host, port),
-                                make_handler(runner, files_root, token, name, report,
+                                make_handler(runner, files_root,
+                                             lambda: live_token[0], name, report,
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path))
     advertiser: Advertiser | None = None
@@ -1047,6 +1062,9 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         if key is None:
             return
         fetcher.key = key
+        # The token every peer will now compute. Without this the box is discoverable
+        # and undrivable, which is the worst of both.
+        live_token[0] = load_or_create_token(root, key)
         beacon = Beacon(name=name, port=port, device=report(),
                         slots=runner.slots, free=runner.slots)
         advertiser = Advertiser(beacon, key, refresh=refresh).start()

@@ -143,8 +143,13 @@ class UI:
         return found
 
     # -- actions ---------------------------------------------------------
-    def join(self, passphrase: str, group: str, source: str) -> dict[str, Any]:
-        """Join a cluster. Costs one scrypt, so it goes through the throttle."""
+    def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
+        """Join a cluster, and sign the person in. Returns ``(state, session id)``.
+
+        Signed in as part of joining because they have just proved they know the
+        passphrase -- asking for it again on the very next screen is a login form that
+        exists only because the code forgot what happened a second ago.
+        """
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
@@ -165,7 +170,7 @@ class UI:
                 # cluster but silent can still be reached by address, and will announce
                 # on its next start.
                 pass
-        return self.state()
+        return self.state(), self.sessions.open("setup").sid
 
     def login(self, source: str, *, passphrase: str = "", group: str = "",
               token: str = "", ticket: str = "") -> str | None:
@@ -291,13 +296,15 @@ def routes(ui: UI, handler: Any) -> bool:
                 return True
         req = body()
         try:
-            state = ui.join(str(req.get("passphrase") or ""),
-                            str(req.get("group") or ""), client_ip)
+            state, sid = ui.join(str(req.get("passphrase") or ""),
+                                 str(req.get("group") or ""), client_ip)
         except DiscoveryError as exc:
             send(429 if "attempts" in str(exc) or "busy" in str(exc) else 400,
                  {"error": str(exc)})
             return True
-        send(200, state)
+        session = ui.sessions.get(sid)
+        send(200, state,
+             {"Set-Cookie": ui.sessions.cookie_header(session)} if session else None)
         return True
 
     if path == "/ui/setup/peers" and method == "GET":

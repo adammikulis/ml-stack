@@ -74,7 +74,10 @@ h2 { font-size: 15px; margin: 0 0 14px; color: var(--muted); font-weight: 600;
 .sub { color: var(--muted); margin: 0 0 24px; }
 
 /* ---- cluster grid ---- */
-.grid { display: grid; gap: var(--gap); grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+/* align-items:start so a card is its own height. Stretching every card to the tallest
+   in its row leaves a machine with fewer meters sitting in a pool of empty space. */
+.grid { display: grid; gap: var(--gap); align-items: start;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
 .peer {
   background: var(--bg-raised); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 16px 18px 18px;
@@ -220,3 +223,25 @@ pre.cmd {
 .stat { display: flex; gap: 26px; margin-bottom: 22px; flex-wrap: wrap; }
 .stat .n { font-size: 25px; font-weight: 680; font-family: var(--mono); letter-spacing: -.02em; }
 .stat .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .07em; }
+
+/* numbered how-to: what replaces "run this command" */
+ol.howto { list-style: none; margin: 18px 0 14px; padding: 0; display: grid; gap: 14px; }
+ol.howto li { display: flex; gap: 12px; align-items: flex-start; }
+ol.howto .num {
+  flex: 0 0 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent);
+  font-size: 12px; font-weight: 700; font-family: var(--mono);
+}
+ol.howto b { font-weight: 600; font-size: 14px; }
+ol.howto .d { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.watching { font-size: 12.5px; color: var(--dim); margin-top: 16px;
+            display: flex; align-items: center; gap: 8px; }
+details.aside { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+details.aside summary {
+  cursor: pointer; font-size: 12.5px; color: var(--dim); list-style: none;
+  user-select: none;
+}
+details.aside summary::-webkit-details-marker { display: none; }
+details.aside summary::before { content: "› "; }
+details.aside[open] summary::before { content: "⌄ "; }
+details.aside summary:hover { color: var(--muted); }

@@ -58,7 +58,10 @@ function peerCard(p) {
     el("div", { class: "meter" },
       el("div", { class: "cap" },
         el("span", {}, "capacity"),
-        el("b", {}, `${running}/${slots}${queued ? ` +${queued} waiting` : ""}`)),
+        // Spelled out: "0/4" beside the word "idle" reads as "none of four available",
+        // which is the opposite of what it means.
+        el("b", {}, running === 0 ? `all ${slots} free`
+          : `${running} of ${slots} busy${queued ? ` · ${queued} waiting` : ""}`)),
       pips),
   ];
 
@@ -253,19 +256,25 @@ function wizard(setup, err) {
       err ? el("div", { class: "err" }, err) : null)));
   }
 
-  // step 3: joined — what next
-  const cmd = el("pre", { class: "cmd" }, "ml-stack-peers setup");
-  const looking = el("div", { class: "hint" },
+  // step 3: joined — what next. Deliberately not a command: telling someone to open a
+  // terminal is the same wall as telling them to paste a 32-byte key, one layer up.
+  const looking = el("div", { class: "watching" },
     el("span", { class: "spin" }), " Watching for other machines…");
   const found = el("div");
+  const skip = el("button", { class: "ghost", onclick: () => location.reload() },
+    "Open the cluster");
 
   const poll = async () => {
     const r = await api("/ui/setup/peers");
     const others = (r.peers || []).filter((p) => !p.is_self);
     if (others.length) {
       looking.remove();
-      found.replaceChildren(el("div", { class: "ok" },
-        `Found ${others.map((p) => p.name).join(", ")}.`),
+      // Replaces the skip button rather than sitting above it: two buttons that do the
+      // same thing is a choice the reader has to stop and make, about nothing.
+      skip.remove();
+      found.replaceChildren(
+        el("div", { class: "ok" },
+          `Found ${others.map((p) => p.name).join(", ")}.`),
         el("button", { onclick: () => location.reload() }, "Open the cluster"));
       return;
     }
@@ -273,14 +282,27 @@ function wizard(setup, err) {
   };
   poll();
 
+  const step = (n, title, body) =>
+    el("li", {}, el("span", { class: "num" }, n),
+      el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
+
   show(el("div", { class: "centre" }, el("div", { class: "card" },
     steps(3),
-    el("h1", {}, `This machine has joined “${state.group}”`),
-    el("p", { class: "sub" }, "Now do the same on every other machine you want to train with:"),
-    cmd,
-    el("div", { class: "hint" }, "Same passphrase, same group name. Then start the daemon there."),
+    el("h1", {}, `Joined “${state.group}”`),
+    el("p", { class: "sub" }, "Now add your other machines. On each one:"),
+    el("ol", { class: "howto" },
+      step(1, "Install ml-stack", "The same installer you used here."),
+      step(2, "Open it", "It opens in your browser and asks the same questions."),
+      step(3, "Type the same passphrase",
+        `The words you just chose${state.group !== "ml-stack"
+          ? `, and the group name “${state.group}”` : ""}.`)),
+    el("p", { class: "hint" },
+      "They find each other on their own. Nothing else to configure."),
     looking, found,
-    el("button", { class: "ghost", onclick: () => location.reload() }, "Skip — open the cluster"))));
+    el("details", { class: "aside" },
+      el("summary", {}, "Already installed it, and happy with a terminal?"),
+      el("pre", { class: "cmd" }, "ml-stack-peers setup")),
+    skip)));
 }
 
 // ---------------------------------------------------------------- boot

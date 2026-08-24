@@ -12,6 +12,8 @@ license-files = ["LICENSE"]
 dependencies = []
 
 [project.scripts]
+# The one people double-click: starts the daemon and opens the browser on it.
+ml-stack = "ml_stack.fleet.launch:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 
