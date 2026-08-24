@@ -33,10 +33,22 @@ Everything runs on your own hardware. Nothing leaves the network.
 
 ## Installing
 
-**If you just want to use it**, download the file for your machine from the
-[latest release](../../releases/latest) and open it. It is an app, not a web page: a real
-window that asks what to call the machine and what passphrase to use. Nothing else to
-set up.
+**One line**, on macOS or Linux:
+
+```
+curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```
+irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+```
+
+It works out which machine it is on, fetches the right download, and opens it. You get a
+window that asks what to call the machine and what passphrase to use.
+
+**Or download it yourself** from the [latest release](../../releases/latest):
 
 | | |
 |---|---|
@@ -44,8 +56,8 @@ set up.
 | Windows | `ml-stack-windows-x86_64.zip` |
 | Linux | `ml-stack-linux-x86_64.zip` |
 
-Each download also contains `ml-stack-headless`, for a machine with no screen — it runs
-the daemon and serves the same interface to a browser on your network.
+Each download holds the app and `ml-stack-headless`, for a machine with no screen — the
+same daemon, serving the interface to a browser on your network.
 
 Do the same on every machine you want to train with, typing the same passphrase. They
 find each other on their own.

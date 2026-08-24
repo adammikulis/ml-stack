@@ -48,6 +48,7 @@ jobs:
         shell: bash
         run: |
           BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack-headless*' -type f | head -1)
+          echo "starting $BIN"
           "$BIN" --port 8899 --no-browser &
           for _ in $(seq 1 40); do
             curl -sf http://127.0.0.1:8899/health >/dev/null && break || sleep 1
@@ -56,15 +57,10 @@ jobs:
           curl -sf -o /dev/null -w 'ui %{http_code}\n' http://127.0.0.1:8899/ui/
           curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/app.js
 
+      # Python rather than zip(1): Windows runners have no zip in bash.
       - name: package it
         shell: bash
-        run: |
-          cd dist/bundle
-          if [ -d ml-stack.app ]; then
-            zip -qry "../${{ matrix.asset }}.zip" ml-stack.app ml-stack-headless
-          else
-            zip -qry "../${{ matrix.asset }}.zip" ml-stack ml-stack-headless
-          fi
+        run: python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
@@ -80,6 +76,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+      - uses: actions/checkout@v4
+        with:
+          path: repo
+      - name: collect the network installers
+        run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
