@@ -160,6 +160,25 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
 
 
 # -- Windows -------------------------------------------------------------
+def _windows_startup() -> Path:
+    return (Path(os.environ.get("APPDATA", Path.home()))
+            / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+            / f"{SERVICE}.cmd")
+
+
+def _windows_task() -> str:
+    return f'schtasks /Delete /F /TN "{LABEL}"'
+
+
+def _windows_task_exists() -> bool:
+    try:
+        done = subprocess.run(["schtasks", "/Query", "/TN", LABEL],
+                              capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
     quoted = " ".join(f'"{a}"' if " " in a else a for a in argv)
     if mode == "boot":
@@ -176,10 +195,8 @@ def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
             pass
         return Autostart(mode, installed=False, command=command,
                          note="Permission was not given, so it will not start at boot.")
-    startup = (Path(os.environ.get("APPDATA", Path.home()))
-               / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup")
-    startup.mkdir(parents=True, exist_ok=True)
-    path = startup / f"{SERVICE}.cmd"
+    path = _windows_startup()
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(f'@echo off\r\nstart "" {quoted} >> "{log_dir / "traind.log"}" 2>&1\r\n')
     return Autostart(mode, installed=True, path=path)
 
@@ -196,7 +213,13 @@ def install(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
     """Arrange for the daemon to start, or explain what a human must run."""
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    uninstall()
     if mode == "manual":
+        left = _left_behind()
+        if left:
+            return Autostart("manual", installed=False, command=left,
+                             note="Removing what starts it at boot needs "
+                                  "administrator rights.")
         return Autostart("manual", installed=True,
                          note="Nothing installed. Start it yourself with "
                               "'ml-stack-traind'.")
@@ -217,9 +240,10 @@ def uninstall(mode: str = "") -> list[Path]:
     if sys.platform == "darwin":
         candidates = [_mac_path("login"), _mac_path("boot")]
     elif sys.platform == "win32":
-        candidates = [Path(os.environ.get("APPDATA", Path.home())) / "Microsoft"
-                      / "Windows" / "Start Menu" / "Programs" / "Startup"
-                      / f"{SERVICE}.cmd"]
+        candidates = [_windows_startup()]
+        if _windows_task_exists():
+            subprocess.run(["schtasks", "/Delete", "/F", "/TN", LABEL],
+                           capture_output=True, check=False)
     else:
         candidates = [Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
                       Path("/etc/systemd/system") / f"{SERVICE}.service"]
@@ -240,13 +264,22 @@ def uninstall(mode: str = "") -> list[Path]:
     return removed
 
 
+def _left_behind() -> str:
+    """What a person must run by hand to remove what is still installed."""
+    paths = [Path(p) for p in status()["paths"]]  # type: ignore[union-attr]
+    if sys.platform == "win32":
+        return _windows_task() if _windows_task_exists() else ""
+    if not paths:
+        return ""
+    return "sudo rm " + " ".join(f"'{p}'" for p in paths)
+
+
 def status() -> dict[str, object]:
     """Which mode, if any, is currently installed on this machine."""
     out: dict[str, object] = {"platform": sys.platform, "mode": "manual", "paths": []}
     checks = {
         "darwin": {"login": _mac_path("login"), "boot": _mac_path("boot")},
-        "win32": {"login": Path(os.environ.get("APPDATA", Path.home())) / "Microsoft"
-                  / "Windows" / "Start Menu" / "Programs" / "Startup" / f"{SERVICE}.cmd"},
+        "win32": {"login": _windows_startup()},
     }.get(sys.platform, {
         "login": Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
         "boot": Path("/etc/systemd/system") / f"{SERVICE}.service",
@@ -255,4 +288,7 @@ def status() -> dict[str, object]:
         if path.exists():
             out["mode"] = mode
             out["paths"].append(str(path))       # type: ignore[union-attr]
+    if sys.platform == "win32" and _windows_task_exists():
+        out["mode"] = "boot"
+        out["paths"].append(LABEL)               # type: ignore[union-attr]
     return out
