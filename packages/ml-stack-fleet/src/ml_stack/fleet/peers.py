@@ -22,6 +22,7 @@ from .discovery import (
     create_cluster_key,
     derive_token,
     discover,
+    cluster_group,
     join_cluster,
     key_path,
     load_cluster_key,
@@ -70,7 +71,9 @@ def cmd_setup(args: argparse.Namespace) -> int:
     p = key_path(args.cluster_key)
 
     if p.exists() and not args.force:
-        print(f"This machine is already in a cluster (key at {p}).")
+        current = cluster_group(args.cluster_key)
+        where = f" '{current}'" if current else ""
+        print(f"This machine is already in cluster{where} (key at {p}).")
         print("Run 'ml-stack-peers ls' to see who else is in it,")
         print("or 'ml-stack-peers setup --force' to join a different one.")
         return 0

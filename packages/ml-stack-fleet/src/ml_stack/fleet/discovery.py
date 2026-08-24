@@ -166,6 +166,28 @@ def key_from_passphrase(passphrase: str, *, group: str = "ml-stack") -> bytes:
     return base64.urlsafe_b64encode(raw).rstrip(b"=")
 
 
+def group_path(path: Path | str | None = None) -> Path:
+    """Where the group name is recorded, beside the key."""
+    return key_path(path).with_suffix(".group")
+
+
+def cluster_group(path: Path | str | None = None) -> str | None:
+    """Which cluster this machine joined, or None.
+
+    Recorded because the group is load-bearing in the derivation -- ``_salt_for`` mixes
+    it in -- so without it a daemon cannot check a passphrase someone types: it does not
+    know which salt the words were stretched with. It also means nothing can tell you
+    which cluster a box is in, and ``setup --force`` cannot say what you are leaving.
+
+    Not a secret. It is the *passphrase* that protects the cluster; the group name only
+    separates two of them that chose the same words.
+    """
+    p = group_path(path)
+    if not p.exists():
+        return None
+    return p.read_text().strip() or None
+
+
 def join_cluster(passphrase: str, *, group: str = "ml-stack",
                  path: Path | str | None = None, overwrite: bool = True) -> bytes:
     """Derive the key from a passphrase and write it here. Returns the key.
@@ -181,7 +203,32 @@ def join_cluster(passphrase: str, *, group: str = "ml-stack",
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(key.decode() + "\n")
     p.chmod(0o600)
+    # Written after the key, and 0644: a reader that finds a group but no key has
+    # learned nothing, whereas a key with no group is a box whose passphrase can never
+    # be checked again.
+    gp = group_path(path)
+    gp.write_text(group + "\n")
+    gp.chmod(0o644)
     return key
+
+
+def check_passphrase(passphrase: str, *, group: str | None = None,
+                     path: Path | str | None = None) -> bool:
+    """Whether these words derive the key this machine already holds.
+
+    This is what lets someone log in by typing the passphrase instead of pasting a
+    43-character token -- the daemon re-derives and compares, so the words are verified
+    without ever being stored.
+    """
+    key = load_cluster_key(path)
+    if key is None:
+        return False
+    group = group if group is not None else (cluster_group(path) or "ml-stack")
+    try:
+        candidate = key_from_passphrase(passphrase, group=group)
+    except DiscoveryError:
+        return False
+    return hmac.compare_digest(candidate, key)
 
 
 def in_cluster(path: Path | str | None = None) -> bool:

@@ -418,3 +418,56 @@ def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, t
 
     assert we_see == {"ours"}, f"our group can see into theirs: {we_see}"
     assert they_see == {"theirs"}, f"their group can see into ours: {they_see}"
+
+
+class TestTheGroupIsRemembered:
+    """The group is load-bearing in the derivation, so a box that forgot it cannot check
+    a passphrase anyone types -- it does not know which salt the words were stretched
+    with. It also could not say which cluster it was in."""
+
+    def test_joining_records_which_cluster_it_joined(self, tmp_path):
+        from ml_stack.fleet.discovery import cluster_group, join_cluster
+
+        join_cluster("correct horse battery", group="garage",
+                     path=tmp_path / "cluster.key")
+        assert cluster_group(tmp_path / "cluster.key") == "garage"
+
+    def test_the_group_is_readable_but_the_key_is_not(self, tmp_path):
+        """The passphrase protects the cluster; the group only separates two of them
+        that chose the same words."""
+        from ml_stack.fleet.discovery import group_path, join_cluster
+
+        keyfile = tmp_path / "cluster.key"
+        join_cluster("correct horse battery", group="garage", path=keyfile)
+
+        assert keyfile.stat().st_mode & 0o077 == 0
+        assert group_path(keyfile).stat().st_mode & 0o004
+
+    def test_a_machine_never_joined_is_in_no_group(self, tmp_path):
+        from ml_stack.fleet.discovery import cluster_group
+
+        assert cluster_group(tmp_path / "nothing.key") is None
+
+    def test_the_right_words_verify_against_the_stored_key(self, tmp_path):
+        """What lets someone log in by typing the passphrase rather than pasting a
+        43-character token: re-derive and compare, storing nothing."""
+        from ml_stack.fleet.discovery import check_passphrase, join_cluster
+
+        keyfile = tmp_path / "cluster.key"
+        join_cluster("correct horse battery", group="garage", path=keyfile)
+
+        assert check_passphrase("correct horse battery", path=keyfile)
+        assert not check_passphrase("wrong words entirely", path=keyfile)
+
+    def test_the_right_words_in_the_wrong_group_do_not_verify(self, tmp_path):
+        from ml_stack.fleet.discovery import check_passphrase, join_cluster
+
+        keyfile = tmp_path / "cluster.key"
+        join_cluster("correct horse battery", group="garage", path=keyfile)
+
+        assert not check_passphrase("correct horse battery", group="lab", path=keyfile)
+
+    def test_a_machine_in_no_cluster_verifies_nothing(self, tmp_path):
+        from ml_stack.fleet.discovery import check_passphrase
+
+        assert not check_passphrase("correct horse battery", path=tmp_path / "no.key")
