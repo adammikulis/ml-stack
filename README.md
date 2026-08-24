@@ -7,6 +7,36 @@ The packages are small and separately installable, so a project takes only what 
 A voice assistant on a single-board computer should not have to install PyTorch to say a
 sentence, and a training script should not have to reimplement checkpoint rotation.
 
+## Installing
+
+**If you just want to use it**, download the file for your machine from the
+[latest release](../../releases/latest) and open it. It starts, opens your browser, and
+asks you what to call the machine and what passphrase to use. Nothing else to set up.
+
+| | |
+|---|---|
+| macOS | `ml-stack-macos-arm64.zip` (Apple silicon) or `ml-stack-macos-x86_64.zip` (Intel) |
+| Windows | `ml-stack-windows-x86_64.zip` |
+| Linux | `ml-stack-linux-x86_64.zip` |
+
+Do the same on every machine you want to train with, typing the same passphrase. They
+find each other on their own.
+
+**If you write Python**, install only the parts you need:
+
+```
+pip install ml-stack-fleet      # find and drive the other machines. No dependencies.
+pip install ml-stack-train      # the training loop, checkpoints, recipes
+pip install ml-stack-serve      # start and adopt model servers
+```
+
+Building from source needs `pip install build`, then:
+
+```
+python packaging/build.py            # wheels into dist/
+python packaging/build.py --bundle   # and a standalone app for this platform
+```
+
 ## Packages
 
 | Package | What it is |

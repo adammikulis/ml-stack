@@ -923,7 +923,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     elif key is None:
         print(f"  token {token}")
         print(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
-        print("  run 'ml-stack-peers setup' to join one")
+        if interface is None:
+            print("  run 'ml-stack-peers setup' to join one")
     print(f"  device {json.dumps(report())}")
     if slots > 1:
         print(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "

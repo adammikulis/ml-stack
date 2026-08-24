@@ -3,6 +3,7 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "--strict-markers"
+markers = ["slow: builds a wheel; skipped with -m 'not slow'"]
 
 [tool.ruff]
 line-length = 100

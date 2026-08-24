@@ -6,3 +6,7 @@ dist/
 .venv/
 .pytest_cache/
 *.part
+.build-venv/
+.build-work/
+packaging/build/
+*.spec.bak

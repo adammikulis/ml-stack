@@ -1,0 +1,84 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python packaging/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: dist/*.whl
+
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            asset: ml-stack-macos-arm64
+          - os: macos-13
+            asset: ml-stack-macos-x86_64
+          - os: ubuntu-latest
+            asset: ml-stack-linux-x86_64
+          - os: windows-latest
+            asset: ml-stack-windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build
+      - run: python packaging/build.py --bundle
+
+      # The bundle has to run on a machine with no Python and no source tree.
+      - name: it starts and serves the interface
+        shell: bash
+        run: |
+          BIN=$(find dist/bundle -maxdepth 3 -name 'ml-stack' -type f -perm -u+x | head -1)
+          "$BIN" --port 8899 --no-browser &
+          for _ in $(seq 1 40); do
+            curl -sf http://127.0.0.1:8899/health >/dev/null && break || sleep 1
+          done
+          curl -sf http://127.0.0.1:8899/health
+          curl -sf -o /dev/null -w 'ui %{http_code}\n' http://127.0.0.1:8899/ui/
+          curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/app.js
+
+      - name: package it
+        shell: bash
+        run: |
+          cd dist/bundle
+          if [ -d ml-stack.app ]; then
+            zip -qry "../${{ matrix.asset }}.zip" ml-stack.app
+          else
+            zip -qry "../${{ matrix.asset }}.zip" ml-stack
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: dist/${{ matrix.asset }}.zip
+
+  publish:
+    needs: [wheels, bundle]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true
