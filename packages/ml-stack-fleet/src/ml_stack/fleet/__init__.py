@@ -46,9 +46,13 @@ from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
+    MIN_PASSPHRASE,
     create_cluster_key,
     derive_token,
     discover,
+    in_cluster,
+    join_cluster,
+    key_from_passphrase,
     key_path,
     load_cluster_key,
 )
@@ -68,6 +72,7 @@ from ml_stack.fleet.work import Placement, Unit, run
 
 __all__ = [
     "BENCH_KIND",
+    "MIN_PASSPHRASE",
     "REPORT_GROUP",
     "Advertiser",
     "Beacon",
@@ -91,6 +96,9 @@ __all__ = [
     "device_report",
     "discover",
     "eligible",
+    "in_cluster",
+    "join_cluster",
+    "key_from_passphrase",
     "key_path",
     "load_cluster_key",
     "load_or_create_token",

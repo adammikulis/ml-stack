@@ -44,6 +44,7 @@ proved it holds the key actually is.
 from __future__ import annotations
 
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -111,6 +112,81 @@ def create_cluster_key(path: Path | str | None = None, *,
     p.write_text(key + "\n")
     p.chmod(0o600)
     return key
+
+
+# -- joining by password -------------------------------------------------
+MIN_PASSPHRASE = 8
+"""Shortest passphrase accepted. Low, because a refusal people work around by typing
+"password1" is worse than the length it enforced -- the real defence is the KDF cost
+below and the fact that this is a LAN, not the internet."""
+
+SCRYPT_N = 1 << 16
+SCRYPT_R = 8
+SCRYPT_P = 1
+"""~80ms and 64MB on a laptop, a second or two on a Pi. Paid once, at join time: the
+daemon derives its bearer token from the *key*, not the passphrase, so nothing on the
+hot path pays this again.
+
+The cost is the whole point. A passphrase someone can type is far weaker than 32 random
+bytes, and a beacon on the wire is a verifiable target -- anyone on this LAN can capture
+one and grind guesses against it offline. scrypt makes each guess expensive in time and
+in memory, which is what turns "a word and two digits" from instantly broken into merely
+weak."""
+
+
+def _salt_for(group: str) -> bytes:
+    """Deterministic, because both machines have to derive the same key from the same
+    words, and they have nothing to exchange first. That is the trade a random salt
+    would break, and it is why the group name matters: it is the only thing separating
+    two households that both chose "letmein"."""
+    return sha256(b"ml-stack-cluster-v1:" + group.encode()).digest()
+
+
+def key_from_passphrase(passphrase: str, *, group: str = "ml-stack") -> bytes:
+    """The cluster key two machines derive from the same words.
+
+    This is what makes joining a cluster something a person can do: type the same
+    passphrase on each box and they find each other. Different passphrase, or different
+    group, means a different key -- so several clusters share one LAN without seeing
+    each other, and no configuration says so. Beacons are signed with this key and a
+    beacon that will not verify is simply not answered, so the isolation is the same
+    mechanism that keeps a stranger out.
+    """
+    passphrase = passphrase.strip()
+    if len(passphrase) < MIN_PASSPHRASE:
+        raise DiscoveryError(
+            f"passphrase must be at least {MIN_PASSPHRASE} characters -- everyone on "
+            "this network can hear the beacons and grind guesses against them offline")
+    # maxmem is not a tuning knob: OpenSSL refuses above 32MB by default and these
+    # parameters need exactly that, so leaving it out fails on some builds and not
+    # others -- which would look like a corrupt passphrase rather than a library limit.
+    raw = hashlib.scrypt(passphrase.encode("utf-8"), salt=_salt_for(group),
+                         n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P, dklen=32,
+                         maxmem=2 * 128 * SCRYPT_N * SCRYPT_R)
+    return base64.urlsafe_b64encode(raw).rstrip(b"=")
+
+
+def join_cluster(passphrase: str, *, group: str = "ml-stack",
+                 path: Path | str | None = None, overwrite: bool = True) -> bytes:
+    """Derive the key from a passphrase and write it here. Returns the key.
+
+    ``overwrite`` defaults True, unlike ``create_cluster_key``: someone typing a
+    passphrase has said which cluster they mean, and silently keeping an old key would
+    leave the box in a cluster the person just told it to leave.
+    """
+    key = key_from_passphrase(passphrase, group=group)
+    p = key_path(path)
+    if p.exists() and not overwrite:
+        return load_cluster_key(p) or key
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(key.decode() + "\n")
+    p.chmod(0o600)
+    return key
+
+
+def in_cluster(path: Path | str | None = None) -> bool:
+    """Whether this machine has joined one. The question a setup wizard opens with."""
+    return load_cluster_key(path) is not None
 
 
 def load_cluster_key(path: Path | str | None = None) -> bytes | None:

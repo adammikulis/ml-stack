@@ -343,3 +343,78 @@ def test_a_beacon_from_an_older_daemon_still_reads_as_one_free_slot(key, port):
                      free=int(payload["free"]) if "free" in payload
                      else (0 if payload.get("busy") else 1))
     assert revived.free == 1
+
+
+# -- joining with a passphrase -------------------------------------------
+class TestPassphrase:
+    """Joining has to be something a person can do. The old story was "generate 32
+    random bytes, then paste this shell fragment on every machine", which is a thing
+    nobody who is not already a developer will get through."""
+
+    WORDS = "correct horse battery staple"
+
+    def test_the_same_words_give_the_same_key(self):
+        from ml_stack.fleet.discovery import key_from_passphrase
+
+        assert key_from_passphrase(self.WORDS) == key_from_passphrase(self.WORDS)
+
+    def test_surrounding_whitespace_does_not_make_a_different_cluster(self):
+        """Someone pastes the passphrase and picks up a trailing space. Failing on that
+        produces a cluster of one, which looks exactly like a network problem."""
+        from ml_stack.fleet.discovery import key_from_passphrase
+
+        assert key_from_passphrase(f"  {self.WORDS}\n") == key_from_passphrase(self.WORDS)
+
+    def test_different_words_give_a_different_key(self):
+        from ml_stack.fleet.discovery import key_from_passphrase
+
+        assert key_from_passphrase(self.WORDS) != key_from_passphrase("something else")
+
+    def test_the_group_name_separates_two_households_that_chose_the_same_words(self):
+        from ml_stack.fleet.discovery import key_from_passphrase
+
+        assert (key_from_passphrase(self.WORDS, group="home")
+                != key_from_passphrase(self.WORDS, group="lab"))
+
+    @pytest.mark.parametrize("bad", ["", "short", "1234567"])
+    def test_a_passphrase_too_short_to_survive_guessing_is_refused(self, bad):
+        from ml_stack.fleet.discovery import key_from_passphrase
+
+        with pytest.raises(DiscoveryError, match="at least"):
+            key_from_passphrase(bad)
+
+    def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):
+        from ml_stack.fleet.discovery import join_cluster
+
+        keyfile = tmp_path / "cluster.key"
+        join_cluster(self.WORDS, path=keyfile)
+
+        assert keyfile.stat().st_mode & 0o077 == 0
+        assert load_cluster_key(keyfile) == join_cluster(self.WORDS, path=keyfile)
+
+    def test_a_derived_key_drives_a_real_daemon(self, tmp_path):
+        """The point of deriving rather than minting: the bearer token both ends compute
+        has to come out the same, or the passphrase bought nothing."""
+        from ml_stack.fleet.discovery import join_cluster
+
+        here = join_cluster(self.WORDS, path=tmp_path / "a.key")
+        there = join_cluster(self.WORDS, path=tmp_path / "b.key")
+        assert derive_token(here) == derive_token(there)
+
+
+def test_two_passphrase_groups_share_a_network_without_seeing_each_other(port, tmp_path):
+    """Several clusters on one LAN, separated by nothing but the words people typed.
+    The isolation is the same mechanism that keeps a stranger out: a beacon signed with
+    another key does not verify, so it is never answered."""
+    from ml_stack.fleet.discovery import join_cluster
+
+    ours = join_cluster("correct horse battery staple", path=tmp_path / "ours.key")
+    theirs = join_cluster("a completely different phrase", path=tmp_path / "theirs.key")
+
+    with Advertiser(Beacon(name="ours", port=8770), ours, port=port, interval_s=0.2), \
+         Advertiser(Beacon(name="theirs", port=8771), theirs, port=port, interval_s=0.2):
+        we_see = {b.name for b in discover(ours, timeout_s=2.0, port=port)}
+        they_see = {b.name for b in discover(theirs, timeout_s=2.0, port=port)}
+
+    assert we_see == {"ours"}, f"our group can see into theirs: {we_see}"
+    assert they_see == {"theirs"}, f"their group can see into ours: {they_see}"

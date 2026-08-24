@@ -66,11 +66,21 @@ Training happens on whatever box has the card, which is usually not the one you 
 working on. `ml-stack-fleet` is how you reach it, and it is standard library only --
 the laptop you drive the fleet from needs no CUDA, no MLX and no training stack.
 
-Mint a key once, and copy it to every machine that should join:
+Run this on every machine, and type the same passphrase into each:
 
 ```
-ml-stack-peers init          # prints the one-line command to run elsewhere
+ml-stack-peers setup
 ```
+
+That is the whole join story. Machines that derived their key from the same words find
+each other; machines that did not are invisible to each other, so several groups share a
+network without any of them being configured to. There is no key to copy and no address
+to write down anywhere.
+
+Anyone who knows the passphrase can run commands on every machine in the group, so it is
+closer to the password to your house than to a wifi password. It is stretched with scrypt
+before it becomes a key, because everyone on the network can hear the beacons and grind
+guesses against them offline.
 
 Then run the daemon on each box, telling it what it is:
 
