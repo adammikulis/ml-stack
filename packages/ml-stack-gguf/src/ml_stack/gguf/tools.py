@@ -1,9 +1,4 @@
-"""Finding llama.cpp's converter and quantiser.
-
-The converter is a Python script that ships only with the llama.cpp *source*; the
-quantiser is a binary that ships with a release build or a package manager. They are
-therefore found in different places, and this module keeps one candidate list for each.
-"""
+"""Finding llama.cpp's converter and quantiser."""
 
 from __future__ import annotations
 
@@ -19,16 +14,10 @@ LLAMA_CPP_SRC = CACHE_ROOT / "llama.cpp-src"
 
 CONVERTER_NAME = "convert_hf_to_gguf.py"
 
-#: Where a llama.cpp *source checkout* might be. The converter is a Python script and
-#: ships only with the source, never with a release binary or a brew install.
 SOURCE_DIRS = (
     LLAMA_CPP_SRC,
     Path.home() / ".local" / "opt" / "llama.cpp-src",
     Path.home() / "llama.cpp",
-    # unsloth vendors a llama.cpp checkout here as part of its own install, so
-    # this is a copy many machines already have without having chosen to. It is
-    # a source checkout, which is the only kind that carries the converter --
-    # brew and the release binaries do not ship it.
     Path.home() / ".unsloth" / "llama.cpp",
     Path("/opt/homebrew/share/llama.cpp"),
     Path("/usr/local/share/llama.cpp"),
@@ -42,10 +31,7 @@ class ToolNotFound(RuntimeError):
 
 
 def find_converter(explicit: str | Path | None = None) -> Path | None:
-    """Locate ``convert_hf_to_gguf.py``. ``None`` if it is nowhere.
-
-    Order: ``explicit``, ``$LLAMA_CPP_ROOT``, ``$LLAMA_CPP_DIR``, then ``SOURCE_DIRS``.
-    """
+    """Locate ``convert_hf_to_gguf.py``. ``None`` if it is nowhere."""
     if explicit:
         path = Path(explicit).expanduser()
         if path.is_file():
@@ -81,11 +67,7 @@ def require_converter(explicit: str | Path | None = None) -> Path:
 
 
 def ensure_converter(*, ref: str = "master") -> Path:
-    """Locate the converter, shallow-cloning llama.cpp into the cache if it is absent.
-
-    Explicit rather than automatic inside ``convert``: a multi-hundred-megabyte clone is
-    not something an export should start without the caller having asked for it.
-    """
+    """Locate the converter, shallow-cloning llama.cpp into the cache if it is absent."""
     if found := find_converter():
         return found
 

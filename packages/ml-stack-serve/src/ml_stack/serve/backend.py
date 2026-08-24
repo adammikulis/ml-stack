@@ -1,13 +1,4 @@
-"""Launching a model server, and the shape every backend presents.
-
-``ServerBackend`` is an ABC so other runtimes (vLLM, SGLang) can be added without
-reshaping the caller. Only llama.cpp is implemented here.
-
-The health wait is ``ml_stack.client.wait_for_health`` with an ``is_alive`` predicate, which
-is how the process-death watch reaches this tier without the client tier importing
-``subprocess``: a bad model path makes the server exit in under a second, and polling a
-dead port for two minutes turns "no such file" into "timed out".
-"""
+"""Launching a model server, and the shape every backend presents."""
 
 from __future__ import annotations
 
@@ -58,11 +49,7 @@ class ServerInfo:
     pid: int | None
     backend: str
     adopted: bool = False
-    """True when this server was already running and we did not start it.
-
-    Terminate only what you launched: tearing down an adopted server kills something
-    another process may be mid-request against.
-    """
+    """True when this server was already running and we did not start it."""
     log_path: Path | None = field(default=None, repr=False)
 
 
@@ -77,8 +64,7 @@ class ServerBackend(ABC):
 
     @abstractmethod
     def command(self, spec: ServerSpec) -> list[str]:
-        """The argv this backend would run. Separate from ``start`` so it is testable
-        without launching anything."""
+        """The argv this backend would run. Separate from ``start`` so it is testable"""
 
 
 class LlamaServerBackend(ServerBackend):
@@ -102,18 +88,10 @@ class LlamaServerBackend(ServerBackend):
         return require_binary("llama-server", explicit=self._explicit, vendor_dir=self._vendor_dir)
 
     def command(self, spec: ServerSpec) -> list[str]:
-        """Build the argv.
-
-        Long flags throughout (``--host``, ``--port``), never the short forms: modern
-        llama-server reads ``-a`` as ``--alias``, so a stale short flag is a silent
-        misconfiguration rather than an error.
-        """
+        """Build the argv."""
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
 
         if spec.is_hf_ref:
-            # `hf:owner/repo[/file.gguf]` -> --hf-repo owner/repo [--hf-file file.gguf].
-            # The download and its caching are llama-server's own; duplicating them here
-            # is how a machine ends up with two model caches on one disk.
             _, _, ref = str(spec.model).partition("hf:")
             parts = [p for p in ref.split("/") if p]
             if len(parts) < 2:
@@ -152,9 +130,6 @@ class LlamaServerBackend(ServerBackend):
         if not spec.is_hf_ref:
             model = Path(spec.model)
             if not model.is_file():
-                # Checked here rather than left to the server: llama-server exits in
-                # under a second on a bad path, and the resulting "did not become
-                # healthy" message sends the reader looking for a slow load.
                 raise ServerFailed(f"no model file at {model}")
 
         if not port_is_free(spec.port):
@@ -207,11 +182,7 @@ class LlamaServerBackend(ServerBackend):
 
 
 def tail(path: Path, lines: int = 40) -> str:
-    """The last ``lines`` of a log file, for an error message.
-
-    A start failure with no log tail is unactionable: the caller sees "did not become
-    healthy" and has to go find the file themselves.
-    """
+    """The last ``lines`` of a log file, for an error message."""
     try:
         content = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except OSError:

@@ -1,27 +1,4 @@
-"""Choosing which peer runs a piece of work, and saying why when none can.
-
-``Peer.find_one`` refuses to pick between two matching peers on purpose: interactively,
-"several match" means the human has not said what they meant. This module is the other
-entry point, where "several" is the input rather than the problem. It does not relax
-that rule; it sits beside it.
-
-Three things shape everything here.
-
-**Eligibility is a separate step from scoring.** A ``-inf`` score used as a filter throws
-away the reason, and then "nothing ran" is a hang with no explanation. ``eligible``
-returns what was kept *and* why each of the rest was dropped, so an unplaceable unit
-fails immediately with the whole picture.
-
-**Speed is measured, never assumed.** There is no table saying a 4090 beats a Pi; it
-would be wrong within a year, and it is the wrong instinct in a codebase whose contracts
-package refuses to demote a model on ignorance. Rates come from jobs that actually ran.
-
-**An unmeasured peer is not a slow peer.** A missing measurement is not evidence -- the
-same rule ``fits()`` follows. An unmeasured peer scores at the median of the measured
-ones and is given an explore allowance, so a box that has never run anything still gets
-work while a known-fast box is busy. Score it as slow instead and the first peer ever
-measured wins forever, because nothing else is ever tried.
-"""
+"""Choosing which peer runs a piece of work, and saying why when none can."""
 
 from __future__ import annotations
 
@@ -41,12 +18,7 @@ Score = Callable[["Candidate", float], float]
 
 @dataclass(frozen=True, slots=True)
 class Requires:
-    """What a piece of work needs from a machine, and what it must not take.
-
-    Measured constraints (``backend``, ``min_vram_gb``) and declared ones (``labels``)
-    compose deliberately: a box can *prove* it has CUDA, but it cannot prove it is meant
-    for data prep, so that half has to be declared with ``traind --label``.
-    """
+    """What a piece of work needs from a machine, and what it must not take."""
 
     backend: str = ""
     labels: tuple[str, ...] = ()
@@ -56,8 +28,7 @@ class Requires:
     min_ram_gb: float = 0.0
     min_cpus: int = 0
     exclusive: bool = False
-    """Take the whole box. Advisory: it refuses a peer that is not entirely free, but two
-    coordinators can still collide -- ``--slots`` is the only real enforcement."""
+    """Take the whole box. Advisory: it refuses a peer that is not entirely free, but two"""
 
     def why_not(self, peer_name: str, report: Mapping[str, Any],
                 free: int, slots: int) -> str:
@@ -76,10 +47,6 @@ class Requires:
         if self.backend:
             backends = report.get("backends") or []
             if not (report.get(self.backend) or self.backend in backends):
-                # Named separately from the vendor keys on purpose. torch's HIP build
-                # answers True to every CUDA question, so a box with a Radeon would
-                # satisfy backend="cuda" and only reveal itself inside the job. "cuda",
-                # "rocm" and "accelerator" are three different questions.
                 have = sorted(backends) or "no backends"
                 extra = ""
                 if self.backend == "cuda" and report.get("rocm"):
@@ -95,8 +62,6 @@ class Requires:
                 continue
             have = report.get(key)
             if have is None:
-                # Unmeasured is not "too small". Refusing here would exclude every box
-                # running the stdlib-only probe, which is most of them.
                 continue
             if have < need:
                 return f"has {have} {unit}, needs {need}"
@@ -104,10 +69,6 @@ class Requires:
         if self.exclusive and free < slots:
             return f"is not idle ({free}/{slots} free) and this work wants the whole box"
 
-        # Last, and reported rather than silently skipped. A box that is somebody's desk
-        # between nine and five is not misconfigured and not broken -- it is unavailable
-        # for a stated reason and at a knowable time, and "nothing could run this" is a
-        # far worse thing to read than "the AMD box is in use until 17:00".
         schedule = report.get("availability") or {}
         if schedule and not schedule.get("available", True):
             return schedule.get("unavailable_because") or "is not taking work right now"
@@ -129,12 +90,9 @@ class Candidate:
     free: int = 0
     queued: int = 0
     rate: float | None = None
-    """Measured units/second for this kind of work. ``None`` means never measured, which
-    is not the same as slow."""
+    """Measured units/second for this kind of work. ``None`` means never measured, which"""
     bench: float | None = None
-    """This peer's join-time benchmark score, if it has one. A proxy for real work and
-    never a substitute for ``rate`` -- but it is a *measurement*, so it orders peers that
-    have not yet run this kind of work far better than picking among them arbitrarily."""
+    """This peer's join-time benchmark score, if it has one. A proxy for real work and"""
     transfer_gb: float = 0.0
     """Bytes this unit would have to fetch to run here, in GB."""
 
@@ -143,12 +101,7 @@ def candidates(peers: Sequence[Peer], *, kind: str = "",
                rates: Mapping[tuple[str, str], float] | None = None,
                bench: Mapping[str, float] | None = None,
                held: Callable[[Peer], float] | None = None) -> list[Candidate]:
-    """Ask every peer what it looks like now. Unreachable peers drop out silently.
-
-    Deliberately live rather than reading the beacon: a beacon is up to one announcement
-    interval stale, and the gap between "was idle when it last announced" and "is idle"
-    is exactly the window two coordinators race in.
-    """
+    """Ask every peer what it looks like now. Unreachable peers drop out silently."""
     out: list[Candidate] = []
     for peer in peers:
         try:
@@ -183,18 +136,7 @@ def eligible(cands: Sequence[Candidate],
 
 def soonest(work: float = 1.0, *, link_gbps: float = 1.0,
             queue_penalty_s: float = 60.0) -> "Score":
-    """Score by estimated seconds until this unit is *finished* here. Lower is better.
-
-    Transfer is part of the estimate rather than a tiebreak: a slower box that already
-    holds the shard usually beats a faster one that has to fetch two gigabytes first,
-    and a score that ignores that will keep choosing the fast idle box and keep waiting
-    on the network.
-
-    ``typical`` is what an unmeasured peer is scored at, and the caller supplies it --
-    the median of the peers that *have* been measured. Scoring an unmeasured peer as
-    slow would mean the first peer ever measured wins forever, because nothing else
-    would ever be tried.
-    """
+    """Score by estimated seconds until this unit is *finished* here. Lower is better."""
     def score(c: Candidate, typical: float) -> float:
         rate = c.rate or typical
         run_s = work / rate if rate > 0 else work
@@ -207,22 +149,13 @@ def soonest(work: float = 1.0, *, link_gbps: float = 1.0,
 
 def choose(cands: Sequence[Candidate], *, score: "Score | None" = None,
            explore: bool = True) -> Candidate | None:
-    """The peer to use, or ``None`` when every one of them is full.
-
-    With ``explore``, an unmeasured peer holding a free slot wins outright. That is the
-    "a missing measurement is not evidence" rule made operational: the only way a peer
-    stops being unmeasured is by being given something to do.
-    """
+    """The peer to use, or ``None`` when every one of them is full."""
     free = [c for c in cands if c.free > 0]
     if not free:
         return None
     if explore:
         unmeasured = [c for c in free if c.rate is None]
         if unmeasured:
-            # Among peers with nothing measured for THIS kind of work, prefer the one
-            # the join-time benchmark liked most, then the one with the most capacity.
-            # An unbenchmarked peer still sorts ahead of a slow benchmarked one, because
-            # "not measured" must not quietly become "measured badly".
             return max(unmeasured,
                        key=lambda c: (c.bench if c.bench is not None else float("inf"),
                                       c.free))

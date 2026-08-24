@@ -1,13 +1,4 @@
-"""Fetch a model asset to disk, once, safely.
-
-Model weights are large and the network is not reliable, so this does four things a
-plain ``urlretrieve`` does not: it lands the download in a ``.part`` file and moves it
-into place only after verification, it resumes an interrupted transfer via HTTP Range,
-it verifies size and digest, and it reports progress.
-
-Progress is a callback rather than a print, so a CLI bar and a server-sent event stream
-are both consumers rather than two forks of the download.
-"""
+"""Fetch a model asset to disk, once, safely."""
 
 from __future__ import annotations
 
@@ -82,15 +73,7 @@ def fetch(
     resume: bool = True,
     timeout: float = 60.0,
 ) -> Path:
-    """Download ``url`` to ``target``, returning the path. Idempotent.
-
-    An existing, verified ``target`` is returned untouched -- this is what makes it safe
-    to call on every startup, which is the usual way to use it.
-
-    The download lands in ``target.with_suffix(target.suffix + ".part")`` and is moved
-    into place with ``os.replace`` only after verification, so a killed process never
-    leaves a half-file that a later run mistakes for a complete one.
-    """
+    """Download ``url`` to ``target``, returning the path. Idempotent."""
     target = Path(target).expanduser()
     label = name or target.name
 
@@ -109,9 +92,6 @@ def fetch(
 
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            # A server that ignores Range answers 200 with the whole body; appending to
-            # the partial file would then produce a corrupt archive that only fails at
-            # decompression time. Detect it and start over instead.
             if start_at and response.status != 206:
                 start_at = 0
 
@@ -145,8 +125,6 @@ def fetch(
                 on_progress(Progress(label, downloaded, total, start_at))
 
     except urllib.error.HTTPError as exc:
-        # A stale .part against a changed file yields 416. Drop it and let the next call
-        # start clean rather than wedging forever.
         if exc.code == 416 and partial.exists():
             partial.unlink(missing_ok=True)
             raise DownloadError(
@@ -163,11 +141,7 @@ def fetch(
 
 
 def bar(width: int = 32) -> ProgressFn:
-    """A ``\\r`` progress bar, for a CLI.
-
-    Falls back to a plain byte count when the server sends no content-length, because a
-    bar with no denominator is worse than a number.
-    """
+    """A ``\r`` progress bar, for a CLI."""
     import sys
 
     def render(progress: Progress) -> None:

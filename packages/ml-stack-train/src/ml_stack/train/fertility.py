@@ -1,25 +1,4 @@
-"""How many tokens a language costs, and what a vocabulary costs to hold.
-
-The question this answers: can one tokenizer serve N languages inside a small
-model's parameter budget? It is decided by two numbers pulling against each
-other.
-
-**Fertility** -- bytes per token -- is how efficiently a vocabulary encodes a
-language. A vocabulary trained mostly on English spends more tokens per sentence
-of German, so German sequences are longer, so German costs more context and more
-compute for the same content. Adding languages without growing the vocabulary
-makes every language worse, not just the new ones.
-
-**Embedding cost** is the other side. At small scale the embedding matrix is a
-serious fraction of the model: at d=512 with tied embeddings, 32k vocab is 16.8M
-parameters, which against a 50M model is a third of it spent on lookup rather
-than on computation.
-
-So the honest way to choose a vocabulary size is to measure both and read them
-together, which is what `report_markdown` prints. Nothing here trains a
-tokenizer: pass any `encode` callable and it measures what that tokenizer
-actually does, which is the only thing that matters.
-"""
+"""How many tokens a language costs, and what a vocabulary costs to hold."""
 
 from __future__ import annotations
 
@@ -48,12 +27,7 @@ class Fertility:
 
 def measure(encode: Callable[[str], Sequence[int]],
             samples: Mapping[str, Sequence[str]], *, vocab: int) -> list[Fertility]:
-    """Fertility per language for one tokenizer.
-
-    Bytes are UTF-8 bytes, not characters. Characters would flatter any language
-    whose accented letters cost two bytes -- which is every language this is
-    usually used to compare.
-    """
+    """Fertility per language for one tokenizer."""
     out: list[Fertility] = []
     for lang, texts in samples.items():
         n_bytes = n_words = n_tokens = 0
@@ -76,13 +50,7 @@ def embedding_params(vocab: int, d_model: int, *, tied: bool = True) -> int:
 def report_markdown(rows: Sequence[Fertility], *, d_model: int,
                     non_embedding_params: int, tied: bool = True,
                     baseline_lang: str | None = None) -> str:
-    """A table meant to be READ before a training run, not filed after one.
-
-    The relative column is the one that decides things. Absolute fertility varies
-    with the sample; the RATIO between languages at the same vocabulary is what
-    says whether one language is being served worse than another, and it is
-    stable under sample size in a way the absolute number is not.
-    """
+    """A table meant to be READ before a training run, not filed after one."""
     if not rows:
         return "no measurements\n"
 

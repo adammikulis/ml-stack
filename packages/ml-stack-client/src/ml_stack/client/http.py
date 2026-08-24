@@ -1,13 +1,4 @@
-"""Stdlib HTTP for talking to a local model server.
-
-``urllib`` rather than httpx, deliberately: this package has to import on targets where
-adding a wheel is a build-system change.
-
-The retry policy covers one specific failure -- a local server answering 500 to a request
-that arrives while it is still loading, or while another request is mid-flight. Retrying
-a 500 from a *remote* API would be wrong; retrying it from a process you launched sixty
-seconds ago is not.
-"""
+"""Stdlib HTTP for talking to a local model server."""
 
 from __future__ import annotations
 
@@ -45,12 +36,7 @@ def request_json(
     backoff: float = 0.5,
     headers: dict[str, str] | None = None,
 ) -> Any:
-    """Send a JSON request and parse the JSON response.
-
-    ``tries > 1`` retries only on a connection failure or a retryable 5xx, with
-    multiplicative backoff capped at 2s.
-    A 4xx is never retried: the request itself is wrong and will stay wrong.
-    """
+    """Send a JSON request and parse the JSON response."""
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request_headers = {"Content-Type": "application/json"}
     if headers:
@@ -83,8 +69,6 @@ def request_json(
             last = ServerUnreachable(f"cannot reach {url} ({exc})")
 
         except json.JSONDecodeError as exc:
-            # Not retryable: a server returning non-JSON is misconfigured, and hammering
-            # it just delays the report.
             raise ServerError(f"{url} returned non-JSON: {exc}") from exc
 
         if attempt < tries - 1:

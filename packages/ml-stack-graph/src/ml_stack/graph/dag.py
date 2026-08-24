@@ -1,13 +1,4 @@
-"""Topological order, and the resolvent sweep it enables.
-
-On a DAG, ``(I - A)^-1 x`` -- the sum of contributions along every path -- can be computed
-in one forward sweep in topological order instead of by inverting a matrix. That is the
-useful thing here: an O(V+E) pass where the linear-algebra spelling is O(V^3).
-
-The topological order itself is a host-side computation on Python ints, so it is cached.
-Recomputing it means a device-to-host transfer of both edge arrays, and for a graph that
-is rebuilt every forward pass but keeps its shape, that transfer dominates.
-"""
+"""Topological order, and the resolvent sweep it enables."""
 
 from __future__ import annotations
 
@@ -31,11 +22,7 @@ def _edge_key(num_nodes: int, src: Tensor, dst: Tensor) -> tuple[int, int]:
 
 
 def topological_order(num_nodes: int, src: Tensor, dst: Tensor) -> list[int] | None:
-    """Kahn's algorithm. Returns ``None`` if the graph has a cycle.
-
-    ``None`` rather than raising, because callers routinely want to *ask* whether a graph
-    is a DAG and take a different path if not; that is a question, not an error.
-    """
+    """Kahn's algorithm. Returns ``None`` if the graph has a cycle."""
     key = _edge_key(num_nodes, src, dst)
     if key in _TOPO_CACHE:
         _TOPO_CACHE.move_to_end(key)
@@ -86,14 +73,7 @@ def resolvent_sweep(
     x: Tensor,
     order: list[int] | None = None,
 ) -> Tensor:
-    """``y = (I - A)^-1 x`` in one topological pass. ``x`` is ``(num_nodes, d)``.
-
-    ``y[u] = x[u] + sum over parents p of  w(p->u) * y[p]``
-
-    Building the result as a list of rows and stacking once at the end, rather than
-    writing into ``y`` in place: an in-place write into a tensor that is also an input
-    corrupts the autograd graph, and on an immutable array type it does not work at all.
-    """
+    """``y = (I - A)^-1 x`` in one topological pass. ``x`` is ``(num_nodes, d)``."""
     ops = backend.ops
     order = order if order is not None else require_topological_order(graph)
 
@@ -121,13 +101,7 @@ def decompose_to_dags(
     *,
     directions: int = 2,
 ) -> list[tuple[list[int], list[int]]]:
-    """Split an undirected graph into directed DAGs by BFS layering.
-
-    Two directions gives a BFS tree oriented root-to-leaves and its reverse; four adds a
-    second tree rooted at the farthest node reached by the first. This is what makes a
-    sequential scan applicable to a graph -- each DAG has a valid topological order, so a
-    recurrence can run over it.
-    """
+    """Split an undirected graph into directed DAGs by BFS layering."""
     n = int(num_nodes)
     sources = [int(v) for v in _to_list(src)]
     targets = [int(v) for v in _to_list(dst)]

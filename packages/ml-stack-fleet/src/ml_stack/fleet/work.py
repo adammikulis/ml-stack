@@ -1,28 +1,4 @@
-"""Spread a list of jobs over the peers that can run them.
-
-The daemon serialises jobs onto a device; this serialises units onto a peer. Same shape,
-one level up: one worker thread per peer, all pulling from a shared queue, each peer
-holding at most as many units as it has free slots.
-
-The failures this is shaped around, none of which are hypothetical on a home LAN:
-
-**A box whose card has fallen over accepts work and fails it in milliseconds.** Left
-alone it will drain the entire queue faster than the healthy boxes can take anything --
-every unit fails, on the fastest machine available, which is the one that is broken. So
-a peer that fails several units in a row is quarantined for a growing cooldown, and
-reported rather than silently dropped.
-
-**A unit that is simply wrong looks exactly like a peer that is broken.** Distinguished
-by counting *distinct* peers: a unit that has failed on several different machines is the
-unit's fault, and retrying it forever just moves the failure around.
-
-**Nothing eligible is not the same as nothing free.** A unit no peer can run must fail
-immediately, carrying every peer's reason, instead of waiting for capacity that would
-not help if it arrived.
-
-**Ctrl-C must not leave six machines training.** Everything outstanding is stopped on the
-way out -- SIGTERM, which a loop that checkpoints on TERM survives without losing work.
-"""
+"""Spread a list of jobs over the peers that can run them."""
 
 from __future__ import annotations
 
@@ -40,9 +16,7 @@ from .remote import Peer
 __all__ = ["Placement", "Unit", "run"]
 
 QUARANTINE_AFTER = 3
-"""Consecutive failures before a peer is set aside. Three, not one: a peer that fails
-one unit is probably looking at a bad unit, and taking a good box out of the fleet for
-that is the more expensive mistake."""
+"""Consecutive failures before a peer is set aside. Three, not one: a peer that fails"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,10 +67,7 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
         held: Callable[[Peer, Unit], float] | None = None,
         on_event: Callable[[str, dict[str, Any]], None] | None = None,
         ) -> list[Placement]:
-    """Run every unit on some peer, and report where each one went.
-
-    ``retries`` is how many *additional distinct peers* a failing unit may be tried on.
-    """
+    """Run every unit on some peer, and report where each one went."""
     if not peers:
         raise ValueError("no peers to run on")
 
@@ -124,15 +95,9 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
                 unit = by_id[uid]
                 if unit.peer and unit.peer != name:
                     continue
-                # Eligibility is decided once up front, but it has to be enforced HERE
-                # too: without this a worker happily takes any pending unit, and the
-                # labels that were supposed to keep prep off the training boxes decide
-                # nothing at all.
                 if name not in admits.get(uid, ()):
                     continue
                 if name in results[uid].tried and len(results[uid].tried) <= retries:
-                    # Prefer a peer that has not already failed this unit, but do not
-                    # strand the unit if this is the only peer that admits it.
                     if any(o != name for o in _admitting(uid)):
                         continue
                 pending.remove(uid)
@@ -148,8 +113,6 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
         while not stop.is_set():
             held_until = cooldown.get(name, 0.0)
             if held_until > time.time():
-                # Quarantined. Sleep rather than exit: the other peers may finish
-                # everything meanwhile, and if they do the loop below notices.
                 if all(results[u].state != "pending" for u in by_id):
                     return
                 time.sleep(min(1.0, held_until - time.time()))
@@ -195,8 +158,6 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             strikes[name] = strikes.get(name, 0) + 1
             emit("fail", unit=uid, peer=name, state=place.state, error=place.error)
             if strikes[name] >= QUARANTINE_AFTER:
-                # Growing, because a box that has failed six things in a row is not
-                # going to be fine in another thirty seconds.
                 wait = min(300.0, 30.0 * 2 ** (strikes[name] - QUARANTINE_AFTER))
                 cooldown[name] = time.time() + wait
                 emit("quarantine", peer=name, seconds=wait, strikes=strikes[name])
@@ -208,8 +169,6 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
             elif place.state == "pending":
                 place.state = "failed"
 
-    # Which peers admit which units, decided once against a live snapshot. This is also
-    # what makes "no peer can run this" an immediate answer rather than a wait.
     bench = {peer: score for (peer, k), score in rates.as_map().items()
              if k == BENCH_KIND}
     snapshot = candidates(peers, kind=kind, rates=rates.as_map(), bench=bench)
@@ -229,9 +188,6 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
                     pending.remove(unit.id)
             emit("unplaceable", unit=unit.id, reasons=refused)
 
-    # One worker per SLOT, not per peer: a box told it has eight is a box that should
-    # be running eight. One thread each would make --slots do nothing from here, which
-    # is the sort of gap that looks like the daemon ignoring its own flag.
     threads = [threading.Thread(target=worker, args=(c.peer, c.name), daemon=True,
                                 name=f"fanout-{c.name}-{i}")
                for c in snapshot for i in range(max(1, c.slots))]
@@ -241,8 +197,6 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
         for t in threads:
             t.join()
     except BaseException:
-        # Ctrl-C, or anything else. Stop what is running before unwinding: a fan-out
-        # that leaves six boxes training is worse than one that never started.
         stop.set()
         with lock:
             outstanding = list(live.items())

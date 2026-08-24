@@ -1,21 +1,4 @@
-"""Speech recognition, synthesis and voice activity, behind three protocols.
-
-Host tier. The engines are optional extras -- install what you need.
-
-One registry serves all three modalities, and its auto-detection *starts* each candidate
-rather than merely constructing it:
-
-    from ml_stack.speech import ASR, TTS, FasterWhisperASR, SystemTTS
-
-    ASR.register("faster-whisper", lambda: FasterWhisperASR("small.en"))
-    TTS.register("system", SystemTTS)
-
-    text = ASR.resolve().transcribe("voice-note.ogg").text
-    audio = TTS.resolve().synthesize("ready").to_wav()
-
-Constructing a provider proves nothing: the weights load in ``start()``, which is where a
-missing model, a blocked download or a wheel built for another architecture shows up.
-"""
+"""Speech recognition, synthesis and voice activity, behind three protocols."""
 
 from __future__ import annotations
 
@@ -49,9 +32,6 @@ ASR: Registry = Registry(kind="asr")
 TTS: Registry = Registry(kind="tts")
 VAD: Registry = Registry(kind="vad")
 
-# The two that need no configuration are registered up front, so a fresh install has a
-# working fallback before the caller has decided anything. Both are last-resort quality;
-# anything registered later goes ahead of them only if the caller says `prefer=True`.
 VAD.register("energy", EnergyVAD)
 TTS.register("system", SystemTTS)
 

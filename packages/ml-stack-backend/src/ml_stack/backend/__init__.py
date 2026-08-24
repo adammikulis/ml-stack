@@ -1,17 +1,4 @@
-"""One array API over MLX and PyTorch, so model math is written once.
-
-Lab tier: needs MLX or PyTorch.
-
-Write shared math against ``ArrayOps`` and take an ``ArrayBackend`` as a parameter:
-
-    def rms_norm(backend, x, weight, eps=1e-6):
-        ops = backend.ops
-        scale = ops.rsqrt(ops.mean(x * x, axis=-1, keepdims=True) + eps)
-        return x * scale * weight
-
-The same function then runs on both frameworks, and ``ml_stack.testing`` proves the two
-agree numerically -- forward and backward.
-"""
+"""One array API over MLX and PyTorch, so model math is written once."""
 
 from __future__ import annotations
 

@@ -1,34 +1,4 @@
-"""One training step, on whichever framework the model belongs to.
-
-The two frameworks disagree about what a step *is*, and the disagreement is not
-cosmetic. PyTorch mutates gradient state on the module and the optimizer reads it:
-
-    opt.zero_grad(); loss = f(model, batch); loss.backward(); opt.step()
-
-MLX has no gradient state at all -- gradients are a value returned by a transform of a
-pure function, and the optimizer is handed them:
-
-    loss, grads = mx.value_and_grad(f)(model, batch); opt.update(model, grads)
-
-Writing a trainer against either one directly means writing it twice, and the copies
-drift in the specific way this repo already warns about: a safety check present in one
-arm quietly goes missing from the other. So the step is a seam, and each framework
-supplies one.
-
-Two things a caller gets wrong once and then never forgets, both handled here:
-
-**MLX is lazy.** ``opt.update`` builds a graph; nothing has happened until something is
-evaluated. A loop that never calls ``mx.eval`` builds a graph of every step it has ever
-taken and then dies on memory, having trained nothing.
-
-**A non-finite loss must be detected before it reaches the weights.** By the time a NaN
-is in the parameters it is in all of them, and every checkpoint after that point is
-worthless -- and skipping the *next* step does not help, because the damage is already
-done. So the check happens between computing the loss and applying the update, inside
-the step, where it is the only place it can still work. The step reports the loss and
-whether it applied anything; the trainer decides what a pattern of skips means, which is
-``NonFiniteBudget``'s job.
-"""
+"""One training step, on whichever framework the model belongs to."""
 
 from __future__ import annotations
 
@@ -46,15 +16,10 @@ class Step(Protocol):
     """How to advance one training step on a particular framework."""
 
     def learning_rate(self, lr: float) -> None:
-        """Set the optimizer's learning rate. A plain float, outside any compiled
-        region -- a schedule object captured by a compiled function freezes the rate for
-        the rest of the run, silently."""
+        """Set the optimizer's learning rate. A plain float, outside any compiled"""
 
     def __call__(self, batch: Batch) -> tuple[float, bool]:
-        """Forward, backward, update. Returns ``(loss, applied)``.
-
-        ``applied`` is False when the loss was not finite and the update was therefore
-        withheld -- the weights are untouched and the step can simply be skipped."""
+        """Forward, backward, update. Returns ``(loss, applied)``."""
 
     def parameters(self) -> dict[str, Any]:
         """Flat name -> tensor, for checkpointing."""
@@ -89,14 +54,10 @@ class TorchStep:
         import torch
 
         self.model.train()
-        # set_to_none: the default zeroes the tensors, which still costs a kernel per
-        # parameter and keeps the memory allocated.
         self.opt.zero_grad(set_to_none=True)
         loss = self.loss(self.model, batch)
         value = float(loss.detach())
         if not is_finite(value):
-            # Before backward, not after: a NaN loss produces NaN gradients, and one
-            # opt.step() with those puts NaN in every parameter permanently.
             return value, False
         loss.backward()
         if self.clip:
@@ -119,9 +80,6 @@ class TorchStep:
 
         out: dict[str, Any] = {}
         names = [n for n, _ in self.model.named_parameters()]
-        # Flattened by parameter name rather than by the optimizer's integer index, so a
-        # checkpoint survives the parameters being registered in a different order --
-        # which happens the moment someone reorders two layers in __init__.
         params = list(self.model.parameters())
         index = {id(p): n for n, p in zip(names, params)}
         for param, state in self.opt.state.items():
@@ -173,8 +131,6 @@ class MLXStep:
 
     def __call__(self, batch: Batch) -> tuple[float, bool]:
         loss, grads = self._value_and_grad(self.model, batch)
-        # Evaluated here because MLX is lazy: without this the comparison below would be
-        # asking a question about a graph node rather than about a number.
         self.mx.eval(loss)
         value = float(loss)
         if not is_finite(value):
@@ -217,12 +173,7 @@ class MLXStep:
 
 def step_for(model: Any, optimizer: Any, loss: Loss,
              *, clip_grad_norm: float = 0.0) -> Step:
-    """Pick the step that matches the model, by asking the model what it is.
-
-    Detected rather than configured: a caller who has to name their framework can name
-    it wrongly, and the resulting error arrives deep inside a backward pass looking like
-    a bug in the loss.
-    """
+    """Pick the step that matches the model, by asking the model what it is."""
     module = type(model).__module__
     if module.startswith("torch") or _is_torch_module(model):
         return TorchStep(model, optimizer, loss, clip_grad_norm=clip_grad_norm)

@@ -1,14 +1,4 @@
-"""Speech synthesis providers.
-
-The same engine often has two unrelated runtimes -- an ONNX build and a PyTorch build,
-with different weights, different sample rates and no shared code. Both go behind
-``TTSProvider`` so a caller picks a *voice*, not a runtime.
-
-The fallback chain matters more here than for recognition. A voice assistant that cannot
-transcribe can say so; one that cannot speak has no way to tell you. So the system voice
-is always last on the list: it sounds worse than everything above it and it is always
-there.
-"""
+"""Speech synthesis providers."""
 
 from __future__ import annotations
 
@@ -67,8 +57,6 @@ class KokoroOnnxTTS:
             if self._engine is None:
                 from kokoro_onnx import Kokoro
 
-                # onnxruntime's session init is slow and synchronous; doing it once here
-                # rather than per request is the whole reason start() exists.
                 self._engine = Kokoro(str(self.model_path), str(self.voices_path))
 
     def stop(self) -> None:
@@ -84,12 +72,7 @@ class KokoroOnnxTTS:
 
 
 class PiperTTS:
-    """Piper, through its binary or its Python module.
-
-    Two paths because installs differ: a bundled native binary on one machine, a pip
-    install on another. The binary is tried first -- it is faster to start and does not
-    need a Python environment that may not exist.
-    """
+    """Piper, through its binary or its Python module."""
 
     name = "piper"
 
@@ -148,8 +131,6 @@ class PiperTTS:
                 argv += ["--espeak_data", str(self.espeak_data)]
 
             result = subprocess.run(argv, input=text.encode("utf-8"), capture_output=True)
-            # Do not trust the exit code alone: a zero exit with no output file is a real
-            # failure mode here, and the caller needs to fall through to another provider.
             if result.returncode != 0 or not out.is_file():
                 raise ProviderError(
                     f"piper produced no audio (exit {result.returncode}): "
@@ -185,11 +166,7 @@ class PiperTTS:
 
 
 class SystemTTS:
-    """The operating system's own voice. Always last, and always there.
-
-    Sounds worse than everything above it. It exists so that a device which cannot load
-    any real model can still say "I cannot load any real model" out loud.
-    """
+    """The operating system's own voice. Always last, and always there."""
 
     name = "system"
 
@@ -254,11 +231,7 @@ class SystemTTS:
 
 
 def _float_to_pcm16(samples) -> bytes:
-    """float32 in [-1, 1] -> little-endian int16.
-
-    Clipped before scaling: a sample slightly outside the range wraps to the opposite sign
-    on conversion, which is a loud click rather than a quiet distortion.
-    """
+    """float32 in [-1, 1] -> little-endian int16."""
     import numpy as np
 
     array = np.asarray(samples, dtype=np.float32)

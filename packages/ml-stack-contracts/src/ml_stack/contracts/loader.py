@@ -1,19 +1,4 @@
-"""Locate and parse the contract files.
-
-Resolution order, first hit wins:
-
-1. ``$ML_STACK_CONTRACTS`` -- an explicit directory. Set this in a deployment that ships
-   the contracts somewhere unusual, such as an embedded image or a host application's
-   own data directory.
-2. ``_data/`` inside this package -- pulled into the wheel at build time. This is what
-   an installed distribution uses.
-3. ``contracts/`` found by walking up from this file -- the working tree, so an edit to
-   ``contracts/model_tiers.json`` is live without a reinstall.
-
-The walk-up is deliberately last. If a wheel is installed AND a repo happens to be an
-ancestor, the wheel's own data should win, because that is what its version was tested
-against.
-"""
+"""Locate and parse the contract files."""
 
 from __future__ import annotations
 
@@ -49,11 +34,7 @@ def _candidates() -> list[Path]:
 
 
 def contracts_dir() -> Path:
-    """The directory the contracts are being read from.
-
-    Raises rather than returning a guess: a silently-wrong contracts dir means a machine
-    picks a model tier from stale data, which surfaces much later as an OOM.
-    """
+    """The directory the contracts are being read from."""
     cached = _CACHE.get("dir")
     if cached is not None:
         return cached
@@ -98,10 +79,7 @@ def sampling_schema() -> dict[str, Any]:
 
 
 def grammar(name: str) -> str:
-    """One GBNF grammar's source, by stem or filename.
-
-    Grammars are text, not JSON, so they do not go through ``load``.
-    """
+    """One GBNF grammar's source, by stem or filename."""
     stem = name[:-5] if name.endswith(".gbnf") else name
     path = contracts_dir() / "grammars" / f"{stem}.gbnf"
     try:

@@ -1,20 +1,4 @@
-"""Vision-language requests, and a gate that checks the model can actually see.
-
-Host tier. Pillow is needed for resizing; the gate itself needs nothing.
-
-    from ml_stack.client import Client
-    from ml_stack.vision import VisionGate, build_message, describe_via_client
-
-    client = Client("http://127.0.0.1:8080")
-    gate = VisionGate()
-    gate.require(describe_via_client(client), model="my-vlm")   # fail now, not later
-
-    message, report = build_message("What is in this photo?", ["photo.heic"])
-    print(client.chat([message]).content, report)
-
-The gate exists because a model served without its multimodal projector does not error
-when handed an image -- it describes the picture confidently, entirely from the prompt.
-"""
+"""Vision-language requests, and a gate that checks the model can actually see."""
 
 from __future__ import annotations
 

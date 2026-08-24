@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-backend"
 version = "0.1.0"
-description = "One array API over MLX and PyTorch, so model math is written once. Lab tier."
+description = "One array API over MLX and PyTorch, so model math is written once. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

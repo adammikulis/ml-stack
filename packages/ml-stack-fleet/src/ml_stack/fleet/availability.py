@@ -1,34 +1,4 @@
-"""When a machine will take work, and when it is somebody's desk.
-
-A box in a cupboard can train at any hour. A box someone works on cannot, and the failure
-without this is specific and annoying: a training run started overnight is still holding
-the GPU at 9am, so the machine someone needs is slow all morning and the only fix is to
-notice and kill it.
-
-Two mechanisms, deliberately separate:
-
-**Windows** are what a machine says about itself -- "not between nine and five on
-weekdays". They are recurring, local wall-clock, and configured on the box, because the
-box is the thing that knows whose desk it is on.
-
-**Reservations** are what one machine asks of another -- "hold this box for me until
-half past". They are one-off and come from the network.
-
-**A pause** is the person at the keyboard saying "not now" -- they have started a game,
-or a render, or they just want their machine back. It beats both of the above, takes
-effect immediately, and unlike a window it is not something anyone has to have predicted.
-It survives a restart, because a pause that quietly lifted when the box rebooted would
-hand the GPU back at the worst possible moment.
-
-Both answer the same question, ``open_at``, and the daemon asks it before it starts a
-job rather than before it queues one. Queued work waits for the window to open; it is not
-refused, because "come back at six" is a thing a scheduler can act on and a rejection is
-not.
-
-Local time on purpose. "The working day" is a fact about where the machine is, and a box
-in another timezone has a different one -- converting them to a shared clock would make
-every window mean the wrong thing on half the fleet.
-"""
+"""When a machine will take work, and when it is somebody's desk."""
 
 from __future__ import annotations
 
@@ -94,18 +64,11 @@ class Window:
     start_min: int
     end_min: int
     busy: bool = True
-    """True means "do not start work here". The common case is blocking out a working
-    day, so it is the default -- a window someone writes down is nearly always one they
-    want protected."""
+    """True means "do not start work here". The common case is blocking out a working"""
     note: str = ""
 
     def covers(self, when: datetime) -> bool:
-        """Whether this window is in force at ``when``.
-
-        A window whose end is not after its start wraps past midnight -- "22:00-06:00"
-        is one span through the night, not an empty one. Getting this wrong silently
-        disables the overnight window, which is the one people most want.
-        """
+        """Whether this window is in force at ``when``."""
         minute = when.hour * 60 + when.minute
         if self.end_min > self.start_min:
             return when.weekday() in self.days and self.start_min <= minute < self.end_min
@@ -115,13 +78,7 @@ class Window:
         return (when.weekday() - 1) % 7 in self.days and minute < self.end_min
 
     def spec(self) -> str:
-        """The canonical text form, which ``parse_window`` reads back exactly.
-
-        Separate from ``describe`` because the two have different jobs and conflating
-        them cost a real bug: a saved schedule written in the prose form did not parse
-        on the next start, so a machine silently lost the working hours it was supposed
-        to be protecting.
-        """
+        """The canonical text form, which ``parse_window`` reads back exactly."""
         days = "daily" if len(self.days) == 7 else ",".join(DAYS[d] for d in self.days)
         out = (f"{days} {self.start_min // 60:02d}:{self.start_min % 60:02d}"
                f"-{self.end_min // 60:02d}:{self.end_min % 60:02d}")
@@ -172,13 +129,9 @@ class Availability:
     windows: list[Window] = field(default_factory=list)
     reservation: Reservation | None = None
     max_hold_s: float = 12 * 3600
-    """Longest a peer may hold this box. A reservation with no ceiling is a way to take
-    a machine out of the fleet permanently by accident."""
+    """Longest a peer may hold this box. A reservation with no ceiling is a way to take"""
     paused_until: float | None = None
-    """``None`` when running. A timestamp when paused for a while, and ``math.inf`` when
-    paused until someone says otherwise. Indefinite is the honest default for "I am
-    using this now": nobody knows how long a game lasts, and a pause that expired
-    mid-session would be worse than one that has to be lifted by hand."""
+    """``None`` when running. A timestamp when paused for a while, and ``math.inf`` when"""
     paused_reason: str = ""
 
     # -- windows ---------------------------------------------------------
@@ -188,8 +141,6 @@ class Availability:
         allowed = None
         for window in self.windows:
             if window.covers(when):
-                # An explicit allow beats a block, so "never on weekdays, except at
-                # lunchtime" is expressible without inventing precedence rules.
                 if not window.busy:
                     return True
                 allowed = False
@@ -203,12 +154,7 @@ class Availability:
 
     def opens_at(self, when: datetime | None = None, *, horizon_h: int = 24 * 8
                  ) -> datetime | None:
-        """When this box next takes work, or None if nothing in the horizon says so.
-
-        Stepped a minute at a time rather than solved algebraically: windows may overlap,
-        allow may override busy, and the wrap-past-midnight case makes a closed-form
-        answer the kind of code that is wrong for one hour a week and nobody notices.
-        """
+        """When this box next takes work, or None if nothing in the horizon says so."""
         when = when or datetime.now()
         if self.open_at(when):
             return when
@@ -265,11 +211,7 @@ class Availability:
         return True
 
     def may_start(self, who: str = "", when: datetime | None = None) -> tuple[bool, str]:
-        """The single question the job runner asks. Returns ``(allowed, why not)``.
-
-        The pause is checked first because it is the only one of the three that means
-        someone is at the keyboard right now.
-        """
+        """The single question the job runner asks. Returns ``(allowed, why not)``."""
         if self.paused:
             if self.paused_until == math.inf:
                 until = "until it is switched back on"
@@ -293,9 +235,6 @@ class Availability:
     # -- reporting -------------------------------------------------------
     def public(self, when: datetime | None = None) -> dict[str, Any]:
         allowed, why = self.may_start(when=when)
-        # A pause has no scheduled end, so do not invent one from the windows: showing
-        # "resumes at 17:00" for a machine someone paused indefinitely is a promise the
-        # box has no way to keep.
         nxt = None if allowed or self.paused else self.opens_at(when)
         return {"available": allowed,
                 "unavailable_because": why,
@@ -322,9 +261,6 @@ class Availability:
         try:
             raw = json.loads(p.read_text())
         except (OSError, ValueError):
-            # An unreadable schedule must not take the box out of the fleet. Available
-            # is the safe failure: someone notices a run at the wrong time far sooner
-            # than they notice a machine that quietly never accepts work.
             return cls()
         out = cls.from_specs(raw.get("busy", []), raw.get("free", []))
         held = raw.get("paused_until")

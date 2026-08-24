@@ -1,14 +1,4 @@
-"""Learning-rate schedules as plain functions of the step.
-
-``schedule(step) -> float``, computed in Python, returning a float. Not a framework
-schedule object.
-
-That is a deliberate constraint rather than a stylistic one. A schedule object held by an
-optimizer becomes part of the optimizer's state, and under a graph-compiling backend the
-compiled function captures the learning rate as it was at trace time -- so the rate never
-changes again and the model trains at a constant LR for the rest of the run, with nothing
-reporting it. A plain float assigned from outside the compiled region cannot do that.
-"""
+"""Learning-rate schedules as plain functions of the step."""
 
 from __future__ import annotations
 
@@ -55,14 +45,7 @@ def warmup_stable_decay(
     decay_fraction: float = 0.2,
     final_fraction: float = 0.1,
 ) -> Schedule:
-    """Warmup, then a long constant stretch, then a linear decay at the end.
-
-    Worth preferring over cosine when the total step count might change. Cosine bakes the
-    horizon into every step's value, so extending a run means every rate after the original
-    end is wrong, and shortening it means the decay never happens. WSD only needs to know
-    the horizon during its final ``decay_fraction``, so the stable stretch can be extended
-    without invalidating what came before.
-    """
+    """Warmup, then a long constant stretch, then a linear decay at the end."""
     floor = peak * final_fraction
     decay_start = int(total_steps * (1.0 - decay_fraction))
 

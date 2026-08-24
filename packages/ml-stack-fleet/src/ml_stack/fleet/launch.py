@@ -1,22 +1,4 @@
-"""``ml-stack`` -- the thing a person double-clicks.
-
-Everything else in this package assumes a terminal. This does not: it starts the daemon,
-waits until it is actually answering, and opens a browser on it. That is the whole
-program, and it exists because the alternative instruction -- "open a terminal and run
-ml-stack-traind" -- is one that a large share of the people this is for cannot follow,
-and should not have to.
-
-Two details that are the difference between working and appearing not to:
-
-**Wait for /health before opening the browser.** Opening it first races the server and
-lands on a connection-refused page, which reads as "the app is broken" rather than as
-"you were half a second early". People do not refresh; they close it.
-
-**Adopt a daemon that is already running.** Double-clicking twice must not try to bind a
-port that is already held and then die with a stack trace. If something healthy is
-already on the port, this just opens the browser on it -- the same rule ``ml_stack.serve``
-follows for model servers, for the same reason.
-"""
+"""``ml-stack`` -- the thing a person double-clicks."""
 
 from __future__ import annotations
 

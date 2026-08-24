@@ -1,22 +1,4 @@
-"""Building a graph from point features, rather than being handed one.
-
-When a model constructs its own topology each forward pass, edge construction sits in the
-inner loop and its determinism matters as much as its speed: two backends must produce the
-*same* edges, or a numerical parity test fails for a reason that has nothing to do with the
-arithmetic.
-
-Both constructions here are exactly reproducible:
-
-* **kNN** is a full pairwise distance argsort. Ties are broken by index because ``argsort``
-  is stable, so the edge set is a pure function of the coordinates.
-* **MST on a point cloud is unique** when the pairwise distances are distinct, which they
-  are for float coordinates in general position. Coincident points are the exception, and
-  they are handled explicitly below.
-
-The distance matrix is O(N²), which is the right trade below a few thousand nodes and the
-wrong one above it. There is no approximate path here; if you need one, that is a real
-addition rather than a tuning knob.
-"""
+"""Building a graph from point features, rather than being handed one."""
 
 from __future__ import annotations
 
@@ -49,12 +31,7 @@ class Edges:
 
 
 def pairwise_distances(points: np.ndarray) -> np.ndarray:
-    """Full Euclidean distance matrix, ``(N, N)``.
-
-    Computed from the squared-norm expansion and then clipped at zero: the expansion is
-    fast but can produce a small negative value on the diagonal through cancellation, and
-    ``sqrt`` of that is NaN.
-    """
+    """Full Euclidean distance matrix, ``(N, N)``."""
     points = np.asarray(points, dtype=np.float64)
     squared = np.sum(points**2, axis=1)
     d2 = squared[:, None] + squared[None, :] - 2.0 * (points @ points.T)
@@ -62,11 +39,7 @@ def pairwise_distances(points: np.ndarray) -> np.ndarray:
 
 
 def knn_edges(points: np.ndarray, k: int) -> Edges:
-    """Each node to its ``k`` nearest neighbours, excluding itself.
-
-    Deterministic: ``argsort`` is stable, so equidistant neighbours are taken in index
-    order rather than in whatever order the sort happened to produce.
-    """
+    """Each node to its ``k`` nearest neighbours, excluding itself."""
     distances = pairwise_distances(points)
     n = distances.shape[0]
     if n <= 1 or k <= 0:
@@ -82,17 +55,7 @@ def knn_edges(points: np.ndarray, k: int) -> Edges:
 
 
 def mst_edges(points: np.ndarray) -> Edges:
-    """Minimum spanning tree over the point cloud, by Prim's algorithm.
-
-    Coincident points need care. A distance of exactly zero is indistinguishable from
-    "no edge" in a sparse representation, and duplicate points are common in real feature
-    data -- two tokens with identical embeddings, a padded row. Zero distances are nudged
-    to the smallest representable positive float so the pair is still connected by an edge
-    of negligible weight rather than being silently dropped.
-
-    Prim from node 0 rather than Kruskal: the output order is then a pure function of the
-    coordinates, which is what makes two backends produce byte-identical edge lists.
-    """
+    """Minimum spanning tree over the point cloud, by Prim's algorithm."""
     points = np.asarray(points, dtype=np.float64)
     n = points.shape[0]
     if n <= 1:
@@ -130,14 +93,7 @@ def mst_edges(points: np.ndarray) -> Edges:
 
 
 def morton_codes(points: np.ndarray, *, bits: int = 10) -> np.ndarray:
-    """Z-order curve index per point, for spatial locality.
-
-    Exact integer bit arithmetic on quantised coordinates, so it is identical on every
-    backend and every platform -- no floating-point comparison anywhere in the result.
-
-    Points are normalised to the unit cube first, so the codes describe relative position
-    within this cloud rather than absolute coordinates.
-    """
+    """Z-order curve index per point, for spatial locality."""
     points = np.asarray(points, dtype=np.float64)
     if points.shape[0] == 0:
         return np.empty(0, dtype=np.int64)
@@ -162,12 +118,7 @@ def _interleave(values: np.ndarray, stride: int, bits: int) -> np.ndarray:
 
 
 def spatial_window_edges(points: np.ndarray, window: int) -> Edges:
-    """Edges between points that are near each other along the Morton curve.
-
-    A cheap locality prior: sort by Z-order and connect each point to the next ``window``
-    in that order. Costs O(N log N) against kNN's O(N²), and gives up exactness for it --
-    the Z-order curve puts spatially close points close together *usually*, not always.
-    """
+    """Edges between points that are near each other along the Morton curve."""
     codes = morton_codes(points)
     order = np.argsort(codes, kind="stable")
     n = order.shape[0]
@@ -197,13 +148,7 @@ def build_topology(
     window: int = 0,
     symmetric: bool = True,
 ) -> Edges:
-    """kNN, optionally plus an MST, optionally plus a Morton window. Deduplicated.
-
-    The MST is worth including because kNN alone can leave a graph disconnected -- a
-    cluster of points whose k nearest neighbours are all inside the cluster has no edge
-    out of it, and no amount of message passing will ever move information across that
-    gap. The MST costs N-1 edges and guarantees one connected component.
-    """
+    """kNN, optionally plus an MST, optionally plus a Morton window. Deduplicated."""
     parts = [knn_edges(points, k)] if k > 0 else []
     if include_mst:
         parts.append(mst_edges(points))

@@ -1,10 +1,4 @@
-"""Which model tier this machine can actually hold.
-
-One rule here is easy to get wrong and expensive when it is: **never demote on
-ignorance.** If the size of a model is unknown, say so. A missing measurement is not
-evidence that a model is too big, and treating it as such silently hands the user a
-worse model than their machine could run.
-"""
+"""Which model tier this machine can actually hold."""
 
 from __future__ import annotations
 
@@ -76,12 +70,7 @@ def _parse(entry: dict[str, Any]) -> Tier:
 
 
 def tiers() -> list[Tier]:
-    """The ladder, largest first.
-
-    Order is the file's order, not a re-sort: ``tests/test_contracts.py`` asserts the
-    file is already descending by ``min_ram_gb``. Re-sorting here would paper over an
-    entry inserted in the wrong place instead of failing on it.
-    """
+    """The ladder, largest first."""
     raw = load("model_tiers.json")
     entries = raw.get("tiers")
     if not entries:
@@ -90,11 +79,7 @@ def tiers() -> list[Tier]:
 
 
 def weights_plus_overhead_bytes(weights_bytes: int, budget: Budget) -> int:
-    """What a model really costs: weights, plus KV cache / activations / arena.
-
-    The overhead is a fraction with a floor, and it is a rough figure -- describe it as
-    one wherever it is shown to a user.
-    """
+    """What a model really costs: weights, plus KV cache / activations / arena."""
     overhead = max(
         int(weights_bytes * budget.overhead_fraction),
         budget.overhead_floor_bytes,
@@ -107,13 +92,7 @@ def fits(
     total_bytes: int,
     budget: Budget | None = None,
 ) -> Verdict:
-    """Can this machine hold a model of this size?
-
-    ``weights_bytes is None`` means the size could not be measured -- an unreachable
-    model server, a repo that has not been pulled. That returns ``"unknown"``, never
-    ``"too_big"``. The caller decides what to do with not knowing; this function refuses
-    to turn ignorance into a demotion.
-    """
+    """Can this machine hold a model of this size?"""
     if weights_bytes is None:
         return "unknown"
     budget = budget or Budget.for_profile("desktop")
@@ -127,16 +106,7 @@ def largest_that_fits(
     available: set[str] | None = None,
     profile: Profile = "desktop",
 ) -> Tier:
-    """Walk the ladder and take the first rung this machine can hold.
-
-    Because the ladder is descending, "the first that fits" and "the largest that fits"
-    are the same walk -- which is why the ordering is asserted rather than assumed.
-
-    ``available`` optionally restricts the walk to tiers whose model is actually present
-    (e.g. the set of Ollama tags from ``/api/tags``). Passing ``None`` means "do not
-    filter", not "nothing is available" -- the same refusal-to-demote-on-ignorance rule
-    as ``fits``.
-    """
+    """Walk the ladder and take the first rung this machine can hold."""
     ladder = tiers()
     for tier in ladder:
         if total_bytes < tier.min_ram_bytes:

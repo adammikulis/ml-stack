@@ -245,3 +245,14 @@ details.aside summary::-webkit-details-marker { display: none; }
 details.aside summary::before { content: "› "; }
 details.aside[open] summary::before { content: "⌄ "; }
 details.aside summary:hover { color: var(--muted); }
+
+/* live telemetry chips */
+.chips { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 12px; }
+.label.temp { color: var(--muted); }
+.label.temp.warm { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+/* Never colour alone: a red chip and an amber chip are the same chip to a good share
+   of readers, so the hot one also carries a mark. */
+.label.temp.hot { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.label.temp.hot::after { content: " ▲"; }
+.label.bad { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+.fill.util { background: linear-gradient(90deg, var(--accent-dim), var(--accent)); }

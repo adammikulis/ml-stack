@@ -1,10 +1,4 @@
-"""PyTorch's implementation of ``ArrayOps``.
-
-Torch's API is close to MLX's but not identical: dimensions are ``dim=`` not ``axis=``,
-reductions that take an axis return a named tuple unless you use the ``a``-prefixed
-variants, and ``take`` needs an explicit ``index_select``. This adapter is where those
-differences live so that shared math never has to know about them.
-"""
+"""PyTorch's implementation of ``ArrayOps``."""
 
 from __future__ import annotations
 
@@ -45,14 +39,7 @@ class TorchArrayOps:
     # ---------------------------------------------------------------- factories
 
     def array(self, value: Any, dtype: Any = None, *, device: Any = None) -> Tensor:
-        """Convert to a tensor. An existing tensor keeps the device it is already on.
-
-        ``_device`` is whatever the *last* caller bound, and this object is typically a
-        process-wide singleton -- so honouring it here would silently relocate a caller's
-        own data onto an earlier caller's device. Only an explicit ``device=`` moves an
-        existing tensor. The pure factories below do follow the binding, because they have
-        no data to take a device from.
-        """
+        """Convert to a tensor. An existing tensor keeps the device it is already on."""
         torch = self._torch
         if isinstance(value, torch.Tensor):
             tensor, target = value, device
@@ -210,8 +197,6 @@ class TorchArrayOps:
         return self._torch.mean(value, dim=axis, keepdim=keepdims)
 
     def max(self, value: Tensor, axis: int | None = None, keepdims: bool = False) -> Tensor:
-        # `amax`, not `max`: torch.max(x, dim=) returns a (values, indices) named tuple,
-        # which is not what the protocol promises.
         if axis is None:
             return self._torch.max(value)
         return self._torch.amax(value, dim=axis, keepdim=keepdims)
@@ -251,11 +236,7 @@ def _expand_index_like(torch: Any, index: Tensor, like_shape: tuple[int, ...], a
 
 
 def build_scatter_add(torch: Any) -> Callable[..., Tensor]:
-    """``(target, index, src, axis=0) -> target + scattered src``. Never in-place.
-
-    Returning a new tensor rather than mutating matters under autograd: an in-place write
-    into a tensor that is also an input to something else silently corrupts the graph.
-    """
+    """``(target, index, src, axis=0) -> target + scattered src``. Never in-place."""
 
     def scatter_add(target: Tensor, index: Tensor, src: Tensor, axis: int = 0) -> Tensor:
         out = target.clone()

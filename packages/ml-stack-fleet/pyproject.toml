@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-fleet"
 version = "0.1.0"
-description = "Find the other machines on the LAN and run work on them. Device tier."
+description = "Find the other machines on the LAN and run work on them. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

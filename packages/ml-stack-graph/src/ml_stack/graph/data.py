@@ -1,15 +1,4 @@
-"""A graph as arrays, so it can go through a model.
-
-This is a COO edge list held in whatever array type the backend uses -- deliberately not a
-node-object graph. Adjacency dicts and node objects are the right shape for traversal and
-the wrong shape for a forward pass: every step would need a host round trip.
-
-For *algorithms* on a graph -- shortest path, connected components, community detection --
-use ``networkx`` on ``to_networkx()`` output. Reimplementing BFS here would be strictly
-worse than a library that has had those algorithms right for twenty years. What lives in
-this package is only the part networkx cannot do: keeping a graph as tensors and moving
-values along its edges inside an autograd graph.
-"""
+"""A graph as arrays, so it can go through a model."""
 
 from __future__ import annotations
 
@@ -21,11 +10,7 @@ Tensor = Any
 
 @dataclass
 class Graph:
-    """A directed graph with optional edge weights and node features.
-
-    Nodes are ``0..num_nodes-1``. Edges are parallel arrays ``src``/``dst`` of length E.
-    An undirected graph is represented by including both directions.
-    """
+    """A directed graph with optional edge weights and node features."""
 
     num_nodes: int
     src: Tensor
@@ -53,11 +38,7 @@ class Graph:
         return _length(self.src)
 
     def to_networkx(self, *, directed: bool = True):
-        """A networkx graph, for algorithms. Copies to host memory.
-
-        Deliberately explicit rather than implicit: this is a device-to-host transfer and
-        a change of representation, and it should be visible at the call site.
-        """
+        """A networkx graph, for algorithms. Copies to host memory."""
         import networkx as nx
 
         graph = nx.DiGraph() if directed else nx.Graph()
@@ -92,12 +73,7 @@ class Graph:
 
 @dataclass
 class BatchedGraph:
-    """Several graphs merged into one super-graph with no edges between them.
-
-    Edge indices are offset so graph ``i``'s edges point into
-    ``[node_offsets[i], node_offsets[i+1])``. Batching this way lets one forward pass cover
-    a whole batch without padding to the largest graph.
-    """
+    """Several graphs merged into one super-graph with no edges between them."""
 
     num_nodes: int
     num_graphs: int

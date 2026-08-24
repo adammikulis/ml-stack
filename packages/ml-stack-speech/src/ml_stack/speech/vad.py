@@ -1,14 +1,4 @@
-"""Voice activity detection.
-
-Two providers with genuinely different characters, not two implementations of one thing:
-
-* **Energy** is a few lines of arithmetic on the PCM. It cannot tell speech from a slammed
-  door, but it needs no model, runs in microseconds, and works on any hardware.
-* **Silero** is a small neural model that actually distinguishes speech from noise.
-
-The energy detector is the fallback rather than a toy: for a push-to-talk button, "is
-there any sound at all" is the whole question, and loading a model to answer it is waste.
-"""
+"""Voice activity detection."""
 
 from __future__ import annotations
 
@@ -142,8 +132,6 @@ class SileroVAD:
         if self._model is None:
             self.start()
 
-        # Silero is trained at 16 kHz and 8 kHz only. Running it on a 44.1 kHz stream
-        # returns confident nonsense rather than an error.
         if sample_rate not in (8000, 16000):
             raise ProviderError(
                 f"Silero VAD supports 8 kHz and 16 kHz only, got {sample_rate}. "
@@ -181,12 +169,7 @@ def _merge_regions(
     min_speech_ms: int,
     min_silence_ms: int,
 ) -> tuple[SpeechRegion, ...]:
-    """Turn per-frame decisions into regions, bridging short gaps.
-
-    The gap bridging is what makes this usable: ordinary speech contains pauses between
-    words that are longer than one frame, and without bridging every utterance comes back
-    as a dozen fragments.
-    """
+    """Turn per-frame decisions into regions, bridging short gaps."""
     if not any(loud):
         return ()
 

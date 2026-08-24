@@ -1,33 +1,4 @@
-"""Train a model, with the things that are easy to get wrong already wired in.
-
-Everything here exists elsewhere in this package as a piece you can use on its own. This
-is the assembly: the loop that holds a run lock so two runs cannot share an output
-directory, checkpoints atomically and rotates, writes a metrics record every step,
-refuses to keep going through a divergence, resumes exactly rather than warm-starting,
-and sets the learning rate as a plain float outside any compiled region.
-
-    from ml_stack.train import Trainer
-
-    report = Trainer(model, optimizer, loss, out="runs/small").fit(batches, steps=10_000)
-
-The loop body is still yours -- ``loss(model, batch)`` is a function you write, and it is
-where the actual work lives. What is taken away is the scaffolding, because the
-scaffolding is identical in every project and the failure modes are expensive:
-
-**A resume that restores less than it saved.** Weights without optimizer state is a warm
-restart, not a resume, and it shows up as a loss spike that gets blamed on the learning
-rate. ``fit`` resumes both or refuses.
-
-**A run that diverged an hour ago and is still going.** A NaN loss reaches every
-parameter within a step or two, and every checkpoint after that is worthless. A budget
-of skipped steps is spent, then the run stops.
-
-**Two runs in one output directory.** They overwrite each other's checkpoints and the
-survivor is whichever process wrote last.
-
-**A checkpoint that looks complete and is not.** Handled by ``checkpoint.save``, which
-this calls -- the state file that makes a directory count is written last.
-"""
+"""Train a model, with the things that are easy to get wrong already wired in."""
 
 from __future__ import annotations
 
@@ -82,13 +53,7 @@ class TrainReport:
 
 
 def batches_from(data: Any, *, batch_size: int = 0) -> Callable[[int], Any]:
-    """Turn whatever the caller has into ``step -> batch``.
-
-    Accepts a callable, an iterable (cycled when it runs out, because a step count is
-    the unit a run is specified in, not an epoch count), or a sequence to slice into
-    batches. A caller with something more complicated passes a callable and this is out
-    of the way.
-    """
+    """Turn whatever the caller has into ``step -> batch``."""
     if callable(data):
         return data
 
@@ -100,8 +65,6 @@ def batches_from(data: Any, *, batch_size: int = 0) -> Callable[[int], Any]:
             start = (step * batch_size) % max(1, n)
             chunk = rows[start:start + batch_size]
             if len(chunk) < batch_size and n >= batch_size:
-                # Wrap rather than yield a short batch: a final batch of three on a
-                # graph compiled for thirty-two triggers a recompile every epoch.
                 chunk = list(chunk) + list(rows[:batch_size - len(chunk)])
             return chunk
 
@@ -122,12 +85,7 @@ def batches_from(data: Any, *, batch_size: int = 0) -> Callable[[int], Any]:
 
 
 class Trainer:
-    """A training loop with the scaffolding already attached.
-
-    ``model`` and ``optimizer`` are the framework's own; the step that drives them is
-    detected from the model. ``loss(model, batch)`` returns a scalar the framework can
-    differentiate.
-    """
+    """A training loop with the scaffolding already attached."""
 
     def __init__(self, model: Any, optimizer: Any,
                  loss: Callable[[Any, Any], Any], *,
@@ -154,8 +112,6 @@ class Trainer:
         from safetensors.torch import save_file
 
         def write_torch(path: Path, mapping: dict[str, Any]) -> None:
-            # contiguous(): safetensors refuses a view, and a transposed weight is a
-            # view. The error names the tensor but not why, which is a bad five minutes.
             save_file({k: v.contiguous() for k, v in mapping.items()}, str(path))
 
         return write_torch
@@ -183,11 +139,7 @@ class Trainer:
         return saved
 
     def resume(self) -> CheckpointState | None:
-        """Restore weights *and* optimizer state, or return None if there is nothing.
-
-        Never partially: a checkpoint whose optimizer file is missing raises out of
-        ``load_tensors`` rather than silently warm-starting.
-        """
+        """Restore weights *and* optimizer state, or return None if there is nothing."""
         latest = find_latest(self.out)
         if latest is None:
             return None
@@ -216,12 +168,7 @@ class Trainer:
             config: dict[str, Any] | None = None,
             on_step: Callable[[int, float], None] | None = None,
             ) -> TrainReport:
-        """Train for ``steps`` steps. Returns what happened.
-
-        ``steps`` is a total, not a remainder: resuming a run that reached 4,000 of
-        10,000 trains 6,000 more, so the same call re-run after a crash finishes the
-        same run rather than doubling it.
-        """
+        """Train for ``steps`` steps. Returns what happened."""
         lr: Schedule = schedule if callable(schedule) else constant(float(schedule))
         next_batch = batches_from(data, batch_size=batch_size)
         next_eval = batches_from(eval_data, batch_size=batch_size) if eval_data is not None else None
@@ -256,10 +203,6 @@ class Trainer:
                     loss, applied = self.step(next_batch(step))
 
                 if not applied:
-                    # Skipped, not fatal -- one bad batch happens. A pattern of them is
-                    # a diverged run, and the budget is what tells them apart. The
-                    # weights are untouched: the step withheld the update rather than
-                    # applying it and leaving us to notice afterwards.
                     budget.record_skip(step)
                     report.skipped += 1
                     log.note("non-finite loss", step=step, skipped=budget.skipped)

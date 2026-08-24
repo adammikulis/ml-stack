@@ -1,22 +1,4 @@
-"""The array API the backend-neutral math is written against.
-
-Model math gets written once, against ``ArrayOps``, and each framework supplies an
-implementation. ``mlx.core`` satisfies this protocol almost as-is; PyTorch needs the
-adapter in ``ml_stack.backend.torch_ops``.
-
-The alternative -- writing the math twice and pinning the two copies with tests -- fails
-in a specific way: the copies drift, and the one that drifts is usually the one with
-fewer users, so a safety check present in one arm quietly goes missing from the other.
-Numerical parity tests catch *disagreement*; they do not catch a feature that only ever
-existed on one side.
-
-Two things deliberately ride on ``ArrayBackend`` rather than ``ArrayOps``:
-
-* **scan primitives** (``cumsum``/``cumprod``), because a framework may need a specific
-  implementation rather than its default one, and the core should not have to know.
-* **``rfft_abs``**, because each framework spells the transform in its own submodule and
-  returns its own complex type, while the core only ever wants the magnitude.
-"""
+"""The array API the backend-neutral math is written against."""
 
 from __future__ import annotations
 
@@ -29,15 +11,7 @@ Tensor = Any
 
 @runtime_checkable
 class ArrayOps(Protocol):
-    """Array operations the backend-neutral math may use.
-
-    Anything not on this list is not available to shared code. Adding an operation means
-    adding it to every backend, which is the point: the protocol is the contract that
-    keeps the implementations from diverging.
-
-    ``bind_device``/``current_device`` are optional. Callers reach them through
-    ``getattr(ops, ..., None)`` so a backend with no device state needs neither.
-    """
+    """Array operations the backend-neutral math may use."""
 
     int32: Any
     int64: Any
@@ -125,10 +99,7 @@ class ArrayBackend:
 
 
 def bind_device(backend: ArrayBackend, reference: Tensor) -> None:
-    """Point the backend's factories at ``reference``'s device, if it has one.
-
-    Duck-typed on purpose: a backend with no device concept needs to implement nothing.
-    """
+    """Point the backend's factories at ``reference``'s device, if it has one."""
     binder = getattr(backend.ops, "bind_device", None)
     if callable(binder):
         binder(reference)

@@ -1,24 +1,4 @@
-"""Make the daemon come back on its own, or deliberately not.
-
-Three honest choices, and they are genuinely different promises:
-
-**At startup** -- the machine boots and the daemon is there, whether or not anyone logs
-in. This is what a headless box in a cupboard needs. It requires administrator rights on
-every platform, so this module *writes the file and prints the one command to run*; it
-never tries to escalate. A tool that silently asks for a password is a tool people stop
-trusting.
-
-**At login** -- the daemon starts when you log in and stops when the session ends. No
-administrator rights, and it is the right default for a laptop: it will not hold a GPU
-or answer the network while nobody is using the machine.
-
-**Manually** -- nothing is installed. The correct answer for a machine you are only
-trying out, and the reason this asks rather than assuming.
-
-Device tier, so everything here is written with the standard library. Nothing is
-executed on the user's behalf except ``launchctl``/``systemctl`` for the login-scoped
-case, which needs no privileges and fails visibly.
-"""
+"""Make the daemon come back on its own, or deliberately not."""
 
 from __future__ import annotations
 
@@ -49,12 +29,7 @@ class Autostart:
 
 
 def _executable() -> list[str]:
-    """How to start the daemon on this machine.
-
-    The console script if it is on PATH, otherwise this interpreter and ``-m``. The
-    fallback matters: a user install, a virtualenv, or a frozen bundle may have no
-    ``ml-stack-traind`` anywhere a login shell would look.
-    """
+    """How to start the daemon on this machine."""
     found = shutil.which(SERVICE)
     if found:
         return [found]
@@ -89,8 +64,6 @@ def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
         "StandardOutPath": str(log_dir / "traind.log"),
         "StandardErrorPath": str(log_dir / "traind.log"),
         "WorkingDirectory": str(Path.home()),
-        # Inherited PATH is minimal under launchd, and a daemon that cannot find its own
-        # interpreter fails with a message nobody sees.
         "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
     }
     body = plistlib.dumps(plist)
@@ -160,8 +133,6 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
         return Autostart(mode, installed=False, path=path,
                          command=f"systemctl --user enable --now {SERVICE}",
                          note=done.stderr.strip() or "systemctl refused the unit")
-    # Without this the daemon stops when the last session closes, which is a surprising
-    # way for a machine to leave the fleet.
     subprocess.run(["loginctl", "enable-linger", os.environ.get("USER", "")],
                    capture_output=True, check=False)
     return Autostart(mode, installed=True, path=path)
@@ -235,8 +206,6 @@ def uninstall(mode: str = "") -> list[Path]:
             path.unlink()
             removed.append(path)
         except OSError:
-            # A root-owned unit is not ours to delete; say what we could not remove
-            # rather than pretending it is gone.
             continue
     return removed
 

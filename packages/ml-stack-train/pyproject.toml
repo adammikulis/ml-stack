@@ -5,11 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-train"
 version = "0.1.0"
-description = "Training scaffolding: atomic checkpoints, schedules, guards, metrics, leak-safe splits. Lab tier."
+description = "Training scaffolding: atomic checkpoints, schedules, guards, metrics, leak-safe splits. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = ["ml-stack-backend", "ml-stack-fleet"]
+
+[project.optional-dependencies]
+# Temperature, clocks and throttle state on Apple silicon, without sudo. Optional:
+# a box without it advertises less rather than failing to advertise.
+telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]
 
 # Registers the accelerator probe with ml-stack-fleet, which is device tier and so cannot
 # import a framework to ask about CUDA itself. See ml_stack.train.accelerator.

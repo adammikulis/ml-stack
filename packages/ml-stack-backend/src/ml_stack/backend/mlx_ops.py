@@ -1,9 +1,4 @@
-"""MLX's implementation of the pieces ``mlx.core`` does not already provide.
-
-``mlx.core`` satisfies ``ArrayOps`` directly -- it is the API the protocol was shaped
-around -- so there is no adapter class here. What MLX lacks is a scatter-add over an
-arbitrary axis and a segment sum, which are built from ``at[].add()``.
-"""
+"""MLX's implementation of the pieces ``mlx.core`` does not already provide."""
 
 from __future__ import annotations
 
@@ -14,11 +9,7 @@ Tensor = Any
 
 
 def require_mlx() -> tuple[Any, Any]:
-    """Import ``mlx.core`` and ``mlx.nn``, with a clear error if they are absent.
-
-    MLX has no wheel outside Apple silicon, so this failing is a platform fact rather
-    than a missing install, and the message says so.
-    """
+    """Import ``mlx.core`` and ``mlx.nn``, with a clear error if they are absent."""
     try:
         import mlx.core as mx
         import mlx.nn as nn
@@ -41,8 +32,6 @@ def build_scatter_add(mx: Any) -> Callable[..., Tensor]:
                 raise ValueError("index length must match the leading dimension of src")
             return target.at[idx].add(src)
 
-        # `at[]` indexes the leading axis, so move the scatter axis to the front, scatter,
-        # and move it back. Cheaper than materialising a full-rank index tensor.
         moved_target = mx.swapaxes(target, 0, axis)
         moved_src = mx.swapaxes(src, 0, axis)
         scattered = moved_target.at[idx].add(moved_src)

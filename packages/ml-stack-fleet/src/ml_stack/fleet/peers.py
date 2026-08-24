@@ -1,13 +1,4 @@
-"""``ml-stack-peers`` -- set up a cluster and see who is in it.
-
-    ml-stack-peers init     # mint the key, print the command to run elsewhere
-    ml-stack-peers ls       # who is on this LAN right now
-    ml-stack-peers token    # the bearer token this key derives
-
-Deliberately small. The whole setup story is "run init here, paste one line
-there", and anything more elaborate than that is a thing to get wrong at 1am on
-a machine you are logged into over ssh.
-"""
+"""``ml-stack-peers`` -- set up a cluster and see who is in it."""
 
 from __future__ import annotations
 
@@ -30,9 +21,7 @@ from .discovery import (
 )
 
 DEFAULT_GROUP_NAME = "ml-stack"
-"""The group a passphrase belongs to. Two households that both chose the same words end
-up in different clusters only if they also chose different group names -- so this is
-worth asking about even though almost nobody will change it."""
+"""The group a passphrase belongs to. Two households that both chose the same words end"""
 
 
 def _require_key(path: str | None) -> bytes:
@@ -44,13 +33,7 @@ def _require_key(path: str | None) -> bytes:
 
 
 def _prompt_passphrase(confirm: bool) -> str:
-    """Ask twice, because a typo here does not fail -- it silently makes a cluster of one.
-
-    That is the failure worth spending a second prompt on. A wrong passphrase produces a
-    perfectly valid key for a cluster nobody else is in, the daemon starts happily, and
-    the only symptom is that ``ls`` finds nobody -- which looks exactly like a network
-    problem and gets debugged as one.
-    """
+    """Ask twice, because a typo here does not fail -- it silently makes a cluster of one."""
     while True:
         first = getpass.getpass("  Passphrase: ")
         if len(first.strip()) < MIN_PASSPHRASE:
@@ -93,8 +76,6 @@ def cmd_setup(args: argparse.Namespace) -> int:
     elif interactive:
         passphrase = _prompt_passphrase(confirm=True)
     else:
-        # Piped input: read one line. Scripted setup should be possible without a TTY,
-        # but never by leaving the passphrase in shell history or in `ps`.
         passphrase = sys.stdin.readline()
         if not passphrase.strip():
             print("error: no passphrase on stdin", file=sys.stderr)
@@ -292,8 +273,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     except Exception as exc:                          # noqa: BLE001
-        # A daemon that is not running is the overwhelmingly likely cause, and a
-        # traceback is a poor way to say "nothing is listening on 8770".
         print(f"error: {exc}", file=sys.stderr)
         print("  is 'ml-stack-traind' running on that machine?", file=sys.stderr)
         return 2

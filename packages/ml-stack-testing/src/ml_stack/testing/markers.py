@@ -1,11 +1,4 @@
-"""Skip markers for tests that need a framework this platform may not have.
-
-The distinction that matters: MLX ships **only** for Apple silicon, so its absence on
-Linux is a platform fact, not a broken environment. Torch missing usually is a broken
-environment. Both are skipped rather than failed, but the reason string says which, so a
-CI log does not read as "these tests were never run" when it means "these tests cannot run
-here".
-"""
+"""Skip markers for tests that need a framework this platform may not have."""
 
 from __future__ import annotations
 

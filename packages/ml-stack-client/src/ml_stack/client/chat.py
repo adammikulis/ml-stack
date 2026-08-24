@@ -1,19 +1,4 @@
-"""One client for a local OpenAI-compatible model server.
-
-It smooths over the differences between llama.cpp's OpenAI-compatible surface and the
-hosted one, and a few local-server behaviours that are easy to get wrong:
-
-* ``id_slot`` + ``cache_prompt``, so a conversation lives in one KV slot and coexists
-  with another caller on a different slot.
-* ``build_body`` split out from ``chat``, so the request shape is unit-testable with no
-  server running.
-* A grammar tripwire, and one retry at double the token budget with a fresh seed when a
-  constrained generation hits the ceiling mid-structure.
-* ``<think>...</think>`` split out of the reply and kept, rather than discarded.
-* ``"json"`` normalised to ``"json_object"``, and llama.cpp-only sampler keys dropped
-  when the base URL is the hosted API, which rejects them.
-* A legacy ``function_call`` lifted up into ``tool_calls``.
-"""
+"""One client for a local OpenAI-compatible model server."""
 
 from __future__ import annotations
 
@@ -24,8 +9,6 @@ from typing import Any
 
 from ml_stack.client.http import ServerError, request_json
 
-# The group is load-bearing: `findall` yields it, so the trace can be kept rather than
-# discarded, while `sub` still removes the whole tagged block from the visible content.
 _THINK = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
 
 # Sampler keys llama.cpp understands but the hosted OpenAI API rejects outright.
@@ -35,21 +18,11 @@ _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
 
 
 class GrammarBudgetError(ServerError):
-    """A grammar-constrained generation ran out of tokens mid-structure.
-
-    Distinct from a plain truncation because the remedy is different: the output is not
-    merely short, it is *unparseable*, and retrying with the same budget will produce the
-    same unparseable output.
-    """
+    """A grammar-constrained generation ran out of tokens mid-structure."""
 
 
 class GrammarUnsupportedError(ServerError):
-    """The server ignored a grammar it was given.
-
-    Raised by ``assert_grammar_support``. A server that silently ignores GBNF returns
-    plausible free text where structured output was required, which downstream code
-    parses into nonsense rather than failing.
-    """
+    """The server ignored a grammar it was given."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +39,7 @@ class Reply:
 
 
 def strip_thinking(text: str | None) -> tuple[str | None, str | None]:
-    """Split ``<think>`` blocks out of a reply. Returns ``(visible, thinking)``.
-
-    Kept rather than discarded: a reasoning trace is the most useful thing in the
-    response when a tool call comes back wrong.
-    """
+    """Split ``<think>`` blocks out of a reply. Returns ``(visible, thinking)``."""
     if not text:
         return text, None
     blocks = [block.strip() for block in _THINK.findall(text)]
@@ -120,11 +89,7 @@ class Client:
         response_format: str | dict[str, Any] | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
-        """Build the ``/v1/chat/completions`` body.
-
-        Separate from ``chat`` on purpose: this is the part worth testing, and testing it
-        must not need a model loaded.
-        """
+        """Build the ``/v1/chat/completions`` body."""
         body: dict[str, Any] = {
             "messages": messages,
             "temperature": self.temperature,
@@ -132,8 +97,6 @@ class Client:
             "stream": stream,
         }
         if self.slot is not None:
-            # llama.cpp extension: pin this conversation to one KV slot, and reuse that
-            # slot's cache across turns -- which is the entire point of having slots.
             body["id_slot"] = self.slot
             body["cache_prompt"] = True
         if tools:
@@ -188,16 +151,7 @@ class Client:
         retry_on_budget: bool = True,
         **extra: Any,
     ) -> str:
-        """Raw ``/completion``, the endpoint to use when there is no chat template.
-
-        A model whose tokenizer ships no chat template must use this path:
-        ``/v1/chat/completions`` would either fail outright or re-wrap the prompt in a
-        template the model was never trained on.
-
-        On a grammar-constrained generation that stops at the token ceiling, retries once
-        at double the budget with a fresh seed. The fresh seed matters: the same seed
-        re-walks the same path into the same ceiling.
-        """
+        """Raw ``/completion``, the endpoint to use when there is no chat template."""
         budget = n_predict if n_predict is not None else self.n_predict
         body: dict[str, Any] = {
             "prompt": prompt,
@@ -238,13 +192,7 @@ class Client:
         return payload if isinstance(payload, dict) else {}
 
     def assert_grammar_support(self) -> None:
-        """Fail now if constrained decoding is broken on this server.
-
-        A server that ignores GBNF does not error -- it returns fluent prose where a
-        single token was required, and every downstream parse then produces confident
-        nonsense. Cheap to check once at startup; very expensive to discover from the
-        output.
-        """
+        """Fail now if constrained decoding is broken on this server."""
         grammar = 'root ::= "ok"'
         try:
             answer = self.complete("", grammar=grammar, n_predict=8, retry_on_budget=False)
@@ -259,20 +207,7 @@ class Client:
             )
 
     def tokenize(self, text: str, *, with_pieces: bool = False) -> list[Any]:
-        """Token ids the SERVER assigns to ``text``, via llama.cpp's /tokenize.
-
-        This is the only way to check that the tokenizer baked into a GGUF agrees
-        with the one the model was trained with. They diverge more easily than
-        anyone expects -- a converter that drops a metadata key, a special token
-        typed NORMAL instead of USER_DEFINED, an implicit space prefix applied on
-        one side only -- and every one of those failures is SILENT. The model
-        keeps generating fluent text; it is simply reading different sequences
-        than it was trained on.
-
-        ``with_pieces`` returns ``{"id", "piece"}`` objects instead of bare ids,
-        which is what you want when a mismatch has to be explained rather than
-        merely detected.
-        """
+        """Token ids the SERVER assigns to ``text``, via llama.cpp's /tokenize."""
         payload = request_json(
             f"{self.base_url}/tokenize",
             payload={"content": text, "with_pieces": with_pieces},
@@ -284,9 +219,7 @@ class Client:
         return list(tokens) if tokens is not None else []
 
     def detokenize(self, tokens: Sequence[int]) -> str:
-        """The round trip. A tokenizer can encode consistently and still fail to
-        reproduce the original string -- which is what a wrong space-prefix
-        setting looks like from the outside."""
+        """The round trip. A tokenizer can encode consistently and still fail to"""
         payload = request_json(
             f"{self.base_url}/detokenize",
             payload={"tokens": list(tokens)},
@@ -311,8 +244,6 @@ class Client:
 
         tool_calls = message.get("tool_calls") or None
         if not tool_calls and message.get("function_call"):
-            # Some llama.cpp builds emit tool calls only in the legacy `function_call`
-            # field. Normalise it up so callers see one shape.
             tool_calls = [
                 {"id": "call_0", "type": "function", "function": message["function_call"]}
             ]
@@ -328,10 +259,7 @@ class Client:
 
 
 def _fresh_seed(previous: Any) -> int:
-    """A different seed from last time, without importing ``random``.
-
-    Determinism is not wanted here -- the point is to leave the path that hit the ceiling.
-    """
+    """A different seed from last time, without importing ``random``."""
     import time
 
     base = int(previous) if isinstance(previous, int) and previous >= 0 else 0

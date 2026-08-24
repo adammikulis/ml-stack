@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-client"
 version = "0.1.0"
-description = "HTTP client for a local model server: chat, completion, embeddings, health. Device tier: stdlib only."
+description = "HTTP client for a local model server: chat, completion, embeddings, health. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

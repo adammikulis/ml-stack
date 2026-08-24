@@ -1,28 +1,4 @@
-"""The fleet's web interface: routes, and the guard on first-run setup.
-
-Served by the daemon itself, from every box, because a browser cannot speak UDP and so
-cannot discover anything on its own -- whichever daemon you open becomes the front door
-and does the discovering for you. It is also one less thing to install and start.
-
-The assets under ``web/`` are data, not code. That is the same call ``contracts/`` makes,
-and it is what keeps this package device tier: no framework, no build step, nothing
-imported that the standard library does not already have.
-
-**The one genuinely dangerous route is first-run setup.** A daemon that has not joined a
-cluster has no credential to check, and the setup route can *create* one -- so whoever
-reaches it first owns the machine. Three things close that:
-
-* it is refused from anywhere but loopback until the box has joined, so being on the LAN
-  is not enough; you have to be on the machine, or use ssh and the CLI, which already
-  does the whole job;
-* a ``Host`` allowlist, because loopback-only is not loopback-safe on its own -- a page
-  in the owner's browser can post to ``127.0.0.1`` from anywhere on the internet, and
-  the ``Host`` header is what tells the two apart;
-* a header no cross-origin form can set without a preflight the daemon refuses.
-
-Once the box *has* joined, setup requires a session like everything else. Changing which
-cluster a machine belongs to is a thing you may do, but not anonymously.
-"""
+"""The fleet's web interface: routes, and the guard on first-run setup."""
 
 from __future__ import annotations
 
@@ -50,22 +26,15 @@ __all__ = ["ASSETS", "UI", "asset_bytes"]
 ASSETS = Path(__file__).parent / "web"
 
 UI_HEADER = "X-ML-Stack-UI"
-"""Required on every UI request. A cross-origin form, image or link cannot set a custom
-header without a preflight, and the daemon answers no preflight -- so this alone stops a
-malicious page driving the fleet through a logged-in browser."""
+"""Required on every UI request. A cross-origin form, image or link cannot set a custom"""
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 DISCOVER_CACHE_S = 3.0
-"""Long enough that three panels refreshing do not each fire a multicast sweep, short
-enough that a machine appearing shows up while someone is still watching for it."""
+"""Long enough that three panels refreshing do not each fire a multicast sweep, short"""
 
 
 def asset_bytes(name: str) -> tuple[bytes, str] | None:
-    """One file from ``web/``, by exact name.
-
-    An allowlist built from the directory rather than a path join: there is no traversal
-    to get wrong if no caller-supplied string ever reaches the filesystem.
-    """
+    """One file from ``web/``, by exact name."""
     allowed = {p.name: p for p in ASSETS.iterdir() if p.is_file()} if ASSETS.is_dir() else {}
     path = allowed.get(name)
     if path is None:
@@ -81,10 +50,6 @@ class UI:
                  peer_port: int = 8770, setup_token: str = "",
                  on_join: "Any | None" = None) -> None:
         self.name = name
-        #: Called after a successful join. A daemon that started before the box was in a
-        #: cluster is not advertising -- it had no key to sign a beacon with -- so
-        #: without this the machine stays invisible until someone restarts it, and
-        #: "set it up and then restart it" is not a setup wizard.
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
         self.peer_port = peer_port
@@ -144,12 +109,7 @@ class UI:
 
     # -- actions ---------------------------------------------------------
     def join(self, passphrase: str, group: str, source: str) -> tuple[dict[str, Any], str]:
-        """Join a cluster, and sign the person in. Returns ``(state, session id)``.
-
-        Signed in as part of joining because they have just proved they know the
-        passphrase -- asking for it again on the very next screen is a login form that
-        exists only because the code forgot what happened a second ago.
-        """
+        """Join a cluster, and sign the person in. Returns ``(state, session id)``."""
         held = self.throttle.blocked_for(source)
         if held:
             raise DiscoveryError(f"too many attempts -- wait {held:.0f}s")
@@ -166,9 +126,6 @@ class UI:
             try:
                 self.on_join()
             except Exception:                         # noqa: BLE001
-                # Joining worked; announcing is best effort. A box that is in the
-                # cluster but silent can still be reached by address, and will announce
-                # on its next start.
                 pass
         return self.state(), self.sessions.open("setup").sid
 
@@ -183,8 +140,6 @@ class UI:
             return None
 
         if token:
-            # No scrypt, so no throttle slot needed -- but a wrong token still counts
-            # toward backoff, or the token path becomes the way around it.
             if _same(token, derive_token(key)):
                 self.throttle.succeeded(source)
                 return self.sessions.open("token").sid
@@ -214,23 +169,14 @@ def _same(a: str, b: str) -> bool:
 
 
 def _looks_like_dns(host: str) -> bool:
-    """Whether a Host header names something that had to be resolved.
-
-    An IP literal or a bare machine name is fine. A dotted name is the rebinding shape:
-    a domain whose A record points at 127.0.0.1, so a page anywhere can post to a daemon
-    it has no business reaching.
-    """
+    """Whether a Host header names something that had to be resolved."""
     if not host or host.replace(".", "").isdigit():
         return False
     return "." in host and not host.endswith(".local")
 
 
 def routes(ui: UI, handler: Any) -> bool:
-    """Handle one ``/ui/*`` request. Returns True when it did.
-
-    Takes the handler rather than living inside it so the logic above stays testable
-    without a socket, which is most of why this module exists at all.
-    """
+    """Handle one ``/ui/*`` request. Returns True when it did."""
     parsed = urllib.parse.urlparse(handler.path)
     path = parsed.path
     if not path.startswith("/ui"):

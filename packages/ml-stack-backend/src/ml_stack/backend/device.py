@@ -1,10 +1,4 @@
-"""What hardware is this, and how much of it can a job have?
-
-One place to answer "which device" so that a training script, a benchmark and a serving
-process do not each guess differently. The guessing is the problem: a benchmark that
-silently lands on CPU while its comparison ran on GPU produces a number that looks like a
-regression.
-"""
+"""What hardware is this, and how much of it can a job have?"""
 
 from __future__ import annotations
 
@@ -38,12 +32,7 @@ class DeviceProfile:
         return f"{self.name} ({self.vendor}, {self.total_memory_gb:.1f} GB)"
 
     def budget_gb(self, *, fraction: float = 0.7, reserve_gb: float = 2.0) -> float:
-        """How much memory a single job may claim.
-
-        The reserve is subtracted *after* the fraction: on a unified-memory machine the
-        window server and everything else are competing for the same pool, and a job that
-        takes its whole fraction will stall the desktop rather than fail.
-        """
+        """How much memory a single job may claim."""
         return max(0.0, self.total_memory_gb * fraction - reserve_gb)
 
 
@@ -57,14 +46,7 @@ def detect_device() -> DeviceProfile:
 
 
 def resolve_torch_device(prefer: str | None = None):
-    """A ``torch.device`` for this machine.
-
-    ``prefer="auto"`` (or ``None``) picks CUDA, then MPS, then CPU.
-
-    MPS is included in ``auto`` here, unlike in a benchmark context where silently landing
-    on a much slower device would make an unfair comparison look like a fair one. Pass an
-    explicit device when a measurement depends on which one ran.
-    """
+    """A ``torch.device`` for this machine."""
     from ml_stack.backend.torch_ops import require_torch
 
     torch, _ = require_torch()
@@ -147,8 +129,6 @@ def _detect_amd() -> DeviceProfile | None:
         return None
     if out.returncode != 0:
         return None
-    # rocm-smi's output format is not stable across versions, so the name is best-effort
-    # and the memory figure is left to the system pool rather than parsed unreliably.
     name = next(
         (ln.split(":", 1)[1].strip() for ln in out.stdout.splitlines() if ":" in ln),
         "AMD GPU",

@@ -1,25 +1,4 @@
-"""Prove an exported GGUF reads the same sequences the model was trained on.
-
-Train/inference tokenizer divergence is the failure this exists for, and it is
-the worst kind: nothing raises, generation stays fluent, and the model is simply
-reading different token ids than it learned from. It is usually found weeks
-later as "the model got worse for no reason".
-
-Three checks, cheapest first, because an early failure explains the later ones:
-
-1. **The file opens.** A GGUF writer that copies a reader's SYNTHETIC header
-   fields (``GGUF.version``, ``GGUF.tensor_count``, ``GGUF.kv_count``) emits a
-   duplicate key. llama.cpp tolerates it; the Python ``gguf`` reader refuses the
-   file outright. That asymmetry is how such a file ships unnoticed.
-2. **``add_space_prefix`` is present.** Absent is not neutral -- llama.cpp
-   defaults it to TRUE, which inserts a space after every special token that a
-   SentencePiece tokenizer never produced.
-3. **The served model agrees with a reference tokenizer, id for id.** The only
-   check that can observe a divergence rather than infer one from metadata.
-
-``encode`` is any callable ``str -> list[int]``, so this is tokenizer-agnostic:
-pass ``sentencepiece``'s, a HF tokenizer's, or your own.
-"""
+"""Prove an exported GGUF reads the same sequences the model was trained on."""
 
 from __future__ import annotations
 
@@ -93,15 +72,7 @@ def verify_tokenizer_fidelity(gguf: Path | str, encode: Callable[[str], Sequence
                               bos_id: int | None = None,
                               expect_space_prefix: bool | None = False,
                               serve_fn=None, client_cls=None) -> FidelityReport:
-    """All three checks. Serves the GGUF and compares /tokenize against ``encode``.
-
-    ``probes`` should be REAL sequences from the training corpus -- tagged turns,
-    structured output, accented text -- not lorem. Divergence concentrates
-    exactly on the special tokens and punctuation that lorem does not contain.
-
-    ``serve_fn`` and ``client_cls`` are injectable so this is testable without a
-    model; they default to ``ml_stack.serve.serve`` and ``ml_stack.client.Client``.
-    """
+    """All three checks. Serves the GGUF and compares /tokenize against ``encode``."""
     report = verify_metadata(gguf, expect_space_prefix=expect_space_prefix)
     if not report.checks or not report.checks[0].ok:
         return report                      # it does not open; nothing else can run

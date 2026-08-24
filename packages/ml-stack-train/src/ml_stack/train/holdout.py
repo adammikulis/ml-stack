@@ -1,19 +1,4 @@
-"""Splitting data so the held-out score means something.
-
-An evaluation set that leaks is worse than no evaluation set: it produces a number that
-looks like generalisation, tracks real improvements closely enough to be believed, and is
-wrong by an amount nobody can estimate.
-
-Three distinct leaks are handled here, because they need different fixes:
-
-* **Neighbouring context.** Splitting a packed token stream at a random offset puts text
-  from either side of the boundary into both halves. Take a contiguous tail instead.
-* **Group membership.** When rows come in correlated groups -- frames from one episode,
-  positions from one game -- a row-wise split puts near-duplicates on both sides. Split by
-  group.
-* **Duplication upstream.** If the source repeats examples, holding out a row still leaves
-  its copies in training. That must be detected, not split around.
-"""
+"""Splitting data so the held-out score means something."""
 
 from __future__ import annotations
 
@@ -24,8 +9,7 @@ from typing import Any, TypeVar
 T = TypeVar("T")
 
 GUARD = 8
-"""Rows dropped either side of a split boundary, so no training row is adjacent to a
-held-out one."""
+"""Rows dropped either side of a split boundary, so no training row is adjacent to a"""
 
 
 class LeakageError(ValueError):
@@ -37,20 +21,14 @@ class Split:
     train: list[Any]
     holdout: list[Any]
     dropped: int = 0
-    """Rows discarded at the boundary. Reported rather than hidden -- if it is a large
-    fraction of the data, the split is the wrong shape."""
+    """Rows discarded at the boundary. Reported rather than hidden -- if it is a large"""
 
     def __str__(self) -> str:
         return f"{len(self.train)} train / {len(self.holdout)} holdout ({self.dropped} dropped)"
 
 
 def contiguous_tail(rows: Sequence[T], fraction: float = 0.005, *, guard: int = GUARD) -> Split:
-    """Hold out a contiguous block from the end, with a guard band before it.
-
-    For sequential data -- a packed token stream, a time series. A random split of such
-    data leaks by construction: the sample immediately before a held-out one is nearly the
-    same sample.
-    """
+    """Hold out a contiguous block from the end, with a guard band before it."""
     total = len(rows)
     count = max(1, int(total * fraction)) if total else 0
     if count + guard >= total:
@@ -69,12 +47,7 @@ def by_group(
     *,
     seed: int = 0,
 ) -> Split:
-    """Hold out whole groups, never rows within a group.
-
-    The difference this makes is not marginal. Splitting row-wise across correlated groups
-    can inflate a reported score by tens of points, because the model has seen a
-    near-duplicate of every evaluation row.
-    """
+    """Hold out whole groups, never rows within a group."""
     if len(rows) != len(groups):
         raise LeakageError(f"{len(rows)} rows but {len(groups)} group labels")
 
@@ -99,12 +72,7 @@ def by_group(
 
 
 def assert_no_duplicates(rows: Sequence[Any], *, key=repr, label: str = "dataset") -> None:
-    """Fail if the data contains repeated examples.
-
-    Holding out a row that appears three times leaves two copies in training. The split is
-    then valid on paper and leaking in fact, and no splitting strategy fixes it -- the
-    duplication has to go first.
-    """
+    """Fail if the data contains repeated examples."""
     seen: dict[str, int] = {}
     for row in rows:
         k = key(row)
@@ -121,13 +89,7 @@ def assert_no_duplicates(rows: Sequence[Any], *, key=repr, label: str = "dataset
 
 
 def spread_order(n: int) -> list[int]:
-    """Indices ordered so that every prefix spans the whole range.
-
-    Bisection order: 0, n-1, midpoint, quarter points, and so on. Taking the first k of
-    this covers the data evenly, whereas taking the first k in natural order samples only
-    the beginning -- which for anything ordered by time, difficulty or source is a biased
-    subset dressed up as a sample.
-    """
+    """Indices ordered so that every prefix spans the whole range."""
     if n <= 0:
         return []
     if n == 1:

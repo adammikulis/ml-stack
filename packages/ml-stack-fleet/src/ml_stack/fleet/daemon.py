@@ -1,37 +1,4 @@
-"""A training daemon: one GPU box, one job at a time, reachable over the LAN.
-
-Training happens on whatever machine has the card, which is usually not the
-machine you are working on. Without something like this, "run it on the other
-box" means ssh, tmux, a hand-rolled rsync, and no way to ask what is happening
-except logging in again.
-
-Three decisions shape this:
-
-**One job at a time.** A GPU is not shareable in any useful sense: two jobs on
-one card contend for memory and both get slower, and the failure is silent --
-a run that should take 3 hours quietly takes 11 and looks like it is working.
-Submitting while busy queues rather than competing. This is ``RunLock``'s
-lesson applied across machines instead of within one.
-
-**Stop means SIGTERM, not SIGKILL.** A training loop that checkpoints on
-SIGTERM can be stopped safely at any moment; killing it outright throws away
-everything since the last checkpoint. The daemon sends TERM, waits, and only
-escalates if the process ignores it.
-
-**It executes commands you send it.** That is the point, and it is also
-remote code execution: a token is mandatory, there is no anonymous mode, and
-this belongs on a trusted LAN and nowhere else. Path traversal is blocked on
-the file endpoints because "upload a dataset" and "overwrite /etc/passwd"
-otherwise differ only by how you spell the path.
-
-**It announces itself only to machines that already hold the cluster key.**
-With a key present at ``~/.ml-stack/cluster.key`` the daemon advertises over
-UDP (see ``discovery``) and derives its bearer token from that key, so a client
-on the LAN finds it and authenticates to it with nothing configured. With no
-key it stays silent and falls back to a random token you copy by hand -- which
-is the old behaviour, and the right default for a machine that has not opted
-into a cluster.
-"""
+"""A training daemon: one GPU box, one job at a time, reachable over the LAN."""
 
 from __future__ import annotations
 
@@ -69,16 +36,9 @@ from .discovery import (
 
 DEFAULT_PORT = 8770
 _SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9._-]+$")
-#: How much of a file is held in memory at once while serving it. Fixed, and
-#: unrelated to the file's size -- that is the entire point.
 FILE_CHUNK = 1 << 20
 DIGEST_HEADER = "X-ML-Stack-SHA256"
 
-#: Digests are cached because a resumed download asks for the same one over and
-#: over, and hashing a gigabyte checkpoint on every attempt would cost more
-#: than the transfer. Keyed on size and mtime as well as path, so rewriting a
-#: file invalidates its entry rather than serving a digest for bytes that are
-#: no longer there. Bounded: this is a cache, not a record.
 _DIGESTS: dict[tuple[str, int, int], str] = {}
 _DIGEST_LOCK = threading.Lock()
 _DIGEST_CACHE_MAX = 256
@@ -146,18 +106,10 @@ class Job:
 
 
 def safe_relpath(root: Path, relpath: str) -> Path:
-    """Resolve ``relpath`` under ``root``, refusing anything that escapes it.
-
-    Checked after resolution, not by string inspection: '..' filtering misses
-    symlinks, and a symlink inside the file root pointing at / is exactly how
-    an upload endpoint becomes a way to write anywhere on the machine.
-    """
+    """Resolve ``relpath`` under ``root``, refusing anything that escapes it."""
     relpath = urllib.parse.unquote(relpath)
     if not relpath:
         raise DaemonError("empty path")
-    # Refuse absolute paths rather than silently rewriting them as relative.
-    # Quietly turning "/etc/passwd" into "<root>/etc/passwd" is contained and
-    # therefore safe, but it hides a confused client instead of telling it.
     if relpath.startswith("/") or (len(relpath) > 1 and relpath[1] == ":"):
         raise DaemonError(f"absolute path not allowed: {relpath!r}")
     for seg in Path(relpath).parts:
@@ -171,51 +123,45 @@ def safe_relpath(root: Path, relpath: str) -> Path:
 
 
 class JobRunner:
-    """Runs jobs, ``slots`` at a time, and owns their processes.
-
-    One slot is the default because a GPU is not shareable in any useful sense -- see the
-    module docstring. A box whose work is tokenizing text has no such contention and
-    should be told so with ``--slots``; capacity here is the number of worker threads
-    rather than a counter, so the limit is structural and there is no arithmetic to get
-    wrong.
-    """
+    """Runs jobs, ``slots`` at a time, and owns their processes."""
 
     def __init__(self, root: Path, files_root: Path | None = None, *,
                  slots: int = 1, gate: "Callable[[], tuple[bool, str]] | None" = None) -> None:
         if slots < 1:
             raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
-        #: Job directories live UNDER the file root, so a checkpoint a job writes to
-        #: $ML_STACK_JOB_DIR can actually be pulled. With them beside it instead, the
-        #: obvious call -- pull("jobs/<id>/ckpt/model.safetensors") -- resolves to a
-        #: path nothing creates and 404s, which is a confusing way to discover that
-        #: the artifact you waited three hours for is unreachable.
         self.files_root = Path(files_root) if files_root is not None else root / "files"
-        #: Asked before a queued job is STARTED, never before it is queued. "Come back
-        #: at six" is something a scheduler can act on; a rejection is not, and work
-        #: submitted at 3pm to a box that frees up at 5pm should simply run at 5pm.
         self.gate = gate
         self.slots = slots
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
-        #: job id -> process. Keyed, not a single handle: with more than one slot
-        #: "the running process" is not a thing, and stopping job B by reaching for
-        #: it would kill job A.
         self._running: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._threads = [
-            threading.Thread(target=self._run_loop, daemon=True, name=f"jobrunner-{i}")
-            for i in range(slots)
-        ]
-        for t in self._threads:
-            t.start()
+        self._threads: list[threading.Thread] = []
+        self._spawn(slots)
+
+    def _spawn(self, upto: int) -> None:
+        while len(self._threads) < upto:
+            index = len(self._threads)
+            worker = threading.Thread(target=self._run_loop, args=(index,), daemon=True,
+                                      name=f"jobrunner-{index}")
+            self._threads.append(worker)
+            worker.start()
+
+    def set_slots(self, slots: int) -> int:
+        """Change how many jobs run at once, without a restart."""
+        if slots < 1:
+            raise DaemonError(f"slots must be at least 1, got {slots}")
+        self.slots = slots
+        self._spawn(slots)
+        self._wake.set()
+        return slots
 
     # -- state, under the lock -------------------------------------------
     def status(self) -> dict[str, Any]:
-        """Capacity and what is on it. Taken under the lock, because a placement loop
-        polling this while a worker thread mutates it is now the normal case."""
+        """Capacity and what is on it. Taken under the lock, because a placement loop"""
         with self._lock:
             running = sorted(self._running)
             return {"slots": self.slots, "free": self.slots - len(running),
@@ -223,9 +169,7 @@ class JobRunner:
                     "queued": len(self._queue)}
 
     def snapshot(self) -> list[dict[str, Any]]:
-        """Every job's public view. Copied under the lock -- iterating ``self.jobs``
-        directly races a submit and raises 'dictionary changed size during iteration',
-        which reaches the caller as a 500 on a route that should never fail."""
+        """Every job's public view. Copied under the lock -- iterating ``self.jobs``"""
         with self._lock:
             return [j.public() for j in list(self.jobs.values())]
 
@@ -266,9 +210,6 @@ class JobRunner:
             proc = self._running.get(job_id)
         if proc is None:
             return job
-        # TERM first: a loop that checkpoints on TERM loses nothing. KILL is
-        # for a process that ignored TERM, and costs everything since the last
-        # checkpoint.
         proc.send_signal(signal.SIGTERM)
         deadline = time.time() + grace_s
         while time.time() < deadline and proc.poll() is None:
@@ -279,8 +220,11 @@ class JobRunner:
         return job
 
     # -- the loop --------------------------------------------------------
-    def _run_loop(self) -> None:
+    def _run_loop(self, index: int = 0) -> None:
         while not self._stop.is_set():
+            if index >= self.slots:
+                time.sleep(0.5)
+                continue
             self._wake.wait(timeout=1.0)
             self._wake.clear()
             if self.gate is not None:
@@ -300,9 +244,6 @@ class JobRunner:
         env = {**os.environ, **job.env, "PYTHONUNBUFFERED": "1",
                "ML_STACK_JOB_ID": job.id,
                "ML_STACK_JOB_DIR": str(self.job_dir(job.id)),
-               # A job that must produce something the coordinator can fetch has to be
-               # told where fetchable is. Without this it defaults to cwd, and a caller
-               # who passes cwd lands the artifact somewhere nothing can see.
                "ML_STACK_FILES_ROOT": str(self.files_root),
                "ML_STACK_OUT": str(self.job_dir(job.id) / "out")}
         try:
@@ -333,12 +274,7 @@ class JobRunner:
             self._wake.set()
 
     def stop_running(self, *, grace_s: float = 30.0) -> list[str]:
-        """TERM everything in flight and put it back on the queue.
-
-        Used when someone takes their machine back. TERM rather than KILL because a loop
-        that checkpoints on TERM loses nothing, which the daemon already relies on --
-        and requeueing rather than failing means the work resumes when the box does.
-        """
+        """TERM everything in flight and put it back on the queue."""
         with self._lock:
             running = list(self._running)
         for job_id in running:
@@ -383,22 +319,7 @@ class Fetch:
 
 
 class Fetcher:
-    """Pulls files from other daemons, without going through the job queue.
-
-    Three decisions shape this.
-
-    **It is not a job.** Making it one would burn a training slot on the GPU box to run
-    a download, which defeats the point of moving the bytes peer-to-peer in the first
-    place. It would also put the source's bearer token in an argv, and therefore in
-    ``ps`` output on a machine other people can see.
-
-    **The destination pulls; the source is never told to push.** The destination is the
-    only side that knows its own disk pressure, ``Peer.pull`` already resumes from a
-    ``.part`` and verifies the whole reassembled file, and a pull inherits all of that
-    for free.
-
-    **The source is named, never addressed.** See ``resolve``.
-    """
+    """Pulls files from other daemons, without going through the job queue."""
 
     def __init__(self, files_root: Path, key: bytes | None, *, slots: int = 2,
                  discover_timeout_s: float = 2.0) -> None:
@@ -412,15 +333,7 @@ class Fetcher:
         self._peers: dict[str, tuple[float, str]] = {}
 
     def resolve(self, name: str) -> str:
-        """A peer name to a base URL, via signed discovery. Never from the caller.
-
-        A route that accepted ``{"from_url": ...}`` would be a general "fetch any URL
-        you are told to, with the cluster token attached" primitive -- server-side
-        request forgery, and a confused deputy handing out a credential the requester
-        did not have. Resolving the name here means the address comes from a signed
-        beacon, which is ``discovery``'s own rule -- a peer's address comes from the
-        packet, never from a self-reported field -- applied one level up.
-        """
+        """A peer name to a base URL, via signed discovery. Never from the caller."""
         if self.key is None:
             raise DaemonError(
                 "this daemon holds no cluster key, so it cannot authenticate to a peer "
@@ -459,10 +372,6 @@ class Fetcher:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 peer.pull(fetch.relpath, target, on_progress=progress)
                 if sha256:
-                    # The caller said which file it wanted. "A file arrived at that
-                    # path" and "the file I asked for arrived" are different facts, and
-                    # a pipeline stage that consumes the wrong shard fails much later,
-                    # somewhere that looks nothing like a transfer.
                     got = sha256_file(target)
                     if not hmac.compare_digest(got, sha256.strip().lower()):
                         target.unlink(missing_ok=True)
@@ -484,13 +393,7 @@ class Fetcher:
 
 
 REPORT_GROUP = "ml_stack.device_report"
-"""Entry-point group a higher tier registers a richer device probe under.
-
-The dependency points the right way: this package cannot import ``ml_stack.backend`` to
-ask about CUDA -- that is a lab module and this is a device one -- so instead a lab
-package *registers itself here* and the daemon finds it at runtime. ``ml-stack-train``
-declares one in its ``pyproject.toml``; a box without it simply reports less.
-"""
+"""Entry-point group a higher tier registers a richer device probe under."""
 
 
 def _total_ram_gb() -> float | None:
@@ -502,13 +405,7 @@ def _total_ram_gb() -> float | None:
 
 
 def stdlib_device_report() -> dict[str, Any]:
-    """What this box is, using only what the standard library can see.
-
-    Deliberately says nothing about accelerators. A device-tier package cannot import a
-    framework to ask, and *guessing* is worse than staying quiet: a beacon claiming no
-    GPU is read by placement as "not a training box", so an unverified negative would
-    park every run on the wrong machine.
-    """
+    """What this box is, using only what the standard library can see."""
     out: dict[str, Any] = {"backends": [], "cpus": os.cpu_count() or 1,
                            "arch": platform.machine(), "platform": sys.platform}
     ram = _total_ram_gb()
@@ -529,21 +426,12 @@ def registered_reports() -> list[Callable[[], dict[str, Any]]]:
         try:
             out.append(ep.load())
         except Exception:                             # noqa: BLE001
-            # A broken plugin must not stop the daemon booting. The box then
-            # advertises less than it could, which placement handles; failing
-            # to start would take the machine out of the fleet entirely.
             continue
     return out
 
 
 def resolve_report(spec: str) -> Callable[[], dict[str, Any]]:
-    """Turn ``"ml_stack.train.accelerator:report"`` into the callable it names.
-
-    The explicit form exists because entry-point discovery cannot be the thing
-    correctness rests on here: this repo's tests run from source directories on
-    ``sys.path`` with nothing pip-installed, so an entry point would be invisible to
-    every test that matters -- an untested default is not a default, it is a hope.
-    """
+    """Turn ``"ml_stack.train.accelerator:report"`` into the callable it names."""
     module, _, attr = spec.partition(":")
     if not module or not attr:
         raise DaemonError(
@@ -556,11 +444,7 @@ def resolve_report(spec: str) -> Callable[[], dict[str, Any]]:
 
 
 def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
-    """What is on this box. Best effort, and additive.
-
-    ``extra`` overrides the registered probes rather than adding to them, so a caller
-    that passes one gets exactly what it asked for.
-    """
+    """What is on this box. Best effort, and additive."""
     out = stdlib_device_report()
     for fn in ([extra] if extra is not None else registered_reports()):
         try:
@@ -571,8 +455,7 @@ def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str
 
 
 _DEFAULT_REPORT = device_report
-"""Bound here so ``serve_forever``'s ``device_report=`` parameter can shadow the name
-without losing the default."""
+"""Bound here so ``serve_forever``'s ``device_report=`` parameter can shadow the name"""
 
 
 def make_handler(runner: JobRunner, files_root: Path,
@@ -592,21 +475,12 @@ def make_handler(runner: JobRunner, files_root: Path,
 
         # -- helpers --
         def _token(self) -> str:
-            """Read at request time, not captured at startup.
-
-            A daemon started before its box had joined a cluster minted a random token.
-            When someone then joins through the setup wizard, the derived token is what
-            every peer will compute -- so a token frozen at startup means the machine
-            appears in the fleet, answers /health, and rejects every job with a 401
-            until somebody restarts it. Which is not a setup wizard.
-            """
+            """Read at request time, not captured at startup."""
             return token() if callable(token) else token
 
         def _authed(self) -> bool:
             got = self.headers.get("Authorization", "")
             if got.startswith("Bearer "):
-                # compare_digest: token comparison should not leak length or
-                # prefix through timing, cheap to get right.
                 return secrets.compare_digest(got[7:], self._token())
             return False
 
@@ -615,10 +489,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                   content_type: str = "") -> None:
             body = raw if raw is not None else json.dumps(payload).encode()
             self.send_response(code)
-            # One Content-Type, chosen here. Passing another through `headers` sends the
-            # header twice, and a browser takes the FIRST -- so an HTML page announced
-            # second arrives as application/octet-stream and is offered as a download
-            # rather than rendered.
             self.send_header("Content-Type", content_type or (
                 "application/octet-stream" if raw is not None else "application/json"))
             self.send_header("Content-Length", str(len(body)))
@@ -630,21 +500,9 @@ def make_handler(runner: JobRunner, files_root: Path,
 
         def _send_file(self, target: Path, start: int = 0,
                        end: int | None = None) -> None:
-            """Send a file without ever holding more than FILE_CHUNK of it.
-
-            The obvious version -- read_bytes() then slice for the Range --
-            costs one full copy of the file, and two if a Range is present.
-            Checkpoints here run to a gigabyte, so serving a resumed download
-            of one cost about 2GB on the machine that is also running the
-            training job it came from. Seek and stream instead: memory is now
-            a function of the buffer, not of the file.
-            """
+            """Send a file without ever holding more than FILE_CHUNK of it."""
             size = target.stat().st_size
             if start and start >= size:
-                # The caller's .part is at or past the end. Saying so with 416
-                # matters: the alternative is a 206 carrying zero bytes and a
-                # nonsensical Content-Range, which a client reasonably reads as
-                # "you already have it all" and promotes a stale file.
                 self._send(416, {"error": "range beyond end of file",
                                  "size": size},
                            headers={"Content-Range": f"bytes */{size}"})
@@ -656,9 +514,6 @@ def make_handler(runner: JobRunner, files_root: Path,
             self.send_header("Content-Type", "application/octet-stream")
             self.send_header("Content-Length", str(length))
             self.send_header("Accept-Ranges", "bytes")
-            # Always the digest of the WHOLE file, never of the range being
-            # sent: the client is reassembling a file across resumes and can
-            # only check the thing it ends up with.
             self.send_header(DIGEST_HEADER, file_digest(target))
             if ranged:
                 self.send_header("Content-Range", f"bytes {start}-{last}/{size}")
@@ -675,9 +530,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                     try:
                         self.wfile.write(chunk)
                     except (BrokenPipeError, ConnectionResetError):
-                        # The client hung up mid-download. Its .part is intact
-                        # and it will resume; there is nothing to clean up and
-                        # nothing worth logging.
                         return
                     remaining -= len(chunk)
 
@@ -700,8 +552,6 @@ def make_handler(runner: JobRunner, files_root: Path,
             parsed = urllib.parse.urlparse(self.path)
             path, q = parsed.path, urllib.parse.parse_qs(parsed.query)
             if path == "/health":
-                # unauthenticated on purpose: liveness must be checkable
-                # without handing a probe the token.
                 status = runner.status()
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
@@ -773,9 +623,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                     spec = rng.split("=", 1)[1].split(",")[0].strip()
                     head, _, tail = spec.partition("-")
                     if not head:
-                        # "bytes=-500" means the LAST 500 bytes. Nothing here
-                        # sends it, and guessing wrong would serve the wrong
-                        # part of a checkpoint, so refuse rather than mis-serve.
                         self._send(400, {"error": "suffix ranges not supported"})
                         return
                     try:
@@ -787,9 +634,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                 return
             self._send(404, {"error": "no such route"})
 
-        # _send and _send_file already branch on HEAD; without this the method they
-        # were written for answers 501. Data-locality scoring asks "do you already hold
-        # this exact file" and should not have to download it to find out.
         do_HEAD = do_GET
 
         def do_POST(self) -> None:                     # noqa: N802
@@ -823,10 +667,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                         schedule.pause(minutes=float(minutes) if minutes else None,
                                        reason=str(req.get("reason") or ""))
                         if on_paused == "stop":
-                            # The point of pausing is to get the machine back. Leaving
-                            # the current job holding the GPU would make the toggle mean
-                            # "no NEW work", which is not what someone reaching for it
-                            # in the middle of a game is asking for.
                             runner.stop_running()
                     elif action == "resume":
                         schedule.resume()
@@ -856,9 +696,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                 try:
                     req = json.loads(body or b"{}")
                     if "from_url" in req or "url" in req or "token" in req:
-                        # Refused rather than ignored, so a caller reaching for the
-                        # obvious-looking field is told why instead of quietly getting
-                        # something else. See Fetcher.resolve.
                         self._send(400, {"error": "name the source peer, not a URL: a "
                                                   "route that fetches any URL it is "
                                                   "given is a forgery primitive"})
@@ -901,8 +738,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                 self._send(400, {"error": str(e)}); return
             target.parent.mkdir(parents=True, exist_ok=True)
             length = int(self.headers.get("Content-Length", "0"))
-            # Content-Range lets a killed upload resume instead of restarting a
-            # multi-gigabyte dataset from zero.
             cr = self.headers.get("Content-Range", "")
             offset = 0
             if cr.startswith("bytes "):
@@ -910,11 +745,6 @@ def make_handler(runner: JobRunner, files_root: Path,
             partial = target.with_suffix(target.suffix + ".part")
             held = partial.stat().st_size if partial.exists() else 0
             if offset > held:
-                # Seeking past the end of what we hold writes a sparse run of zeros and
-                # then fails the digest check with "checksum mismatch" -- which sends the
-                # uploader hunting a corruption that never happened. The truth is that
-                # this resume has nothing to resume from, so say the size we actually
-                # hold, the same answer the download side already gives on a bad Range.
                 self._send(416, {"error": "cannot resume past what this daemon holds",
                                  "held": held, "requested_offset": offset},
                            headers={"Content-Range": f"bytes */{held}"})
@@ -934,10 +764,6 @@ def make_handler(runner: JobRunner, files_root: Path,
                 want = self.headers.get(DIGEST_HEADER, "").strip().lower()
                 got = file_digest(partial) if want else ""
                 if want and not secrets.compare_digest(got, want):
-                    # Delete rather than keep for resume. A length mismatch is
-                    # a short transfer and resuming fixes it; a digest mismatch
-                    # means some byte already written is wrong, and resuming
-                    # from it preserves the corruption forever.
                     partial.unlink(missing_ok=True)
                     self._send(422, {"error": "checksum mismatch, upload discarded",
                                      "expected": want, "got": got})
@@ -956,14 +782,7 @@ def make_handler(runner: JobRunner, files_root: Path,
 
 
 def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
-    """The bearer token: derived from the cluster key, or random and local.
-
-    A cluster key deliberately overrides an existing random token rather than
-    deferring to it. The alternative -- keeping whatever the file says -- means
-    a box that joins a cluster keeps answering on a token no peer can compute,
-    and presents as "found but unauthorised", which is a far more confusing
-    failure than a token that changed when you asked it to change.
-    """
+    """The bearer token: derived from the cluster key, or random and local."""
     p = root / "token"
     if cluster_key is not None:
         tok = derive_token(cluster_key)
@@ -1017,21 +836,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     if web:
         from .ui import UI
         if key is None and setup_from_lan:
-            # Printed to the console below. Someone who can read this machine's console
-            # is someone who is already on the machine, which is the property that makes
-            # relaxing the loopback rule safe to offer at all.
             setup_token = secrets.token_urlsafe(9)
         interface = UI(name=name, cluster_key_path=cluster_key_path, peer_port=port,
                        setup_token=setup_token)
     base_report = device_report or _DEFAULT_REPORT
-    # Filtered: an unset $ML_STACK_LABELS splits to [""], and an empty label would be
-    # advertised, shown in the UI, and matchable by Requires(labels=("",)).
     labels = sorted({s.strip() for s in labels if s and s.strip()})
 
     def report() -> dict[str, Any]:
-        # Declared, not detected. A box cannot prove it has no GPU, so "keep prep off the
-        # training boxes" has to be something an operator says rather than something the
-        # daemon infers -- see stdlib_device_report.
         return {**base_report(), "labels": labels}
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(runner, files_root,
@@ -1047,9 +858,6 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         b.busy, b.queued = status["busy"], status["queued"]
         b.slots, b.free = status["slots"], status["free"]
         if not available["available"]:
-            # Advertised as having no capacity rather than as absent: the box is still
-            # there, still reachable, and still worth showing -- it just will not take
-            # work right now, and placement should say so rather than silently skip it.
             b.free = 0
         b.device = {**report(), "availability": available}
 
@@ -1062,8 +870,6 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         if key is None:
             return
         fetcher.key = key
-        # The token every peer will now compute. Without this the box is discoverable
-        # and undrivable, which is the worst of both.
         live_token[0] = load_or_create_token(root, key)
         beacon = Beacon(name=name, port=port, device=report(),
                         slots=runner.slots, free=runner.slots)
@@ -1078,9 +884,6 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         try:
             advertiser = Advertiser(beacon, key, refresh=refresh).start()
         except DiscoveryError as exc:
-            # Not fatal. A daemon nobody can find is still a daemon you can
-            # reach by address, and refusing to start would turn a flaky
-            # network into an outage.
             print(f"  discovery OFF: {exc}")
     print(f"ml-stack traind on http://{host}:{port}")
     print(f"  name  {name}")
@@ -1104,9 +907,6 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         print("  run 'ml-stack-peers setup' to join one")
     print(f"  device {json.dumps(report())}")
     if slots > 1:
-        # Said out loud next to the other warning, because --slots on a box with a card
-        # is how you quietly halve your own training throughput: two jobs on one GPU
-        # contend for memory and both get slower, and nothing in the logs says so.
         print(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
               "this makes every job slower.")
     if interface is not None:

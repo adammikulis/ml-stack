@@ -1,23 +1,4 @@
-"""Browser sessions for the fleet UI, and the throttle that makes login safe to expose.
-
-**The cluster key never enters the browser.** If the derived token sat in
-``localStorage``, any script that ever runs on this origin -- an XSS, an extension, a
-page the user was tricked into -- would hold permanent, unrevocable remote code execution
-on every machine in the cluster. A session id is a random opaque string that means
-nothing anywhere else, dies when the daemon restarts, and can be revoked.
-
-**Logging in with the passphrase is the point.** ``check_passphrase`` re-derives and
-compares, so someone can type the words they already know instead of pasting a
-43-character token. The words are verified and discarded, never stored.
-
-**And that is why the throttle exists.** Verifying a passphrase costs one scrypt: ~64MB
-and up to a second or two. The login route is unauthenticated by necessity, and the
-daemon is a ``ThreadingHTTPServer`` with no connection cap -- twenty concurrent guesses
-would be over a gigabyte of allocation on a box whose entire job is to have memory free
-for training. The parameters are right and must not be weakened, so the HTTP path around
-them is what has to hold: one derivation at a time, a short queue, and a fast refusal
-past that. Refusing quickly is a better failure than swapping.
-"""
+"""Browser sessions for the fleet UI, and the throttle that makes login safe to expose."""
 
 from __future__ import annotations
 
@@ -51,12 +32,7 @@ class Session:
 
 
 class Sessions:
-    """Live sessions and single-use tickets, in memory only.
-
-    In memory is deliberate: a restart should end every session. A credential persisted
-    to disk to save people a login is a credential that outlives the process holding it,
-    on a box that runs whatever it is sent.
-    """
+    """Live sessions and single-use tickets, in memory only."""
 
     def __init__(self, *, ttl_s: float = TTL_S) -> None:
         self.ttl_s = ttl_s
@@ -92,11 +68,7 @@ class Sessions:
             return self._sessions.pop(sid, None) is not None
 
     def mint_ticket(self) -> tuple[str, float]:
-        """A one-shot credential for handing a browser a session without typing.
-
-        Short-lived and single-use because it travels in a URL, and a URL ends up in
-        shell history, in the address bar, and in whatever the browser syncs.
-        """
+        """A one-shot credential for handing a browser a session without typing."""
         ticket = secrets.token_urlsafe(24)
         expires = time.time() + TICKET_TTL_S
         with self._lock:
@@ -128,19 +100,12 @@ class Sessions:
 
 @dataclass
 class Throttle:
-    """Serialises expensive derivations and backs off a source that keeps guessing.
-
-    ``slots`` is one on purpose. People log in rarely, so serialising costs nothing that
-    matters, and it turns an unbounded memory multiplier into a single 64MB allocation.
-    """
+    """Serialises expensive derivations and backs off a source that keeps guessing."""
 
     slots: int = 1
     wait_s: float = 2.0
     free_attempts: int = 3
-    """Wrong guesses before any delay is imposed. Not one: people mistype, and someone
-    who fumbles a passphrase once and is then told to wait has been punished for being
-    the legitimate user. Three is the same allowance the fleet gives a peer before it
-    quarantines it, and for the same reason."""
+    """Wrong guesses before any delay is imposed. Not one: people mistype, and someone"""
     base_backoff_s: float = 1.0
     max_backoff_s: float = 30.0
     _sem: threading.Semaphore = field(init=False)
@@ -151,22 +116,14 @@ class Throttle:
         self._sem = threading.Semaphore(self.slots)
 
     def blocked_for(self, source: str) -> float:
-        """Seconds this source must still wait, or 0.
-
-        Rounded up, never down: reporting "wait 0s" while refusing the request is the
-        worst of both -- it reads as a bug, because from the outside it is one.
-        """
+        """Seconds this source must still wait, or 0."""
         with self._lock:
             _count, until = self._fails.get(source, (0, 0.0))
         left = until - time.time()
         return 0.0 if left <= 0 else max(1.0, left)
 
     def acquire(self) -> bool:
-        """A derivation slot, or False if the queue is already too deep.
-
-        False must become a fast 503. Queueing instead simply moves the exhaustion from
-        scrypt's arenas to thread stacks, which fails later and less legibly.
-        """
+        """A derivation slot, or False if the queue is already too deep."""
         return self._sem.acquire(timeout=self.wait_s)
 
     def release(self) -> None:

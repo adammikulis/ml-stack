@@ -1,20 +1,4 @@
-"""How fast each peer is at each kind of work, remembered across runs.
-
-Nothing new is measured to build this: a job already records how long it took
-(``Job.elapsed_s``), and a job that says how many units it processed gives the other
-half. The quotient, smoothed, is the whole file.
-
-Two decisions worth not reversing by accident:
-
-**Keyed on the peer's name and host, not its beacon instance.** ``instance`` is
-regenerated every time the daemon restarts, so keying on it would throw away every
-measurement each time a box rebooted -- and a box that reboots is exactly the one you
-have the least information about.
-
-**Per kind of work, not one number per peer.** The box that is fastest at training is
-not the box that is fastest at tokenizing, and a single "speed" would average those into
-a number describing neither.
-"""
+"""How fast each peer is at each kind of work, remembered across runs."""
 
 from __future__ import annotations
 
@@ -26,9 +10,7 @@ from pathlib import Path
 __all__ = ["Rates", "default_path"]
 
 ALPHA = 0.3
-"""EWMA weight for a new observation. Low enough that one slow run -- a thermal blip, a
-noisy neighbour -- does not rewrite a peer's reputation, high enough that a box that has
-genuinely changed is believed within a few jobs."""
+"""EWMA weight for a new observation. Low enough that one slow run -- a thermal blip, a"""
 
 
 def default_path() -> Path:
@@ -47,9 +29,6 @@ class Rates:
                 self._seen = {k: float(v) for k, v in
                               json.loads(self.path.read_text()).items()}
             except (OSError, ValueError, TypeError):
-                # A corrupt rates file must not stop a run. Forgetting how fast the
-                # boxes are costs one round of exploration; refusing to start costs
-                # the whole job.
                 self._seen = {}
 
     @staticmethod
@@ -79,8 +58,7 @@ class Rates:
         return self._seen[key]
 
     def save(self) -> Path:
-        """Write atomically. Two coordinators finishing at once must not leave a file
-        that is half of each."""
+        """Write atomically. Two coordinators finishing at once must not leave a file"""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
         try:

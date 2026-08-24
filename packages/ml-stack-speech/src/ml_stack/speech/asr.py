@@ -1,15 +1,4 @@
-"""Speech recognition providers.
-
-Every provider here loads its model **once**, behind a lock. Two utterances arriving
-together would otherwise each start their own load: several seconds and several gigabytes,
-twice, for a model that is about to be identical.
-
-Audio normalisation is ffmpeg's job rather than a format sniffer's. What arrives from a
-browser, a phone or a messaging bot is whatever that client encodes -- webm/opus, m4a,
-3gp, occasionally a WAV with a surprising sample rate -- and handing all of it to ffmpeg
-with an explicit output format is both shorter and more correct than a decode table that
-will always be missing a case.
-"""
+"""Speech recognition providers."""
 
 from __future__ import annotations
 
@@ -83,12 +72,7 @@ class _LoadedOnce:
 
 
 class FasterWhisperASR(_LoadedOnce):
-    """``faster-whisper``: CTranslate2 Whisper, fast on CPU.
-
-    ``int8`` on CPU by default. The quality loss on speech is small and the speed
-    difference is not -- a CPU-only box running fp32 Whisper is slower than real time,
-    which makes it useless for anything interactive.
-    """
+    """``faster-whisper``: CTranslate2 Whisper, fast on CPU."""
 
     name = "faster-whisper"
 
@@ -143,11 +127,7 @@ class FasterWhisperASR(_LoadedOnce):
 
 
 class WhisperCppASR:
-    """``whisper.cpp``'s CLI, for machines with no Python ML stack at all.
-
-    Handles one real quirk: some builds write ``<input>.json`` next to the input rather
-    than at the requested output path.
-    """
+    """``whisper.cpp``'s CLI, for machines with no Python ML stack at all."""
 
     name = "whisper.cpp"
 
@@ -239,12 +219,7 @@ class TransformersWhisperASR(_LoadedOnce):
         return ProviderHealth.ok(self.model)
 
     def _resolve_dtype(self, torch):
-        """float32 on MPS, deliberately.
-
-        In float16 on MPS, Whisper decodes a token or two and stops -- returning a
-        *fragment* rather than an error. A short transcript is not distinguishable from a
-        short utterance by anything downstream, so this one is worth the memory.
-        """
+        """float32 on MPS, deliberately."""
         device = str(self.device or "")
         if device.startswith("mps") or (
             not device and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()
@@ -253,13 +228,7 @@ class TransformersWhisperASR(_LoadedOnce):
         return torch.float16 if torch.cuda.is_available() else torch.float32
 
     def _pick_device(self, torch):
-        """Pick a torch device without reaching into the lab tier.
-
-        `ml_stack.backend.resolve_torch_device` does the same job with more care, but a
-        host-tier package must not depend on a lab-tier one -- torch is optional here and
-        mandatory there, and inverting that would drag a training dependency onto every
-        machine that only wants to transcribe.
-        """
+        """Pick a torch device without reaching into the lab tier."""
         if self.device:
             return torch.device(self.device)
         if torch.cuda.is_available():

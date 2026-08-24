@@ -1,10 +1,4 @@
-"""Media bytes: WAV containers, image formats, asset downloads.
-
-Device tier: importable with nothing but the standard library, so it runs on embedded
-targets and inside host applications that cannot add wheels. It must not grow a
-dependency on Pillow, soundfile, httpx or numpy; the parts that genuinely need those --
-resizing, resampling -- live in the host-tier packages.
-"""
+"""Media bytes: WAV containers, image formats, asset downloads."""
 
 from __future__ import annotations
 

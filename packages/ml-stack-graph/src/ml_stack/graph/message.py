@@ -1,9 +1,4 @@
-"""Moving values along edges: the one thing a graph library has to do on-device.
-
-Everything here is differentiable and stays in the array backend. Nothing here calls
-``.tolist()`` -- that would sync the device to the host on every step, which for a graph
-rebuilt each forward pass is the whole cost of the model.
-"""
+"""Moving values along edges: the one thing a graph library has to do on-device."""
 
 from __future__ import annotations
 
@@ -25,12 +20,7 @@ def scatter_sum(backend: Any, values: Tensor, index: Tensor, num_nodes: int) -> 
 
 
 def scatter_mean(backend: Any, values: Tensor, index: Tensor, num_nodes: int) -> Tensor:
-    """Mean instead of sum, with empty slots left at zero rather than NaN.
-
-    A node with no in-edges divides by a count of zero. Clamping the denominator to 1
-    yields 0 for that node, which is what a mean over nothing should contribute -- whereas
-    NaN would propagate through the rest of the layer and destroy the whole batch.
-    """
+    """Mean instead of sum, with empty slots left at zero rather than NaN."""
     ops = backend.ops
     totals = scatter_sum(backend, values, index, num_nodes)
     counts = scatter_sum(backend, ops.ones_like(values), index, num_nodes)
@@ -45,13 +35,7 @@ def propagate(
     reduce: str = "sum",
     use_weights: bool = True,
 ) -> Tensor:
-    """One round of message passing: gather from ``src``, scatter into ``dst``.
-
-    ``x`` is ``(num_nodes, d)``; the result has the same shape. This is the primitive a
-    GCN/GraphSAGE layer is built from -- the normalisation and the learned projection are
-    the caller's business, deliberately, because every architecture spells them
-    differently.
-    """
+    """One round of message passing: gather from ``src``, scatter into ``dst``."""
     messages = gather(backend, x, graph.src)
 
     if use_weights and graph.w is not None:
@@ -74,11 +58,7 @@ def degree(backend: Any, graph: Graph, *, incoming: bool = True) -> Tensor:
 
 
 def normalize_by_degree(backend: Any, graph: Graph, x: Tensor) -> Tensor:
-    """Symmetric normalisation, the ``D^-1/2 A D^-1/2`` of a GCN layer.
-
-    Isolated nodes get a degree of zero; their normalisation factor is clamped to 1 rather
-    than producing an infinity from ``rsqrt(0)``.
-    """
+    """Symmetric normalisation, the ``D^-1/2 A D^-1/2`` of a GCN layer."""
     ops = backend.ops
     deg = degree(backend, graph, incoming=True)
     inv_sqrt = ops.rsqrt(ops.maximum(deg, ops.ones_like(deg)))

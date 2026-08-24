@@ -1,19 +1,4 @@
-"""Leasing a server: start one, or adopt the one already running.
-
-Four behaviours make this safe to run from several processes at once:
-
-* **Adopt, and terminate only what you launched.** A healthy server already serving the
-  model you want is the server you want. Tearing it down and starting your own kills
-  something another process may be mid-request against.
-* **Prove it is serving *your* model.** "Something answers on this port" and "the thing on
-  this port serves the model I asked for" are different facts, and adopting on the first
-  one silently benchmarks the wrong weights.
-* **Merge the state file, never replace it.** Replacing it with one process's view erases
-  a concurrent run's entry: its server becomes an orphan nothing can reap, and the next
-  lease reclaims the port out from under the run in progress.
-* **Negative cache.** A caller polling on every frame must not re-pay the connect timeout
-  each time once the answer is known to be "no".
-"""
+"""Leasing a server: start one, or adopt the one already running."""
 
 from __future__ import annotations
 
@@ -45,12 +30,7 @@ UNAVAILABLE_COOLDOWN_S = 3.0
 
 
 def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
-    """This process's servers, merged over records other *live* processes left.
-
-    A record survives when it belongs to a different process that is still alive.
-    Another process's record is not ours to drop; a record whose owner has exited is not
-    evidence of anything.
-    """
+    """This process's servers, merged over records other *live* processes left."""
     merged = {
         key: entry
         for key, entry in on_disk.items()
@@ -63,11 +43,7 @@ def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
 
 
 def model_matches(reported: str, wanted: str | Path) -> bool:
-    """Whether a server reporting ``reported`` is serving ``wanted``.
-
-    Compares basenames because llama-server reports an absolute path, an alias, or a
-    bare repo id depending on how it was started and which build it is.
-    """
+    """Whether a server reporting ``reported`` is serving ``wanted``."""
     wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
     reported_name = Path(reported).name.lower()
     if not wanted_name or not reported_name:
@@ -111,8 +87,6 @@ class ServerManager:
             try:
                 info = self.backend.start(spec, timeout=timeout)
             except ServerFailed:
-                # Cache the failure briefly. A caller in a render loop otherwise re-pays
-                # the whole connect-and-timeout cost on every frame.
                 self._unavailable_until[spec.port] = time.monotonic() + UNAVAILABLE_COOLDOWN_S
                 raise
 
@@ -121,18 +95,13 @@ class ServerManager:
             return info
 
     def adopt(self, spec: ServerSpec) -> ServerInfo | None:
-        """The already-running server for ``spec``, if there is one. Else ``None``.
-
-        Returns ``adopted=True`` so the caller knows not to kill it on the way out.
-        """
+        """The already-running server for ``spec``, if there is one. Else ``None``."""
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
         if not is_healthy(base_url, timeout=1.0):
             return None
 
         models = reported_models(base_url)
         if models and not any(model_matches(m, spec.model) for m in models):
-            # Something is up, but it is serving different weights. Leave it alone and
-            # say so -- silently benchmarking the wrong model is worse than failing.
             raise ServerFailed(
                 f"port {spec.port} already serves {models!r}, not {spec.model!r}. "
                 "Stop it, or lease on a different port."
@@ -227,13 +196,7 @@ def serve(
     manager: ServerManager | None = None,
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
-    """Run a server for the duration of the block, yielding its ``ServerInfo``.
-
-    The ergonomic entry point, and the shape that cannot leak a process: the teardown is
-    not something the caller has to remember.
-
-    An adopted server is *not* stopped on exit.
-    """
+    """Run a server for the duration of the block, yielding its ``ServerInfo``."""
     from ml_stack.serve.ports import free_port
 
     manager = manager or _DEFAULT
@@ -251,11 +214,7 @@ def serve(
 
 
 def stop_all_servers() -> list[int]:
-    """Stop every model server recorded on this machine by any live owner.
-
-    The blunt instrument, for a CLI ``down`` command. Uses the state file, so it reaches
-    servers other processes started -- which is the point.
-    """
+    """Stop every model server recorded on this machine by any live owner."""
     stopped: list[int] = []
     try:
         state = json.loads(STATE_FILE.read_text(encoding="utf-8"))

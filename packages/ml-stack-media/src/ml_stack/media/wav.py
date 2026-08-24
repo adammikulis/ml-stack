@@ -1,9 +1,4 @@
-"""PCM <-> WAV, with no dependencies.
-
-The header is packed by hand rather than through ``wave`` so that ``encode`` can write a
-streaming placeholder length: ``wave`` insists on seeking back to patch the size, which a
-pipe does not support.
-"""
+"""PCM <-> WAV, with no dependencies."""
 
 from __future__ import annotations
 
@@ -42,11 +37,7 @@ def header(
     channels: int = 1,
     sample_width: int = 2,
 ) -> bytes:
-    """A 44-byte canonical PCM RIFF header for ``data_len`` bytes of samples.
-
-    Pass ``data_len=0xFFFFFFFF - _HEADER_BYTES`` (see ``streaming_header``) when the
-    length is not yet known.
-    """
+    """A 44-byte canonical PCM RIFF header for ``data_len`` bytes of samples."""
     if channels < 1:
         raise WavError(f"channels must be >= 1, got {channels}")
     if sample_width not in (1, 2, 3, 4):
@@ -73,12 +64,7 @@ def streaming_header(
     channels: int = 1,
     sample_width: int = 2,
 ) -> bytes:
-    """A header claiming an effectively-unbounded length, for a pipe.
-
-    Players read until the stream ends. This is what lets TTS start playing before
-    synthesis finishes -- the alternative is buffering the whole utterance to learn its
-    length, which is exactly the latency the streaming path exists to avoid.
-    """
+    """A header claiming an effectively-unbounded length, for a pipe."""
     return header(
         0xFFFFFFFF - _HEADER_BYTES,
         sample_rate=sample_rate,
@@ -104,12 +90,7 @@ def encode(
 
 
 def decode(data: bytes) -> tuple[bytes, WavInfo]:
-    """Pull the PCM payload and format out of a WAV file.
-
-    Walks the chunk list rather than assuming a 44-byte header: real encoders emit
-    ``LIST``/``fact`` chunks between ``fmt `` and ``data``, and skipping a fixed 44 bytes
-    turns those into a burst of noise at the start of the audio.
-    """
+    """Pull the PCM payload and format out of a WAV file."""
     if len(data) < 12 or data[:4] != b"RIFF" or data[8:12] != b"WAVE":
         raise WavError("not a RIFF/WAVE file")
 
@@ -131,8 +112,6 @@ def decode(data: bytes) -> tuple[bytes, WavInfo]:
             if fmt is None:
                 raise WavError("data chunk precedes fmt chunk")
             sample_rate, channels, sample_width = fmt
-            # Trust the file's length only as far as the buffer actually goes: a
-            # truncated download otherwise raises a struct error far from the cause.
             pcm = data[body:body + min(chunk_len, len(data) - body)]
             frame_size = max(channels * sample_width, 1)
             return pcm, WavInfo(sample_rate, channels, sample_width, len(pcm) // frame_size)

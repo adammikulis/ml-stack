@@ -76,6 +76,29 @@ function peerCard(p) {
         el("div", { class: "fill vram", style: `width:${pct}%` }))));
   }
 
+  // Temperature, clock and power, when a vendor tool or darwin-perf reported them.
+  // Throttling is the one that changes a decision: a card clocking down looks exactly
+  // like a bad hyperparameter from a loss curve, and the measured rates would record
+  // the box as slow and send it less work — the wrong correction to a heat problem.
+  const chips = [];
+  if (d.temp_c !== undefined) {
+    const hot = d.temp_c >= 85 ? " hot" : d.temp_c >= 75 ? " warm" : "";
+    chips.push(el("span", { class: `label temp${hot}` }, `${Math.round(d.temp_c)}°C`));
+  }
+  if (d.clock_mhz) chips.push(el("span", { class: "label" }, `${Math.round(d.clock_mhz)} MHz`));
+  if (d.power_w !== undefined) chips.push(el("span", { class: "label" }, `${d.power_w.toFixed(1)} W`));
+  if (d.throttled) chips.push(el("span", { class: "label bad" }, "▼ throttled"));
+  if (chips.length) meters.push(el("div", { class: "chips" }, chips));
+
+  if (d.gpu_util_pct !== undefined) {
+    meters.push(el("div", { class: "meter" },
+      el("div", { class: "cap" },
+        el("span", {}, "gpu"),
+        el("b", {}, `${Math.round(d.gpu_util_pct)}% busy`)),
+      el("div", { class: "track" },
+        el("div", { class: "fill util", style: `width:${Math.min(100, d.gpu_util_pct)}%` }))));
+  }
+
   const state = free === 0
     ? { cls: "busy", text: queued ? `working · ${queued} waiting` : "working" }
     : { cls: "", text: running ? `${running} running · ${free} free` : "idle" };

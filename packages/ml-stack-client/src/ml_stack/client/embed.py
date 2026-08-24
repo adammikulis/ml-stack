@@ -1,17 +1,4 @@
-"""Embeddings from a local server, and the two similarity helpers everyone rewrites.
-
-Three deliberate choices:
-
-**Retry on a concurrent 500.** Local embedding servers commonly reject requests that
-overlap with another in flight. Handled by ``request_json(tries=...)``.
-
-**Dimension checking is opt-in, and it raises.** Silently padding or trimming a vector to
-the expected width so an insert can never fail turns a model mismatch into a store full
-of garbage vectors that still cosine-compare.
-
-**Failures raise.** A ``None`` embedding written into a vector index is a document that
-can never be retrieved, and nothing reports it.
-"""
+"""Embeddings from a local server, and the two similarity helpers everyone rewrites."""
 
 from __future__ import annotations
 
@@ -35,12 +22,7 @@ def embed(
     tries: int = 3,
     api_key: str | None = None,
 ) -> list[list[float]]:
-    """Embed one string or a batch. Always returns a list of vectors.
-
-    ``tries=3`` by default because a local embedding server commonly answers 500 to a
-    request that overlaps with another in flight. A remote API would not get this
-    treatment.
-    """
+    """Embed one string or a batch. Always returns a list of vectors."""
     batch = [texts] if isinstance(texts, str) else list(texts)
     if not batch:
         return []

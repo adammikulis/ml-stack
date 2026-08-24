@@ -1,13 +1,4 @@
-"""Seed every random source that could affect a run.
-
-Seeding one framework and forgetting the others is the usual failure: a run looks
-reproducible because the model init is pinned, while the data shuffle is not. This seeds
-Python, NumPy, MLX and PyTorch together, and skips whichever are not installed.
-
-``strict=True`` additionally asks PyTorch for deterministic algorithms and turns off the
-cuDNN autotuner. That is genuinely slower, so it is opt-in: use it when comparing two runs
-that must match exactly, not for ordinary training.
-"""
+"""Seed every random source that could affect a run."""
 
 from __future__ import annotations
 
@@ -35,14 +26,8 @@ class SeedReport:
 
 
 def set_seeds(seed: int = 42, *, strict: bool = False) -> SeedReport:
-    """Seed everything available. Returns what was actually seeded.
-
-    The report matters: "I set the seed" and "the seed reached the library that shuffled
-    my data" are different claims, and only the second one makes a run reproducible.
-    """
+    """Seed everything available. Returns what was actually seeded."""
     random.seed(seed)
-    # Hash randomisation is fixed at interpreter start, so setting it here cannot affect
-    # this process. Set it anyway for child processes (dataloader workers, subprocesses).
     os.environ.setdefault("PYTHONHASHSEED", str(seed))
 
     numpy_ok = _seed_numpy(seed)
@@ -93,9 +78,6 @@ def _seed_torch(seed: int, strict: bool) -> tuple[bool, bool]:
     if not strict:
         return True, False
 
-    # Both of these can fail on a build that does not support them. Report the failure
-    # through the return value rather than swallowing it -- a caller that asked for strict
-    # determinism and did not get it needs to know.
     deterministic = False
     try:
         torch.use_deterministic_algorithms(True)

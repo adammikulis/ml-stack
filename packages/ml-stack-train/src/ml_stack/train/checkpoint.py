@@ -1,25 +1,4 @@
-"""Checkpoints that survive being killed, and resumes that are actually exact.
-
-Two failure modes this is shaped around, both of which cost days rather than minutes:
-
-**A half-written checkpoint that looks complete.** A process killed during a save leaves a
-directory containing some of the files. A later resume reads it, gets a partial model, and
-trains on from there -- producing a run that is subtly wrong with nothing in the logs. So:
-every checkpoint is built in a ``.partial`` directory and moved into place with
-``os.replace``, and the metadata file that makes a directory *count* as a checkpoint is
-written **last**. A directory without it is ignored, which is exactly what a half-written
-one will be.
-
-**A resume that silently restores less than it saved.** Restoring the weights but not the
-optimizer state is not a resume; it is a fresh run starting from a warm initialisation,
-and it shows up as a loss spike that is easy to mistake for a bad learning rate. So the
-loader is strict: every tensor the checkpoint holds must land somewhere, and anything
-missing or extra raises rather than being tolerated.
-
-The array serialisation itself is delegated: this module owns the *directory protocol*
-(atomicity, validity, rotation, ``latest``), and a backend supplies ``save``/``load`` for
-whatever it stores tensors in.
-"""
+"""Checkpoints that survive being killed, and resumes that are actually exact."""
 
 from __future__ import annotations
 
@@ -51,8 +30,7 @@ class CheckpointState:
     epoch: int = 0
     best_metric: float | None = None
     rng: dict[str, Any] | None = None
-    """Bit-generator state. Without it, a resumed run re-draws the same batches the
-    original run already trained on, which quietly turns a fresh epoch into a repeat."""
+    """Bit-generator state. Without it, a resumed run re-draws the same batches the"""
     config: dict[str, Any] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
 
@@ -65,11 +43,7 @@ def save(
     optimizer: dict[str, Any] | None = None,
     write_tensors: Callable[[Path, dict[str, Any]], None],
 ) -> Path:
-    """Write a checkpoint atomically. Returns the finished directory.
-
-    ``write_tensors(path, mapping)`` is the backend's serialiser -- typically
-    ``mlx.core.save_safetensors`` or ``safetensors.torch.save_file``.
-    """
+    """Write a checkpoint atomically. Returns the finished directory."""
     directory = Path(directory)
     staging = directory.with_name(directory.name + ".partial")
 
@@ -82,8 +56,6 @@ def save(
         if optimizer:
             _write_and_verify(write_tensors, staging / OPTIMIZER_FILE, optimizer)
 
-        # Last. Everything above must have succeeded for this file to exist, which is
-        # precisely the property `is_valid` relies on.
         (staging / STATE_FILE).write_text(
             json.dumps(asdict(state), indent=2, default=str), encoding="utf-8"
         )
@@ -102,13 +74,7 @@ def _write_and_verify(
     path: Path,
     tensors: dict[str, Any],
 ) -> None:
-    """Call the serialiser, then check it actually produced the file it was given.
-
-    Some serialisers append their own extension (``numpy.savez`` is the common one). The
-    save then appears to succeed, ``state.json`` gets written, and the checkpoint passes
-    ``is_valid`` while being unloadable -- which is exactly the class of failure the
-    write-state-last protocol exists to prevent, reintroduced one layer down.
-    """
+    """Call the serialiser, then check it actually produced the file it was given."""
     write_tensors(path, tensors)
     if not path.is_file():
         near = sorted(p.name for p in path.parent.iterdir() if p.name.startswith(path.name))
@@ -164,11 +130,7 @@ def load_tensors(
 
 
 def assert_exact_restore(saved: dict[str, Any], target: dict[str, Any]) -> None:
-    """Fail unless the checkpoint's tensors exactly match what is being restored into.
-
-    A partial restore is the failure that eats a multi-day run: it does not raise, the loss
-    is merely worse, and by the time that is noticeable the original run is long gone.
-    """
+    """Fail unless the checkpoint's tensors exactly match what is being restored into."""
     only_saved = sorted(set(saved) - set(target))
     only_target = sorted(set(target) - set(saved))
     if only_saved or only_target:
@@ -192,12 +154,7 @@ def assert_exact_restore(saved: dict[str, Any], target: dict[str, Any]) -> None:
 
 
 def point_latest_at(root: Path | str, directory: Path | str) -> Path:
-    """Repoint ``root/latest`` at ``directory``, atomically.
-
-    Through a temporary symlink and ``os.replace``: removing the old link and creating a
-    new one leaves a window in which ``latest`` does not exist, and a resume that lands in
-    that window reports no checkpoint at all.
-    """
+    """Repoint ``root/latest`` at ``directory``, atomically."""
     root, directory = Path(root), Path(directory)
     link = root / LATEST
     staging = root / f"{LATEST}.tmp"
@@ -209,12 +166,7 @@ def point_latest_at(root: Path | str, directory: Path | str) -> Path:
 
 
 def find_latest(root: Path | str) -> Path | None:
-    """The most recent valid checkpoint, or ``None``.
-
-    Follows ``latest`` when it resolves to a valid checkpoint, and otherwise scans -- so a
-    dangling or stale symlink degrades to "find it the slow way" rather than to "there is
-    nothing here".
-    """
+    """The most recent valid checkpoint, or ``None``."""
     root = Path(root)
     if not root.is_dir():
         return None
@@ -239,14 +191,7 @@ def rotate(
     milestone_every: int = 0,
     protected: tuple[str, ...] = ("best",),
 ) -> list[Path]:
-    """Delete old checkpoints, keeping the last N plus every Nth milestone.
-
-    Returns what was removed. Checkpoints whose name is in ``protected`` are never touched,
-    and neither is whatever ``latest`` points at.
-
-    Milestones exist because "keep the last 3" alone means a run that goes wrong at step
-    50k has nothing left from step 10k to go back to.
-    """
+    """Delete old checkpoints, keeping the last N plus every Nth milestone."""
     root = Path(root)
     if not root.is_dir():
         return []
@@ -285,9 +230,5 @@ def rotate(
 
 
 def checkpoint_name(step: int, *, width: int = 9) -> str:
-    """``step_000001000``. Zero-padded so lexical order is numeric order.
-
-    That property is load-bearing: ``find_latest`` and ``rotate`` both sort by name, and
-    unpadded names put ``step_9`` after ``step_10000``.
-    """
+    """``step_000001000``. Zero-padded so lexical order is numeric order."""
     return f"step_{step:0{width}d}"

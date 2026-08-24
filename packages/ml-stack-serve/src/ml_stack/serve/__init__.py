@@ -1,17 +1,4 @@
-"""Start, adopt and tear down local model servers.
-
-Host tier: may use psutil and subprocess.
-
-The usual entry point is the context manager, because it is the shape that cannot leak a
-process:
-
-    from ml_stack.serve import serve
-
-    with serve("model.gguf", port=8899) as server:
-        reply = Client(server.base_url).chat([...])
-
-``ServerManager`` is underneath it when a caller needs to hold a lease across calls.
-"""
+"""Start, adopt and tear down local model servers."""
 
 from __future__ import annotations
 

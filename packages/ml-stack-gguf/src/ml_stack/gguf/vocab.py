@@ -1,16 +1,4 @@
-"""Rewrite a GGUF's tokenizer metadata in place.
-
-``convert_hf_to_gguf.py``'s generic Llama path never emits
-``tokenizer.ggml.add_space_prefix`` -- only the Gemma3 path calls it. Without the key,
-llama.cpp **defaults it to true** and inserts a space after every special token, so
-``"<user> go"`` tokenizes with an extra ``▁`` that the Python tokenizer never produces.
-Training data and inference then disagree on every single sequence, and nothing reports
-it: the model simply learns slightly worse and serves slightly worse, forever.
-
-Written for any metadata key rather than just this one, because the underlying class of
-bug -- a converter path that omits a key whose default is wrong for your tokenizer -- is
-not specific to this field.
-"""
+"""Rewrite a GGUF's tokenizer metadata in place."""
 
 from __future__ import annotations
 
@@ -20,10 +8,6 @@ from typing import Any
 
 ADD_SPACE_PREFIX = "tokenizer.ggml.add_space_prefix"
 
-#: Reader fields that describe the *container* rather than the model. ``GGUFReader``
-#: surfaces these alongside real metadata, but the writer emits its own header -- copying
-#: them through produces a file with duplicate header keys that the reader then refuses
-#: to open.
 _HEADER_PREFIX = "GGUF."
 
 
@@ -55,12 +39,7 @@ def set_metadata(
     dst: Path | str,
     values: dict[str, Any],
 ) -> Path:
-    """Copy ``src`` to ``dst``, overriding the metadata keys in ``values``.
-
-    Every other key and every tensor is copied through untouched. Rewriting rather than
-    patching in place because GGUF metadata is length-prefixed at the head of the file --
-    changing a value shifts every tensor offset after it.
-    """
+    """Copy ``src`` to ``dst``, overriding the metadata keys in ``values``."""
     try:
         import numpy as np
         from gguf import GGUFReader, GGUFValueType, GGUFWriter
@@ -100,9 +79,6 @@ def set_metadata(
                 writer.add_key_value(name, field.contents(), value_type)
             copied += 1
         except Exception as exc:
-            # Recorded and returned rather than printed: a key this gguf version cannot
-            # round-trip is a real loss, and a caller comparing two exports needs to know
-            # which ones went missing.
             skipped.append(f"{name} ({type(exc).__name__})")
 
     for key, value in values.items():
@@ -142,13 +118,7 @@ def fix_space_prefix(
     *,
     add_space_prefix: bool = False,
 ) -> Path:
-    """Write ``tokenizer.ggml.add_space_prefix`` into a GGUF that lacks it.
-
-    ``dst=None`` rewrites ``src`` through a temporary file.
-
-    Default ``False``, which is the correct value for a plain SentencePiece tokenizer --
-    and the whole point is that llama.cpp's default when the key is *absent* is ``True``.
-    """
+    """Write ``tokenizer.ggml.add_space_prefix`` into a GGUF that lacks it."""
     src = Path(src)
     target = Path(dst) if dst is not None else src
 

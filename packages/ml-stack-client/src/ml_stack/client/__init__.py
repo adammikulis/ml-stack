@@ -1,13 +1,4 @@
-"""Talk to a local model server over HTTP. Standard library only.
-
-Device tier. This package knows how to *talk* to a server; it does not know how to
-*start* one -- that is ``ml_stack.serve``, which is host tier and may use psutil and
-subprocess.
-
-The seam between them is deliberate. ``wait_for_health`` takes an ``is_alive`` callable
-rather than a ``Popen``, so the process-death watch that makes a bad model path fail in
-under a second works without this package ever importing ``subprocess``.
-"""
+"""Talk to a local model server over HTTP. Standard library only."""
 
 from __future__ import annotations
 

@@ -1,13 +1,4 @@
-"""A durable record of what a run actually did.
-
-JSONL, flushed every write, one record per logged step. Not a TensorBoard event file and
-not a hosted dashboard: a run that died at 03:00 on a machine you cannot reach still has
-its metrics on disk in a format that `grep`, `jq` and pandas all read.
-
-The first record is the fully-resolved config. Not the config file, the *resolved* values --
-after defaults, after environment overrides, after whatever the CLI changed. When two runs
-disagree six weeks later, that record is the only thing that says how.
-"""
+"""A durable record of what a run actually did."""
 
 from __future__ import annotations
 
@@ -29,8 +20,6 @@ class MetricsLog:
     def __init__(self, path: Path | str, *, resume: bool = False) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # Append on resume rather than truncate: the earlier part of the run is the half
-        # you most want when working out why the later half went wrong.
         self._handle = self.path.open("a" if resume else "w", encoding="utf-8")
         self._start = time.monotonic()
 
@@ -76,11 +65,7 @@ class MetricsLog:
 
 
 def read(path: Path | str) -> list[dict[str, Any]]:
-    """Parse a metrics log, skipping any trailing partial line.
-
-    A run killed mid-write leaves an incomplete final line. That is expected, not
-    corruption, and it should not stop the other 40,000 records from being readable.
-    """
+    """Parse a metrics log, skipping any trailing partial line."""
     records: list[dict[str, Any]] = []
     for line in Path(path).read_text(encoding="utf-8").splitlines():
         line = line.strip()
@@ -95,11 +80,7 @@ def read(path: Path | str) -> list[dict[str, Any]]:
 
 @dataclass
 class Throughput:
-    """Tokens (or samples) per second, over a window rather than since the start.
-
-    A since-the-start average hides a slowdown: by the time it moves, the run has already
-    been slow for a long while.
-    """
+    """Tokens (or samples) per second, over a window rather than since the start."""
 
     window: int = 50
     _times: list[float] = field(default_factory=list, repr=False)

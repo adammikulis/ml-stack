@@ -1,14 +1,4 @@
-"""Things that stop a long run from wasting itself.
-
-Three separate hazards, each with its own guard:
-
-* **Two runs in one output directory.** Both write checkpoints, each overwrites the
-  other's, and the resulting run resumes from an interleaving of two different models.
-* **A run that has gone numerically bad.** One NaN batch is a hardware blip; a thousand is
-  a broken run that has been burning a GPU for hours producing nothing.
-* **A run that has stalled.** Throughput collapses -- memory pressure, thermal throttling,
-  a swap storm -- and the run keeps going at a fraction of its speed with no error.
-"""
+"""Things that stop a long run from wasting itself."""
 
 from __future__ import annotations
 
@@ -29,12 +19,7 @@ class TrainingDiverged(RuntimeError):
 
 
 class RunLock:
-    """Exclusive ownership of an output directory, for the life of the process.
-
-    ``flock`` rather than a pid file, because the kernel releases it when the process dies.
-    A pid file left behind by a crash blocks every subsequent run until a human deletes it,
-    which trains people to delete it reflexively -- and then it stops protecting anything.
-    """
+    """Exclusive ownership of an output directory, for the life of the process."""
 
     def __init__(self, directory: Path | str, *, name: str = "run.lock") -> None:
         self.path = Path(directory) / name
@@ -79,16 +64,7 @@ class RunLock:
 
 @dataclass
 class NonFiniteBudget:
-    """How many non-finite steps to skip before giving up.
-
-    Skipping is right: a single bad step is usually a transient hardware fault, and
-    aborting the run over one wastes everything before it. Skipping *without a budget* is
-    wrong: it converts a permanently broken GPU into a run that trains on nothing for as
-    long as you let it.
-
-    The budget is cumulative over the whole run, not consecutive. A machine producing one
-    bad step in every ten is broken even though it never produces two in a row.
-    """
+    """How many non-finite steps to skip before giving up."""
 
     max_skipped: int = 50
     skipped: int = 0
@@ -111,13 +87,7 @@ class NonFiniteBudget:
 
 @dataclass
 class StallWatchdog:
-    """Notice when steps suddenly get much slower.
-
-    Compares each step against the rolling **median**, not the mean: one 40-second stall
-    drags a mean far enough that the next stall looks normal, which is exactly backwards.
-
-    This reports; it does not intervene. What to do about a stall depends on the run.
-    """
+    """Notice when steps suddenly get much slower."""
 
     window: int = 101
     factor: float = 3.0

@@ -1,11 +1,4 @@
-"""What a speech provider has to be, whichever engine is behind it.
-
-Three protocols -- recognition, synthesis, voice activity -- each with the same lifecycle:
-``probe`` to ask whether it could work, ``start`` to load the model, ``stop`` to release
-it. Keeping load separate from construction matters because loading is the expensive part
-and the part that fails; a provider that constructs fine and then cannot load its weights
-is the normal case, not an edge one.
-"""
+"""What a speech provider has to be, whichever engine is behind it."""
 
 from __future__ import annotations
 
@@ -59,11 +52,7 @@ class Transcript:
 
 @dataclass(frozen=True, slots=True)
 class Speech:
-    """Synthesised audio as raw PCM plus the rate it was produced at.
-
-    PCM rather than a WAV blob: a caller streaming to a speaker does not want a container,
-    and one that needs a file gets it from ``ml_stack.media.wav.encode``.
-    """
+    """Synthesised audio as raw PCM plus the rate it was produced at."""
 
     pcm: bytes
     sample_rate: int = DEFAULT_SAMPLE_RATE
@@ -146,12 +135,7 @@ class VADProvider(Protocol):
 
 
 class StreamingASR(Protocol):
-    """An ASR provider that can transcribe while audio is still arriving.
-
-    Separate from ``ASRProvider`` because most cannot, and a ``stream`` method that
-    secretly buffers the whole utterance to a temporary file before transcribing is worse
-    than not having one: it presents a latency guarantee it does not keep.
-    """
+    """An ASR provider that can transcribe while audio is still arriving."""
 
     def stream(self, chunks: Iterable[bytes], *, sample_rate: int = DEFAULT_SAMPLE_RATE) -> Iterator[Transcript]: ...
 

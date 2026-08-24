@@ -1,15 +1,4 @@
-"""Cross-backend parity checking, plus the pytest markers that go with it.
-
-Lab tier. Needs MLX and PyTorch to actually run a comparison; the markers let a suite skip
-gracefully on a platform where one of them has no wheel.
-
-    from ml_stack.testing import needs_both, run_pair
-
-    @needs_both
-    def test_my_layer_matches():
-        report = run_pair(build_torch, build_mlx, fwd_torch, fwd_mlx, (6, 8))
-        assert report.checked_parameters == 4
-"""
+"""Cross-backend parity checking, plus the pytest markers that go with it."""
 
 from __future__ import annotations
 

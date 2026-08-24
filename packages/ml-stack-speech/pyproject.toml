@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-speech"
 version = "0.1.0"
-description = "ASR, TTS and VAD behind three protocols and one resolver. Host tier."
+description = "ASR, TTS and VAD behind three protocols and one resolver. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

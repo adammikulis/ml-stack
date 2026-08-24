@@ -1,12 +1,4 @@
-"""Getting a backend, and choosing one when the caller has no preference.
-
-The singletons here are guarded by an explicit re-entrancy check rather than
-``functools.lru_cache``. The factories import framework modules, those imports can
-traverse package ``__init__`` code that calls the factory again mid-build, and a re-entered
-``lru_cache`` mints a *second* instance. Two instances is not merely wasteful: modules then
-bind devices on different objects, and factories start creating tensors on the wrong
-device. The post-build check keeps exactly one instance no matter who wins the race.
-"""
+"""Getting a backend, and choosing one when the caller has no preference."""
 
 from __future__ import annotations
 
@@ -20,22 +12,12 @@ _FACTORIES: dict[str, "Callable[[], ArrayBackend]"] = {}
 _BUILT: dict[str, ArrayBackend] = {}
 
 REGISTRY_GROUP = "ml_stack.backend"
-"""Entry-point group a third-party backend registers itself under.
-
-The built-in two are not special-cased anywhere below; they register through the same
-call an outside package would, so the extension path is the one that is exercised on
-every import rather than a second path nobody runs.
-"""
+"""Entry-point group a third-party backend registers itself under."""
 
 
 def register(name: str, factory: "Callable[[], ArrayBackend]", *,
              replace: bool = False) -> None:
-    """Make a backend available under ``name``.
-
-    Refuses to shadow an existing name unless asked. Two packages claiming "torch" and
-    the winner being import order is the kind of thing that is diagnosed by printing the
-    backend and not believing the answer.
-    """
+    """Make a backend available under ``name``."""
     if name in _FACTORIES and not replace:
         raise BackendUnavailable(
             f"a backend named {name!r} is already registered; pass replace=True "
@@ -128,27 +110,13 @@ def available() -> list[str]:
         try:
             get_backend(name)
         except Exception:                             # noqa: BLE001
-            # Deliberately broad. A registered backend can fail to build in any way its
-            # framework chooses -- ImportError, OSError from a missing driver, a
-            # RuntimeError deep in a CUDA init -- and one that cannot build is simply
-            # not available. Letting it escape would mean a single broken plugin makes
-            # every other backend unlistable, and this is what the fleet's device
-            # report calls.
             continue
         found.append(name)
     return found
 
 
 def detect_backend() -> str:
-    """The backend to use when the caller has no preference.
-
-    ``$ML_STACK_BACKEND`` overrides everything, so a comparison run can pin one without
-    editing code. Otherwise: MLX on Apple silicon, torch elsewhere.
-
-    Raises rather than returning a name that cannot be imported. A backend chosen by
-    platform guess and then found missing produces an import error somewhere far from
-    here, which is a much worse place to read it.
-    """
+    """The backend to use when the caller has no preference."""
     override = os.environ.get("ML_STACK_BACKEND")
     if override:
         if override not in backends():
@@ -157,10 +125,6 @@ def detect_backend() -> str:
             )
         return override
 
-    # MLX first on Apple silicon because it is the native path there; torch first
-    # elsewhere because it covers CUDA and ROCm both. Anything registered by a plugin
-    # comes after the two that ship here -- an installed extra should not silently
-    # become the default.
     known = backends()
     preferred = ("mlx", "torch") if sys.platform == "darwin" else ("torch", "mlx")
     order = [n for n in preferred if n in known] + [n for n in known if n not in preferred]
@@ -189,9 +153,6 @@ def get_backend(name: str | None = None) -> ArrayBackend:
     if factory is None:
         raise BackendUnavailable(
             f"unknown backend {name!r}; expected one of {backends()}")
-    # Re-checked rather than assigned straight in: building a backend imports a
-    # framework, and a framework import can re-enter this function. Two instances mean
-    # device bindings landing on different objects.
     made = factory()
     if name not in _BUILT:
         _BUILT[name] = made
@@ -207,5 +168,4 @@ register("mlx", lambda: mlx_backend())
 register("torch", lambda: torch_backend())
 
 BACKENDS = ("mlx", "torch")
-"""The backends that ship with this package. Prefer ``backends()``, which also sees
-anything a plugin registered."""
+"""The backends that ship with this package. Prefer ``backends()``, which also sees"""

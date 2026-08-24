@@ -1,19 +1,4 @@
-"""Prove two backends compute the same thing -- forward and backward.
-
-What a parity test can and cannot show is worth being precise about, because the
-distinction decides how much you may conclude from a green suite:
-
-* It **can** show the two implementations agree.
-* It **cannot** show either one is *correct*. Both arms move together and still compare
-  equal, so a shared bug in the neutral core is invisible here.
-
-So every module checked for parity also needs behavioural assertions about what it
-computes. Parity is a drift alarm, not a correctness proof.
-
-Gradients are compared as **per-parameter L2 norms**, not elementwise, and at a much looser
-tolerance than the forward pass. Accumulation order differs between frameworks; an
-elementwise comparison at forward tolerance fails on arithmetic that is working correctly.
-"""
+"""Prove two backends compute the same thing -- forward and backward."""
 
 from __future__ import annotations
 
@@ -28,12 +13,7 @@ FORWARD_RTOL = 1e-4
 GRAD_NORM_RTOL = 5e-2
 
 ZERO_GRAD = 1e-7
-"""Below this, a gradient norm is fp32 residue on an analytically dead parameter.
-
-A softmax is invariant to a constant shift of its scores per query, so a key bias
-contributes nothing and both backends report something like 1e-9. Comparing those two
-numbers relatively is meaningless -- they are both noise -- so they are treated as equal.
-"""
+"""Below this, a gradient norm is fp32 residue on an analytically dead parameter."""
 
 
 class ParityError(AssertionError):
@@ -66,16 +46,7 @@ def _normalize_mlx_name(name: str) -> str:
 
 
 def copy_torch_weights_to_mlx(torch_module: Any, mlx_module: Any) -> None:
-    """Load a torch module's weights into an MLX module, matched by name.
-
-    Compares against the MLX *trainable* tree so that buffers the MLX side deliberately
-    froze -- a running mean, an EMA -- stay out of the mapping rather than looking like a
-    missing parameter.
-
-    Raises on any name mismatch. A silent partial copy is the worst outcome available
-    here: the forward comparison then runs against two different models and reports a
-    numerical disagreement, sending the reader to hunt for a maths bug that does not exist.
-    """
+    """Load a torch module's weights into an MLX module, matched by name."""
     from mlx.utils import tree_flatten, tree_unflatten
 
     torch_params = {k: v.detach().cpu().numpy() for k, v in torch_module.state_dict().items()}
@@ -186,11 +157,7 @@ def run_pair(
     rtol: float = FORWARD_RTOL,
     grad_rtol: float = GRAD_NORM_RTOL,
 ) -> ParityReport:
-    """The whole drill: one set of weights, both forwards, both backwards, compare.
-
-    The loss is ``mean(output**2)`` rather than anything task-shaped, because the point is
-    to get a gradient into every parameter, not to be meaningful.
-    """
+    """The whole drill: one set of weights, both forwards, both backwards, compare."""
     import mlx.core as mx
     import mlx.nn as mlx_nn  # noqa: F401  (import proves MLX is usable before we build)
     import torch  # noqa: F401  (same, for torch: fail here, not inside build_torch)

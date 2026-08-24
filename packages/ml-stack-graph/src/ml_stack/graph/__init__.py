@@ -1,14 +1,4 @@
-"""Graphs as tensors: a container, message passing, DAG sweeps, topology construction.
-
-Lab tier.
-
-Deliberately **not** a graph-algorithm library. Shortest path, connected components,
-community detection, centrality -- use ``networkx`` via ``Graph.to_networkx()``. It has had
-those right for twenty years and reimplementing them here would be strictly worse.
-
-What is here is the part networkx cannot do: keeping a graph in the array backend so it can
-go through a model, and moving values along its edges inside an autograd graph.
-"""
+"""Graphs as tensors: a container, message passing, DAG sweeps, topology construction."""
 
 from __future__ import annotations
 

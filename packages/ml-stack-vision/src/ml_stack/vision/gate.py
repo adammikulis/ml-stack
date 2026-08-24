@@ -1,23 +1,4 @@
-"""Check that a vision model can actually see before believing what it says.
-
-A model served without its multimodal projector, or one whose runtime advertises vision it
-does not have, does not error when handed an image. It describes the picture — fluently,
-confidently, and entirely from the prompt. There is nothing in the response to distinguish
-that from a real description, so the only defence is to ask it about an image whose
-contents are already known.
-
-Two details make the difference between a gate that works and one that feels like it does:
-
-**The palette is not primary colours.** Ask a blind model to name red, green, blue and
-yellow bands and it will often get all four right, because those are the colours a model
-guesses when guessing. The palette here is teal, orange, purple, brown, pink and olive —
-plausible enough to be nameable, unusual enough that guessing the exact set in the exact
-order does not happen.
-
-**The probe image is built by hand.** ``ml_stack.media.probe_png`` uses only zlib and
-struct, so the gate runs on a machine with no imaging library installed. A gate that cannot
-run **fails open**, which is the one outcome it exists to prevent.
-"""
+"""Check that a vision model can actually see before believing what it says."""
 
 from __future__ import annotations
 
@@ -75,18 +56,10 @@ class VisionGate:
         return probe_png(colours, size=size), tuple(names)
 
     def read_answer(self, text: str) -> tuple[str, ...]:
-        """Pull colour names out of a reply, in order of first appearance.
-
-        Consecutive repeats collapse: a model that says "orange, orange, teal" about two
-        bands has named two, and holding that against it tests its prose rather than its
-        eyes.
-        """
+        """Pull colour names out of a reply, in order of first appearance."""
         lowered = text.lower()
         hits: list[tuple[int, str]] = []
         for canonical, (_rgb, synonyms) in PALETTE.items():
-            # Word boundaries, not substrings. "tangerine" contains "tan", so a substring
-            # search scores a model that correctly said orange as having said brown --
-            # failing a gate it should pass.
             positions = [
                 match.start()
                 for word in synonyms
@@ -103,11 +76,7 @@ class VisionGate:
         return tuple(collapsed)
 
     def check(self, describe, *, model: str = "default", refresh: bool = False) -> GateResult:
-        """Run the gate. ``describe(image_bytes, prompt) -> str``.
-
-        Failures are cached too. A model that cannot see will not start seeing on the next
-        request, and re-probing per call spends a full inference to learn that again.
-        """
+        """Run the gate. ``describe(image_bytes, prompt) -> str``."""
         if not refresh and model in self._verdicts:
             return self._verdicts[model]
 

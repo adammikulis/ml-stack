@@ -1,8 +1,4 @@
-"""GGUF conversion, quantisation and tokenizer-metadata repair.
-
-Host tier: needs the `gguf` and `numpy` packages, and shells out to llama.cpp's own
-converter and quantiser.
-"""
+"""GGUF conversion, quantisation and tokenizer-metadata repair."""
 
 from __future__ import annotations
 

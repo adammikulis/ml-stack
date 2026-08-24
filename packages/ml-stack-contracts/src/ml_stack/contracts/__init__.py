@@ -1,12 +1,4 @@
-"""Read the shared contracts. Standard library only.
-
-The contracts are DATA (``contracts/*.json`` at the repo root), not code, so a
-non-Python host can consume the same tier ladder and sampler surface directly. This
-package is the Python reader for them, plus the one piece of logic that has to travel
-with the data: deciding which tier a machine can actually hold.
-
-Device tier: importable with nothing but the standard library.
-"""
+"""Read the shared contracts. Standard library only."""
 
 from __future__ import annotations
 

@@ -1,13 +1,4 @@
-"""Getting an image into a request without blowing the context or the API's limits.
-
-``ml_stack.media.image`` handles format sniffing and data URLs with no dependencies.
-This module is the part that needs Pillow: resizing, re-encoding, and trimming an
-attachment set down to what a given endpoint will actually accept.
-
-Resizing is not optional in practice. A phone photo is 4000 px on its long edge and costs
-thousands of tokens as tiles, for a description that a 1024 px version answers identically.
-Sending the original is slower, more expensive, and frequently over the request limit.
-"""
+"""Getting an image into a request without blowing the context or the API's limits."""
 
 from __future__ import annotations
 
@@ -50,13 +41,7 @@ def load_bytes(source: Path | str | bytes) -> bytes:
 
 
 def _pillow():
-    """Pillow, or an ``ImageError`` naming the extra that installs it.
-
-    Pillow is an optional dependency because the vision *gate* needs nothing to run, but
-    every path that changes pixels needs it. A bare ``ImportError`` escaping from inside
-    ``normalize`` would abort the whole batch over one image; an ``ImageError`` is what
-    the per-image handler there already knows how to report and carry on from.
-    """
+    """Pillow, or an ``ImageError`` naming the extra that installs it."""
     try:
         from PIL import Image
     except ImportError as exc:
@@ -68,13 +53,7 @@ def _pillow():
 
 
 def _open_heif_too() -> None:
-    """Teach Pillow to read HEIC, if the plugin for it is installed.
-
-    Stock Pillow cannot decode HEIC at all, and iPhones produce it by default -- so the
-    format the docstring below calls "the case that matters" is exactly the one that fails
-    without ``pillow-heif``. Best effort: a box without the plugin gets a clear
-    ``ImageError`` from the caller rather than an exception from here.
-    """
+    """Teach Pillow to read HEIC, if the plugin for it is installed."""
     try:
         import pillow_heif
     except ImportError:
@@ -91,20 +70,13 @@ def resize_to_fit(
     max_edge: int = DEFAULT_MAX_EDGE,
     quality: int = 85,
 ) -> tuple[bytes, bool]:
-    """Shrink so the long edge is at most ``max_edge``. Returns ``(bytes, was_resized)``.
-
-    An image already within the limit is returned untouched rather than re-encoded --
-    re-encoding a JPEG is lossy every time, so doing it for no reason degrades the image
-    the model sees.
-    """
+    """Shrink so the long edge is at most ``max_edge``. Returns ``(bytes, was_resized)``."""
     import io
 
     Image = _pillow()
     try:
         image = Image.open(io.BytesIO(data))
     except OSError as exc:
-        # UnidentifiedImageError subclasses OSError, so this is also the "Pillow does not
-        # have a decoder for this" case -- which normalize must report, not crash on.
         raise ImageError(f"could not decode image for resizing: {exc}") from exc
     with image:
         width, height = image.size
@@ -115,8 +87,6 @@ def resize_to_fit(
         scale = max_edge / longest
         resized = image.resize((max(1, int(width * scale)), max(1, int(height * scale))))
 
-        # Keep PNG as PNG: it is usually a screenshot or a diagram, where JPEG artefacts
-        # land exactly on the text the model is being asked to read.
         source_kind = kind(data)
         buffer = io.BytesIO()
         if source_kind == "png":
@@ -127,11 +97,7 @@ def resize_to_fit(
 
 
 def to_supported_format(data: bytes) -> tuple[bytes, bool]:
-    """Convert to PNG when the format is one that endpoints commonly reject.
-
-    HEIC is the case that matters: iPhones produce it by default, and almost nothing
-    accepts it.
-    """
+    """Convert to PNG when the format is one that endpoints commonly reject."""
     detected = kind(data)
     if detected in ("jpeg", "png", "gif", "webp"):
         return data, False
@@ -161,12 +127,7 @@ def normalize(
     max_bytes: int = DEFAULT_MAX_BYTES,
     max_images: int | None = None,
 ) -> tuple[list[str], NormalizationReport]:
-    """Turn a list of image sources into data URLs an endpoint will accept.
-
-    Trimming to ``max_images`` keeps the **first** ones. Later attachments in a message are
-    usually context for earlier ones, so dropping from the end loses less than sampling.
-    Whatever is dropped is reported rather than silently discarded.
-    """
+    """Turn a list of image sources into data URLs an endpoint will accept."""
     report = NormalizationReport()
     urls: list[str] = []
 

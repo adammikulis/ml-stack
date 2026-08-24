@@ -1,22 +1,4 @@
-"""Client for one fleet daemon on another machine.
-
-    from ml_stack.fleet.remote import Peer
-
-    rtx = Peer("http://rtx:8770", token=...)
-    rtx.push("train/data/packed/train.npy", "data/train.npy")
-    job = rtx.submit(["python", "-m", "train.cuda_train", "--steps", "30000"],
-                     name="doly-full")
-    rtx.wait(job["id"], on_metric=print)
-    rtx.pull(f"jobs/{job['id']}/ckpt/best/model.safetensors", "local/model.safetensors")
-
-Or, with a cluster key in place, without knowing where it is:
-
-    rtx = Peer.find_one(require="cuda")
-
-stdlib only. Uploads and downloads resume, because a 2GB dataset over a home
-network will be interrupted eventually and restarting from zero each time
-turns a five-minute transfer into an afternoon.
-"""
+"""Client for one fleet daemon on another machine."""
 
 from __future__ import annotations
 
@@ -59,8 +41,6 @@ class Peer:
         self.base_url = base_url.rstrip("/")
         self.token = token
         self.timeout = timeout
-        #: Set when this client came from discovery; carries the peer's name
-        #: and device report so a caller can choose between several.
         self.beacon = beacon
 
     @property
@@ -73,11 +53,7 @@ class Peer:
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
                  port: int | None = None) -> list["Peer"]:
-        """Every daemon on the LAN that proves it holds the cluster key.
-
-        No token argument: it is derived from the same key that authenticated
-        the peer, so a peer you can find is a peer you can already drive.
-        """
+        """Every daemon on the LAN that proves it holds the cluster key."""
         key = key or load_cluster_key(cluster_key_path)
         if key is None:
             raise DiscoveryError(
@@ -93,13 +69,7 @@ class Peer:
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
                  port: int | None = None) -> "Peer":
-        """The one peer to use, or an error saying exactly why there isn\'t one.
-
-        ``require`` filters on a backend the peer reports ("cuda", "mps"), and
-        ``name`` on its advertised name. Ambiguity is an error rather than a
-        silent pick: two GPU boxes on one LAN and a coin-flip between them is
-        how a run ends up on the wrong card without anyone noticing.
-        """
+        """The one peer to use, or an error saying exactly why there isn't one."""
         peers = cls.discover(timeout_s=timeout_s, key=key,
                              cluster_key_path=cluster_key_path, timeout=timeout,
                              group=group, port=port)
@@ -139,8 +109,6 @@ class Peer:
                 return r.status, r.read(), dict(r.headers)
         except urllib.error.HTTPError as e:
             body = e.read().decode(errors="replace")
-            # The daemon puts the reason in the body; a bare "HTTP 400" from
-            # urllib tells you nothing about which field it rejected.
             raise PeerError(f"{method} {path} -> {e.code}: {body[:400]}") from None
         except urllib.error.URLError as e:
             raise PeerError(f"{method} {path} -> unreachable: {e.reason}") from None
@@ -158,11 +126,7 @@ class Peer:
             return json.loads(r.read())
 
     def availability(self, action: str = "", **fields: Any) -> dict:
-        """Read or change when this peer takes work.
-
-        Actions: ``pause``, ``resume``, ``reserve``, ``release``, ``window``,
-        ``clear_windows``. No action reads the current state.
-        """
+        """Read or change when this peer takes work."""
         if not action:
             return self._json("GET", "/availability")
         return self._json("POST", "/availability", {"action": action, **fields})
@@ -213,17 +177,10 @@ class Peer:
         local = Path(local).expanduser()
         total = local.stat().st_size
         sent = 0
-        # Hashed from the same bytes being sent, in the same pass. Reading the
-        # file twice would be wasteful and would also miss the case worth
-        # catching: a file that changes underneath a long upload.
         digest = hashlib.sha256()
         with local.open("rb") as fh:
             while True:
                 chunk = fh.read(CHUNK)
-                # `and total` so a zero-byte file still sends one (empty) request. A
-                # prep shard that filtered to nothing is an empty file and is a real
-                # result: breaking here instead would leave the upload never made and
-                # the reply never read.
                 if not chunk and total:
                     break
                 digest.update(chunk)
@@ -246,19 +203,7 @@ class Peer:
     def pull(self, remote: str, local: Path | str, *,
              on_progress: Callable[[int, int], None] | None = None,
              timeout: float = 600.0) -> Path:
-        """Download, resuming a partial file rather than restarting it.
-
-        Streamed to disk in CHUNK-sized pieces. Reading the whole response
-        first would hold a gigabyte checkpoint in memory on both ends at once,
-        and would make ``on_progress`` a single call at the end -- a progress
-        callback that fires once when the work is already done.
-
-        Lands in ``.part`` and is moved with os.replace only when the byte
-        count matches what the server said it was sending, so an interrupted
-        pull never leaves a truncated file that a later step mistakes for a
-        whole one. On a short read the ``.part`` is left alone: it is exactly
-        what the next call needs to resume from.
-        """
+        """Download, resuming a partial file rather than restarting it."""
         local = Path(local).expanduser()
         local.parent.mkdir(parents=True, exist_ok=True)
         partial = local.with_suffix(local.suffix + ".part")
@@ -273,10 +218,6 @@ class Peer:
             resp = urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as e:
             if e.code == 416:
-                # The server holds fewer bytes than we already have. Equal
-                # means a previous pull got everything and died before the
-                # rename; larger means this .part belongs to some other,
-                # bigger file and resuming from it would splice two files.
                 size = self._range_total(e.headers.get("Content-Range", ""))
                 if size is not None and start == size:
                     os.replace(partial, local)
@@ -309,9 +250,6 @@ class Peer:
                 f"{remote}: got {got} of {total} bytes; left {partial.name} "
                 "in place to resume from")
         if want:
-            # The whole reassembled file, not just this response: on a resume
-            # most of these bytes arrived in an earlier call, and those are
-            # exactly the ones no single response could have vouched for.
             actual = sha256_file(partial)
             if not hmac.compare_digest(actual, want):
                 partial.unlink(missing_ok=True)

@@ -1,12 +1,4 @@
-"""Existence and termination for processes this machine started.
-
-A model server outlives its launcher, so nothing reaps it automatically. This is the one
-owner for "is it alive" and "make it not alive".
-
-psutil maps the platform differences uniformly: ``terminate()`` is SIGTERM on Unix and
-TerminateProcess on Windows, and ``children()`` walks the tree without needing a process
-group (Windows has none).
-"""
+"""Existence and termination for processes this machine started."""
 
 from __future__ import annotations
 
@@ -16,14 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 def pid_exists(pid: int | None) -> bool:
-    """Whether ``pid`` names a process that is still doing something.
-
-    A zombie is not. It is an exit status waiting to be collected, and it keeps its pid
-    until a parent that may never call ``wait`` gets round to it -- so a dead server
-    supervising nothing reads as alive for as long as its launcher lives. "The pid is in
-    the table" is the proxy; "the process is running" is the fact, and only the second
-    one answers "is this server still up".
-    """
+    """Whether ``pid`` names a process that is still doing something."""
     if not pid or pid <= 0:
         return False
     try:
@@ -63,13 +48,7 @@ def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:
 
 
 def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
-    """Terminate ``pid`` and every descendant, returning the pids acted on.
-
-    Children first, then the parent: a supervisor that notices its child died can
-    otherwise respawn it in the window between the two kills. Killing the parent alone is
-    worse than doing nothing -- the real worker is reparented to init and keeps holding
-    the GPU with no record naming it.
-    """
+    """Terminate ``pid`` and every descendant, returning the pids acted on."""
     if not pid_exists(pid):
         return []
     import psutil

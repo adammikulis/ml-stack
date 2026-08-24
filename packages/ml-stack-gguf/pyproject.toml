@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ml-stack-gguf"
 version = "0.1.0"
-description = "GGUF conversion, quantisation and tokenizer-metadata repair. Host tier."
+description = "GGUF conversion, quantisation and tokenizer-metadata repair. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]

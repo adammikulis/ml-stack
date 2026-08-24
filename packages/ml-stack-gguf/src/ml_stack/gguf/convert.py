@@ -1,8 +1,4 @@
-"""HF safetensors -> GGUF -> quantised GGUF.
-
-Each step writes a checksum sidecar, so an export stays verifiable after the fact --
-which matters when the same weights get converted more than once with different flags.
-"""
+"""HF safetensors -> GGUF -> quantised GGUF."""
 
 from __future__ import annotations
 
@@ -81,12 +77,7 @@ def convert(
     python: str | None = None,
     write_sidecar: bool = True,
 ) -> ConversionResult:
-    """Run ``convert_hf_to_gguf.py`` over a HF-layout directory.
-
-    Use ``outtype="f32"`` when the result will be re-quantised. A bf16 checkpoint is a
-    strict prefix of fp32, so widening it is exactly lossless, and quantising from f32
-    then avoids a double rounding.
-    """
+    """Run ``convert_hf_to_gguf.py`` over a HF-layout directory."""
     model_dir, outfile = Path(model_dir), Path(outfile)
     if not model_dir.is_dir():
         raise ConversionError(f"no model directory at {model_dir}")
@@ -137,13 +128,7 @@ def export(
     fix_space_prefix: bool | None = False,
     keep_intermediate: bool = False,
 ) -> ConversionResult:
-    """The whole path: convert, patch the tokenizer metadata, quantise.
-
-    ``fix_space_prefix`` writes ``tokenizer.ggml.add_space_prefix`` before quantising.
-    Pass ``None`` to skip the patch entirely; the default of ``False`` writes the key
-    with the value that a SentencePiece tokenizer actually wants, because llama.cpp's
-    default when the key is *absent* is ``True``, which is wrong and silent.
-    """
+    """The whole path: convert, patch the tokenizer metadata, quantise."""
     from ml_stack.gguf.vocab import fix_space_prefix as _patch
 
     out_dir = Path(out_dir)

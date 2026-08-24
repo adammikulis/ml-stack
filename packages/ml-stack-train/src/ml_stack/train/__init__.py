@@ -1,22 +1,4 @@
-"""Training: the loop, and the parts of it that are easy to get wrong.
-
-Lab tier. ``Trainer`` runs the loop, on PyTorch or MLX, with checkpointing, resume,
-schedules, divergence guards and metrics already attached:
-
-    from ml_stack.train import Trainer, warmup_stable_decay
-
-    report = Trainer(model, optimizer, loss, out="runs/small").fit(
-        batches, steps=100_000,
-        schedule=warmup_stable_decay(3e-4, total_steps=100_000, warmup_steps=2_000),
-        eval_data=holdout, eval_every=1_000, checkpoint_every=1_000)
-
-``loss(model, batch)`` is yours; everything around it is not. The framework is detected
-from the model, so the same call trains on a Mac and on a CUDA box.
-
-Every piece is also usable on its own, for a loop you want to write yourself --
-``CheckpointState``, ``MetricsLog``, ``RunLock``, the schedules, the guards, the leak-safe
-splits. ``Trainer`` is an assembly of them, not a replacement for them.
-"""
+"""Training: the loop, and the parts of it that are easy to get wrong."""
 
 from __future__ import annotations
 

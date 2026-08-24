@@ -1,9 +1,4 @@
-"""Find ``llama-server``, and give it an environment it can actually load in.
-
-``shutil.which`` alone is not enough. The usual install locations reach PATH only through
-a login shell's profile, so anything spawned from a subprocess, an editor or a TUI gets
-"No such file or directory" for a binary that is plainly there in a terminal.
-"""
+"""Find ``llama-server``, and give it an environment it can actually load in."""
 
 from __future__ import annotations
 
@@ -44,20 +39,7 @@ def find_binary(
     explicit: str | Path | None = None,
     vendor_dir: Path | None = None,
 ) -> Path | None:
-    """Locate a llama.cpp binary. ``None`` if it is nowhere to be found.
-
-    Order, first hit wins:
-
-    1. ``explicit`` -- a path from a config file or a CLI flag.
-    2. ``$LLAMA_CPP_SERVER`` (for llama-server) or ``$LLAMA_CPP_DIR/<name>``.
-    3. ``vendor_dir`` -- a self-contained build the caller owns.
-    4. ``PATH``.
-    5. ``ML_STACK_CACHE`` -- a previous auto-download.
-    6. The login-shell directories PATH does not carry into a subprocess.
-
-    An ``explicit`` path that does not exist falls through rather than hard-failing, so a
-    stale config still boots off a vendored or cached copy.
-    """
+    """Locate a llama.cpp binary. ``None`` if it is nowhere to be found."""
     candidates = _name_variants(name)
 
     if explicit:
@@ -105,16 +87,7 @@ def require_binary(name: str = "llama-server", **kwargs: object) -> Path:
 
 
 def child_env(binary: Path | str, extra: dict[str, str] | None = None) -> dict[str, str]:
-    """The environment to launch ``binary`` with, with its own directory on PATH.
-
-    This is what makes a self-contained build work on Windows. An absolute-path launch of
-    ``llama-server.exe`` does **not** find its sibling DLLs (``ggml*.dll``, ``llama*.dll``,
-    cudart/cublas) unless their directory is on the loader search path; prepending the
-    binary's own directory makes the bundled DLLs resolve.
-
-    Harmless on Unix, and applied unconditionally so the two platforms do not diverge
-    into two code paths that get tested separately and drift.
-    """
+    """The environment to launch ``binary`` with, with its own directory on PATH."""
     env = dict(os.environ)
     bindir = str(Path(binary).resolve().parent)
     env["PATH"] = bindir + os.pathsep + env.get("PATH", "")
