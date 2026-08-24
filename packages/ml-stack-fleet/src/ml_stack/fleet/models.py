@@ -18,6 +18,9 @@ __all__ = ["Model", "Models", "ModelError", "default_roots"]
 SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
 MIN_SIZE = 1 << 20
+# A download in progress writes continuously, so a part file untouched for this
+# long belongs to one that stopped.
+STALE_PART_S = 3600.0
 
 
 class ModelError(RuntimeError):
@@ -265,6 +268,41 @@ class Models:
             return False
         found.path.unlink(missing_ok=True)
         return True
+
+    def unfinished(self, *, stale_s: float = STALE_PART_S) -> list[dict[str, Any]]:
+        """Part files left by downloads that stopped, newest first."""
+        import time
+
+        if not self.store.exists():
+            return []
+        now = time.time()
+        out = []
+        for path in self.store.glob("*.part"):
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if now - stat.st_mtime < stale_s:
+                continue
+            out.append({"name": path.name, "size": stat.st_size,
+                        "modified": stat.st_mtime})
+        out.sort(key=lambda r: r["modified"], reverse=True)
+        return out
+
+    def discard(self, name: str = "") -> list[str]:
+        """Delete a part file and what it recorded, or every stale one. Returns names."""
+        wanted = [r["name"] for r in self.unfinished()] if not name else [Path(name).name]
+        gone = []
+        for part in wanted:
+            path = self.store / part
+            if path.suffix != ".part" or self.store not in path.parents:
+                continue
+            if not path.exists():
+                continue
+            path.unlink(missing_ok=True)
+            Path(str(path) + ".from").unlink(missing_ok=True)
+            gone.append(part)
+        return gone
 
     def free_gb(self) -> float:
         try:

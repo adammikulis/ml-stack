@@ -258,6 +258,50 @@ class TestResuming:
         assert not part.exists()
 
 
+class TestUnfinishedDownloads:
+    def test_a_part_still_being_written_is_not_offered_for_discard(self, store):
+        (store.store / "busy.gguf.part").write_bytes(b"x" * 1024)
+        assert store.unfinished() == []
+
+    def test_one_nothing_has_touched_for_an_hour_is(self, store):
+        import os
+        import time
+
+        part = store.store / "stopped.gguf.part"
+        part.write_bytes(b"x" * 2048)
+        old = time.time() - 7200
+        os.utime(part, (old, old))
+
+        found = store.unfinished()
+        assert [r["name"] for r in found] == ["stopped.gguf.part"]
+        assert found[0]["size"] == 2048
+
+    def test_discarding_takes_the_part_and_what_it_recorded(self, store):
+        part = store.store / "gone.gguf.part"
+        part.write_bytes(b"x" * 16)
+        stamp = Path(str(part) + ".from")
+        stamp.write_text(json.dumps({"url": "http://x/y.gguf", "validator": "t"}))
+
+        assert store.discard("gone.gguf.part") == ["gone.gguf.part"]
+        assert not part.exists()
+        assert not stamp.exists()
+
+    def test_discarding_leaves_finished_models_alone(self, store, tmp_path):
+        a_model(tmp_path / "models", name="keep.gguf")
+        (store.store / "drop.gguf.part").write_bytes(b"x")
+        store.discard("drop.gguf.part")
+        assert [m.name for m in store.all()] == ["keep.gguf"]
+
+    @pytest.mark.parametrize("bad", ["../keep.gguf", "keep.gguf", "a/b.part"])
+    def test_discard_reaches_nothing_outside_the_store(self, store, tmp_path, bad):
+        a_model(tmp_path / "models", name="keep.gguf")
+        outside = store.store.parent / "keep.gguf"
+        outside.write_bytes(b"important")
+        assert store.discard(bad) == []
+        assert outside.exists()
+        assert (store.store / "keep.gguf").exists()
+
+
 class TestRemoving:
     def test_only_models_this_machine_downloaded_can_be_removed(self, tmp_path):
         """A model in someone's own folder is theirs, not this program's to delete."""

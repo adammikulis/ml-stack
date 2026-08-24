@@ -364,6 +364,17 @@ async function models(message) {
         el("span", { class: "why" }, `on ${x.peers.join(", ")}`)), b);
   });
 
+  const unfinished = (m.unfinished || []).map((x) =>
+    el("div", { class: "row" },
+      el("span", {}, el("b", {}, x.name.replace(/\.part$/, "")),
+        el("span", { class: "why" }, `${fileSize(x.size)} copied, then stopped`)),
+      el("button", { class: "ghost small",
+        onclick: async () => {
+          await api("/ui/models", { method: "DELETE",
+            body: JSON.stringify({ name: x.name }) });
+          models();
+        } }, "Discard")));
+
   const ref = el("input", { type: "text", id: "src",
     placeholder: "hf:Qwen/Qwen3-4B-GGUF/qwen3-4b-q4_k_m.gguf" });
   const fetchIt = el("button", {}, "Get it");
@@ -389,6 +400,14 @@ async function models(message) {
             el("div", { class: "hint" },
               "Copied over your network rather than downloaded again."),
             ...elsewhere)
+        : null,
+
+      unfinished.length
+        ? el("div", { class: "group" },
+            el("h2", {}, "Started, not finished"),
+            el("div", { class: "hint" },
+              "Asking for the same model again picks up where it stopped."),
+            ...unfinished)
         : null,
 
       el("div", { class: "group" },

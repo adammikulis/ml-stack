@@ -499,7 +499,11 @@ def routes(ui: UI, handler: Any) -> bool:
                               for n, p in sorted(elsewhere.items()) if n not in here],
                 "free_gb": ui.models.free_gb(),
                 "autodownload": auto_models,
+                "unfinished": ui.models.unfinished(),
             })
+            return True
+        if method == "DELETE":
+            send(200, {"discarded": ui.models.discard(str(body().get("name") or ""))})
             return True
         if method == "POST":
             req = body()

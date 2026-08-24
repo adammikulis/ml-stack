@@ -542,6 +542,33 @@ def _():
     return "the stale part was thrown away"
 
 
+@check("Models", "a download that stopped is listed, and can be discarded")
+def _():
+    import os
+    import time as clock
+
+    from ml_stack.fleet import Models
+
+    store = TMP / "stopped"
+    store.mkdir(parents=True, exist_ok=True)
+    part = store / "half.gguf.part"
+    part.write_bytes(b"x" * 4096)
+    stamp = Path(str(part) + ".from")
+    stamp.write_text('{"url": "http://x/half.gguf", "validator": "t"}')
+
+    models = Models([store], store)
+    assert models.unfinished() == [], "an active download must not be offered"
+    old = clock.time() - 7200
+    os.utime(part, (old, old))
+
+    listed = models.unfinished()
+    assert [r["name"] for r in listed] == ["half.gguf.part"], listed
+    assert listed[0]["size"] == 4096
+    assert models.discard("half.gguf.part") == ["half.gguf.part"]
+    assert not part.exists() and not stamp.exists()
+    return "4096 bytes offered, then discarded with what it recorded"
+
+
 # -- chat ----------------------------------------------------------------
 @check("Chat", "a machine that can run nothing itself still talks to a peer's model")
 def _():
