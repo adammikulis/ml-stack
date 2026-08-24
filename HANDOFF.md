@@ -4,16 +4,13 @@ Pending work on `main`. Read `CLAUDE.md` first.
 
 ## Before tagging v0.1.4
 
-The suite and `docs/verify_release.py` both pass, but neither has run a real
-`llama-server`. Two things need a real machine:
+`llama.py` picks the right asset for all six platform and architecture pairs, checked
+against a real build release. macOS arm64 is verified the whole way: downloaded,
+unpacked, executable, and `llama-server --version` answers. The Linux and Windows
+binaries have not been run — only their names confirmed — so press Run once on each
+before announcing them.
 
-- **`llama.py` asset names.** `_tokens()` guesses what the ggml-org release calls a
-  build for each platform. Verified against a stubbed release, not a real one. Check the
-  names on macOS arm64, Linux x64 and Windows x64 before trusting the Run button.
-- **macOS quarantine.** A binary downloaded from the internet may refuse to run until
-  the quarantine attribute is cleared. Not handled.
-
-Then the release gate, which is two machines:
+The release gate is two machines:
 
 1. **The machine that installs nothing.** From the bundle only — no `llama-server`, no
    sidecar venv, no model store. Type the passphrase, open Chat, pick a model the other

@@ -39,13 +39,78 @@ class TestPickingABuild:
         assert llama.asset_for_this_machine(
             a_release(["llama-b1234-bin-ubuntu-x64.zip"])) is None
 
+    def test_it_takes_the_tarball_platforms_ship(self, monkeypatch):
+        """Windows builds are zipped; macOS and Linux ones are tarred."""
+        monkeypatch.setattr(llama, "_tokens", lambda: ("macos-arm64",))
+        got = llama.asset_for_this_machine(a_release([
+            "llama-b1234-bin-ubuntu-x64.tar.gz",
+            "llama-b1234-bin-macos-arm64.tar.gz"]))
+        assert got["name"] == "llama-b1234-bin-macos-arm64.tar.gz"
+
     def test_it_ignores_things_that_are_not_archives(self, monkeypatch):
         monkeypatch.setattr(llama, "_tokens", lambda: ("macos-arm64",))
         assert llama.asset_for_this_machine(
-            a_release(["llama-b1234-bin-macos-arm64.tar.gz"])) is None
+            a_release(["llama-b1234-bin-macos-arm64.txt",
+                       "llama-b1234-bin-macos-arm64.sha256"])) is None
 
     def test_every_platform_asks_for_something(self):
         assert llama._tokens()
+
+
+# The assets of a real llama.cpp build release, b10612. Recorded rather than
+# fetched so the test does not need the network.
+REAL = [
+    "cudart-llama-bin-win-cuda-12.4-x64.zip",
+    "cudart-llama-bin-win-cuda-13.4-arm64.zip",
+    "llama-b10612-bin-android-arm64.tar.gz",
+    "llama-b10612-bin-macos-arm64.tar.gz",
+    "llama-b10612-bin-macos-x64.tar.gz",
+    "llama-b10612-bin-ubuntu-arm64.tar.gz",
+    "llama-b10612-bin-ubuntu-rocm-7.14-x64.tar.gz",
+    "llama-b10612-bin-ubuntu-s390x.tar.gz",
+    "llama-b10612-bin-ubuntu-vulkan-x64.tar.gz",
+    "llama-b10612-bin-ubuntu-x64.tar.gz",
+    "llama-b10612-bin-win-cpu-arm64.zip",
+    "llama-b10612-bin-win-cpu-x64.zip",
+    "llama-b10612-bin-win-cuda-12.4-x64.zip",
+    "llama-b10612-bin-win-vulkan-x64.zip",
+    "llama-b10612-xcframework.zip",
+    "llama-b10612-ui.tar.gz",
+]
+
+
+class TestAgainstARealRelease:
+    @pytest.mark.parametrize("tokens,want", [
+        (("macos-arm64",), "llama-b10612-bin-macos-arm64.tar.gz"),
+        (("macos-x64",), "llama-b10612-bin-macos-x64.tar.gz"),
+        (("ubuntu-x64", "ubuntu-vulkan-x64"), "llama-b10612-bin-ubuntu-x64.tar.gz"),
+        (("ubuntu-arm64",), "llama-b10612-bin-ubuntu-arm64.tar.gz"),
+        (("win-cpu-x64", "win-x64"), "llama-b10612-bin-win-cpu-x64.zip"),
+        (("win-cpu-arm64", "win-arm64"), "llama-b10612-bin-win-cpu-arm64.zip"),
+    ])
+    def test_every_platform_resolves_to_its_build(self, tokens, want, monkeypatch):
+        monkeypatch.setattr(llama, "_tokens", lambda: tokens)
+        assert llama.asset_for_this_machine(a_release(REAL))["name"] == want
+
+    def test_the_build_releases_are_prereleases_so_the_list_is_read(self, monkeypatch):
+        """/releases/latest skips prereleases, and every binary build is one, so
+        it answers with a release carrying no binaries at all."""
+        monkeypatch.setattr(llama, "_tokens", lambda: ("macos-arm64",))
+        tagged = a_release(["nightly-tag.txt"])
+        tagged["tag_name"] = "v0.2.0"
+        builds = a_release(REAL)
+        builds["prerelease"] = True
+
+        assert llama.asset_for_this_machine(tagged) is None
+        got = llama._first_with_a_build([tagged, builds])
+        assert got is builds
+
+    def test_a_draft_is_passed_over(self, monkeypatch):
+        monkeypatch.setattr(llama, "_tokens", lambda: ("macos-arm64",))
+        draft = a_release(REAL)
+        draft["draft"] = True
+        real = a_release(REAL)
+        assert llama._first_with_a_build([draft, real]) is real
 
 
 class TestFindingOneAlreadyHere:
@@ -61,13 +126,38 @@ class TestFindingOneAlreadyHere:
 
 
 class TestUnpacking:
-    def test_an_archive_that_escapes_its_directory_is_refused(self, tmp_path):
+    def test_a_zip_that_escapes_its_directory_is_refused(self, tmp_path):
         bad = tmp_path / "bad.zip"
         with zipfile.ZipFile(bad, "w") as zf:
             zf.writestr("../escaped.txt", "no")
         with pytest.raises(llama.LlamaError, match="escapes"):
-            llama._unzip(bad, tmp_path / "out")
+            llama._unpack(bad, tmp_path / "out")
         assert not (tmp_path.parent / "escaped.txt").exists()
+
+    def test_a_tarball_that_escapes_its_directory_is_refused(self, tmp_path):
+        import io
+        import tarfile
+
+        bad = tmp_path / "bad.tar.gz"
+        with tarfile.open(bad, "w:gz") as tf:
+            info = tarfile.TarInfo("../escaped.txt")
+            info.size = 2
+            tf.addfile(info, io.BytesIO(b"no"))
+        with pytest.raises(llama.LlamaError, match="escapes"):
+            llama._unpack(bad, tmp_path / "out")
+        assert not (tmp_path.parent / "escaped.txt").exists()
+
+    def test_a_tarball_unpacks(self, tmp_path):
+        import io
+        import tarfile
+
+        good = tmp_path / "good.tar.gz"
+        with tarfile.open(good, "w:gz") as tf:
+            info = tarfile.TarInfo(f"build/bin/{llama.SERVER}")
+            info.size = 4
+            tf.addfile(info, io.BytesIO(b"body"))
+        llama._unpack(good, tmp_path / "out")
+        assert (tmp_path / "out" / "build" / "bin" / llama.SERVER).read_bytes() == b"body"
 
 
 class TestFetching:
