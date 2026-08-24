@@ -602,6 +602,59 @@ class TestUpdates:
 
         assert Release("0.10.0", "", "", (), 0).newer_than("0.9.0")
 
+    def test_nothing_is_newer_than_a_version_nobody_knows(self):
+        """A source tree used to report 0.0.0, so every release looked newer and the
+        screen offered to move backwards onto the last tag."""
+        from ml_stack.fleet.updates import Release
+
+        older = Release("0.1.3", "", "", (), 0)
+        assert older.newer_than("") is False
+        assert older.newer_than("   ") is False
+        assert older.newer_than("0.1.4") is False
+        assert older.newer_than("0.1.2") is True
+
+    def test_a_source_tree_reports_the_version_it_holds(self, monkeypatch):
+        import tomllib
+        from pathlib import Path as P
+
+        from ml_stack.fleet import updates
+
+        def no_metadata(*a, **k):
+            raise LookupError("not installed")
+
+        monkeypatch.setattr("importlib.metadata.version", no_metadata)
+        monkeypatch.delenv("ML_STACK_VERSION", raising=False)
+
+        got = updates.current_version()
+        here = P(updates.__file__).resolve()
+        pyproject = next(
+            p / "packages" / "ml-stack-fleet" / "pyproject.toml"
+            for p in here.parents
+            if (p / "packages" / "ml-stack-fleet" / "pyproject.toml").is_file())
+        want = tomllib.loads(pyproject.read_text())["project"]["version"]
+        assert got == want, f"reported {got!r}, the checkout says {want!r}"
+
+    def test_being_told_the_version_wins_over_guessing(self, monkeypatch):
+        from ml_stack.fleet import updates
+
+        def no_metadata(*a, **k):
+            raise LookupError("not installed")
+
+        monkeypatch.setattr("importlib.metadata.version", no_metadata)
+        monkeypatch.setenv("ML_STACK_VERSION", "9.9.9")
+        assert updates.current_version() == "9.9.9"
+
+    def test_with_no_way_to_tell_it_says_nothing_rather_than_zero(self, monkeypatch):
+        from ml_stack.fleet import updates
+
+        def no_metadata(*a, **k):
+            raise LookupError("not installed")
+
+        monkeypatch.setattr("importlib.metadata.version", no_metadata)
+        monkeypatch.delenv("ML_STACK_VERSION", raising=False)
+        monkeypatch.setattr(updates, "_version_in_source", lambda: "")
+        assert updates.current_version() == ""
+
     def test_the_download_for_this_machine_is_picked(self):
         from ml_stack.fleet.updates import Release, asset_for, platform_key
 

@@ -40,6 +40,9 @@ class Release:
     checked_at: float
 
     def newer_than(self, version: str) -> bool:
+        """False when the running version is unknown: nothing is newer than nothing."""
+        if not version.strip():
+            return False
         return _parse(self.version) > _parse(version)
 
 
@@ -53,12 +56,29 @@ def _parse(version: str) -> tuple[int, ...]:
 
 
 def current_version() -> str:
-    """The running version, from the installed package."""
+    """The running version, or empty when there is no way to tell."""
     try:
         from importlib.metadata import version
         return version("ml-stack-fleet")
     except Exception:                                 # noqa: BLE001
-        return os.environ.get("ML_STACK_VERSION", "0.0.0")
+        pass
+    told = os.environ.get("ML_STACK_VERSION", "").strip()
+    if told:
+        return told
+    return _version_in_source() or ""
+
+
+def _version_in_source() -> str:
+    """The version in this checkout, when running from one rather than an install."""
+    for parent in Path(__file__).resolve().parents:
+        found = parent / "packages" / "ml-stack-fleet" / "pyproject.toml"
+        if not found.is_file():
+            continue
+        for line in found.read_text().splitlines():
+            if line.startswith("version"):
+                _, _, value = line.partition("=")
+                return value.strip().strip('"').strip("'")
+    return ""
 
 
 def platform_key() -> str:
