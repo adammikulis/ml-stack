@@ -120,3 +120,24 @@ If you have not driven it, say what you did instead, in the same breath as the c
 
 This applies hardest to anything a person only does once — first run, setup, an
 uninstall. Those are the paths with no second chance to notice.
+
+## Reporting a problem
+
+Fix it. Then say what you fixed.
+
+A problem you found and did not fix is only worth raising if you are **actually blocked**:
+you need a decision only the owner can make, you need hardware or an account you do not
+have, or fixing it would go outside what was asked. Say which of those it is, in one line.
+
+**Existing code is not a blocker.** Neither is code you did not write, a function that
+returns the wrong thing on one platform, a missing branch, or a test that was never
+written. Those are the work. Reporting them as findings, with the fix left undone, is
+handing back a list instead of a result.
+
+Watch for the passive voice that turns a bug into weather: "the field is simply absent",
+"psutil isn't available there", "that platform doesn't expose it". Every one of those is
+a sentence about something you could have changed. If it is genuinely impossible, say why
+in terms of the thing that makes it impossible, not in terms of what currently happens.
+
+The bar for mentioning a problem at all is the same as the bar for a commit: it changes
+what someone would do next.

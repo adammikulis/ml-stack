@@ -754,6 +754,38 @@ class TestWhatAMachineIsDoing:
         assert got.get("cpu_pct") is not None
         assert got.get("ram_used_gb") is not None
 
+    def test_windows_gets_its_memory_from_the_system_call(self, monkeypatch):
+        """os.sysconf does not exist there, so a Windows machine reported no memory
+        at all -- not just no usage, no total either."""
+        import ml_stack.fleet.daemon as mod
+
+        def no_sysconf(*a, **k):
+            raise AttributeError("no sysconf on this platform")
+
+        import builtins
+
+        real = builtins.__import__
+
+        def no_psutil(name, *a, **k):
+            if name == "psutil":
+                raise ImportError("not installed")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", no_psutil)
+        monkeypatch.setattr(mod.os, "sysconf", no_sysconf)
+        monkeypatch.setattr(mod, "_windows_memory_gb", lambda: (16.0, 6.5))
+
+        assert mod._total_ram_gb() == 16.0
+        assert mod._ram_used_gb(16.0) == 6.5
+
+    def test_the_windows_call_is_not_made_on_anything_else(self):
+        import sys
+
+        import ml_stack.fleet.daemon as mod
+
+        if sys.platform != "win32":
+            assert mod._windows_memory_gb() is None
+
     def test_memory_in_use_is_never_more_than_there_is(self):
         from ml_stack.fleet.daemon import stdlib_device_report
 
