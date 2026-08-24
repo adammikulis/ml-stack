@@ -65,6 +65,7 @@ class UI:
         self.serving: Any = None
         self.models: Any = None
         self.conversations: Any = None
+        self.downloads: Any = None
         self.root: Any = None
         self.servers: Any = None
         self._leases: dict[int, Any] = {}
@@ -500,6 +501,8 @@ def routes(ui: UI, handler: Any) -> bool:
                 "free_gb": ui.models.free_gb(),
                 "autodownload": auto_models,
                 "unfinished": ui.models.unfinished(),
+                "getting": [g.public() for g in ui.downloads.active()]
+                           if ui.downloads is not None else [],
             })
             return True
         if method == "DELETE":
@@ -507,15 +510,27 @@ def routes(ui: UI, handler: Any) -> bool:
             return True
         if method == "POST":
             req = body()
-            try:
-                got = ui.models.ensure(
-                    str(req.get("name") or ""), source=str(req.get("source") or ""),
-                    key=key,
-                    autodownload=auto_models)
-            except (ModelError, ValueError) as exc:
-                send(400, {"error": str(exc)})
+            name = str(req.get("name") or "")
+            if not name:
+                send(400, {"error": "no model was named"})
                 return True
-            send(200, got.public())
+            if ui.downloads is None:
+                try:
+                    got = ui.models.ensure(
+                        name, source=str(req.get("source") or ""), key=key,
+                        autodownload=auto_models)
+                except (ModelError, ValueError) as exc:
+                    send(400, {"error": str(exc)})
+                    return True
+                send(200, got.public())
+                return True
+            here = ui.models.find(name)
+            if here is not None:
+                send(200, here.public())
+                return True
+            started = ui.downloads.start(name, source=str(req.get("source") or ""),
+                                         key=key, autodownload=auto_models)
+            send(202, started.public())
             return True
 
     if path == "/ui/serving":

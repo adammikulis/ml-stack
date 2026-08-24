@@ -5,15 +5,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import secrets
+import threading
+import time
 import shutil
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Model", "Models", "ModelError", "default_roots"]
+__all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
+           "default_roots"]
 
 SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
@@ -146,7 +151,9 @@ class Models:
         return out
 
     def ensure(self, name: str, *, source: str = "", key: bytes | None = None,
-               on_progress: Any = None, autodownload: bool = True) -> Model:
+               on_progress: "Callable[[int, int], None] | None" = None,
+               on_note: "Callable[[str], None] | None" = None,
+               autodownload: bool = True) -> Model:
         """Make sure this machine holds a model, preferring one on the network."""
         found = self.find(name)
         if found:
@@ -157,8 +164,8 @@ class Models:
 
         if key is not None:
             for peer_name, base_url, _size in self.where(name, key):
-                if on_progress:
-                    on_progress(f"Copying {name} from {peer_name}")
+                if on_note:
+                    on_note(f"Copying {name} from {peer_name}")
                 try:
                     return self._from_peer(name, base_url, key, on_progress)
                 except (ModelError, OSError):
@@ -167,8 +174,8 @@ class Models:
         if not source:
             raise ModelError(
                 f"no machine on this network has {name}, and no download was given")
-        if on_progress:
-            on_progress(f"Downloading {name}")
+        if on_note:
+            on_note(f"Downloading {name}")
         return self._from_internet(name, source, on_progress)
 
     def _from_peer(self, name: str, base_url: str, key: bytes,
@@ -310,6 +317,85 @@ class Models:
             return round(shutil.disk_usage(self.store).free / 2**30, 1)
         except OSError:
             return 0.0
+
+
+@dataclass
+class Getting:
+    """One model being fetched, and how far it has got."""
+
+    id: str
+    name: str
+    source: str = ""
+    state: str = "getting"          # getting | done | failed
+    note: str = ""
+    done: int = 0
+    total: int = 0
+    error: str = ""
+    started_at: float = field(default_factory=time.time)
+    finished_at: float = 0.0
+
+    def public(self) -> dict[str, Any]:
+        return {"id": self.id, "name": self.name, "source": self.source,
+                "state": self.state, "note": self.note, "done": self.done,
+                "total": self.total, "error": self.error,
+                "started_at": self.started_at, "finished_at": self.finished_at}
+
+
+class Downloads:
+    """Model fetches running in the background, so a big one does not hold a request."""
+
+    KEEP_S = 300.0
+
+    def __init__(self, models: "Models", *, slots: int = 1) -> None:
+        self.models = models
+        self.getting: dict[str, Getting] = {}
+        self._lock = threading.Lock()
+        self._sem = threading.Semaphore(slots)
+
+    def start(self, name: str, *, source: str = "", key: bytes | None = None,
+              autodownload: bool = True) -> Getting:
+        with self._lock:
+            for row in self.getting.values():
+                if row.state == "getting" and row.name == name:
+                    return row
+        row = Getting(id=f"{int(time.time())}-{secrets.token_hex(3)}",
+                      name=name, source=source)
+        with self._lock:
+            self.getting[row.id] = row
+        threading.Thread(target=self._run, args=(row, key, autodownload),
+                         daemon=True, name=f"get-{row.id}").start()
+        return row
+
+    def _run(self, row: Getting, key: bytes | None, autodownload: bool) -> None:
+        with self._sem:
+            try:
+                def progress(done: int, total: int) -> None:
+                    row.done, row.total = done, total
+
+                def note(text: str) -> None:
+                    row.note = text
+
+                got = self.models.ensure(row.name, source=row.source, key=key,
+                                         on_progress=progress, on_note=note,
+                                         autodownload=autodownload)
+                row.state = "done"
+                row.name = got.name
+                row.done = row.total = got.size
+            except Exception as exc:                  # noqa: BLE001
+                row.state = "failed"
+                row.error = str(exc)
+            finally:
+                row.finished_at = time.time()
+
+    def active(self) -> list[Getting]:
+        """Everything still running, plus anything that finished recently."""
+        now = time.time()
+        with self._lock:
+            for key in [k for k, r in self.getting.items()
+                        if r.finished_at and now - r.finished_at > self.KEEP_S]:
+                del self.getting[key]
+            rows = sorted(self.getting.values(), key=lambda r: r.started_at)
+        return rows
 
 
 def _resolve(source: str) -> str:

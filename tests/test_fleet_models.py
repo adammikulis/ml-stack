@@ -258,6 +258,146 @@ class TestResuming:
         assert not part.exists()
 
 
+class TestProgress:
+    def test_the_two_kinds_of_progress_do_not_share_a_callback(self, store):
+        """ensure() reports a stage as text and bytes as two numbers. One callback
+        taking both would be called with a string and then with a pair."""
+        payload = os.urandom(512 * 1024)
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+        notes, seen = [], []
+        try:
+            store.ensure("m.gguf",
+                         source=f"http://127.0.0.1:{srv.server_address[1]}/m.gguf",
+                         on_note=notes.append,
+                         on_progress=lambda done, total: seen.append((done, total)))
+        finally:
+            srv.shutdown()
+
+        assert notes == ["Downloading m.gguf"]
+        assert seen, "no byte counts arrived"
+        assert all(isinstance(d, int) and isinstance(t, int) for d, t in seen)
+        assert seen[-1][0] == len(payload)
+        assert seen[-1][1] == len(payload)
+
+
+class TestGettingInTheBackground:
+    def serve(self, payload, delay=0.0):
+        import time as clock
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                for i in range(0, len(payload), 65536):
+                    self.wfile.write(payload[i:i + 65536])
+                    self.wfile.flush()
+                    if delay:
+                        clock.sleep(delay)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        return srv
+
+    def waited(self, downloads, gid, want, timeout=20.0):
+        import time as clock
+
+        until = clock.monotonic() + timeout
+        while clock.monotonic() < until:
+            row = next(g for g in downloads.active() if g.id == gid)
+            if row.state == want:
+                return row
+            clock.sleep(0.05)
+        raise AssertionError(f"still {row.state} after {timeout}s: {row.error}")
+
+    def test_a_download_runs_without_holding_the_caller(self, store):
+        from ml_stack.fleet.models import Downloads
+
+        payload = os.urandom(1024 * 1024)
+        srv = self.serve(payload)
+        downloads = Downloads(store)
+        try:
+            started = downloads.start(
+                "big.gguf",
+                source=f"http://127.0.0.1:{srv.server_address[1]}/big.gguf")
+            assert started.state == "getting"
+            done = self.waited(downloads, started.id, "done")
+        finally:
+            srv.shutdown()
+
+        assert done.total == len(payload)
+        assert done.done == len(payload)
+        assert (store.store / "big.gguf").read_bytes() == payload
+
+    def test_how_far_along_it_is_can_be_read_while_it_runs(self, store):
+        """Bigger than one CHUNK, or the whole body arrives in a single read and
+        the only counts ever seen are nothing and everything."""
+        from ml_stack.fleet.models import CHUNK, Downloads
+
+        payload = os.urandom(4 * CHUNK)
+        srv = self.serve(payload, delay=0.01)
+        downloads = Downloads(store)
+        try:
+            started = downloads.start(
+                "slow.gguf",
+                source=f"http://127.0.0.1:{srv.server_address[1]}/slow.gguf")
+            import time as clock
+            seen = []
+            for _ in range(200):
+                row = next(g for g in downloads.active() if g.id == started.id)
+                seen.append(row.done)
+                if row.state != "getting":
+                    break
+                clock.sleep(0.05)
+            self.waited(downloads, started.id, "done")
+        finally:
+            srv.shutdown()
+
+        assert any(0 < d < len(payload) for d in seen), (
+            f"only ever saw {sorted(set(seen))}")
+
+    def test_a_failure_is_reported_rather_than_raised_into_nowhere(self, store):
+        from ml_stack.fleet.models import Downloads
+
+        downloads = Downloads(store)
+        started = downloads.start("nope.gguf", source="http://127.0.0.1:1/nope.gguf")
+        row = self.waited(downloads, started.id, "failed")
+        assert row.error
+        assert not (store.store / "nope.gguf").exists()
+
+    def test_asking_twice_for_the_same_model_does_not_start_it_twice(self, store):
+        from ml_stack.fleet.models import Downloads
+
+        payload = os.urandom(512 * 1024)
+        srv = self.serve(payload, delay=0.05)
+        downloads = Downloads(store)
+        try:
+            source = f"http://127.0.0.1:{srv.server_address[1]}/twice.gguf"
+            first = downloads.start("twice.gguf", source=source)
+            again = downloads.start("twice.gguf", source=source)
+            assert again.id == first.id
+            self.waited(downloads, first.id, "done")
+        finally:
+            srv.shutdown()
+        assert len([g for g in downloads.active() if g.name == "twice.gguf"]) == 1
+
+
 class TestUnfinishedDownloads:
     def test_a_part_still_being_written_is_not_offered_for_discard(self, store):
         (store.store / "busy.gguf.part").write_bytes(b"x" * 1024)

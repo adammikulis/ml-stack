@@ -45,7 +45,8 @@ from ml_stack.fleet.pool import (
 )
 from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer, PeerError, sha256_file
-from ml_stack.fleet.models import Model, ModelError, Models, default_roots
+from ml_stack.fleet.models import (
+    Downloads, Getting, Model, ModelError, Models, default_roots)
 from ml_stack.fleet.chat import ChatError, Target, targets
 from ml_stack.fleet.conversations import Conversation, Conversations, Message
 from ml_stack.fleet.serving import Endpoint, Served, Serving, discover_serving
@@ -65,9 +66,11 @@ __all__ = [
     "ChatError",
     "Conversation",
     "Conversations",
+    "Downloads",
     "Endpoint",
     "Model",
     "ModelError",
+    "Getting",
     "Message",
     "Models",
     "Peer",

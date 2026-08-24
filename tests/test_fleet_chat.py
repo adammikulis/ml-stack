@@ -268,6 +268,82 @@ class TestChattingThroughTheInterface:
         assert status == 501
         assert "run a model" in body["error"]
 
+    def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path):
+        """A multi-gigabyte fetch must not be held open inside one request."""
+        import os
+        import time as clock
+        from http.server import BaseHTTPRequestHandler
+        from ml_stack.fleet.models import CHUNK, Downloads, Models
+
+        payload = os.urandom(2 * CHUNK)
+
+        class Slow(BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                for i in range(0, len(payload), 65536):
+                    self.wfile.write(payload[i:i + 65536])
+                    self.wfile.flush()
+                    clock.sleep(0.01)
+
+        blob = ThreadingHTTPServer(("127.0.0.1", _free_port()), Slow)
+        threading.Thread(target=blob.serve_forever, daemon=True).start()
+
+        ui, cookie = bare
+        shelf = tmp_path / "bare" / "models"
+        shelf.mkdir(parents=True, exist_ok=True)
+        ui.ui.models = Models([shelf], shelf)
+        ui.ui.downloads = Downloads(ui.ui.models)
+        try:
+            began = clock.monotonic()
+            status, body, _ = ui.call(
+                "/ui/models", method="POST", cookie=cookie,
+                body={"name": "big.gguf",
+                      "source": f"http://127.0.0.1:{blob.server_address[1]}/big.gguf"})
+            answered = clock.monotonic() - began
+
+            assert status == 202, body
+            assert body["state"] == "getting"
+            assert answered < 1.0, f"the request waited {answered:.1f}s"
+
+            saw_partial = False
+            for _ in range(300):
+                _, listing, _ = ui.call("/ui/models", cookie=cookie)
+                rows = listing.get("getting") or []
+                row = next((g for g in rows if g["id"] == body["id"]), None)
+                if row is None:
+                    break
+                if 0 < row["done"] < row["total"]:
+                    saw_partial = True
+                if row["state"] != "getting":
+                    assert row["state"] == "done", row
+                    break
+                clock.sleep(0.05)
+        finally:
+            blob.shutdown()
+
+        assert saw_partial, "the screen could never show how far along it was"
+        assert (shelf / "big.gguf").read_bytes() == payload
+
+    def test_a_model_already_here_answers_at_once(self, bare, tmp_path):
+        from ml_stack.fleet.models import Downloads, Models
+
+        ui, cookie = bare
+        shelf = tmp_path / "bare" / "models"
+        shelf.mkdir(parents=True, exist_ok=True)
+        (shelf / "here.gguf").write_bytes(b"x" * (2 * 1024 * 1024))
+        ui.ui.models = Models([shelf], shelf)
+        ui.ui.downloads = Downloads(ui.ui.models)
+
+        status, body, _ = ui.call("/ui/models", method="POST", cookie=cookie,
+                                  body={"name": "here.gguf"})
+        assert status == 200
+        assert body["name"] == "here.gguf"
+
     def test_with_nobody_serving_it_says_so_rather_than_failing(self, tmp_path):
         ui = UIServing(tmp_path / "alone", name="alone")
         try:

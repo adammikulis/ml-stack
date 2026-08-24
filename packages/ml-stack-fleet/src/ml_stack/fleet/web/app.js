@@ -339,11 +339,37 @@ async function models(message) {
       el("span", { class: "spin" }), ` Getting ${name}…`));
     const r = await api("/ui/models", { method: "POST",
       body: JSON.stringify({ name, source }) });
-    note.replaceChildren(r.error
-      ? el("div", { class: "err" }, r.error)
-      : el("div", { class: "ok" }, `${r.name} is on this machine.`));
-    if (!r.error) setTimeout(() => models(), 800);
+    if (r.error) {
+      note.replaceChildren(el("div", { class: "err" }, r.error));
+      return;
+    }
+    note.replaceChildren();
+    models();
   };
+
+  const bar = (g) => {
+    const pct = g.total ? Math.min(100, Math.round((g.done / g.total) * 100)) : 0;
+    return el("div", { class: "row" },
+      el("span", { class: "grow" },
+        el("b", {}, g.name),
+        el("span", { class: "why" },
+          g.state === "failed" ? g.error
+            : g.total ? `${fileSize(g.done)} of ${fileSize(g.total)} — ${pct}%`
+            : (g.note || "Starting…")),
+        g.state === "getting"
+          ? el("div", { class: "track" },
+              el("div", { class: "fill vram",
+                          style: `width:${g.total ? pct : 0}%` }))
+          : null),
+      g.state === "failed"
+        ? el("span", { class: "label bad" }, "failed")
+        : el("span", { class: "spin" }));
+  };
+
+  const getting = (m.getting || []).filter((g) => g.state !== "done").map(bar);
+  if ((m.getting || []).some((g) => g.state === "getting")) {
+    timer = setTimeout(() => models(), 1000);
+  }
 
   const here = (m.here || []).map((x) =>
     el("div", { class: "row" },
@@ -400,6 +426,12 @@ async function models(message) {
             el("div", { class: "hint" },
               "Copied over your network rather than downloaded again."),
             ...elsewhere)
+        : null,
+
+      getting.length
+        ? el("div", { class: "group" },
+            el("h2", {}, "Coming in"),
+            ...getting)
         : null,
 
       unfinished.length

@@ -26,7 +26,7 @@ from typing import Any
 from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
-from .models import Models, ModelError, default_roots
+from .models import Downloads, Models, ModelError, default_roots
 from .serving import Serving
 from .settings import Settings
 from .discovery import (
@@ -981,6 +981,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     serving = Serving(root / "serving.json")
     models = Models(default_roots(root), root / "models")
     conversations = Conversations(root / "chats")
+    downloads = Downloads(models)
     runner = JobRunner(root, files_root, slots=slots,
                        gate=lambda: schedule.may_start(),
                        environment=environment)
@@ -1043,6 +1044,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         interface.serving = serving
         interface.models = models
         interface.conversations = conversations
+        interface.downloads = downloads
         interface.root = root
 
     if announce and key is not None:

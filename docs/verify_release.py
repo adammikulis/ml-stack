@@ -569,6 +569,60 @@ def _():
     return "4096 bytes offered, then discarded with what it recorded"
 
 
+@check("Models", "getting a model reports how far along it is")
+def _():
+    import http.server
+    import os
+    import threading
+    import time as clock
+
+    from ml_stack.fleet.models import CHUNK, Downloads, Models
+
+    payload = os.urandom(3 * CHUNK)
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            for i in range(0, len(payload), 65536):
+                self.wfile.write(payload[i:i + 65536])
+                self.wfile.flush()
+                clock.sleep(0.005)
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+
+    store = TMP / "progress"
+    store.mkdir(parents=True, exist_ok=True)
+    downloads = Downloads(Models([store], store))
+    try:
+        began = clock.monotonic()
+        row = downloads.start(
+            "big.gguf", source=f"http://127.0.0.1:{srv.server_address[1]}/big.gguf")
+        answered = clock.monotonic() - began
+        assert answered < 1.0, f"starting it waited {answered:.1f}s"
+
+        partial = False
+        for _ in range(400):
+            now = next(g for g in downloads.active() if g.id == row.id)
+            if 0 < now.done < now.total:
+                partial = True
+            if now.state != "getting":
+                break
+            clock.sleep(0.02)
+    finally:
+        srv.shutdown()
+
+    assert now.state == "done", now.error
+    assert partial, "it only ever reported nothing, then everything"
+    assert (store / "big.gguf").read_bytes() == payload
+    return f"{len(payload) // 1024 // 1024} MB, counted as it arrived"
+
+
 # -- chat ----------------------------------------------------------------
 @check("Chat", "a machine that can run nothing itself still talks to a peer's model")
 def _():

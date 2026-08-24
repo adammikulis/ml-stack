@@ -83,6 +83,8 @@ Every model file this machine holds, and every one held by the others.
 - **Getting one** takes a Hugging Face reference or a link. If another machine on your
   network already has that file, it is copied across the network instead of downloaded
   again.
+- **Getting a model happens in the background**, so a large one does not hold the
+  screen. It is listed while it arrives, with how much has come and how much is left.
 - **A download that stopped** is listed on the Models screen with how much of it
   arrived, to resume by asking for the model again or to discard.
 - **A copy in progress** resumes where it stopped. A part-file is only finished into a
@@ -228,7 +230,6 @@ python packaging/build.py --bundle   # and a standalone app for this platform
   backends, and a window cannot be tested without a display.
 - **No dataset browser yet.** Models are catalogued across the network; datasets are
   not. Peer-to-peer transfer of them exists, but nothing indexes what each machine has.
-- **A long download reports no progress.** It says it is working, not how far along.
 - **Conversations stay on the machine they were held on.** They are not shared across
   the network.
 - **Training is one machine per run.** Splitting a single run across machines is not

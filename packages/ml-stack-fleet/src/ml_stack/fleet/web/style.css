@@ -346,3 +346,7 @@ button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 .askrow { display: flex; gap: 8px; align-items: flex-end; }
 .askrow textarea { flex: 1; margin: 0; resize: vertical; }
 .askrow button { width: auto; margin: 0; }
+
+/* a download in flight: the bar sits under the name, inside the row */
+.row .grow { flex: 1; min-width: 0; }
+.row .grow .track { margin-top: 6px; }
