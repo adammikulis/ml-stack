@@ -245,28 +245,13 @@ class UI:
         self.serving.unregister(port)
 
     def install_update(self) -> dict[str, Any]:
-        """Download the newest release for this machine and put it in place."""
-        from .updates import (UpdateError, asset_for, check, current_version,
-                              download, install, running_path)
-        if running_path() is None:
-            return {"ok": False,
-                    "error": "this copy was installed with pip; update it with pip"}
-        try:
-            release = check()
-            if not release.newer_than(current_version()):
-                return {"ok": True, "installed": False, "version": current_version()}
-            asset = asset_for(release)
-            if asset is None:
-                return {"ok": False,
-                        "error": f"release {release.version} has no download for "
-                                 "this machine"}
-            import tempfile
-            archive = download(asset, tempfile.mkdtemp(prefix="ml-stack-update-"))
-            install(archive)
-        except UpdateError as exc:
-            return {"ok": False, "error": str(exc)}
-        return {"ok": True, "installed": True, "version": release.version,
-                "restart": True}
+        """Put the newest release in place and start it. Returns what happened."""
+        from .updates import apply_if_newer, relaunch
+
+        got = apply_if_newer()
+        if got.get("installed"):
+            got["restarting"] = relaunch()
+        return got
 
     def login(self, source: str, *, passphrase: str = "", group: str = "",
               token: str = "", ticket: str = "") -> str | None:

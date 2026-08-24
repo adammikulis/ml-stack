@@ -748,3 +748,114 @@ def test_the_interface_script_parses():
     done = subprocess.run([node, "--check", str(ASSETS / "app.js")],
                           capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-400:]
+
+
+
+class TestUpdatingItself:
+    """auto_update was stored and shown and did nothing: no timer looked at it, and
+    relaunch was written but never called."""
+
+    def test_a_newer_release_is_put_on_and_the_copy_restarts(self, monkeypatch,
+                                                             tmp_path):
+        from ml_stack.fleet import updates
+
+        seen = {}
+        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "ml-stack")
+        monkeypatch.setattr(updates, "current_version", lambda: "0.1.0")
+        monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
+            "0.2.0", "", "", ({"name": "ml-stack-macos-arm64.zip"},), 0))
+        monkeypatch.setattr(updates, "asset_for", lambda r, key="": r.assets[0])
+        monkeypatch.setattr(updates, "download", lambda a, into, **k: tmp_path / "a.zip")
+        monkeypatch.setattr(updates, "install", lambda a: seen.setdefault("put", a))
+
+        got = updates.apply_if_newer()
+        assert got == {"ok": True, "installed": True, "version": "0.2.0"}, got
+        assert "put" in seen, "it never unpacked anything"
+
+    def test_an_older_release_is_left_alone(self, monkeypatch, tmp_path):
+        from ml_stack.fleet import updates
+
+        monkeypatch.setattr(updates, "running_path", lambda: tmp_path / "ml-stack")
+        monkeypatch.setattr(updates, "current_version", lambda: "0.2.0")
+        monkeypatch.setattr(updates, "check", lambda **k: updates.Release(
+            "0.1.0", "", "", (), 0))
+
+        def never(*a, **k):
+            raise AssertionError("it tried to install an older release")
+
+        monkeypatch.setattr(updates, "install", never)
+        got = updates.apply_if_newer()
+        assert got["installed"] is False
+
+    def test_a_pip_install_is_told_to_use_pip(self, monkeypatch):
+        from ml_stack.fleet import updates
+
+        monkeypatch.setattr(updates, "running_path", lambda: None)
+        got = updates.apply_if_newer()
+        assert got["installed"] is False
+        assert "pip" in got["error"]
+
+    def test_the_watcher_leaves_a_machine_that_is_working_alone(self, monkeypatch):
+        """An update that killed a training run halfway would be worse than waiting.
+
+        The loop swallows exceptions so a bad network does not stop it, so this
+        counts the calls rather than raising inside it.
+        """
+        from ml_stack.fleet import updates
+
+        tried = threading.Event()
+        monkeypatch.setattr(updates, "apply_if_newer",
+                            lambda: (tried.set(), {"installed": False})[1])
+        thread = updates.watch(wanted=lambda: True, idle=lambda: False,
+                               every_s=0.02, first_after_s=0.0)
+        time.sleep(0.4)
+        assert not tried.is_set(), "it updated while a job was running"
+        assert thread.is_alive()
+
+    def test_the_watcher_does_nothing_when_it_is_turned_off(self, monkeypatch):
+        from ml_stack.fleet import updates
+
+        tried = threading.Event()
+        monkeypatch.setattr(updates, "apply_if_newer",
+                            lambda: (tried.set(), {"installed": False})[1])
+        updates.watch(wanted=lambda: False, idle=lambda: True,
+                      every_s=0.02, first_after_s=0.0)
+        time.sleep(0.4)
+        assert not tried.is_set(), "it updated with the setting off"
+
+    def test_an_idle_machine_with_the_setting_on_updates_and_restarts(self,
+                                                                     monkeypatch):
+        from ml_stack.fleet import updates
+
+        done = threading.Event()
+        monkeypatch.setattr(updates, "apply_if_newer",
+                            lambda: {"ok": True, "installed": True, "version": "9.9.9"})
+        monkeypatch.setattr(updates, "relaunch",
+                            lambda **k: (done.set(), True)[1])
+        updates.watch(wanted=lambda: True, idle=lambda: True,
+                      every_s=0.05, first_after_s=0.0)
+        assert done.wait(3.0), "it never restarted itself"
+
+    def test_relaunch_says_no_when_this_is_not_a_bundle(self, monkeypatch):
+        from ml_stack.fleet import updates
+
+        monkeypatch.setattr(updates, "running_path", lambda: None)
+        assert updates.relaunch() is False
+
+    def test_relaunch_starts_the_replaced_copy(self, monkeypatch, tmp_path):
+        from ml_stack.fleet import updates
+
+        target = tmp_path / "ml-stack"
+        target.write_text("#!/bin/sh\n")
+        started = []
+        monkeypatch.setattr(updates, "running_path", lambda: target)
+        monkeypatch.setattr(updates.subprocess, "Popen",
+                            lambda argv, **k: started.append(argv))
+
+        assert updates.relaunch(delay_s=0.0, stop=False) is True
+        for _ in range(40):
+            if started:
+                break
+            time.sleep(0.05)
+        assert started, "it never started the new copy"
+        assert str(target) in " ".join(str(x) for x in started[0])

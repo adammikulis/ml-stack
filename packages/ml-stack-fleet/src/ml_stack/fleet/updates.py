@@ -10,15 +10,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
 import zipfile
 from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Release", "UpdateError", "asset_for", "check", "current_version",
+__all__ = ["Release", "UpdateError", "apply_if_newer", "asset_for", "check",
+           "current_version", "watch",
            "download", "install", "REPO"]
 
 REPO = "adammikulis/ml-stack"
@@ -231,12 +234,70 @@ def running_path() -> Path | None:
     return exe
 
 
-def relaunch() -> None:
-    """Start the replaced copy and leave."""
+def relaunch(*, delay_s: float = 1.5, stop: bool = True) -> bool:
+    """Start the replaced copy and stop this one. False when this is not a bundle.
+
+    The wait is so an answer already being written reaches the browser first.
+    """
     target = running_path()
     if target is None:
-        return
-    if target.suffix == ".app":
-        subprocess.Popen(["open", "-n", str(target)])
-    else:
-        subprocess.Popen([str(target)], start_new_session=True)
+        return False
+
+    def go() -> None:
+        time.sleep(delay_s)
+        try:
+            if target.suffix == ".app":
+                subprocess.Popen(["open", "-n", str(target)])
+            else:
+                subprocess.Popen([str(target)], start_new_session=True)
+        finally:
+            if stop:
+                os._exit(0)
+
+    threading.Thread(target=go, daemon=True, name="relaunch").start()
+    return True
+
+
+def apply_if_newer() -> dict[str, Any]:
+    """Put the newest release in place, if there is one. Says what happened."""
+    if running_path() is None:
+        return {"ok": False, "installed": False,
+                "error": "this copy was installed with pip; update it with pip"}
+    now = current_version()
+    try:
+        release = check()
+        if not release.newer_than(now):
+            return {"ok": True, "installed": False, "version": now}
+        asset = asset_for(release)
+        if asset is None:
+            return {"ok": False, "installed": False,
+                    "error": f"release {release.version} has no download for "
+                             "this machine"}
+        archive = download(asset, tempfile.mkdtemp(prefix="ml-stack-update-"))
+        install(archive)
+    except UpdateError as exc:
+        return {"ok": False, "installed": False, "error": str(exc)}
+    return {"ok": True, "installed": True, "version": release.version}
+
+
+def watch(*, wanted: "Callable[[], bool]", idle: "Callable[[], bool]",
+          every_s: float = 24 * 3600, first_after_s: float = 300.0) -> threading.Thread:
+    """Check for a newer release on a timer, and put it on when nothing is running.
+
+    A machine part way through a training run is left alone until it is not.
+    """
+    def loop() -> None:
+        time.sleep(first_after_s)
+        while True:
+            try:
+                if wanted() and idle():
+                    got = apply_if_newer()
+                    if got.get("installed") and relaunch():
+                        return
+            except Exception:                         # noqa: BLE001
+                pass
+            time.sleep(every_s)
+
+    thread = threading.Thread(target=loop, daemon=True, name="updates")
+    thread.start()
+    return thread

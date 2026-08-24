@@ -771,6 +771,32 @@ def _():
     return "kept and found again by what was said in it"
 
 
+@check("Updating", "a machine that is working is not updated out from under a job")
+def _():
+    import threading as th
+    import time as clock
+
+    from ml_stack.fleet import updates
+
+    tried = th.Event()
+    real = updates.apply_if_newer
+    updates.apply_if_newer = lambda: (tried.set(), {"installed": False})[1]
+    try:
+        updates.watch(wanted=lambda: True, idle=lambda: False,
+                      every_s=0.02, first_after_s=0.0)
+        clock.sleep(0.4)
+        assert not tried.is_set(), "it updated while a job was running"
+
+        ran = th.Event()
+        updates.apply_if_newer = lambda: (ran.set(), {"installed": False})[1]
+        updates.watch(wanted=lambda: True, idle=lambda: True,
+                      every_s=0.02, first_after_s=0.0)
+        assert ran.wait(3.0), "it never checked on an idle machine"
+    finally:
+        updates.apply_if_newer = real
+    return "left alone while busy, checked when idle"
+
+
 # -- removing it ---------------------------------------------------------
 @check("Removing", "an uninstall leaves your models and your own files alone")
 def _():

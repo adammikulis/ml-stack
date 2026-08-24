@@ -1104,6 +1104,11 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path, serving, models,
                                              cluster_key_path))
+    from .updates import watch as watch_for_updates
+    watch_for_updates(
+        wanted=lambda: bool(getattr(settings, "auto_update", False)),
+        idle=lambda: not runner.status()["busy"])
+
     advertiser: Advertiser | None = None
 
     def refresh(b: Beacon) -> None:

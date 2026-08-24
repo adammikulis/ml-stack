@@ -760,8 +760,9 @@ async function settings(message) {
       const r = await api("/ui/updates/install", { method: "POST" });
       status.replaceChildren(r.ok
         ? el("div", { class: "ok" },
-            r.installed ? `Updated to ${r.version}. Restart to use it.`
-                        : "Already up to date.")
+            !r.installed ? "Already up to date."
+              : r.restarting ? `Updated to ${r.version}. Starting it now…`
+              : `Updated to ${r.version}. Open it again to use it.`)
         : el("div", { class: "err" }, r.error || "Could not install the update."));
     };
     status.replaceChildren(

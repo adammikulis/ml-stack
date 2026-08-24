@@ -228,6 +228,19 @@ Settings has a Remove section listing everything on this machine with what it ta
 - **Removing needs two clicks**, and says what it took and how much came back.
 - Starting up with the computer is undone whether or not anything else is.
 
+## Keeping itself up to date
+
+Turned on in Settings, and off in the same place.
+
+- **Checked once a day.** A newer release is downloaded, verified against the digest
+  GitHub publishes for it, and unpacked over the running copy, which is kept until the
+  new one is in place.
+- **Never while a job is running.** A machine part way through training is left alone
+  until it is not, so an update cannot cost a run.
+- **It starts the new copy itself** and stops the old one, rather than waiting to be
+  opened again.
+- Installed with pip instead? It says so, and leaves pip to it.
+
 ## Telemetry
 
 Temperature, clocks, power draw, utilisation and throttle state.
