@@ -69,10 +69,12 @@ def test_key_is_created_once_and_not_silently_rotated(tmp_path):
     assert create_cluster_key(p, overwrite=True) != first
 
 
-def test_key_file_is_not_world_readable(tmp_path):
+def test_the_file_holding_the_keys_is_not_world_readable(tmp_path):
+    from ml_stack.fleet.discovery import clusters_path
+
     p = tmp_path / "cluster.key"
     create_cluster_key(p)
-    assert oct(p.stat().st_mode)[-3:] == "600"
+    assert oct(clusters_path(p).stat().st_mode)[-3:] == "600"
 
 
 def test_missing_key_reads_as_none(tmp_path):
@@ -386,10 +388,12 @@ class TestPassphrase:
     def test_joining_writes_a_key_only_this_user_can_read(self, tmp_path):
         from ml_stack.fleet.discovery import join_cluster
 
+        from ml_stack.fleet.discovery import clusters_path
+
         keyfile = tmp_path / "cluster.key"
         join_cluster(self.WORDS, path=keyfile)
 
-        assert keyfile.stat().st_mode & 0o077 == 0
+        assert clusters_path(keyfile).stat().st_mode & 0o077 == 0
         assert load_cluster_key(keyfile) == join_cluster(self.WORDS, path=keyfile)
 
     def test_a_derived_key_drives_a_real_daemon(self, tmp_path):
@@ -432,16 +436,16 @@ class TestTheGroupIsRemembered:
                      path=tmp_path / "cluster.key")
         assert cluster_group(tmp_path / "cluster.key") == "garage"
 
-    def test_the_group_is_readable_but_the_key_is_not(self, tmp_path):
-        """The passphrase protects the cluster; the group only separates two of them
-        that chose the same words."""
-        from ml_stack.fleet.discovery import group_path, join_cluster
+    def test_the_keys_are_not_left_where_anyone_can_read_them(self, tmp_path):
+        """The passphrase protects the cluster, so the keys derived from it are the
+        one thing on disk that no other account may read."""
+        from ml_stack.fleet.discovery import clusters_path, cluster_group, join_cluster
 
         keyfile = tmp_path / "cluster.key"
         join_cluster("correct horse battery", group="garage", path=keyfile)
 
-        assert keyfile.stat().st_mode & 0o077 == 0
-        assert group_path(keyfile).stat().st_mode & 0o004
+        assert clusters_path(keyfile).stat().st_mode & 0o077 == 0
+        assert cluster_group(keyfile) == "garage"
 
     def test_a_machine_never_joined_is_in_no_group(self, tmp_path):
         from ml_stack.fleet.discovery import cluster_group
@@ -471,3 +475,105 @@ class TestTheGroupIsRemembered:
         from ml_stack.fleet.discovery import check_passphrase
 
         assert not check_passphrase("correct horse battery", path=tmp_path / "no.key")
+
+
+
+class TestBelongingToSeveralClusters:
+    """A machine is not owned by one group of machines."""
+
+    WORDS = "correct horse battery staple"
+    OTHER = "a completely different set of words"
+
+    def test_it_joins_more_than_one_and_keeps_both(self, tmp_path):
+        from ml_stack.fleet.discovery import join, memberships
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        join(self.OTHER, group="work", path=anchor)
+
+        assert [m.group for m in memberships(anchor)] == ["home", "work"]
+        assert len({m.key for m in memberships(anchor)}) == 2
+
+    def test_leaving_one_leaves_the_others_alone(self, tmp_path):
+        from ml_stack.fleet.discovery import join, leave, memberships
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        join(self.OTHER, group="work", path=anchor)
+        leave("home", anchor)
+
+        assert [m.group for m in memberships(anchor)] == ["work"]
+
+    def test_leaving_the_last_one_leaves_no_cluster(self, tmp_path):
+        from ml_stack.fleet.discovery import in_cluster, join, leave
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        leave("home", anchor)
+
+        assert in_cluster(anchor) is False
+
+    def test_the_machine_answers_as_the_first_one(self, tmp_path):
+        from ml_stack.fleet.discovery import (
+            cluster_group, join, leave, load_cluster_key, memberships)
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        join(self.OTHER, group="work", path=anchor)
+
+        assert cluster_group(anchor) == "home"
+        assert load_cluster_key(anchor) == memberships(anchor)[0].key
+
+        leave("home", anchor)
+        assert cluster_group(anchor) == "work", "it did not promote the one left"
+
+    def test_joining_the_same_cluster_twice_does_not_double_it(self, tmp_path):
+        from ml_stack.fleet.discovery import join, memberships
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        join(self.WORDS, group="home", path=anchor)
+        assert [m.group for m in memberships(anchor)] == ["home"]
+
+    def test_a_new_passphrase_for_a_cluster_replaces_the_old_key(self, tmp_path):
+        from ml_stack.fleet.discovery import join, memberships
+
+        anchor = tmp_path / "cluster.key"
+        join(self.WORDS, group="home", path=anchor)
+        first = memberships(anchor)[0].key
+        join(self.OTHER, group="home", path=anchor)
+
+        assert [m.group for m in memberships(anchor)] == ["home"]
+        assert memberships(anchor)[0].key != first, "the passphrase did not change"
+
+    def test_a_short_passphrase_is_refused_for_every_cluster(self, tmp_path):
+        import pytest as pt
+
+        from ml_stack.fleet.discovery import DiscoveryError, join, memberships
+
+        anchor = tmp_path / "cluster.key"
+        with pt.raises(DiscoveryError, match="at least"):
+            join("short", group="home", path=anchor)
+        assert memberships(anchor) == []
+
+    def test_two_machines_in_the_same_cluster_derive_the_same_key(self, tmp_path):
+        from ml_stack.fleet.discovery import join
+
+        one = join(self.WORDS, group="home", path=tmp_path / "a.key")
+        two = join(self.WORDS, group="home", path=tmp_path / "b.key")
+        assert one[0].key == two[0].key
+
+    def test_the_same_words_in_different_clusters_do_not_meet(self, tmp_path):
+        from ml_stack.fleet.discovery import join
+
+        home = join(self.WORDS, group="home", path=tmp_path / "a.key")
+        work = join(self.WORDS, group="work", path=tmp_path / "b.key")
+        assert home[0].key != work[0].key
+
+    def test_a_corrupt_list_reads_as_no_clusters(self, tmp_path):
+        from ml_stack.fleet.discovery import clusters_path, memberships
+
+        anchor = tmp_path / "cluster.key"
+        clusters_path(anchor).parent.mkdir(parents=True, exist_ok=True)
+        clusters_path(anchor).write_text("{not json")
+        assert memberships(anchor) == []

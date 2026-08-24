@@ -25,6 +25,16 @@ anything — there is no key to copy and no address to write down.
 Beacons are signed. A peer's address is taken from the packet it arrived in, never from
 anything the packet claims about itself.
 
+A machine can be in several clusters at once, and join or leave any of them from the
+Cluster screen without touching the others. It answers to each: work sent from any
+cluster it belongs to reaches it, and its models and served endpoints are offered to all
+of them. The one it answers as, when something has to pick, is the first in the list.
+Leaving takes effect at once, and a machine that has left stops answering to that
+cluster's credential.
+
+Settings has a button to walk through first-run setup again, for renaming the machine or
+changing its passphrase.
+
 ## Running work
 
 Each machine runs a daemon that accepts jobs, moves files, and reports what it is.

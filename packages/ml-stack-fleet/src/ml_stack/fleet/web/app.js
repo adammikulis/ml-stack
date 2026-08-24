@@ -154,6 +154,10 @@ function peerCard(p) {
       el("span", { class: `badge ${v.key}` }, el("span", { class: "chip" }), v.text),
       d.gpu ? el("span", { class: "label" }, d.gpu) : null,
       d.ram_gb ? el("span", { class: "label" }, `${Math.round(d.ram_gb)} GB RAM`) : null),
+    (p.clusters || []).length > 1
+      ? el("div", { class: "labels" },
+          p.clusters.map((c) => el("span", { class: "label" }, c)))
+      : null,
     (d.labels || []).length
       ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
       : null,
@@ -178,6 +182,62 @@ async function fleet() {
         el("div", {}, "Install ml-stack on another machine and open it."),
         el("div", {}, "Type the same passphrase, and it appears here on its own."));
 
+  // Which clusters this machine is in, and the way in and out of one.
+  const joined = el("div", { class: "group" },
+    el("h2", {}, "Clusters"),
+    el("div", { class: "hint" }, "Loading…"));
+  const drawJoined = (rows) => {
+    const words = el("input", { type: "password", id: "words",
+      placeholder: "passphrase" });
+    const named = el("input", { type: "text", id: "cname",
+      placeholder: "name (optional)" });
+    const note = el("div");
+    const add = el("button", { class: "ghost small" }, "Join");
+    add.onclick = async () => {
+      const said = words.value.trim();
+      if (said.length < 8) {
+        note.replaceChildren(el("div", { class: "err" },
+          "A passphrase needs at least 8 characters."));
+        return;
+      }
+      add.disabled = true;
+      const got = await api("/ui/clusters", { method: "POST",
+        body: JSON.stringify({ passphrase: said, group: named.value.trim() }) });
+      add.disabled = false;
+      if (got.error) {
+        note.replaceChildren(el("div", { class: "err" }, got.error));
+        return;
+      }
+      words.value = ""; named.value = "";
+      note.replaceChildren(el("div", { class: "ok" }, `Joined ${got.joined}.`));
+      drawJoined(got.clusters || []);
+      fleet();
+    };
+
+    joined.replaceChildren(
+      el("h2", {}, "Clusters"),
+      el("div", { class: "hint" },
+        "This machine answers to every cluster listed. Machines find each other by "
+        + "sharing a passphrase."),
+      ...(rows.length
+        ? rows.map((c, i) =>
+            el("div", { class: "row" },
+              el("span", {}, el("b", {}, c.group),
+                el("span", { class: "why" },
+                  i === 0 ? "this machine answers as this one" : "also in this one")),
+              el("button", { class: "ghost small",
+                onclick: async () => {
+                  const left = await api("/ui/clusters", { method: "DELETE",
+                    body: JSON.stringify({ group: c.group }) });
+                  drawJoined(left.clusters || []);
+                  fleet();
+                } }, "Leave")))
+        : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
+      el("div", { class: "searchrow" }, words, named, add),
+      note);
+  };
+  api("/ui/clusters").then((c) => drawJoined(c.clusters || []));
+
   show(el("div", { class: "app" },
     top("Cluster", r.group),
     el("main", {},
@@ -190,7 +250,8 @@ async function fleet() {
         el("div", {}, el("div", { class: "n" },
           peers.filter((p) => vendorOf(p.device || {}).key !== "cpu").length),
           el("div", { class: "k" }, "with a GPU"))),
-      cards)));
+      cards,
+      joined)));
 
   clearTimeout(timer);
   timer = setTimeout(fleet, 4000);
@@ -680,10 +741,21 @@ async function settings(message) {
     check("autodownload_models", "Get models automatically",
       "from another machine on your network if one has it, otherwise the internet"),
     check("auto_update", "Download and install updates automatically",
-      "checked once a day, and applied the next time you open it"));
+      "checked once a day, put on when no job is running, and it restarts itself"));
   const status = el("div", { class: "hint", style: "margin-top:10px" },
     el("span", { class: "spin" }), " Checking for updates…");
   updates.append(status);
+
+  const again = el("div", { class: "group" },
+    el("h2", {}, "Set this machine up again"),
+    el("div", { class: "hint" },
+      "Walks through naming it and choosing a passphrase, as it did the first time. "
+      + "The clusters it is already in are left alone."),
+    el("button", { class: "ghost small",
+      onclick: async () => {
+        const state = await api("/ui/setup");
+        wizard(state);
+      } }, "Run setup again"));
 
   // removing it
   const removal = el("div", { class: "group" },
@@ -823,6 +895,7 @@ async function settings(message) {
                   el("div", { class: "label", style: "display:block;margin-bottom:4px" }, w)))
             : null)),
       save,
+      again,
       removal, note)));
 }
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import hashlib
 import hmac
@@ -38,6 +39,7 @@ from .discovery import (
     discover,
     key_path,
     load_cluster_key,
+    memberships,
 )
 
 DEFAULT_PORT = 8770
@@ -595,7 +597,8 @@ def make_handler(runner: JobRunner, files_root: Path,
                  schedule_path: "Path | None" = None,
                  serving: "Serving | None" = None,
                  models: "Models | None" = None,
-                 cluster_key_path: "Path | str | None" = None):
+                 cluster_key_path: "Path | str | None" = None,
+                 tokens: "Callable[[], set[str]] | None" = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -609,8 +612,13 @@ def make_handler(runner: JobRunner, files_root: Path,
 
         def _authed(self) -> bool:
             got = self.headers.get("Authorization", "")
-            if got.startswith("Bearer "):
-                return secrets.compare_digest(got[7:], self._token())
+            if not got.startswith("Bearer "):
+                return False
+            offered = got[7:]
+            # A machine in several clusters answers to each of them.
+            for good in {self._token(), *(tokens() if tokens else ())}:
+                if good and secrets.compare_digest(offered, good):
+                    return True
             return False
 
         def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
@@ -1098,18 +1106,23 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     def report() -> dict[str, Any]:
         return {**base_report(), "labels": labels}
+    def every_token() -> set[str]:
+        """Every token this machine answers to, one per cluster it is in."""
+        return {derive_token(m.key) for m in memberships(cluster_key_path)}
+
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(runner, files_root,
                                              lambda: live_token[0], name, report,
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path, serving, models,
-                                             cluster_key_path))
+                                             cluster_key_path, every_token))
     from .updates import watch as watch_for_updates
     watch_for_updates(
         wanted=lambda: bool(getattr(settings, "auto_update", False)),
         idle=lambda: not runner.status()["busy"])
 
     advertiser: Advertiser | None = None
+    advertisers: dict[str, Advertiser] = {}
 
     def refresh(b: Beacon) -> None:
         """Bring the beacon's mutable half up to date before it goes on the wire."""
@@ -1123,18 +1136,35 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                     "serving": serving.public(), "models": models.public()}
 
     def start_announcing() -> None:
-        """Begin advertising, now that there is a key to sign beacons with."""
+        """Advertise on every cluster this machine is in, and stop on any it left."""
         nonlocal advertiser, key
-        if advertiser is not None or not announce:
+        if not announce:
             return
-        key = load_cluster_key(cluster_key_path)
-        if key is None:
-            return
-        fetcher.key = key
-        live_token[0] = load_or_create_token(root, key)
-        beacon = Beacon(name=name, port=port, device=report(),
-                        slots=runner.slots, free=runner.slots)
-        advertiser = Advertiser(beacon, key, refresh=refresh).start()
+        joined = {m.group: m for m in memberships(cluster_key_path)}
+
+        for group in [g for g in advertisers if g not in joined]:
+            with contextlib.suppress(Exception):
+                advertisers.pop(group).stop()
+
+        for group, member in joined.items():
+            if group in advertisers:
+                continue
+            beacon = Beacon(name=name, port=port, device=report(),
+                            slots=runner.slots, free=runner.slots)
+            try:
+                # Not group=: that is the multicast address every cluster shares.
+                # Clusters are told apart by the key their beacons are signed with.
+                advertisers[group] = Advertiser(beacon, member.key,
+                                                refresh=refresh).start()
+            except DiscoveryError as exc:
+                print(f"  discovery OFF for {group}: {exc}")
+
+        first = next(iter(joined.values()), None)
+        if first is not None:
+            key = first.key
+            fetcher.key = first.key
+            live_token[0] = load_or_create_token(root, first.key)
+            advertiser = advertisers.get(first.group)
 
     if interface is not None:
         interface.on_join = start_announcing
@@ -1151,13 +1181,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         interface.downloads = downloads
         interface.root = root
 
-    if announce and key is not None:
-        beacon = Beacon(name=name, port=port, device=report(),
-                        slots=runner.slots, free=runner.slots)
-        try:
-            advertiser = Advertiser(beacon, key, refresh=refresh).start()
-        except DiscoveryError as exc:
-            print(f"  discovery OFF: {exc}")
+    if announce:
+        start_announcing()
     print(f"ml-stack traind on http://{host}:{port}")
     print(f"  name  {name}")
     print(f"  root  {root}")

@@ -360,3 +360,84 @@ class TestChattingThroughTheInterface:
             assert "serving a model" in body["error"]
         finally:
             ui.close()
+
+
+
+class TestAnsweringToSeveralClusters:
+    """The bearer token is derived from a cluster key, so a machine in two clusters
+    has two tokens and must accept either."""
+
+    def daemon(self, tmp_path, anchor):
+        from http.server import ThreadingHTTPServer
+
+        from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+        from ml_stack.fleet.discovery import derive_token, memberships
+
+        root = tmp_path / "traind"
+        files = root / "files"
+        files.mkdir(parents=True, exist_ok=True)
+        rows = memberships(anchor)
+        token = load_or_create_token(root, rows[0].key)
+        runner = JobRunner(root, files)
+        port = _free_port()
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", port),
+            make_handler(runner, files, token, "box",
+                         cluster_key_path=anchor,
+                         tokens=lambda: {derive_token(m.key)
+                                         for m in memberships(anchor)}))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        return f"http://127.0.0.1:{port}", runner, httpd
+
+    def ask(self, base, token):
+        import urllib.error
+        import urllib.request
+
+        # /health answers anyone: it is how a peer checks a machine is alive. /jobs
+        # is behind the bearer token, which is what this is about.
+        req = urllib.request.Request(f"{base}/jobs")
+        req.add_header("Authorization", f"Bearer {token}")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def test_either_cluster_can_reach_it(self, tmp_path):
+        from ml_stack.fleet.discovery import derive_token, join
+
+        anchor = tmp_path / "cluster.key"
+        join(WORDS, group="home", path=anchor)
+        join("a different set of words here", group="work", path=anchor)
+        rows = {m.group: m.key for m in __import__(
+            "ml_stack.fleet.discovery", fromlist=["memberships"]).memberships(anchor)}
+
+        base, runner, httpd = self.daemon(tmp_path, anchor)
+        try:
+            assert self.ask(base, derive_token(rows["home"])) == 200
+            assert self.ask(base, derive_token(rows["work"])) == 200, (
+                "the second cluster was refused")
+            assert self.ask(base, "not-a-real-token") == 401
+        finally:
+            runner.shutdown()
+            httpd.shutdown()
+            httpd.server_close()
+
+    def test_a_cluster_it_left_is_refused(self, tmp_path):
+        from ml_stack.fleet.discovery import derive_token, join, leave, memberships
+
+        anchor = tmp_path / "cluster.key"
+        join(WORDS, group="home", path=anchor)
+        join("a different set of words here", group="work", path=anchor)
+        gone = derive_token({m.group: m.key
+                             for m in memberships(anchor)}["work"])
+
+        base, runner, httpd = self.daemon(tmp_path, anchor)
+        try:
+            assert self.ask(base, gone) == 200
+            leave("work", anchor)
+            assert self.ask(base, gone) == 401, "it still answered a cluster it left"
+        finally:
+            runner.shutdown()
+            httpd.shutdown()
+            httpd.server_close()

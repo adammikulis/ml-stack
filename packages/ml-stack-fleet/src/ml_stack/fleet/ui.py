@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import mimetypes
 import time
@@ -120,22 +121,41 @@ class UI:
                 "group": cluster_group(self.cluster_key_path) if joined else None,
                 "needs_setup": not joined}
 
+    def rejoined(self) -> None:
+        """The set of clusters changed: advertise on the new one, drop the old."""
+        self._peers = (0.0, [])
+        if self.on_join is not None:
+            with contextlib.suppress(Exception):
+                self.on_join()
+
     def peers(self, *, force: bool = False) -> list[dict[str, Any]]:
         """Everyone on the LAN, cached briefly. The browser cannot do this itself."""
+        from .discovery import memberships
+
         age, cached = self._peers
         if not force and time.time() - age < DISCOVER_CACHE_S:
             return cached
-        key = load_cluster_key(self.cluster_key_path)
-        if key is None:
+        joined = memberships(self.cluster_key_path)
+        if not joined:
             return []
-        found = []
-        for beacon in discover(key, timeout_s=1.5):
-            row = beacon.public()
-            row["host"] = beacon.host
-            row["base_url"] = beacon.base_url
-            row["is_self"] = beacon.name == self.name
-            found.append(row)
-        found.sort(key=lambda r: (not r["is_self"], r["name"]))
+        # One machine in two of your clusters is one machine, listed once, with the
+        # clusters you share with it. Each cluster is advertised separately, so the
+        # same daemon answers on each with a beacon of its own.
+        by_address: dict[str, dict[str, Any]] = {}
+        for member in joined:
+            for beacon in discover(member.key, timeout_s=1.5):
+                row = by_address.get(beacon.base_url)
+                if row is None:
+                    row = beacon.public()
+                    row["host"] = beacon.host
+                    row["base_url"] = beacon.base_url
+                    row["is_self"] = beacon.name == self.name
+                    row["clusters"] = []
+                    by_address[beacon.base_url] = row
+                if member.group not in row["clusters"]:
+                    row["clusters"].append(member.group)
+        found = sorted(by_address.values(),
+                       key=lambda r: (not r["is_self"], r["name"]))
         self._peers = (time.time(), found)
         return found
 
@@ -733,6 +753,31 @@ def routes(ui: UI, handler: Any) -> bool:
     if path == "/ui/updates/install" and method == "POST":
         send(200, ui.install_update())
         return True
+
+    if path == "/ui/clusters":
+        from .discovery import default_group, join, leave, memberships
+        if method == "GET":
+            send(200, {"clusters": [m.public() for m in
+                                    memberships(ui.cluster_key_path)]})
+            return True
+        if method == "POST":
+            req = body()
+            words = str(req.get("passphrase") or "")
+            group = str(req.get("group") or "").strip() or default_group()
+            try:
+                rows = join(words, group=group, path=ui.cluster_key_path)
+            except DiscoveryError as exc:
+                send(400, {"error": str(exc)})
+                return True
+            ui.rejoined()
+            send(200, {"clusters": [m.public() for m in rows], "joined": group})
+            return True
+        if method == "DELETE":
+            group = str(body().get("group") or "")
+            rows = leave(group, ui.cluster_key_path)
+            ui.rejoined()
+            send(200, {"clusters": [m.public() for m in rows], "left": group})
+            return True
 
     if path == "/ui/peers" and method == "GET":
         send(200, {"peers": ui.peers(), "self": ui.name,

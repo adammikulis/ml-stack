@@ -10,6 +10,7 @@ import os
 import secrets
 import socket
 import struct
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -54,14 +55,14 @@ def key_path(path: Path | str | None = None) -> Path:
 
 def create_cluster_key(path: Path | str | None = None, *,
                        overwrite: bool = False) -> str:
-    """Mint a cluster key, or return the existing one."""
-    p = key_path(path)
-    if p.exists() and not overwrite:
-        return p.read_text().strip()
-    p.parent.mkdir(parents=True, exist_ok=True)
+    """Mint a cluster key with no passphrase behind it, or return the one here."""
+    joined = memberships(path)
+    if joined and not overwrite:
+        return joined[0].key.decode()
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-    p.write_text(key + "\n")
-    p.chmod(0o600)
+    rows = [Membership(group=default_group(), key=key.encode())]
+    rows += [m for m in joined if m.group != default_group()]
+    _write_memberships(rows, path)
     return key
 
 
@@ -99,26 +100,21 @@ def group_path(path: Path | str | None = None) -> Path:
 
 
 def cluster_group(path: Path | str | None = None) -> str | None:
-    """Which cluster this machine joined, or None."""
-    p = group_path(path)
-    if not p.exists():
-        return None
-    return p.read_text().strip() or None
+    """The cluster this machine answers as, or None."""
+    rows = memberships(path)
+    return rows[0].group if rows else None
 
 
 def join_cluster(passphrase: str, *, group: str = "ml-stack",
                  path: Path | str | None = None, overwrite: bool = True) -> bytes:
-    """Derive the key from a passphrase and write it here. Returns the key."""
+    """Join, and answer as this cluster from now on. Returns the key."""
     key = key_from_passphrase(passphrase, group=group)
-    p = key_path(path)
-    if p.exists() and not overwrite:
-        return load_cluster_key(p) or key
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(key.decode() + "\n")
-    p.chmod(0o600)
-    gp = group_path(path)
-    gp.write_text(group + "\n")
-    gp.chmod(0o644)
+    joined = memberships(path)
+    if joined and not overwrite:
+        return joined[0].key
+    rows = [Membership(group=group, key=key)]
+    rows += [m for m in joined if m.group != group]
+    _write_memberships(rows, path)
     return key
 
 
@@ -136,18 +132,89 @@ def check_passphrase(passphrase: str, *, group: str | None = None,
     return hmac.compare_digest(candidate, key)
 
 
+@dataclass(frozen=True, slots=True)
+class Membership:
+    """One cluster this machine belongs to."""
+
+    group: str
+    key: bytes
+
+    def public(self) -> dict[str, Any]:
+        return {"group": self.group}
+
+
+def clusters_path(path: Path | str | None = None) -> Path:
+    """Where the clusters this machine belongs to are recorded.
+
+    Named after the path it is given rather than fixed, so two callers pointed at
+    different files do not share one store.
+    """
+    return key_path(path).with_suffix(".json")
+
+
+def memberships(path: Path | str | None = None) -> list[Membership]:
+    """Every cluster this machine is in, the first being the one it answers as."""
+    out: list[Membership] = []
+    seen: set[str] = set()
+    try:
+        raw = json.loads(clusters_path(path).read_text())
+    except (OSError, ValueError):
+        return out
+    for row in raw if isinstance(raw, list) else []:
+        try:
+            group, key = str(row["group"]), str(row["key"]).encode()
+        except (KeyError, TypeError, AttributeError):
+            continue
+        if key and group not in seen:
+            seen.add(group)
+            out.append(Membership(group=group, key=key))
+    return out
+
+
+def _write_memberships(rows: list[Membership],
+                       path: Path | str | None = None) -> None:
+    """Record the list this machine belongs to."""
+    listed = clusters_path(path)
+    listed.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=listed.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump([{"group": m.group, "key": m.key.decode()} for m in rows], fh,
+                      indent=2)
+        os.replace(tmp, listed)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+    listed.chmod(0o600)
+
+
+def join(passphrase: str, *, group: str = "", path: Path | str | None = None
+         ) -> list[Membership]:
+    """Add a cluster. Joining one already joined replaces its key."""
+    group = group.strip() or default_group()
+    key = key_from_passphrase(passphrase, group=group)
+    rows = [m for m in memberships(path) if m.group != group]
+    rows.append(Membership(group=group, key=key))
+    _write_memberships(rows, path)
+    return rows
+
+
+def leave(group: str, path: Path | str | None = None) -> list[Membership]:
+    """Drop a cluster. The machine stops answering to it at once."""
+    rows = [m for m in memberships(path) if m.group != group]
+    _write_memberships(rows, path)
+    return rows
+
+
 def in_cluster(path: Path | str | None = None) -> bool:
     """Whether this machine has joined one. The question a setup wizard opens with."""
     return load_cluster_key(path) is not None
 
 
 def load_cluster_key(path: Path | str | None = None) -> bytes | None:
-    """The key as bytes, or None if this machine is not in a cluster."""
-    p = key_path(path)
-    if not p.exists():
-        return None
-    text = p.read_text().strip()
-    return text.encode() if text else None
+    """The key this machine answers as, or None if it is in no cluster."""
+    rows = memberships(path)
+    return rows[0].key if rows else None
 
 
 def derive_token(key: bytes) -> str:
