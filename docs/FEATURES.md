@@ -200,8 +200,10 @@ same interface to a browser.
   beside each, so a wrong guess is visible rather than silent.
 - **Starting up** — with the computer, when you log in, or only when you open it. The
   boot option asks for permission through the operating system's own password dialog.
-- **The cluster view** shows every machine with its vendor, capacity, memory,
-  temperature, clocks, power and whether it is throttling.
+- **The cluster view** shows every machine with its vendor, how many jobs are
+  running of how many it will take, how much of its memory is in use, how busy its
+  processors are, and — where a probe reports them — temperature, clocks, power,
+  video memory and whether it is throttling.
 - **Closing** asks once whether to keep running so the others can still send it work, or
   quit. The answer is remembered if you leave the box ticked.
 

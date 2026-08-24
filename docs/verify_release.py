@@ -426,6 +426,20 @@ def _():
     return ", ".join(f"{k}={got[k]}" for k in have)
 
 
+@check("Telemetry", "a machine says how much memory is in use and how busy it is")
+def _():
+    from ml_stack.fleet.daemon import stdlib_device_report
+
+    got = stdlib_device_report()
+    assert got.get("ram_gb"), "no memory total"
+    assert "ram_used_gb" in got, "the card cannot say how much memory is in use"
+    assert 0 <= got["ram_used_gb"] <= got["ram_gb"], got
+    assert "cpu_pct" in got, "the card cannot say how busy the processors are"
+    assert 0 <= got["cpu_pct"] <= 100, got
+    return (f"{got['ram_used_gb']} of {got['ram_gb']} GB in use, "
+            f"{got['cpu_pct']}% busy")
+
+
 @check("Telemetry", "a machine with no framework still reports what it is")
 def _():
     from ml_stack.fleet.daemon import stdlib_device_report

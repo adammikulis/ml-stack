@@ -695,3 +695,67 @@ def test_a_job_runs_in_the_file_root_by_default(daemon):
 
     assert client.job(job["id"])["state"] == "done", client.log(job["id"])
     assert (files / "jobs" / job["id"] / "out" / "saw.txt").read_text() == "here"
+
+
+
+class TestWhatAMachineIsDoing:
+    """The card showed what a machine is, never what it was doing."""
+
+    def test_the_report_carries_memory_in_use_and_how_busy_it_is(self):
+        from ml_stack.fleet.daemon import stdlib_device_report
+
+        got = stdlib_device_report()
+        assert got["ram_gb"] > 0
+        assert "ram_used_gb" in got, got
+        assert 0 <= got["ram_used_gb"] <= got["ram_gb"]
+        assert "cpu_pct" in got, got
+        assert 0 <= got["cpu_pct"] <= 100
+
+    def test_the_first_reading_does_not_come_from_psutil(self, monkeypatch):
+        """psutil's first cpu_percent has nothing to compare against and answers
+        0.0, which would report a working machine as asleep."""
+        import sys
+
+        import ml_stack.fleet.daemon as mod
+
+        psutil = sys.modules.get("psutil")
+        if psutil is None:
+            import psutil                             # noqa: PLC0415
+        monkeypatch.setattr(psutil, "cpu_percent", lambda **k: 0.0)
+        monkeypatch.setattr(mod.os, "getloadavg", lambda: (8.0, 8.0, 8.0))
+        monkeypatch.setattr(mod.os, "cpu_count", lambda: 16)
+
+        was, mod._cpu_primed = mod._cpu_primed, False
+        try:
+            first = mod._cpu_busy_pct()
+            second = mod._cpu_busy_pct()
+        finally:
+            mod._cpu_primed = was
+
+        assert first == 50.0, f"the first reading was psutil's 0.0, not the load ({first})"
+        assert second == 0.0, "after priming it should be psutil's own number"
+
+    def test_it_still_answers_without_psutil(self, monkeypatch):
+        """ml-stack-fleet declares no dependencies; psutil is a bonus."""
+        import builtins
+
+        import ml_stack.fleet.daemon as mod
+
+        real = builtins.__import__
+
+        def no_psutil(name, *a, **k):
+            if name == "psutil":
+                raise ImportError("not installed")
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(builtins, "__import__", no_psutil)
+        got = mod.stdlib_device_report()
+        assert got["ram_gb"] > 0
+        assert got.get("cpu_pct") is not None
+        assert got.get("ram_used_gb") is not None
+
+    def test_memory_in_use_is_never_more_than_there_is(self):
+        from ml_stack.fleet.daemon import stdlib_device_report
+
+        got = stdlib_device_report()
+        assert got["ram_used_gb"] <= got["ram_gb"]

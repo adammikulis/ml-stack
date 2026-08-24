@@ -420,13 +420,77 @@ def _total_ram_gb() -> float | None:
         return None
 
 
+def _ram_used_gb(total_gb: float) -> float | None:
+    """Memory in use, from whatever this platform will say without a dependency."""
+    try:
+        import psutil
+        return round(psutil.virtual_memory().used / 2**30, 2)
+    except Exception:                                 # noqa: BLE001
+        pass
+    try:
+        if sys.platform.startswith("linux"):
+            fields = {}
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                key, _, rest = line.partition(":")
+                fields[key] = float(rest.strip().split()[0]) / 2**20
+            free = fields.get("MemAvailable", fields.get("MemFree", 0.0))
+            return round(max(0.0, total_gb - free), 2)
+        if sys.platform == "darwin":
+            out = subprocess.run(["vm_stat"], capture_output=True, text=True,
+                                 timeout=5).stdout
+            page = 4096
+            first = out.splitlines()[0] if out else ""
+            if "page size of" in first:
+                page = int(first.split("page size of")[1].split()[0])
+            pages = {}
+            for line in out.splitlines()[1:]:
+                key, _, rest = line.partition(":")
+                pages[key.strip()] = int(rest.strip().rstrip(".") or 0)
+            used = sum(pages.get(k, 0) for k in
+                       ("Pages active", "Pages wired down", "Pages occupied by compressor"))
+            return round(used * page / 2**30, 2)
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+    return None
+
+
+_cpu_primed = False
+
+
+def _cpu_busy_pct() -> float | None:
+    """How busy the processors are, as a percentage."""
+    global _cpu_primed
+    try:
+        import psutil
+        # The first reading has nothing to measure against and comes back 0.0, so
+        # the load average answers until there is a second one.
+        if not _cpu_primed:
+            psutil.cpu_percent(interval=None)
+            _cpu_primed = True
+        else:
+            return round(float(psutil.cpu_percent(interval=None)), 1)
+    except Exception:                                 # noqa: BLE001
+        pass
+    try:
+        load = os.getloadavg()[0]
+        return round(min(100.0, 100.0 * load / (os.cpu_count() or 1)), 1)
+    except (AttributeError, OSError):
+        return None
+
+
 def stdlib_device_report() -> dict[str, Any]:
-    """What this box is, using only what the standard library can see."""
+    """What this box is, and what it is doing, from the standard library."""
     out: dict[str, Any] = {"backends": [], "cpus": os.cpu_count() or 1,
                            "arch": platform.machine(), "platform": sys.platform}
     ram = _total_ram_gb()
     if ram is not None:
         out["ram_gb"] = ram
+        used = _ram_used_gb(ram)
+        if used is not None:
+            out["ram_used_gb"] = min(used, ram)
+    busy = _cpu_busy_pct()
+    if busy is not None:
+        out["cpu_pct"] = busy
     return out
 
 

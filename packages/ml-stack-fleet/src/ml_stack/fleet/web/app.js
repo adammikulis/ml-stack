@@ -74,13 +74,38 @@ function peerCard(p) {
   const meters = [
     el("div", { class: "meter" },
       el("div", { class: "cap" },
-        el("span", {}, "capacity"),
-        // Spelled out: "0/4" beside the word "idle" reads as "none of four available",
-        // which is the opposite of what it means.
-        el("b", {}, running === 0 ? `all ${slots} free`
-          : `${running} of ${slots} busy${queued ? ` · ${queued} waiting` : ""}`)),
+        el("span", {}, "jobs"),
+        // Spelled out: "0/4" beside the word "idle" reads as "none of four
+        // available", which is the opposite of what it means.
+        el("b", {}, running === 0
+          ? `none running · ${slots} slot${slots === 1 ? "" : "s"} free`
+          : `${running} running of ${slots}${queued ? ` · ${queued} waiting` : ""}`)),
       pips),
   ];
+
+  if (d.ram_gb) {
+    const used = d.ram_used_gb;
+    const pct = used === undefined ? null
+      : Math.max(0, Math.min(100, (used / d.ram_gb) * 100));
+    meters.push(el("div", { class: "meter" },
+      el("div", { class: "cap" },
+        el("span", {}, "memory"),
+        el("b", {}, used === undefined ? `${gb(d.ram_gb)} total`
+          : `${gb(used)} of ${gb(d.ram_gb)} in use`)),
+      pct === null ? null
+        : el("div", { class: "track" },
+            el("div", { class: "fill", style: `width:${pct}%` }))));
+  }
+
+  if (d.cpu_pct !== undefined) {
+    meters.push(el("div", { class: "meter" },
+      el("div", { class: "cap" },
+        el("span", {}, "processors"),
+        el("b", {}, `${Math.round(d.cpu_pct)}% busy`)),
+      el("div", { class: "track" },
+        el("div", { class: "fill util",
+                    style: `width:${Math.min(100, d.cpu_pct)}%` }))));
+  }
 
   if (d.vram_total_gb) {
     const used = d.vram_total_gb - (d.vram_free_gb ?? d.vram_total_gb);
