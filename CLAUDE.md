@@ -99,3 +99,24 @@ and say so.
 
 A new worktree has no `dist/`, and one test builds a real environment out of it. Run
 `python packaging/build.py` in the worktree before trusting a full test run there.
+
+## Saying that something works
+
+Drive it the way a person does before you say it works. Open the interface, click
+through the screen, type into the box, press the button, read what comes back.
+
+**A request is not a person.** `curl` against a route proves the route answers. It does
+not prove there is a button that reaches it, that the button is on a screen anyone can
+find, that the reply renders, or that the next screen follows. Every bug that has shipped
+here has been on the side of the line `curl` does not cross.
+
+**A green suite is not a person either.** The tests are written against the same
+understanding that wrote the code, so they agree with it by construction. They catch a
+change that breaks something. They do not catch something that was never right.
+
+If you have not driven it, say what you did instead, in the same breath as the claim:
+"the route answers, I have not opened the screen". Never let "it works" stand for
+"the parts I checked did not fail".
+
+This applies hardest to anything a person only does once — first run, setup, an
+uninstall. Those are the paths with no second chance to notice.
