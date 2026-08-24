@@ -193,6 +193,7 @@ def run_pair(
     """
     import mlx.core as mx
     import mlx.nn as mlx_nn  # noqa: F401  (import proves MLX is usable before we build)
+    import torch  # noqa: F401  (same, for torch: fail here, not inside build_torch)
 
     x = inputs(input_shape, seed=seed)
 
