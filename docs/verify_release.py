@@ -712,6 +712,33 @@ def _():
     return "kept and found again by what was said in it"
 
 
+# -- removing it ---------------------------------------------------------
+@check("Removing", "an uninstall leaves your models and your own files alone")
+def _():
+    from ml_stack.fleet.uninstall import plan, remove
+
+    home = TMP / "leaving" / ".ml-stack"
+    root = home / "traind"
+    for name in ("chats", "files", "models", "env"):
+        (root / name).mkdir(parents=True, exist_ok=True)
+    key = home / "cluster.key"
+    key.write_text("k" * 44)
+    (root / "models" / "big.gguf").write_bytes(b"m" * 8192)
+    (root / "files" / "mine.jsonl").write_bytes(b"d" * 256)
+    (root / "chats" / "a.json").write_text('{"id": "a"}')
+
+    offered = {i.key: i for i in plan(root, key_path=key)}
+    assert offered["models"].default is False, "models were ticked for removal"
+    assert offered["datasets"].default is False, "your files were ticked for removal"
+
+    remove(root, [k for k, i in offered.items() if i.default], key_path=key)
+    assert (root / "models" / "big.gguf").exists(), "it took the models"
+    assert (root / "files" / "mine.jsonl").exists(), "it took the datasets"
+    assert not (root / "chats").exists()
+    assert not key.exists()
+    return "chats and the key gone, the model and the dataset kept"
+
+
 # -- report --------------------------------------------------------------
 def main() -> int:
     width = max(len(c) for _, c, _, _ in RESULTS) + 2

@@ -43,6 +43,18 @@ def asset_bytes(name: str) -> tuple[bytes, str] | None:
     return path.read_bytes(), kind or "application/octet-stream"
 
 
+def app_location() -> Path | None:
+    """The bundle this is running from, which cannot delete itself."""
+    import sys
+    if not getattr(sys, "frozen", False):
+        return None
+    here = Path(sys.executable).resolve()
+    for parent in here.parents:
+        if parent.suffix == ".app":
+            return parent
+    return here
+
+
 def _can_serve() -> bool:
     """Whether this install has the code to run a model server itself."""
     from importlib.util import find_spec
@@ -652,6 +664,24 @@ def routes(ui: UI, handler: Any) -> bool:
                 spoken = reply_text(bytes(said))
                 if spoken:
                     ui.conversations.append(cid, "assistant", spoken)
+            return True
+
+    if path == "/ui/uninstall":
+        from .uninstall import plan, remove
+        if ui.root is None:
+            send(501, {"error": "this daemon does not know where it keeps things"})
+            return True
+        if method == "GET":
+            items = plan(ui.root, key_path=ui.cluster_key_path)
+            send(200, {"items": [i.public() for i in items],
+                       "app": str(app_location() or "")})
+            return True
+        if method == "POST":
+            req = body()
+            keys = [str(k) for k in (req.get("remove") or [])]
+            out = remove(ui.root, keys, key_path=ui.cluster_key_path)
+            out["app"] = str(app_location() or "")
+            send(200, out)
             return True
 
     if path == "/ui/updates" and method == "GET":

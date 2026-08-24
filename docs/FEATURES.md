@@ -193,6 +193,19 @@ code printed on its console.
 The cluster key never enters the browser. Signing in is the passphrase, checked by
 deriving the key again and comparing.
 
+## Removing it
+
+Settings has a Remove section listing everything on this machine with what it takes up.
+
+- **Your models and your own files are not ticked.** Everything ml-stack made for
+  itself is: the settings, the key, the chats, the training environment, the model
+  server. A model takes as long to download the second time as it did the first, so it
+  is only removed if you say so.
+- **Each line says what it is and what going without it costs**, so a decision is not
+  made for you.
+- **Removing needs two clicks**, and says what it took and how much came back.
+- Starting up with the computer is undone whether or not anything else is.
+
 ## Telemetry
 
 Temperature, clocks, power draw, utilisation and throttle state.

@@ -350,3 +350,7 @@ button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 /* a download in flight: the bar sits under the name, inside the row */
 .row .grow { flex: 1; min-width: 0; }
 .row .grow .track { margin-top: 6px; }
+
+/* removing it: the one button that destroys something */
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+button.danger:hover:not(:disabled) { filter: brightness(1.1); }

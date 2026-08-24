@@ -304,8 +304,12 @@ async function chat(cid) {
 }
 
 // ---------------------------------------------------------------- models
-const fileSize = (n) =>
-  (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.round(n / 1e6)} MB`);
+const fileSize = (n) => {
+  if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+  if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+  return `${n || 0} bytes`;
+};
 
 async function models(message) {
   clearTimeout(timer);
@@ -570,6 +574,58 @@ async function settings(message) {
     el("span", { class: "spin" }), " Checking for updates…");
   updates.append(status);
 
+  // removing it
+  const removal = el("div", { class: "group" },
+    el("h2", {}, "Remove ml-stack"),
+    el("div", { class: "hint" }, "Loading what is on this machine…"));
+  api("/ui/uninstall").then((u) => {
+    if (u.error) {
+      removal.replaceChildren(el("h2", {}, "Remove ml-stack"),
+        el("div", { class: "err" }, u.error));
+      return;
+    }
+    const want = {};
+    for (const it of u.items || []) want[it.key] = it.default;
+    const boxes = (u.items || []).map((it) => {
+      const box = el("input", { type: "checkbox", id: `rm_${it.key}`,
+                                ...(it.default ? { checked: "1" } : {}) });
+      box.onchange = () => { want[it.key] = box.checked; };
+      return el("label", { class: "opt", for: `rm_${it.key}` }, box,
+        row(`${it.name} — ${fileSize(it.bytes)}`, it.why));
+    });
+    const out = el("div");
+    const go = el("button", { class: "danger" }, "Remove");
+    let armed = false;
+    go.onclick = async () => {
+      const chosen = Object.keys(want).filter((k) => want[k]);
+      if (!armed) {
+        armed = true;
+        go.textContent = `Remove ${chosen.length} of these — click again`;
+        out.replaceChildren(el("div", { class: "hint" },
+          "This cannot be undone."));
+        return;
+      }
+      go.disabled = true;
+      const r = await api("/ui/uninstall", { method: "POST",
+        body: JSON.stringify({ remove: chosen }) });
+      out.replaceChildren(
+        el("div", { class: "ok" },
+          `Removed ${(r.removed || []).length} of ${chosen.length}, freeing `
+          + `${fileSize(r.freed || 0)}.`),
+        r.app ? el("div", { class: "hint" },
+          `Drag ${r.app} to the bin to finish.`) : null,
+        Object.keys(r.failed || {}).length
+          ? el("div", { class: "err" }, Object.values(r.failed).join("; "))
+          : null);
+    };
+    removal.replaceChildren(
+      el("h2", {}, "Remove ml-stack"),
+      el("div", { class: "hint" },
+        "Ticked items go. Your models and your own files are left unless you say "
+        + "otherwise."),
+      ...boxes, go, out);
+  });
+
   (async () => {
     const u = await api("/ui/updates");
     if (!u.checked) {
@@ -648,7 +704,8 @@ async function settings(message) {
                 ...s.schedule.windows.map((w) =>
                   el("div", { class: "label", style: "display:block;margin-bottom:4px" }, w)))
             : null)),
-      save, note)));
+      save,
+      removal, note)));
 }
 
 // ---------------------------------------------------------------- sign in
