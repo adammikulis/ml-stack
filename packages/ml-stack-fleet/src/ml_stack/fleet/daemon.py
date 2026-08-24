@@ -651,8 +651,11 @@ def make_handler(runner: JobRunner, files_root: Path,
                     argv = req.get("argv")
                     if isinstance(argv, str):
                         argv = shlex.split(argv)
+                    # `or`, not a get() default: the client sends "cwd": "" when the
+                    # caller did not set one, so the default never applied and the job
+                    # ran wherever the daemon happened to be.
                     job = runner.submit(req.get("name", ""), argv or [],
-                                        req.get("cwd", str(files_root)),
+                                        req.get("cwd") or str(files_root),
                                         req.get("env"))
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)}); return

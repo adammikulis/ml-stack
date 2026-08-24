@@ -679,3 +679,19 @@ def test_a_job_is_told_where_fetchable_is(daemon):
 
     said = (files / "jobs" / job["id"] / "out" / "where.txt").read_text()
     assert Path(said).resolve() == files.resolve()
+
+
+def test_a_job_runs_in_the_file_root_by_default(daemon):
+    """A job that does not name a working directory must land where pushed files are,
+    or every relative path a caller gives it is wrong."""
+    client, _root, files, _ = daemon
+    (files / "pushed.txt").write_text("here")
+    job = client.submit([sys.executable, "-c",
+                         "import pathlib,os; "
+                         "pathlib.Path(os.environ['ML_STACK_OUT']).mkdir(parents=True, exist_ok=True); "
+                         "(pathlib.Path(os.environ['ML_STACK_OUT'])/'saw.txt')"
+                         ".write_text(pathlib.Path('pushed.txt').read_text())"])
+    client.wait(job["id"], poll_s=0.1, timeout_s=30)
+
+    assert client.job(job["id"])["state"] == "done", client.log(job["id"])
+    assert (files / "jobs" / job["id"] / "out" / "saw.txt").read_text() == "here"
