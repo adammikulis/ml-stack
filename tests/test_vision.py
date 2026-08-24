@@ -415,7 +415,6 @@ class TestGeometry:
         """Two objects: the one whose floor ends lower in the frame is closer,
         and closer is what 'come here' should walk toward."""
         from ml_stack.vision import nearest_obstacle
-        import numpy as np
         f = self._room()
         f[int(240 * 0.30):int(240 * 0.60), 40:80] = 40      # far: ends higher
         f[int(240 * 0.30):int(240 * 0.95), 250:290] = 40    # near: ends lower
@@ -500,7 +499,6 @@ class TestColourBlob:
     def test_a_reflection_elsewhere_does_not_widen_the_answer(self):
         """The widest contiguous run of columns, not the full extent of the mask: a
         glint across the room would otherwise make one can read as a metre wide."""
-        import numpy as np
         from ml_stack.vision import find_color_blob
         f = self._with_can(cols=(140, 180))
         f[10:16, 300:306] = [20, 90, 230]              # a small glint, far right
@@ -537,7 +535,6 @@ class TestColourBlob:
     def test_rgb_and_bgr_are_not_silently_interchangeable(self):
         """Getting this backwards finds blue where the orange is, which reads as a
         detector that cannot see rather than as a channel-order bug."""
-        import numpy as np
         from ml_stack.vision import find_color_blob
         bgr = self._with_can(cols=(140, 180))
         as_bgr = find_color_blob(bgr, bgr=True)

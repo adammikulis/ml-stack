@@ -324,3 +324,38 @@ def test_a_labelled_unit_never_lands_on_a_box_that_lacks_the_label(tmp_path, rat
     assert all(p.ok for p in placements), [p.error for p in placements if not p.ok]
     landed = {p.peer for p in placements}
     assert landed == {"pi"}, f"prep work reached the training box: {landed}"
+
+
+class TestVendorsAreNotInterchangeable:
+    """torch's HIP build answers True to every CUDA question. A box with a Radeon would
+    therefore satisfy backend="cuda" and only reveal itself inside the job -- so "cuda",
+    "rocm" and "accelerator" have to be three different questions."""
+
+    AMD = {"backends": ["torch"], "vendor": "amd", "rocm": True, "cuda": False,
+           "accelerator": True, "gpu": "AMD Radeon RX 7900 XTX",
+           "vram_free_gb": 23.0, "labels": []}
+    NVIDIA = {"backends": ["torch"], "vendor": "nvidia", "cuda": True, "rocm": False,
+              "accelerator": True, "gpu": "RTX 4090", "vram_free_gb": 23.0, "labels": []}
+    APPLE = {"backends": ["mlx"], "vendor": "apple", "cuda": False, "rocm": False,
+             "accelerator": True, "unified_memory": True, "labels": []}
+    PI = {"backends": [], "vendor": "cpu", "accelerator": False, "cpus": 4, "labels": []}
+
+    def test_a_cuda_only_run_refuses_the_amd_box(self):
+        why = Requires(backend="cuda").why_not("amd", self.AMD, 1, 1)
+        assert why and "ROCm" in why
+
+    def test_the_refusal_says_what_to_ask_for_instead(self):
+        why = Requires(backend="cuda").why_not("amd", self.AMD, 1, 1)
+        assert "rocm" in why and "accelerator" in why
+
+    def test_rocm_work_lands_on_the_amd_box_and_not_the_nvidia_one(self):
+        wants = Requires(backend="rocm")
+        assert wants.admits("amd", self.AMD, 1, 1)
+        assert not wants.admits("rtx", self.NVIDIA, 1, 1)
+
+    @pytest.mark.parametrize("name", ["AMD", "NVIDIA", "APPLE"])
+    def test_any_gpu_matches_every_vendor(self, name):
+        assert Requires(backend="accelerator").admits(name, getattr(self, name), 1, 1)
+
+    def test_any_gpu_still_refuses_a_box_with_none(self):
+        assert not Requires(backend="accelerator").admits("pi", self.PI, 1, 1)

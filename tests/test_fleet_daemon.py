@@ -15,10 +15,7 @@ import socket
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from http.server import ThreadingHTTPServer
-from pathlib import Path
 
 import pytest
 from ml_stack.fleet.daemon import (

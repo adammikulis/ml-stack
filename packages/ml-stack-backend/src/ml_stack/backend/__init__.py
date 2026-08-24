@@ -25,6 +25,9 @@ from ml_stack.backend.device import (
 from ml_stack.backend.ops import ArrayBackend, ArrayOps, bind_device
 from ml_stack.backend.registry import (
     BACKENDS,
+    REGISTRY_GROUP,
+    backends,
+    register,
     BackendUnavailable,
     available,
     detect_backend,
@@ -35,6 +38,9 @@ from ml_stack.backend.registry import (
 
 __all__ = [
     "BACKENDS",
+    "REGISTRY_GROUP",
+    "backends",
+    "register",
     "ArrayBackend",
     "ArrayOps",
     "BackendUnavailable",

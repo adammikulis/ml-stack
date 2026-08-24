@@ -76,8 +76,17 @@ class Requires:
         if self.backend:
             backends = report.get("backends") or []
             if not (report.get(self.backend) or self.backend in backends):
-                return (f"does not report {self.backend!r}; "
-                        f"has {sorted(backends) or 'no backends'}")
+                # Named separately from the vendor keys on purpose. torch's HIP build
+                # answers True to every CUDA question, so a box with a Radeon would
+                # satisfy backend="cuda" and only reveal itself inside the job. "cuda",
+                # "rocm" and "accelerator" are three different questions.
+                have = sorted(backends) or "no backends"
+                extra = ""
+                if self.backend == "cuda" and report.get("rocm"):
+                    extra = " (it has ROCm -- ask for 'rocm', or 'accelerator' for any GPU)"
+                elif self.backend in ("cuda", "rocm") and report.get("accelerator"):
+                    extra = f" (it has {report.get('vendor', 'some')} acceleration)"
+                return f"does not report {self.backend!r}; has {have}{extra}"
 
         for key, need, unit in (("vram_free_gb", self.min_vram_gb, "GB VRAM"),
                                 ("ram_gb", self.min_ram_gb, "GB RAM"),

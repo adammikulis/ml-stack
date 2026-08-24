@@ -1,18 +1,21 @@
-"""The parts of a training loop that are the same everywhere and easy to get wrong.
+"""Training: the loop, and the parts of it that are easy to get wrong.
 
-Lab tier. Deliberately **not** a Trainer class: the loop body is where a project's actual
-work lives, and wrapping it costs more than it saves. What is here is the scaffolding
-around the loop -- checkpointing, schedules, guards, metrics, splitting -- each usable on
-its own.
+Lab tier. ``Trainer`` runs the loop, on PyTorch or MLX, with checkpointing, resume,
+schedules, divergence guards and metrics already attached:
 
-    from ml_stack.train import CheckpointState, MetricsLog, RunLock, warmup_stable_decay
+    from ml_stack.train import Trainer, warmup_stable_decay
 
-    with RunLock(out), MetricsLog(out / "metrics.jsonl") as log:
-        log.start(config)
-        lr = warmup_stable_decay(3e-4, total_steps=100_000, warmup_steps=2_000)
-        for step in range(100_000):
-            opt.learning_rate = lr(step)     # a float, assigned outside any compiled region
-            ...
+    report = Trainer(model, optimizer, loss, out="runs/small").fit(
+        batches, steps=100_000,
+        schedule=warmup_stable_decay(3e-4, total_steps=100_000, warmup_steps=2_000),
+        eval_data=holdout, eval_every=1_000, checkpoint_every=1_000)
+
+``loss(model, batch)`` is yours; everything around it is not. The framework is detected
+from the model, so the same call trains on a Mac and on a CUDA box.
+
+Every piece is also usable on its own, for a loop you want to write yourself --
+``CheckpointState``, ``MetricsLog``, ``RunLock``, the schedules, the guards, the leak-safe
+splits. ``Trainer`` is an assembly of them, not a replacement for them.
 """
 
 from __future__ import annotations
@@ -64,6 +67,8 @@ from ml_stack.train.holdout import (
     spread_order,
 )
 from ml_stack.train.metrics import MetricsLog, Throughput, read
+from ml_stack.train.step import MLXStep, Step, TorchStep, step_for
+from ml_stack.train.trainer import Trainer, TrainReport, batches_from
 from ml_stack.train.schedule import (
     Schedule,
     constant,
@@ -73,6 +78,13 @@ from ml_stack.train.schedule import (
 )
 
 __all__ = [
+    "Trainer",
+    "TrainReport",
+    "Step",
+    "TorchStep",
+    "MLXStep",
+    "step_for",
+    "batches_from",
     "serve_forever",
     "safe_relpath",
     "Peer",

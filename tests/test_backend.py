@@ -276,3 +276,55 @@ def test_scatter_add_agrees_across_backends():
         results.append(np.asarray(out))
 
     assert_forward_parity(results[0], results[1], label="scatter_add")
+
+
+class TestRegistryIsExtensible:
+    """The registry shipped with a hardcoded pair and an if/elif dispatch, so a third
+    backend -- ROCm through a different seam, JAX, anything -- had nowhere to go."""
+
+    def test_the_builtin_backends_are_registered_not_special_cased(self):
+        from ml_stack.backend import backends
+
+        assert "mlx" in backends() and "torch" in backends()
+
+    def test_a_backend_can_be_registered_and_fetched(self):
+        from ml_stack.backend import backends, get_backend, register
+
+        sentinel = object()
+        register("pretend", lambda: sentinel, replace=True)
+        try:
+            assert "pretend" in backends()
+            assert get_backend("pretend") is sentinel
+        finally:
+            from ml_stack.backend import registry
+            registry._FACTORIES.pop("pretend", None)
+            registry._BUILT.pop("pretend", None)
+
+    def test_shadowing_an_existing_name_is_refused_unless_asked(self):
+        """Two packages claiming 'torch' and the winner being import order is diagnosed
+        by printing the backend and not believing the answer."""
+        from ml_stack.backend import BackendUnavailable, register
+
+        with pytest.raises(BackendUnavailable, match="already registered"):
+            register("torch", lambda: None)
+
+    def test_one_broken_backend_does_not_make_the_others_unlistable(self):
+        """`available()` is what the fleet's device report calls. A plugin that raises
+        on import must cost its own entry, not every entry."""
+        from ml_stack.backend import available, register
+        from ml_stack.backend import registry
+
+        before = available()
+        register("broken", lambda: (_ for _ in ()).throw(ImportError("no driver")),
+                 replace=True)
+        try:
+            assert available() == before
+            assert "broken" not in available()
+        finally:
+            registry._FACTORIES.pop("broken", None)
+
+    def test_an_unknown_backend_names_what_is_available(self):
+        from ml_stack.backend import BackendUnavailable, get_backend
+
+        with pytest.raises(BackendUnavailable, match="unknown backend"):
+            get_backend("nope")

@@ -7,7 +7,6 @@ bug this module exists to prevent is precisely a key that is silently absent.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest

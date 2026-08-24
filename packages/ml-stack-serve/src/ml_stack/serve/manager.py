@@ -24,7 +24,6 @@ import threading
 import time
 from contextlib import contextmanager
 from collections.abc import Iterator
-from dataclasses import replace
 from pathlib import Path
 
 from ml_stack.client import is_healthy, reported_models

@@ -12,23 +12,70 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 
 from ml_stack.backend.ops import ArrayBackend
 
-BACKENDS = ("mlx", "torch")
+_FACTORIES: dict[str, "Callable[[], ArrayBackend]"] = {}
+_BUILT: dict[str, ArrayBackend] = {}
 
-_MLX: ArrayBackend | None = None
-_TORCH: ArrayBackend | None = None
+REGISTRY_GROUP = "ml_stack.backend"
+"""Entry-point group a third-party backend registers itself under.
 
+The built-in two are not special-cased anywhere below; they register through the same
+call an outside package would, so the extension path is the one that is exercised on
+every import rather than a second path nobody runs.
+"""
+
+
+def register(name: str, factory: "Callable[[], ArrayBackend]", *,
+             replace: bool = False) -> None:
+    """Make a backend available under ``name``.
+
+    Refuses to shadow an existing name unless asked. Two packages claiming "torch" and
+    the winner being import order is the kind of thing that is diagnosed by printing the
+    backend and not believing the answer.
+    """
+    if name in _FACTORIES and not replace:
+        raise BackendUnavailable(
+            f"a backend named {name!r} is already registered; pass replace=True "
+            "if shadowing it is deliberate")
+    _FACTORIES[name] = factory
+    _BUILT.pop(name, None)
+
+
+def backends() -> tuple[str, ...]:
+    """Every registered backend name, whether or not it can be imported here."""
+    _load_plugins()
+    return tuple(sorted(_FACTORIES))
 
 class BackendUnavailable(RuntimeError):
     """The requested backend cannot be imported on this machine."""
 
 
+_PLUGINS_LOADED = False
+
+
+def _load_plugins() -> None:
+    """Pull in any backend a third-party package registered. Once, and best effort."""
+    global _PLUGINS_LOADED
+    if _PLUGINS_LOADED:
+        return
+    _PLUGINS_LOADED = True
+    try:
+        from importlib.metadata import entry_points
+        found = entry_points(group=REGISTRY_GROUP)
+    except Exception:                                 # noqa: BLE001
+        return
+    for ep in found:
+        try:
+            register(ep.name, ep.load())
+        except Exception:                             # noqa: BLE001
+            # A broken plugin costs its own backend, not every other one.
+            continue
+
+
 def torch_backend() -> ArrayBackend:
-    global _TORCH
-    if _TORCH is not None:
-        return _TORCH
 
     from ml_stack.backend.torch_ops import (
         TorchArrayOps,
@@ -48,15 +95,10 @@ def torch_backend() -> ArrayBackend:
         cumprod=lambda x, axis=-1: torch.cumprod(x, dim=axis),
         rfft_abs=lambda x, axis=-1: torch.fft.rfft(x, dim=axis).abs(),
     )
-    if _TORCH is None:  # an inner, re-entrant call may have won
-        _TORCH = built
-    return _TORCH
+    return built
 
 
 def mlx_backend() -> ArrayBackend:
-    global _MLX
-    if _MLX is not None:
-        return _MLX
 
     from ml_stack.backend.mlx_ops import (
         build_make_linear,
@@ -76,18 +118,22 @@ def mlx_backend() -> ArrayBackend:
         cumprod=lambda x, axis=-1: mx.cumprod(x, axis=axis),
         rfft_abs=lambda x, axis=-1: mx.abs(mx.fft.rfft(x, axis=axis)),
     )
-    if _MLX is None:
-        _MLX = built
-    return _MLX
+    return built
 
 
 def available() -> list[str]:
     """Backend names that can actually be imported here, in preference order."""
     found: list[str] = []
-    for name in BACKENDS:
+    for name in backends():
         try:
             get_backend(name)
-        except (BackendUnavailable, RuntimeError):
+        except Exception:                             # noqa: BLE001
+            # Deliberately broad. A registered backend can fail to build in any way its
+            # framework chooses -- ImportError, OSError from a missing driver, a
+            # RuntimeError deep in a CUDA init -- and one that cannot build is simply
+            # not available. Letting it escape would mean a single broken plugin makes
+            # every other backend unlistable, and this is what the fleet's device
+            # report calls.
             continue
         found.append(name)
     return found
@@ -105,13 +151,19 @@ def detect_backend() -> str:
     """
     override = os.environ.get("ML_STACK_BACKEND")
     if override:
-        if override not in BACKENDS:
+        if override not in backends():
             raise BackendUnavailable(
-                f"ML_STACK_BACKEND={override!r} is not one of {BACKENDS}"
+                f"ML_STACK_BACKEND={override!r} is not one of {backends()}"
             )
         return override
 
-    order = ("mlx", "torch") if sys.platform == "darwin" else ("torch", "mlx")
+    # MLX first on Apple silicon because it is the native path there; torch first
+    # elsewhere because it covers CUDA and ROCm both. Anything registered by a plugin
+    # comes after the two that ship here -- an installed extra should not silently
+    # become the default.
+    known = backends()
+    preferred = ("mlx", "torch") if sys.platform == "darwin" else ("torch", "mlx")
+    order = [n for n in preferred if n in known] + [n for n in known if n not in preferred]
     for name in order:
         try:
             get_backend(name)
@@ -120,8 +172,8 @@ def detect_backend() -> str:
         return name
 
     raise BackendUnavailable(
-        "neither MLX nor PyTorch could be imported. Install one: "
-        "`pip install torch`, or `pip install mlx` on Apple silicon."
+        f"none of {backends()} could be imported. Install one: `pip install torch` "
+        "(which covers both CUDA and ROCm), or `pip install mlx` on Apple silicon."
     )
 
 
@@ -129,15 +181,31 @@ def get_backend(name: str | None = None) -> ArrayBackend:
     """The backend called ``name``, or the detected default."""
     if name is None:
         name = detect_backend()
-    if name == "torch":
-        return torch_backend()
-    if name == "mlx":
-        return mlx_backend()
-    raise BackendUnavailable(f"unknown backend {name!r}; expected one of {BACKENDS}")
+    _load_plugins()
+    built = _BUILT.get(name)
+    if built is not None:
+        return built
+    factory = _FACTORIES.get(name)
+    if factory is None:
+        raise BackendUnavailable(
+            f"unknown backend {name!r}; expected one of {backends()}")
+    # Re-checked rather than assigned straight in: building a backend imports a
+    # framework, and a framework import can re-enter this function. Two instances mean
+    # device bindings landing on different objects.
+    made = factory()
+    if name not in _BUILT:
+        _BUILT[name] = made
+    return _BUILT[name]
 
 
 def reset() -> None:
     """Drop the cached singletons. For tests only."""
-    global _MLX, _TORCH
-    _MLX = None
-    _TORCH = None
+    _BUILT.clear()
+
+
+register("mlx", lambda: mlx_backend())
+register("torch", lambda: torch_backend())
+
+BACKENDS = ("mlx", "torch")
+"""The backends that ship with this package. Prefer ``backends()``, which also sees
+anything a plugin registered."""
