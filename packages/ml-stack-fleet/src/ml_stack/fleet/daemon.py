@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from .availability import Availability, parse_window
+from .environment import Environment
 from .settings import Settings
 from .discovery import (
     Advertiser,
@@ -127,12 +128,14 @@ class JobRunner:
     """Runs jobs, ``slots`` at a time, and owns their processes."""
 
     def __init__(self, root: Path, files_root: Path | None = None, *,
-                 slots: int = 1, gate: "Callable[[], tuple[bool, str]] | None" = None) -> None:
+                 slots: int = 1, gate: "Callable[[], tuple[bool, str]] | None" = None,
+                 environment: "Environment | None" = None) -> None:
         if slots < 1:
             raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
         self.files_root = Path(files_root) if files_root is not None else root / "files"
         self.gate = gate
+        self.environment = environment
         self.slots = slots
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
@@ -247,6 +250,13 @@ class JobRunner:
                "ML_STACK_JOB_DIR": str(self.job_dir(job.id)),
                "ML_STACK_FILES_ROOT": str(self.files_root),
                "ML_STACK_OUT": str(self.job_dir(job.id) / "out")}
+        if self.environment is not None and self.environment.exists:
+            # A job that asks for "python" gets the environment the machine was set up
+            # with, not whatever interpreter happens to be first on PATH -- and in a
+            # bundled install there is no other one.
+            env["ML_STACK_PYTHON"] = str(self.environment.python)
+            env["PATH"] = os.pathsep.join(
+                [str(self.environment.python.parent), env.get("PATH", "")])
         try:
             with log.open("ab") as fh:
                 proc = subprocess.Popen(job.argv, cwd=job.cwd or None, env=env,
@@ -847,8 +857,10 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     settings.labels = [s.strip() for s in labels if s and s.strip()]
     settings.on_paused = on_paused
 
+    environment = Environment(root)
     runner = JobRunner(root, files_root, slots=slots,
-                       gate=lambda: schedule.may_start())
+                       gate=lambda: schedule.may_start(),
+                       environment=environment)
     fetcher = Fetcher(files_root, key, slots=fetch_slots)
     interface = None
     setup_token = ""
@@ -902,6 +914,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         interface.settings_path = settings_path
         interface.schedule_path = schedule_path
         interface.report = report
+        interface.environment = environment
 
     if announce and key is not None:
         beacon = Beacon(name=name, port=port, device=report(),

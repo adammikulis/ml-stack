@@ -9,7 +9,7 @@ description = "Training scaffolding: atomic checkpoints, schedules, guards, metr
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["ml-stack-backend", "ml-stack-fleet"]
+dependencies = ["ml-stack-backend", "ml-stack-fleet", "ml-stack-contracts", "numpy>=1.24"]
 
 [project.scripts]
 ml-stack-train-run = "ml_stack.train.run:main"

@@ -40,7 +40,10 @@ def bundle(built: list[Path]) -> Path:
         run([sys.executable, "-m", "venv", str(env)])
     pip = env / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
     run([str(pip), "install", "-q", "--upgrade", *EXTERNAL])
-    run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST), *BUNDLED])
+    # force-reinstall: the version has not changed between builds, so pip would keep
+    # the wheel already in the build venv and bundle code that is one edit behind.
+    run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
+         "--force-reinstall", "--no-deps", *BUNDLED])
 
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     for spec in ("ml-stack-app.spec", "ml-stack.spec"):

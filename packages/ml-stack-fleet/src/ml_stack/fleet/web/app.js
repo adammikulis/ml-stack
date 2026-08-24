@@ -211,6 +211,60 @@ async function settings(message) {
       : el("div", { class: "ok" }, "Saved."));
   };
 
+  // libraries
+  const libs = el("div", { class: "group" },
+    el("h2", {}, "What this machine can train with"),
+    el("div", { class: "hint" }, el("span", { class: "spin" }), " Looking…"));
+
+  (async () => {
+    const L = await api("/ui/libraries");
+    if (L.status === 501) { libs.remove(); return; }
+    const want = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
+    const boxes = (L.libraries || []).map((lib) => {
+      const input = el("input", { type: "checkbox", id: `lib-${lib.name}`,
+                                  ...(lib.installed || (!L.ready && lib.default)
+                                      ? { checked: "1" } : {}) });
+      if (!lib.installed && !L.ready && lib.default) want.add(lib.name);
+      input.onchange = () => { input.checked ? want.add(lib.name) : want.delete(lib.name); };
+      return el("label", { class: "opt", for: `lib-${lib.name}` }, input,
+        el("span", {},
+          el("b", {}, lib.title),
+          el("span", { class: "why" },
+            `${lib.blurb} · ${lib.size_mb >= 1000
+              ? (lib.size_mb / 1000).toFixed(1) + " GB" : lib.size_mb + " MB"}`
+            + (lib.version ? ` · installed ${lib.version}` : ""))));
+    });
+
+    const apply = el("button", { class: "ghost" }, "Apply");
+    const out = el("div");
+    apply.onclick = async () => {
+      const before = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
+      const install = [...want].filter((n) => !before.has(n));
+      const remove = [...before].filter((n) => !want.has(n));
+      if (!install.length && !remove.length) {
+        out.replaceChildren(el("div", { class: "hint" }, "Nothing to change."));
+        return;
+      }
+      apply.disabled = true;
+      apply.innerHTML = '<span class="spin"></span> This can take a while…';
+      const r = await api("/ui/libraries", { method: "POST",
+        body: JSON.stringify({ install, remove }) });
+      apply.disabled = false; apply.textContent = "Apply";
+      const failed = Object.entries(r.changed || {}).filter(([, v]) => !v.ok);
+      out.replaceChildren(failed.length
+        ? el("div", { class: "err" },
+            failed.map(([k, v]) => `${k}: ${v.error}`).join("; "))
+        : el("div", { class: "ok" }, "Done."));
+    };
+
+    libs.replaceChildren(
+      el("h2", {}, "What this machine can train with"),
+      el("div", { class: "hint" },
+        L.ready ? "Installed alongside ml-stack, not in your system Python."
+                : "Nothing installed yet. Tick what this machine should be able to do."),
+      ...boxes, apply, out);
+  })();
+
   // updates
   const updates = el("div", { class: "group" },
     el("h2", {}, "Updates"),
@@ -284,6 +338,7 @@ async function settings(message) {
             radio("autostart", "manual", "Only when I open it", ""))),
 
         el("div", {},
+          libs,
           updates,
 
           el("div", { class: "group" },

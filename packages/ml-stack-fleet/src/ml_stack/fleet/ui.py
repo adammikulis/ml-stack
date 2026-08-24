@@ -55,6 +55,7 @@ class UI:
         self.settings_path: Any = None
         self.schedule_path: Any = None
         self.report: Any = None
+        self.environment: Any = None
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -412,6 +413,31 @@ def routes(ui: UI, handler: Any) -> bool:
             return True
         if method == "POST":
             send(200, ui.apply_prefs(body()))
+            return True
+
+    if path == "/ui/libraries":
+        if ui.environment is None:
+            send(501, {"error": "no environment on this daemon"})
+            return True
+        report = ui.report() if callable(ui.report) else {}
+        vendor = str(report.get("vendor") or "cpu")
+        if method == "GET":
+            send(200, ui.environment.state(vendor))
+            return True
+        if method == "POST":
+            req = body()
+            add = [str(s) for s in req.get("install") or []]
+            drop = [str(s) for s in req.get("remove") or []]
+            out: dict[str, Any] = {}
+            try:
+                if drop:
+                    out.update(ui.environment.uninstall(drop))
+                if add:
+                    out.update(ui.environment.install(add))
+            except EnvironmentError as exc:
+                send(400, {"error": str(exc)})
+                return True
+            send(200, {"changed": out, **ui.environment.state(vendor)})
             return True
 
     if path == "/ui/updates" and method == "GET":

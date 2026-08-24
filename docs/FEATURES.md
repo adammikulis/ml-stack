@@ -107,6 +107,30 @@ Both are byte-level, so any text works with no vocabulary file.
 - The model size is checked against the memory the chosen machine reports.
 - `--dry-run` trains twenty steps and writes nothing.
 
+## What each machine can train with
+
+Training needs numpy, safetensors and a framework, and those are too large and too
+platform-specific to carry inside the app. So the app builds an environment of its own,
+separate from any Python already on the machine, and runs training jobs with it.
+
+Settings lists what can go in it, with what each is for and what it costs to download:
+
+| | |
+|---|---|
+| Training essentials | Arrays, checkpoint files, and ml-stack's own training code |
+| PyTorch | The build that matches the card — NVIDIA, AMD ROCm, or processor-only |
+| MLX | Apple silicon |
+| Images | Reading and resizing pictures |
+| Hugging Face models | Starting from a downloaded model rather than from scratch |
+| Temperature and clocks | Reporting this machine's temperature and GPU clock |
+
+The right PyTorch is offered for the card that is there: the NVIDIA and AMD builds come
+from different indexes, and installing the wrong one gives a machine that never uses its
+card.
+
+If the machine has no Python new enough to build with — macOS ships 3.9 — the app
+downloads one. Nothing is installed into the system Python.
+
 ## The interface
 
 A native window — WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux. Each
