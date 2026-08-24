@@ -546,6 +546,46 @@ class TestBelongingToSeveralClusters:
         assert [m.group for m in memberships(anchor)] == ["home"]
         assert memberships(anchor)[0].key != first, "the passphrase did not change"
 
+    def test_a_machine_set_up_before_the_list_existed_is_still_in_its_cluster(
+            self, tmp_path):
+        from ml_stack.fleet.discovery import (
+            cluster_group, in_cluster, key_from_passphrase, load_cluster_key,
+        )
+
+        anchor = tmp_path / "cluster.key"
+        key = key_from_passphrase(self.WORDS, group="ml-stack")
+        anchor.write_text(key.decode() + "\n")
+
+        assert in_cluster(anchor)
+        assert load_cluster_key(anchor) == key
+        assert cluster_group(anchor) == "ml-stack"
+
+    def test_the_group_it_was_set_up_with_survives(self, tmp_path):
+        from ml_stack.fleet.discovery import cluster_group, key_from_passphrase
+
+        anchor = tmp_path / "cluster.key"
+        anchor.write_text(key_from_passphrase(self.WORDS, group="garage").decode())
+        (tmp_path / "cluster.group").write_text("garage\n")
+
+        assert cluster_group(anchor) == "garage"
+
+    def test_the_old_key_is_moved_into_the_list_once(self, tmp_path):
+        from ml_stack.fleet.discovery import (
+            join, key_from_passphrase, leave, memberships,
+        )
+
+        anchor = tmp_path / "cluster.key"
+        anchor.write_text(key_from_passphrase(self.WORDS, group="ml-stack").decode())
+        assert len(memberships(anchor)) == 1
+        assert (tmp_path / "cluster.json").exists()
+
+        join(self.WORDS, group="lab", path=anchor)
+        assert {m.group for m in memberships(anchor)} == {"ml-stack", "lab"}
+
+        leave("ml-stack", path=anchor)
+        leave("lab", path=anchor)
+        assert memberships(anchor) == [], "leaving must not be undone by the old file"
+
     def test_a_short_passphrase_is_refused_for_every_cluster(self, tmp_path):
         import pytest as pt
 

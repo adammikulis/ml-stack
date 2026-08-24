@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import hmac
 import json
@@ -159,7 +160,7 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     try:
         raw = json.loads(clusters_path(path).read_text())
     except (OSError, ValueError):
-        return out
+        return _adopt_single(path)
     for row in raw if isinstance(raw, list) else []:
         try:
             group, key = str(row["group"]), str(row["key"]).encode()
@@ -169,6 +170,27 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
             seen.add(group)
             out.append(Membership(group=group, key=key))
     return out
+
+
+LEGACY_GROUP = "ml-stack"
+
+
+def _adopt_single(path: Path | str | None = None) -> list[Membership]:
+    """The one cluster written before the list existed, moved into the list."""
+    try:
+        key = key_path(path).read_text().strip()
+    except OSError:
+        return []
+    if not key:
+        return []
+    try:
+        group = group_path(path).read_text().strip()
+    except OSError:
+        group = ""
+    rows = [Membership(group=group or LEGACY_GROUP, key=key.encode())]
+    with contextlib.suppress(OSError):
+        _write_memberships(rows, path)
+    return rows
 
 
 def _write_memberships(rows: list[Membership],
