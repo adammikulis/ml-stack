@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import urllib.error
@@ -21,6 +22,23 @@ MIN_SIZE = 1 << 20
 
 class ModelError(RuntimeError):
     pass
+
+
+def _read_stamp(stamp: Path) -> dict[str, Any]:
+    """What a half-finished download recorded about where it came from."""
+    try:
+        raw = json.loads(stamp.read_text())
+    except (OSError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _write_stamp(stamp: Path, url: str, headers: Any) -> None:
+    validator = headers.get("ETag") or headers.get("Last-Modified") or ""
+    try:
+        stamp.write_text(json.dumps({"url": url, "validator": validator}))
+    except OSError:
+        pass
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +187,8 @@ class Models:
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
     def _from_internet(self, name: str, source: str, on_progress: Any) -> Model:
+        from .remote import range_total
+
         url = _resolve(source)
         self.store.mkdir(parents=True, exist_ok=True)
         # The name that was asked for wins: saving it under whatever the URL happened
@@ -178,23 +198,48 @@ class Models:
             wanted = Path(urllib.parse.urlparse(url).path).name or wanted
         target = self.store / wanted
         partial = target.with_suffix(target.suffix + ".part")
+        stamp = Path(str(partial) + ".from")
+
         start = partial.stat().st_size if partial.exists() else 0
+        origin = _read_stamp(stamp)
+        if start and origin.get("url") not in (None, url):
+            partial.unlink(missing_ok=True)
+            stamp.unlink(missing_ok=True)
+            start, origin = 0, {}
 
         req = urllib.request.Request(url, headers={"User-Agent": "ml-stack"})
         if start:
             req.add_header("Range", f"bytes={start}-")
+            if origin.get("validator"):
+                req.add_header("If-Range", str(origin["validator"]))
         try:
             response = urllib.request.urlopen(req, timeout=120)
         except urllib.error.HTTPError as exc:
             if exc.code == 416 and start:
-                os.replace(partial, target)
-                stat = target.stat()
-                return Model(target.name, target, stat.st_size, stat.st_mtime)
+                size = range_total(exc.headers.get("Content-Range", ""))
+                if size is not None and size == start:
+                    os.replace(partial, target)
+                    stamp.unlink(missing_ok=True)
+                    stat = target.stat()
+                    return Model(target.name, target, stat.st_size, stat.st_mtime)
+                partial.unlink(missing_ok=True)
+                stamp.unlink(missing_ok=True)
+                raise ModelError(
+                    f"{name}: the part here is {start} bytes but the file is "
+                    f"{size}; discarded it, ask again") from None
             raise ModelError(f"could not download {name}: {exc.code}") from None
         except (urllib.error.URLError, OSError) as exc:
             raise ModelError(f"could not download {name}: {exc}") from None
 
-        total = start + int(response.headers.get("Content-Length") or 0)
+        # A server that does not honour Range answers 200 with the whole file.
+        if start and response.status != 206:
+            start = 0
+        if start:
+            total = range_total(response.headers.get("Content-Range", "")) or 0
+        else:
+            total = int(response.headers.get("Content-Length") or 0)
+
+        _write_stamp(stamp, url, response.headers)
         done = start
         with response, partial.open("ab" if start else "wb") as fh:
             while True:
@@ -210,6 +255,7 @@ class Models:
                 f"{name}: got {partial.stat().st_size} of {total} bytes; "
                 f"left {partial.name} to resume from")
         os.replace(partial, target)
+        stamp.unlink(missing_ok=True)
         stat = target.stat()
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 

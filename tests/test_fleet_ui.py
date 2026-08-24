@@ -526,6 +526,15 @@ class TestSettingsScreen:
                      body={"auto_update": False, "autostart": "manual"})
         assert Settings.load(serving.ui.settings_path).auto_update is False
 
+    def test_getting_models_automatically_is_on_unless_turned_off(self, signed_in):
+        from ml_stack.fleet.settings import Settings
+
+        serving, cookie = signed_in
+        assert Settings().autodownload_models is True
+        serving.call("/ui/settings", method="POST", cookie=cookie,
+                     body={"autodownload_models": False, "autostart": "manual"})
+        assert Settings.load(serving.ui.settings_path).autodownload_models is False
+
 
 class TestUpdates:
     def test_versions_compare_numerically(self):

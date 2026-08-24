@@ -31,6 +31,15 @@ def sha256_file(path: Path, chunk: int = CHUNK) -> str:
     return h.hexdigest()
 
 
+def range_total(content_range: str) -> int | None:
+    """Total size out of a ``bytes */N`` or ``bytes a-b/N`` header."""
+    _, _, tail = content_range.partition("/")
+    try:
+        return int(tail)
+    except ValueError:
+        return None
+
+
 class PeerError(RuntimeError):
     pass
 
@@ -226,7 +235,7 @@ class Peer:
             resp = urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError as e:
             if e.code == 416:
-                size = self._range_total(e.headers.get("Content-Range", ""))
+                size = range_total(e.headers.get("Content-Range", ""))
                 if size is not None and start == size:
                     os.replace(partial, local)
                     return local
@@ -267,11 +276,3 @@ class Peer:
         os.replace(partial, local)
         return local
 
-    @staticmethod
-    def _range_total(content_range: str) -> int | None:
-        """Total size out of a ``bytes */N`` or ``bytes a-b/N`` header."""
-        _, _, tail = content_range.partition("/")
-        try:
-            return int(tail)
-        except ValueError:
-            return None

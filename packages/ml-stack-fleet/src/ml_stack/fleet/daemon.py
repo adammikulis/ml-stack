@@ -494,7 +494,8 @@ def make_handler(runner: JobRunner, files_root: Path,
                  on_paused: str = "stop",
                  schedule_path: "Path | None" = None,
                  serving: "Serving | None" = None,
-                 models: "Models | None" = None):
+                 models: "Models | None" = None,
+                 cluster_key_path: "Path | str | None" = None):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -999,7 +1000,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                 make_handler(runner, files_root,
                                              lambda: live_token[0], name, report,
                                              fetcher, interface, schedule, on_paused,
-                                             schedule_path, serving, models))
+                                             schedule_path, serving, models,
+                                             cluster_key_path))
     advertiser: Advertiser | None = None
 
     def refresh(b: Beacon) -> None:

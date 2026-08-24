@@ -27,6 +27,7 @@ class Settings:
     auto_update: bool = True
     update_channel: str = "stable"
     fetch_slots: int = 2
+    autodownload_models: bool = True
 
     @classmethod
     def load(cls, path: Path | str) -> "Settings":

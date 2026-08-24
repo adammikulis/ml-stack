@@ -160,6 +160,8 @@ class UI:
             settings.on_close = req["on_close"]
         if "auto_update" in req:
             settings.auto_update = bool(req["auto_update"])
+        if "autodownload_models" in req:
+            settings.autodownload_models = bool(req["autodownload_models"])
 
         if req.get("work_hours") and self.schedule is not None:
             spec = str(req.get("work_hours_spec") or "mon-fri 09:00-17:00")
@@ -449,6 +451,7 @@ def routes(ui: UI, handler: Any) -> bool:
         from .discovery import load_cluster_key
         from .models import ModelError
         key = load_cluster_key(ui.cluster_key_path)
+        auto_models = ui.settings is None or ui.settings.autodownload_models
         if method == "GET":
             here = {m.name for m in ui.models.all()}
             elsewhere: dict[str, list[str]] = {}
@@ -463,7 +466,7 @@ def routes(ui: UI, handler: Any) -> bool:
                 "elsewhere": [{"name": n, "peers": p}
                               for n, p in sorted(elsewhere.items()) if n not in here],
                 "free_gb": ui.models.free_gb(),
-                "autodownload": bool(getattr(ui.settings, "autodownload_models", True)),
+                "autodownload": auto_models,
             })
             return True
         if method == "POST":
@@ -472,7 +475,7 @@ def routes(ui: UI, handler: Any) -> bool:
                 got = ui.models.ensure(
                     str(req.get("name") or ""), source=str(req.get("source") or ""),
                     key=key,
-                    autodownload=bool(getattr(ui.settings, "autodownload_models", True)))
+                    autodownload=auto_models)
             except (ModelError, ValueError) as exc:
                 send(400, {"error": str(exc)})
                 return True
