@@ -1,0 +1,172 @@
+# What ml-stack does
+
+Every claim here has a check in `docs/verify_release.py`. Run it:
+
+```
+python docs/verify_release.py
+```
+
+---
+
+## Setting up
+
+Install it on each machine and type the same passphrase. The key is derived from those
+words, so two machines that heard the same phrase agree on it without exchanging
+anything — there is no key to copy and no address to write down.
+
+- Machines that derived their key from different words are invisible to each other, so
+  several groups share a network without any of them being configured to.
+- The group name separates two clusters that happened to choose the same passphrase.
+- The passphrase is stretched with scrypt before it becomes a key. Everyone on the
+  network can hear the beacons, so a weak phrase would otherwise be worth grinding
+  guesses against offline.
+- At least eight characters.
+
+Beacons are signed. A peer's address is taken from the packet it arrived in, never from
+anything the packet claims about itself.
+
+## Running work
+
+Each machine runs a daemon that accepts jobs, moves files, and reports what it is.
+
+- **Slots.** One job at a time by default, because two jobs on one card contend for
+  memory and both get slower. A machine whose work is preparing data has no such
+  contention and can be told to run several.
+- **Files.** Uploads and downloads resume from where they stopped and are verified by
+  digest, in both directions.
+- **Stopping.** A stop is SIGTERM first, so a loop that checkpoints on it keeps its
+  progress. Stopping one job leaves the others alone.
+- **Jobs run in the file root**, so a relative path in a job's arguments points at the
+  files you pushed.
+
+## Choosing where work runs
+
+- **What a machine reports** — CUDA, ROCm, Apple silicon, free VRAM, RAM, cores. These
+  are three different questions: PyTorch's ROCm build answers yes to every CUDA
+  question, so a Radeon would otherwise satisfy a CUDA-only requirement and only reveal
+  itself once the job failed.
+- **What a machine declares** — labels like `train` or `prep`, set by whoever runs it. A
+  machine cannot prove it has no GPU, so this half is declared rather than detected.
+- **How fast it has been** — measured per kind of work, from jobs that ran. There is no
+  table of which card is faster.
+- **A machine nobody has measured is tried, not skipped.** It is scored as typical and
+  given work, because being given work is the only way it stops being unmeasured. A new
+  machine also benchmarks itself once when it joins, so the first choice is not a
+  coin-flip.
+
+Work that no machine can run fails immediately, naming every machine and the reason:
+
+```
+gpubox:  has 23.0 GB VRAM, needs 80.0
+pi-rack: does not report 'cuda'; has no backends
+radeon:  this machine is in use (mon tue wed thu fri 09:00-17:00); work resumes Mon 17:00
+```
+
+Work that fails is retried on a different machine. A machine that fails several jobs in
+a row is set aside for a growing cooldown rather than draining the queue.
+
+## Keeping your machine yours
+
+- **Working hours.** Block out times when a machine is somebody's desk. Windows are
+  local wall-clock and may cross midnight. Work submitted during a blocked window waits
+  rather than failing.
+- **Pause.** Stops the machine taking work now. What is already running is stopped and
+  requeued, so the machine comes back to you immediately and the run resumes from its
+  last checkpoint. A pause survives a restart.
+- **Reservations.** One machine can hold another for a while, with a ceiling so a
+  forgotten reservation cannot take a machine out of the cluster permanently.
+
+## Training
+
+`Trainer` runs the loop on PyTorch or MLX. The framework comes from the model, so the
+same call works on a Mac and on a CUDA box.
+
+- Checkpoints are written atomically; a half-written one is ignored rather than resumed
+  from.
+- A resume restores weights **and** optimizer state, or refuses. Weights alone is a warm
+  restart, and shows up later as a loss spike.
+- `steps` is a total, so re-running the same call after a crash finishes the run.
+- A run whose loss goes non-finite is stopped before the update reaches the weights.
+- Learning-rate schedules are plain functions returning floats.
+- Leak-safe splits: contiguous tail, by group, or stratified by label.
+
+### Recipes
+
+Training without writing code. A recipe is a JSON contract describing a form, the data it
+needs and what it requires from a machine; a builder turns the answers into a model.
+
+| Recipe | What it learns |
+|---|---|
+| `text-lm` | Continues a pile of writing — a house style, a character voice, a domain's jargon |
+| `classify-text` | Sorts labelled documents into their categories |
+
+Both are byte-level, so any text works with no vocabulary file.
+
+- A setting the recipe does not declare is refused rather than ignored, so a config
+  cannot quietly disagree with what was trained.
+- The model size is checked against the memory the chosen machine reports.
+- `--dry-run` trains twenty steps and writes nothing.
+
+## The interface
+
+A native window — WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux. Each
+download also carries a headless binary for a machine with no screen, which serves the
+same interface to a browser.
+
+- **First run** asks what to call the machine, then for a passphrase, then what the
+  machine is for. The settings are pre-filled from the hardware, with the reason shown
+  beside each, so a wrong guess is visible rather than silent.
+- **Starting up** — with the computer, when you log in, or only when you open it. The
+  boot option asks for permission through the operating system's own password dialog.
+- **The cluster view** shows every machine with its vendor, capacity, memory,
+  temperature, clocks, power and whether it is throttling.
+- **Closing** asks once whether to keep running so the others can still send it work, or
+  quit. The answer is remembered if you leave the box ticked.
+
+Setup on a machine that has not joined a cluster is refused from anywhere but that
+machine, because until it joins there is no credential to check and the first person to
+reach it would own it. A headless machine can be set up over the network with a one-time
+code printed on its console.
+
+The cluster key never enters the browser. Signing in is the passphrase, checked by
+deriving the key again and comparing.
+
+## Telemetry
+
+Temperature, clocks, power draw, utilisation and throttle state.
+
+| Machine | Source |
+|---|---|
+| NVIDIA | `nvidia-smi` |
+| AMD | `rocm-smi` |
+| Apple silicon | `darwin-perf`, no `sudo` |
+
+The vendor tools are read by the daemon itself, so a machine with a card and no
+framework installed still reports it. They also see memory held by other processes,
+which a framework's own reading does not.
+
+A machine with no probe reports what the standard library can see — cores, architecture,
+memory — and says nothing about accelerators rather than guessing.
+
+## Installing
+
+Twelve packages, installed separately. Four have no dependencies at all: `fleet`,
+`client`, `media` and `contracts`, so the daemon installs on a small board as fast as on
+a workstation.
+
+```
+python packaging/build.py            # wheels
+python packaging/build.py --bundle   # and a standalone app for this platform
+```
+
+## Known limits
+
+- **Several daemons on one machine share a discovery port**, and only one of them
+  answers. One daemon per machine is unaffected; this only shows up when simulating a
+  cluster on a single box.
+- **The native window is verified on macOS.** Windows and Linux use different webview
+  backends, and a window cannot be tested without a display.
+- **No dataset browser yet.** Peer-to-peer transfer exists; a fleet-wide catalogue does
+  not.
+- **Training is one machine per run.** Splitting a single run across machines is not
+  built.

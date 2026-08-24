@@ -17,6 +17,7 @@ pi-rack          http://192.168.2.51:8770     5/6     busy +2    16 cpu
 ```
 
 Everything runs on your own hardware. Nothing leaves the network.
+[Full list of what it does](docs/FEATURES.md).
 
 - **Nothing to configure.** A passphrase is the whole setup. Two households on one
   network stay separate without either of them being told to.

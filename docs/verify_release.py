@@ -1,0 +1,480 @@
+"""Run every claim in RELEASE.md and report whether it holds.
+
+    python docs/verify_release.py
+"""
+
+from __future__ import annotations
+
+import json
+import socket
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+from pathlib import Path
+
+RESULTS: list[tuple[str, str, bool, str]] = []
+
+
+def check(area: str, claim: str):
+    def wrap(fn):
+        try:
+            detail = fn() or ""
+            RESULTS.append((area, claim, True, str(detail)))
+        except Exception as exc:                      # noqa: BLE001
+            RESULTS.append((area, claim, False, f"{type(exc).__name__}: {exc}"))
+        return fn
+    return wrap
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+TMP = Path(tempfile.mkdtemp(prefix="ml-stack-verify-"))
+WORDS = "correct horse battery staple"
+
+
+# -- setup ---------------------------------------------------------------
+@check("Setup", "the same passphrase gives the same cluster key")
+def _():
+    from ml_stack.fleet import key_from_passphrase
+    a = key_from_passphrase(WORDS)
+    assert a == key_from_passphrase(WORDS)
+    assert a != key_from_passphrase("something else entirely")
+    return f"{len(a)}-byte key"
+
+
+@check("Setup", "two groups on one network cannot see each other")
+def _():
+    from ml_stack.fleet import Advertiser, Beacon, discover, join_cluster
+    port = free_port()
+    ours = join_cluster(WORDS, path=TMP / "a.key")
+    theirs = join_cluster("a completely different phrase", path=TMP / "b.key")
+    with Advertiser(Beacon(name="ours", port=8770), ours, port=port, interval_s=0.2), \
+         Advertiser(Beacon(name="theirs", port=8771), theirs, port=port, interval_s=0.2):
+        we = {b.name for b in discover(ours, timeout_s=2.0, port=port)}
+        they = {b.name for b in discover(theirs, timeout_s=2.0, port=port)}
+    assert we == {"ours"} and they == {"theirs"}, (we, they)
+    return "each sees only its own"
+
+
+@check("Setup", "a passphrase shorter than 8 characters is refused")
+def _():
+    from ml_stack.fleet import DiscoveryError, key_from_passphrase
+    try:
+        key_from_passphrase("short")
+    except DiscoveryError as exc:
+        return str(exc)[:60]
+    raise AssertionError("accepted a short passphrase")
+
+
+@check("Setup", "the group is remembered, so a passphrase can be checked later")
+def _():
+    from ml_stack.fleet import check_passphrase, cluster_group, join_cluster
+    key = TMP / "grp.key"
+    join_cluster(WORDS, group="garage", path=key)
+    assert cluster_group(key) == "garage"
+    assert check_passphrase(WORDS, path=key)
+    assert not check_passphrase("wrong words here", path=key)
+    return "group 'garage'"
+
+
+# -- the daemon ----------------------------------------------------------
+class Box:
+    def __init__(self, name="box", slots=1, labels=(), extra=None, host="127.0.0.1"):
+        from ml_stack.fleet import JobRunner, Peer, device_report, load_or_create_token, make_handler
+        from ml_stack.fleet.settings import Settings
+        from ml_stack.fleet.ui import UI
+        root = TMP / name
+        self.files = root / "files"
+        self.files.mkdir(parents=True)
+        token = load_or_create_token(root)
+        self.runner = JobRunner(root, self.files, slots=slots)
+        self.port = free_port()
+        report = lambda: {**device_report(lambda: dict(extra or {})), "labels": list(labels)}
+        self.ui = UI(name=name, cluster_key_path=root / "cluster.key")
+        self.ui.runner, self.ui.settings = self.runner, Settings()
+        self.ui.settings_path, self.ui.report = root / "settings.json", report
+        self.httpd = ThreadingHTTPServer(
+            (host, self.port),
+            make_handler(self.runner, self.files, token, name, report, ui=self.ui))
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.peer = Peer(f"http://127.0.0.1:{self.port}", token)
+
+    def close(self):
+        self.runner.shutdown(); self.httpd.shutdown(); self.httpd.server_close()
+
+
+@check("Daemon", "a job runs and its output can be pulled back")
+def _():
+    box = Box("pull")
+    try:
+        job = box.peer.submit([sys.executable, "-c",
+            "import os,pathlib;d=pathlib.Path(os.environ['ML_STACK_OUT']);"
+            "d.mkdir(parents=True,exist_ok=True);(d/'r.txt').write_text('done')"])
+        box.peer.wait(job["id"], poll_s=0.1, timeout_s=30)
+        got = box.peer.pull(f"jobs/{job['id']}/out/r.txt", TMP / "pulled.txt")
+        assert got.read_text() == "done"
+        return "argv -> job -> file back"
+    finally:
+        box.close()
+
+
+@check("Daemon", "slots let several jobs run at once, and default to one")
+def _():
+    one, many = Box("one", slots=1), Box("many", slots=4)
+    try:
+        assert one.peer.health()["slots"] == 1
+        for i in range(4):
+            many.peer.submit([sys.executable, "-c", "import time;time.sleep(2)"])
+        end = time.time() + 8
+        while time.time() < end and many.runner.status()["free"] > 0:
+            time.sleep(0.1)
+        assert many.runner.status()["free"] == 0
+        return f"{len(many.runner.status()['running'])} at once"
+    finally:
+        one.close(); many.close()
+
+
+@check("Daemon", "stopping one job leaves its neighbour running")
+def _():
+    box = Box("stop", slots=2)
+    try:
+        keep = box.peer.submit([sys.executable, "-c", "import time;time.sleep(4)"])
+        doomed = box.peer.submit([sys.executable, "-c", "import time;time.sleep(4)"])
+        end = time.time() + 6
+        while time.time() < end and len(box.runner.status()["running"]) < 2:
+            time.sleep(0.1)
+        box.peer.stop(doomed["id"])
+        time.sleep(0.5)
+        assert box.peer.job(keep["id"])["state"] == "running"
+        return "neighbour survived"
+    finally:
+        box.close()
+
+
+@check("Daemon", "an empty file uploads without error")
+def _():
+    box = Box("empty")
+    try:
+        p = TMP / "empty.bin"; p.write_bytes(b"")
+        box.peer.push(p, "empty.bin")
+        assert (box.files / "empty.bin").read_bytes() == b""
+        return "0 bytes round-tripped"
+    finally:
+        box.close()
+
+
+# -- placement -----------------------------------------------------------
+@check("Placement", "vendors are distinguished: cuda, rocm and any-GPU differ")
+def _():
+    from ml_stack.fleet import Requires
+    amd = {"backends": ["torch"], "vendor": "amd", "rocm": True, "cuda": False,
+           "accelerator": True, "labels": []}
+    why = Requires(backend="cuda").why_not("amd", amd, 1, 1)
+    assert why and "ROCm" in why
+    assert Requires(backend="rocm").admits("amd", amd, 1, 1)
+    assert Requires(backend="accelerator").admits("amd", amd, 1, 1)
+    return why[:70]
+
+
+@check("Placement", "an unmeasured machine is tried, not skipped")
+def _():
+    from ml_stack.fleet import Candidate, choose
+    fast = Candidate(peer=None, name="fast", report={}, slots=1, free=1, rate=1000.0)
+    new = Candidate(peer=None, name="new", report={}, slots=1, free=1, rate=None)
+    assert choose([fast, new]).name == "new"
+    return "unmeasured wins while it has capacity"
+
+
+@check("Placement", "work is refused with every machine's reason")
+def _():
+    from ml_stack.fleet import Rates, Requires, Unit, run
+    gpu, pi = Box("gpu-lbl", labels=("train",)), Box("pi-lbl", labels=("prep",))
+    try:
+        unit = Unit(id="needs-cuda", argv=["true"], requires=Requires(backend="cuda"))
+        [place] = run([unit], [gpu.peer, pi.peer], rates=Rates(TMP / "r.json"))
+        assert place.state == "unplaceable", place
+        assert "gpu-lbl" in place.error and "pi-lbl" in place.error
+        return place.error[:70]
+    finally:
+        gpu.close(); pi.close()
+
+
+@check("Placement", "labels keep prep work off the training machines")
+def _():
+    from ml_stack.fleet import Rates, Requires, Unit, run
+    gpu, pi = Box("g2", labels=("train",)), Box("p2", slots=2, labels=("prep",))
+    try:
+        units = [Unit(id=f"u{i}", argv=[sys.executable, "-c", "pass"],
+                      requires=Requires(labels=("prep",))) for i in range(4)]
+        places = run(units, [gpu.peer, pi.peer], rates=Rates(TMP / "r2.json"), poll_s=0.05)
+        assert all(p.ok for p in places), [p.error for p in places]
+        assert {p.peer for p in places} == {"p2"}
+        return "all four landed on the prep box"
+    finally:
+        gpu.close(); pi.close()
+
+
+# -- scheduling ----------------------------------------------------------
+@check("Scheduling", "working hours block new work, including past midnight")
+def _():
+    from datetime import datetime
+    from ml_stack.fleet.availability import Availability
+    day = Availability.from_specs(busy=["mon-fri 09:00-17:00"])
+    assert not day.open_at(datetime.fromisoformat("2026-08-24 10:00"))
+    assert day.open_at(datetime.fromisoformat("2026-08-24 18:00"))
+    night = Availability.from_specs(busy=["22:00-06:00"])
+    assert not night.open_at(datetime.fromisoformat("2026-08-25 03:00"))
+    assert night.open_at(datetime.fromisoformat("2026-08-25 07:00"))
+    return "09:00-17:00 and 22:00-06:00 both hold"
+
+
+@check("Scheduling", "pausing stops running work and requeues it")
+def _():
+    from ml_stack.fleet.availability import Availability
+    box = Box("pause")
+    sched = Availability()
+    box.runner.gate = lambda: sched.may_start()
+    try:
+        job = box.peer.submit([sys.executable, "-c", "import time;time.sleep(30)"])
+        end = time.time() + 5
+        while time.time() < end and not box.runner.status()["running"]:
+            time.sleep(0.1)
+        sched.pause(reason="gaming")
+        box.runner.stop_running()
+        time.sleep(0.5)
+        assert box.peer.job(job["id"])["state"] == "queued"
+        return "job requeued, machine free"
+    finally:
+        box.close()
+
+
+@check("Scheduling", "a pause survives a restart")
+def _():
+    from ml_stack.fleet.availability import Availability
+    a = Availability(); a.pause(reason="gaming"); a.save(TMP / "av.json")
+    back = Availability.load(TMP / "av.json")
+    assert back.paused and "gaming" in back.may_start()[1]
+    return back.may_start()[1][:50]
+
+
+# -- training ------------------------------------------------------------
+@check("Training", "a language model trains and the loss falls")
+def _():
+    import math
+    from ml_stack.train.run import run as train_run
+    data = TMP / "corpus"; data.mkdir()
+    (data / "c.jsonl").write_text("\n".join(json.dumps(
+        {"text": f"The quick brown fox jumps over the lazy dog {i}."}) for i in range(300)))
+    got = train_run("text-lm", {"size": "small", "steps": 120, "context": 64,
+                                "batch_size": 8}, data, TMP / "lm")
+    assert got["final_loss"] < math.log(256) * 0.7, got
+    return f"loss {got['final_loss']:.2f} vs {math.log(256):.2f} untrained"
+
+
+@check("Training", "a classifier generalises to rows it never saw")
+def _():
+    import math
+    from ml_stack.train.run import run as train_run
+    data = TMP / "reviews"; data.mkdir()
+    rows = [{"text": f"This was {'great' if i % 2 else 'awful'}, truly.",
+             "label": "good" if i % 2 else "bad"} for i in range(300)]
+    (data / "r.jsonl").write_text("\n".join(json.dumps(r) for r in rows))
+    got = train_run("classify-text", {"size": "small", "steps": 200, "context": 48},
+                    data, TMP / "cls")
+    assert got["best_metric"] < math.log(2), got
+    return f"held-out {got['best_metric']:.4f} vs {math.log(2):.2f} for guessing"
+
+
+@check("Training", "a dry run leaves no checkpoint behind")
+def _():
+    from ml_stack.train.run import run as train_run
+    out = TMP / "dry"
+    got = train_run("classify-text", {"size": "small"}, TMP / "reviews", out, dry=True)
+    assert got["dry_run"] and not [p for p in out.iterdir() if p.is_dir()]
+    return f"{got['steps']} steps, nothing written"
+
+
+@check("Training", "resuming continues rather than restarting")
+def _():
+    from ml_stack.train.run import run as train_run
+    train_run("text-lm", {"size": "small", "steps": 60, "context": 64},
+              TMP / "corpus", TMP / "resume")
+    again = train_run("text-lm", {"size": "small", "steps": 120, "context": 64},
+                      TMP / "corpus", TMP / "resume")
+    assert again["steps"] == 120
+    return "60 -> 120, not 60 -> 180"
+
+
+@check("Training", "an undeclared setting is refused, not ignored")
+def _():
+    from ml_stack.train.recipes import validate
+    try:
+        validate("text-lm", {"lr_schedule": "cosine"})
+    except ValueError as exc:
+        return str(exc)[:70]
+    raise AssertionError("a silently dropped setting")
+
+
+# -- the interface -------------------------------------------------------
+@check("Interface", "the web assets are served")
+def _():
+    box = Box("ui")
+    try:
+        for path, kind in (("/ui/", "text/html"), ("/ui/static/app.js", "text/javascript"),
+                           ("/ui/static/style.css", "text/css")):
+            req = urllib.request.Request(f"http://127.0.0.1:{box.port}{path}")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                assert r.status == 200 and r.headers["Content-Type"] == kind, path
+        return "index, script and stylesheet"
+    finally:
+        box.close()
+
+
+@check("Interface", "setup is refused from another machine")
+def _():
+    from ml_stack.fleet.discovery import primary_ip
+    box = Box("guard", host="0.0.0.0")
+    try:
+        req = urllib.request.Request(
+            f"http://{primary_ip()}:{box.port}/ui/setup/join",
+            data=json.dumps({"passphrase": WORDS}).encode(), method="POST")
+        req.add_header("X-ML-Stack-UI", "1")
+        req.add_header("Content-Type", "application/json")
+        try:
+            urllib.request.urlopen(req, timeout=5)
+        except urllib.error.HTTPError as e:
+            assert e.code == 403, e.code
+            return json.loads(e.read())["error"][:70]
+        raise AssertionError("a stranger could claim this machine")
+    finally:
+        box.close()
+    return ""
+
+
+@check("Interface", "the passphrase signs you in, and one typo does not lock you out")
+def _():
+    box = Box("login")
+    try:
+        def post(body):
+            req = urllib.request.Request(
+                f"http://127.0.0.1:{box.port}/ui/session",
+                data=json.dumps(body).encode(), method="POST")
+            req.add_header("X-ML-Stack-UI", "1")
+            req.add_header("Content-Type", "application/json")
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    return r.status
+            except urllib.error.HTTPError as e:
+                return e.code
+        urllib.request.urlopen(urllib.request.Request(
+            f"http://127.0.0.1:{box.port}/ui/setup/join",
+            data=json.dumps({"passphrase": WORDS}).encode(), method="POST",
+            headers={"X-ML-Stack-UI": "1", "Content-Type": "application/json"}), timeout=20)
+        assert post({"passphrase": "wrong words here"}) == 401
+        assert post({"passphrase": WORDS}) == 200
+        return "typo then correct -> signed in"
+    finally:
+        box.close()
+
+
+@check("Interface", "settings are suggested from the machine's own hardware")
+def _():
+    from ml_stack.fleet.settings import suggest
+    gpu = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
+    cpu = suggest({"accelerator": False, "cpus": 12})
+    assert gpu["labels"].value == ["train"] and gpu["slots"].value == 1
+    assert cpu["labels"].value == ["prep"] and cpu["slots"].value > 1
+    return f"GPU -> train/1 slot, CPU -> prep/{cpu['slots'].value} slots"
+
+
+@check("Interface", "closing asks once, then remembers")
+def _():
+    from ml_stack.fleet.app import Bridge
+    from ml_stack.fleet.settings import Settings
+    path = TMP / "close.json"
+
+    class W:
+        hidden = destroyed = False
+        def hide(self): self.hidden = True
+        def destroy(self): self.destroyed = True
+
+    b = Bridge(path); b.window = W()
+    b.close_choice("background", remember=False)
+    assert b.window.hidden and Settings.load(path).on_close == ""
+    b.window = W(); b.close_choice("background", remember=True)
+    assert Settings.load(path).on_close == "background"
+    return "unticked -> ask again; ticked -> remembered"
+
+
+# -- telemetry -----------------------------------------------------------
+@check("Telemetry", "this machine reports its own temperature and clocks")
+def _():
+    from ml_stack.train.accelerator import report
+    got = report()
+    have = [k for k in ("temp_c", "clock_mhz", "power_w", "gpu_util_pct") if k in got]
+    if not have:
+        return "no probe available on this machine (optional)"
+    return ", ".join(f"{k}={got[k]}" for k in have)
+
+
+@check("Telemetry", "a machine with no framework still reports what it is")
+def _():
+    from ml_stack.fleet.daemon import stdlib_device_report
+    got = stdlib_device_report()
+    assert got["cpus"] >= 1 and got["arch"]
+    assert "cuda" not in got and "gpu" not in got
+    return f"{got['cpus']} cpus, {got['arch']}, no guess about a GPU"
+
+
+# -- packaging -----------------------------------------------------------
+@check("Packaging", "the interface ships inside the wheel")
+def _():
+    import zipfile
+    out = TMP / "wheels"
+    done = subprocess.run(
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(out),
+         str(Path(__file__).resolve().parent.parent / "packages" / "ml-stack-fleet")],
+        capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-200:]
+    names = zipfile.ZipFile(sorted(out.glob("*.whl"))[-1]).namelist()
+    for asset in ("index.html", "style.css", "app.js"):
+        assert f"ml_stack/fleet/web/{asset}" in names, asset
+    return "index.html, style.css, app.js"
+
+
+@check("Packaging", "the packages that must install anywhere have no dependencies")
+def _():
+    root = Path(__file__).resolve().parent.parent
+    for name in ("fleet", "client", "media", "contracts"):
+        text = (root / "packages" / f"ml-stack-{name}" / "pyproject.toml").read_text()
+        line = next(x for x in text.splitlines() if x.startswith("dependencies ="))
+        assert line.split("=", 1)[1].strip() == "[]", f"{name}: {line}"
+    return "fleet, client, media, contracts"
+
+
+# -- report --------------------------------------------------------------
+def main() -> int:
+    width = max(len(c) for _, c, _, _ in RESULTS) + 2
+    area = ""
+    for a, claim, ok, detail in RESULTS:
+        if a != area:
+            print(f"\n{a}")
+            area = a
+        mark = "PASS" if ok else "FAIL"
+        print(f"  [{mark}] {claim:<{width}} {detail}")
+    failed = [r for r in RESULTS if not r[2]]
+    print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} verified")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
