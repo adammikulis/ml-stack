@@ -62,6 +62,30 @@ jobs:
           curl -sf -o /dev/null -w 'ui %{http_code}\n' http://127.0.0.1:8899/ui/
           curl -sf -o /dev/null http://127.0.0.1:8899/ui/static/app.js
 
+      # The screens, not just the assets. ml_stack.serve is reached through a lazy
+      # import, so nothing static points at it and only a running bundle says whether
+      # PyInstaller carried it.
+      - name: the screens answer
+        shell: bash
+        run: |
+          U='X-ML-Stack-UI: 1'; J='Content-Type: application/json'
+          B=http://127.0.0.1:8899
+          curl -sf -H "$J" -H "$U" -X POST \
+            -d '{"passphrase":"correct horse battery staple","group":"ci"}' \
+            $B/ui/setup/join > /dev/null
+          C=$(curl -s -D- -o /dev/null -H "$J" -H "$U" -X POST \
+            -d '{"passphrase":"correct horse battery staple"}' \
+            $B/ui/session | tr -d '\r' | awk 'tolower($1)=="set-cookie:"{print $2}' \
+            | cut -d';' -f1)
+          test -n "$C" || { echo "no session cookie"; exit 1; }
+          for p in /ui/chat /ui/models /ui/serving /ui/conversations /ui/uninstall; do
+            code=$(curl -s -o /tmp/body -w '%{http_code}' -H "$U" -H "Cookie: $C" "$B$p")
+            echo "$p -> $code $(head -c 120 /tmp/body)"
+            test "$code" = "200" || { echo "$p did not answer"; exit 1; }
+          done
+          curl -s -H "$U" -H "Cookie: $C" $B/ui/serving | grep -q '"can_serve": true' \
+            || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
+
       # Python rather than zip(1): Windows runners have no zip in bash.
       - name: package it
         shell: bash
