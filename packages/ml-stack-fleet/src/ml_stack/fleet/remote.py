@@ -1,8 +1,8 @@
-"""Client for a training daemon on another machine.
+"""Client for one fleet daemon on another machine.
 
-    from ml_stack.train.remote import RemoteTrainer
+    from ml_stack.fleet.remote import Peer
 
-    rtx = RemoteTrainer("http://rtx:8770", token=...)
+    rtx = Peer("http://rtx:8770", token=...)
     rtx.push("train/data/packed/train.npy", "data/train.npy")
     job = rtx.submit(["python", "-m", "train.cuda_train", "--steps", "30000"],
                      name="doly-full")
@@ -11,7 +11,7 @@
 
 Or, with a cluster key in place, without knowing where it is:
 
-    rtx = RemoteTrainer.find_one(require="cuda")
+    rtx = Peer.find_one(require="cuda")
 
 stdlib only. Uploads and downloads resume, because a 2GB dataset over a home
 network will be interrupted eventually and restarting from zero each time
@@ -49,11 +49,11 @@ def sha256_file(path: Path, chunk: int = CHUNK) -> str:
     return h.hexdigest()
 
 
-class RemoteError(RuntimeError):
+class PeerError(RuntimeError):
     pass
 
 
-class RemoteTrainer:
+class Peer:
     def __init__(self, base_url: str, token: str, *, timeout: float = 60.0,
                  beacon: Beacon | None = None) -> None:
         self.base_url = base_url.rstrip("/")
@@ -72,7 +72,7 @@ class RemoteTrainer:
     def discover(cls, *, timeout_s: float = 2.0, key: bytes | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
-                 port: int | None = None) -> list["RemoteTrainer"]:
+                 port: int | None = None) -> list["Peer"]:
         """Every daemon on the LAN that proves it holds the cluster key.
 
         No token argument: it is derived from the same key that authenticated
@@ -92,7 +92,7 @@ class RemoteTrainer:
                  timeout_s: float = 2.0, key: bytes | None = None,
                  cluster_key_path: Path | str | None = None,
                  timeout: float = 60.0, group: str | None = None,
-                 port: int | None = None) -> "RemoteTrainer":
+                 port: int | None = None) -> "Peer":
         """The one peer to use, or an error saying exactly why there isn\'t one.
 
         ``require`` filters on a backend the peer reports ("cuda", "mps"), and
@@ -141,9 +141,9 @@ class RemoteTrainer:
             body = e.read().decode(errors="replace")
             # The daemon puts the reason in the body; a bare "HTTP 400" from
             # urllib tells you nothing about which field it rejected.
-            raise RemoteError(f"{method} {path} -> {e.code}: {body[:400]}") from None
+            raise PeerError(f"{method} {path} -> {e.code}: {body[:400]}") from None
         except urllib.error.URLError as e:
-            raise RemoteError(f"{method} {path} -> unreachable: {e.reason}") from None
+            raise PeerError(f"{method} {path} -> unreachable: {e.reason}") from None
 
     def _json(self, method: str, path: str, payload: Any = None) -> Any:
         data = json.dumps(payload).encode() if payload is not None else None
@@ -193,7 +193,7 @@ class RemoteTrainer:
             if job["state"] not in ("queued", "running"):
                 return job
             if deadline and time.time() > deadline:
-                raise RemoteError(f"job {job_id} still {job['state']} after timeout")
+                raise PeerError(f"job {job_id} still {job['state']} after timeout")
             time.sleep(poll_s)
 
     # -- files -----------------------------------------------------------
@@ -210,7 +210,11 @@ class RemoteTrainer:
         with local.open("rb") as fh:
             while True:
                 chunk = fh.read(CHUNK)
-                if not chunk:
+                # `and total` so a zero-byte file still sends one (empty) request. A
+                # prep shard that filtered to nothing is an empty file and is a real
+                # result: breaking here instead would leave the upload never made and
+                # the reply never read.
+                if not chunk and total:
                     break
                 digest.update(chunk)
                 last = fh.tell() >= total
@@ -225,6 +229,8 @@ class RemoteTrainer:
                 sent += len(chunk)
                 if on_progress:
                     on_progress(sent, total)
+                if not chunk:
+                    break
         return json.loads(body or b"{}")
 
     def pull(self, remote: str, local: Path | str, *,
@@ -265,13 +271,13 @@ class RemoteTrainer:
                 if size is not None and start == size:
                     os.replace(partial, local)
                     return local
-                raise RemoteError(
+                raise PeerError(
                     f"{partial} is {start} bytes but the remote file is "
                     f"{size}; delete it and pull again") from None
             body = e.read().decode(errors="replace")
-            raise RemoteError(f"GET /files/{remote} -> {e.code}: {body[:400]}") from None
+            raise PeerError(f"GET /files/{remote} -> {e.code}: {body[:400]}") from None
         except urllib.error.URLError as e:
-            raise RemoteError(f"GET /files/{remote} -> unreachable: {e.reason}") from None
+            raise PeerError(f"GET /files/{remote} -> unreachable: {e.reason}") from None
 
         with resp:
             want = (resp.headers.get(DIGEST_HEADER) or "").strip().lower()
@@ -289,7 +295,7 @@ class RemoteTrainer:
                         on_progress(done, total if total is not None else done)
         got = partial.stat().st_size
         if total is not None and got != total:
-            raise RemoteError(
+            raise PeerError(
                 f"{remote}: got {got} of {total} bytes; left {partial.name} "
                 "in place to resume from")
         if want:
@@ -299,7 +305,7 @@ class RemoteTrainer:
             actual = sha256_file(partial)
             if not hmac.compare_digest(actual, want):
                 partial.unlink(missing_ok=True)
-                raise RemoteError(
+                raise PeerError(
                     f"{remote}: checksum mismatch (expected {want[:16]}..., "
                     f"got {actual[:16]}...); discarded the download")
         os.replace(partial, local)

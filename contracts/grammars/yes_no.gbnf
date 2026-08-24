@@ -1,0 +1,3 @@
+# Exactly one of two tokens, nothing else. For a binary decision that downstream code
+# branches on: "yes, because..." is not a value that `== "yes"` handles.
+root ::= "yes" | "no"

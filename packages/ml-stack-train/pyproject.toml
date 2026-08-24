@@ -9,11 +9,12 @@ description = "Training scaffolding: atomic checkpoints, schedules, guards, metr
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-dependencies = ["ml-stack-backend"]
+dependencies = ["ml-stack-backend", "ml-stack-fleet"]
 
-[project.scripts]
-ml-stack-traind = "ml_stack.train.daemon:main"
-ml-stack-peers = "ml_stack.train.peers:main"
+# Registers the accelerator probe with ml-stack-fleet, which is device tier and so cannot
+# import a framework to ask about CUDA itself. See ml_stack.train.accelerator.
+[project.entry-points."ml_stack.device_report"]
+accelerator = "ml_stack.train.accelerator:report"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

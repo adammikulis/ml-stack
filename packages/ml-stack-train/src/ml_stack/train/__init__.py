@@ -17,6 +17,22 @@ its own.
 
 from __future__ import annotations
 
+from ml_stack.fleet import (
+    Advertiser,
+    Beacon,
+    DaemonError,
+    DiscoveryError,
+    Job,
+    JobRunner,
+    Peer,
+    PeerError,
+    create_cluster_key,
+    derive_token,
+    discover,
+    load_cluster_key,
+    safe_relpath,
+    serve_forever,
+)
 from ml_stack.train.checkpoint import (
     CheckpointError,
     CheckpointState,
@@ -30,23 +46,6 @@ from ml_stack.train.checkpoint import (
     rotate,
     save,
 )
-from ml_stack.train.daemon import (
-    DaemonError,
-    Job,
-    JobRunner,
-    safe_relpath,
-    serve_forever,
-)
-from ml_stack.train.discovery import (
-    Advertiser,
-    Beacon,
-    DiscoveryError,
-    create_cluster_key,
-    derive_token,
-    discover,
-    load_cluster_key,
-)
-from ml_stack.train.remote import RemoteError, RemoteTrainer
 from ml_stack.train.guard import (
     NonFiniteBudget,
     RunLock,
@@ -76,8 +75,8 @@ from ml_stack.train.schedule import (
 __all__ = [
     "serve_forever",
     "safe_relpath",
-    "RemoteTrainer",
-    "RemoteError",
+    "Peer",
+    "PeerError",
     "Advertiser",
     "Beacon",
     "DiscoveryError",

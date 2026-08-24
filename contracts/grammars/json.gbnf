@@ -1,0 +1,19 @@
+# Any JSON value. The general-purpose constraint: use it when you want valid JSON and
+# will validate the shape yourself afterwards.
+root   ::= value
+value  ::= object | array | string | number | "true" | "false" | "null"
+
+object ::= "{" ws ( string ws ":" ws value ( ws "," ws string ws ":" ws value )* )? ws "}"
+array  ::= "[" ws ( value ( ws "," ws value )* )? ws "]"
+
+string ::= "\"" char* "\""
+char   ::= [^"\\\x7F\x00-\x1F] | "\\" escape
+escape ::= ["\\bfnrt/] | "u" hex hex hex hex
+hex    ::= [0-9a-fA-F]
+
+number ::= "-"? int frac? exp?
+int    ::= "0" | [1-9] [0-9]*
+frac   ::= "." [0-9]+
+exp    ::= [eE] [-+]? [0-9]+
+
+ws     ::= [ \t\n\r]*

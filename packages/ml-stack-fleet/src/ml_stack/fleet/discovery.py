@@ -52,6 +52,7 @@ import socket
 import struct
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
@@ -184,6 +185,13 @@ class Beacon:
     device: dict[str, Any] = field(default_factory=dict)
     busy: bool = False
     queued: int = 0
+    #: How many jobs this daemon will run at once, and how many of those are free.
+    #: ``busy`` stays on the wire beside them: it is what an older peer reads, and
+    #: ``free`` is what a newer one reads, so a mixed-version fleet degrades to the
+    #: old meaning rather than to an error. The HMAC covers the whole body, so the
+    #: extra keys verify either way.
+    slots: int = 1
+    free: int = 1
     #: Filled in by the receiver from the packet source address, never trusted
     #: from the payload. Empty on the advertising side.
     host: str = ""
@@ -203,6 +211,7 @@ class Beacon:
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "port": self.port, "device": self.device,
                 "busy": self.busy, "queued": self.queued,
+                "slots": self.slots, "free": self.free,
                 "hostname": self.hostname, "instance": self.instance}
 
     @property
@@ -302,10 +311,17 @@ class Advertiser:
 
     def __init__(self, beacon: Beacon, key: bytes, *,
                  group: str | None = None, port: int | None = None,
-                 interval_s: float = 10.0) -> None:
+                 interval_s: float = 10.0,
+                 refresh: Callable[[Beacon], None] | None = None) -> None:
         beacon.instance = beacon.instance or secrets.token_hex(8)
         self.beacon = beacon
         self.key = key
+        #: Called just before each announcement and each reply, to bring the beacon's
+        #: mutable half up to date. Without it ``busy``, ``queued`` and the free-VRAM
+        #: reading are whatever they were when the daemon booted -- so a box that has
+        #: been training for six hours still advertises itself as idle, and anything
+        #: choosing a peer on that basis is reading a constant.
+        self.refresh = refresh
         self.group = group or default_group()
         self.port = port if port is not None else default_port()
         self.interval_s = interval_s
@@ -348,6 +364,14 @@ class Advertiser:
 
     # -- internals --
     def _payload(self, kind: str, nonce: str = "") -> bytes:
+        if self.refresh is not None:
+            try:
+                self.refresh(self.beacon)
+            except Exception:                         # noqa: BLE001
+                # A probe that raises must not silence the beacon. Advertising a stale
+                # answer keeps the box discoverable; advertising nothing removes it from
+                # the fleet, which is strictly worse.
+                pass
         b = self.beacon.public()
         b["hostname"] = b["hostname"] or socket.gethostname()
         return _sign(self.key, {"v": PROTOCOL, "kind": kind, "t": time.time(),
@@ -458,6 +482,11 @@ def discover(key: bytes, *, timeout_s: float = 2.0, group: str | None = None,
                                 device=dict(body.get("device") or {}),
                                 busy=bool(body.get("busy")),
                                 queued=int(body.get("queued") or 0),
+                                slots=int(body.get("slots") or 1),
+                                # An old beacon carries no "free"; its "busy" flag is
+                                # the whole truth it has, so read it as one slot used.
+                                free=int(body["free"]) if "free" in body
+                                else (0 if body.get("busy") else 1),
                                 host=addr[0],
                                 hostname=str(body.get("hostname", "")),
                                 instance=str(body.get("instance", "")))

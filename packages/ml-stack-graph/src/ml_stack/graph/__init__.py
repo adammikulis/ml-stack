@@ -23,7 +23,6 @@ from ml_stack.graph.dag import (
 from ml_stack.graph.data import (
     BatchedGraph,
     Graph,
-    GraphSource,
     batch_graphs,
 )
 from ml_stack.graph.message import (
@@ -48,7 +47,6 @@ __all__ = [
     "BatchedGraph",
     "Edges",
     "Graph",
-    "GraphSource",
     "NotADAG",
     "batch_graphs",
     "build_topology",

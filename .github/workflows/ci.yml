@@ -15,7 +15,15 @@ jobs:
       - name: tier isolation
         run: python scripts/check_tiers.py --live
 
-      - name: tests
+      # The suite imports numpy, psutil and Pillow at module scope, so without these the
+      # test modules ERROR at collection rather than skipping -- which reads as a broken
+      # run, not as reduced coverage. torch and mlx are deliberately absent: the tests
+      # that need them are marked and skip cleanly, and a CPU torch wheel costs more
+      # install time than the parity tests are worth on every push.
+      - name: install test dependencies
         run: |
-          python -m pip install --upgrade pip pytest
-          python -m pytest tests/ -q
+          python -m pip install --upgrade pip
+          python -m pip install pytest numpy psutil pillow networkx gguf
+
+      - name: tests
+        run: python -m pytest tests/ -q

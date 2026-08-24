@@ -13,9 +13,8 @@ values along its edges inside an autograd graph.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any
 
 Tensor = Any
 
@@ -107,12 +106,6 @@ class BatchedGraph:
     x: Tensor | None
     graph_ids: Tensor
     node_offsets: Tensor
-
-
-class GraphSource(Protocol):
-    """Anything that yields graphs. Datasets implement this."""
-
-    def iter_graphs(self) -> Iterator[Graph]: ...
 
 
 def batch_graphs(graphs: list[Graph], *, backend: Any = None) -> BatchedGraph:

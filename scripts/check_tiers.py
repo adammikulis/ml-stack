@@ -42,6 +42,7 @@ TIERS: dict[str, str] = {
     "contracts": "device",
     "media": "device",
     "client": "device",
+    "fleet": "device",
     "serve": "host",
     "gguf": "host",
     "speech": "host",

@@ -74,16 +74,19 @@ def cmd_ls(args: argparse.Namespace) -> int:
         print("  - is 'ml-stack-traind' running there?")
         print("  - same LAN, and does that box hold the same cluster key?")
         return 1
-    print(f"{'NAME':<16} {'URL':<28} {'STATE':<10} DEVICE")
+    print(f"{'NAME':<16} {'URL':<28} {'FREE':<7} {'STATE':<10} DEVICE")
     for p in peers:
-        state = "busy" if p.busy else "idle"
+        state = "busy" if p.free == 0 else "idle"
         if p.queued:
             state += f" +{p.queued}"
-        gpu = p.device.get("gpu") or ",".join(p.device.get("backends") or []) or "-"
+        slots = f"{p.free}/{p.slots}"
+        gpu = (p.device.get("gpu")
+               or ",".join(p.device.get("backends") or [])
+               or f"{p.device.get('cpus', '?')} cpu")
         vram = p.device.get("vram_free_gb")
         if vram is not None:
             gpu += f"  {vram}/{p.device.get('vram_total_gb', '?')} GB free"
-        print(f"{p.name:<16} {p.base_url:<28} {state:<10} {gpu}")
+        print(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {gpu}")
     return 0
 
 

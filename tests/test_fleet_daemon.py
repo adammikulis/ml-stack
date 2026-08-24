@@ -21,14 +21,18 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from ml_stack.train.daemon import (
+from ml_stack.fleet.daemon import (
+    DIGEST_HEADER,
     DaemonError,
     JobRunner,
+    device_report,
     load_or_create_token,
     make_handler,
+    resolve_report,
     safe_relpath,
+    stdlib_device_report,
 )
-from ml_stack.train.remote import RemoteError, RemoteTrainer, sha256_file
+from ml_stack.fleet.remote import PeerError, Peer, sha256_file
 
 
 def _free_port() -> int:
@@ -49,7 +53,7 @@ def daemon(tmp_path):
                                 make_handler(runner, files, token))
     t = threading.Thread(target=httpd.serve_forever, daemon=True)
     t.start()
-    client = RemoteTrainer(f"http://127.0.0.1:{port}", token)
+    client = Peer(f"http://127.0.0.1:{port}", token)
     try:
         yield client, root, files, token
     finally:
@@ -92,8 +96,8 @@ def test_health_needs_no_token(daemon):
 
 def test_everything_else_requires_the_token(daemon):
     client, _, _, _ = daemon
-    bad = RemoteTrainer(client.base_url, "not-the-token")
-    with pytest.raises(RemoteError) as e:
+    bad = Peer(client.base_url, "not-the-token")
+    with pytest.raises(PeerError) as e:
         bad.jobs()
     assert "401" in str(e.value)
 
@@ -167,13 +171,13 @@ def test_stopping_a_queued_job_dequeues_it(daemon):
 
 def test_empty_argv_is_rejected(daemon):
     client, *_ = daemon
-    with pytest.raises(RemoteError):
+    with pytest.raises(PeerError):
         client.submit([])
 
 
 def test_unknown_job_is_404(daemon):
     client, *_ = daemon
-    with pytest.raises(RemoteError) as e:
+    with pytest.raises(PeerError) as e:
         client.job("nope")
     assert "404" in str(e.value)
 
@@ -220,7 +224,7 @@ def test_push_is_chunked_for_large_files(daemon, tmp_path):
 
 def test_pull_of_a_missing_file_is_404(daemon, tmp_path):
     client, *_ = daemon
-    with pytest.raises(RemoteError) as e:
+    with pytest.raises(PeerError) as e:
         client.pull("no/such.bin", tmp_path / "x.bin")
     assert "404" in str(e.value)
 
@@ -229,7 +233,7 @@ def test_upload_cannot_escape_the_file_root(daemon, tmp_path):
     client, _, files, _ = daemon
     src = tmp_path / "evil.bin"
     src.write_bytes(b"pwn")
-    with pytest.raises(RemoteError):
+    with pytest.raises(PeerError):
         client.push(src, "../escaped.bin")
     assert not (files.parent / "escaped.bin").exists()
 
@@ -317,7 +321,7 @@ def test_a_stale_oversized_part_is_refused_not_spliced(daemon, tmp_path):
     (files / "small.bin").write_bytes(b"x" * 1000)
     out = tmp_path / "small.bin"
     out.with_suffix(".bin.part").write_bytes(b"y" * 5000)
-    with pytest.raises(RemoteError, match="delete it and pull again"):
+    with pytest.raises(PeerError, match="delete it and pull again"):
         client.pull("small.bin", out)
     assert not out.exists(), "a refused pull must not produce a file"
 
@@ -345,7 +349,7 @@ def test_an_explicit_range_end_is_honoured(daemon, tmp_path):
 def test_a_suffix_range_is_refused_rather_than_mis_served(daemon):
     client, root, files, _ = daemon
     (files / "s.bin").write_bytes(b"abcdefghij")
-    with pytest.raises(RemoteError, match="suffix ranges"):
+    with pytest.raises(PeerError, match="suffix ranges"):
         client._request("GET", "/files/s.bin", headers={"Range": "bytes=-5"})
 
 
@@ -364,7 +368,7 @@ def test_an_upload_that_does_not_match_its_digest_is_discarded(daemon, tmp_path)
     """The bytes arrived intact by luck or not at all -- either way, refuse."""
     client, root, files, _ = daemon
     payload = b"the real payload" * 64
-    with pytest.raises(RemoteError, match="checksum mismatch"):
+    with pytest.raises(PeerError, match="checksum mismatch"):
         client._request("PUT", "/files/bad.bin", data=payload, headers={
             "Content-Range": f"bytes 0-{len(payload)-1}/{len(payload)}",
             "X-ML-Stack-Complete": "1",
@@ -407,7 +411,7 @@ def test_a_download_whose_bytes_do_not_match_the_digest_is_discarded(daemon, tmp
     os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
 
     out = tmp_path / "second.bin"
-    with pytest.raises(RemoteError, match="checksum mismatch"):
+    with pytest.raises(PeerError, match="checksum mismatch"):
         client.pull("ckpt.bin", out)
     assert not out.exists(), "a corrupt download must not be promoted"
     assert not out.with_suffix(".bin.part").exists()
@@ -421,7 +425,7 @@ def test_a_resumed_download_verifies_the_bytes_it_did_not_fetch(daemon, tmp_path
     out = tmp_path / "resume.bin"
     # A .part whose length is plausible but whose content is wrong.
     out.with_suffix(".bin.part").write_bytes(b"\xff" * 2048)
-    with pytest.raises(RemoteError, match="checksum mismatch"):
+    with pytest.raises(PeerError, match="checksum mismatch"):
         client.pull("resume.bin", out)
     assert not out.exists()
 
@@ -434,3 +438,212 @@ def test_the_digest_cache_notices_a_rewritten_file(daemon, tmp_path):
     time.sleep(0.01)
     target.write_bytes(b"b" * 200)           # different size and mtime
     assert client.pull("moving.bin", tmp_path / "b.bin").read_bytes() == b"b" * 200
+
+
+# -- slots ---------------------------------------------------------------
+@pytest.fixture
+def multi_daemon(tmp_path):
+    """A daemon with room for three jobs at once, the way a prep box is configured."""
+    root = tmp_path / "traind"
+    files = root / "files"
+    files.mkdir(parents=True)
+    token = load_or_create_token(root)
+    runner = JobRunner(root, slots=3)
+    port = _free_port()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port),
+                                make_handler(runner, files, token))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    client = Peer(f"http://127.0.0.1:{port}", token)
+    try:
+        yield client, runner
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def _await(predicate, timeout=10.0, interval=0.05):
+    end = time.time() + timeout
+    while time.time() < end:
+        if predicate():
+            return True
+        time.sleep(interval)
+    return False
+
+
+def test_slots_let_several_jobs_run_at_once(multi_daemon):
+    """The one-job rule exists for GPU contention. A box tokenizing text has none, and
+    serialising four shards onto it wastes three quarters of the machine."""
+    client, runner = multi_daemon
+    for i in range(3):
+        client.submit([sys.executable, "-c", "import time; time.sleep(3)"], name=f"j{i}")
+
+    assert _await(lambda: runner.status()["free"] == 0), runner.status()
+    status = runner.status()
+    assert len(status["running"]) == 3
+    assert status["slots"] == 3
+
+
+def test_stopping_one_job_does_not_kill_its_neighbour(multi_daemon):
+    """The specific failure: with a single `_current` handle, "the running process" is
+    not a thing, and stopping job B reaches for whatever ran last -- killing job A."""
+    client, runner = multi_daemon
+    keep = client.submit([sys.executable, "-c", "import time; time.sleep(4)"], name="keep")
+    doomed = client.submit([sys.executable, "-c", "import time; time.sleep(4)"], name="doomed")
+
+    assert _await(lambda: len(runner.status()["running"]) == 2)
+    client.stop(doomed["id"])
+
+    assert _await(lambda: client.job(doomed["id"])["state"] == "stopped")
+    assert client.job(keep["id"])["state"] == "running"
+    assert _await(lambda: client.job(keep["id"])["state"] == "done", timeout=15)
+
+
+def test_the_default_is_still_one_job_at_a_time(daemon):
+    """Raising the limit must be a decision someone made, not a default they inherited."""
+    client, *_ = daemon
+    assert client.health()["slots"] == 1
+
+
+def test_a_slot_count_below_one_is_refused(tmp_path):
+    with pytest.raises(DaemonError, match="at least 1"):
+        JobRunner(tmp_path, slots=0)
+
+
+def test_listing_jobs_survives_a_submit_landing_mid_poll(multi_daemon):
+    """Iterating runner.jobs directly races a submit and raises 'dictionary changed size
+    during iteration', which reaches the caller as a 500 on a route that cannot fail."""
+    client, _ = multi_daemon
+    stop = threading.Event()
+    errors: list[Exception] = []
+
+    def submit_forever():
+        while not stop.is_set():
+            try:
+                client.submit([sys.executable, "-c", ""], name="churn")
+            except Exception as exc:                  # noqa: BLE001
+                errors.append(exc)
+            time.sleep(0.005)
+
+    writer = threading.Thread(target=submit_forever, daemon=True)
+    writer.start()
+    try:
+        for _ in range(60):
+            client.jobs()
+    finally:
+        stop.set()
+        writer.join(timeout=5)
+    assert not errors, errors
+
+
+# -- transfer edge cases -------------------------------------------------
+def test_pushing_an_empty_file_works(daemon, tmp_path):
+    """A prep shard that filtered to nothing is an empty file, and it is a real result.
+    The upload loop never runs for zero bytes, so the reply was read before it was set."""
+    client, _root, files, _token = daemon
+    empty = tmp_path / "empty.bin"
+    empty.write_bytes(b"")
+
+    client.push(empty, "empty.bin")
+
+    assert (files / "empty.bin").exists()
+    assert (files / "empty.bin").read_bytes() == b""
+
+
+def test_resuming_an_upload_whose_part_vanished_is_refused(daemon, tmp_path):
+    """Seeking past the end of a fresh file writes a run of zeros, which then fails the
+    digest check as 'checksum mismatch' -- sending the uploader after a corruption that
+    never happened. The truth is that there is nothing here to resume from."""
+    client, _root, files, _token = daemon
+    with pytest.raises(PeerError) as exc:
+        client._request("PUT", "/files/gap.bin", data=b"tail",
+                        headers={"Content-Range": "bytes 4096-4099/4100",
+                                 "X-ML-Stack-Complete": "1"})
+    assert "416" in str(exc.value)
+    assert "resume" in str(exc.value)
+    assert not (files / "gap.bin.part").exists()
+
+
+def test_head_reports_size_and_digest_without_sending_the_body(daemon):
+    """Data-locality scoring asks "do you already hold this exact file". Answering that
+    by downloading it defeats the purpose of asking."""
+    client, _root, files, _token = daemon
+    (files / "known.bin").write_bytes(b"x" * 5000)
+
+    status, body, headers = client._request("HEAD", "/files/known.bin")
+
+    assert status == 200
+    assert body == b""
+    assert headers["Content-Length"] == "5000"
+    assert headers[DIGEST_HEADER] == sha256_file(files / "known.bin")
+
+
+# -- the device report seam ----------------------------------------------
+def test_the_stdlib_report_says_nothing_about_accelerators(tmp_path):
+    """A device-tier package cannot import a framework to ask. Guessing is worse than
+    silence: placement reads "no GPU" as "not a training box", so an unverified negative
+    would park every run on the wrong machine."""
+    out = stdlib_device_report()
+
+    assert out["cpus"] >= 1
+    assert out["arch"]
+    assert out["backends"] == []
+    assert "cuda" not in out
+    assert "gpu" not in out
+
+
+def test_a_richer_probe_is_merged_over_the_stdlib_facts():
+    merged = device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"})
+
+    assert merged["gpu"] == "RTX 3090 Ti"
+    assert merged["cpus"] >= 1, "the stdlib facts must survive the merge"
+
+
+def test_a_probe_that_raises_costs_detail_not_the_daemon():
+    def boom() -> dict:
+        raise RuntimeError("no driver")
+
+    out = device_report(boom)
+
+    assert out["cpus"] >= 1
+
+
+def test_a_report_spec_resolves_to_its_callable():
+    fn = resolve_report("ml_stack.fleet.daemon:stdlib_device_report")
+    assert fn is stdlib_device_report
+
+
+@pytest.mark.parametrize("spec, why", [
+    ("no_colon_here", "expected"),
+    ("ml_stack.fleet.daemon:nope", "cannot load"),
+    ("ml_stack.nonexistent:report", "cannot load"),
+])
+def test_a_bad_report_spec_says_what_is_wrong(spec, why):
+    """A typo in a systemd unit must fail at boot with the reason, not silently leave a
+    GPU box advertising itself as a bare CPU."""
+    with pytest.raises(DaemonError, match=why):
+        resolve_report(spec)
+
+
+def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
+    """End to end: a box with a card is one that was given a probe that can see it."""
+    root = tmp_path / "traind"
+    (root / "files").mkdir(parents=True)
+    token = load_or_create_token(root)
+    runner = JobRunner(root)
+    port = _free_port()
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", port),
+        make_handler(runner, root / "files", token, "rtx",
+                     lambda: device_report(lambda: {"cuda": True, "gpu": "RTX 3090 Ti"})))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        health = Peer(f"http://127.0.0.1:{port}", token).health()
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert health["gpu"] == "RTX 3090 Ti"
+    assert health["cuda"] is True
+    assert health["slots"] == 1

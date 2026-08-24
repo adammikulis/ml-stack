@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from ml_stack.contracts import Budget, contracts_dir, fits, largest_that_fits, tiers
@@ -109,3 +110,39 @@ def test_unknown_profile_raises():
 
     with pytest.raises(ContractError, match="no budget profile"):
         Budget.for_profile("toaster")  # type: ignore[arg-type]
+
+
+class TestGrammars:
+    """``grammar()`` was an exported API with nothing behind it: ``contracts/grammars/``
+    was empty, so every call raised. These pin that the files ship and stay parseable."""
+
+    def test_the_advertised_grammars_are_present(self):
+        from ml_stack.contracts import grammar
+
+        for name in ("json", "json_object", "yes_no"):
+            assert re.search(r"^root\s*::=", grammar(name), re.M), name
+
+    def test_a_grammar_loads_by_stem_or_filename(self):
+        from ml_stack.contracts import grammar
+
+        assert grammar("json") == grammar("json.gbnf")
+
+    def test_json_object_does_not_permit_a_bare_scalar(self):
+        """The reason it exists apart from json.gbnf: a caller that subscripts the result
+        needs an object, and ``root ::= value`` would let a bare string through."""
+        from ml_stack.contracts import grammar
+
+        assert "root   ::= object" in grammar("json_object")
+        assert "root   ::= value" in grammar("json")
+
+    def test_a_missing_grammar_says_which_file(self, tmp_path):
+        from ml_stack.contracts import ContractError, grammar
+
+        with pytest.raises(ContractError, match="nonesuch.gbnf"):
+            grammar("nonesuch")
+
+    def test_every_grammar_ships_in_the_contracts_directory(self):
+        """The wheel force-includes the whole `contracts/` tree, so a grammar that is on
+        disk but untracked would work locally and be missing for everyone else."""
+        found = sorted(p.name for p in (contracts_dir() / "grammars").glob("*.gbnf"))
+        assert found == ["json.gbnf", "json_object.gbnf", "yes_no.gbnf"]

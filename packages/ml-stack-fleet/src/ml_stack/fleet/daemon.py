@@ -38,23 +38,23 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
 import re
 import secrets
 import socket
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 import urllib.parse
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from .discovery import DEFAULT_GROUP as DISCOVERY_GROUP
-from .discovery import DEFAULT_PORT as DISCOVERY_PORT
 from .discovery import (
     Advertiser,
     Beacon,
@@ -168,19 +168,52 @@ def safe_relpath(root: Path, relpath: str) -> Path:
 
 
 class JobRunner:
-    """Serialises jobs onto one device and owns their processes."""
+    """Runs jobs, ``slots`` at a time, and owns their processes.
 
-    def __init__(self, root: Path) -> None:
+    One slot is the default because a GPU is not shareable in any useful sense -- see the
+    module docstring. A box whose work is tokenizing text has no such contention and
+    should be told so with ``--slots``; capacity here is the number of worker threads
+    rather than a counter, so the limit is structural and there is no arithmetic to get
+    wrong.
+    """
+
+    def __init__(self, root: Path, *, slots: int = 1) -> None:
+        if slots < 1:
+            raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
+        self.slots = slots
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
-        self._current: subprocess.Popen | None = None
+        #: job id -> process. Keyed, not a single handle: with more than one slot
+        #: "the running process" is not a thing, and stopping job B by reaching for
+        #: it would kill job A.
+        self._running: dict[str, subprocess.Popen] = {}
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True,
-                                        name="jobrunner")
-        self._thread.start()
+        self._threads = [
+            threading.Thread(target=self._run_loop, daemon=True, name=f"jobrunner-{i}")
+            for i in range(slots)
+        ]
+        for t in self._threads:
+            t.start()
+
+    # -- state, under the lock -------------------------------------------
+    def status(self) -> dict[str, Any]:
+        """Capacity and what is on it. Taken under the lock, because a placement loop
+        polling this while a worker thread mutates it is now the normal case."""
+        with self._lock:
+            running = sorted(self._running)
+            return {"slots": self.slots, "free": self.slots - len(running),
+                    "busy": bool(running), "running": running,
+                    "queued": len(self._queue)}
+
+    def snapshot(self) -> list[dict[str, Any]]:
+        """Every job's public view. Copied under the lock -- iterating ``self.jobs``
+        directly races a submit and raises 'dictionary changed size during iteration',
+        which reaches the caller as a 500 on a route that should never fail."""
+        with self._lock:
+            return [j.public() for j in list(self.jobs.values())]
 
     # -- paths -----------------------------------------------------------
     def job_dir(self, job_id: str) -> Path:
@@ -216,7 +249,7 @@ class JobRunner:
                 self._queue.remove(job_id)
                 job.state = "stopped"
                 return job
-            proc = self._current if job.state == "running" else None
+            proc = self._running.get(job_id)
         if proc is None:
             return job
         # TERM first: a loop that checkpoints on TERM loses nothing. KILL is
@@ -237,7 +270,7 @@ class JobRunner:
             self._wake.wait(timeout=1.0)
             self._wake.clear()
             with self._lock:
-                if self._current is not None or not self._queue:
+                if not self._queue:
                     continue
                 job_id = self._queue.pop(0)
                 job = self.jobs[job_id]
@@ -255,7 +288,7 @@ class JobRunner:
                                         stdout=fh, stderr=subprocess.STDOUT,
                                         start_new_session=True)
                 with self._lock:
-                    self._current = proc
+                    self._running[job.id] = proc
                     job.state = "running"
                     job.pid = proc.pid
                     job.started_at = time.time()
@@ -271,7 +304,7 @@ class JobRunner:
         finally:
             job.finished_at = time.time()
             with self._lock:
-                self._current = None
+                self._running.pop(job.id, None)
             (self.job_dir(job.id) / "job.json").write_text(
                 json.dumps(job.public(), indent=2))
             self._wake.set()
@@ -281,29 +314,101 @@ class JobRunner:
         self._wake.set()
 
 
-def device_report() -> dict[str, Any]:
-    """What card is here, and how much of it is free. Best effort."""
-    out: dict[str, Any] = {"backends": []}
-    try:
-        from ml_stack.backend import available
-        out["backends"] = list(available())
-    except Exception:
-        pass
-    try:
-        import torch
-        out["cuda"] = torch.cuda.is_available()
-        if torch.cuda.is_available():
-            free, total = torch.cuda.mem_get_info()
-            out["gpu"] = torch.cuda.get_device_name(0)
-            out["vram_free_gb"] = round(free / 2**30, 2)
-            out["vram_total_gb"] = round(total / 2**30, 2)
-    except Exception:
-        pass
+REPORT_GROUP = "ml_stack.device_report"
+"""Entry-point group a higher tier registers a richer device probe under.
+
+The dependency points the right way: this package cannot import ``ml_stack.backend`` to
+ask about CUDA -- that is a lab module and this is a device one -- so instead a lab
+package *registers itself here* and the daemon finds it at runtime. ``ml-stack-train``
+declares one in its ``pyproject.toml``; a box without it simply reports less.
+"""
+
+
+def _total_ram_gb() -> float | None:
+    """Physical RAM, from whatever this platform exposes to the standard library."""
+    try:                                    # Linux, and macOS via SC_PHYS_PAGES
+        return round(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2**30, 2)
+    except (AttributeError, ValueError, OSError):
+        return None
+
+
+def stdlib_device_report() -> dict[str, Any]:
+    """What this box is, using only what the standard library can see.
+
+    Deliberately says nothing about accelerators. A device-tier package cannot import a
+    framework to ask, and *guessing* is worse than staying quiet: a beacon claiming no
+    GPU is read by placement as "not a training box", so an unverified negative would
+    park every run on the wrong machine.
+    """
+    out: dict[str, Any] = {"backends": [], "cpus": os.cpu_count() or 1,
+                           "arch": platform.machine(), "platform": sys.platform}
+    ram = _total_ram_gb()
+    if ram is not None:
+        out["ram_gb"] = ram
     return out
 
 
+def registered_reports() -> list[Callable[[], dict[str, Any]]]:
+    """Every device probe a higher tier has registered under ``REPORT_GROUP``."""
+    try:
+        from importlib.metadata import entry_points
+        found = entry_points(group=REPORT_GROUP)
+    except Exception:                                 # noqa: BLE001
+        return []
+    out = []
+    for ep in found:
+        try:
+            out.append(ep.load())
+        except Exception:                             # noqa: BLE001
+            # A broken plugin must not stop the daemon booting. The box then
+            # advertises less than it could, which placement handles; failing
+            # to start would take the machine out of the fleet entirely.
+            continue
+    return out
+
+
+def resolve_report(spec: str) -> Callable[[], dict[str, Any]]:
+    """Turn ``"ml_stack.train.accelerator:report"`` into the callable it names.
+
+    The explicit form exists because entry-point discovery cannot be the thing
+    correctness rests on here: this repo's tests run from source directories on
+    ``sys.path`` with nothing pip-installed, so an entry point would be invisible to
+    every test that matters -- an untested default is not a default, it is a hope.
+    """
+    module, _, attr = spec.partition(":")
+    if not module or not attr:
+        raise DaemonError(
+            f"bad report spec {spec!r} -- expected 'module.path:callable'")
+    try:
+        import importlib
+        return getattr(importlib.import_module(module), attr)
+    except (ImportError, AttributeError) as exc:
+        raise DaemonError(f"cannot load report {spec!r}: {exc}") from None
+
+
+def device_report(extra: Callable[[], dict[str, Any]] | None = None) -> dict[str, Any]:
+    """What is on this box. Best effort, and additive.
+
+    ``extra`` overrides the registered probes rather than adding to them, so a caller
+    that passes one gets exactly what it asked for.
+    """
+    out = stdlib_device_report()
+    for fn in ([extra] if extra is not None else registered_reports()):
+        try:
+            out.update(fn() or {})
+        except Exception:                             # noqa: BLE001
+            pass
+    return out
+
+
+_DEFAULT_REPORT = device_report
+"""Bound here so ``serve_forever``'s ``device_report=`` parameter can shadow the name
+without losing the default."""
+
+
 def make_handler(runner: JobRunner, files_root: Path, token: str,
-                 name: str = ""):
+                 name: str = "",
+                 report: Callable[[], dict[str, Any]] = device_report):
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -399,15 +504,13 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             if path == "/health":
                 # unauthenticated on purpose: liveness must be checkable
                 # without handing a probe the token.
-                busy = runner._current is not None
-                self._send(200, {"ok": True, "name": name, "busy": busy,
-                                 "queued": len(runner._queue),
-                                 **device_report()})
+                self._send(200, {"ok": True, "name": name,
+                                 **runner.status(), **report()})
                 return
             if not self._guard():
                 return
             if path == "/jobs":
-                self._send(200, {"jobs": [j.public() for j in runner.jobs.values()]})
+                self._send(200, {"jobs": runner.snapshot()})
                 return
             m = re.match(r"^/jobs/([^/]+)(/log|/metrics)?$", path)
             if m:
@@ -461,6 +564,11 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
                 return
             self._send(404, {"error": "no such route"})
 
+        # _send and _send_file already branch on HEAD; without this the method they
+        # were written for answers 501. Data-locality scoring asks "do you already hold
+        # this exact file" and should not have to download it to find out.
+        do_HEAD = do_GET
+
         def do_POST(self) -> None:                     # noqa: N802
             if not self._guard():
                 return
@@ -507,7 +615,18 @@ def make_handler(runner: JobRunner, files_root: Path, token: str,
             if cr.startswith("bytes "):
                 offset = int(cr.split(" ", 1)[1].split("-")[0])
             partial = target.with_suffix(target.suffix + ".part")
-            mode = "r+b" if offset and partial.exists() else "wb"
+            held = partial.stat().st_size if partial.exists() else 0
+            if offset > held:
+                # Seeking past the end of what we hold writes a sparse run of zeros and
+                # then fails the digest check with "checksum mismatch" -- which sends the
+                # uploader hunting a corruption that never happened. The truth is that
+                # this resume has nothing to resume from, so say the size we actually
+                # hold, the same answer the download side already gives on a bad Range.
+                self._send(416, {"error": "cannot resume past what this daemon holds",
+                                 "held": held, "requested_offset": offset},
+                           headers={"Content-Range": f"bytes */{held}"})
+                return
+            mode = "r+b" if offset else "wb"
             with partial.open(mode) as fh:
                 if offset:
                     fh.seek(offset)
@@ -572,7 +691,9 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
 def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   host: str = "0.0.0.0", port: int = DEFAULT_PORT, *,
                   name: str = "", announce: bool = True,
-                  cluster_key_path: Path | str | None = None) -> None:
+                  cluster_key_path: Path | str | None = None,
+                  device_report: Callable[[], dict[str, Any]] | None = None,
+                  slots: int = 1) -> None:
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     files_root = root / "files"
@@ -580,14 +701,23 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     name = name or os.environ.get("ML_STACK_PEER_NAME") or socket.gethostname()
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
-    runner = JobRunner(root)
+    runner = JobRunner(root, slots=slots)
+    report = device_report or _DEFAULT_REPORT
     httpd = ThreadingHTTPServer((host, port),
-                                make_handler(runner, files_root, token, name))
+                                make_handler(runner, files_root, token, name, report))
     advertiser: Advertiser | None = None
     if announce and key is not None:
-        beacon = Beacon(name=name, port=port, device=device_report())
+        def refresh(b: Beacon) -> None:
+            """Bring the beacon's mutable half up to date before it goes on the wire."""
+            status = runner.status()
+            b.busy, b.queued = status["busy"], status["queued"]
+            b.slots, b.free = status["slots"], status["free"]
+            b.device = report()
+
+        beacon = Beacon(name=name, port=port, device=report(),
+                        slots=runner.slots, free=runner.slots)
         try:
-            advertiser = Advertiser(beacon, key).start()
+            advertiser = Advertiser(beacon, key, refresh=refresh).start()
         except DiscoveryError as exc:
             # Not fatal. A daemon nobody can find is still a daemon you can
             # reach by address, and refusing to start would turn a flaky
@@ -596,6 +726,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     print(f"ml-stack traind on http://{host}:{port}")
     print(f"  name  {name}")
     print(f"  root  {root}")
+    print(f"  slots {slots}")
     if advertiser is not None:
         print(f"  peers announcing on {advertiser.group}:{advertiser.port} "
               f"(key {key_path(cluster_key_path)})")
@@ -604,7 +735,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         print(f"  token {token}")
         print(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
         print("  run 'ml-stack-peers init' to make this box discoverable")
-    print(f"  device {json.dumps(device_report())}")
+    print(f"  device {json.dumps(report())}")
+    if slots > 1:
+        # Said out loud next to the other warning, because --slots on a box with a card
+        # is how you quietly halve your own training throughput: two jobs on one GPU
+        # contend for memory and both get slower, and nothing in the logs says so.
+        print(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
+              "this makes every job slower.")
     print("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
     try:
         httpd.serve_forever()
@@ -630,9 +767,31 @@ def main(argv: list[str] | None = None) -> int:
                     help="path to the cluster key (default: ~/.ml-stack/cluster.key)")
     ap.add_argument("--no-announce", action="store_true",
                     help="serve, but stay invisible to peer discovery")
+    ap.add_argument("--report", action="append", default=[], metavar="MODULE:CALLABLE",
+                    help="a richer device probe, e.g. "
+                         "'ml_stack.train.accelerator:report' on a box with a card. "
+                         "Repeatable; later ones win. Without any, the daemon reports "
+                         "only what the standard library can see, plus whatever is "
+                         "registered under the 'ml_stack.device_report' entry point.")
+    ap.add_argument("--slots", type=int,
+                    default=int(os.environ.get("ML_STACK_SLOTS") or 1),
+                    help="how many jobs to run at once (default 1; raise it only on a "
+                         "box whose work does not contend for one accelerator)")
     a = ap.parse_args(argv)
+    probes = [resolve_report(spec) for spec in a.report]
+
+    def report() -> dict[str, Any]:
+        out = stdlib_device_report()
+        for probe in probes:
+            try:
+                out.update(probe() or {})
+            except Exception:                         # noqa: BLE001
+                pass
+        return out
+
     serve_forever(a.root, a.host, a.port, name=a.name,
-                  announce=not a.no_announce, cluster_key_path=a.cluster_key)
+                  announce=not a.no_announce, cluster_key_path=a.cluster_key,
+                  slots=a.slots, device_report=report if probes else None)
     return 0
 
 

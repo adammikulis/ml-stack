@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 import pytest
-from ml_stack.train.discovery import (
+from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
@@ -33,7 +33,7 @@ from ml_stack.train.discovery import (
     discover,
     load_cluster_key,
 )
-from ml_stack.train.remote import RemoteTrainer
+from ml_stack.fleet.remote import Peer
 
 REPO = Path(__file__).resolve().parent.parent
 
@@ -216,7 +216,7 @@ def traind(tmp_path):
     log = tmp_path / "traind.out"
     fh = log.open("wb")
     proc = subprocess.Popen(
-        [sys.executable, "-m", "ml_stack.train.daemon",
+        [sys.executable, "-m", "ml_stack.fleet.daemon",
          "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", "testbox",
          "--cluster-key", str(keyfile)],
@@ -248,7 +248,7 @@ def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, 
     """The whole point: nobody typed a host, a port, or a token anywhere."""
     keyfile, disco_port, http_port, log = traind
     try:
-        rtx = RemoteTrainer.find_one(cluster_key_path=keyfile, timeout_s=3.0,
+        rtx = Peer.find_one(cluster_key_path=keyfile, timeout_s=3.0,
                                      port=disco_port)
     except DiscoveryError as exc:
         pytest.fail(f"{exc}\n--- traind said ---\n{log.read_text(errors='replace')}")
@@ -272,14 +272,14 @@ def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, 
 def test_find_one_says_why_when_no_peer_matches(traind):
     keyfile, disco_port, _, log = traind
     with pytest.raises(DiscoveryError, match="no peer matches"):
-        RemoteTrainer.find_one(name="not-this-box", cluster_key_path=keyfile,
+        Peer.find_one(name="not-this-box", cluster_key_path=keyfile,
                                timeout_s=3.0, port=disco_port)
 
 
 def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
     """Silence and 'you have no key' are different facts and must read that way."""
     with pytest.raises(DiscoveryError, match="no cluster key"):
-        RemoteTrainer.find_one(cluster_key_path=tmp_path / "absent.key")
+        Peer.find_one(cluster_key_path=tmp_path / "absent.key")
 
 
 def test_peers_ls_reports_the_running_daemon(traind):
@@ -287,10 +287,59 @@ def test_peers_ls_reports_the_running_daemon(traind):
     env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
            "PYTHONPATH": os.pathsep.join(
                str(p) for p in sorted((REPO / "packages").glob("*/src")))}
-    r = subprocess.run([sys.executable, "-m", "ml_stack.train.peers",
+    r = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers",
                         "--cluster-key", str(keyfile), "ls", "--json",
                         "--timeout", "3"],
                        env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     peers = json.loads(r.stdout)
     assert any(p["name"] == "testbox" and p["port"] == http_port for p in peers)
+
+
+# -- a beacon that tells the truth about right now ------------------------
+def test_a_busy_daemon_stops_advertising_itself_as_idle(key, port):
+    """The specific failure: Beacon.busy/queued are set once when the daemon boots and
+    never touched again, so a box that has been training for six hours still announces
+    itself as idle. Anything choosing a peer on that basis is reading a constant."""
+    beacon = Beacon(name="rtx", port=8770, slots=1, free=1)
+    state = {"free": 1}
+
+    def refresh(b: Beacon) -> None:
+        b.free = state["free"]
+        b.busy = state["free"] == 0
+
+    with Advertiser(beacon, key, port=port, interval_s=0.2, refresh=refresh):
+        idle = next(b for b in discover(key, timeout_s=2.0, port=port) if b.name == "rtx")
+        assert idle.free == 1 and not idle.busy
+
+        state["free"] = 0                       # a job starts
+        busy = next(b for b in discover(key, timeout_s=2.0, port=port) if b.name == "rtx")
+
+    assert busy.free == 0, "the beacon still claims a free slot after the job started"
+    assert busy.busy
+
+
+def test_a_refresh_that_raises_does_not_silence_the_beacon(key, port):
+    """A probe that throws must cost freshness, not discoverability: a box that vanishes
+    from the fleet is strictly worse than one advertising a stale answer."""
+    def boom(b: Beacon) -> None:
+        raise RuntimeError("nvidia-smi fell over")
+
+    with Advertiser(Beacon(name="rtx", port=8770), key, port=port,
+                    interval_s=0.2, refresh=boom):
+        found = discover(key, timeout_s=2.0, port=port)
+    assert "rtx" in [b.name for b in found]
+
+
+def test_a_beacon_from_an_older_daemon_still_reads_as_one_free_slot(key, port):
+    """Mixed versions: an old daemon sends busy/queued and no slots/free. Reading that as
+    zero capacity would quietly park the whole fleet on the new boxes."""
+    old = Beacon(name="old", port=8770)
+    payload = old.public()
+    del payload["slots"], payload["free"]
+
+    revived = Beacon(name=payload["name"], port=payload["port"],
+                     busy=bool(payload.get("busy")),
+                     free=int(payload["free"]) if "free" in payload
+                     else (0 if payload.get("busy") else 1))
+    assert revived.free == 1
