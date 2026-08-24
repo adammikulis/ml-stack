@@ -179,10 +179,17 @@ class JobRunner:
     wrong.
     """
 
-    def __init__(self, root: Path, *, slots: int = 1) -> None:
+    def __init__(self, root: Path, files_root: Path | None = None, *,
+                 slots: int = 1) -> None:
         if slots < 1:
             raise DaemonError(f"slots must be at least 1, got {slots}")
         self.root = root
+        #: Job directories live UNDER the file root, so a checkpoint a job writes to
+        #: $ML_STACK_JOB_DIR can actually be pulled. With them beside it instead, the
+        #: obvious call -- pull("jobs/<id>/ckpt/model.safetensors") -- resolves to a
+        #: path nothing creates and 404s, which is a confusing way to discover that
+        #: the artifact you waited three hours for is unreachable.
+        self.files_root = Path(files_root) if files_root is not None else root / "files"
         self.slots = slots
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
@@ -219,7 +226,7 @@ class JobRunner:
 
     # -- paths -----------------------------------------------------------
     def job_dir(self, job_id: str) -> Path:
-        return self.root / "jobs" / job_id
+        return self.files_root / "jobs" / job_id
 
     def log_path(self, job_id: str) -> Path:
         return self.job_dir(job_id) / "job.log"
@@ -283,7 +290,12 @@ class JobRunner:
         log.parent.mkdir(parents=True, exist_ok=True)
         env = {**os.environ, **job.env, "PYTHONUNBUFFERED": "1",
                "ML_STACK_JOB_ID": job.id,
-               "ML_STACK_JOB_DIR": str(self.job_dir(job.id))}
+               "ML_STACK_JOB_DIR": str(self.job_dir(job.id)),
+               # A job that must produce something the coordinator can fetch has to be
+               # told where fetchable is. Without this it defaults to cwd, and a caller
+               # who passes cwd lands the artifact somewhere nothing can see.
+               "ML_STACK_FILES_ROOT": str(self.files_root),
+               "ML_STACK_OUT": str(self.job_dir(job.id) / "out")}
         try:
             with log.open("ab") as fh:
                 proc = subprocess.Popen(job.argv, cwd=job.cwd or None, env=env,
@@ -869,7 +881,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     name = name or os.environ.get("ML_STACK_PEER_NAME") or socket.gethostname()
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
-    runner = JobRunner(root, slots=slots)
+    runner = JobRunner(root, files_root, slots=slots)
     fetcher = Fetcher(files_root, key, slots=fetch_slots)
     base_report = device_report or _DEFAULT_REPORT
     labels = sorted(set(labels))

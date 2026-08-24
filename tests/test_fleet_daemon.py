@@ -13,9 +13,11 @@ import json
 import os
 import socket
 import sys
+import tempfile
 import threading
 import time
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 from ml_stack.fleet.daemon import (
@@ -181,9 +183,9 @@ def test_unknown_job_is_404(daemon):
 
 # -- metrics -------------------------------------------------------------
 def test_metrics_stream_incrementally(daemon):
-    client, root, _, _ = daemon
+    client, _root, files, _ = daemon
     job = client.submit([sys.executable, "-c", "import time; time.sleep(1.5)"])
-    mp = root / "jobs" / job["id"] / "metrics.jsonl"
+    mp = files / "jobs" / job["id"] / "metrics.jsonl"
     mp.parent.mkdir(parents=True, exist_ok=True)
     mp.write_text(json.dumps({"step": 1}) + "\n")
     rows, nxt = client.metrics(job["id"])
@@ -644,3 +646,36 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     assert health["gpu"] == "RTX 3090 Ti"
     assert health["cuda"] is True
     assert health["slots"] == 1
+
+
+def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
+    """The README's own example -- pull("jobs/<id>/ckpt/...") -- used to 404, because
+    job directories sat BESIDE the file root rather than under it. A checkpoint you
+    waited three hours for being unreachable is a bad way to learn that."""
+    client, _root, _files, _ = daemon
+    job = client.submit([sys.executable, "-c",
+                         "import os, pathlib; "
+                         "d = pathlib.Path(os.environ['ML_STACK_JOB_DIR']) / 'ckpt'; "
+                         "d.mkdir(parents=True, exist_ok=True); "
+                         "(d / 'model.safetensors').write_bytes(b'weights')"])
+    client.wait(job["id"], poll_s=0.1, timeout_s=30)
+
+    got = client.pull(f"jobs/{job['id']}/ckpt/model.safetensors",
+                      Path(tempfile.mkdtemp()) / "model.safetensors")
+
+    assert got.read_bytes() == b"weights"
+
+
+def test_a_job_is_told_where_fetchable_is(daemon):
+    """Without ML_STACK_FILES_ROOT a job has to guess, and a caller who passes cwd
+    makes the guess wrong -- landing the artifact where nothing can see it."""
+    client, _root, files, _ = daemon
+    job = client.submit([sys.executable, "-c",
+                         "import os, pathlib; "
+                         "pathlib.Path(os.environ['ML_STACK_OUT']).mkdir(parents=True, exist_ok=True); "
+                         "(pathlib.Path(os.environ['ML_STACK_OUT']) / 'where.txt')"
+                         ".write_text(os.environ['ML_STACK_FILES_ROOT'])"])
+    client.wait(job["id"], poll_s=0.1, timeout_s=30)
+
+    said = (files / "jobs" / job["id"] / "out" / "where.txt").read_text()
+    assert Path(said).resolve() == files.resolve()
