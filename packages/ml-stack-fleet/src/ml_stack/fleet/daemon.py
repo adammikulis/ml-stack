@@ -780,7 +780,7 @@ def make_handler(runner: JobRunner, files_root: Path,
                 if models is None:
                     self._send(501, {"error": "no model store on this daemon"}); return
                 wanted = urllib.parse.unquote(path[len("/models/"):])
-                found = models.find(wanted)
+                found = models.find(wanted) or models.find_draft(wanted)
                 if found is None:
                     self._send(404, {"error": f"no model called {wanted!r}"}); return
                 self._send_file(found.path, *_range(self.headers.get("Range", "")))

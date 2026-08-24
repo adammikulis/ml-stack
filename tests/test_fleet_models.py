@@ -427,6 +427,56 @@ class TestDraftModels:
         assert got.read_bytes() == payload
         assert [m.name for m in store.all()] == ["pair.gguf"]
 
+    def test_a_draft_is_copied_from_a_machine_that_has_it(self, store, tmp_path,
+                                                          monkeypatch):
+        """The internet is only for what nobody nearby holds."""
+        from http.server import ThreadingHTTPServer
+
+        from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+
+        shelf = tmp_path / "shelf"
+        payload = a_model(shelf, name="pair.draft.gguf", mb=2).read_bytes()
+        a_model(shelf, name="pair.gguf", mb=2)
+        root = tmp_path / "traind"
+        (root / "files").mkdir(parents=True)
+        key = b"a-cluster-key-they-both-know"
+        token = load_or_create_token(root, key)
+        runner = JobRunner(root)
+        port = free_port()
+        httpd = ThreadingHTTPServer(
+            ("127.0.0.1", port),
+            make_handler(runner, root / "files", token,
+                         models=Models([shelf], shelf),
+                         cluster_key_path=tmp_path / "their.key"))
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+
+        asked = []
+        monkeypatch.setattr(
+            Models, "where",
+            lambda self, name, k, **kw: (asked.append(name),
+                                         [("theirs", f"http://127.0.0.1:{port}", 0)])[1])
+
+        big = a_model(tmp_path / "models", name="pair.gguf", mb=2)
+        model = store.find("pair.gguf")
+        try:
+            got = store.ensure_draft(model, "http://127.0.0.1:1/none.gguf", key=key)
+        finally:
+            runner.shutdown()
+            httpd.shutdown()
+            httpd.server_close()
+
+        assert got == big.with_suffix(".draft.gguf")
+        assert got.read_bytes() == payload
+        assert asked == ["pair.gguf"], "the machines holding the model are the ones asked"
+
+    def test_a_name_pointing_out_of_the_store_finds_nothing(self, store, tmp_path):
+        (tmp_path / "secret.draft.gguf").write_bytes(b"x" * 4096)
+        a_model(tmp_path / "models", name="here.draft.gguf", mb=2)
+
+        assert store.find_draft("../secret.draft.gguf") is None
+        assert store.find_draft("here.draft.gguf") is not None
+        assert store.find_draft("here.gguf") is None
+
     def test_a_draft_already_there_is_not_fetched_again(self, store, tmp_path):
         big = a_model(tmp_path / "models", name="again.gguf", mb=2)
         draft = big.with_suffix(".draft.gguf")

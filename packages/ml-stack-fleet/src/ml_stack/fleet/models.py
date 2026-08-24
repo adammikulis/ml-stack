@@ -118,6 +118,16 @@ class Models:
                 return model
         return None
 
+    def find_draft(self, name: str) -> Model | None:
+        """A draft by its exact filename. Drafts are fetched, never listed."""
+        for root in self.roots:
+            path = root / Path(name).name
+            if DRAFT_MARK not in path.suffixes or not path.is_file():
+                continue
+            stat = path.stat()
+            return Model(path.name, path, stat.st_size, stat.st_mtime)
+        return None
+
     def digest(self, model: Model) -> str:
         """sha256, cached against size and mtime so a large file is read once."""
         stat = model.path.stat()
@@ -190,8 +200,11 @@ class Models:
 
         peer = Peer(base_url, derive_token(key))
         holds = peer.models()
+        wanted = name.strip().lower()
         match = next((m for m in holds
-                      if name.strip().lower() in str(m.get("name", "")).lower()), None)
+                      if str(m.get("name", "")).lower() == wanted), None)
+        match = match or next((m for m in holds
+                               if wanted in str(m.get("name", "")).lower()), None)
         if match is None:
             raise ModelError(f"{base_url} no longer has {name}")
         self.store.mkdir(parents=True, exist_ok=True)
@@ -274,16 +287,36 @@ class Models:
         stat = target.stat()
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
-    def ensure_draft(self, model: Model, source: str, *,
+    def ensure_draft(self, model: Model, source: str, *, key: bytes | None = None,
                      on_progress: "Callable[[int, int], None] | None" = None) -> Path:
-        """Fetch the small model that guesses ahead for ``model``, beside it."""
+        """Fetch the small model that guesses ahead for ``model``, beside it.
+
+        Taken from a machine on this network if one holds it, as the model itself is.
+        """
         beside = model.path.with_suffix(DRAFT_MARK + model.path.suffix)
         if beside.is_file():
+            return beside
+        if key is not None and self._draft_from_peers(model, beside, key, on_progress):
             return beside
         got = self._from_internet(beside.name, source, on_progress)
         if got.path != beside:
             os.replace(got.path, beside)
         return beside
+
+    def _draft_from_peers(self, model: Model, beside: Path, key: bytes,
+                          on_progress: Any) -> bool:
+        """Ask the machines holding ``model`` for the draft that sits beside it."""
+        from .discovery import derive_token
+        from .remote import Peer, PeerError
+
+        for _name, base_url, _size in self.where(model.name, key):
+            try:
+                Peer(base_url, derive_token(key)).pull(
+                    beside.name, beside, on_progress=on_progress, route="/models/")
+            except (PeerError, OSError):
+                continue
+            return True
+        return False
 
     def remove(self, name: str) -> bool:
         found = self.find(name)
@@ -398,19 +431,19 @@ def is_unfiltered(name: str) -> bool:
 # What to fall back on when Hugging Face cannot be reached. Anything shipped here is
 # out of date the day it is written, so it is a backstop, not the list.
 SUGGESTED: tuple[Suggestion, ...] = (
-    Suggestion("Qwen3 4B", "hf:Qwen/Qwen3-4B-GGUF/Qwen3-4B-Q4_K_M.gguf", 2.4,
+    Suggestion("Qwen3.5 4B", "hf:unsloth/Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf", 2.6,
                "Fast, and good on a laptop."),
-    Suggestion("Qwen3 8B", "hf:Qwen/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M.gguf", 4.7,
-               "Better answers, still comfortable on 16 GB."),
-    Suggestion("Qwen3 14B", "hf:unsloth/Qwen3-14B-GGUF/Qwen3-14B-Q4_K_M.gguf", 8.4,
-               "For a machine with room to spare."),
-    Suggestion("Gemma 3 4B",
-               "hf:ggml-org/gemma-3-4b-it-GGUF/gemma-3-4b-it-Q4_K_M.gguf", 2.3,
+    Suggestion("Gemma 4 E4B",
+               "hf:unsloth/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf", 4.7,
                "Google's small one."),
-    Suggestion("Llama 3.2 3B",
-               "hf:bartowski/Llama-3.2-3B-Instruct-GGUF/"
-               "Llama-3.2-3B-Instruct-Q4_K_M.gguf", 1.9,
-               "Small and widely used."),
+    Suggestion("Qwen3.5 9B", "hf:unsloth/Qwen3.5-9B-GGUF/Qwen3.5-9B-Q4_K_M.gguf", 5.3,
+               "Better answers, still comfortable on 16 GB."),
+    Suggestion("Gemma 4 12B",
+               "hf:unsloth/gemma-4-12b-it-GGUF/gemma-4-12b-it-Q4_K_M.gguf", 6.7,
+               "For a machine with room to spare."),
+    Suggestion("Qwen3.8 27B",
+               "hf:unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M.gguf", 15.4,
+               "The best of these, for a machine with 24 GB or more."),
     Suggestion("Tiny stories 15M",
                "hf:ggml-org/models/tinyllamas/stories15M-q4_0.gguf", 0.02,
                "Twenty megabytes, for seeing that all this works."),
@@ -791,7 +824,8 @@ class Downloads:
                 if draft:
                     row.note = f"Getting the draft for {got.name}"
                     try:
-                        self.models.ensure_draft(got, draft, on_progress=progress)
+                        self.models.ensure_draft(got, draft, key=key,
+                                                 on_progress=progress)
                     except (ModelError, OSError):
                         pass          # a model without its draft still runs
                 row.state = "done"
