@@ -82,11 +82,23 @@ Every model file this machine holds, and every one held by the others.
 
 - **Popular models are listed for you**, asked of Hugging Face each time rather than
   written into the app, so the list is what people are downloading now and not what was
-  current when it shipped. Only builds that fit this machine appear.
+  current when it shipped. Ranked by where a model sits in both the last month's
+  downloads and what is trending, so a release from last week reaches the first page.
+  Only builds that fit this machine appear.
+- **Searching narrows the same list.** Type into the box above it and the hub is
+  searched; the results carry the same sizes, families and symbols. Paste a reference
+  instead and it is fetched directly.
+- **Pages.** Twelve at a time, with how many there are in total.
+- **Uncensored builds are left out** unless the box is ticked. Abliterated, heretic and
+  uncensored variants are published with their refusals removed, and are a large share
+  of what is most downloaded.
+- **A draft model is taken too** when the publisher ships one, and the server is told
+  to guess ahead with it.
 - **Each one shows** its download size, how many parameters it has, how many are active
   if it is a mixture of experts, and what it reads and writes: 💬 text, 🖼 images,
   🔊 audio, 🎬 video.
-- **Families are checkboxes**, all ticked, so a family you do not want goes away.
+- **Families are checkboxes**, all ticked, covering the whole list rather than the page
+  in front of you, so a family further down still has a box.
 - **Getting one** takes a Hugging Face reference or a link. Naming a repository and no
   file gets its Q4 build, which is the one that fits in memory. If another machine on your
   network already has that file, it is copied across the network instead of downloaded

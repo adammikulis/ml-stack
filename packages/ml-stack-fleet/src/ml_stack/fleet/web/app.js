@@ -29,6 +29,9 @@ const el = (tag, attrs = {}, ...kids) => {
 
 const show = (...nodes) => { root.replaceChildren(...nodes); };
 
+const row = (label, why) => el("span", {},
+  el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+
 const TABS = [["Chat", () => chat()], ["Cluster", () => fleet()],
               ["Models", () => models()], ["Settings", () => settings()]];
 
@@ -338,11 +341,11 @@ async function models(message) {
       body: JSON.stringify({ port: portOf(name) }) });
     models();
   };
-  const get = async (name, source) => {
+  const get = async (name, source, draft) => {
     note.replaceChildren(el("div", { class: "hint" },
       el("span", { class: "spin" }), ` Getting ${name}…`));
     const r = await api("/ui/models", { method: "POST",
-      body: JSON.stringify({ name, source }) });
+      body: JSON.stringify({ name, source, draft: draft || "" }) });
     if (r.error) {
       note.replaceChildren(el("div", { class: "err" }, r.error));
       return;
@@ -376,21 +379,51 @@ async function models(message) {
     el("h2", {}, "Popular models"),
     el("div", { class: "hint" }, el("span", { class: "spin" }),
       " Asking Hugging Face what people are running…"));
-  (async () => {
-    const pop = await api("/ui/models/popular");
+  let rude = false;
+  let page = 0;
+  let on = null;
+  let typed = "";
+  const hunt = el("input", { type: "search", id: "hunt",
+    placeholder: "Search models, or paste hf:owner/repo" });
+  let waiting = null;
+  hunt.oninput = () => {
+    clearTimeout(waiting);
+    waiting = setTimeout(() => {
+      typed = hunt.value.trim(); page = 0; on = null; load();
+    }, 350);
+  };
+
+  const load = async () => {
+    const pop = await api(`/ui/models/popular?page=${page}&rude=${rude ? 1 : 0}`
+      + `&q=${encodeURIComponent(typed)}`);
+    const heading = () => [
+      el("h2", {}, typed ? `Models matching “${typed}”` : "Popular models"),
+      el("div", { class: "searchrow" }, hunt,
+        typed ? el("button", { class: "ghost small",
+          onclick: () => { hunt.value = ""; typed = ""; page = 0; on = null; load(); } },
+          "Clear") : null),
+    ];
     if (pop.error || !(pop.models || []).length) {
-      popularBox.replaceChildren(el("h2", {}, "Popular models"),
+      const ref = typed.startsWith("hf:") || typed.startsWith("http");
+      popularBox.replaceChildren(...heading(),
         el("div", { class: "hint" },
-          pop.error || "Nothing that fits on this machine."));
+          pop.error || (typed ? "Nothing on the hub matches that."
+                              : "Nothing that fits on this machine.")),
+        ref ? el("button", { class: "ghost small",
+          onclick: () => get(typed.split("/").pop(), typed) },
+          `Get ${typed.split("/").pop()}`) : null);
+      if (hunt.value) hunt.focus();
       return;
     }
-    const on = new Set(pop.families || []);
+    // Families come from the whole list, so ticking one off survives paging.
+    if (on === null) on = new Set(pop.families || []);
     const paint = () => {
       const rows = pop.models.filter((x) => on.has(x.family));
       popularBox.replaceChildren(
-        el("h2", {}, "Popular models"),
+        ...heading(),
         el("div", { class: "hint" },
-          "What is most downloaded right now, in a Q4 build that fits this machine. "
+          (typed ? "From Hugging Face" : "Most downloaded and trending now")
+          + ", in a Q4 build that fits this machine. "
           + "💬 text · 🖼 images · 🔊 audio · 🎬 video."),
         el("div", { class: "chips" }, (pop.families || []).map((f) => {
           const box = el("input", { type: "checkbox", id: `fam_${f}`,
@@ -398,23 +431,49 @@ async function models(message) {
           box.onchange = () => { box.checked ? on.add(f) : on.delete(f); paint(); };
           return el("label", { class: "opt inline", for: `fam_${f}` }, box, f);
         })),
+        (() => {
+          const box = el("input", { type: "checkbox", id: "rude",
+                                    ...(rude ? { checked: "1" } : {}) });
+          box.onchange = () => { rude = box.checked; page = 0; load(); };
+          return el("label", { class: "opt", for: "rude" }, box,
+            row("Show uncensored builds",
+              "abliterated, heretic and uncensored variants, which are "
+              + "published with their refusals removed"));
+        })(),
         ...(rows.length
           ? rows.map((x) => {
               const bits = [`${x.gb} GB`];
               if (x.params_b) bits.push(`${x.params_b}B`);
               if (x.moe) bits.push(`${x.active_b}B active`);
+              if (x.draft_ref) bits.push(`+${x.draft_gb} GB draft`);
               bits.push(`${x.takes.join("")} → ${x.gives.join("")}`);
               bits.push(x.what);
               return el("div", { class: "row" },
                 el("span", {}, el("b", {}, x.name),
                   el("span", { class: "why" }, bits.join(" · "))),
                 el("button", { class: "ghost small",
-                  onclick: () => get(x.file, x.ref) }, "Get"));
+                  onclick: () => get(x.file, x.ref, x.draft_ref) }, "Get"));
             })
-          : [el("div", { class: "hint" }, "No family is ticked.")]));
+          : [el("div", { class: "hint" }, "No family is ticked.")]),
+        el("div", { class: "pager" },
+          (() => {
+            const back = el("button", { class: "ghost small" }, "← Newer");
+            back.disabled = pop.page <= 0;
+            back.onclick = () => { page = pop.page - 1; load(); };
+            return back;
+          })(),
+          el("span", { class: "why" },
+            `Page ${pop.page + 1} of ${pop.pages} · ${pop.total} models`),
+          (() => {
+            const on2 = el("button", { class: "ghost small" }, "More →");
+            on2.disabled = pop.page + 1 >= pop.pages;
+            on2.onclick = () => { page = pop.page + 1; load(); };
+            return on2;
+          })()));
     };
     paint();
-  })();
+  };
+  load();
 
   const getting = (m.getting || []).filter((g) => g.state !== "done").map(bar);
   if ((m.getting || []).some((g) => g.state === "getting")) {
@@ -451,14 +510,6 @@ async function models(message) {
           models();
         } }, "Discard")));
 
-  const ref = el("input", { type: "text", id: "src",
-    placeholder: "hf:Qwen/Qwen3-4B-GGUF/qwen3-4b-q4_k_m.gguf" });
-  const fetchIt = el("button", {}, "Get it");
-  fetchIt.onclick = () => {
-    const v = ref.value.trim();
-    if (v) get(v.split("/").pop(), v);
-  };
-
   show(el("div", { class: "app" },
     top("Models"),
     el("main", {},
@@ -493,16 +544,6 @@ async function models(message) {
         : null,
 
       popularBox,
-
-      el("div", { class: "group" },
-        el("h2", {}, "Something else"),
-        el("label", { for: "src" }, "Hugging Face reference, or a link"),
-        ref,
-        el("div", { class: "hint" },
-          m.autodownload
-            ? "Checked first on your other machines, then downloaded."
-            : "Automatic downloading is off in Settings."),
-        fetchIt),
       note)));
 }
 
@@ -521,9 +562,6 @@ async function settings(message) {
     auto_update: cur.auto_update !== false,
     autodownload_models: cur.autodownload_models !== false,
   };
-
-  const row = (label, why) => el("span", {},
-    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
 
   const radio = (group, value, label, why) => {
     const id = `${group}-${value}`;

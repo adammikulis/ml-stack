@@ -354,3 +354,13 @@ button.small { margin: 0; width: auto; padding: 6px 12px; font-size: 12.5px; }
 /* removing it: the one button that destroys something */
 button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
 button.danger:hover:not(:disabled) { filter: brightness(1.1); }
+
+/* paging through the model list */
+.pager { display: flex; align-items: center; justify-content: space-between;
+         gap: 12px; margin-top: 12px; }
+.pager button { margin: 0; }
+
+/* searching the model list */
+.searchrow { display: flex; gap: 8px; align-items: center; margin: 8px 0 12px; }
+.searchrow input { flex: 1; margin: 0; }
+.searchrow button { margin: 0; }

@@ -224,9 +224,17 @@ class UI:
         if self.servers is None:
             self.servers = ServerManager(
                 backend=LlamaServerBackend(binary=ensure_server(self.root)))
+        from .models import draft_beside
+
         port = free_port()
+        extra: tuple[str, ...] = ()
+        draft = draft_beside(model.path)
+        if draft is not None:
+            # -md is what this build calls --spec-draft-model.
+            extra = ("-md", str(draft), "-ngld", "99")
         self._leases[port] = self.servers.lease(ServerSpec(model=model.path,
-                                                           port=port))
+                                                           port=port,
+                                                           extra_args=extra))
         return self.serving.register(port, [model.name])
 
     def stop_serving(self, port: int) -> None:
@@ -493,12 +501,28 @@ def routes(ui: UI, handler: Any) -> bool:
         if ui.models is None:
             send(501, {"error": "no model store on this daemon"})
             return True
-        from .models import popular
+        from .models import (
+            PER_PAGE, families, how_many, popular, searched_count,
+            searched_families)
+        asked = urllib.parse.parse_qs(parsed.query)
+        page = max(0, int((asked.get("page", ["0"])[0] or "0")))
+        rude = asked.get("rude", ["0"])[0] in ("1", "true", "yes")
+        query = (asked.get("q", [""])[0] or "").strip()
         ram = float((ui.report() if ui.report else {}).get("ram_gb") or 0)
+        free = ui.models.free_gb()
         here = {m.name for m in ui.models.all()}
-        found = [x for x in popular(ui.models.free_gb(), ram) if x.file not in here]
-        send(200, {"models": [x.public() for x in found],
-                   "families": sorted({x.public()["family"] for x in found})})
+        found = [x for x in popular(free, ram, page=page, rude=rude, query=query)
+                 if x.file not in here]
+        if query:
+            total = searched_count(query, free, ram, rude=rude)
+            names = searched_families(query, free, ram, rude=rude)
+        else:
+            total = how_many(free, ram, rude=rude)
+            # Across the whole list: a family further down still needs a box.
+            names = families(free, ram, rude=rude)
+        send(200, {"models": [x.public() for x in found], "families": names,
+                   "page": page, "pages": max(1, -(-total // PER_PAGE)),
+                   "total": total, "q": query})
         return True
 
     if path == "/ui/models":
@@ -555,7 +579,8 @@ def routes(ui: UI, handler: Any) -> bool:
                 send(200, here.public())
                 return True
             started = ui.downloads.start(name, source=str(req.get("source") or ""),
-                                         key=key, autodownload=auto_models)
+                                         key=key, autodownload=auto_models,
+                                         draft=str(req.get("draft") or ""))
             send(202, started.public())
             return True
 

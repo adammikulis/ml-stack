@@ -366,6 +366,176 @@ class TestReadingWhatAModelIs:
         assert family_of("owner/Zarquon-9000-70B-GGUF") == "Zarquon"
 
 
+class TestDraftModels:
+    """A small model kept beside a big one, for guessing ahead."""
+
+    def test_a_draft_is_kept_beside_its_model_and_not_listed_as_one(self, store,
+                                                                   tmp_path):
+        from ml_stack.fleet.models import draft_beside
+
+        big = a_model(tmp_path / "models", name="big.gguf", mb=2)
+        draft = big.with_suffix(".draft.gguf")
+        draft.write_bytes(os.urandom(2 * 1024 * 1024))
+
+        assert [m.name for m in store.all()] == ["big.gguf"], "the draft was listed"
+        assert draft_beside(big) == draft
+
+    def test_with_no_draft_there_is_nothing_beside_it(self, store, tmp_path):
+        from ml_stack.fleet.models import draft_beside
+
+        big = a_model(tmp_path / "models", name="lonely.gguf", mb=2)
+        assert draft_beside(big) is None
+
+    def test_getting_a_draft_puts_it_next_to_the_model(self, store, tmp_path):
+        payload = os.urandom(2 * 1024 * 1024)
+
+        class H(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+        srv = http.server.ThreadingHTTPServer(("127.0.0.1", free_port()), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        big = a_model(tmp_path / "models", name="pair.gguf", mb=2)
+        model = store.find("pair.gguf")
+        try:
+            got = store.ensure_draft(
+                model, f"http://127.0.0.1:{srv.server_address[1]}/d.gguf")
+        finally:
+            srv.shutdown()
+
+        assert got == big.with_suffix(".draft.gguf")
+        assert got.read_bytes() == payload
+        assert [m.name for m in store.all()] == ["pair.gguf"]
+
+    def test_a_draft_already_there_is_not_fetched_again(self, store, tmp_path):
+        big = a_model(tmp_path / "models", name="again.gguf", mb=2)
+        draft = big.with_suffix(".draft.gguf")
+        draft.write_bytes(b"x" * 2048)
+        model = store.find("again.gguf")
+        # An unreachable source: it must not be asked for.
+        assert store.ensure_draft(model, "http://127.0.0.1:1/none.gguf") == draft
+
+    def test_a_repository_that_ships_a_draft_offers_it(self):
+        from ml_stack.fleet.models import Suggestion
+
+        pick = Suggestion("m", "hf:o/r/m.gguf", 5.0, "", draft_ref="hf:o/r/m-draft.gguf",
+                          draft_gb=0.5)
+        assert pick.public()["draft_ref"].endswith("m-draft.gguf")
+        assert pick.public()["draft_gb"] == 0.5
+
+
+class TestUncensoredBuilds:
+    @pytest.mark.parametrize("name", [
+        "Qwen3.8-27B-Uncensored", "Huihui-DeepSeek-V4-abliterated",
+        "Qwen3.8-27B-Heretic-Abliterated-Uncensored", "Model-OBLITERATED",
+        "something-nsfw-7B",
+    ])
+    def test_a_build_with_its_refusals_removed_is_marked(self, name):
+        from ml_stack.fleet.models import is_unfiltered
+
+        assert is_unfiltered(name) is True
+
+    @pytest.mark.parametrize("name", [
+        "Qwen3-Coder-30B-A3B-Instruct", "Ornith-1.5-9B", "gpt-oss-20b",
+    ])
+    def test_an_ordinary_build_is_not(self, name):
+        from ml_stack.fleet.models import is_unfiltered
+
+        assert is_unfiltered(name) is False
+
+    def test_the_flag_reaches_the_screen(self):
+        from ml_stack.fleet.models import Suggestion
+
+        assert Suggestion("Qwen3-Uncensored", "hf:o/r/m.gguf", 1.0, "").public()[
+            "unfiltered"] is True
+        assert Suggestion("Qwen3-4B", "hf:o/r/m.gguf", 1.0, "").public()[
+            "unfiltered"] is False
+
+
+class TestPagingAndSearching:
+    def rows(self, n, unfiltered_every=0):
+        from ml_stack.fleet.models import Suggestion
+
+        out = []
+        for i in range(n):
+            rude = unfiltered_every and i % unfiltered_every == 0
+            out.append(Suggestion(
+                name=f"{'Rude' if rude else 'Plain'}-{i}-7B",
+                ref=f"hf:o/r{i}/m.gguf", gb=1.0 + i, what="", family="Fam",
+                unfiltered=rude))
+        return out
+
+    def test_a_page_is_cut_after_filtering_not_before(self, monkeypatch):
+        """Filtering the page would leave it half empty."""
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(40, 2)))
+        page = mod.popular(free_gb=999, ram_gb=999, limit=10, page=0, rude=False)
+        assert len(page) == 10, f"got {len(page)} of 10"
+        assert all(not p.public()["unfiltered"] for p in page)
+
+    def test_pages_do_not_repeat_or_skip(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(25)))
+        seen = []
+        for page in range(3):
+            seen += [p.name for p in mod.popular(999, 999, limit=10, page=page)]
+        assert len(seen) == 25
+        assert len(set(seen)) == 25
+
+    def test_showing_uncensored_builds_adds_them_back(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(20, 2)))
+        assert mod.how_many(999, 999, rude=False) == 10
+        assert mod.how_many(999, 999, rude=True) == 20
+
+    def test_families_cover_the_whole_list_not_one_page(self, monkeypatch):
+        """A family further down still needs a box on the first page."""
+        from ml_stack.fleet import models as mod
+        from ml_stack.fleet.models import Suggestion
+
+        rows = [Suggestion(f"Qwen3-{i}B", "hf:o/r/m.gguf", float(i), "", family="Qwen")
+                for i in range(1, 20)]
+        rows.append(Suggestion("gemma-4-2B", "hf:o/r/g.gguf", 40.0, "", family="Gemma"))
+        monkeypatch.setattr(mod, "_popular", (mod.time.time(), rows))
+
+        first = mod.popular(999, 999, limit=5, page=0)
+        assert "Gemma" not in {p.family for p in first}
+        assert mod.families(999, 999) == ["Gemma", "Qwen"]
+
+    def test_a_search_asks_the_hub_and_is_paged_the_same_way(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        asked = []
+
+        def fake_hub(url, timeout=25.0):
+            asked.append(url)
+            return [{"id": f"owner/thing-{i}-GGUF"} for i in range(6)]
+
+        monkeypatch.setattr(mod, "_hub", fake_hub)
+        monkeypatch.setattr(mod, "_resolve_rows",
+                            lambda rows: self.rows(len(rows)))
+        mod._found.clear()
+        got = mod.popular(999, 999, limit=4, page=0, query="thing")
+        assert len(got) == 4
+        assert any("search=thing" in u for u in asked), asked
+        assert mod.searched_count("thing", 999, 999) == 6
+
+    def test_an_empty_search_goes_back_to_the_popular_list(self, monkeypatch):
+        from ml_stack.fleet import models as mod
+
+        monkeypatch.setattr(mod, "_popular", (mod.time.time(), self.rows(5)))
+        assert len(mod.popular(999, 999, limit=10, query="   ")) == 5
+
+
 class TestSuggestions:
     def test_every_one_is_a_reference_this_code_can_resolve(self):
         from ml_stack.fleet.models import SUGGESTED, _resolve

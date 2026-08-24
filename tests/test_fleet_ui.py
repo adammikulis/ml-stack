@@ -559,17 +559,33 @@ class TestTheInterfaceAndTheDaemonAgree:
         source = asset[0].decode()
         found = set(re.findall(r"""api\(\s*[`"']([^`"']+)""", source))
         found |= set(re.findall(r"""fetch\(\s*[`"']([^`"']+)""", source))
-        # Template holes stand for an id; any id will do for asking whether the
-        # route exists at all.
-        return sorted(pp.replace("${c.id}", "x").replace("${id}", "x")
-                      for pp in found if pp.startswith("/ui"))
+        # Only the path matters here. A query string carries template holes, and
+        # any id will do for asking whether the route exists at all.
+        cleaned = set()
+        for pp in found:
+            if not pp.startswith("/ui"):
+                continue
+            path = pp.split("?", 1)[0]
+            cleaned.add(re.sub(r"\$\{[^}]*\}", "x", path))
+        return sorted(cleaned)
 
-    def test_the_page_calls_nothing_the_daemon_does_not_answer(self, signed_in):
+    def test_the_page_calls_nothing_the_daemon_does_not_answer(self, signed_in,
+                                                              monkeypatch):
+        import urllib.error
+
         serving, cookie = signed_in
+        from ml_stack.fleet import models as models_mod
         from ml_stack.fleet.conversations import Conversations
         from ml_stack.fleet.models import Models
         serving.ui.conversations = Conversations(serving.files.parent / "chats")
         serving.ui.models = Models([serving.files], serving.files)
+
+        # No hub: the popular route must still answer, and a test must not wait on
+        # the internet to find out whether a route exists.
+        def unreachable(*a, **k):
+            raise urllib.error.URLError("no network in tests")
+
+        monkeypatch.setattr(models_mod, "_hub", unreachable)
 
         called = self.called_paths()
         assert "/ui/chat" in called and "/ui/models" in called, called

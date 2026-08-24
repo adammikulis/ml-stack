@@ -19,8 +19,9 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
-           "Suggestion", "default_roots", "family_of", "popular",
-           "suggestions"]
+           "Suggestion", "default_roots", "family_of", "is_unfiltered",
+           "families", "how_many", "popular", "searched_count",
+           "searched_families", "suggestions"]
 
 SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
@@ -93,6 +94,8 @@ class Models:
                 continue
             for path in sorted(root.rglob("*")):
                 if not path.is_file() or path.suffix.lower() not in SUFFIXES:
+                    continue
+                if DRAFT_MARK in path.suffixes:
                     continue
                 try:
                     stat = path.stat()
@@ -271,6 +274,17 @@ class Models:
         stat = target.stat()
         return Model(target.name, target, stat.st_size, stat.st_mtime)
 
+    def ensure_draft(self, model: Model, source: str, *,
+                     on_progress: "Callable[[int, int], None] | None" = None) -> Path:
+        """Fetch the small model that guesses ahead for ``model``, beside it."""
+        beside = model.path.with_suffix(DRAFT_MARK + model.path.suffix)
+        if beside.is_file():
+            return beside
+        got = self._from_internet(beside.name, source, on_progress)
+        if got.path != beside:
+            os.replace(got.path, beside)
+        return beside
+
     def remove(self, name: str) -> bool:
         found = self.find(name)
         if found is None or self.store not in found.path.parents:
@@ -334,6 +348,9 @@ class Suggestion:
     active_b: float = 0.0
     takes: tuple[str, ...] = ("text",)
     gives: tuple[str, ...] = ("text",)
+    unfiltered: bool = False
+    draft_ref: str = ""
+    draft_gb: float = 0.0
 
     @property
     def file(self) -> str:
@@ -350,10 +367,32 @@ class Suggestion:
                 "params_b": self.params_b, "active_b": self.active_b,
                 "moe": self.moe,
                 "takes": [MODALITY.get(m, m) for m in self.takes],
-                "gives": [MODALITY.get(m, m) for m in self.gives]}
+                "gives": [MODALITY.get(m, m) for m in self.gives],
+                "unfiltered": self.unfiltered or is_unfiltered(self.name),
+                "draft_ref": self.draft_ref, "draft_gb": self.draft_gb}
 
 
 MODALITY = {"text": "💬", "image": "🖼", "audio": "🔊", "video": "🎬"}
+
+# Names publishers give a model whose refusals have been trained or edited out.
+UNFILTERED = ("uncensored", "abliterated", "obliterated", "unfiltered",
+              "unleashed", "unchained", "heretic", "nsfw", "jailbreak",
+              "norefusal", "no-refusal", "unaligned", "unsafe")
+
+
+DRAFT_MARK = ".draft"
+
+
+def draft_beside(model: Path) -> Path | None:
+    """The small model kept next to ``model`` to guess ahead with, if one was got."""
+    beside = model.with_suffix(DRAFT_MARK + model.suffix)
+    return beside if beside.is_file() else None
+
+
+def is_unfiltered(name: str) -> bool:
+    """Whether a model is published as one that will not decline."""
+    low = name.lower()
+    return any(word in low for word in UNFILTERED)
 
 
 # What to fall back on when Hugging Face cannot be reached. Anything shipped here is
@@ -390,15 +429,37 @@ def suggestions(free_gb: float = 0.0, ram_gb: float = 0.0) -> list[Suggestion]:
     return sorted(out, key=lambda s: s.gb)
 
 
-# Spelling only. Which families exist is read off what the hub returns, because a
-# list of families written here would go out of date the same way a list of models does.
-SPELLING = {"gpt-oss": "GPT-OSS", "lfm": "LFM", "smollm": "SmolLM",
-            "deepseek": "DeepSeek", "qwen": "Qwen", "llama": "Llama"}
+# Families worth recognising wherever they appear in a name, so Ternary-Bonsai-27B
+# lands under Bonsai rather than starting a family of its own. Longest first: gpt-oss
+# must win over gpt. A name matching nothing here still gets a family from its first
+# word, so a release nobody has heard of yet still groups.
+KNOWN = {
+    "gpt-oss": "GPT-OSS", "command-r": "Command R", "deepseek": "DeepSeek",
+    "nemotron": "Nemotron", "minicpm": "MiniCPM", "smollm": "SmolLM",
+    "granite": "Granite", "mistral": "Mistral", "mixtral": "Mixtral",
+    "starcoder": "StarCoder", "codestral": "Codestral", "exaone": "EXAONE",
+    "internlm": "InternLM", "falcon": "Falcon", "bonsai": "Bonsai",
+    "ornith": "Ornith", "gemma": "Gemma", "llama": "Llama", "qwen": "Qwen",
+    "phi": "Phi", "olmo": "OLMo", "yi": "Yi", "glm": "GLM", "lfm": "LFM",
+}
+SPELLING = KNOWN
 HUB = "https://huggingface.co/api/models"
 POPULAR_TTL_S = 6 * 3600
 SCAN = 40
-WANT = 24
+WANT = 48
+PER_PAGE = 12
+
+# What a chat model is not. Asking for pipeline_tag=text-generation instead would drop
+# anything the hub has not tagged, and the newest releases are often untagged.
+NOT_CHAT = frozenset({
+    "automatic-speech-recognition", "text-to-speech", "text-to-audio",
+    "feature-extraction", "sentence-similarity", "fill-mask", "text-to-image",
+    "image-to-image", "object-detection", "image-segmentation", "image-classification",
+    "text-classification", "token-classification", "translation", "summarization",
+    "audio-classification", "video-classification", "reinforcement-learning",
+})
 _popular: tuple[float, list[Suggestion]] = (0.0, [])
+_drafts: dict[str, tuple[str, int] | None] = {}
 
 
 def family_of(name: str) -> str:
@@ -410,6 +471,12 @@ def family_of(name: str) -> str:
     bare = name.split("/")[-1]
     for tail in ("-GGUF", "-gguf", ".gguf"):
         bare = bare.removesuffix(tail)
+
+    low = bare.lower()
+    for needle in sorted(KNOWN, key=len, reverse=True):
+        if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z])", low):
+            return KNOWN[needle]
+
     head = re.match(r"[A-Za-z][A-Za-z\-_]*", bare)
     if not head:
         return "Other"
@@ -476,19 +543,24 @@ def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
         return None
     whole = []
     sees = False
+    drafts: list[tuple[str, int]] = []
     for row in tree if isinstance(tree, list) else []:
         path = str(row.get("path", ""))
         if not path.lower().endswith(".gguf"):
             continue
-        if "mmproj" in path.rsplit("/", 1)[-1].lower():
+        stem = path.rsplit("/", 1)[-1].lower()
+        size = int(row.get("size") or (row.get("lfs") or {}).get("size") or 0)
+        if "mmproj" in stem:
             sees = True
+        if size and ("draft" in stem or "mtp" in stem):
+            drafts.append((path, size))
         if _is_a_piece(path) or _is_beside(path):
             continue
-        size = int(row.get("size") or (row.get("lfs") or {}).get("size") or 0)
         if size:
             whole.append((path, size))
     if not whole:
         return None
+    _drafts[repo] = min(drafts, key=lambda x: x[1]) if drafts else None
     # A file at the top level is the model; one in a subdirectory is a variant.
     flat = [x for x in whole if "/" not in x[0]] or whole
     for want in QUANTS:
@@ -499,56 +571,151 @@ def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
     return path, size, sees
 
 
-def popular(free_gb: float = 0.0, ram_gb: float = 0.0, *, limit: int = 12,
-            sort: str = "downloads") -> list[Suggestion]:
+def _ranked() -> list[dict[str, Any]]:
+    """The hub's two orderings, folded into one.
+
+    Downloads alone is the last thirty days but favours whatever has been around all
+    month; trending alone swings on a day's noise. A model near the top of either
+    belongs on the first page, so each is scored by where it sits in both.
+    """
+    boards = []
+    for order in ("downloads", "trendingScore"):
+        try:
+            got = _hub(f"{HUB}?filter=gguf&sort={order}&direction=-1&limit={SCAN}")
+        except (urllib.error.URLError, OSError, ValueError):
+            got = []
+        boards.append([r for r in got if isinstance(r, dict)])
+    if not any(boards):
+        raise urllib.error.URLError("no board")
+
+    score: dict[str, float] = {}
+    rows: dict[str, dict[str, Any]] = {}
+    for board in boards:
+        for place, row in enumerate(board):
+            repo = str(row.get("id") or "")
+            if not repo:
+                continue
+            rows[repo] = row
+            score[repo] = score.get(repo, 0.0) + 1.0 / (place + 1)
+    return [rows[r] for r in sorted(score, key=lambda r: score[r], reverse=True)]
+
+
+def popular(free_gb: float = 0.0, ram_gb: float = 0.0, *, limit: int = PER_PAGE,
+            page: int = 0, rude: bool = False,
+            query: str = "") -> list[Suggestion]:
     """What people are actually running, asked of Hugging Face rather than remembered.
 
+    With a ``query`` the hub is searched instead, so typing narrows the same list.
     Falls back to ``suggestions`` when the hub cannot be reached.
     """
     global _popular
+    if query.strip():
+        return _searched(query.strip(), free_gb, ram_gb, limit=limit, page=page,
+                         rude=rude)
     age, cached = _popular
     if time.time() - age > POPULAR_TTL_S or not cached:
         try:
-            listed = _hub(f"{HUB}?filter=gguf&pipeline_tag=text-generation"
-                          f"&sort={sort}&direction=-1&limit={SCAN}")
+            listed = _ranked()
         except (urllib.error.URLError, OSError, ValueError):
             return suggestions(free_gb, ram_gb)
-        found: list[Suggestion] = []
-        for row in listed if isinstance(listed, list) else []:
-            repo = str(row.get("id") or "")
-            if not repo or "/" not in repo:
-                continue
-            best = _best_gguf(repo)
-            if best is None:
-                continue
-            path, size, sees = best
-            short = repo.split("/")[-1].removesuffix("-GGUF").removesuffix("-gguf")
-            facts = _repo_facts(repo)
-            total_b, active_b = _params_in(short)
-            exact = int((facts.get("gguf") or {}).get("total") or 0)
-            if exact:
-                total_b = round(exact / 1e9, 1)
-            if not active_b and "moe" in str(
-                    (facts.get("gguf") or {}).get("architecture") or "").lower():
-                active_b = 0.0
-            takes, gives = _modalities(facts)
-            if sees and "image" not in takes:
-                takes = (*takes, "image")
-            found.append(Suggestion(
-                name=short, ref=f"hf:{repo}/{path}", gb=round(size / 2**30, 2),
-                what=f"from {repo.split('/')[0]}", family=family_of(short),
-                params_b=total_b, active_b=active_b, takes=takes, gives=gives))
-            if len(found) >= WANT:
-                break
+        found = _resolve_rows(listed)
         if not found:
             return suggestions(free_gb, ram_gb)
         _popular = (time.time(), found)
         cached = found
 
-    # Kept in the order the hub gave them: that order is the popularity.
-    out = [p for p in cached
-           if (not free_gb or p.gb <= free_gb) and (not ram_gb or p.gb <= ram_gb)]
-    return out[:limit]
+    # Kept in the order the fold gave them: that order is the popularity. Filtered
+    # before the page is cut, or a page would arrive half empty.
+    out = _fitting(cached, free_gb, ram_gb, rude)
+    start = max(0, page) * limit
+    return out[start:start + limit]
+
+
+def _fitting(rows: list[Suggestion], free_gb: float, ram_gb: float,
+             rude: bool) -> list[Suggestion]:
+    return [p for p in rows
+            if (not free_gb or p.gb <= free_gb)
+            and (not ram_gb or p.gb <= ram_gb)
+            and (rude or not p.public()["unfiltered"])]
+
+
+def _resolve_rows(listed: list[dict[str, Any]]) -> list[Suggestion]:
+    """Turn hub rows into something the screen can show, stopping at ``WANT``."""
+    found: list[Suggestion] = []
+    for row in listed:
+        repo = str(row.get("id") or "")
+        if not repo or "/" not in repo:
+            continue
+        if str(row.get("pipeline_tag") or "") in NOT_CHAT:
+            continue
+        best = _best_gguf(repo)
+        if best is None:
+            continue
+        path, size, sees = best
+        draft = _drafts.get(repo)
+        short = repo.split("/")[-1].removesuffix("-GGUF").removesuffix("-gguf")
+        facts = _repo_facts(repo)
+        total_b, active_b = _params_in(short)
+        exact = int((facts.get("gguf") or {}).get("total") or 0)
+        if exact:
+            total_b = round(exact / 1e9, 1)
+        takes, gives = _modalities(facts)
+        if sees and "image" not in takes:
+            takes = (*takes, "image")
+        found.append(Suggestion(
+            name=short, ref=f"hf:{repo}/{path}", gb=round(size / 2**30, 2),
+            what=f"from {repo.split('/')[0]}", family=family_of(short),
+            params_b=total_b, active_b=active_b, takes=takes, gives=gives,
+            unfiltered=is_unfiltered(repo),
+            draft_ref=f"hf:{repo}/{draft[0]}" if draft else "",
+            draft_gb=round(draft[1] / 2**30, 2) if draft else 0.0))
+        if len(found) >= WANT:
+            break
+    return found
+
+
+_found: dict[str, list[Suggestion]] = {}
+
+
+def _searched(query: str, free_gb: float, ram_gb: float, *, limit: int,
+              page: int, rude: bool) -> list[Suggestion]:
+    """The hub's answer to a search, resolved the same way the popular list is."""
+    if query not in _found:
+        try:
+            listed = _hub(f"{HUB}?filter=gguf&search={urllib.parse.quote(query)}"
+                          f"&sort=downloads&direction=-1&limit={SCAN}")
+        except (urllib.error.URLError, OSError, ValueError):
+            return []
+        _found[query] = _resolve_rows(listed if isinstance(listed, list) else [])
+    out = _fitting(_found[query], free_gb, ram_gb, rude)
+    start = max(0, page) * limit
+    return out[start:start + limit]
+
+
+def searched_count(query: str, free_gb: float = 0.0, ram_gb: float = 0.0, *,
+                   rude: bool = False) -> int:
+    return len(_fitting(_found.get(query.strip(), []), free_gb, ram_gb, rude))
+
+
+def searched_families(query: str, free_gb: float = 0.0, ram_gb: float = 0.0, *,
+                      rude: bool = False) -> list[str]:
+    return sorted({p.public()["family"]
+                   for p in _fitting(_found.get(query.strip(), []), free_gb, ram_gb,
+                                     rude)})
+
+
+def how_many(free_gb: float = 0.0, ram_gb: float = 0.0, *, rude: bool = False) -> int:
+    """How many models the last look found that fit here."""
+    _, cached = _popular
+    return len(_fitting(cached, free_gb, ram_gb, rude))
+
+
+def families(free_gb: float = 0.0, ram_gb: float = 0.0, *,
+             rude: bool = False) -> list[str]:
+    """Every family across the whole list, not just the page being shown."""
+    _, cached = _popular
+    return sorted({p.public()["family"]
+                   for p in _fitting(cached, free_gb, ram_gb, rude)})
 
 
 @dataclass
@@ -585,7 +752,7 @@ class Downloads:
         self._sem = threading.Semaphore(slots)
 
     def start(self, name: str, *, source: str = "", key: bytes | None = None,
-              autodownload: bool = True) -> Getting:
+              autodownload: bool = True, draft: str = "") -> Getting:
         with self._lock:
             for row in self.getting.values():
                 if row.state == "getting" and row.name == name:
@@ -594,11 +761,12 @@ class Downloads:
                       name=name, source=source)
         with self._lock:
             self.getting[row.id] = row
-        threading.Thread(target=self._run, args=(row, key, autodownload),
+        threading.Thread(target=self._run, args=(row, key, autodownload, draft),
                          daemon=True, name=f"get-{row.id}").start()
         return row
 
-    def _run(self, row: Getting, key: bytes | None, autodownload: bool) -> None:
+    def _run(self, row: Getting, key: bytes | None, autodownload: bool,
+             draft: str = "") -> None:
         with self._sem:
             try:
                 def progress(done: int, total: int) -> None:
@@ -610,6 +778,12 @@ class Downloads:
                 got = self.models.ensure(row.name, source=row.source, key=key,
                                          on_progress=progress, on_note=note,
                                          autodownload=autodownload)
+                if draft:
+                    row.note = f"Getting the draft for {got.name}"
+                    try:
+                        self.models.ensure_draft(got, draft, on_progress=progress)
+                    except (ModelError, OSError):
+                        pass          # a model without its draft still runs
                 row.state = "done"
                 row.name = got.name
                 row.done = row.total = got.size
