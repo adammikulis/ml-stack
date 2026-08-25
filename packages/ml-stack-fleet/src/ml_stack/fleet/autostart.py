@@ -28,10 +28,19 @@ class Autostart:
     note: str = ""
 
 
+def _runs(argv: list[str]) -> bool:
+    """Whether a command answers ``--help``, which starts nothing."""
+    try:
+        done = subprocess.run([*argv, "--help"], capture_output=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
 def _executable() -> list[str]:
     """How to start the daemon on this machine."""
     found = shutil.which(SERVICE)
-    if found:
+    if found and _runs([found]):
         return [found]
     return [sys.executable, "-m", "ml_stack.fleet.daemon"]
 
@@ -226,6 +235,11 @@ def install(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
     logs = Path(log_dir).expanduser() if log_dir else Path.home() / ".ml-stack"
     logs.mkdir(parents=True, exist_ok=True)
     argv = plan(mode, slots=slots, labels=labels, report=report)
+    if not _runs(argv):
+        return Autostart(
+            mode, installed=False, command=" ".join(argv),
+            note="This machine has no working ml-stack to start. Installing it here "
+                 "would leave the operating system retrying a command that fails.")
     if sys.platform == "darwin":
         return _mac_install(mode, argv, logs)
     if sys.platform == "win32":

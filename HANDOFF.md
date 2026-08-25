@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 935 passing, `docs/verify_release.py` is 40/40.
+The suite is 938 passing, `docs/verify_release.py` is 40/40.
 
 ## In flight
 

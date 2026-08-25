@@ -45,6 +45,42 @@ def windows(monkeypatch, tmp_path):
     return autostart, ran
 
 
+class TestWhatItWouldStart:
+    """The operating system retries a command that fails, silently and for ever."""
+
+    def test_a_console_script_that_cannot_run_is_not_the_one_installed(
+            self, monkeypatch, tmp_path):
+        from ml_stack.fleet import autostart
+
+        broken = tmp_path / "ml-stack-traind"
+        broken.write_text("#!/bin/sh\nexit 1\n")
+        broken.chmod(0o755)
+        monkeypatch.setattr(autostart.shutil, "which", lambda name: str(broken))
+
+        assert autostart.plan("login")[:2] == [sys.executable, "-m"]
+
+    def test_a_console_script_that_answers_is(self, monkeypatch, tmp_path):
+        from ml_stack.fleet import autostart
+
+        works = tmp_path / "ml-stack-traind"
+        works.write_text("#!/bin/sh\nexit 0\n")
+        works.chmod(0o755)
+        monkeypatch.setattr(autostart.shutil, "which", lambda name: str(works))
+
+        assert autostart.plan("login")[0] == str(works)
+
+    def test_starting_at_login_is_refused_when_nothing_would_start(
+            self, mac, tmp_path, monkeypatch):
+        auto, paths = mac
+        monkeypatch.setattr(auto, "_runs", lambda argv: False)
+
+        done = auto.install("login", log_dir=tmp_path)
+
+        assert not done.installed
+        assert not paths["login"].exists(), "installed a job that cannot run"
+        assert "no working ml-stack" in done.note
+
+
 class TestChangingTheAnswer:
     def test_only_when_i_open_it_removes_what_login_installed(self, mac, tmp_path):
         auto, paths = mac
