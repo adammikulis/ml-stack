@@ -968,7 +968,7 @@ function steps(n, back) {
   return el("div", {},
     back ? el("button", { class: "back", onclick: back }, "\u2190 Back") : null,
     el("div", { class: "steps" },
-      [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" }))));
+      [0, 1, 2, 3, 4, 5, 6].map((i) => el("i", { class: i <= n ? "on" : "" }))));
 }
 
 // Step 1: the clusters this machine belongs to. Skippable: a machine on its own is a
@@ -1142,67 +1142,71 @@ async function startStep(next, back) {
 // Step 4: what this machine should be able to run. Asked here rather than left in
 // Settings, because a machine that can do nothing yet is the state everyone starts in
 // and nobody goes looking for.
-async function installStep(next, back) {
+function chosen() {
+  return state.install || (state.install = {
+    want: [], chat: true, context: 8192, updates: true, getModels: true, onClose: "",
+  });
+}
+
+const optBox = (id, on, label, why, flip) => {
+  const input = el("input", { type: "checkbox", id,
+                              ...(on ? { checked: "1" } : {}) });
+  input.onchange = () => flip(input.checked);
+  return el("label", { class: "opt", for: id }, input, row(label, why));
+};
+
+async function runStep(next, back) {
   if (!state.libraries) state.libraries = await api("/ui/libraries");
   const offered = state.libraries.libraries || [];
-  const kept = state.install || (state.install = {
-    want: offered.filter((x) => x.default || x.installed).map((x) => x.name),
-    chat: true, context: 8192, updates: true, getModels: true, onClose: "",
-  });
+  const kept = chosen();
+  if (!kept.picked) {
+    kept.picked = true;
+    kept.want = offered.filter((x) => x.default || x.installed).map((x) => x.name);
+  }
   const want = new Set(kept.want);
 
   const note = el("div");
+  const size = el("div", { class: "hint" });
   const go = el("button", {}, "Install and continue");
-  const later = el("button", { class: "ghost", onclick: () => next() },
-    "Not now");
+  const later = el("button", { class: "ghost", onclick: () => next() }, "Not now");
 
-  const box = (id, on, label, why, flip) => {
-    const input = el("input", { type: "checkbox", id,
-                                ...(on ? { checked: "1" } : {}) });
-    input.onchange = () => flip(input.checked);
-    return el("label", { class: "opt", for: id }, input, row(label, why));
+  const paint = () => {
+    const mb = offered.filter((x) => want.has(x.name))
+                      .reduce((a, x) => a + (x.size_mb || 0), 0);
+    size.textContent = mb
+      ? `About ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} to download, `
+        + "alongside ml-stack rather than into your system Python."
+      : "Installed alongside ml-stack, not into your system Python.";
   };
 
   go.onclick = async () => {
     go.disabled = true; later.disabled = true;
-    await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
-      context: kept.context, auto_update: kept.updates,
-      autodownload_models: kept.getModels, on_close: kept.onClose,
-      autostart: (state.prefs || {}).autostart || "manual" }) });
     const doing = (what) => note.replaceChildren(
       el("div", { class: "hint" }, el("span", { class: "spin" }), " " + what));
+    const stop = (why) => {
+      note.replaceChildren(el("div", { class: "err" }, why));
+      go.disabled = false; later.disabled = false;
+    };
     try {
       if (kept.chat) {
         doing("Getting the model server…");
         const got = await api("/ui/serving/install", { method: "POST" });
-        if (got.error) {
-          note.replaceChildren(el("div", { class: "err" }, got.error));
-          go.disabled = false; later.disabled = false;
-          return;
-        }
+        if (got.error) return stop(got.error);
       }
       const add = [...want];
       if (add.length) {
         doing(`Installing ${add.join(", ")}… this can take a few minutes.`);
         const r = await api("/ui/libraries", { method: "POST",
           body: JSON.stringify({ install: add }) });
-        if (r.error) {
-          note.replaceChildren(el("div", { class: "err" }, r.error));
-          go.disabled = false; later.disabled = false;
-          return;
-        }
+        if (r.error) return stop(r.error);
       }
     } catch (e) {
-      note.replaceChildren(el("div", { class: "err" }, String(e)));
-      go.disabled = false; later.disabled = false;
-      return;
+      return stop(String(e));
     }
     next();
   };
 
-  const total = () => offered.filter((x) => want.has(x.name))
-                             .reduce((a, x) => a + (x.size_mb || 0), 0);
-
+  paint();
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
     steps(4, back),
     el("h1", {}, "What should it be able to do?"),
@@ -1210,7 +1214,7 @@ async function installStep(next, back) {
       "Ticked from what this machine is. Anything here can be changed later in "
       + "Settings."),
     el("div", { class: "cap" }, el("span", {}, "CHATTING")),
-    box("chat", kept.chat, "Run models and chat with them",
+    optBox("chat", kept.chat, "Run models and chat with them",
       "downloads llama.cpp, about 20 MB; models come later and are your choice",
       (on) => { kept.chat = on; }),
     contextPicker(kept.context, (n) => { kept.context = n; }),
@@ -1218,20 +1222,42 @@ async function installStep(next, back) {
       ? el("div", { class: "cap" }, el("span", {}, "TRAINING"))
       : null,
     ...offered.map((lib) =>
-      box(`lib_${lib.name}`, want.has(lib.name), lib.title,
+      optBox(`lib_${lib.name}`, want.has(lib.name), lib.title,
         `${lib.blurb || ""}${lib.size_mb ? ` — about ${lib.size_mb} MB` : ""}`,
         (on) => {
           on ? want.add(lib.name) : want.delete(lib.name);
           kept.want = [...want];
+          paint();
         })),
-    el("div", { class: "hint" },
-      "Installed alongside ml-stack, not into your system Python."),
+    size,
+    go, later, note)));
+}
+
+// Step 5: what it does while nobody is looking at it.
+function awayStep(next, back) {
+  const kept = chosen();
+  const go = el("button", {}, "Continue");
+
+  go.onclick = async () => {
+    go.disabled = true; go.innerHTML = '<span class="spin"></span> Saving…';
+    await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+      context: kept.context, auto_update: kept.updates,
+      autodownload_models: kept.getModels, on_close: kept.onClose,
+      autostart: (state.prefs || {}).autostart || "manual" }) });
+    next();
+  };
+
+  show(el("div", { class: "centre" }, el("div", { class: "card" },
+    steps(5, back),
+    el("h1", {}, "When you are not using it"),
+    el("p", { class: "sub" },
+      "It keeps itself current, and stays reachable while the window is shut."),
 
     el("div", { class: "cap" }, el("span", {}, "KEEPING UP TO DATE")),
-    box("upd", kept.updates, "Download and install updates automatically",
+    optBox("upd", kept.updates, "Download and install updates automatically",
       "checked once a day, put on when no job is running, and it restarts itself",
       (on) => { kept.updates = on; }),
-    box("getm", kept.getModels, "Get models automatically",
+    optBox("getm", kept.getModels, "Get models automatically",
       "from another machine on your network if one has it, otherwise the internet",
       (on) => { kept.getModels = on; }),
 
@@ -1246,7 +1272,7 @@ async function installStep(next, back) {
       return el("label", { class: "opt", for: id }, input, row(label, ""));
     }),
 
-    go, later, note)));
+    go)));
 }
 
 function wizard(setup) {
@@ -1270,9 +1296,10 @@ function wizard(setup) {
   if (state.step === 1) return clustersStep(() => next(2), () => next(0));
   if (state.step === 2) return jobStep(() => next(3), () => next(1));
   if (state.step === 3) return startStep(() => next(4), () => next(2));
-  if (state.step === 4) return installStep(() => next(5), () => next(3));
+  if (state.step === 4) return runStep(() => next(5), () => next(3));
+  if (state.step === 5) return awayStep(() => next(6), () => next(4));
 
-  // step 5: done. Deliberately not a command: telling someone to open a terminal is the
+  // step 6: done. Deliberately not a command: telling someone to open a terminal is the
   // same wall as telling them to paste a 32-byte key, one layer up.
   api("/ui/setup/done", { method: "POST" });
   const joined = state.clusters[0];
@@ -1286,7 +1313,7 @@ function wizard(setup) {
 
   if (!joined) {
     return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(5),
+      steps(6),
       el("h1", {}, `“${state.name}” is ready`),
       el("p", { class: "sub" },
         "It is on its own: it will run models and train here, and nothing else on your "
@@ -1323,7 +1350,7 @@ function wizard(setup) {
       el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
   show(el("div", { class: "centre" }, el("div", { class: "card" },
-    steps(5),
+    steps(6),
     el("h1", {}, `Joined “${joined.group}”`),
     el("p", { class: "sub" }, "Now add your other machines. On each one:"),
     el("ol", { class: "howto" },
