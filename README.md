@@ -62,9 +62,9 @@ from the hardware it finds:
 
 | | |
 |---|---|
-| macOS | `ml-stack-macos-arm64.zip` — Apple silicon (M1 or later) |
-| Windows | `ml-stack-windows-x86_64.zip` |
-| Linux | `ml-stack-linux-x86_64.zip` |
+| macOS | `ml-stack-macos-arm64-<version>.zip` — Apple silicon (M1 or later) |
+| Windows | `ml-stack-windows-x86_64-<version>.zip` |
+| Linux | `ml-stack-linux-x86_64-<version>.zip` |
 
 Each download holds the app and `ml-stack-headless`, for a machine with no screen — the
 same daemon, serving the interface to a browser on your network.

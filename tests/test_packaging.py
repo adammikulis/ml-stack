@@ -87,7 +87,7 @@ def test_every_bundle_the_release_builds_is_linked_from_its_notes():
     assert built, "the release builds no bundles"
     step = downloads_step()
     for asset in built:
-        assert f"{asset}.zip" in step, f"{asset}.zip is built but not offered"
+        assert asset in step, f"{asset} is built but not offered"
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
@@ -97,7 +97,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
 
     (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
     (tmp_path / "artifacts" / "mac").mkdir()
-    (tmp_path / "artifacts" / "mac" / "ml-stack-macos-arm64.zip").write_text("x")
+    (tmp_path / "artifacts" / "mac" / "ml-stack-macos-arm64-v9.9.9.zip").write_text("x")
     (tmp_path / "artifacts" / "install.sh").write_text("x")
     (tmp_path / "artifacts" / "install.ps1").write_text("x")
     (tmp_path / "artifacts" / "wheels" / "ml_stack_fleet-0-py3-none-any.whl").write_text("x")
@@ -112,7 +112,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     assert done.returncode == 0, done.stderr
 
     body = out.read_text()
-    assert "releases/download/v9.9.9/ml-stack-macos-arm64.zip" in body
+    assert "releases/download/v9.9.9/ml-stack-macos-arm64-v9.9.9.zip" in body
     assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
     assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
     assert "the 1 `ml_stack_*.whl`" in body
@@ -164,3 +164,18 @@ def test_the_notes_say_what_changed_and_leave_out_what_did_not(tmp_path):
     assert "Explain the recipes" not in body
     assert "Before the tag" not in body, "listed a commit from the previous release"
     assert "compare/v0.1.0...v0.2.0" in body
+
+
+def test_the_name_of_a_download_says_which_release_it_is():
+    """Two downloads in one folder are two files, and the updater and both installers
+    still find theirs: they look for ml-stack-<os>-<arch> inside the name."""
+    import re
+
+    text = WORKFLOW.read_text()
+    packed = re.search(r'pack\.py dist/bundle "([^"]+)"', text)
+    assert packed, "nothing packs the bundle"
+    assert packed.group(1) == "dist/${{ matrix.asset }}-$stamp.zip", packed.group(1)
+
+    for asset in re.findall(r"^\s+asset: (\S+)$", text, re.M):
+        assert packed.group(1).startswith("dist/${{ matrix.asset }}-"), (
+            f"{asset} would not keep its platform in the name")

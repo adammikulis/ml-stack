@@ -817,6 +817,18 @@ class TestUpdates:
         ), 0)
         assert asset_for(release)["name"] == f"ml-stack-{key}.zip"
 
+    def test_a_download_named_after_its_release_is_still_picked(self):
+        """v0.1.4 is out there looking for its next download by this name. The version
+        went on the end so those copies keep updating."""
+        from ml_stack.fleet.updates import Release, asset_for, platform_key
+
+        key = platform_key()
+        release = Release("9.9.9", "", "", (
+            {"name": "install.sh"},
+            {"name": f"ml-stack-{key}-v9.9.9.zip"},
+        ), 0)
+        assert asset_for(release)["name"] == f"ml-stack-{key}-v9.9.9.zip"
+
     def test_a_release_with_nothing_for_this_machine_returns_none(self):
         from ml_stack.fleet.updates import Release, asset_for
 

@@ -87,13 +87,23 @@ jobs:
             || { echo "the bundle cannot run a model: ml_stack.serve is missing"; exit 1; }
 
       # Python rather than zip(1): Windows runners have no zip in bash.
+      # The name carries the tag, or the commit for a build off a branch, so two
+      # downloads in one folder are two files and it is clear which is which. It
+      # stays a suffix: install.sh, install.ps1 and the updater all look for
+      # "ml-stack-<os>-<arch>" inside the name, including the copies already out there.
       - name: package it
         shell: bash
-        run: python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}.zip"
+        run: |
+          stamp="${GITHUB_REF_NAME}"
+          case "${GITHUB_REF}" in
+            refs/tags/*) ;;
+            *) stamp=$(git rev-parse --short HEAD) ;;
+          esac
+          python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}-$stamp.zip"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: dist/${{ matrix.asset }}.zip
+          path: dist/${{ matrix.asset }}-*.zip
           retention-days: 7
 
   publish:
@@ -123,16 +133,19 @@ jobs:
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           here() { find artifacts -name "$1" -type f -print -quit | grep -q .; }
           section() {
-            here "$2" || return 0
-            printf '\n%s\n- [%s](%s/%s)\n' "$1" "$2" "$base" "$2"
+            local path name
+            path=$(find artifacts -name "$2-*.zip" -type f -print -quit)
+            [ -n "$path" ] || return 0
+            name=$(basename "$path")
+            printf '\n%s\n- [%s](%s/%s)\n' "$1" "$name" "$base" "$name"
           }
           wheels=$(find artifacts -name '*.whl' -type f | wc -l | tr -d ' ')
           {
             echo "body<<DOWNLOADS_EOF"
             echo "## Download"
-            section "**macOS** — Apple silicon (M1 or later)" ml-stack-macos-arm64.zip
-            section "**Windows** — 64-bit" ml-stack-windows-x86_64.zip
-            section "**Linux** — 64-bit" ml-stack-linux-x86_64.zip
+            section "**macOS** — Apple silicon (M1 or later)" ml-stack-macos-arm64
+            section "**Windows** — 64-bit" ml-stack-windows-x86_64
+            section "**Linux** — 64-bit" ml-stack-linux-x86_64
             echo
             echo "Each holds the app and \`ml-stack-headless\`, for a machine with no screen. Unzip it and open it."
             if here install.sh && here install.ps1; then

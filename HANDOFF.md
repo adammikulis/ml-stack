@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 939 passing, `docs/verify_release.py` is 40/40.
+The suite is 941 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -110,6 +110,10 @@ The suite and the release checks do not cover these.
   delivered by the thread that is blocked waiting for it, and the window freezes with no
   way out but killing it. `Bridge.on_closing` hands that work to another thread. The same
   applies to `before_load`, `before_show` and `initialized`.
+- **The version goes on the end of a download's name**, never in the middle.
+  `install.sh`, `install.ps1` and `updates.asset_for` all look for
+  `ml-stack-<os>-<arch>` as a substring, and the copies already installed look for it
+  in releases that do not exist yet.
 - **The windowed app is one file outside macOS**, beside `ml-stack-headless`. It was a
   directory holding the executable with its runtime alongside, which `install.sh` skipped
   entirely — the test was `-f` against a directory — and `install.ps1` launched a path
