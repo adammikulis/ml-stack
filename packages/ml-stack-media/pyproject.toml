@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-media"
-version = "0.1.4"  # x-release-please-version
+version = "0.1.5"  # x-release-please-version
 description = "WAV containers, image formats and model-asset downloads. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
