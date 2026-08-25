@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.6](https://github.com/adammikulis/ml-stack/compare/v0.1.5...v0.1.6) (2026-08-25)
+
+
+### Features
+
+* The twelve packages are on PyPI: `pip install ml-stack-fleet`, `ml-stack-train`, `ml-stack-serve` and the rest ([69c1020](https://github.com/adammikulis/ml-stack/commit/69c102029893be2c4e09c604c65724fae897c8f8))
+
 ## [0.1.5](https://github.com/adammikulis/ml-stack/compare/v0.1.4...v0.1.5) (2026-08-25)
 
 
