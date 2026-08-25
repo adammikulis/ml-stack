@@ -201,8 +201,8 @@ class UI:
             return out
 
         if "slots" in req and self.runner is not None:
-            settings.slots = self.runner.set_slots(max(1, int(req["slots"])))
-            out["applied"].append(f"{settings.slots} job(s) at a time")
+            settings.slots = self.runner.set_slots(1)
+            out["applied"].append("one job at a time")
         if "labels" in req:
             settings.labels = [str(s) for s in req["labels"] if str(s).strip()]
             out["applied"].append("this machine is for " + (

@@ -99,7 +99,6 @@ def _has_battery() -> bool:
 def suggest(report: dict[str, Any] | None = None) -> dict[str, Suggestion]:
     """What to pre-tick in the wizard, based on what this machine actually is."""
     report = report or {}
-    cpus = int(report.get("cpus") or 1)
     accelerator = bool(report.get("accelerator") or report.get("cuda")
                        or report.get("rocm"))
     gpu = report.get("gpu") or "a GPU"
@@ -110,16 +109,10 @@ def suggest(report: dict[str, Any] | None = None) -> dict[str, Suggestion]:
     if accelerator:
         out["labels"] = Suggestion(
             ["train"], f"it has {gpu}, so it is the machine to train on")
-        out["slots"] = Suggestion(
-            1, "one job at a time: two on one card contend for memory and both get "
-               "slower, with nothing in the logs to say so")
     else:
-        want = max(1, min(8, cpus // 2))
         out["labels"] = Suggestion(
             ["prep"], "no GPU found, so this is a good machine for preparing data "
                       "while the others train")
-        out["slots"] = Suggestion(
-            want, f"{cpus} cores, so {want} jobs at once leaves the machine usable")
 
     if portable:
         out["autostart"] = Suggestion(

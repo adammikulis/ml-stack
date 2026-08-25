@@ -391,9 +391,9 @@ def _():
     from ml_stack.fleet.settings import suggest
     gpu = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
     cpu = suggest({"accelerator": False, "cpus": 12})
-    assert gpu["labels"].value == ["train"] and gpu["slots"].value == 1
-    assert cpu["labels"].value == ["prep"] and cpu["slots"].value > 1
-    return f"GPU -> train/1 slot, CPU -> prep/{cpu['slots'].value} slots"
+    assert gpu["labels"].value == ["train"] and "RTX 4090" in gpu["labels"].why
+    assert cpu["labels"].value == ["prep"]
+    return "GPU -> train, CPU -> prepare data"
 
 
 @check("Interface", "closing asks once, then remembers")
