@@ -676,7 +676,6 @@ async function settings(message) {
   const cur = s.settings || {};
   const pick = {
     labels: (cur.labels || []).join(","),
-    slots: cur.slots ?? 1,
     autostart: (s.autostart || {}).mode || cur.autostart || "manual",
     on_paused: cur.on_paused || "stop",
     on_close: cur.on_close || "",
@@ -698,10 +697,6 @@ async function settings(message) {
     input.onchange = () => { pick[key] = input.checked; };
     return el("label", { class: "opt", for: key }, input, row(label, why));
   };
-
-  const slots = el("input", { type: "number", min: "1", max: "64",
-                              value: String(pick.slots), class: "num" });
-  slots.oninput = () => { pick.slots = Math.max(1, parseInt(slots.value || "1", 10)); };
 
   const save = el("button", {}, "Save");
   const note = el("div");
@@ -900,11 +895,6 @@ async function settings(message) {
             radio("labels", "train,prep", "Both", "")),
 
           el("div", { class: "group" },
-            el("h2", {}, "At once"),
-            el("label", { class: "opt inline" }, slots,
-              row("jobs at a time", "one on a card; more on a machine preparing data"))),
-
-          el("div", { class: "group" },
             el("h2", {}, "Starting up"),
             radio("autostart", "login", "When I log in", ""),
             radio("autostart", "boot", "When the computer starts",
@@ -978,101 +968,175 @@ function steps(n, back) {
   return el("div", {},
     back ? el("button", { class: "back", onclick: back }, "\u2190 Back") : null,
     el("div", { class: "steps" },
-      [0, 1, 2, 3, 4].map((i) => el("i", { class: i <= n ? "on" : "" }))));
+      [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" }))));
 }
 
 // Step 1: the clusters this machine belongs to. Skippable: a machine on its own is a
-// working machine, and one that belongs to three is the same screen three times over.
+// working machine, and one that belongs to three is the same row three times over.
 async function clustersStep(next, back) {
   const rows = el("div");
-  const note = el("div");
-  const p1 = el("input", { type: "password", id: "p1", value: state.pass });
-  const p2 = el("input", { type: "password", id: "p2", value: state.pass });
+  const note = el("div", { class: "hint" });
+  const pass = el("input", { type: "password", id: "p1", value: state.pass,
+                             placeholder: "passphrase" });
   const grp = el("input", { type: "text", id: "g", value: state.group,
-                            placeholder: "ml-stack" });
-  const add = el("button", { class: "ghost" }, "Join");
+                            placeholder: "name (optional)" });
+  const add = el("button", { class: "ghost small" }, "Join");
 
   const remember = () => {
-    state.pass = p1.value;
+    state.pass = pass.value;
     state.group = grp.value.trim();
   };
 
   const draw = (list) => {
     state.clusters = list;
-    rows.replaceChildren(...(list.length
-      ? list.map((c, i) =>
-          el("div", { class: "row" },
-            el("span", {}, el("b", {}, c.group),
-              el("span", { class: "why" },
-                i === 0 ? "this machine answers as this one" : "also in this one")),
-            el("button", { class: "ghost small",
-              onclick: async () => {
-                const left = await api("/ui/clusters", { method: "DELETE",
-                  body: JSON.stringify({ group: c.group }) });
-                draw(left.clusters || []);
-              } }, "Leave")))
-      : [el("div", { class: "hint" }, "In none yet.")]));
+    rows.replaceChildren(...list.map((c, i) =>
+      el("div", { class: "row" },
+        el("span", {}, el("b", {}, c.group),
+          el("span", { class: "why" },
+            i === 0 ? "this machine answers as this one" : "also in this one")),
+        el("button", { class: "ghost small",
+          onclick: async () => {
+            const left = await api("/ui/clusters", { method: "DELETE",
+              body: JSON.stringify({ group: c.group }) });
+            draw(left.clusters || []);
+          } }, "Leave"))));
   };
 
   const check = () => {
-    const a = p1.value, b = p2.value;
-    if (a.trim().length && a.trim().length < MIN_PASS) {
-      note.replaceChildren(el("div", { class: "hint" },
-        `At least ${MIN_PASS} characters. A few words you will remember beats a short `
-        + "complicated one."));
-    } else if (a && b && a !== b) {
-      note.replaceChildren(el("div", { class: "hint" }, "These do not match yet."));
-    } else if (!a) {
-      note.replaceChildren(el("div", { class: "hint" },
-        "Everyone who knows this can run commands on every machine in the cluster."));
-    } else {
-      note.replaceChildren();
-    }
-    add.disabled = !(a.trim().length >= MIN_PASS && a === b);
+    add.disabled = pass.value.trim().length < MIN_PASS;
   };
-  p1.oninput = p2.oninput = check;
+  pass.oninput = check;
 
   add.onclick = async () => {
     add.disabled = true;
-    add.innerHTML = '<span class="spin"></span> Joining — this takes a moment';
+    note.replaceChildren(el("span", { class: "spin" }), " Joining…");
     const named = grp.value.trim() || "ml-stack";
     const r = await api("/ui/setup/join", { method: "POST",
-      body: JSON.stringify({ passphrase: p1.value, group: named }) });
-    add.textContent = "Join";
+      body: JSON.stringify({ passphrase: pass.value, group: named }) });
     if (!r.ok) {
       note.replaceChildren(el("div", { class: "err" }, r.error || "Could not join."));
       check();
       return;
     }
-    p1.value = p2.value = grp.value = "";
+    pass.value = grp.value = "";
     state.pass = state.group = "";
     check();
-    note.replaceChildren(el("div", { class: "ok" },
-      `Joined \u201c${named}\u201d. Type the same passphrase on your other machines `
-      + "and they appear here."));
+    note.textContent = "Type the same passphrase on your other machines. If you "
+      + "mistyped it, leave and join again.";
     draw((await api("/ui/clusters")).clusters || []);
   };
 
   draw((await api("/ui/clusters")).clusters || []);
   check();
+  note.textContent = "A few words you will remember. Everyone who knows them can run "
+    + "commands on every machine in the cluster.";
 
   show(el("div", { class: "centre" }, el("div", { class: "card" },
     steps(1, () => { remember(); back(); }),
     el("h1", {}, "Clusters"),
     el("p", { class: "sub" },
-      "Machines that share a passphrase find each other and can send each other work. "
-      + "Join one now, or leave it for later — this machine works either way."),
+      "Machines that share a passphrase find each other and send each other work. "
+      + "You can do this later instead — this one works on its own until you do."),
     rows,
-    el("div", { class: "group" },
-      el("h2", {}, "Join one"),
-      el("label", { for: "p1" }, "Passphrase"), p1,
-      el("label", { for: "p2" }, "Again"), p2,
-      el("label", { for: "g" }, "Cluster name"), grp,
-      el("div", { class: "hint" },
-        "Leave this empty unless two separate clusters share your network."),
-      note,
-      add),
+    el("div", { class: "searchrow" }, pass, grp, add),
+    note,
     el("button", { onclick: () => { remember(); next(); } }, "Continue"))));
+}
+
+// Steps 2 and 3: what work this machine takes, and when it runs. Every box is
+// pre-ticked from what the machine actually is, and every one shows why, so a wrong
+// guess is visible rather than silent.
+async function asked() {
+  if (!state.suggest) state.suggest = await api("/ui/setup/suggest");
+  const r = state.suggest;
+  const s = r.suggest || {};
+  const pick = state.prefs || (state.prefs = {
+    labels: (s.labels?.value || []).join(","),
+    autostart: s.autostart?.value || "manual",
+    work_hours: !!s.work_hours?.value,
+    on_paused: s.on_paused?.value || "stop",
+  });
+
+  const spec = (label, why) => el("span", {},
+    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+
+  const radio = (group, value, label, why) => {
+    const id = `${group}-${value}`;
+    const input = el("input", { type: "radio", name: group, id,
+                                ...(pick[group] === value ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[group] = value; };
+    return el("label", { class: "opt", for: id }, input, spec(label, why));
+  };
+
+  const check = (key, label, why) => {
+    const input = el("input", { type: "checkbox", id: key,
+                                ...(pick[key] ? { checked: "1" } : {}) });
+    input.onchange = () => { pick[key] = input.checked; };
+    return el("label", { class: "opt", for: key }, input, spec(label, why));
+  };
+
+  return { s, machine: r.machine || {}, pick, spec, radio, check };
+}
+
+async function jobStep(next, back) {
+  const { s, machine, spec, radio, check } = await asked();
+
+  show(el("div", { class: "centre" }, el("div", { class: "card" },
+    steps(2, back),
+    el("h1", {}, "What should this machine do?"),
+    el("p", { class: "sub" },
+      machine.gpu ? `Found ${machine.gpu}. These are set from that — change either.`
+                  : "These are set from what this machine is — change either."),
+
+    el("div", { class: "group" },
+      el("h2", {}, "Its job"),
+      radio("labels", "train", "Train models", s.labels?.why),
+      radio("labels", "prep", "Prepare data", "tokenizing and packing, while others train"),
+      radio("labels", "train,prep", "Both", "")),
+
+    el("div", { class: "group" },
+      el("h2", {}, "When I need the machine"),
+      check("work_hours", "Don't take work on weekdays, 9 to 5",
+        s.work_hours?.why || "for a machine somebody works on"),
+      el("label", { class: "opt" },
+        el("input", { type: "checkbox", checked: "1", disabled: "1" }),
+        spec("Pausing stops what is running", s.on_paused?.why))),
+
+    el("button", { onclick: () => next() }, "Continue"))));
+}
+
+async function startStep(next, back) {
+  const { s, pick, radio } = await asked();
+
+  const go = el("button", {}, "Continue");
+  const outcome = el("div");
+  go.onclick = async () => {
+    go.disabled = true; go.innerHTML = '<span class="spin"></span> Applying…';
+    const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+      ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
+    if (res.manual) {
+      go.disabled = false; go.textContent = "Continue";
+      outcome.replaceChildren(
+        el("div", { class: "err" }, res.manual_why || "This part needs administrator rights."),
+        el("pre", { class: "cmd" }, res.manual),
+        el("button", { class: "ghost", onclick: () => next() }, "Skip this — continue"));
+      return;
+    }
+    next();
+  };
+
+  show(el("div", { class: "centre" }, el("div", { class: "card" },
+    steps(3, back),
+    el("h1", {}, "When should it start?"),
+    el("p", { class: "sub" },
+      "It keeps running after you close the window, so the other machines can still "
+      + "send it work."),
+    radio("autostart", "login", "When I log in",
+      s.autostart?.value === "login" ? s.autostart.why : ""),
+    radio("autostart", "boot", "When the computer starts",
+      "even before anyone logs in — your computer will ask for your password"),
+    radio("autostart", "manual", "Only when I open it", ""),
+    go, outcome)));
 }
 
 // Step 4: what this machine should be able to run. Asked here rather than left in
@@ -1140,7 +1204,7 @@ async function installStep(next, back) {
                              .reduce((a, x) => a + (x.size_mb || 0), 0);
 
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(3, back),
+    steps(4, back),
     el("h1", {}, "What should it be able to do?"),
     el("p", { class: "sub" },
       "Ticked from what this machine is. Anything here can be changed later in "
@@ -1185,97 +1249,6 @@ async function installStep(next, back) {
     go, later, note)));
 }
 
-// Step 3: what this machine should do. Every box is pre-ticked from what the machine
-// actually is, and every one shows why, so a wrong guess is visible rather than silent.
-async function prefsStep(next, back) {
-  if (!state.suggest) state.suggest = await api("/ui/setup/suggest");
-  const r = state.suggest;
-  const s = r.suggest || {};
-  const m = r.machine || {};
-  const pick = state.prefs || (state.prefs = {
-    labels: (s.labels?.value || []).join(","),
-    slots: s.slots?.value ?? 1,
-    autostart: s.autostart?.value || "manual",
-    work_hours: !!s.work_hours?.value,
-    on_paused: s.on_paused?.value || "stop",
-  });
-
-  const spec = (label, why) => el("span", {},
-    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
-
-  const radio = (group, value, label, why) => {
-    const id = `${group}-${value}`;
-    const input = el("input", { type: "radio", name: group, id,
-                                ...(pick[group] === value ? { checked: "1" } : {}) });
-    input.onchange = () => { pick[group] = value; };
-    return el("label", { class: "opt", for: id }, input, spec(label, why));
-  };
-
-  const check = (key, label, why) => {
-    const input = el("input", { type: "checkbox", id: key,
-                                ...(pick[key] ? { checked: "1" } : {}) });
-    input.onchange = () => { pick[key] = input.checked; };
-    return el("label", { class: "opt", for: key }, input, spec(label, why));
-  };
-
-  const slots = el("input", { type: "number", min: "1", max: "64", value: String(pick.slots),
-                              class: "num" });
-  slots.oninput = () => { pick.slots = Math.max(1, parseInt(slots.value || "1", 10)); };
-
-  const go = el("button", {}, "Continue");
-  const outcome = el("div");
-  go.onclick = async () => {
-    go.disabled = true; go.innerHTML = '<span class="spin"></span> Applying…';
-    const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
-      ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
-    if (res.manual) {
-      go.disabled = false; go.textContent = "Continue";
-      outcome.replaceChildren(
-        el("div", { class: "err" }, res.manual_why || "This part needs administrator rights."),
-        el("pre", { class: "cmd" }, res.manual),
-        el("button", { class: "ghost", onclick: () => next() }, "Skip this — continue"));
-      return;
-    }
-    next();
-  };
-
-  show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(2, back),
-    el("h1", {}, "What should this machine do?"),
-    el("p", { class: "sub" },
-      m.gpu ? `Found ${m.gpu}. These are set from that — change any of them.`
-            : "These are set from what this machine is — change any of them."),
-
-    el("div", { class: "group" },
-      el("h2", {}, "Its job"),
-      radio("labels", "train", "Train models", s.labels?.why),
-      radio("labels", "prep", "Prepare data", "tokenizing and packing, while others train"),
-      radio("labels", "train,prep", "Both", "")),
-
-    el("div", { class: "group" },
-      el("h2", {}, "At once"),
-      el("label", { class: "opt inline" }, slots,
-        spec("jobs at a time", s.slots?.why))),
-
-    el("div", { class: "group" },
-      el("h2", {}, "Starting up"),
-      radio("autostart", "login", "When I log in",
-        s.autostart?.value === "login" ? s.autostart.why : ""),
-      radio("autostart", "boot", "When the computer starts",
-        "even before anyone logs in — your Mac will ask for your password"),
-      radio("autostart", "manual", "Only when I open it", "")),
-
-    el("div", { class: "group" },
-      el("h2", {}, "When I need the machine"),
-      check("work_hours", "Don't take work on weekdays, 9 to 5",
-        s.work_hours?.why || "for a machine somebody works on"),
-      el("label", { class: "opt" },
-        el("input", { type: "checkbox", checked: "1", disabled: "1" }),
-        spec("Pausing stops what is running", s.on_paused?.why))),
-
-    go, outcome)));
-}
-
 function wizard(setup) {
   const next = (s) => { state.step = s; wizard(setup); };
 
@@ -1286,7 +1259,7 @@ function wizard(setup) {
       steps(0),
       el("h1", {}, "Set up this machine"),
       el("p", { class: "sub" },
-        "Four questions, and every answer can be changed afterwards."),
+        "A few questions, and every answer can be changed afterwards."),
       el("label", { for: "n" }, "What should this machine be called?"),
       name,
       el("div", { class: "hint" }, "Other machines will show it under this name."),
@@ -1295,10 +1268,11 @@ function wizard(setup) {
   }
 
   if (state.step === 1) return clustersStep(() => next(2), () => next(0));
-  if (state.step === 2) return prefsStep(() => next(3), () => next(1));
-  if (state.step === 3) return installStep(() => next(4), () => next(2));
+  if (state.step === 2) return jobStep(() => next(3), () => next(1));
+  if (state.step === 3) return startStep(() => next(4), () => next(2));
+  if (state.step === 4) return installStep(() => next(5), () => next(3));
 
-  // step 4: done. Deliberately not a command: telling someone to open a terminal is the
+  // step 5: done. Deliberately not a command: telling someone to open a terminal is the
   // same wall as telling them to paste a 32-byte key, one layer up.
   api("/ui/setup/done", { method: "POST" });
   const joined = state.clusters[0];
@@ -1312,7 +1286,7 @@ function wizard(setup) {
 
   if (!joined) {
     return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(4),
+      steps(5),
       el("h1", {}, `“${state.name}” is ready`),
       el("p", { class: "sub" },
         "It is on its own: it will run models and train here, and nothing else on your "
@@ -1349,7 +1323,7 @@ function wizard(setup) {
       el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
   show(el("div", { class: "centre" }, el("div", { class: "card" },
-    steps(4),
+    steps(5),
     el("h1", {}, `Joined “${joined.group}”`),
     el("p", { class: "sub" }, "Now add your other machines. On each one:"),
     el("ol", { class: "howto" },

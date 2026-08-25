@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 932 passing, `docs/verify_release.py` is 40/40.
+The suite is 933 passing, `docs/verify_release.py` is 40/40.
 
 ## In flight
 
@@ -121,9 +121,10 @@ The suite and the release checks do not cover these.
   an address rather than discovering one.
 - **The full suite takes longer than the 120s Bash timeout.** Background it and poll.
 - **`node --check web/app.js` catches syntax, not scope.** A helper defined inside one
-  screen and used from another parses fine and throws at runtime. There is a test that
-  extracts every address `app.js` calls and asks the daemon for each; there is nothing
-  equivalent for identifiers.
+  screen and used from another parses fine and throws at runtime, and so does a whole
+  screen deleted by an edit that took too much. Two tests cover the common shapes: every
+  address the page calls is asked of the daemon, and every `<name>Step` the wizard moves
+  to is defined. Anything else has to be clicked.
 - **`window.events.closing` runs on the thread that draws the window.** Anything that
   waits for the page to answer — `evaluate_js` above all — deadlocks there: the reply is
   delivered by the thread that is blocked waiting for it, and the window freezes with no

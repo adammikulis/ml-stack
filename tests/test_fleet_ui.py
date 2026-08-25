@@ -110,6 +110,16 @@ class TestAssets:
         for ref in re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html):
             assert asset_bytes(ref) is not None, f"index.html references missing {ref}"
 
+    def test_every_screen_the_wizard_moves_to_is_defined(self):
+        """node --check parses the file; it does not notice a screen that is gone."""
+        import re
+
+        js = asset_bytes("app.js")[0].decode()
+        defined = set(re.findall(r"^(?:async )?function (\w+)", js, re.M))
+        called = set(re.findall(r"return (\w+Step)\(", js))
+        assert called, "the wizard moves to no screen at all"
+        assert called <= defined, f"screens that are gone: {sorted(called - defined)}"
+
     def test_there_is_no_python_hiding_in_the_asset_directory(self):
         """web/ is data, not code -- which is what keeps this package device tier. The
         tier check only globs *.py, so it would not notice a module smuggled in here."""
@@ -409,7 +419,6 @@ class TestPreferences:
 
         got = suggest({"accelerator": True, "gpu": "RTX 4090", "cpus": 16})
         assert got["labels"].value == ["train"]
-        assert got["slots"].value == 1
         assert "RTX 4090" in got["labels"].why
 
     def test_a_machine_with_no_gpu_is_suggested_for_data(self):
@@ -417,12 +426,15 @@ class TestPreferences:
 
         got = suggest({"accelerator": False, "cpus": 12})
         assert got["labels"].value == ["prep"]
-        assert 1 < got["slots"].value <= 8
 
-    def test_a_small_machine_is_not_given_more_jobs_than_cores(self):
+    def test_no_machine_is_offered_more_than_one_job_at_a_time(self):
+        """Two jobs on one card contend for memory and both get slower, with nothing
+        in the logs to say so."""
         from ml_stack.fleet.settings import suggest
 
-        assert suggest({"accelerator": False, "cpus": 2})["slots"].value == 1
+        for machine in ({"accelerator": True, "cpus": 16},
+                        {"accelerator": False, "cpus": 64}):
+            assert "slots" not in suggest(machine)
 
     def test_every_suggestion_carries_a_reason(self):
         from ml_stack.fleet.settings import suggest
@@ -451,9 +463,8 @@ class TestPreferences:
         status, body, _ = joined.call("/ui/setup/suggest")
         assert status == 200
         assert "machine" in body and "suggest" in body
-        assert body["suggest"]["slots"]["value"] >= 1
 
-    def test_choosing_more_jobs_takes_effect_without_a_restart(self, joined):
+    def test_asking_for_more_jobs_leaves_it_at_one(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
                                     body={"passphrase": WORDS})
         cookie = headers["Set-Cookie"].split(";")[0]
@@ -463,11 +474,10 @@ class TestPreferences:
                                             "autostart": "manual"})
 
         assert status == 200, body
-        assert joined.runner.slots == 4
-        health = joined.call("/health")[1]
-        assert health["slots"] == 4
+        assert joined.runner.slots == 1
+        assert joined.call("/health")[1]["slots"] == 1
 
-    def test_lowering_the_count_does_not_interrupt_running_work(self, joined):
+    def test_saving_a_preference_does_not_interrupt_running_work(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
                                     body={"passphrase": WORDS})
         cookie = headers["Set-Cookie"].split(";")[0]
@@ -623,17 +633,17 @@ class TestSettingsScreen:
         serving.call("/ui/setup/join", method="POST", body={"passphrase": WORDS})
         assert serving.call("/ui/settings")[0] == 401
 
-    def test_changing_the_job_count_takes_effect_and_persists(self, signed_in):
+    def test_the_settings_screen_cannot_raise_the_job_count(self, signed_in):
         from ml_stack.fleet.settings import Settings
 
         serving, cookie = signed_in
         serving.call("/ui/settings", method="POST", cookie=cookie,
                      body={"slots": 5, "labels": ["prep"], "autostart": "manual"})
 
-        assert serving.runner.slots == 5
-        assert serving.call("/health")[1]["slots"] == 5
+        assert serving.runner.slots == 1
+        assert serving.call("/health")[1]["slots"] == 1
         saved = Settings.load(serving.ui.settings_path)
-        assert saved.slots == 5 and saved.labels == ["prep"]
+        assert saved.slots == 1 and saved.labels == ["prep"]
 
     def test_the_close_preference_can_be_set_from_settings(self, signed_in):
         from ml_stack.fleet.settings import Settings
