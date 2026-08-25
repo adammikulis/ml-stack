@@ -112,6 +112,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: repo
+          fetch-depth: 0
       - name: collect the network installers
         run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
 
@@ -148,8 +149,45 @@ jobs:
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: what changed
+        id: notes
+        working-directory: repo
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          before=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
+          range="$tag"
+          [ -n "$before" ] && range="$before..$tag"
+          # A commit that touched nothing but prose or a version number changed
+          # nothing a person downloading this can see.
+          worth_saying() {
+            local file
+            while read -r file; do
+              case "$file" in
+                "") ;;
+                *.md|docs/*) ;;
+                packages/*/pyproject.toml|packaging/ml-stack-app.spec) ;;
+                *) return 0 ;;
+              esac
+            done < <(git show --name-only --pretty=format: "$1")
+            return 1
+          }
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo
+            echo "## What changed"
+            echo
+            for sha in $(git log --no-merges --reverse --pretty=format:'%H' "$range"); do
+              worth_saying "$sha" && git show -s --pretty=format:'- %s' "$sha" && echo
+            done
+            if [ -n "$before" ]; then
+              echo
+              echo "**Every commit**: https://github.com/${GITHUB_REPOSITORY}/compare/$before...$tag"
+            fi
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
-          body: ${{ steps.downloads.outputs.body }}
-          generate_release_notes: true
+          body: ${{ steps.downloads.outputs.body }}${{ steps.notes.outputs.body }}

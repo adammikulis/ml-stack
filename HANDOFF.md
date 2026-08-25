@@ -4,37 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 938 passing, `docs/verify_release.py` is 40/40.
-
-## In flight
-
-**A `release-notes` branch, not merged.** `git worktree list` shows a second worktree at
-`../ml-stack-notes` holding an uncommitted change to `.github/workflows/release.yml`.
-
-`generate_release_notes: true` lists merged pull requests. Everything lands here as
-direct commits, so v0.1.4's release body is one compare link and nothing else. The change
-builds the body from `git log --no-merges` between the previous tag and this one. It was
-run against the real `v0.1.3..v0.1.4` range and produced all 21 subjects plus a compare
-link, but has never run inside the workflow.
-
-The owner asked whether a library should do this instead. It is an open question:
-
-- **git-cliff** groups by Conventional Commit type, one binary, no repo restructuring,
-  and its `cliff.toml` can group on plain subjects instead of prefixes.
-- **release-please** also bumps the version across all twelve `pyproject.toml` files and
-  `packaging/ml-stack-app.spec`, which is thirteen files edited by hand at every release.
-  That is the part worth having.
-- Both want Conventional Commits. Nothing in `CLAUDE.md` forbids `feat:` / `fix:` — a
-  previous session claimed it did, and was wrong. `feat: native window instead of a
-  browser tab` satisfies the rule as written.
-
-Decide between the `git log` version and a tool before the next release. Do not merge the
-branch to avoid the decision.
-
-`main` now sets `body:` on the same release step, from a `what to download` step that
-lists each bundle under its operating system. Whichever way the changelog is decided, the
-two bodies have to be concatenated:
-`body: ${{ steps.downloads.outputs.body }}${{ steps.notes.outputs.body }}`.
+The suite is 939 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -77,25 +47,30 @@ The suite and the release checks do not cover these.
 
 ## Asked for, not built
 
-1. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
+1. **Thirteen files hold the version.** Twelve `packages/*/pyproject.toml` and
+   `packaging/ml-stack-app.spec`, edited by hand at every release. `release-please`
+   does exactly this, and would also write the changelog; it wants Conventional
+   Commits, which nothing here forbids. The changelog is now built from the commits,
+   so what is left to want from a tool is the version bump.
+2. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
    indexes what datasets each machine holds. Browse every dataset on every machine,
    deduplicated by content digest, so three copies of one path that do not match show as
    three that do not match.
-2. **Two more recipes** — image classification, and fine-tuning from an existing model.
+3. **Two more recipes** — image classification, and fine-tuning from an existing model.
    `text-lm` and `classify-text` work; the shape is the same.
-3. **Local-SGD.** One training run split across machines, averaging safetensors with
+4. **Local-SGD.** One training run split across machines, averaging safetensors with
    numpy so a Mac and an AMD box contribute to one model.
-4. **Semantic search over conversations.** Search is keyword. `embed()`, `cosine()` and
+5. **Semantic search over conversations.** Search is keyword. `embed()`, `cosine()` and
    `top_k()` in `ml-stack-client` are ready; the cost is underneath them. llama-server
    cannot serve embeddings and chat at once — `backend.py` drops `--jinja` when
    `--embeddings` is set — so it needs a second server, a second model download, and a
    vectors sidecar recording the model and dimension it was built with.
-5. **Sharing conversations across machines.** They stay where they were held.
-6. **A machine holding only a draft model is never asked for it.** Drafts are left out
+6. **Sharing conversations across machines.** They stay where they were held.
+7. **A machine holding only a draft model is never asked for it.** Drafts are left out
    of the listing a beacon carries, so `ensure_draft` asks the machines that hold the
    model itself, and falls back to the internet. A machine with the draft and not the
    model is invisible.
-7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
+8. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
 
@@ -156,8 +131,8 @@ throughout `daemon.py`, which is house style. CI does not run it.
 
 Bump thirteen files — twelve `packages/*/pyproject.toml` at line 7, plus
 `packaging/ml-stack-app.spec` (`CFBundleShortVersionString`). Commit, `git tag vX.Y.Z`,
-push the tag. `release.yml` builds twelve wheels and three bundles and publishes only on
-a `refs/tags/` ref. `workflow_dispatch` on a branch builds all three platforms and
+push the tag. `release.yml` builds twelve wheels and three bundles, writes the release
+body from the tag range, and publishes only on a `refs/tags/` ref. `workflow_dispatch` on a branch builds all three platforms and
 publishes nothing, which is how to test a packaging change without cutting a release.
 
 Actions are free: the repository is public and every runner is a standard GitHub-hosted

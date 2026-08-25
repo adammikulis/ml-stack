@@ -59,10 +59,10 @@ def test_every_package_declares_a_console_script_that_exists():
 WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
 
 
-def downloads_step() -> str:
-    """The shell of the step that writes the download links into the release body."""
+def workflow_step(name: str) -> str:
+    """The shell of one step of the release workflow."""
     text = WORKFLOW.read_text()
-    start = text.index("- name: what to download")
+    start = text.index(f"- name: {name}")
     body = text[text.index("run: |", start):]
     lines = body.splitlines()[1:]
     indent = len(lines[0]) - len(lines[0].lstrip())
@@ -72,6 +72,10 @@ def downloads_step() -> str:
             break
         out.append(line[indent:])
     return "\n".join(out)
+
+
+def downloads_step() -> str:
+    return workflow_step("what to download")
 
 
 def test_every_bundle_the_release_builds_is_linked_from_its_notes():
@@ -112,3 +116,51 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
     assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
     assert "the 1 `ml_stack_*.whl`" in body
+
+
+def git(*args, cwd):
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
+def test_the_notes_say_what_changed_and_leave_out_what_did_not(tmp_path):
+    """A version bump and a paragraph of prose are not news to someone downloading it."""
+    import os
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git("init", "-q", "-b", "main", cwd=repo)
+    git("config", "user.email", "t@example.com", cwd=repo)
+    git("config", "user.name", "T", cwd=repo)
+
+    def commit(subject, path, body="x"):
+        target = repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+        git("add", "-A", cwd=repo)
+        git("commit", "-qm", subject, cwd=repo)
+
+    commit("Before the tag", "packages/ml-stack-fleet/src/a.py")
+    git("tag", "v0.1.0", cwd=repo)
+    commit("Chat with a model on any machine", "packages/ml-stack-fleet/src/b.py")
+    commit("Write down what is pending", "HANDOFF.md")
+    commit("Version 0.2.0", "packages/ml-stack-fleet/pyproject.toml")
+    commit("Explain the recipes", "docs/FEATURES.md")
+    git("tag", "v0.2.0", cwd=repo)
+
+    out = tmp_path / "out"
+    out.touch()
+    done = subprocess.run(
+        ["bash", "-e", "-c", workflow_step("what changed")], cwd=repo,
+        capture_output=True, text=True,
+        env={**os.environ, "GITHUB_REF_NAME": "v0.2.0",
+             "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
+    assert done.returncode == 0, done.stderr
+
+    body = out.read_text()
+    assert "- Chat with a model on any machine" in body
+    assert "Write down what is pending" not in body
+    assert "Version 0.2.0" not in body
+    assert "Explain the recipes" not in body
+    assert "Before the tag" not in body, "listed a commit from the previous release"
+    assert "compare/v0.1.0...v0.2.0" in body
