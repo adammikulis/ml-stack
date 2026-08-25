@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-fleet"
-version = "0.1.5"  # x-release-please-version
+version = "0.1.6"  # x-release-please-version
 description = "Find the other machines on the LAN and run work on them. "
 readme = "README.md"
 requires-python = ">=3.11"

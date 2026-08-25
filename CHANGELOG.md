@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.6](https://github.com/adammikulis/ml-stack/compare/v0.1.5...v0.1.6) (2026-08-25)
+
+
+### Features
+
+* publish the packages to PyPI ([69c1020](https://github.com/adammikulis/ml-stack/commit/69c102029893be2c4e09c604c65724fae897c8f8))
+
+
+### Bug Fixes
+
+* pass the PyPI secret to the workflow that uploads ([abd8912](https://github.com/adammikulis/ml-stack/commit/abd8912344504ab65ddbeea898141832cfc941f3))
+
 ## [0.1.5](https://github.com/adammikulis/ml-stack/compare/v0.1.4...v0.1.5) (2026-08-25)
 
 
