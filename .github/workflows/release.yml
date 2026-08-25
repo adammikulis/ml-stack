@@ -8,6 +8,10 @@ on:
         description: the release to build and publish
         required: true
         type: string
+    secrets:
+      PYPI_API_TOKEN:
+        description: only when the repository publishes with a token instead of OIDC
+        required: false
   workflow_dispatch:
 
 concurrency:
