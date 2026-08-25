@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-speech"
-version = "0.1.5"  # x-release-please-version
+version = "0.1.6"  # x-release-please-version
 description = "ASR, TTS and VAD behind three protocols and one resolver. "
 readme = "README.md"
 requires-python = ">=3.11"
