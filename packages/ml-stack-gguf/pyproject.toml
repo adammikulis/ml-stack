@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ml-stack-gguf"
-version = "0.1.4"  # x-release-please-version
+version = "0.1.5"  # x-release-please-version
 description = "GGUF conversion, quantisation and tokenizer-metadata repair. "
 requires-python = ">=3.11"
 license = "Apache-2.0"
