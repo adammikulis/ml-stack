@@ -244,3 +244,32 @@ def test_the_readme_names_the_package_it_belongs_to():
         readme = (path.parent / "README.md").read_text()
         assert readme.startswith(f"# {name}\n"), path.parent.name
         assert f"pip install {name}" in readme
+
+
+# -- one workflow calling another ----------------------------------------
+def workflows() -> dict:
+    """Every workflow file, read as text. Parsed by hand: PyYAML is not a test
+    dependency and CI installs only what the tests import."""
+    return {p.name: p.read_text()
+            for p in sorted((REPO / ".github" / "workflows").glob("*.yml"))}
+
+
+def test_a_called_workflow_declares_the_secrets_it_reads():
+    """A reusable workflow that reads a secret it never declared does not start: the
+    run fails before any job, with nothing in the log to say which secret."""
+    import re
+
+    text = workflows()["release.yml"]
+    used = {m for m in re.findall(r"secrets\.([A-Z_][A-Z0-9_]*)", text)
+            if m != "GITHUB_TOKEN"}
+    called = text[text.index("workflow_call:"):]
+    declared = called[:called.index("\n  workflow_dispatch")] if "\n  workflow_dispatch" in called else called
+    for name in used:
+        assert name in declared, f"{name} is read but not declared under workflow_call"
+
+
+def test_the_caller_passes_its_secrets_and_the_right_permissions():
+    caller = workflows()["release-please.yml"]
+    assert "secrets: inherit" in caller, "the called workflow would see no secrets"
+    assert "id-token: write" in caller, "trusted publishing needs the token claim"
+    assert "uses: ./.github/workflows/release.yml" in caller
