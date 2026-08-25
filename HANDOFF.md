@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 933 passing, `docs/verify_release.py` is 40/40.
+The suite is 935 passing, `docs/verify_release.py` is 40/40.
 
 ## In flight
 
@@ -30,6 +30,11 @@ The owner asked whether a library should do this instead. It is an open question
 
 Decide between the `git log` version and a tool before the next release. Do not merge the
 branch to avoid the decision.
+
+`main` now sets `body:` on the same release step, from a `what to download` step that
+lists each bundle under its operating system. Whichever way the changelog is decided, the
+two bodies have to be concatenated:
+`body: ${{ steps.downloads.outputs.body }}${{ steps.notes.outputs.body }}`.
 
 ## Parity: a coding agent cannot drive all of this
 

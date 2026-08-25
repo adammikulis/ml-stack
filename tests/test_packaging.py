@@ -53,3 +53,62 @@ def test_every_package_declares_a_console_script_that_exists():
             path = pyproject.parent / "src" / Path(*module.split(".")).with_suffix(".py")
             assert path.exists(), f"{name} points at {module}, which is not a file"
             assert f"def {attr}(" in path.read_text(), f"{module} has no {attr}()"
+
+
+# -- the release page ----------------------------------------------------
+WORKFLOW = REPO / ".github" / "workflows" / "release.yml"
+
+
+def downloads_step() -> str:
+    """The shell of the step that writes the download links into the release body."""
+    text = WORKFLOW.read_text()
+    start = text.index("- name: what to download")
+    body = text[text.index("run: |", start):]
+    lines = body.splitlines()[1:]
+    indent = len(lines[0]) - len(lines[0].lstrip())
+    out = []
+    for line in lines:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        out.append(line[indent:])
+    return "\n".join(out)
+
+
+def test_every_bundle_the_release_builds_is_linked_from_its_notes():
+    """An asset renamed in the matrix and not in the notes is a dead link."""
+    import re
+
+    text = WORKFLOW.read_text()
+    built = set(re.findall(r"^\s+asset: (\S+)$", text, re.M))
+    assert built, "the release builds no bundles"
+    step = downloads_step()
+    for asset in built:
+        assert f"{asset}.zip" in step, f"{asset}.zip is built but not offered"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
+def test_the_notes_offer_only_what_actually_built(tmp_path):
+    """A platform whose runner was unavailable must not leave a link to nothing."""
+    import os
+
+    (tmp_path / "artifacts" / "wheels").mkdir(parents=True)
+    (tmp_path / "artifacts" / "mac").mkdir()
+    (tmp_path / "artifacts" / "mac" / "ml-stack-macos-arm64.zip").write_text("x")
+    (tmp_path / "artifacts" / "install.sh").write_text("x")
+    (tmp_path / "artifacts" / "install.ps1").write_text("x")
+    (tmp_path / "artifacts" / "wheels" / "ml_stack_fleet-0-py3-none-any.whl").write_text("x")
+    out = tmp_path / "out"
+    out.touch()
+
+    done = subprocess.run(
+        ["bash", "-e", "-c", downloads_step()], cwd=tmp_path, capture_output=True,
+        text=True,
+        env={**os.environ, "GITHUB_REF_NAME": "v9.9.9",
+             "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
+    assert done.returncode == 0, done.stderr
+
+    body = out.read_text()
+    assert "releases/download/v9.9.9/ml-stack-macos-arm64.zip" in body
+    assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
+    assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
+    assert "the 1 `ml_stack_*.whl`" in body

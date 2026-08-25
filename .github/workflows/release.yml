@@ -114,7 +114,42 @@ jobs:
           path: repo
       - name: collect the network installers
         run: cp repo/packaging/install.sh repo/packaging/install.ps1 artifacts/
+
+      - name: what to download
+        id: downloads
+        shell: bash
+        run: |
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          here() { find artifacts -name "$1" -type f -print -quit | grep -q .; }
+          section() {
+            here "$2" || return 0
+            printf '\n%s\n- [%s](%s/%s)\n' "$1" "$2" "$base" "$2"
+          }
+          wheels=$(find artifacts -name '*.whl' -type f | wc -l | tr -d ' ')
+          {
+            echo "body<<DOWNLOADS_EOF"
+            echo "## Download"
+            section "**macOS** — Apple silicon (M1 or later)" ml-stack-macos-arm64.zip
+            section "**Windows** — 64-bit" ml-stack-windows-x86_64.zip
+            section "**Linux** — 64-bit" ml-stack-linux-x86_64.zip
+            echo
+            echo "Each holds the app and \`ml-stack-headless\`, for a machine with no screen. Unzip it and open it."
+            if here install.sh && here install.ps1; then
+              echo
+              echo "**Or install from a terminal**, which picks the right one for you:"
+              echo
+              echo "- macOS and Linux: \`curl -fsSL $base/install.sh | sh\`"
+              echo "- Windows: \`irm $base/install.ps1 | iex\`"
+            fi
+            if [ "$wheels" -gt 0 ]; then
+              echo
+              echo "**If you write Python**, the $wheels \`ml_stack_*.whl\` files under Assets are the packages: \`pip install ml-stack-fleet\` and the rest."
+            fi
+            echo "DOWNLOADS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
+          body: ${{ steps.downloads.outputs.body }}
           generate_release_notes: true
