@@ -6,10 +6,29 @@ build-backend = "hatchling.build"
 name = "ml-stack-media"
 version = "0.1.5"  # x-release-please-version
 description = "WAV containers, image formats and model-asset downloads. "
+readme = "README.md"
 requires-python = ">=3.11"
+authors = [{ name = "Adam Mikulis" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/adammikulis/ml-stack"
+Repository = "https://github.com/adammikulis/ml-stack"
+Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

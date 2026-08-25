@@ -217,3 +217,30 @@ def test_the_version_in_a_checkout_is_read_without_the_marker():
     import json
     want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
     assert _version_in_source() == want
+
+
+# -- what PyPI shows -----------------------------------------------------
+@pytest.mark.parametrize("path", sorted((REPO / "packages").glob("*/pyproject.toml")),
+                         ids=lambda p: p.parent.name)
+def test_every_package_says_what_it_is_and_where_it_came_from(path):
+    """A package published without these is a blank page on PyPI, and the version it
+    was published at cannot be re-uploaded to fix it."""
+    import tomllib
+
+    meta = tomllib.load(path.open("rb"))["project"]
+    assert meta["readme"] == "README.md"
+    assert (path.parent / "README.md").is_file()
+    assert meta["urls"]["Homepage"].startswith("https://github.com/")
+    assert meta["classifiers"], "no classifiers, so it is filed under nothing"
+    assert meta["description"].strip()
+    assert meta["license"]
+
+
+def test_the_readme_names_the_package_it_belongs_to():
+    import tomllib
+
+    for path in sorted((REPO / "packages").glob("*/pyproject.toml")):
+        name = tomllib.load(path.open("rb"))["project"]["name"]
+        readme = (path.parent / "README.md").read_text()
+        assert readme.startswith(f"# {name}\n"), path.parent.name
+        assert f"pip install {name}" in readme
