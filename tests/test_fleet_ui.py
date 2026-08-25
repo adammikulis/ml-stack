@@ -189,6 +189,86 @@ class TestFirstRunIsNotUpForGrabs:
             s.close()
 
 
+class TestJoiningTwice:
+    def test_a_cluster_with_no_name_is_the_same_one_either_way(self, serving):
+        """The wizard and the Clusters box must derive the same key from the same
+        words, or two machines set up different ways never see each other."""
+        from ml_stack.fleet.discovery import key_from_passphrase, memberships
+
+        status, body, headers = serving.call("/ui/setup/join", method="POST",
+                                             body={"passphrase": WORDS})
+        assert status == 200, body
+        cookie = headers["Set-Cookie"].split(";")[0]
+        first = memberships(serving.keyfile)[0]
+
+        status, body, _ = serving.call("/ui/clusters", method="POST", cookie=cookie,
+                                       body={"passphrase": WORDS})
+        assert status == 200, body
+        rows = memberships(serving.keyfile)
+        assert [m.group for m in rows] == [first.group]
+        assert rows[0].key == key_from_passphrase(WORDS, group="ml-stack")
+
+
+# -- a machine in no cluster ---------------------------------------------
+class TestOnItsOwn:
+    """Joining a cluster is optional. A machine that skipped it has no password, so it
+    answers to itself and to nobody else."""
+
+    def finished(self, serving):
+        status, body, _ = serving.call("/ui/setup/done", method="POST")
+        assert status == 200, body
+        return body
+
+    def test_the_wizard_is_not_shown_again_once_it_is_finished(self, serving):
+        assert serving.call("/ui/setup")[1]["needs_setup"] is True
+        assert self.finished(serving)["needs_setup"] is False
+        assert serving.call("/ui/setup")[1]["needs_setup"] is False
+        assert not in_cluster(serving.keyfile)
+
+    def test_finishing_is_remembered_between_runs(self, serving):
+        from ml_stack.fleet.settings import Settings
+
+        self.finished(serving)
+        assert Settings.load(serving.ui.settings_path).setup_done is True
+
+    def test_there_is_no_password_to_ask_for(self, serving):
+        assert serving.call("/ui/setup")[1]["needs_password"] is False
+        serving.call("/ui/setup/join", method="POST",
+                     body={"passphrase": WORDS, "group": "home"})
+        assert serving.call("/ui/setup")[1]["needs_password"] is True
+
+    def test_the_machine_itself_gets_in_without_signing_in(self, serving):
+        self.finished(serving)
+        status, body, _ = serving.call("/ui/settings")
+        assert status == 200, body
+
+    def test_nobody_else_does(self, serving):
+        self.finished(serving)
+        status, body, _ = serving.call("/ui/settings", host=primary_ip())
+        assert status == 403
+        assert "ssh" in body["error"]
+
+    def test_a_page_pointing_a_domain_at_loopback_does_not(self, serving):
+        self.finished(serving)
+        status, body, _ = serving.call(
+            "/ui/settings", headers={"Host": f"evil.example.com:{serving.port}"})
+        assert status == 403
+        assert "hostname" in body["error"]
+
+    def test_finishing_is_refused_from_another_machine(self, serving):
+        status, body, _ = serving.call("/ui/setup/done", method="POST",
+                                       host=primary_ip())
+        assert status == 403
+        assert serving.call("/ui/setup")[1]["needs_setup"] is True
+
+    def test_a_cluster_puts_the_password_back(self, serving):
+        self.finished(serving)
+        serving.call("/ui/setup/join", method="POST",
+                     body={"passphrase": WORDS, "group": "home"})
+        status, body, _ = serving.call("/ui/settings")
+        assert status == 401 and "sign in" in body["error"]
+
+
 # -- signing in ----------------------------------------------------------
 class TestSignIn:
     @pytest.fixture

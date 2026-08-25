@@ -23,6 +23,8 @@ class Settings:
     on_paused: str = "stop"
     """``stop`` gets the machine back now, at the cost of restarting the current job"""
     autostart: str = "manual"
+    setup_done: bool = False
+    """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
     on_close: str = ""
     auto_update: bool = True
     update_channel: str = "stable"

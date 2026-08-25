@@ -117,9 +117,19 @@ class UI:
     # -- state -----------------------------------------------------------
     def state(self) -> dict[str, Any]:
         joined = in_cluster(self.cluster_key_path)
+        done = bool(self.settings and self.settings.setup_done)
         return {"in_cluster": joined, "name": self.name,
                 "group": cluster_group(self.cluster_key_path) if joined else None,
-                "needs_setup": not joined}
+                "needs_password": joined,
+                "needs_setup": not (joined or done)}
+
+    def setup_finished(self) -> dict[str, Any]:
+        """Remember that the wizard was finished, so it is not shown again."""
+        if self.settings is not None:
+            self.settings.setup_done = True
+            if self.settings_path is not None:
+                self.settings.save(self.settings_path)
+        return self.state()
 
     def rejoined(self) -> None:
         """The set of clusters changed: advertise on the new one, drop the old."""
@@ -414,9 +424,19 @@ def routes(ui: UI, handler: Any) -> bool:
         })
         return True
 
-    if path == "/ui/setup/prefs" and method == "POST":
-        if in_cluster(ui.cluster_key_path) and not ui.authed(cookie):
-            send(401, {"error": "sign in first"})
+    if path in ("/ui/setup/prefs", "/ui/setup/done") and method == "POST":
+        if in_cluster(ui.cluster_key_path):
+            if not ui.authed(cookie):
+                send(401, {"error": "sign in first"})
+                return True
+        else:
+            why = ui.may_setup(client_ip, host_header,
+                               handler.headers.get("X-ML-Stack-Setup", ""))
+            if why:
+                send(403, {"error": why})
+                return True
+        if path == "/ui/setup/done":
+            send(200, ui.setup_finished())
             return True
         req = body()
         applied = ui.apply_prefs(req)
@@ -459,9 +479,17 @@ def routes(ui: UI, handler: Any) -> bool:
             return True
 
     # -- everything else needs a session ---------------------------------
+    # A machine in no cluster has no password anyone could be asked for, so it answers
+    # to itself and to nobody else.
     if not ui.authed(cookie):
-        send(401, {"error": "sign in first"})
-        return True
+        if in_cluster(ui.cluster_key_path):
+            send(401, {"error": "sign in first"})
+            return True
+        why = ui.may_setup(client_ip, host_header,
+                           handler.headers.get("X-ML-Stack-Setup", ""))
+        if why:
+            send(403, {"error": why})
+            return True
 
     if path == "/ui/settings":
         if method == "GET":
@@ -776,7 +804,7 @@ def routes(ui: UI, handler: Any) -> bool:
         return True
 
     if path == "/ui/clusters":
-        from .discovery import default_group, join, leave, memberships
+        from .discovery import join, leave, memberships
         if method == "GET":
             send(200, {"clusters": [m.public() for m in
                                     memberships(ui.cluster_key_path)]})
@@ -784,7 +812,7 @@ def routes(ui: UI, handler: Any) -> bool:
         if method == "POST":
             req = body()
             words = str(req.get("passphrase") or "")
-            group = str(req.get("group") or "").strip() or default_group()
+            group = str(req.get("group") or "").strip() or "ml-stack"
             try:
                 rows = join(words, group=group, path=ui.cluster_key_path)
             except DiscoveryError as exc:
