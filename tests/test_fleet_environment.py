@@ -76,6 +76,8 @@ class TestEnvironment:
 class TestBuildingItForReal:
     def test_it_builds_and_installs_and_a_job_can_use_it(self, tmp_path):
         env = Environment(tmp_path)
+        if env.wheels() is None:
+            pytest.skip("no wheels built; run packaging/build.py")
         done = env.install(["core"])
         assert done["core"]["ok"], done
 

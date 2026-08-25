@@ -112,8 +112,8 @@ The suite and the release checks do not cover these.
   before finishing.
 - **A fresh worktree has no `dist/`.** `test_fleet_environment.py` builds a real
   environment and finds the packages by walking up for a `dist/` holding wheels, which
-  git ignores. Run `python packaging/build.py` there first, or link an existing one, or
-  that one test fails for reasons unrelated to your work.
+  git ignores. Without them its two real-environment tests skip. Run
+  `python packaging/build.py` there, or link an existing `dist/`, to make them run.
 - **Lazy imports are invisible to PyInstaller.** `ml_stack.serve` is reached only through
   one, and is listed in `hidden` in both spec files. Anything else imported inside a
   function needs the same.

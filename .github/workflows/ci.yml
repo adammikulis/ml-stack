@@ -30,5 +30,10 @@ jobs:
           # and without one they fail rather than skip.
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
+      # ml-stack's own packages are on no index. Without them the environment test
+      # can build a venv, install torch, and still not import ml_stack.
+      - name: build the wheels the environment test installs
+        run: python packaging/build.py
+
       - name: tests
         run: python -m pytest tests/ -q
