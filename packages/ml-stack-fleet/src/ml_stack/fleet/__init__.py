@@ -20,6 +20,7 @@ from ml_stack.fleet.discovery import (
     Advertiser,
     Beacon,
     DiscoveryError,
+    DEFAULT_CLUSTER,
     MIN_PASSPHRASE,
     create_cluster_key,
     derive_token,
@@ -54,6 +55,7 @@ from ml_stack.fleet.work import Placement, Unit, run
 
 __all__ = [
     "BENCH_KIND",
+    "DEFAULT_CLUSTER",
     "MIN_PASSPHRASE",
     "REPORT_GROUP",
     "Advertiser",

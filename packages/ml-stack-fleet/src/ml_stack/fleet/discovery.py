@@ -24,6 +24,9 @@ from typing import Any
 DEFAULT_GROUP = "239.255.77.70"
 #: One above traind's HTTP port, so a single firewall rule covers both.
 DEFAULT_PORT = 8771
+#: What a cluster is called when nobody names one. Two machines that type the same
+#: passphrase derive the same key only if they also agree on this.
+DEFAULT_CLUSTER = "ml-stack"
 DEFAULT_KEY_PATH = Path("~/.ml-stack/cluster.key")
 
 
@@ -61,8 +64,8 @@ def create_cluster_key(path: Path | str | None = None, *,
     if joined and not overwrite:
         return joined[0].key.decode()
     key = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-    rows = [Membership(group=default_group(), key=key.encode())]
-    rows += [m for m in joined if m.group != default_group()]
+    rows = [Membership(group=DEFAULT_CLUSTER, key=key.encode())]
+    rows += [m for m in joined if m.group != DEFAULT_CLUSTER]
     _write_memberships(rows, path)
     return key
 
@@ -82,7 +85,7 @@ def _salt_for(group: str) -> bytes:
     return sha256(b"ml-stack-cluster-v1:" + group.encode()).digest()
 
 
-def key_from_passphrase(passphrase: str, *, group: str = "ml-stack") -> bytes:
+def key_from_passphrase(passphrase: str, *, group: str = DEFAULT_CLUSTER) -> bytes:
     """The cluster key two machines derive from the same words."""
     passphrase = passphrase.strip()
     if len(passphrase) < MIN_PASSPHRASE:
@@ -106,7 +109,7 @@ def cluster_group(path: Path | str | None = None) -> str | None:
     return rows[0].group if rows else None
 
 
-def join_cluster(passphrase: str, *, group: str = "ml-stack",
+def join_cluster(passphrase: str, *, group: str = DEFAULT_CLUSTER,
                  path: Path | str | None = None, overwrite: bool = True) -> bytes:
     """Join, and answer as this cluster from now on. Returns the key."""
     key = key_from_passphrase(passphrase, group=group)
@@ -125,7 +128,7 @@ def check_passphrase(passphrase: str, *, group: str | None = None,
     key = load_cluster_key(path)
     if key is None:
         return False
-    group = group if group is not None else (cluster_group(path) or "ml-stack")
+    group = group if group is not None else (cluster_group(path) or DEFAULT_CLUSTER)
     try:
         candidate = key_from_passphrase(passphrase, group=group)
     except DiscoveryError:
@@ -172,9 +175,6 @@ def memberships(path: Path | str | None = None) -> list[Membership]:
     return out
 
 
-LEGACY_GROUP = "ml-stack"
-
-
 def _adopt_single(path: Path | str | None = None) -> list[Membership]:
     """The one cluster written before the list existed, moved into the list."""
     try:
@@ -187,7 +187,7 @@ def _adopt_single(path: Path | str | None = None) -> list[Membership]:
         group = group_path(path).read_text().strip()
     except OSError:
         group = ""
-    rows = [Membership(group=group or LEGACY_GROUP, key=key.encode())]
+    rows = [Membership(group=group or DEFAULT_CLUSTER, key=key.encode())]
     with contextlib.suppress(OSError):
         _write_memberships(rows, path)
     return rows
@@ -213,7 +213,7 @@ def _write_memberships(rows: list[Membership],
 def join(passphrase: str, *, group: str = "", path: Path | str | None = None
          ) -> list[Membership]:
     """Add a cluster. Joining one already joined replaces its key."""
-    group = group.strip() or default_group()
+    group = group.strip() or DEFAULT_CLUSTER
     key = key_from_passphrase(passphrase, group=group)
     rows = [m for m in memberships(path) if m.group != group]
     rows.append(Membership(group=group, key=key))
