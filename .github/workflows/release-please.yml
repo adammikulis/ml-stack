@@ -29,8 +29,6 @@ jobs:
     if: needs.propose.outputs.released == 'true'
     permissions:
       contents: write
-      id-token: write
     uses: ./.github/workflows/release.yml
     with:
       tag: ${{ needs.propose.outputs.tag }}
-    secrets: inherit

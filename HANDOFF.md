@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.5` is published with 17 assets.
-The suite is 947 passing, `docs/verify_release.py` is 40/40.
+The suite is 949 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -71,13 +71,16 @@ The suite and the release checks do not cover these.
 
 ## PyPI
 
-`ml-stack` is one distribution and the only name that should exist. `release.yml`
-uploads it on a release, by trusted publishing or a `PYPI_API_TOKEN` secret.
+`ml-stack` is not published, and nothing in the repository tries to publish it. The
+release builds the wheel and attaches it; that is where it stops.
 
-Four names went up before this was one package and have to be deleted by hand at
-`pypi.org/manage/project/<name>/settings/`: `ml-stack-backend`, `ml-stack-client`,
-`ml-stack-contracts`, `ml-stack-fleet`, all at 0.1.6. PyPI keeps a deleted filename
-reserved for ever, so none of those four can ever be uploaded again at 0.1.6.
+PyPI refused twelve uploads and six retries with `429 Too many new projects created`,
+an account-wide limit spent by the twelve names this repository used to have. The limit
+clears on its own. The name `ml-stack` is free and `PYPI_API_TOKEN` is still a secret on
+the repository -- delete it if it is not going to be used.
+
+Publishing, when it is wanted, is `twine upload dist/*.whl` from a checkout, or the job
+that was removed in this commit's parent.
 
 ## Stale
 
@@ -115,11 +118,10 @@ reserved for ever, so none of those four can ever be uploaded again at 0.1.6.
   delivered by the thread that is blocked waiting for it, and the window freezes with no
   way out but killing it. `Bridge.on_closing` hands that work to another thread. The same
   applies to `before_load`, `before_show` and `initialized`.
-- **The release notes come from the pull request, not from `CHANGELOG.md`.**
-  release-please works out the notes when it opens the release pull request and
-  publishes those; editing `CHANGELOG.md` on that branch changes the file in the repo
-  and nothing on the release page. Edit the pull request body before merging, or fix
-  the release afterwards with `gh release edit <tag> --notes-file`.
+- **release-please publishes the notes it worked out when it opened the pull request**,
+  not what `CHANGELOG.md` says. `release.yml` overwrites the body afterwards from the
+  file, so the file is what a reader ends up with -- but between the two, the release
+  briefly says something else.
 - **A release pull request runs no checks.** Nothing triggers a workflow on a branch
   the Actions token pushed, so CI is silent on it and the version bump is unverified
   until it lands on `main`.

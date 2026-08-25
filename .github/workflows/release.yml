@@ -8,10 +8,6 @@ on:
         description: the release to build and publish
         required: true
         type: string
-    secrets:
-      PYPI_API_TOKEN:
-        description: only when the repository publishes with a token instead of OIDC
-        required: false
   workflow_dispatch:
 
 concurrency:
@@ -115,25 +111,6 @@ jobs:
           path: dist/${{ matrix.asset }}-*.zip
           retention-days: 7
 
-  # Trusted publishing when PyPI is configured for it; the token is the fallback,
-  # and the action uses whichever it is given.
-  pypi:
-    needs: wheels
-    if: always() && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: wheels
-          path: dist
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-          skip-existing: true
-
   publish:
     needs: [wheels, bundle]
     # Publishes whatever built. A platform whose runner was unavailable should
@@ -192,44 +169,55 @@ jobs:
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # Only for a tag pushed by hand. A release release-please made already carries
-      # its own changelog, and this would print a second one under it.
+      # CHANGELOG.md is what the release page says. Composed rather than appended:
+      # a re-run of this job has to leave the body the same, not twice as long.
       - name: what changed
         id: notes
-        if: inputs.tag == ''
         working-directory: repo
         shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          tag="${GITHUB_REF_NAME}"
-          before=$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)
-          range="$tag"
-          [ -n "$before" ] && range="$before..$tag"
-          # A commit that touched nothing but prose or a version number changed
-          # nothing a person downloading this can see.
+          section=""
+          if [ -f CHANGELOG.md ]; then
+            section=$(awk -v want="${TAG#v}" '
+              $0 ~ "^## \\[" want "\\]" { on = 1; print; next }
+              on && /^## \[/ { exit }
+              on { print }' CHANGELOG.md)
+          fi
+          # A tag cut by hand has no entry to read, so the subjects stand in for one.
+          # A commit that touched nothing but prose or a version number changed nothing
+          # a person downloading this can see.
           worth_saying() {
             local file
             while read -r file; do
               case "$file" in
                 "") ;;
                 *.md|docs/*) ;;
-                packages/*/pyproject.toml|packaging/ml-stack-app.spec) ;;
+                pyproject.toml|packaging/ml-stack-app.spec) ;;
                 *) return 0 ;;
               esac
             done < <(git show --name-only --pretty=format: "$1")
             return 1
           }
+          if [ -z "$section" ]; then
+            before=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+            range="$TAG"
+            [ -n "$before" ] && range="$before..$TAG"
+            section=$(
+              printf '## What changed\n\n'
+              for sha in $(git log --no-merges --reverse --pretty=format:'%H' "$range"); do
+                worth_saying "$sha" && git show -s --pretty=format:'- %s' "$sha" && echo
+              done
+              if [ -n "$before" ]; then
+                printf '\n**Every commit**: https://github.com/%s/compare/%s...%s\n' \
+                  "$GITHUB_REPOSITORY" "$before" "$TAG"
+              fi
+            )
+          fi
           {
             echo "body<<CHANGELOG_EOF"
-            echo
-            echo "## What changed"
-            echo
-            for sha in $(git log --no-merges --reverse --pretty=format:'%H' "$range"); do
-              worth_saying "$sha" && git show -s --pretty=format:'- %s' "$sha" && echo
-            done
-            if [ -n "$before" ]; then
-              echo
-              echo "**Every commit**: https://github.com/${GITHUB_REPOSITORY}/compare/$before...$tag"
-            fi
+            printf '%s\n' "$section"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
 
@@ -237,5 +225,4 @@ jobs:
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           files: artifacts/**/*
-          append_body: true
-          body: ${{ steps.downloads.outputs.body }}${{ steps.notes.outputs.body }}
+          body: ${{ steps.notes.outputs.body }}${{ steps.downloads.outputs.body }}

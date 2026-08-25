@@ -123,7 +123,30 @@ def git(*args, cwd):
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
-def test_the_notes_say_what_changed_and_leave_out_what_did_not(tmp_path):
+def test_a_tag_with_a_changelog_entry_uses_it(tmp_path):
+    """The release page says what CHANGELOG.md says, so editing the file is enough and
+    a second run of the job leaves the body the same rather than twice as long."""
+    import os
+
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [0.2.0](link) (2026-01-01)\n\n* the new thing\n\n"
+        "## [0.1.0](link) (2025-01-01)\n\n* the old thing\n")
+    out = tmp_path / "out"
+    out.touch()
+    done = subprocess.run(
+        ["bash", "-e", "-c", workflow_step("what changed")], cwd=tmp_path,
+        capture_output=True, text=True,
+        env={**os.environ, "TAG": "v0.2.0", "GITHUB_REPOSITORY": "owner/repo",
+             "GITHUB_OUTPUT": str(out)})
+    assert done.returncode == 0, done.stderr
+
+    body = out.read_text()
+    assert "* the new thing" in body
+    assert "the old thing" not in body, "carried the previous release's notes too"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="the step is written for bash")
+def test_a_tag_with_no_entry_falls_back_to_the_subjects(tmp_path):
     """A version bump and a paragraph of prose are not news to someone downloading it."""
     import os
 
@@ -140,11 +163,11 @@ def test_the_notes_say_what_changed_and_leave_out_what_did_not(tmp_path):
         git("add", "-A", cwd=repo)
         git("commit", "-qm", subject, cwd=repo)
 
-    commit("Before the tag", "packages/ml-stack-fleet/src/a.py")
+    commit("Before the tag", "src/ml_stack/fleet/a.py")
     git("tag", "v0.1.0", cwd=repo)
-    commit("Chat with a model on any machine", "packages/ml-stack-fleet/src/b.py")
+    commit("Chat with a model on any machine", "src/ml_stack/fleet/b.py")
     commit("Write down what is pending", "HANDOFF.md")
-    commit("Version 0.2.0", "packages/ml-stack-fleet/pyproject.toml")
+    commit("Version 0.2.0", "pyproject.toml")
     commit("Explain the recipes", "docs/FEATURES.md")
     git("tag", "v0.2.0", cwd=repo)
 
@@ -153,7 +176,7 @@ def test_the_notes_say_what_changed_and_leave_out_what_did_not(tmp_path):
     done = subprocess.run(
         ["bash", "-e", "-c", workflow_step("what changed")], cwd=repo,
         capture_output=True, text=True,
-        env={**os.environ, "GITHUB_REF_NAME": "v0.2.0",
+        env={**os.environ, "TAG": "v0.2.0",
              "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
     assert done.returncode == 0, done.stderr
 
@@ -249,13 +272,21 @@ def test_a_called_workflow_declares_the_secrets_it_reads():
     used = {m for m in re.findall(r"secrets\.([A-Z_][A-Z0-9_]*)", text)
             if m != "GITHUB_TOKEN"}
     called = text[text.index("workflow_call:"):]
-    declared = called[:called.index("\n  workflow_dispatch")] if "\n  workflow_dispatch" in called else called
     for name in used:
-        assert name in declared, f"{name} is read but not declared under workflow_call"
+        assert name in called, f"{name} is read but not declared under workflow_call"
+    if used:
+        assert "secrets: inherit" in workflows()["release-please.yml"], (
+            "the called workflow would see no secrets")
 
 
-def test_the_caller_passes_its_secrets_and_the_right_permissions():
+def test_the_release_is_built_by_the_workflow_that_cuts_it():
     caller = workflows()["release-please.yml"]
-    assert "secrets: inherit" in caller, "the called workflow would see no secrets"
-    assert "id-token: write" in caller, "trusted publishing needs the token claim"
     assert "uses: ./.github/workflows/release.yml" in caller
+    assert "id-token" not in caller, "nothing here asks PyPI for anything any more"
+
+
+def test_nothing_uploads_to_pypi():
+    """The release builds the wheel and attaches it. Publishing it is a decision, not
+    something a tag does on its own."""
+    for name, text in workflows().items():
+        assert "pypi" not in text.lower(), f"{name} still reaches for PyPI"
