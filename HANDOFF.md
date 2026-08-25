@@ -3,7 +3,7 @@
 Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and three of them
 were written because they were broken in the session that produced v0.1.4.
 
-`main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
+`main` is the default branch and holds everything. `v0.1.5` is published with 17 assets.
 The suite is 944 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
@@ -105,6 +105,14 @@ The suite and the release checks do not cover these.
   delivered by the thread that is blocked waiting for it, and the window freezes with no
   way out but killing it. `Bridge.on_closing` hands that work to another thread. The same
   applies to `before_load`, `before_show` and `initialized`.
+- **The release notes come from the pull request, not from `CHANGELOG.md`.**
+  release-please works out the notes when it opens the release pull request and
+  publishes those; editing `CHANGELOG.md` on that branch changes the file in the repo
+  and nothing on the release page. Edit the pull request body before merging, or fix
+  the release afterwards with `gh release edit <tag> --notes-file`.
+- **A release pull request runs no checks.** Nothing triggers a workflow on a branch
+  the Actions token pushed, so CI is silent on it and the version bump is unverified
+  until it lands on `main`.
 - **The version goes on the end of a download's name**, never in the middle.
   `install.sh`, `install.ps1` and `updates.asset_for` all look for
   `ml-stack-<os>-<arch>` as a substring, and the copies already installed look for it
