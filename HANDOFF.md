@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.5` is published with 17 assets.
-The suite is 944 passing, `docs/verify_release.py` is 40/40.
+The suite is 957 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -68,6 +68,29 @@ The suite and the release checks do not cover these.
 7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
+
+## PyPI
+
+The twelve wheels are built and checked at every release but nothing has been uploaded;
+all twelve names are unclaimed. `release.yml` has a `pypi` job that runs on a release
+and uses trusted publishing, falling back to a `PYPI_API_TOKEN` secret if one is set.
+
+What is left is on pypi.org, and only the account owner can do it: add a **pending
+publisher** for each of the twelve names — owner `adammikulis`, repository `ml-stack`,
+workflow `release.yml`, environment blank. Twelve forms, once. A token secret instead
+skips all twelve.
+
+`ml-stack-train`, `ml-stack-graph`, `ml-stack-serve`, `ml-stack-speech` and
+`ml-stack-vision` depend on their siblings, so the first upload has to carry all twelve
+or `pip install ml-stack-train` finds nothing to resolve.
+
+Wheels only. These are pure Python and `py3-none-any`, so nothing needs a source
+distribution to install; anyone who wants one has to build it.
+
+If the first run fails on the trusted-publisher claim, it is because the release is cut
+by `release-please.yml` calling `release.yml`, and PyPI matched the entry point rather
+than the file the job lives in. Add a second pending publisher naming
+`release-please.yml`, or set the token.
 
 ## Stale
 
