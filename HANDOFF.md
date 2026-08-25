@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.5` is published with 17 assets.
-The suite is 957 passing, `docs/verify_release.py` is 40/40.
+The suite is 947 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -71,26 +71,13 @@ The suite and the release checks do not cover these.
 
 ## PyPI
 
-The twelve wheels are built and checked at every release but nothing has been uploaded;
-all twelve names are unclaimed. `release.yml` has a `pypi` job that runs on a release
-and uses trusted publishing, falling back to a `PYPI_API_TOKEN` secret if one is set.
+`ml-stack` is one distribution and the only name that should exist. `release.yml`
+uploads it on a release, by trusted publishing or a `PYPI_API_TOKEN` secret.
 
-What is left is on pypi.org, and only the account owner can do it: add a **pending
-publisher** for each of the twelve names — owner `adammikulis`, repository `ml-stack`,
-workflow `release.yml`, environment blank. Twelve forms, once. A token secret instead
-skips all twelve.
-
-`ml-stack-train`, `ml-stack-graph`, `ml-stack-serve`, `ml-stack-speech` and
-`ml-stack-vision` depend on their siblings, so the first upload has to carry all twelve
-or `pip install ml-stack-train` finds nothing to resolve.
-
-Wheels only. These are pure Python and `py3-none-any`, so nothing needs a source
-distribution to install; anyone who wants one has to build it.
-
-If the first run fails on the trusted-publisher claim, it is because the release is cut
-by `release-please.yml` calling `release.yml`, and PyPI matched the entry point rather
-than the file the job lives in. Add a second pending publisher naming
-`release-please.yml`, or set the token.
+Four names went up before this was one package and have to be deleted by hand at
+`pypi.org/manage/project/<name>/settings/`: `ml-stack-backend`, `ml-stack-client`,
+`ml-stack-contracts`, `ml-stack-fleet`, all at 0.1.6. PyPI keeps a deleted filename
+reserved for ever, so none of those four can ever be uploaded again at 0.1.6.
 
 ## Stale
 
@@ -136,6 +123,9 @@ than the file the job lives in. Add a second pending publisher naming
 - **A release pull request runs no checks.** Nothing triggers a workflow on a branch
   the Actions token pushed, so CI is silent on it and the version bump is unverified
   until it lands on `main`.
+- **One package, twelve modules.** `packages/*` is gone: everything is `src/ml_stack/`
+  under a single `pyproject.toml`. What used to be a package's dependencies is an extra
+  of the same name, and `pip install ml-stack` still pulls in nothing.
 - **The version goes on the end of a download's name**, never in the middle.
   `install.sh`, `install.ps1` and `updates.asset_for` all look for
   `ml-stack-<os>-<arch>` as a substring, and the copies already installed look for it

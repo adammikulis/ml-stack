@@ -1,4 +1,4 @@
-"""These packages must import with no third-party libraries installed."""
+"""These parts of ml_stack must import with no third-party libraries installed."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ STDLIB_ONLY = ["contracts", "media", "client", "fleet"]
 
 @pytest.mark.parametrize("name", STDLIB_ONLY)
 def test_it_imports_with_nothing_installed(name):
-    src = REPO / "packages" / f"ml-stack-{name}" / "src"
+    src = REPO / "src"
     program = (
         "import sys\n"
         "sys.path = [p for p in sys.path "
@@ -31,13 +31,14 @@ def test_it_imports_with_nothing_installed(name):
         f"{done.stderr}")
 
 
-def test_the_stdlib_only_packages_declare_no_dependencies():
-    for name in STDLIB_ONLY:
-        text = (REPO / "packages" / f"ml-stack-{name}" / "pyproject.toml").read_text()
-        for line in text.splitlines():
-            if line.startswith("dependencies ="):
-                deps = line.split("=", 1)[1].strip()
-                assert deps in ("[]", '[""]'), f"ml-stack-{name}: {line}"
+def test_installing_ml_stack_brings_in_nothing():
+    """`pip install ml-stack` has to be enough on a machine that only joins the
+    cluster and passes work about. Everything heavier is an extra."""
+    import tomllib
+
+    meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
+    assert meta["dependencies"] == []
+    assert set(meta["optional-dependencies"]) >= {"app", "train", "serve", "all"}
 
 
 def test_the_web_assets_are_not_python():

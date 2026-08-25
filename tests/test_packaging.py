@@ -12,10 +12,9 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 
 
-def build(package: str, out: Path) -> Path:
+def build(out: Path) -> Path:
     done = subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "--outdir", str(out),
-         str(REPO / "packages" / package)],
+        [sys.executable, "-m", "build", "--wheel", "--outdir", str(out), str(REPO)],
         capture_output=True, text=True)
     if done.returncode != 0:
         pytest.skip(f"cannot build wheels here: {done.stderr[-300:]}")
@@ -25,7 +24,7 @@ def build(package: str, out: Path) -> Path:
 @pytest.mark.slow
 def test_the_web_interface_ships_in_the_fleet_wheel(tmp_path):
     """Served from disk at runtime, so a wheel without them is a daemon whose UI 404s."""
-    wheel = build("ml-stack-fleet", tmp_path)
+    wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
     for asset in ("index.html", "style.css", "app.js"):
@@ -35,7 +34,7 @@ def test_the_web_interface_ships_in_the_fleet_wheel(tmp_path):
 @pytest.mark.slow
 def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
     """contracts/ lives at the repo root and is force-included at build time."""
-    wheel = build("ml-stack-contracts", tmp_path)
+    wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
     assert any(n.endswith("model_tiers.json") for n in names)
@@ -43,16 +42,17 @@ def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
     assert any("recipes/" in n and n.endswith(".json") for n in names)
 
 
-def test_every_package_declares_a_console_script_that_exists():
+def test_every_console_script_points_at_something_that_exists():
     import tomllib
 
-    for pyproject in sorted((REPO / "packages").glob("*/pyproject.toml")):
-        data = tomllib.loads(pyproject.read_text())
-        for name, target in data.get("project", {}).get("scripts", {}).items():
-            module, _, attr = target.partition(":")
-            path = pyproject.parent / "src" / Path(*module.split(".")).with_suffix(".py")
-            assert path.exists(), f"{name} points at {module}, which is not a file"
-            assert f"def {attr}(" in path.read_text(), f"{module} has no {attr}()"
+    data = tomllib.load((REPO / "pyproject.toml").open("rb"))
+    scripts = data["project"]["scripts"]
+    assert scripts, "the package installs no commands"
+    for name, target in scripts.items():
+        module, _, attr = target.partition(":")
+        path = REPO / "src" / Path(*module.split(".")).with_suffix(".py")
+        assert path.exists(), f"{name} points at {module}, which is not a file"
+        assert f"def {attr}(" in path.read_text(), f"{module} has no {attr}()"
 
 
 # -- the release page ----------------------------------------------------
@@ -100,7 +100,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     (tmp_path / "artifacts" / "mac" / "ml-stack-macos-arm64-v9.9.9.zip").write_text("x")
     (tmp_path / "artifacts" / "install.sh").write_text("x")
     (tmp_path / "artifacts" / "install.ps1").write_text("x")
-    (tmp_path / "artifacts" / "wheels" / "ml_stack_fleet-0-py3-none-any.whl").write_text("x")
+    (tmp_path / "artifacts" / "wheels" / "ml_stack-0-py3-none-any.whl").write_text("x")
     out = tmp_path / "out"
     out.touch()
 
@@ -115,7 +115,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     assert "releases/download/v9.9.9/ml-stack-macos-arm64-v9.9.9.zip" in body
     assert "ml-stack-windows-x86_64" not in body, "linked a bundle that did not build"
     assert "ml-stack-linux-x86_64" not in body, "linked a bundle that did not build"
-    assert "the 1 `ml_stack_*.whl`" in body
+    assert "pip install ml-stack" in body
 
 
 def git(*args, cwd):
@@ -181,69 +181,55 @@ def test_the_name_of_a_download_says_which_release_it_is():
             f"{asset} would not keep its platform in the name")
 
 
-# -- the version, in thirteen places -------------------------------------
+# -- the version -------------------------------------------------------
 def test_release_please_is_pointed_at_every_file_that_holds_the_version():
-    """A thirteenth package added without registering it here ships the old version
-    for ever, and nothing else would say so."""
     import json
+    import re
 
     config = json.loads((REPO / "release-please-config.json").read_text())
     listed = {e["path"] for e in config["packages"]["."]["extra-files"]}
-    carry = {str(p.relative_to(REPO)) for p in (REPO / "packages").glob("*/pyproject.toml")}
-    carry.add("packaging/ml-stack-app.spec")
+    carry = {str(p.relative_to(REPO)) for p in (REPO.glob("pyproject.toml"))}
+    carry |= {"packaging/ml-stack-app.spec"}
 
-    assert listed == carry, f"registered but not carrying: {listed - carry}; " \
-                            f"carrying but not registered: {carry - listed}"
+    assert listed == carry, f"registered: {listed}; carrying: {carry}"
     for path in sorted(carry):
         text = (REPO / path).read_text()
         assert "x-release-please-version" in text, f"{path} has no line to bump"
+    del re
 
 
-def test_every_package_is_on_the_version_in_the_manifest():
+def test_the_package_is_on_the_version_in_the_manifest():
     import json
     import re
 
     want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
     assert (REPO / "version.txt").read_text().strip() == want
-    for path in sorted((REPO / "packages").glob("*/pyproject.toml")):
-        found = re.search(r'^version = "([^"]+)"', path.read_text(), re.M)
-        assert found and found.group(1) == want, f"{path.parent.name} is on {found and found.group(1)}"
+    found = re.search(r'^version = "([^"]+)"', (REPO / "pyproject.toml").read_text(), re.M)
+    assert found and found.group(1) == want
 
 
 def test_the_version_in_a_checkout_is_read_without_the_marker():
     """The marker is a comment on the same line; the reader has to stop at it."""
+    import json
+
     from ml_stack.fleet.updates import _version_in_source
 
-    import json
     want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
     assert _version_in_source() == want
 
 
 # -- what PyPI shows -----------------------------------------------------
-@pytest.mark.parametrize("path", sorted((REPO / "packages").glob("*/pyproject.toml")),
-                         ids=lambda p: p.parent.name)
-def test_every_package_says_what_it_is_and_where_it_came_from(path):
-    """A package published without these is a blank page on PyPI, and the version it
-    was published at cannot be re-uploaded to fix it."""
+def test_the_package_says_what_it_is_and_where_it_came_from():
+    """Published without these it is a blank page on PyPI, and the version it went up
+    at cannot be uploaded again to fix it."""
     import tomllib
 
-    meta = tomllib.load(path.open("rb"))["project"]
-    assert meta["readme"] == "README.md"
-    assert (path.parent / "README.md").is_file()
+    meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
+    assert meta["name"] == "ml-stack"
+    assert meta["readme"] == "README.md" and (REPO / "README.md").is_file()
     assert meta["urls"]["Homepage"].startswith("https://github.com/")
     assert meta["classifiers"], "no classifiers, so it is filed under nothing"
-    assert meta["description"].strip()
-    assert meta["license"]
-
-
-def test_the_readme_names_the_package_it_belongs_to():
-    import tomllib
-
-    for path in sorted((REPO / "packages").glob("*/pyproject.toml")):
-        name = tomllib.load(path.open("rb"))["project"]["name"]
-        readme = (path.parent / "README.md").read_text()
-        assert readme.startswith(f"# {name}\n"), path.parent.name
-        assert f"pip install {name}" in readme
+    assert meta["description"].strip() and meta["license"]
 
 
 # -- one workflow calling another ----------------------------------------

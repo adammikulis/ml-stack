@@ -74,7 +74,7 @@ def current_version() -> str:
 def _version_in_source() -> str:
     """The version in this checkout, when running from one rather than an install."""
     for parent in Path(__file__).resolve().parents:
-        found = parent / "packages" / "ml-stack-fleet" / "pyproject.toml"
+        found = parent / "pyproject.toml"
         if not found.is_file():
             continue
         for line in found.read_text().splitlines():

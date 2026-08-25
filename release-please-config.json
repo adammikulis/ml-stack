@@ -11,51 +11,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "packages/ml-stack-backend/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-client/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-contracts/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-fleet/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-gguf/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-graph/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-media/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-serve/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-speech/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-testing/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-train/pyproject.toml"
-        },
-        {
-          "type": "generic",
-          "path": "packages/ml-stack-vision/pyproject.toml"
+          "path": "pyproject.toml"
         },
         {
           "type": "generic",

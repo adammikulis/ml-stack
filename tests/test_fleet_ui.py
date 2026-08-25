@@ -780,9 +780,8 @@ class TestUpdates:
         got = updates.current_version()
         here = P(updates.__file__).resolve()
         pyproject = next(
-            p / "packages" / "ml-stack-fleet" / "pyproject.toml"
-            for p in here.parents
-            if (p / "packages" / "ml-stack-fleet" / "pyproject.toml").is_file())
+            p / "pyproject.toml" for p in here.parents
+            if (p / "pyproject.toml").is_file())
         want = tomllib.loads(pyproject.read_text())["project"]["version"]
         assert got == want, f"reported {got!r}, the checkout says {want!r}"
 

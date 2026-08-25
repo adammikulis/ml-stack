@@ -456,7 +456,7 @@ def _():
     out = TMP / "wheels"
     done = subprocess.run(
         [sys.executable, "-m", "build", "--wheel", "--outdir", str(out),
-         str(Path(__file__).resolve().parent.parent / "packages" / "ml-stack-fleet")],
+         str(Path(__file__).resolve().parent.parent)],
         capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-200:]
     names = zipfile.ZipFile(sorted(out.glob("*.whl"))[-1]).namelist()
@@ -465,14 +465,16 @@ def _():
     return "index.html, style.css, app.js"
 
 
-@check("Packaging", "the packages that must install anywhere have no dependencies")
+@check("Packaging", "installing it brings in nothing")
 def _():
+    import tomllib
+
     root = Path(__file__).resolve().parent.parent
-    for name in ("fleet", "client", "media", "contracts"):
-        text = (root / "packages" / f"ml-stack-{name}" / "pyproject.toml").read_text()
-        line = next(x for x in text.splitlines() if x.startswith("dependencies ="))
-        assert line.split("=", 1)[1].strip() == "[]", f"{name}: {line}"
-    return "fleet, client, media, contracts"
+    meta = tomllib.load((root / "pyproject.toml").open("rb"))["project"]
+    assert meta["dependencies"] == [], meta["dependencies"]
+    extras = sorted(meta["optional-dependencies"])
+    assert {"app", "train", "serve", "all"} <= set(extras)
+    return "no dependencies; " + ", ".join(extras)
 
 
 # -- models --------------------------------------------------------------

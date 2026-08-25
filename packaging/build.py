@@ -14,8 +14,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "dist"
-BUNDLED = ("ml-stack-fleet", "ml-stack-contracts", "ml-stack-client",
-           "ml-stack-media", "ml-stack-serve")
 EXTERNAL = ("pyinstaller", "pywebview", "psutil")
 
 
@@ -30,11 +28,8 @@ def wheels() -> list[Path]:
     # The bundle carries every wheel it finds here, including a previous version's.
     for old in DIST.glob("*.whl"):
         old.unlink()
-    for package in sorted((ROOT / "packages").iterdir()):
-        if not (package / "pyproject.toml").exists():
-            continue
-        run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST),
-             str(package)], stdout=subprocess.DEVNULL)
+    run([sys.executable, "-m", "build", "--wheel", "--outdir", str(DIST), str(ROOT)],
+        stdout=subprocess.DEVNULL)
     return sorted(DIST.glob("*.whl"))
 
 
@@ -47,7 +42,7 @@ def bundle(built: list[Path]) -> Path:
     # force-reinstall: the version has not changed between builds, so pip would keep
     # the wheel already in the build venv and bundle code that is one edit behind.
     run([str(pip), "install", "-q", "--no-index", "--find-links", str(DIST),
-         "--force-reinstall", "--no-deps", *BUNDLED])
+         "--force-reinstall", "--no-deps", "ml-stack"])
 
     tool = env / ("Scripts" if sys.platform == "win32" else "bin") / "pyinstaller"
     for spec in ("ml-stack-app.spec", "ml-stack.spec"):

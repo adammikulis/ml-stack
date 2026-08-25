@@ -209,8 +209,7 @@ def traind(tmp_path):
     http_port = _free_tcp_port()
     env = {**os.environ,
            "ML_STACK_DISCOVERY_PORT": str(disco_port),
-           "PYTHONPATH": os.pathsep.join(
-               str(p) for p in sorted((REPO / "packages").glob("*/src"))),
+           "PYTHONPATH": str(REPO / "src"),
            "PYTHONUNBUFFERED": "1"}
     # To a file, not a pipe: a test that fails because discovery was off should
     # say so with the daemon's own words, and a pipe nobody drains can only be
@@ -287,8 +286,7 @@ def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
 def test_peers_ls_reports_the_running_daemon(traind):
     keyfile, disco_port, http_port, log = traind
     env = {**os.environ, "ML_STACK_DISCOVERY_PORT": str(disco_port),
-           "PYTHONPATH": os.pathsep.join(
-               str(p) for p in sorted((REPO / "packages").glob("*/src")))}
+           "PYTHONPATH": str(REPO / "src")}
     r = subprocess.run([sys.executable, "-m", "ml_stack.fleet.peers",
                         "--cluster-key", str(keyfile), "ls", "--json",
                         "--timeout", "3"],

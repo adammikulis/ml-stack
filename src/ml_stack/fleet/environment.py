@@ -47,7 +47,7 @@ CATALOG: tuple[Library, ...] = (
     Library("core", "Training essentials",
             "Arrays, checkpoint files, and ml-stack's own training code. "
             "Needed by everything below.",
-            ("numpy>=1.24", "safetensors>=0.4", "ml-stack-train", "ml-stack-backend"),
+            ("ml-stack[train]",),
             size_mb=40, default=True),
     Library("torch-cuda", "PyTorch for NVIDIA",
             "Training on an NVIDIA card.",
@@ -223,7 +223,7 @@ class Environment:
             return bundled if bundled.is_dir() else None
         for parent in Path(__file__).resolve().parents:
             candidate = parent / "dist"
-            if candidate.is_dir() and any(candidate.glob("ml_stack_*.whl")):
+            if candidate.is_dir() and any(candidate.glob("ml_stack-*.whl")):
                 return candidate
         return None
 
