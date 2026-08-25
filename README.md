@@ -72,12 +72,12 @@ same daemon, serving the interface to a browser on your network.
 Do the same on every machine you want to train with, typing the same passphrase. They
 find each other on their own.
 
-**If you write Python**, install only the parts you need:
+**If you write Python**:
 
 ```
-pip install ml-stack-fleet      # find and drive the other machines. No dependencies.
-pip install ml-stack-train      # the training loop, checkpoints, recipes
-pip install ml-stack-serve      # start and adopt model servers
+pip install ml-stack            # all of it, and nothing else. No dependencies.
+pip install ml-stack[train]     # and numpy and safetensors, to train
+pip install ml-stack[all]       # and everything the rest of it can use
 ```
 
 Building from source needs `pip install build`, then:
@@ -93,8 +93,8 @@ Everything is adjustable later:
 
 ## Driving it from Python
 
-`ml-stack-fleet` has no dependencies, so the machine you drive from needs no CUDA, no
-MLX and no training stack.
+`ml-stack` has no dependencies, so the machine you drive from needs no CUDA, no MLX
+and no training stack.
 
 ```python
 from ml_stack.fleet import Peer, Requires, Unit, run
@@ -168,20 +168,24 @@ instead of six hours.
 
 ## Packages
 
-| Package | What it is |
+| Module | What it is |
 |---|---|
-| `ml-stack-contracts` | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
-| `ml-stack-media` | WAV containers, image format sniffing, resumable asset download |
-| `ml-stack-client` | HTTP client: chat, completion, embeddings, health, token estimate |
-| `ml-stack-fleet` | Find the other boxes, run jobs on them, move files between them |
-| `ml-stack-serve` | Start, adopt and tear down a model server |
-| `ml-stack-gguf` | Converter/quantiser discovery, export, tokenizer-metadata repair |
-| `ml-stack-speech` | ASR / TTS / VAD behind three protocols and one resolver |
-| `ml-stack-vision` | Image payloads, and a gate that verifies a model can see |
-| `ml-stack-backend` | One array API over MLX and PyTorch, so math is written once |
-| `ml-stack-graph` | Graphs as tensors: message passing, DAG sweeps, topology |
-| `ml-stack-train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
-| `ml-stack-testing` | Cross-backend numerical parity harness |
+| `ml_stack.contracts` | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
+| `ml_stack.media` | WAV containers, image format sniffing, resumable asset download |
+| `ml_stack.client` | HTTP client: chat, completion, embeddings, health, token estimate |
+| `ml_stack.fleet` | Find the other boxes, run jobs on them, move files between them |
+| `ml_stack.serve` | Start, adopt and tear down a model server |
+| `ml_stack.gguf` | Converter/quantiser discovery, export, tokenizer-metadata repair |
+| `ml_stack.speech` | ASR / TTS / VAD behind three protocols and one resolver |
+| `ml_stack.vision` | Image payloads, and a gate that verifies a model can see |
+| `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
+| `ml_stack.graph` | Graphs as tensors: message passing, DAG sweeps, topology |
+| `ml_stack.train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
+| `ml_stack.testing` | Cross-backend numerical parity harness |
+
+Everything above ships in one package. The extras carry what a module needs beyond the
+standard library: `[app] [train] [serve] [gguf] [graph] [vision] [testing] [torch] [mlx]
+[telemetry]`, and `[all]`.
 
 ## Serving a model
 
@@ -204,7 +208,7 @@ and leaves an adopted server alone on exit. It only stops what it started.
 agree on: the RAM→model tier ladder, the sampler surface, GBNF grammars. It contains no
 code, so a native or scripting host can read it directly.
 
-There is exactly one copy on disk. `ml-stack-contracts` pulls it into its wheel at build time,
+There is exactly one copy on disk. The wheel pulls it in at build time,
 so there is no synced duplicate in the source tree to drift.
 
 Resolution order at runtime: `$ML_STACK_CONTRACTS` → the copy inside the installed wheel → a

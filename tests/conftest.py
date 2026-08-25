@@ -1,4 +1,4 @@
-"""Put every package's ``src`` on the path, and provide a real HTTP server to test against.
+"""Put ``src`` on the path, and provide a real HTTP server to test against.
 
 No mocking of the transport. Every client test below runs a real ``http.server`` in a
 thread and does a real socket round trip, because the bugs these modules exist to prevent
@@ -19,8 +19,7 @@ from pathlib import Path
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
-for src in sorted((REPO / "packages").glob("*/src")):
-    sys.path.insert(0, str(src))
+sys.path.insert(0, str(REPO / "src"))
 
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]

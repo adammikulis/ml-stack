@@ -33,7 +33,7 @@ class TestCatalog:
     def test_the_essentials_include_ml_stack_itself(self):
         """A machine can hold torch and still not run a job without these."""
         core = next(lib for lib in CATALOG if lib.name == "core")
-        assert any("ml-stack-train" in p for p in core.packages)
+        assert any(p.startswith("ml-stack[") for p in core.packages), core.packages
 
 
 class TestEnvironment:
@@ -54,7 +54,7 @@ class TestEnvironment:
         found = Environment(tmp_path).wheels()
         if found is None:
             pytest.skip("no wheels built; run packaging/build.py")
-        assert any(found.glob("ml_stack_train-*.whl"))
+        assert any(found.glob("ml_stack-*.whl"))
 
     def test_an_unknown_library_is_reported_not_ignored(self, tmp_path):
         env = Environment(tmp_path)
@@ -84,7 +84,7 @@ class TestBuildingItForReal:
         assert env.exists
         have = env.installed()
         assert "numpy" in have and "safetensors" in have
-        assert "ml-stack-train" in have, "a job could not import ml_stack.train"
+        assert "ml-stack" in have, "a job could not import ml_stack.train"
 
         import subprocess
         out = subprocess.run([str(env.python), "-c",

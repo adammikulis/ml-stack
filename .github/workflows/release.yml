@@ -169,7 +169,7 @@ jobs:
             name=$(basename "$path")
             printf '\n%s\n- [%s](%s/%s)\n' "$1" "$name" "$base" "$name"
           }
-          wheels=$(find artifacts -name '*.whl' -type f | wc -l | tr -d ' ')
+          wheel=$(find artifacts -name 'ml_stack-*.whl' -type f -print -quit)
           {
             echo "body<<DOWNLOADS_EOF"
             echo "## Download"
@@ -185,9 +185,9 @@ jobs:
               echo "- macOS and Linux: \`curl -fsSL $base/install.sh | sh\`"
               echo "- Windows: \`irm $base/install.ps1 | iex\`"
             fi
-            if [ "$wheels" -gt 0 ]; then
+            if [ -n "$wheel" ]; then
               echo
-              echo "**If you write Python**, the $wheels \`ml_stack_*.whl\` files under Assets are the packages: \`pip install ml-stack-fleet\` and the rest."
+              echo "**If you write Python**: \`pip install ml-stack\`, and \`ml-stack[train]\`, \`[serve]\`, \`[app]\` or \`[all]\` for what needs more than the standard library."
             fi
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
