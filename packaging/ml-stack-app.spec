@@ -49,7 +49,7 @@ if sys.platform == "darwin":
         info_plist={
             "CFBundleName": "ml-stack",
             "CFBundleDisplayName": "ml-stack",
-            "CFBundleShortVersionString": "0.1.6",  # x-release-please-version
+            "CFBundleShortVersionString": "0.1.7",  # x-release-please-version
             "LSMinimumSystemVersion": "12.0",
             "NSHighResolutionCapable": True,
         },
