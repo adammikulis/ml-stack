@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 941 passing, `docs/verify_release.py` is 40/40.
+The suite is 944 passing, `docs/verify_release.py` is 40/40.
 
 ## Parity: a coding agent cannot drive all of this
 
@@ -47,30 +47,25 @@ The suite and the release checks do not cover these.
 
 ## Asked for, not built
 
-1. **Thirteen files hold the version.** Twelve `packages/*/pyproject.toml` and
-   `packaging/ml-stack-app.spec`, edited by hand at every release. `release-please`
-   does exactly this, and would also write the changelog; it wants Conventional
-   Commits, which nothing here forbids. The changelog is now built from the commits,
-   so what is left to want from a tool is the version bump.
-2. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
+1. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
    indexes what datasets each machine holds. Browse every dataset on every machine,
    deduplicated by content digest, so three copies of one path that do not match show as
    three that do not match.
-3. **Two more recipes** — image classification, and fine-tuning from an existing model.
+2. **Two more recipes** — image classification, and fine-tuning from an existing model.
    `text-lm` and `classify-text` work; the shape is the same.
-4. **Local-SGD.** One training run split across machines, averaging safetensors with
+3. **Local-SGD.** One training run split across machines, averaging safetensors with
    numpy so a Mac and an AMD box contribute to one model.
-5. **Semantic search over conversations.** Search is keyword. `embed()`, `cosine()` and
+4. **Semantic search over conversations.** Search is keyword. `embed()`, `cosine()` and
    `top_k()` in `ml-stack-client` are ready; the cost is underneath them. llama-server
    cannot serve embeddings and chat at once — `backend.py` drops `--jinja` when
    `--embeddings` is set — so it needs a second server, a second model download, and a
    vectors sidecar recording the model and dimension it was built with.
-6. **Sharing conversations across machines.** They stay where they were held.
-7. **A machine holding only a draft model is never asked for it.** Drafts are left out
+5. **Sharing conversations across machines.** They stay where they were held.
+6. **A machine holding only a draft model is never asked for it.** Drafts are left out
    of the listing a beacon carries, so `ensure_draft` asks the machines that hold the
    model itself, and falls back to the internet. A machine with the draft and not the
    model is invisible.
-8. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
+7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
 
@@ -133,11 +128,19 @@ throughout `daemon.py`, which is house style. CI does not run it.
 
 ## Releasing
 
-Bump thirteen files — twelve `packages/*/pyproject.toml` at line 7, plus
-`packaging/ml-stack-app.spec` (`CFBundleShortVersionString`). Commit, `git tag vX.Y.Z`,
-push the tag. `release.yml` builds twelve wheels and three bundles, writes the release
-body from the tag range, and publishes only on a `refs/tags/` ref. `workflow_dispatch` on a branch builds all three platforms and
-publishes nothing, which is how to test a packaging change without cutting a release.
+Nothing is bumped or tagged by hand. Push to `main`; release-please opens a pull request
+that raises the version in thirteen files and writes `CHANGELOG.md` from the commit
+subjects since the last release. Merging it tags `vX.Y.Z`, publishes the release with
+that changelog, and calls `release.yml` to build twelve wheels and three bundles and
+attach them, adding the downloads to the bottom of the body.
+
+`feat:` moves the minor, `fix:` the patch, `chore:` neither. A run of commits with no
+prefix produces no release pull request, which is what an empty `/releases` page after a
+week of work would mean.
+
+`workflow_dispatch` on `release.yml` builds all three platforms and publishes nothing,
+which is how to test a packaging change. A tag pushed by hand still works, and gets its
+changelog from `git log` instead.
 
 Actions are free: the repository is public and every runner is a standard GitHub-hosted
 one. Larger runners would be billed; there are none.

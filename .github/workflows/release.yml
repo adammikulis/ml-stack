@@ -2,6 +2,12 @@ name: release
 on:
   push:
     tags: ["v*"]
+  workflow_call:
+    inputs:
+      tag:
+        description: the release to build and publish
+        required: true
+        type: string
   workflow_dispatch:
 
 concurrency:
@@ -93,12 +99,11 @@ jobs:
       # "ml-stack-<os>-<arch>" inside the name, including the copies already out there.
       - name: package it
         shell: bash
+        env:
+          TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
         run: |
-          stamp="${GITHUB_REF_NAME}"
-          case "${GITHUB_REF}" in
-            refs/tags/*) ;;
-            *) stamp=$(git rev-parse --short HEAD) ;;
-          esac
+          stamp="$TAG"
+          [ -n "$stamp" ] || stamp=$(git rev-parse --short HEAD)
           python packaging/pack.py dist/bundle "dist/${{ matrix.asset }}-$stamp.zip"
       - uses: actions/upload-artifact@v4
         with:
@@ -110,7 +115,7 @@ jobs:
     needs: [wheels, bundle]
     # Publishes whatever built. A platform whose runner was unavailable should
     # not hold back the ones that are ready.
-    if: always() && startsWith(github.ref, 'refs/tags/')
+    if: always() && (inputs.tag != '' || startsWith(github.ref, 'refs/tags/'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -129,8 +134,10 @@ jobs:
       - name: what to download
         id: downloads
         shell: bash
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}"
           here() { find artifacts -name "$1" -type f -print -quit | grep -q .; }
           section() {
             local path name
@@ -162,8 +169,11 @@ jobs:
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # Only for a tag pushed by hand. A release release-please made already carries
+      # its own changelog, and this would print a second one under it.
       - name: what changed
         id: notes
+        if: inputs.tag == ''
         working-directory: repo
         shell: bash
         run: |
@@ -202,5 +212,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           files: artifacts/**/*
+          append_body: true
           body: ${{ steps.downloads.outputs.body }}${{ steps.notes.outputs.body }}

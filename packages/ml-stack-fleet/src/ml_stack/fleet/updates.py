@@ -80,6 +80,7 @@ def _version_in_source() -> str:
         for line in found.read_text().splitlines():
             if line.startswith("version"):
                 _, _, value = line.partition("=")
+                value, _, _ = value.partition("#")
                 return value.strip().strip('"').strip("'")
     return ""
 

@@ -107,7 +107,7 @@ def test_the_notes_offer_only_what_actually_built(tmp_path):
     done = subprocess.run(
         ["bash", "-e", "-c", downloads_step()], cwd=tmp_path, capture_output=True,
         text=True,
-        env={**os.environ, "GITHUB_REF_NAME": "v9.9.9",
+        env={**os.environ, "TAG": "v9.9.9",
              "GITHUB_REPOSITORY": "owner/repo", "GITHUB_OUTPUT": str(out)})
     assert done.returncode == 0, done.stderr
 
@@ -179,3 +179,41 @@ def test_the_name_of_a_download_says_which_release_it_is():
     for asset in re.findall(r"^\s+asset: (\S+)$", text, re.M):
         assert packed.group(1).startswith("dist/${{ matrix.asset }}-"), (
             f"{asset} would not keep its platform in the name")
+
+
+# -- the version, in thirteen places -------------------------------------
+def test_release_please_is_pointed_at_every_file_that_holds_the_version():
+    """A thirteenth package added without registering it here ships the old version
+    for ever, and nothing else would say so."""
+    import json
+
+    config = json.loads((REPO / "release-please-config.json").read_text())
+    listed = {e["path"] for e in config["packages"]["."]["extra-files"]}
+    carry = {str(p.relative_to(REPO)) for p in (REPO / "packages").glob("*/pyproject.toml")}
+    carry.add("packaging/ml-stack-app.spec")
+
+    assert listed == carry, f"registered but not carrying: {listed - carry}; " \
+                            f"carrying but not registered: {carry - listed}"
+    for path in sorted(carry):
+        text = (REPO / path).read_text()
+        assert "x-release-please-version" in text, f"{path} has no line to bump"
+
+
+def test_every_package_is_on_the_version_in_the_manifest():
+    import json
+    import re
+
+    want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
+    assert (REPO / "version.txt").read_text().strip() == want
+    for path in sorted((REPO / "packages").glob("*/pyproject.toml")):
+        found = re.search(r'^version = "([^"]+)"', path.read_text(), re.M)
+        assert found and found.group(1) == want, f"{path.parent.name} is on {found and found.group(1)}"
+
+
+def test_the_version_in_a_checkout_is_read_without_the_marker():
+    """The marker is a comment on the same line; the reader has to stop at it."""
+    from ml_stack.fleet.updates import _version_in_source
+
+    import json
+    want = json.loads((REPO / ".release-please-manifest.json").read_text())["."]
+    assert _version_in_source() == want

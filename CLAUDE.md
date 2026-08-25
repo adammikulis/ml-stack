@@ -22,15 +22,19 @@ Default to fewer words. If a docstring is longer than the function, delete most 
 
 ## Commit messages
 
-The subject says what changed. Nothing else.
+Start the subject with `feat:`, `fix:`, or `chore:`. release-please reads them: `feat`
+bumps the minor, `fix` the patch, `chore` neither. A subject with no prefix is a change
+that never reaches a release.
+
+After the prefix, the subject says what changed. Nothing else.
 
 **Banned:** "actually", "real", "finally", "now works", scare quotes, before/after
 contrasts, anything that editorialises about the previous state or sounds pleased with
 itself. "A real app, and a CI that can actually run the tests" says the old one was fake
 and the old CI was lazy; neither is a description.
 
-Write: `Native window instead of a browser tab`. `Install CPU torch in CI`.
-`Add Trainer`. `Remove the tier system`.
+Write: `feat: native window instead of a browser tab`. `chore: install CPU torch in CI`.
+`feat: add Trainer`. `fix: remove the tier system`.
 
 The body is for detail a reader would want later: what was wrong, what the fix is, what
 it costs. Plain sentences. No war stories, no rhetorical questions, no lines that argue

@@ -1,0 +1,34 @@
+name: release-please
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  propose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      released: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # A tag pushed by the action's own token starts no workflow, so the build is
+  # called from here rather than waiting for refs/tags to fire release.yml.
+  build:
+    needs: propose
+    if: needs.propose.outputs.released == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.propose.outputs.tag }}
