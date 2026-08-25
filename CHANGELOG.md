@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.7](https://github.com/adammikulis/ml-stack/compare/v0.1.6...v0.1.7) (2026-08-25)
+
+
+### Features
+
+* one package called ml-stack ([43d926f](https://github.com/adammikulis/ml-stack/commit/43d926f241d01063d717049fa0cfb4a83512c2b3))
+
 ## [0.1.6](https://github.com/adammikulis/ml-stack/compare/v0.1.5...v0.1.6) (2026-08-25)
 
 
