@@ -53,7 +53,7 @@ irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/instal
 ```
 
 It works out which machine it is on, fetches the right download, and opens it. You get a
-window that asks what to call the machine and what passphrase to use, then sets the rest
+window that asks what to call the machine and which cluster to join, then sets the rest
 from the hardware it finds:
 
 ![Setting up a machine](docs/images/setup.jpg)

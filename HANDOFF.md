@@ -4,7 +4,7 @@ Pending work. Read `CLAUDE.md` first — its rules are not suggestions, and thre
 were written because they were broken in the session that produced v0.1.4.
 
 `main` is the default branch and holds everything. `v0.1.4` is published with 17 assets.
-The suite is 923 passing, `docs/verify_release.py` is 40/40.
+The suite is 932 passing, `docs/verify_release.py` is 40/40.
 
 ## In flight
 
@@ -93,6 +93,12 @@ The suite and the release checks do not cover these.
 7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
+
+## Stale
+
+- **`docs/images/setup.jpg`** is the preferences step as it was before the wizard had a
+  back button, and the step bar has one segment too many. Retaking it means a screenshot
+  of the window, which needs screen-recording permission for whatever runs it.
 
 ## Things that will bite you
 

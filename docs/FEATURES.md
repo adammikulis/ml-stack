@@ -205,9 +205,13 @@ A native window — WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux.
 download also carries a headless binary for a machine with no screen, which serves the
 same interface to a browser.
 
-- **First run** asks what to call the machine, then for a passphrase, then what the
-  machine is for. The settings are pre-filled from the hardware, with the reason shown
-  beside each, so a wrong guess is visible rather than silent.
+- **First run** asks what to call the machine, then which clusters it belongs to, then
+  what the machine is for. The settings are pre-filled from the hardware, with the reason
+  shown beside each, so a wrong guess is visible rather than silent.
+- **Clusters are optional and there can be several.** The same page lists the ones this
+  machine is in, joins another with a passphrase, and leaves one. A machine that joins
+  none runs models and trains on its own; with no passphrase there is nothing to check,
+  so it answers to that machine and to nobody else.
 - **Starting up** — with the computer, when you log in, or only when you open it. The
   boot option asks for permission through the operating system's own password dialog.
 - **The cluster view** shows every machine with its vendor, how many jobs are

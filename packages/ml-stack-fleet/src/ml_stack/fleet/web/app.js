@@ -971,14 +971,108 @@ async function signOut(e) {
 }
 
 // ---------------------------------------------------------------- wizard
-const state = { step: 0, mode: "", name: "", group: "ml-stack", pass: "",
+const state = { step: 0, name: "", group: "", pass: "", clusters: [],
                 libraries: null, suggest: null, prefs: null, install: null };
 
 function steps(n, back) {
   return el("div", {},
     back ? el("button", { class: "back", onclick: back }, "\u2190 Back") : null,
     el("div", { class: "steps" },
-      [0, 1, 2, 3, 4, 5].map((i) => el("i", { class: i <= n ? "on" : "" }))));
+      [0, 1, 2, 3, 4].map((i) => el("i", { class: i <= n ? "on" : "" }))));
+}
+
+// Step 1: the clusters this machine belongs to. Skippable: a machine on its own is a
+// working machine, and one that belongs to three is the same screen three times over.
+async function clustersStep(next, back) {
+  const rows = el("div");
+  const note = el("div");
+  const p1 = el("input", { type: "password", id: "p1", value: state.pass });
+  const p2 = el("input", { type: "password", id: "p2", value: state.pass });
+  const grp = el("input", { type: "text", id: "g", value: state.group,
+                            placeholder: "ml-stack" });
+  const add = el("button", { class: "ghost" }, "Join");
+
+  const remember = () => {
+    state.pass = p1.value;
+    state.group = grp.value.trim();
+  };
+
+  const draw = (list) => {
+    state.clusters = list;
+    rows.replaceChildren(...(list.length
+      ? list.map((c, i) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, c.group),
+              el("span", { class: "why" },
+                i === 0 ? "this machine answers as this one" : "also in this one")),
+            el("button", { class: "ghost small",
+              onclick: async () => {
+                const left = await api("/ui/clusters", { method: "DELETE",
+                  body: JSON.stringify({ group: c.group }) });
+                draw(left.clusters || []);
+              } }, "Leave")))
+      : [el("div", { class: "hint" }, "In none yet.")]));
+  };
+
+  const check = () => {
+    const a = p1.value, b = p2.value;
+    if (a.trim().length && a.trim().length < MIN_PASS) {
+      note.replaceChildren(el("div", { class: "hint" },
+        `At least ${MIN_PASS} characters. A few words you will remember beats a short `
+        + "complicated one."));
+    } else if (a && b && a !== b) {
+      note.replaceChildren(el("div", { class: "hint" }, "These do not match yet."));
+    } else if (!a) {
+      note.replaceChildren(el("div", { class: "hint" },
+        "Everyone who knows this can run commands on every machine in the cluster."));
+    } else {
+      note.replaceChildren();
+    }
+    add.disabled = !(a.trim().length >= MIN_PASS && a === b);
+  };
+  p1.oninput = p2.oninput = check;
+
+  add.onclick = async () => {
+    add.disabled = true;
+    add.innerHTML = '<span class="spin"></span> Joining — this takes a moment';
+    const named = grp.value.trim() || "ml-stack";
+    const r = await api("/ui/setup/join", { method: "POST",
+      body: JSON.stringify({ passphrase: p1.value, group: named }) });
+    add.textContent = "Join";
+    if (!r.ok) {
+      note.replaceChildren(el("div", { class: "err" }, r.error || "Could not join."));
+      check();
+      return;
+    }
+    p1.value = p2.value = grp.value = "";
+    state.pass = state.group = "";
+    check();
+    note.replaceChildren(el("div", { class: "ok" },
+      `Joined \u201c${named}\u201d. Type the same passphrase on your other machines `
+      + "and they appear here."));
+    draw((await api("/ui/clusters")).clusters || []);
+  };
+
+  draw((await api("/ui/clusters")).clusters || []);
+  check();
+
+  show(el("div", { class: "centre" }, el("div", { class: "card" },
+    steps(1, () => { remember(); back(); }),
+    el("h1", {}, "Clusters"),
+    el("p", { class: "sub" },
+      "Machines that share a passphrase find each other and can send each other work. "
+      + "Join one now, or leave it for later — this machine works either way."),
+    rows,
+    el("div", { class: "group" },
+      el("h2", {}, "Join one"),
+      el("label", { for: "p1" }, "Passphrase"), p1,
+      el("label", { for: "p2" }, "Again"), p2,
+      el("label", { for: "g" }, "Cluster name"), grp,
+      el("div", { class: "hint" },
+        "Leave this empty unless two separate clusters share your network."),
+      note,
+      add),
+    el("button", { onclick: () => { remember(); next(); } }, "Continue"))));
 }
 
 // Step 4: what this machine should be able to run. Asked here rather than left in
@@ -1046,7 +1140,7 @@ async function installStep(next, back) {
                              .reduce((a, x) => a + (x.size_mb || 0), 0);
 
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(4, back),
+    steps(3, back),
     el("h1", {}, "What should it be able to do?"),
     el("p", { class: "sub" },
       "Ticked from what this machine is. Anything here can be changed later in "
@@ -1146,7 +1240,7 @@ async function prefsStep(next, back) {
   };
 
   show(el("div", { class: "centre" }, el("div", { class: "card wide" },
-    steps(3, back),
+    steps(2, back),
     el("h1", {}, "What should this machine do?"),
     el("p", { class: "sub" },
       m.gpu ? `Found ${m.gpu}. These are set from that — change any of them.`
@@ -1182,7 +1276,7 @@ async function prefsStep(next, back) {
     go, outcome)));
 }
 
-function wizard(setup, err) {
+function wizard(setup) {
   const next = (s) => { state.step = s; wizard(setup); };
 
   if (state.step === 0) {
@@ -1192,8 +1286,7 @@ function wizard(setup, err) {
       steps(0),
       el("h1", {}, "Set up this machine"),
       el("p", { class: "sub" },
-        "Machines that share a passphrase find each other and can train together. "
-        + "Nothing else needs configuring."),
+        "Four questions, and every answer can be changed afterwards."),
       el("label", { for: "n" }, "What should this machine be called?"),
       name,
       el("div", { class: "hint" }, "Other machines will show it under this name."),
@@ -1201,86 +1294,37 @@ function wizard(setup, err) {
         "Continue"))));
   }
 
-  if (state.step === 1) {
-    const pick = (mode) => { state.mode = mode; next(2); };
+  if (state.step === 1) return clustersStep(() => next(2), () => next(0));
+  if (state.step === 2) return prefsStep(() => next(3), () => next(1));
+  if (state.step === 3) return installStep(() => next(4), () => next(2));
+
+  // step 4: done. Deliberately not a command: telling someone to open a terminal is the
+  // same wall as telling them to paste a 32-byte key, one layer up.
+  api("/ui/setup/done", { method: "POST" });
+  const joined = state.clusters[0];
+  const open = el("button", { onclick: () => location.reload() },
+    joined ? "Open the cluster" : "Open ml-stack");
+
+  const ssh = el("div", { class: "aside" },
+    el("div", { class: "hint" },
+      "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
+    el("pre", { class: "cmd" }, "ml-stack-peers setup"));
+
+  if (!joined) {
     return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(1, () => next(0)),
-      el("h1", {}, "Is this your first machine?"),
-      el("p", { class: "sub" }, "Both roads lead to the same passphrase — this just changes what happens next."),
-      el("div", { class: "choices" },
-        el("button", { class: `choice${state.mode === "first" ? " on" : ""}`,
-                       onclick: () => pick("first") },
-          el("span", { class: "t" }, "This is my first machine"),
-          el("span", { class: "d" }, "You will choose a passphrase, then type the same one on the others.")),
-        el("button", { class: `choice${state.mode === "join" ? " on" : ""}`,
-                       onclick: () => pick("join") },
-          el("span", { class: "t" }, "Another machine is already set up"),
-          el("span", { class: "d" }, "Type the passphrase you used there and this one joins it."))))));
-  }
-
-  if (state.step === 2) {
-    const p1 = el("input", { type: "password", id: "p1", value: state.pass,
-                             autofocus: "1" });
-    const p2 = el("input", { type: "password", id: "p2", value: state.pass });
-    const grp = el("input", { type: "text", value: state.group, id: "g" });
-    const go = el("button", {}, state.mode === "first" ? "Create the cluster" : "Join");
-    const note = el("div", { class: "hint" });
-
-    const check = () => {
-      const a = p1.value, b = p2.value;
-      if (a.trim().length && a.trim().length < MIN_PASS) {
-        note.textContent = `At least ${MIN_PASS} characters. A few words you will remember beats a short complicated one.`;
-      } else if (a && b && a !== b) {
-        note.textContent = "These do not match yet.";
-      } else { note.textContent = "Everyone who knows this can run commands on every machine in the group."; }
-      go.disabled = !(a.trim().length >= MIN_PASS && a === b);
-    };
-    p1.oninput = p2.oninput = check;
-    check();
-
-    go.onclick = async () => {
-      go.disabled = true;
-      go.innerHTML = '<span class="spin"></span> Setting up — this takes a moment';
-      const r = await api("/ui/setup/join", { method: "POST",
-        body: JSON.stringify({ passphrase: p1.value, group: grp.value.trim() || "ml-stack" }) });
-      if (!r.ok) return wizard(setup, r.error || "Could not set up.");
-      state.pass = p1.value;
-      state.group = grp.value.trim() || "ml-stack";
-      next(3);
-    };
-
-    return show(el("div", { class: "centre" }, el("div", { class: "card" },
-      steps(2, () => {
-        state.pass = p1.value;
-        state.group = grp.value.trim() || "ml-stack";
-        next(1);
-      }),
-      el("h1", {}, state.mode === "first" ? "Choose a passphrase" : "Type the passphrase"),
+      steps(4),
+      el("h1", {}, `“${state.name}” is ready`),
       el("p", { class: "sub" },
-        state.mode === "first"
-          ? "You will type this same passphrase on every other machine."
-          : "The same words you used on the machine that is already set up."),
-      el("label", { for: "p1" }, "Passphrase"), p1,
-      el("label", { for: "p2" }, "Again"), p2,
-      note,
-      el("label", { for: "g" }, "Group name"),
-      grp,
-      el("div", { class: "hint" },
-        "Only matters if two separate clusters share this network. Leave it alone otherwise."),
-      go,
-      err ? el("div", { class: "err" }, err) : null)));
+        "It is on its own: it will run models and train here, and nothing else on your "
+        + "network can see it."),
+      el("p", { class: "hint" },
+        "Join a cluster whenever you like, from the Cluster screen."),
+      open, ssh)));
   }
 
-  if (state.step === 3) return prefsStep(() => next(4), () => next(2));
-  if (state.step === 4) return installStep(() => next(5), () => next(3));
-
-  // step 5: joined — what next. Deliberately not a command: telling someone to open a
-  // terminal is the same wall as telling them to paste a 32-byte key, one layer up.
   const looking = el("div", { class: "watching" },
     el("span", { class: "spin" }), " Watching for other machines…");
   const found = el("div");
-  const skip = el("button", { class: "ghost", onclick: () => location.reload() },
-    "Open the cluster");
 
   const poll = async () => {
     const r = await api("/ui/setup/peers");
@@ -1289,7 +1333,7 @@ function wizard(setup, err) {
       looking.remove();
       // Replaces the skip button rather than sitting above it: two buttons that do the
       // same thing is a choice the reader has to stop and make, about nothing.
-      skip.remove();
+      open.remove();
       found.replaceChildren(
         el("div", { class: "ok" },
           `Found ${others.map((p) => p.name).join(", ")}.`),
@@ -1305,29 +1349,25 @@ function wizard(setup, err) {
       el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
 
   show(el("div", { class: "centre" }, el("div", { class: "card" },
-    steps(5),
-    el("h1", {}, `Joined “${state.group}”`),
+    steps(4),
+    el("h1", {}, `Joined “${joined.group}”`),
     el("p", { class: "sub" }, "Now add your other machines. On each one:"),
     el("ol", { class: "howto" },
       step(1, "Install ml-stack", "The same installer you used here."),
       step(2, "Open it", "It opens in your browser and asks the same questions."),
       step(3, "Type the same passphrase",
-        `The words you just chose${state.group !== "ml-stack"
-          ? `, and the group name “${state.group}”` : ""}.`)),
+        `The words you chose${joined.group !== "ml-stack"
+          ? `, and the cluster name “${joined.group}”` : ""}.`)),
     el("p", { class: "hint" },
       "They find each other on their own. Nothing else to configure."),
-    looking, found,
-    el("div", { class: "aside" },
-      el("div", { class: "hint" },
-        "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
-      el("pre", { class: "cmd" }, "ml-stack-peers setup")),
-    skip)));
+    looking, found, ssh, open)));
 }
 
 // ---------------------------------------------------------------- boot
 (async function start() {
   const setup = await api("/ui/setup");
   if (setup.needs_setup) return wizard(setup);
+  if (!setup.needs_password) return fleet();
   const s = await api("/ui/session");
   return s.signed_in ? fleet() : signIn();
 })();
