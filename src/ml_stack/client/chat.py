@@ -219,7 +219,7 @@ class Client:
         """Fail now if constrained decoding is broken on this server."""
         grammar = 'root ::= "ok"'
         try:
-            answer = self.complete("", grammar=grammar, n_predict=8, retry_on_budget=False)
+            answer = self.complete("Reply:", grammar=grammar, n_predict=8, retry_on_budget=False)
         except ServerError as exc:
             raise GrammarUnsupportedError(
                 f"grammar tripwire could not run against {self.base_url}: {exc}"

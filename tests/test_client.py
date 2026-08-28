@@ -259,6 +259,13 @@ class TestGrammarTripwire:
         instance = server(lambda m, p, b: json_reply({"content": "ok"}))
         Client(instance.base_url).assert_grammar_support()
 
+    def test_sends_a_non_empty_prompt(self, server):
+        """llama-server predicts zero tokens for an empty prompt, grammar or not."""
+        instance = server(lambda m, p, b: json_reply({"content": "ok"}))
+        Client(instance.base_url).assert_grammar_support()
+        _, _, body = instance.requests[-1]
+        assert json.loads(body)["prompt"].strip()
+
     def test_fails_loudly_when_the_grammar_is_ignored(self, server):
         """A server that ignores GBNF does not error -- it returns fluent prose where a
         single token was required, and every downstream parse produces confident nonsense."""
