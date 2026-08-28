@@ -270,7 +270,7 @@ class Client:
         ]
         response_format = {
             "type": "json_schema",
-            "json_schema": {"name": schema_name, "schema": schema},
+            "json_schema": {"name": schema_name, "schema": strict_schema(schema)},
         }
 
         def ask(seed: int | None) -> str:
@@ -372,6 +372,22 @@ def _rejection(objections: list[str]) -> str:
     """The block appended to a prompt to re-ask after a checker refused the answer."""
     lines = "".join(f"- {objection}\n" for objection in objections)
     return f"\n\nYour previous answer was rejected:\n{lines}Return corrected JSON.\n"
+
+
+def strict_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """A copy where every object lists all its properties as required and admits no
+    others, the way ``grammar_for`` already reads a schema."""
+    def walk(node: Any) -> Any:
+        if isinstance(node, dict):
+            out = {k: walk(v) for k, v in node.items()}
+            if out.get("type") == "object" and isinstance(out.get("properties"), dict):
+                out.setdefault("required", list(out["properties"].keys()))
+                out.setdefault("additionalProperties", False)
+            return out
+        if isinstance(node, list):
+            return [walk(v) for v in node]
+        return node
+    return walk(schema)
 
 
 def _with_rejection(prompt: str, objections: list[str]) -> str:

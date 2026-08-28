@@ -698,3 +698,25 @@ class TestExtract:
                 "x", {"type": "object", "properties": {"a": {"type": "date"}}},
                 prompt="find it\nJSON:\n")
         assert calls["n"] == 0
+
+
+
+class TestStrictSchema:
+    def test_every_object_requires_all_its_properties_and_nothing_else(self, server):
+        """Without ``required`` the server's schema-to-grammar makes every key optional,
+        and a model that skips ``title`` produces a record nothing downstream can use."""
+        from ml_stack.client.chat import strict_schema
+        schema = {"type": "object", "properties": {"items": {"type": "array", "items": {
+            "type": "object", "properties": {"title": {"type": "string"}, "kind": {"type": "string"}}}}}}
+        out = strict_schema(schema)
+        assert out["required"] == ["items"] and out["additionalProperties"] is False
+        inner = out["properties"]["items"]["items"]
+        assert inner["required"] == ["title", "kind"] and inner["additionalProperties"] is False
+        assert "required" not in schema  # the caller's schema is left alone
+
+    def test_the_chat_request_carries_the_hardened_schema(self, server):
+        instance = server(lambda m, p, b: json_reply({"choices": [{"message": {"content": "{\"a\": \"x\"}"}}]}))
+        Client(instance.base_url).extract("t", {"type": "object", "properties": {"a": {"type": "string"}}})
+        _, _, body = instance.requests[-1]
+        sent = json.loads(body)["response_format"]["json_schema"]["schema"]
+        assert sent["required"] == ["a"] and sent["additionalProperties"] is False
