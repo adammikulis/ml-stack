@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack.client.http import ServerError, request_json
@@ -183,27 +183,49 @@ class Client:
         return text
 
     def extract(self, text: str, schema: dict[str, Any], *, instructions: str = "",
-                n_predict: int | None = None) -> dict[str, Any]:
-        """``text`` as a JSON document matching ``schema``. Retries once on bad JSON."""
+                n_predict: int | None = None,
+                check: Callable[[dict[str, Any]], list[str]] | None = None,
+                tries: int = 2, prompt: str | None = None) -> dict[str, Any]:
+        """``text`` as a JSON document matching ``schema``, re-prompted while ``check``
+        objects. Objections left after ``tries`` calls land under ``"_objections"``."""
         from ml_stack.contracts.jsonschema import grammar_for
 
+        if tries < 1:
+            raise ValueError(f"tries must be at least 1, got {tries}")
+
         grammar = grammar_for(schema)
-        prompt = f"{instructions}\n\nText:\n{text}\n\nJSON:\n"
+        base = prompt if prompt is not None else f"{instructions}\n\nText:\n{text}\n\nJSON:\n"
 
-        raw = self.complete(prompt, grammar=grammar, n_predict=n_predict)
-        try:
-            return json.loads(raw)
-        except ValueError:
-            pass
+        body = base
+        seed: int | None = None
+        raw = ""
+        parsed: Any = None
+        objections: list[str] = []
 
-        raw = self.complete(prompt, grammar=grammar, n_predict=n_predict,
-                            seed=_fresh_seed(None))
-        try:
-            return json.loads(raw)
-        except ValueError:
+        for attempt in range(tries):
+            extra = {} if seed is None else {"seed": seed}
+            raw = self.complete(body, grammar=grammar, n_predict=n_predict, **extra)
+            try:
+                answer = json.loads(raw)
+            except ValueError:
+                objections = ["reply was not valid JSON"]
+            else:
+                parsed = answer
+                objections = list(check(answer)) if check else []
+                if not objections:
+                    return answer
+
+            if attempt + 1 < tries:
+                seed = _fresh_seed(seed)
+                body = base + _rejection(objections)
+
+        if parsed is None:
             raise ServerError(
-                f"twice the model returned something that is not JSON: {raw[:200]!r}"
-            ) from None
+                f"the model returned something that is not JSON {tries} times: {raw[:200]!r}"
+            )
+        if isinstance(parsed, dict):
+            return dict(parsed, _objections=objections)
+        return parsed
 
     def _completion(self, body: dict[str, Any], timeout: float | None) -> dict[str, Any]:
         payload = request_json(
@@ -280,6 +302,12 @@ class Client:
             thinking=thinking,
             raw=payload,
         )
+
+
+def _rejection(objections: list[str]) -> str:
+    """The block appended to a prompt to re-ask after a checker refused the answer."""
+    lines = "".join(f"- {objection}\n" for objection in objections)
+    return f"\n\nYour previous answer was rejected:\n{lines}Return corrected JSON.\n"
 
 
 def _fresh_seed(previous: Any) -> int:
