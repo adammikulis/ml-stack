@@ -248,35 +248,26 @@ class UI:
 
     def start_serving(self, model: Any) -> Any:
         """Run ``model`` on this machine and tell the network it is here."""
-        from ml_stack.serve import (
-            LlamaServerBackend, ServerManager, ServerSpec, free_port)
+        from .serving import start_model
 
-        from .llama import ensure_server
-
-        if self.servers is None:
-            self.servers = ServerManager(
-                backend=LlamaServerBackend(binary=ensure_server(self.root)))
-        from .models import draft_beside
-
-        port = free_port()
-        extra: tuple[str, ...] = ()
-        draft = draft_beside(model.path)
-        if draft is not None:
-            # -md is what this build calls --spec-draft-model.
-            extra = ("-md", str(draft), "-ngld", "99")
-        context = int(getattr(self.settings, "context", 0) or 8192)
-        self._leases[port] = self.servers.lease(ServerSpec(model=model.path,
-                                                           port=port,
-                                                           context=context,
-                                                           extra_args=extra))
-        return self.serving.register(port, [model.name])
+        started = start_model(
+            self.root, model.path, name=model.name,
+            context=int(getattr(self.settings, "context", 0) or 8192),
+            manager=self.servers, serving=self.serving)
+        self.servers = started.manager
+        self._leases[started.port] = started.lease
+        return started.served
 
     def stop_serving(self, port: int) -> None:
         """Stop a model server this machine started."""
+        from .serving import Started, stop_model
+
         held = self._leases.pop(port, None)
-        if held is not None and self.servers is not None:
-            self.servers.release(held)
-        self.serving.unregister(port)
+        if held is None or self.servers is None:
+            self.serving.unregister(port)
+            return
+        stop_model(Started(port=port, lease=held, manager=self.servers),
+                   serving=self.serving)
 
     def install_update(self) -> dict[str, Any]:
         """Put the newest release in place and start it. Returns what happened."""

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ml_stack.contracts.jsonschema import grammar_for
 from ml_stack.contracts.loader import (
     ContractError,
     contracts_dir,
@@ -27,6 +28,7 @@ __all__ = [
     "contracts_dir",
     "fits",
     "grammar",
+    "grammar_for",
     "largest_that_fits",
     "load",
     "recipe",

@@ -406,3 +406,96 @@ class TestTokenize:
         Client(instance.base_url).detokenize((4, 5))
         assert seen["path"] == "/detokenize"
         assert seen["body"]["tokens"] == [4, 5]
+
+
+class TestExtract:
+    """A schema in, a dict out, over a real socket. The grammar the server is sent is
+    the one ``grammar_for`` built; nothing here reimplements it."""
+
+    SCHEMA = {
+        "type": "object",
+        "properties": {
+            "people": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"name": {"type": "string"},
+                                   "role": {"type": "string"}},
+                },
+            },
+        },
+    }
+
+    def test_a_document_comes_back_as_a_dict(self, server):
+        found = {"people": [{"name": "Ada", "role": "engineer"}]}
+        instance = server(lambda m, p, b: json_reply({"content": json.dumps(found)}))
+
+        out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
+        assert out == found
+
+    def test_it_asks_the_completion_endpoint_with_the_grammar(self, server):
+        from ml_stack.contracts import grammar_for
+
+        seen = {}
+
+        def handler(method, path, body):
+            seen["path"] = path
+            seen["body"] = json.loads(body)
+            return json_reply({"content": "{}"})
+
+        instance = server(handler)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          instructions="Pull out the people.",
+                                          n_predict=256)
+
+        assert seen["path"] == "/completion"
+        assert seen["body"]["grammar"] == grammar_for(self.SCHEMA)
+        assert seen["body"]["n_predict"] == 256
+        assert seen["body"]["prompt"] == (
+            "Pull out the people.\n\nText:\nAda is an engineer.\n\nJSON:\n")
+
+    def test_malformed_json_is_retried_once_with_a_fresh_seed(self, server):
+        """A server that ignores the grammar returns prose. The same seed returns the
+        same prose."""
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            if len(seen) == 1:
+                return json_reply({"content": "Here you go: {people:"})
+            return json_reply({"content": '{"people": []}'})
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
+
+        assert out == {"people": []}
+        assert len(seen) == 2
+        assert seen[1].get("seed") != seen[0].get("seed")
+
+    def test_two_malformed_replies_raise_with_what_came_back(self, server):
+        instance = server(lambda m, p, b: json_reply({"content": "I cannot do that."}))
+
+        with pytest.raises(ServerError, match="I cannot do that."):
+            Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
+
+    def test_the_raw_text_in_the_error_is_truncated(self, server):
+        instance = server(lambda m, p, b: json_reply({"content": "no " * 500}))
+
+        with pytest.raises(ServerError) as exc:
+            Client(instance.base_url).extract("x", self.SCHEMA)
+        assert len(str(exc.value)) < 300
+
+    def test_a_schema_it_cannot_constrain_never_reaches_the_server(self, server):
+        from ml_stack.contracts import ContractError
+
+        calls = {"n": 0}
+
+        def handler(method, path, body):
+            calls["n"] += 1
+            return json_reply({"content": "{}"})
+
+        instance = server(handler)
+        with pytest.raises(ContractError):
+            Client(instance.base_url).extract(
+                "x", {"type": "object", "properties": {"a": {"type": "date"}}})
+        assert calls["n"] == 0

@@ -285,3 +285,139 @@ class TestEndpoint:
 
 def test_a_probe_reports_a_port_nothing_is_on(tmp_path):
     assert not answers(free_port(), timeout=1.0)
+
+
+FAKE_SERVER = '''
+import json, sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+argv = sys.argv[1:]
+Path(sys.argv[0]).with_name("argv.json").write_text(json.dumps(argv))
+port = int(argv[argv.index("--port") + 1])
+name = Path(argv[argv.index("-m") + 1]).name
+
+
+class H(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        body = json.dumps({"status": "ok", "data": [{"id": name}]}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
+'''
+
+
+@pytest.fixture
+def fake_llama_server(tmp_path, monkeypatch):
+    """A llama-server that really launches, binds the port it was given and answers."""
+    import sys
+
+    from ml_stack.serve import backend as backend_module
+
+    monkeypatch.setattr(backend_module, "LOG_DIR", tmp_path / "logs")
+    script = tmp_path / "server.py"
+    script.write_text(FAKE_SERVER)
+    binary = tmp_path / "llama-server"
+    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+    binary.chmod(0o755)
+    return binary
+
+
+@pytest.fixture
+def manager(tmp_path, fake_llama_server):
+    from ml_stack.serve import LlamaServerBackend, ServerManager
+
+    return ServerManager(LlamaServerBackend(binary=fake_llama_server),
+                         state_file=tmp_path / "servers.json")
+
+
+@pytest.fixture
+def gguf(tmp_path):
+    path = tmp_path / "Qwen3-4B-Q4_K_M.gguf"
+    path.write_bytes(b"GGUF" + b"\x00" * 64)
+    return path
+
+
+class TestStartingAModelWithoutTheInterface:
+    def test_it_leases_a_server_that_answers(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        started = start_model(tmp_path, gguf, manager=manager)
+        try:
+            assert answers(started.port, timeout=5.0)
+            assert started.lease.pid
+        finally:
+            stop_model(started)
+
+    def test_stopping_it_leaves_nothing_on_the_port(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        started = start_model(tmp_path, gguf, manager=manager)
+        stop_model(started)
+        assert not answers(started.port, timeout=1.0)
+
+    def test_the_registry_gains_and_loses_the_port(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        registry = Serving(tmp_path / "serving.json")
+        started = start_model(tmp_path, gguf, manager=manager, serving=registry)
+        try:
+            assert started.served is not None
+            assert [s.port for s in registry.all()] == [started.port]
+            assert registry.all()[0].models == ["Qwen3-4B-Q4_K_M.gguf"]
+        finally:
+            stop_model(started, serving=registry)
+        assert registry.all() == []
+
+    def test_the_name_it_registers_can_be_given(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        registry = Serving(tmp_path / "serving.json")
+        started = start_model(tmp_path, gguf, name="something else.gguf",
+                              manager=manager, serving=registry)
+        try:
+            assert registry.all()[0].models == ["something else.gguf"]
+        finally:
+            stop_model(started, serving=registry)
+
+    def test_the_context_length_reaches_the_server(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        started = start_model(tmp_path, gguf, context=2048, manager=manager)
+        stop_model(started)
+        argv = json.loads((tmp_path / "argv.json").read_text())
+        assert argv[argv.index("-c") + 1] == "2048"
+
+    def test_a_draft_beside_the_model_is_served_with_it(self, tmp_path, manager, gguf):
+        """A machine that fetched the draft and does not pass it paid for nothing."""
+        from ml_stack.fleet.models import DRAFT_MARK
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)
+        draft.write_bytes(b"GGUF" + b"\x00" * 64)
+
+        started = start_model(tmp_path, gguf, manager=manager)
+        stop_model(started)
+        argv = json.loads((tmp_path / "argv.json").read_text())
+        assert argv[argv.index("-md") + 1] == str(draft)
+        assert argv[argv.index("-ngld") + 1] == "99"
+
+    def test_a_given_port_is_the_one_used(self, tmp_path, manager, gguf):
+        from ml_stack.fleet.serving import start_model, stop_model
+
+        port = free_port()
+        started = start_model(tmp_path, gguf, manager=manager, port=port)
+        try:
+            assert started.port == port
+        finally:
+            stop_model(started)
