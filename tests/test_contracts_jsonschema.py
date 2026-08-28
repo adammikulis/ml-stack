@@ -106,7 +106,7 @@ class TestShape:
         assert rules[rules["root"]].startswith('"{"')
 
     def test_whitespace_is_the_json_set(self):
-        assert rules_of(grammar_for(EXTRACTION))["ws"] == r"[ \t\n]*"
+        assert rules_of(grammar_for(EXTRACTION))["ws"] == r"([ \t\n] [ \t\n]?)?"
 
     def test_a_string_carries_the_escape_rule(self):
         rules = rules_of(grammar_for({"type": "object",
@@ -218,3 +218,10 @@ class TestRefusals:
     def test_a_non_object_schema_is_refused(self):
         with pytest.raises(ContractError, match="not str"):
             grammar_for("object")
+
+
+class TestWhitespaceIsBounded:
+    def test_the_ws_rule_cannot_repeat_without_limit(self):
+        """An unbounded whitespace rule lets a constrained model emit spaces until the
+        token budget is gone, which reads back as truncated, invalid JSON."""
+        assert "*" not in rules_of(grammar_for({"type": "object", "properties": {"a": {"type": "string"}}}))["ws"]

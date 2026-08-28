@@ -12,7 +12,7 @@ __all__ = ["grammar_for"]
 SCALARS = ("string", "integer", "number", "boolean", "null")
 
 PRIMITIVES: dict[str, str] = {
-    "ws": r"[ \t\n]*",
+    "ws": r"([ \t\n] [ \t\n]?)?",
     "string": r'"\"" char* "\""',
     "char": r'[^"\\] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)',
     "hex": r"[0-9a-fA-F]",
