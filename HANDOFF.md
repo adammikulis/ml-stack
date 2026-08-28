@@ -15,15 +15,10 @@ Twenty-one `/ui/*` routes; `ml-stack-peers` has `setup init key token ls pause r
 when busy`. Missing from the command line entirely: models, chat, conversations,
 clusters, serving, updates, uninstall, libraries.
 
-Most of the logic is already importable and does not need moving — `Models`,
+Every piece of the logic is already importable and does not need moving — `Models`,
 `fleet.chat`, `Conversations`, `discovery.join`/`leave`/`memberships`, `uninstall.plan`/
-`remove`, `updates.apply_if_newer`, `Environment.install`. A CLI over those is assembly,
-not design.
-
-**The one real gap is serving.** `UI.start_serving` and `UI.stop_serving` hold the only
-code that leases a model server, passes the draft model and the context length, and
-registers it. Nothing outside a live `UI` object can start a model. Move that into
-`serving.py` as functions and have `UI` call them; then the API is complete.
+`remove`, `updates.apply_if_newer`, `Environment.install`, `serving.start_model`/
+`stop_model`. A CLI over those is assembly, not design.
 
 ## Never driven by a person
 

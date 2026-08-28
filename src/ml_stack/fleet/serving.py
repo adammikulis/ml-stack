@@ -13,7 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Endpoint", "Served", "Serving", "discover_serving"]
+__all__ = ["Endpoint", "Served", "Serving", "Started", "discover_serving",
+           "start_model", "stop_model"]
 
 # Each health path waits this long, and the beacon rebuilds the list every 10s.
 PROBE_TIMEOUT = 1.0
@@ -104,6 +105,53 @@ class Serving:
         except BaseException:
             Path(tmp).unlink(missing_ok=True)
             raise
+
+
+@dataclass(frozen=True, slots=True)
+class Started:
+    """A model server this process leased, and its entry in the registry."""
+
+    port: int
+    lease: Any
+    manager: Any
+    served: Served | None = None
+
+
+def start_model(root: Path | str, model_path: Path | str, *, name: str | None = None,
+                context: int = 8192, manager: Any = None, serving: Serving | None = None,
+                port: int | None = None) -> Started:
+    """Run ``model_path`` on this machine. Registers the port when given a ``Serving``."""
+    from ml_stack.serve import (
+        LlamaServerBackend, ServerManager, ServerSpec, free_port)
+
+    if manager is None:
+        from .llama import ensure_server
+        manager = ServerManager(
+            backend=LlamaServerBackend(binary=ensure_server(root)))
+
+    from .models import draft_beside
+
+    if port is None:
+        port = free_port()
+    extra: tuple[str, ...] = ()
+    draft = draft_beside(Path(model_path))
+    if draft is not None:
+        # -md is what this build calls --spec-draft-model.
+        extra = ("-md", str(draft), "-ngld", "99")
+    lease = manager.lease(ServerSpec(model=model_path, port=port,
+                                     context=int(context), extra_args=extra))
+    served = None
+    if serving is not None:
+        served = serving.register(port, [name or Path(model_path).name])
+    return Started(port=port, lease=lease, manager=manager, served=served)
+
+
+def stop_model(started: Started, serving: Serving | None = None) -> None:
+    """Release the lease. Takes the port out of the registry when given one."""
+    if started.manager is not None:
+        started.manager.release(started.lease)
+    if serving is not None:
+        serving.unregister(started.port)
 
 
 def answers(port: int, *, timeout: float = PROBE_TIMEOUT) -> bool:
