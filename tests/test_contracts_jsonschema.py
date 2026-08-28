@@ -225,3 +225,11 @@ class TestWhitespaceIsBounded:
         """An unbounded whitespace rule lets a constrained model emit spaces until the
         token budget is gone, which reads back as truncated, invalid JSON."""
         assert "*" not in rules_of(grammar_for({"type": "object", "properties": {"a": {"type": "string"}}}))["ws"]
+
+
+class TestStringsFollowTheJsonSpec:
+    def test_raw_control_characters_are_not_string_characters(self):
+        """A model that can put a raw newline inside a string can also put a whole
+        paragraph there; the reply then fails json.loads even though the grammar passed."""
+        char = rules_of(grammar_for({"type": "object", "properties": {"a": {"type": "string"}}}))["char"]
+        assert r"\x00-\x1f" in char

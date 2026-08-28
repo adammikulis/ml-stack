@@ -14,7 +14,7 @@ SCALARS = ("string", "integer", "number", "boolean", "null")
 PRIMITIVES: dict[str, str] = {
     "ws": r"([ \t\n] [ \t\n]?)?",
     "string": r'"\"" char* "\""',
-    "char": r'[^"\\] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)',
+    "char": r'[^"\\\x00-\x1f] | "\\" (["\\/bfnrt] | "u" hex hex hex hex)',
     "hex": r"[0-9a-fA-F]",
     "integer": r'"-"? ("0" | [1-9] [0-9]*)',
     "number": r'integer ("." [0-9]+)? ([eE] [-+]? [0-9]+)?',
