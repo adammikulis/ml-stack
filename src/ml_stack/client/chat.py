@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from collections.abc import Sequence
@@ -180,6 +181,29 @@ class Client:
                     f"{budget * 2} tokens; the output is structurally incomplete"
                 )
         return text
+
+    def extract(self, text: str, schema: dict[str, Any], *, instructions: str = "",
+                n_predict: int | None = None) -> dict[str, Any]:
+        """``text`` as a JSON document matching ``schema``. Retries once on bad JSON."""
+        from ml_stack.contracts.jsonschema import grammar_for
+
+        grammar = grammar_for(schema)
+        prompt = f"{instructions}\n\nText:\n{text}\n\nJSON:\n"
+
+        raw = self.complete(prompt, grammar=grammar, n_predict=n_predict)
+        try:
+            return json.loads(raw)
+        except ValueError:
+            pass
+
+        raw = self.complete(prompt, grammar=grammar, n_predict=n_predict,
+                            seed=_fresh_seed(None))
+        try:
+            return json.loads(raw)
+        except ValueError:
+            raise ServerError(
+                f"twice the model returned something that is not JSON: {raw[:200]!r}"
+            ) from None
 
     def _completion(self, body: dict[str, Any], timeout: float | None) -> dict[str, Any]:
         payload = request_json(
