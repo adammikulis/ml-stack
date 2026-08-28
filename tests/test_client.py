@@ -461,7 +461,8 @@ class TestExtract:
         assert out == {"people": []}
         assert seen["path"] == "/v1/chat/completions"
         assert seen["body"]["response_format"]["type"] == "json_schema"
-        assert seen["body"]["response_format"]["json_schema"]["schema"] == self.SCHEMA
+        from ml_stack.client.chat import strict_schema
+        assert seen["body"]["response_format"]["json_schema"]["schema"] == strict_schema(self.SCHEMA)
         assert seen["body"]["response_format"]["json_schema"]["name"] == "extraction"
         assert seen["body"]["chat_template_kwargs"]["enable_thinking"] is False
         assert seen["body"]["n_predict"] == 256
