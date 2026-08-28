@@ -12,6 +12,19 @@ from ml_stack.client.http import ServerError, request_json
 
 _THINK = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
 
+_Extractor = tuple[Callable[[Any], str], Callable[[str, list[str]], None]]
+"""``(ask(seed) -> raw, reject(raw, objections))`` for one extraction run."""
+
+EXTRACT_INSTRUCTIONS = "Return only a JSON document that matches the schema. No prose."
+
+# Chat templates end a prompt with the opener of the turn the model is to fill in.
+_ASSISTANT_OPENERS = (
+    "<|im_start|>assistant\n",
+    "<|start_header_id|>assistant<|end_header_id|>\n\n",
+    "[/INST]",
+    "<start_of_turn>model\n",
+)
+
 # Sampler keys llama.cpp understands but the hosted OpenAI API rejects outright.
 _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "repeat_last_n", "mirostat", "mirostat_tau", "mirostat_eta",
@@ -185,26 +198,28 @@ class Client:
     def extract(self, text: str, schema: dict[str, Any], *, instructions: str = "",
                 n_predict: int | None = None,
                 check: Callable[[dict[str, Any]], list[str]] | None = None,
-                tries: int = 2, prompt: str | None = None) -> dict[str, Any]:
+                tries: int = 2, prompt: str | None = None,
+                messages: list[dict[str, Any]] | None = None,
+                think: bool = False,
+                schema_name: str = "extraction") -> dict[str, Any]:
         """``text`` as a JSON document matching ``schema``, re-prompted while ``check``
         objects. Objections left after ``tries`` calls land under ``"_objections"``."""
-        from ml_stack.contracts.jsonschema import grammar_for
-
         if tries < 1:
             raise ValueError(f"tries must be at least 1, got {tries}")
 
-        grammar = grammar_for(schema)
-        base = prompt if prompt is not None else f"{instructions}\n\nText:\n{text}\n\nJSON:\n"
+        if prompt is not None:
+            ask, reject = self._raw_extractor(prompt, schema, n_predict)
+        else:
+            ask, reject = self._chat_extractor(
+                text, schema, instructions, messages, think, schema_name, n_predict)
 
-        body = base
         seed: int | None = None
         raw = ""
         parsed: Any = None
         objections: list[str] = []
 
         for attempt in range(tries):
-            extra = {} if seed is None else {"seed": seed}
-            raw = self.complete(body, grammar=grammar, n_predict=n_predict, **extra)
+            raw = ask(seed)
             try:
                 answer = json.loads(raw)
             except ValueError:
@@ -217,7 +232,7 @@ class Client:
 
             if attempt + 1 < tries:
                 seed = _fresh_seed(seed)
-                body = base + _rejection(objections)
+                reject(raw, objections)
 
         if parsed is None:
             raise ServerError(
@@ -226,6 +241,55 @@ class Client:
         if isinstance(parsed, dict):
             return dict(parsed, _objections=objections)
         return parsed
+
+    def _raw_extractor(self, prompt: str, schema: dict[str, Any],
+                       n_predict: int | None) -> _Extractor:
+        """``(ask, reject)`` driving ``/completion`` under a grammar built from ``schema``."""
+        from ml_stack.contracts.jsonschema import grammar_for
+
+        grammar = grammar_for(schema)
+        state = {"prompt": prompt}
+
+        def ask(seed: int | None) -> str:
+            extra = {} if seed is None else {"seed": seed}
+            return self.complete(state["prompt"], grammar=grammar,
+                                 n_predict=n_predict, **extra)
+
+        def reject(raw: str, objections: list[str]) -> None:
+            state["prompt"] = _with_rejection(prompt, objections)
+
+        return ask, reject
+
+    def _chat_extractor(self, text: str, schema: dict[str, Any], instructions: str,
+                        messages: list[dict[str, Any]] | None, think: bool,
+                        schema_name: str, n_predict: int | None) -> _Extractor:
+        """``(ask, reject)`` driving ``/v1/chat/completions`` under a JSON schema."""
+        convo = list(messages) if messages is not None else [
+            {"role": "system", "content": instructions or EXTRACT_INSTRUCTIONS},
+            {"role": "user", "content": text},
+        ]
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {"name": schema_name, "schema": schema},
+        }
+
+        def ask(seed: int | None) -> str:
+            extra: dict[str, Any] = {} if seed is None else {"seed": seed}
+            if n_predict is not None:
+                extra["n_predict"] = n_predict
+            reply = self.chat(
+                convo,
+                response_format=response_format,
+                chat_template_kwargs={"enable_thinking": think},
+                **extra,
+            )
+            return (reply.content or "").strip()
+
+        def reject(raw: str, objections: list[str]) -> None:
+            convo.append({"role": "assistant", "content": raw})
+            convo.append({"role": "user", "content": _rejection(objections)})
+
+        return ask, reject
 
     def _completion(self, body: dict[str, Any], timeout: float | None) -> dict[str, Any]:
         payload = request_json(
@@ -308,6 +372,15 @@ def _rejection(objections: list[str]) -> str:
     """The block appended to a prompt to re-ask after a checker refused the answer."""
     lines = "".join(f"- {objection}\n" for objection in objections)
     return f"\n\nYour previous answer was rejected:\n{lines}Return corrected JSON.\n"
+
+
+def _with_rejection(prompt: str, objections: list[str]) -> str:
+    """``prompt`` with the rejection block ahead of any assistant-turn opener."""
+    block = _rejection(objections)
+    for opener in _ASSISTANT_OPENERS:
+        if prompt.endswith(opener):
+            return prompt[: -len(opener)] + block + opener
+    return prompt + block
 
 
 def _fresh_seed(previous: Any) -> int:

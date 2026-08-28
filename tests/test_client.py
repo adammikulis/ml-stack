@@ -416,8 +416,8 @@ class TestTokenize:
 
 
 class TestExtract:
-    """A schema in, a dict out, over a real socket. The grammar the server is sent is
-    the one ``grammar_for`` built; nothing here reimplements it."""
+    """A schema in, a dict out, over a real socket. The default path goes through the
+    server's chat template; ``prompt=`` keeps the raw endpoint under a grammar."""
 
     SCHEMA = {
         "type": "object",
@@ -433,44 +433,107 @@ class TestExtract:
         },
     }
 
+    @staticmethod
+    def chat_reply(content):
+        return json_reply({"choices": [{"message": {"role": "assistant",
+                                                    "content": content}}]})
+
     def test_a_document_comes_back_as_a_dict(self, server):
         found = {"people": [{"name": "Ada", "role": "engineer"}]}
-        instance = server(lambda m, p, b: json_reply({"content": json.dumps(found)}))
+        instance = server(lambda m, p, b: self.chat_reply(json.dumps(found)))
 
         out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
         assert out == found
 
-    def test_it_asks_the_completion_endpoint_with_the_grammar(self, server):
-        from ml_stack.contracts import grammar_for
-
+    def test_it_asks_the_chat_endpoint_under_the_schema_with_thinking_off(self, server):
         seen = {}
 
         def handler(method, path, body):
             seen["path"] = path
             seen["body"] = json.loads(body)
-            return json_reply({"content": "{}"})
+            return self.chat_reply('{"people": []}')
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                                instructions="Pull out the people.",
+                                                n_predict=256)
+
+        assert out == {"people": []}
+        assert seen["path"] == "/v1/chat/completions"
+        assert seen["body"]["response_format"]["type"] == "json_schema"
+        assert seen["body"]["response_format"]["json_schema"]["schema"] == self.SCHEMA
+        assert seen["body"]["response_format"]["json_schema"]["name"] == "extraction"
+        assert seen["body"]["chat_template_kwargs"]["enable_thinking"] is False
+        assert seen["body"]["n_predict"] == 256
+        assert seen["body"]["messages"] == [
+            {"role": "system", "content": "Pull out the people."},
+            {"role": "user", "content": "Ada is an engineer."},
+        ]
+
+    def test_the_default_system_message_asks_for_json_and_no_prose(self, server):
+        seen = {}
+
+        def handler(method, path, body):
+            seen["body"] = json.loads(body)
+            return self.chat_reply("{}")
+
+        instance = server(handler)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
+
+        assert seen["body"]["messages"][0] == {
+            "role": "system",
+            "content": "Return only a JSON document that matches the schema. No prose.",
+        }
+
+    def test_thinking_can_be_turned_back_on(self, server):
+        seen = {}
+
+        def handler(method, path, body):
+            seen["body"] = json.loads(body)
+            return self.chat_reply("{}")
+
+        instance = server(handler)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA, think=True)
+
+        assert seen["body"]["chat_template_kwargs"]["enable_thinking"] is True
+
+    def test_a_schema_name_reaches_the_response_format(self, server):
+        seen = {}
+
+        def handler(method, path, body):
+            seen["body"] = json.loads(body)
+            return self.chat_reply("{}")
 
         instance = server(handler)
         Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                          instructions="Pull out the people.",
-                                          n_predict=256)
+                                          schema_name="people")
 
-        assert seen["path"] == "/completion"
-        assert seen["body"]["grammar"] == grammar_for(self.SCHEMA)
-        assert seen["body"]["n_predict"] == 256
-        assert seen["body"]["prompt"] == (
-            "Pull out the people.\n\nText:\nAda is an engineer.\n\nJSON:\n")
+        assert seen["body"]["response_format"]["json_schema"]["name"] == "people"
+
+    def test_supplied_messages_are_sent_word_for_word(self, server):
+        seen: list[dict] = []
+        convo = [{"role": "system", "content": "You index people."},
+                 {"role": "user", "content": "Ada is an engineer."},
+                 {"role": "assistant", "content": "Understood."}]
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return self.chat_reply("{}")
+
+        instance = server(handler)
+        Client(instance.base_url).extract("ignored", self.SCHEMA,
+                                          instructions="ignored", messages=convo)
+
+        assert seen[0]["messages"] == convo
 
     def test_malformed_json_is_retried_once_with_a_fresh_seed(self, server):
-        """A server that ignores the grammar returns prose. The same seed returns the
-        same prose."""
         seen: list[dict] = []
 
         def handler(method, path, body):
             seen.append(json.loads(body))
             if len(seen) == 1:
-                return json_reply({"content": "Here you go: {people:"})
-            return json_reply({"content": '{"people": []}'})
+                return self.chat_reply("Here you go: {people:")
+            return self.chat_reply('{"people": []}')
 
         instance = server(handler)
         out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
@@ -480,13 +543,13 @@ class TestExtract:
         assert seen[1].get("seed") != seen[0].get("seed")
 
     def test_two_malformed_replies_raise_with_what_came_back(self, server):
-        instance = server(lambda m, p, b: json_reply({"content": "I cannot do that."}))
+        instance = server(lambda m, p, b: self.chat_reply("I cannot do that."))
 
         with pytest.raises(ServerError, match="I cannot do that."):
             Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA)
 
     def test_the_raw_text_in_the_error_is_truncated(self, server):
-        instance = server(lambda m, p, b: json_reply({"content": "no " * 500}))
+        instance = server(lambda m, p, b: self.chat_reply("no " * 500))
 
         with pytest.raises(ServerError) as exc:
             Client(instance.base_url).extract("x", self.SCHEMA)
@@ -498,7 +561,7 @@ class TestExtract:
 
         def handler(method, path, body):
             seen.append(json.loads(body))
-            return json_reply({"content": json.dumps(found)})
+            return self.chat_reply(json.dumps(found))
 
         instance = server(handler)
         out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
@@ -508,14 +571,14 @@ class TestExtract:
         assert "_objections" not in out
         assert len(seen) == 1
 
-    def test_a_rejected_answer_is_asked_again_with_the_objection(self, server):
+    def test_a_rejected_answer_comes_back_as_a_turn_of_its_own(self, server):
         seen: list[dict] = []
 
         def handler(method, path, body):
             seen.append(json.loads(body))
             if len(seen) == 1:
-                return json_reply({"content": '{"people": []}'})
-            return json_reply({"content": '{"people": [{"name": "Ada"}]}'})
+                return self.chat_reply('{"people": []}')
+            return self.chat_reply('{"people": [{"name": "Ada"}]}')
 
         instance = server(handler)
         out = Client(instance.base_url).extract(
@@ -525,15 +588,21 @@ class TestExtract:
         assert out == {"people": [{"name": "Ada"}]}
         assert "_objections" not in out
         assert len(seen) == 2
-        assert "no people were found" in seen[1]["prompt"]
-        assert seen[1]["prompt"].startswith(seen[0]["prompt"])
+
+        messages = seen[1]["messages"]
+        assert messages[0]["role"] == "system"
+        assert messages[:2] == seen[0]["messages"]
+        assert messages[2] == {"role": "assistant", "content": '{"people": []}'}
+        assert messages[3]["role"] == "user"
+        assert "no people were found" in messages[3]["content"]
+        assert "no people were found" not in messages[2]["content"]
 
     def test_objections_that_survive_every_try_come_back_on_the_object(self, server):
         seen: list[dict] = []
 
         def handler(method, path, body):
             seen.append(json.loads(body))
-            return json_reply({"content": '{"people": []}'})
+            return self.chat_reply('{"people": []}')
 
         instance = server(handler)
         out = Client(instance.base_url).extract(
@@ -544,26 +613,12 @@ class TestExtract:
         assert out["people"] == []
         assert out["_objections"] == ["no people were found", "role is missing"]
 
-    def test_a_supplied_prompt_is_sent_word_for_word(self, server):
-        seen: list[dict] = []
-
-        def handler(method, path, body):
-            seen.append(json.loads(body))
-            return json_reply({"content": "{}"})
-
-        instance = server(handler)
-        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
-                                          instructions="ignored",
-                                          prompt="<|user|>find the people<|assistant|>")
-
-        assert seen[0]["prompt"] == "<|user|>find the people<|assistant|>"
-
     def test_one_try_returns_the_rejected_answer_without_asking_again(self, server):
         seen: list[dict] = []
 
         def handler(method, path, body):
             seen.append(json.loads(body))
-            return json_reply({"content": '{"people": []}'})
+            return self.chat_reply('{"people": []}')
 
         instance = server(handler)
         out = Client(instance.base_url).extract(
@@ -572,6 +627,61 @@ class TestExtract:
 
         assert len(seen) == 1
         assert out["_objections"] == ["no people were found"]
+
+    def test_a_supplied_prompt_asks_the_completion_endpoint_with_the_grammar(self, server):
+        from ml_stack.contracts import grammar_for
+
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append((path, json.loads(body)))
+            return json_reply({"content": "{}"})
+
+        instance = server(handler)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          instructions="ignored", n_predict=256,
+                                          prompt="<|user|>find the people<|assistant|>")
+
+        assert seen[0][0] == "/completion"
+        assert seen[0][1]["prompt"] == "<|user|>find the people<|assistant|>"
+        assert seen[0][1]["grammar"] == grammar_for(self.SCHEMA)
+        assert seen[0][1]["n_predict"] == 256
+
+    def test_the_rejection_goes_before_the_assistant_opener(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": '{"people": []}'})
+
+        instance = server(handler)
+        base = "<|im_start|>user\nfind the people<|im_end|>\n<|im_start|>assistant\n"
+        Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA, prompt=base,
+            check=lambda obj: ["no people were found"])
+
+        retried = seen[1]["prompt"]
+        assert len(seen) == 2
+        assert retried.endswith("<|im_start|>assistant\n")
+        assert "no people were found" in retried
+        assert retried.index("no people were found") < retried.index(
+            "<|im_start|>assistant\n")
+        assert retried.startswith("<|im_start|>user\nfind the people<|im_end|>\n")
+
+    def test_a_rejection_with_no_assistant_opener_is_appended(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": '{"people": []}'})
+
+        instance = server(handler)
+        Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA, prompt="find the people\nJSON:\n",
+            check=lambda obj: ["no people were found"])
+
+        assert seen[1]["prompt"].startswith(seen[0]["prompt"])
+        assert "no people were found" in seen[1]["prompt"]
 
     def test_a_schema_it_cannot_constrain_never_reaches_the_server(self, server):
         from ml_stack.contracts import ContractError
@@ -585,5 +695,6 @@ class TestExtract:
         instance = server(handler)
         with pytest.raises(ContractError):
             Client(instance.base_url).extract(
-                "x", {"type": "object", "properties": {"a": {"type": "date"}}})
+                "x", {"type": "object", "properties": {"a": {"type": "date"}}},
+                prompt="find it\nJSON:\n")
         assert calls["n"] == 0
