@@ -492,6 +492,87 @@ class TestExtract:
             Client(instance.base_url).extract("x", self.SCHEMA)
         assert len(str(exc.value)) < 300
 
+    def test_an_accepted_answer_is_returned_without_asking_again(self, server):
+        found = {"people": [{"name": "Ada", "role": "engineer"}]}
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": json.dumps(found)})
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                                check=lambda obj: [])
+
+        assert out == found
+        assert "_objections" not in out
+        assert len(seen) == 1
+
+    def test_a_rejected_answer_is_asked_again_with_the_objection(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            if len(seen) == 1:
+                return json_reply({"content": '{"people": []}'})
+            return json_reply({"content": '{"people": [{"name": "Ada"}]}'})
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA,
+            check=lambda obj: [] if obj["people"] else ["no people were found"])
+
+        assert out == {"people": [{"name": "Ada"}]}
+        assert "_objections" not in out
+        assert len(seen) == 2
+        assert "no people were found" in seen[1]["prompt"]
+        assert seen[1]["prompt"].startswith(seen[0]["prompt"])
+
+    def test_objections_that_survive_every_try_come_back_on_the_object(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": '{"people": []}'})
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA, tries=3,
+            check=lambda obj: ["no people were found", "role is missing"])
+
+        assert len(seen) == 3
+        assert out["people"] == []
+        assert out["_objections"] == ["no people were found", "role is missing"]
+
+    def test_a_supplied_prompt_is_sent_word_for_word(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": "{}"})
+
+        instance = server(handler)
+        Client(instance.base_url).extract("Ada is an engineer.", self.SCHEMA,
+                                          instructions="ignored",
+                                          prompt="<|user|>find the people<|assistant|>")
+
+        assert seen[0]["prompt"] == "<|user|>find the people<|assistant|>"
+
+    def test_one_try_returns_the_rejected_answer_without_asking_again(self, server):
+        seen: list[dict] = []
+
+        def handler(method, path, body):
+            seen.append(json.loads(body))
+            return json_reply({"content": '{"people": []}'})
+
+        instance = server(handler)
+        out = Client(instance.base_url).extract(
+            "Ada is an engineer.", self.SCHEMA, tries=1,
+            check=lambda obj: ["no people were found"])
+
+        assert len(seen) == 1
+        assert out["_objections"] == ["no people were found"]
+
     def test_a_schema_it_cannot_constrain_never_reaches_the_server(self, server):
         from ml_stack.contracts import ContractError
 
