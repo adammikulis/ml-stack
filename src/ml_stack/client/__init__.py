@@ -9,7 +9,7 @@ from ml_stack.client.chat import (
     Reply,
     strip_thinking,
 )
-from ml_stack.client.embed import EmbeddingError, cosine, embed, top_k
+from ml_stack.client.embed import EmbeddingError, cosine, embed, rank_pairs, top_k
 from ml_stack.client.health import (
     HEALTH_PATHS,
     ServingParams,
@@ -43,6 +43,7 @@ __all__ = [
     "serving_params",
     "set_token_counter",
     "strip_thinking",
+    "rank_pairs",
     "top_k",
     "wait_for_health",
 ]
