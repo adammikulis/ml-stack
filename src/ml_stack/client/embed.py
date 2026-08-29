@@ -85,3 +85,18 @@ def top_k(
     scored = [(i, cosine(query, c)) for i, c in enumerate(candidates)]
     scored.sort(key=lambda pair: pair[1], reverse=True)
     return scored[:k]
+
+
+def rank_pairs(
+    vectors: list[list[float]],
+    *,
+    limit: int | None = None,
+) -> list[tuple[int, int, float]]:
+    """Every distinct pair as ``(i, j, score)`` with ``i < j``, most similar first."""
+    scored = [
+        (i, j, cosine(vectors[i], vectors[j]))
+        for i in range(len(vectors))
+        for j in range(i + 1, len(vectors))
+    ]
+    scored.sort(key=lambda triple: (-triple[2], triple[0], triple[1]))
+    return scored[:limit] if limit is not None else scored

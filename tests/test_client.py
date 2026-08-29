@@ -344,6 +344,31 @@ class TestEmbeddings:
         with pytest.raises(EmbeddingError):
             cosine([1.0], [1.0, 2.0])
 
+    def test_rank_pairs_returns_every_pair_once_best_first(self):
+        from ml_stack.client import rank_pairs
+
+        vectors = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]]
+        pairs = rank_pairs(vectors)
+        assert [(i, j) for i, j, _ in pairs] == [(0, 1), (1, 2), (0, 2)]
+        assert pairs[0][2] > pairs[-1][2]
+
+    def test_rank_pairs_breaks_ties_by_index_so_the_order_is_stable(self):
+        from ml_stack.client import rank_pairs
+
+        vectors = [[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]
+        assert [(i, j) for i, j, _ in rank_pairs(vectors)] == [(0, 1), (0, 2), (1, 2)]
+
+    def test_rank_pairs_limit_keeps_the_best(self):
+        from ml_stack.client import rank_pairs
+
+        vectors = [[1.0, 0.0], [0.9, 0.1], [0.0, 1.0]]
+        assert [(i, j) for i, j, _ in rank_pairs(vectors, limit=1)] == [(0, 1)]
+
+    def test_rank_pairs_of_one_vector_is_empty(self):
+        from ml_stack.client import rank_pairs
+
+        assert rank_pairs([[1.0, 0.0]]) == []
+
 
 class TestTokenEstimate:
     def test_over_counts_rather_than_under(self):
