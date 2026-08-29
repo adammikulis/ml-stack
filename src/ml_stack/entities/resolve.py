@@ -59,8 +59,7 @@ def fold_duplicates(records: Iterable[Mapping[str, Any]], *, rank: Mapping[str, 
     the kinds, lowest first, for choosing which of a group survives.
 
     - equal fold keys: the survivor is the best (rank, -weight, label)
-    - weak-kind A whose key is a strict subset of weak-kind B: with two or more words in A,
-      B folds into A; with one word, A folds into B only when B is its single superset
+    - weak-kind A whose key is a strict subset of weak-kind B: B folds into A
     """
     weak = frozenset(weak_kinds)
     items = list(records)
@@ -79,12 +78,9 @@ def fold_duplicates(records: Iterable[Mapping[str, Any]], *, rank: Mapping[str, 
     keys = {r["id"]: set(fold_key(r["label"], stopwords)) for r in loose}
     for a in loose:
         ka = keys[a["id"]]
-        supersets = [b for b in loose if b["id"] != a["id"] and b["id"] not in fold and ka < keys[b["id"]]]
-        if not ka or not supersets:
+        if not ka:
             continue
-        if len(ka) >= 2:
-            for b in supersets:
+        for b in loose:
+            if b["id"] != a["id"] and b["id"] not in fold and ka < keys[b["id"]]:
                 fold[b["id"]] = a["id"]
-        elif len(supersets) == 1:
-            fold[a["id"]] = supersets[0]["id"]
     return fold

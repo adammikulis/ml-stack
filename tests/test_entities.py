@@ -95,19 +95,27 @@ def test_a_two_word_topic_absorbs_its_longer_forms():
     assert fold == {"t:ai-agent-deploy": "t:ai-agents"}
 
 
-def test_a_one_word_topic_joins_its_only_superset():
+def test_the_narrower_topic_joins_the_broader_one():
     fold = fold_duplicates(
-        [node("t:onboarding", "topic", "onboarding"), node("t:community", "topic", "community onboarding")],
+        [node("t:finance", "topic", "finance"), node("t:community", "topic", "community finance")],
         rank=RANK, weak_kinds={"topic"})
-    assert fold == {"t:onboarding": "t:community"}
+    assert fold == {"t:community": "t:finance"}
 
 
-def test_a_one_word_topic_with_rival_supersets_stays_put():
+def test_a_broad_topic_outweighed_by_a_narrow_one_still_survives():
+    fold = fold_duplicates(
+        [node("t:finance", "topic", "finance", weight=1),
+         node("t:community", "topic", "community finance", weight=9)],
+        rank=RANK, weak_kinds={"topic"})
+    assert fold == {"t:community": "t:finance"}
+
+
+def test_rival_narrow_topics_both_join_the_broad_one():
     fold = fold_duplicates(
         [node("t:ai", "topic", "AI"), node("t:agents", "topic", "AI agents"),
          node("t:training", "topic", "AI training")],
         rank=RANK, weak_kinds={"topic"})
-    assert "t:ai" not in fold
+    assert fold == {"t:agents": "t:ai", "t:training": "t:ai"}
 
 
 def test_same_kind_folds_without_weak_kinds():
