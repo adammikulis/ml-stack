@@ -1,6 +1,6 @@
 """One word written two ways.
 
-Someone reading a thread knows that "dolly" three messages down is the "Doly" someone named
+Someone reading a thread knows that "pellrd" three messages down is the "Pellard" someone named
 above, because they saw the word spelled once already. A per-message reader has no such luck.
 What is here is the small part of that judgement a machine can make alone: whether two words
 are close enough to be the same word typed twice, and which word in a piece of text a name is
@@ -57,7 +57,7 @@ def budget(word: str) -> int:
 
 
 def collapsed(word: str) -> str:
-    """The word with every doubled letter written once: "Dolly" and "Doly" both give "doly"."""
+    """The word with every doubled letter written once: "Pellard" and "Pelard" both give "pelard"."""
     out = []
     for ch in word.casefold():
         if not out or out[-1] != ch:
