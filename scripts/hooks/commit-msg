@@ -1,0 +1,54 @@
+#!/bin/sh
+# A commit message is source too. Refuse one that names a real person.
+[ -n "$SKIP_NAME_CHECK" ] && exit 0
+MSG="$1"
+python3 - "$MSG" <<'PY' || exit 1
+import json, os, re, sys
+
+HOME = os.path.expanduser("~")
+names = set()
+try:
+    graph = json.load(open(f"{HOME}/ai_ceo/data/graph.json", encoding="utf-8"))
+    names |= {n["label"] for n in graph.get("nodes", []) if n.get("kind") == "person"}
+    names |= {m["sender"] for m in (graph.get("messages") or {}).values() if m.get("sender")}
+except (OSError, ValueError):
+    pass
+try:
+    for line in open(f"{HOME}/ai_ceo/data/messages.jsonl", encoding="utf-8"):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(row, dict) and row.get("sender"):
+            names.add(row["sender"])
+except OSError:
+    pass
+for path in (f"{HOME}/.config/pii-deny.txt",):
+    try:
+        names |= {ln.strip() for ln in open(path, encoding="utf-8") if ln.strip()}
+    except OSError:
+        pass
+# the same allow-lists the pre-commit hook reads: what is invented, or deliberately permitted
+allowed = set()
+root = os.popen("git rev-parse --show-toplevel").read().strip()
+for path in (f"{root}/services/known-fixtures.txt", f"{HOME}/ai_ceo/services/known-fixtures.txt",
+             f"{root}/tests/known-fixtures.txt", f"{HOME}/.config/pii-allow.txt"):
+    try:
+        for line in open(path, encoding="utf-8"):
+            body = line.split("#")[0].strip()
+            if body:
+                allowed.add(body.casefold())
+    except OSError:
+        pass
+
+text = open(sys.argv[1], encoding="utf-8").read()
+bad = sorted({n for n in names if n.casefold() not in allowed and len(n) > 2
+              and re.search(rf"(?<![\w.]){re.escape(n)}(?![\w])", text, re.I)})
+if bad:
+    print("commit-msg: refusing a message that names a real person", file=sys.stderr)
+    for n in bad:
+        print(f"            {n!r}", file=sys.stderr)
+    print("            describe what changed, not who.", file=sys.stderr)
+    sys.exit(1)
+PY
+exit 0
