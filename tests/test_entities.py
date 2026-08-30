@@ -130,10 +130,11 @@ def test_a_record_never_folds_onto_itself():
 
 
 def test_a_fold_never_points_at_something_that_itself_folds():
-    """"a" absorbs "a b" absorbs "a b c"; every one of them has to land on "a"."""
+    """The middle label is reached first here, so "alpha beta gamma" folds onto "alpha beta"
+    before "alpha beta" folds onto "alpha". Both have to end up on "alpha"."""
     fold = fold_duplicates(
-        [node("t:1", "topic", "alpha"), node("t:2", "topic", "alpha beta"),
-         node("t:3", "topic", "alpha beta gamma")],
+        [node("t:2", "topic", "alpha beta"), node("t:3", "topic", "alpha beta gamma"),
+         node("t:1", "topic", "alpha")],
         rank=RANK, weak_kinds={"topic"})
-    assert set(fold.values()) == {"t:1"}
+    assert fold == {"t:2": "t:1", "t:3": "t:1"}
     assert not (set(fold.values()) & set(fold))
