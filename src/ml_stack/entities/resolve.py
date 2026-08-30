@@ -60,6 +60,8 @@ def fold_duplicates(records: Iterable[Mapping[str, Any]], *, rank: Mapping[str, 
 
     - equal fold keys: the survivor is the best (rank, -weight, label)
     - weak-kind A whose key is a strict subset of weak-kind B: B folds into A
+
+    No value in the map is itself a key: a record folds straight to the one that survives.
     """
     weak = frozenset(weak_kinds)
     items = list(records)
@@ -83,4 +85,11 @@ def fold_duplicates(records: Iterable[Mapping[str, Any]], *, rank: Mapping[str, 
         for b in loose:
             if b["id"] != a["id"] and b["id"] not in fold and ka < keys[b["id"]]:
                 fold[b["id"]] = a["id"]
+    # a subset of a subset can fold in two steps; callers resolve one, so close the map here
+    for src in list(fold):
+        seen, dst = {src}, fold[src]
+        while dst in fold and dst not in seen:
+            seen.add(dst)
+            dst = fold[dst]
+        fold[src] = dst
     return fold

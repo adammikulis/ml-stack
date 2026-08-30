@@ -127,3 +127,13 @@ def test_a_record_never_folds_onto_itself():
     fold = fold_duplicates([node("t:x", "topic", "sales"), node("t:y", "topic", "sale")],
                            rank=RANK, weak_kinds={"topic"})
     assert all(k != v for k, v in fold.items())
+
+
+def test_a_fold_never_points_at_something_that_itself_folds():
+    """"a" absorbs "a b" absorbs "a b c"; every one of them has to land on "a"."""
+    fold = fold_duplicates(
+        [node("t:1", "topic", "alpha"), node("t:2", "topic", "alpha beta"),
+         node("t:3", "topic", "alpha beta gamma")],
+        rank=RANK, weak_kinds={"topic"})
+    assert set(fold.values()) == {"t:1"}
+    assert not (set(fold.values()) & set(fold))
