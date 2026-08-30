@@ -1,0 +1,11 @@
+# Invented names used by the tests. Never add a real person.
+Ada Lovelace
+Alan Turing
+Grace Hopper
+Mary Somerville
+Joan Clarke
+Rosalind Franklin
+Charles Babbage
+night owl
+a.person
+Natural Earth

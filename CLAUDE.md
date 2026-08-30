@@ -145,3 +145,18 @@ in terms of the thing that makes it impossible, not in terms of what currently h
 
 The bar for mentioning a problem at all is the same as the bar for a commit: it changes
 what someone would do next.
+
+## Never a real person
+
+No name, handle, email or phone number of a real person may appear anywhere in this repository:
+not in source, not in a test, not in a fixture, not in a docstring, not in a commit message.
+Test data is invented. If a real value revealed a bug, reproduce its *shape* — the casing, the
+punctuation, a dot in a handle, a missing surname — never its content.
+
+`scripts/hooks/no-real-names` enforces it and is worth installing:
+
+    ln -sf ../../scripts/hooks/no-real-names .git/hooks/pre-commit
+    pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
+
+It refuses a person it has never seen, not merely a list of known names. Invented names go in
+`tests/known-fixtures.txt`.

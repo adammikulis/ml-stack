@@ -28,6 +28,7 @@ dependencies = []
 # Nothing here is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
 [project.optional-dependencies]
+privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
 app = ["pywebview>=5.0"]
 arrays = ["numpy>=1.24"]
 torch = ["torch>=2.2"]
