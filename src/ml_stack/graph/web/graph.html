@@ -163,7 +163,7 @@ main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 
 .hint { font-size: 11px; color: var(--ink-3); max-width: 340px; text-align: right; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
-aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
+aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-height: 0; }
 /* the question on the left, what it is about on the right */
 .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
 .askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
@@ -247,6 +247,29 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
 .map-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
 .map-wrap { position: relative; background: var(--sea); }
 .map-wrap svg { width: 100%; height: var(--map-h, auto); display: block; }
+.review-box { border-top: 1px solid var(--line); }
+.review-box[hidden] { display: none; }
+.review-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
+  font: 500 12px var(--font-body); color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; }
+.review-box > summary::-webkit-details-marker { display: none; }
+.review-box > summary::after { content: "\2212"; margin-left: auto; font-family: var(--font-mono); color: var(--line-strong); }
+.review-box:not([open]) > summary::after { content: "+"; }
+.review-box > summary:hover { color: var(--ink); }
+.review-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+.review { padding: 0 18px 8px; display: grid; gap: 10px; max-height: 40vh; overflow: auto; }
+.req { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; font-size: 12px; }
+.req .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.req .meta .status { color: var(--ink); }
+.req .from { margin-top: 4px; color: var(--ink-2); }
+.req .text { margin: 6px 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.req .edit { padding-left: 10px; border-left: 2px solid var(--line); margin: 4px 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.req .warn { color: var(--k-org); }
+.req .act { display: flex; gap: 6px; margin-top: 8px; }
+.req .act button { font: inherit; font-size: 11px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.req .act button:hover { color: var(--ink); border-color: var(--accent); }
+.req .act button[disabled] { opacity: .6; cursor: progress; }
+.review-note { padding: 0 18px 12px; margin: 0; font-size: 11px; color: var(--ink-3); }
 .detail { overflow: auto; padding: 16px 18px 24px; }
 .detail[hidden] { display: none; }
 .detail h2 { font: 700 20px/1.15 var(--font-display); margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
@@ -460,6 +483,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         </div>
         <div class="detail" id="detail"></div>
       </div>
+      <details class="review-box" id="review-box" hidden>
+        <summary><b id="review-count">0</b> <span>change requests</span></summary>
+        <div class="review" id="review-list"></div>
+        <p class="review-note">Accepted changes reach the picture on the next “Refresh graph”.</p>
+      </details>
     </aside>
   </main>
 </div>
@@ -2228,6 +2256,65 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       };
       es.onerror = () => { es.close(); btn.disabled = false; if (!/done|error/.test(st.textContent)) st.textContent = 'refresh already running or server gone'; };
     });
+  }
+
+  // ---- review (only when the process serving this page on this machine answers /review).
+  // Everything shown is the server's words verbatim; the page invents none of it.
+  const editSaid = e => {
+    const said = {
+      add_node: `add ${e.value || e.target}`,
+      add_edge: `join ${e.target} -${e.name}-> ${e.other}`,
+      rename: `rename ${e.target} to ${e.value}`,
+      set_attribute: `set ${e.name} of ${e.target} to ${e.value}`,
+      set_attr: `set ${e.name} of ${e.target} to ${e.value}`,
+      remove_node: `remove ${e.target}`,
+      remove_edge: `unjoin ${e.target} -${e.name}-> ${e.other}`,
+      merge_nodes: `fold ${e.other} into ${e.target}`,
+    }[e.op] || `${e.op} ${e.target || ''}`.trim();
+    return said + (e.reason ? ` — ${e.reason}` : '');
+  };
+  if (local) {
+    const reviewBox = document.getElementById('review-box');
+    const reviewList = document.getElementById('review-list');
+    const reviewCount = document.getElementById('review-count');
+    const stamp = t => String(t || '').replace('T', ' ').slice(0, 16);
+    const editHtml = e => `<div class="edit">${esc(editSaid(e))}${(e.problems || [])
+      .map(x => `<div class="warn">the graph says: ${esc(x)}</div>`).join('')}</div>`;
+    function paintReview(rows) {
+      reviewBox.hidden = false;
+      reviewCount.textContent = rows.length;
+      reviewList.innerHTML = rows.map(p => `<div class="req">
+        <div class="meta"><span>${esc(stamp(p.at))}</span><span>${esc(p.kind || '')}</span>
+          <span class="status">${esc(p.status || '')}</span>
+          <span>${p.attested ? 'attested' : 'NOT ATTESTED'}</span></div>
+        <div class="from">from: ${esc(p.claimedLabel || p.claimed || '(did not say)')}</div>
+        ${(p.concerns || []).map(c => `<div class="warn">${esc(c)}</div>`).join('')}
+        <div class="text">${esc(p.text || '')}</div>
+        ${(p.edits || []).length ? p.edits.map(editHtml).join('')
+          : '<div class="edit">(nothing proposed — decide by hand)</div>'}
+        <div class="act">${p.status === 'accepted'
+          ? `<button type="button" data-id="${esc(p.id)}" data-act="undo">Undo</button>`
+          : `<button type="button" data-id="${esc(p.id)}" data-act="accept">Accept</button>
+             <button type="button" data-id="${esc(p.id)}" data-act="refuse">Refuse</button>`}</div>
+      </div>`).join('');
+      reviewList.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', async () => {
+        b.disabled = true;
+        try {
+          await fetch('/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                   body: JSON.stringify({ id: b.dataset.id, action: b.dataset.act }) });
+        } catch (err) {}
+        loadReview();
+      }));
+    }
+    async function loadReview() {
+      try {
+        const r = await fetch('/review');
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (Array.isArray(rows)) paintReview(rows);
+      } catch (err) {}
+    }
+    loadReview();
   }
 })();
 </script>

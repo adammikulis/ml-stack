@@ -118,7 +118,8 @@ def open_page(browser, vendored):
     """Opens the page in a fresh context; returns ``(page, errors)``."""
     contexts = []
 
-    def _open(graph=None, *, view="2d", served=False, ask_reply=None):
+    def _open(graph=None, *, view="2d", served=False, ask_reply=None, review=None,
+              origin="http://graph.test/"):
         html = document(graph if graph is not None else sample_graph(), served=served)
         ctx = browser.new_context(viewport={"width": 1400, "height": 900})
         contexts.append(ctx)
@@ -129,11 +130,15 @@ def open_page(browser, vendored):
             url = r.request.url
             if url in vendored:
                 r.fulfill(path=str(vendored[url]), content_type="application/javascript")
-            elif url == "http://graph.test/":
+            elif url == origin:
                 r.fulfill(body=html, content_type="text/html")
-            elif url == "http://graph.test/ask" and r.request.method == "POST" \
+            elif url == origin + "ask" and r.request.method == "POST" \
                     and ask_reply is not None:
                 r.fulfill(body=json.dumps(ask_reply), content_type="application/json")
+            elif url == origin + "review" and review is not None:
+                r.fulfill(body=json.dumps({"ok": True, "problems": []}
+                                          if r.request.method == "POST" else review),
+                          content_type="application/json")
             elif "fonts.googleapis.com" in url:
                 r.fulfill(body="", content_type="text/css")
             else:
@@ -146,7 +151,7 @@ def open_page(browser, vendored):
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text)
                 if m.type == "error" and "Failed to load resource" not in m.text else None)
-        page.goto("http://graph.test/")
+        page.goto(origin)
         return page, errors
 
     yield _open
@@ -326,4 +331,72 @@ def test_a_finished_history_run_leaves_nothing_behind(open_page):
     assert page.locator("#graph .node.lit").count() == 0
     assert page.text_content("#history") == "▶ history"
     assert page.is_hidden("#history-when")
+    assert errors == []
+
+
+REVIEW = [
+    {"id": "r1", "index": 1, "at": "2026-01-02T09:00:00Z", "kind": "Fix my information",
+     "attested": True, "claimed": "person:ada", "claimedLabel": "Ada Lovelace",
+     "concerns": [], "text": "I do not work on iron any more",
+     "targets": [{"key": "node:topic:iron", "label": "iron"}],
+     "edits": [{"op": "remove_edge", "target": "person:ada", "other": "topic:iron",
+                "name": "works_on", "reason": "asked to", "problems": []}],
+     "status": "proposed"},
+    {"id": "r2", "index": 2, "at": "2026-01-03T09:00:00Z", "kind": "Remove something",
+     "attested": False, "claimed": "", "claimedLabel": "Grace Hopper",
+     "concerns": ["not attested as their own information"],
+     "text": "take that org out", "targets": [],
+     "edits": [{"op": "remove_node", "target": "org:quenlow", "reason": "asked",
+                "problems": ["the entry 'org:quenlow' is not in the graph"]}],
+     "status": "accepted"},
+]
+
+
+def test_the_review_panel_lists_what_the_server_sent(open_page):
+    """Fails when the loadReview() call at the bottom of the review block is deleted."""
+    page, errors = open_page(served=True, review=REVIEW, origin="http://127.0.0.1/")
+    page.wait_for_selector("#review-box:not([hidden])", state="attached")
+    assert page.text_content("#review-count") == "2"
+    page.eval_on_selector("#review-box", "el => { el.open = true }")
+    reqs = page.locator("#review-list .req")
+    assert reqs.count() == 2
+    first = reqs.nth(0).inner_text()
+    assert "2026-01-02 09:00" in first and "Fix my information" in first
+    assert "attested" in first and "NOT ATTESTED" not in first
+    assert "from: Ada Lovelace" in first
+    assert "unjoin person:ada -works_on-> topic:iron — asked to" in first
+    second = reqs.nth(1).inner_text()
+    assert "NOT ATTESTED" in second
+    assert "not attested as their own information" in second
+    assert "the graph says: the entry 'org:quenlow' is not in the graph" in second
+    assert reqs.nth(0).locator('button[data-act="accept"]').count() == 1
+    assert reqs.nth(0).locator('button[data-act="refuse"]').count() == 1
+    assert reqs.nth(1).locator('button[data-act="undo"]').count() == 1
+    assert "Refresh graph" in page.text_content("#review-box .review-note")
+    assert errors == []
+
+
+def test_accepting_posts_the_id_and_refetches_the_list(open_page):
+    """Fails when the POST body in paintReview loses its action field."""
+    page, errors = open_page(served=True, review=REVIEW, origin="http://127.0.0.1/")
+    page.wait_for_selector("#review-box:not([hidden])", state="attached")
+    page.eval_on_selector("#review-box", "el => { el.open = true }")
+    with page.expect_request(
+            lambda r: r.url == "http://127.0.0.1/review" and r.method == "POST") as posted, \
+         page.expect_request(
+            lambda r: r.url == "http://127.0.0.1/review" and r.method == "GET") as refetched:
+        page.click('#review-list button[data-act="accept"]')
+    assert json.loads(posted.value.post_data) == {"id": "r1", "action": "accept"}
+    assert refetched.value is not None
+    page.wait_for_selector("#review-list .req")
+    assert errors == []
+
+
+def test_a_page_not_on_loopback_never_shows_review(open_page):
+    """Fails when the review block stops standing behind the loopback gate."""
+    page, errors = open_page(served=True, review=REVIEW)
+    page.wait_for_selector("#stats b")
+    page.wait_for_timeout(500)
+    assert page.locator("#review-box").is_hidden()
+    assert page.locator("#review-list .req").count() == 0
     assert errors == []
