@@ -88,7 +88,7 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
 #spin { display: none; }
 .graph-wrap.is3d #spin { display: inline-flex; }
 .tools .chip[aria-pressed="false"] { color: var(--line-strong); }
-.tools { position: absolute; right: 14px; top: 76px; z-index: 2;
+.tools { position: absolute; right: 14px; top: 50px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #graph3d { position: absolute; inset: 0; display: none; }
 .graph-wrap.is3d #graph3d { display: block; }
@@ -159,9 +159,8 @@ main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 
 .grip.horizontal { cursor: row-resize; height: 6px; }
 .graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
 .graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
-/* under the filter it describes */
-.hint { position: absolute; right: 14px; top: 50px; z-index: 3; font-size: 11px;
-  color: var(--ink-3); max-width: 340px; text-align: right; }
+/* first row of the tool column, so however many lines it wraps to, the buttons start below */
+.hint { font-size: 11px; color: var(--ink-3); max-width: 340px; text-align: right; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
 aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
@@ -397,12 +396,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <input id="gq" type="search" placeholder="Filter the graph" aria-label="Filter the graph">
         <span class="count" id="qcount" aria-live="polite"></span>
       </label>
-      <div class="hint">drag to move · scroll to zoom · click to inspect</div>
       <details class="ask-box" id="ask-box">
       <summary>Ask for a change</summary>
       <form class="ask" id="ask">
         <div class="kinds-of-ask" id="ask-kind"></div>
-        <div class="picked" id="picked"><span class="hint-inline">Shift-click nodes or links to gather what this is about.</span></div>
+        <div class="picked" id="picked"><span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span></div>
         <textarea id="ask-text" rows="3" placeholder="What should change?"></textarea>
         <p class="for-instance">for instance: drop my location · I left that company · this is not my topic</p>
         <label class="who-i-am"><span>Which of these are you?</span>
@@ -415,6 +413,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       </form>
       </details>
       <div class="tools">
+        <div class="hint">drag to move · scroll to zoom · click to inspect</div>
         <button id="spin" class="chip" aria-pressed="false">↻ spin</button>
         <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
         <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
@@ -805,12 +804,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
     .on('click', (e, l) => {
       e.stopPropagation();
-      if (e.shiftKey) pick('link:' + links.indexOf(l)); else selectEdge(l);
+      if (e.shiftKey || e.ctrlKey || e.metaKey) pick('link:' + links.indexOf(l)); else selectEdge(l);
     })
     .on('mousemove', (e, l) => tip(e, `${shown(l.source)} → ${shown(l.target)}`, `${l.rel.replace(/_/g, ' ')} · seen in ${l.messages.length} message${l.messages.length === 1 ? '' : 's'}`))
     .on('mouseleave', hideTip);
   const node = root.append('g').selectAll('g').data(nodes).join('g').attr('class', d => 'node k-' + d.kind).attr('tabindex', 0)
-    .call(d3.drag().on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+    .call(d3.drag()
+      .filter(e => e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey)
+      .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
       .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
       .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
   node.append('circle').attr('class', 'hit').attr('r', d => radius(d) + 5);
@@ -826,7 +827,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   };
   measure();
   if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
-  node.on('click', (e, d) => (e.shiftKey ? pick('node:' + d.id) : select(d.id)))
+  node.on('click', (e, d) => ((e.shiftKey || e.ctrlKey || e.metaKey) ? pick('node:' + d.id) : select(d.id)))
     .on('keydown', (e, d) => { if (e.key === 'Enter') select(d.id); })
     .on('mousemove', (e, d) => tip(e, d.label, `${d.attrs.type || d.kind} · in ${d.mentions} message${d.mentions === 1 ? '' : 's'}${d.attrs.location ? ' · ' + d.attrs.location : ''}`))
     .on('mouseleave', hideTip);
@@ -1265,12 +1266,18 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   }
   for (const kind of ['pointerdown', 'pointerup', 'click']) {
     wrap.addEventListener(kind, e => {
-      if (!is3d || !e.shiftKey || e.button !== 0) return;
-      e.preventDefault();
-      e.stopPropagation();
-      if (kind !== 'pointerdown') return;
-      const n = nodeAt(e.clientX, e.clientY);
-      if (n) pick('node:' + n.id);
+      if (!is3d) return;
+      if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.button === 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (kind !== 'pointerdown') return;
+        const n = nodeAt(e.clientX, e.clientY);
+        if (n) pick('node:' + n.id);
+        return;
+      }
+      // only the left button may grab a node: a middle press over one would start the
+      // library's drag, so it is stopped here and the camera keeps the gesture
+      if (kind === 'pointerdown' && e.button !== 0 && nodeAt(e.clientX, e.clientY)) e.stopPropagation();
     }, true);
   }
 
@@ -1844,7 +1851,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   }
   function renderPicked() {
     if (!picked.size) {
-      pickedBox.innerHTML = '<span class="hint-inline">Shift-click nodes or links to gather what this is about.</span>';
+      pickedBox.innerHTML = '<span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span>';
       return;
     }
     pickedBox.innerHTML = '';
