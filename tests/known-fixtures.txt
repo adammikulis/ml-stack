@@ -37,3 +37,4 @@ Group Graph
 assert held.fileno
 assert info
 | fcntl
+meta STRING

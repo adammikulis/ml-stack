@@ -19,7 +19,7 @@ migrate.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +31,8 @@ EDGE_TABLE = """CREATE REL TABLE IF NOT EXISTS Edge(
 # a graph is more than its nodes: where it came from, what it counts, the messages behind it
 DOC_TABLE = """CREATE NODE TABLE IF NOT EXISTS Doc(
     key STRING, value STRING, PRIMARY KEY (key))"""
+ASSET_TABLE = """CREATE NODE TABLE IF NOT EXISTS Asset(
+    id STRING, node_id STRING, mime STRING, bytes BLOB, meta STRING, PRIMARY KEY (id))"""
 NODE_COLUMNS = ("id", "kind", "label", "mentions", "attrs")
 EDGE_COLUMNS = ("source", "target", "rel", "weight")
 MAX_HOPS = 6
@@ -100,10 +102,14 @@ class GraphStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = lb.Database(str(self.path), read_only=read_only)
         self._conn = lb.Connection(self._db)
+        self.read_only = read_only
         if not read_only:
             self._conn.execute(NODE_TABLE)
             self._conn.execute(EDGE_TABLE)
             self._conn.execute(DOC_TABLE)
+            self._conn.execute(ASSET_TABLE)
+        self._extensions: set[str] = set()
+        self._indexed: set[str] = set()
 
     # -- lifetime
 
@@ -246,6 +252,128 @@ class GraphStore:
                 raise GraphStoreUnavailable(f"could not count {name} in {self.path}")
             out[name] = int(rows[0]["c"])
         return out
+
+    # -- searching by meaning, and by word
+
+    def _extension(self, name: str) -> None:
+        """Load an extension. Allowed on a read-only handle; only building an index is a write."""
+        if name in self._extensions:
+            return
+        self._conn.execute(f"INSTALL {name}")
+        self._conn.execute(f"LOAD EXTENSION {name}")
+        self._extensions.add(name)
+
+    def _index(self, name: str, cypher: str) -> None:
+        """Build an index once per handle. A read-only handle uses whatever a writer built.
+
+        A read-only handle attempting to create one would raise and break every search made
+        through it, so it does not try.
+        """
+        if self.read_only or name in self._indexed:
+            return
+        self._indexed.add(name)
+        try:
+            self._conn.execute(cypher)
+        except RuntimeError:
+            pass                      # already there, or this build will not take the arguments
+
+    def set_embedding(self, node_id: str, vector: Sequence[float], *, model: str = "") -> None:
+        """Remember what a node means, as a vector.
+
+        Whoever writes an embedding owns making it findable: retrieval usually reads through a
+        read-only handle, which cannot build an index, so an embedding written without one is
+        invisible for ever.
+        """
+        values = [float(x) for x in vector]
+        self._conn.execute(
+            f"CREATE NODE TABLE IF NOT EXISTS Embedding(id STRING, node_id STRING, "
+            f"model STRING, vector FLOAT[{len(values)}], PRIMARY KEY (id))")
+        self._extension("vector")
+        key = f"{node_id}\u0000{model}"
+        if self.query("MATCH (e:Embedding {id:$id}) RETURN e.id AS id", {"id": key}):
+            self._conn.execute("MATCH (e:Embedding {id:$id}) SET e.vector = $v",
+                               {"id": key, "v": values})
+        else:
+            self._conn.execute(
+                "CREATE (e:Embedding {id:$id, node_id:$n, model:$m, vector:$v})",
+                {"id": key, "n": str(node_id), "m": str(model), "v": values})
+        # cosine, said explicitly, because the distance-to-similarity mapping below assumes it
+        self._index("vector", "CALL CREATE_VECTOR_INDEX('Embedding', 'embedding_index', "
+                              "'vector', metric := 'cosine')")
+
+    def similar(self, vector: Sequence[float], *, model: str = "", limit: int = 10
+                ) -> list[dict[str, Any]]:
+        """The nodes closest in meaning to a vector, nearest first."""
+        self._extension("vector")
+        self._index("vector", "CALL CREATE_VECTOR_INDEX('Embedding', 'embedding_index', "
+                              "'vector', metric := 'cosine')")
+        try:
+            rows = self.query(
+                "CALL QUERY_VECTOR_INDEX('Embedding', 'embedding_index', $v, $k) "
+                "RETURN node.node_id AS id, node.model AS model, distance AS distance",
+                {"v": [float(x) for x in vector], "k": int(limit)})
+        except RuntimeError:
+            return []                 # nothing embedded yet, so nothing is close to anything
+        label = {n["id"]: n["label"] for n in self.nodes()}
+        out = []
+        for row in rows:
+            if model and row.get("model") != model:
+                continue
+            far = row.get("distance")
+            # cosine distance runs 0 (identical) to 2 (opposite); this reads as a similarity
+            near = max(0.0, min(1.0, (2.0 - float(far)) / 2.0)) if isinstance(far, (int, float)) else 0.0
+            out.append({"id": row["id"], "label": label.get(row["id"], ""), "similarity": near})
+        return out[:limit]
+
+    def search(self, text: str, *, limit: int = 10) -> list[dict[str, Any]]:
+        """Nodes whose label matches some words, stemmed and ranked."""
+        self._extension("fts")
+        self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
+        try:
+            rows = self.query(
+                "CALL QUERY_FTS_INDEX('Node', 'node_index', $q, TOP := $k) "
+                "RETURN node.id AS id, node.label AS label, node.kind AS kind, score AS score",
+                {"q": str(text), "k": int(limit)})
+        except RuntimeError:
+            return []                 # no index yet, which is not the same as no match
+        return rows[:limit]
+
+    # -- files that belong to something in the graph
+
+    def add_asset(self, asset_id: str, node_id: str, blob: bytes, *, mime: str = "",
+                  meta: Mapping[str, Any] | None = None) -> None:
+        """Keep a file with the node it belongs to."""
+        self._conn.execute(
+            "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta",
+            {"id": str(asset_id), "n": str(node_id), "m": str(mime), "b": bytes(blob),
+             "meta": _json(meta)})
+
+    def asset(self, asset_id: str) -> dict[str, Any] | None:
+        rows = self.query("MATCH (a:Asset {id:$id}) RETURN a.node_id AS node_id, "
+                          "a.mime AS mime, a.bytes AS bytes, a.meta AS meta", {"id": str(asset_id)})
+        if not rows:
+            return None
+        row = rows[0]
+        return {**row, "meta": _unjson(row["meta"]), "bytes": bytes(row["bytes"] or b"")}
+
+    def assets_of(self, node_id: str) -> list[str]:
+        return [r["id"] for r in self.query(
+            "MATCH (a:Asset {node_id:$n}) RETURN a.id AS id ORDER BY a.id", {"n": str(node_id)})]
+
+    def merge_nodes(self, keep: str, remove: str) -> int:
+        """Fold one node into another, moving everything joined to it. Returns edges moved."""
+        if keep == remove:
+            return 0
+        moved = 0
+        for edge in self.edges():
+            if edge["source"] == remove and edge["target"] != keep:
+                self.upsert_edge({**edge, "source": keep})
+                moved += 1
+            elif edge["target"] == remove and edge["source"] != keep:
+                self.upsert_edge({**edge, "target": keep})
+                moved += 1
+        self.drop([remove])
+        return moved
 
     def drop(self, node_ids: Iterable[str]) -> int:
         """Take nodes out, and every edge that touched them."""

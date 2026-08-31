@@ -18,6 +18,7 @@ GRAPH = {
         {"id": "person:bea", "kind": "person", "label": "Bea Marlow", "mentions": 2, "attrs": {}},
         {"id": "topic:compilers", "kind": "topic", "label": "compilers", "mentions": 3, "attrs": {}},
         {"id": "place:turin", "kind": "place", "label": "Turin", "mentions": 1, "attrs": {}},
+        {"id": "org:pellard", "kind": "org", "label": "Pellard Foundry", "mentions": 1, "attrs": {}},
     ],
     "edges": [
         {"source": "person:ada", "target": "topic:compilers", "rel": "interested_in", "weight": 3,
@@ -30,7 +31,7 @@ GRAPH = {
 
 def test_what_was_written_is_there_after_reopening(tmp_path):
     with GraphStore(tmp_path / "g") as store:
-        assert store.write(GRAPH) == {"nodes": 4, "edges": 3}
+        assert store.write(GRAPH) == {"nodes": 5, "edges": 3}
 
     with GraphStore(tmp_path / "g") as reopened:
         back = reopened.read()
@@ -55,7 +56,7 @@ def test_writing_twice_updates_rather_than_doubles(tmp_path):
     with GraphStore(tmp_path / "g") as store:
         store.write(GRAPH)
         store.write({**GRAPH, "nodes": [{**GRAPH["nodes"][0], "mentions": 9}]})
-        assert len(store.nodes()) == 4
+        assert len(store.nodes()) == 5
         assert len(store.edges()) == 3
     with GraphStore(tmp_path / "g") as reopened:
         assert next(n for n in reopened.nodes() if n["id"] == "person:ada")["mentions"] == 9
@@ -82,7 +83,7 @@ def test_dropping_a_node_takes_its_edges_with_it(tmp_path):
         store.write(GRAPH)
         assert store.drop(["topic:compilers", "person:nobody"]) == 1
     with GraphStore(tmp_path / "g") as reopened:
-        assert [n["id"] for n in reopened.nodes()] == ["person:ada", "person:bea", "place:turin"]
+        assert [n["id"] for n in reopened.nodes()] == ["org:pellard", "person:ada", "person:bea", "place:turin"]
         assert [e["rel"] for e in reopened.edges()] == ["based_in"]
 
 
@@ -112,14 +113,14 @@ def test_a_node_keeps_what_it_carries_beyond_the_columns(tmp_path):
 
 
 def test_what_is_about_the_graph_is_kept_with_it(tmp_path):
-    graph = {**GRAPH, "stats": {"nodes": 4, "edges": 3},
+    graph = {**GRAPH, "stats": {"nodes": 5, "edges": 3},
              "meta": {"built_at": "2026-08-31T10:00:00"},
              "messages": {"C1-1.1": {"text": "Hello", "read": {"model": "a-model.gguf"}}}}
     with GraphStore(tmp_path / "g") as store:
         store.write(graph)
     with GraphStore(tmp_path / "g") as reopened:
         back = reopened.read()
-        assert reopened.get_doc("stats") == {"nodes": 4, "edges": 3}
+        assert reopened.get_doc("stats") == {"nodes": 5, "edges": 3}
         assert reopened.get_doc("nowhere", "fallback") == "fallback"
     assert back["meta"]["built_at"] == "2026-08-31T10:00:00"
     assert back["messages"]["C1-1.1"]["read"]["model"] == "a-model.gguf"
@@ -133,16 +134,73 @@ def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     path = tmp_path / "g"
     with GraphStore(path) as store:
         store.write(GRAPH)
-    assert count_store(path) == {"nodes": 4, "edges": 3, "docs": 0}
+    assert count_store(path) == {"nodes": 5, "edges": 3, "docs": 0}
 
     kept = snapshot(path, reason="before a rebuild")
-    assert kept.counts == {"nodes": 4, "edges": 3, "docs": 0}
+    assert kept.counts == {"nodes": 5, "edges": 3, "docs": 0}
 
     with GraphStore(path) as store:      # the rebuild goes wrong
         store.drop([n["id"] for n in GRAPH["nodes"]])
     assert count_store(path)["nodes"] == 0
 
     roll_back(kept.path)
-    assert count_store(path) == {"nodes": 4, "edges": 3, "docs": 0}
+    assert count_store(path) == {"nodes": 5, "edges": 3, "docs": 0}
     with GraphStore(path) as store:
         assert {n["id"] for n in store.nodes()} == {n["id"] for n in GRAPH["nodes"]}
+
+
+def test_a_node_can_be_found_by_what_it_means(tmp_path):
+    """The writer only writes. Retrieval reads read-only, and cannot build the index itself,
+    so an embedding written without one would be invisible for ever."""
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.set_embedding("topic:compilers", [1.0, 0.0, 0.0], model="m")
+        store.set_embedding("place:turin", [0.0, 1.0, 0.0], model="m")
+
+    with GraphStore(tmp_path / "g", read_only=True) as reader:
+        near = reader.similar([0.95, 0.05, 0.0], model="m")
+    assert [n["id"] for n in near] == ["topic:compilers", "place:turin"]
+    assert near[0]["label"] == "compilers"
+    assert near[0]["similarity"] > near[1]["similarity"]
+
+
+def test_an_embedding_written_twice_is_replaced_not_doubled(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.set_embedding("topic:compilers", [1.0, 0.0, 0.0], model="m")
+        store.set_embedding("topic:compilers", [0.0, 0.0, 1.0], model="m")
+        near = store.similar([0.0, 0.0, 1.0], model="m")
+    assert [n["id"] for n in near] == ["topic:compilers"]
+
+
+def test_a_node_can_be_found_by_a_word_that_is_not_quite_the_word(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        found = store.search("compiler")           # the label says "compilers"
+    assert [r["id"] for r in found] == ["topic:compilers"]
+
+
+def test_a_file_is_kept_with_the_node_it_belongs_to(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.add_asset("a1", "person:ada", b"\x00\x01binary", mime="application/octet-stream",
+                        meta={"why": "a portrait"})
+    with GraphStore(tmp_path / "g") as reopened:
+        got = reopened.asset("a1")
+        assert got["bytes"] == b"\x00\x01binary"
+        assert got["node_id"] == "person:ada" and got["meta"] == {"why": "a portrait"}
+        assert reopened.assets_of("person:ada") == ["a1"]
+        assert reopened.asset("nothing") is None
+
+
+def test_folding_one_node_into_another_moves_what_was_joined_to_it(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        # Bea is the same person as Ada, as far as this test is concerned
+        assert store.merge_nodes("person:ada", "person:bea") == 1
+        assert [n["id"] for n in store.nodes()] == ["org:pellard", "person:ada",
+                                                    "place:turin", "topic:compilers"]
+        joined = {(e["source"], e["rel"], e["target"]) for e in store.edges()}
+    assert ("person:ada", "interested_in", "topic:compilers") in joined
+    assert not any(e[0] == "person:bea" or e[2] == "person:bea" for e in joined)
+    assert len(joined) == 2   # ada->compilers and ada->turin
