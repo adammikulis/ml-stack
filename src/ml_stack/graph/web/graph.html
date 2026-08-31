@@ -55,7 +55,8 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
 .brand::after { content: ""; flex: 1; }
 
 /* the title sits over the graph, centred, out of the way of everything */
-.banner { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 3;
+/* below the controls row, so the title is centred on the graph and not on whatever is beside it */
+.banner { position: absolute; left: 50%; top: 52px; transform: translateX(-50%); z-index: 3;
   text-align: center; pointer-events: none; max-width: 62%; }
 .banner h1 { font: 500 21px/1.15 var(--font-display); letter-spacing: -0.01em; margin: 0;
   text-wrap: balance; color: var(--ink); }
@@ -83,6 +84,7 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
 #refresh button[disabled] { opacity: .6; cursor: progress; }
 #spin { display: none; }
 .graph-wrap.is3d #spin { display: inline-flex; }
+.tools .chip[aria-pressed="false"] { color: var(--line-strong); }
 .tools { position: absolute; right: 14px; top: 70px; z-index: 2;
   display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 #graph3d { position: absolute; inset: 0; display: none; }
@@ -96,7 +98,9 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
 .l3.edge { font: 500 calc(10px * var(--elabel-scale, 1)) var(--font-body); color: var(--ink-3); }
 .graph-wrap.is3d > svg { visibility: hidden; }
 /* in the graph's own top-left corner, where what it controls is */
-.menu { position: absolute; left: 14px; top: 12px; z-index: 9; }
+.topleft { position: absolute; left: 14px; top: 12px; z-index: 9; display: flex; gap: 8px;
+  align-items: flex-start; }
+.menu { position: relative; }
 .menu .chip { backdrop-filter: blur(6px); }
 /* hung off its own button: opening it across the window read as a different control */
 .panel { position: absolute; left: 0; top: calc(100% + 10px); z-index: 9; width: 350px;
@@ -129,8 +133,8 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
          font-family: var(--font-mono); color: var(--ink-2); margin-bottom: 8px; }
 .about .k { color: var(--ink-3); }
 /* the search sits in the graph, because the graph is what it searches */
-.search { position: absolute; right: 14px; top: 12px; z-index: 3; }
-.search input { width: 300px; padding: 6px 10px 6px 30px; border: 1px solid var(--line); border-radius: 8px;
+.search { position: relative; }
+.search input { width: 210px; padding: 6px 10px 6px 30px; border: 1px solid var(--line); border-radius: 8px;
   background: color-mix(in srgb, var(--surface-2) 88%, transparent); backdrop-filter: blur(6px); }
 .search svg { position: absolute; left: 9px; top: 8px; width: 14px; height: 14px; color: var(--ink-3); }
 .node.answer .mark { stroke: var(--k-opportunity); stroke-width: 4px; }
@@ -152,17 +156,17 @@ main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 
 .grip.horizontal { cursor: row-resize; height: 6px; }
 .graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
 .graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
-/* under the tools, so it does not sit in the title's lap */
-.hint { position: absolute; right: 14px; top: 178px; font-size: 11px; color: var(--ink-3); text-align: right; }
-.graph-wrap:not(.is3d) .hint { top: 146px; }
+/* last in the tools column, so anything added above simply moves it down */
+.hint { font-size: 11px; color: var(--ink-3); text-align: right; max-width: 260px; margin-top: 2px; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
 aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
 /* the question on the left, what it is about on the right */
 .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
-.askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
+.askpane { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; gap: 9px;
   padding: 14px 16px 16px; min-height: 0; border-right: 1px solid var(--line); }
 .askpane .turns { max-height: none; overflow: auto; align-content: start; }
+.pane-hint { margin: 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .pane-title { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink-3); margin: 0; }
 @media (max-width: 1180px) { .two { grid-template-columns: 1fr; } .askpane { border-right: 0;
@@ -366,11 +370,6 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       <svg id="graph"></svg>
       <div id="graph3d" aria-label="Knowledge graph, 3D"></div>
       <div id="labels3d" aria-hidden="true"></div>
-      <label class="search">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-        <input id="gq" type="search" placeholder="Filter the graph" aria-label="Filter the graph">
-        <span class="count" id="qcount" aria-live="polite"></span>
-      </label>
       <div class="banner">
         <h1 id="title">__TITLE__</h1>
         <small id="subtitle"></small>
@@ -382,9 +381,16 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         </div>
         <div id="refresh"><button id="refresh-btn">Refresh graph</button><span class="stage" id="refresh-stage"></span></div>
       </div>
-      <div class="menu">
-        <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
-        <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
+      <div class="topleft">
+        <div class="menu">
+          <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
+          <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
+        </div>
+        <label class="search">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+          <input id="gq" type="search" placeholder="Filter the graph" aria-label="Filter the graph">
+          <span class="count" id="qcount" aria-live="polite"></span>
+        </label>
       </div>
       <details class="ask-box" id="ask-box">
       <summary>Ask for a change</summary>
@@ -402,12 +408,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <div class="ask-row"><button type="submit">Send</button><span class="note" id="ask-note"></span></div>
       </form>
       </details>
-      <div class="hint">drag to move · scroll to zoom · click to inspect</div>
       <div class="tools">
         <button id="spin" class="chip" aria-pressed="false">↻ spin</button>
         <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
         <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
         <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
+        <button id="snap" class="chip" aria-pressed="true"
+                title="Move the view to a node when you click it">⊙ snap to node</button>
+        <div class="hint">drag to move · scroll to zoom · click to inspect</div>
       </div>
     </section>
     <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
@@ -425,6 +433,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <div class="askpane" id="askpane">
           <h3 class="pane-title">Ask the model</h3>
           <div class="turns" id="qturns"></div>
+          <p class="pane-hint" id="qhint">Ask in words — “who works on healthcare?”, “how are these
+            two connected?”. What the answer finds lights up on the graph and lists itself here.</p>
           <form class="chat-row" id="qform">
             <input id="q" type="text" placeholder="Ask about this graph" autocomplete="off">
             <button type="submit">Send</button>
@@ -478,7 +488,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   display.between = 'show';
   const colors = {};
   const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true,
-                 map: true, split: 0, mapH: 0 };
+                 map: true, split: 0, mapH: 0, snap: true };
   const picked = new Set();
   let pathLinks = new Set();
   // the same file is served from this machine and published as a flat page; only the served
@@ -576,6 +586,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   let asking = false;
 
   function say(role, text) {
+    const hint = document.getElementById('qhint');
+    if (hint) hint.remove();
     const el = document.createElement('div');
     el.className = 't' + (role === 'user' ? ' mine' : '');
     el.textContent = text;
@@ -1437,11 +1449,21 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     }
     return walk;
   }
+  // What to join, in the order a person means it: the nodes shift-clicked, else the answer's
+  // set, else whatever the filter has lit.
+  function toJoin() {
+    const shifted = [...picked].filter(k => k.startsWith('node:')).map(k => k.slice(5));
+    if (shifted.length) return shifted;
+    if (answer) return [...answer];
+    if (found) return nodes.filter(n => matches(n)).map(n => n.id);
+    return selected ? [selected] : [];
+  }
   function findPaths() {
-    const lit = [...(answer || new Set([...(selected ? [selected] : []),
-      ...nodes.filter(n => matches(n) && found).map(n => n.id)]))];
-    const wanted = new Set(lit.filter(id => byId.has(id)));
-    if (wanted.size < 2) { qCount.textContent = 'pick two or more'; return; }
+    const wanted = new Set(toJoin().filter(id => byId.has(id)));
+    if (wanted.size < 2) {
+      qCount.textContent = 'shift-click two or more';
+      return;
+    }
     const joined = new Set([[...wanted][0]]);
     const onPath = new Set();
     let left = wanted.size - 1;
@@ -1458,6 +1480,16 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     refresh();
     renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '));
   }
+  const snapBtn = document.getElementById('snap');
+  // Clicking a node moves the view to it, which is what you want while you are following a
+  // thread and exactly what you do not want while you are shift-clicking your way around one.
+  function paintSnap() { snapBtn.setAttribute('aria-pressed', view.snap !== false); }
+  snapBtn.addEventListener('click', () => {
+    view.snap = view.snap === false;
+    paintSnap();
+    saveDisplay();
+  });
+  paintSnap();
   document.getElementById('findpath').addEventListener('click', findPaths);
   document.getElementById('arrange').addEventListener('click', () => arrange());
   document.getElementById('recenter').addEventListener('click', () => recenter());
@@ -1470,6 +1502,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     renderDetail(id ? byId.get(id) : null);
     if (id) face('details');
     raiseSelected();
+    if (!view.snap) return;
     if (!id) return;
     if (is3d) flyTo(id); else bringIntoView(byId.get(id));
   }
