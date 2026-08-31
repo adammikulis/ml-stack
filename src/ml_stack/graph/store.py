@@ -24,9 +24,15 @@ from pathlib import Path
 from typing import Any
 
 NODE_TABLE = """CREATE NODE TABLE IF NOT EXISTS Node(
-    id STRING, kind STRING, label STRING, mentions INT64, attrs STRING, PRIMARY KEY (id))"""
+    id STRING, kind STRING, label STRING, mentions INT64, attrs STRING, data STRING,
+    PRIMARY KEY (id))"""
 EDGE_TABLE = """CREATE REL TABLE IF NOT EXISTS Edge(
     FROM Node TO Node, rel STRING, weight INT64, data STRING)"""
+# a graph is more than its nodes: where it came from, what it counts, the messages behind it
+DOC_TABLE = """CREATE NODE TABLE IF NOT EXISTS Doc(
+    key STRING, value STRING, PRIMARY KEY (key))"""
+NODE_COLUMNS = ("id", "kind", "label", "mentions", "attrs")
+EDGE_COLUMNS = ("source", "target", "rel", "weight")
 MAX_HOPS = 6
 
 
@@ -67,6 +73,7 @@ class GraphStore:
         if not read_only:
             self._conn.execute(NODE_TABLE)
             self._conn.execute(EDGE_TABLE)
+            self._conn.execute(DOC_TABLE)
 
     # -- lifetime
 
@@ -96,13 +103,18 @@ class GraphStore:
     # -- writing
 
     def upsert_node(self, node: Mapping[str, Any]) -> None:
-        """Put one node in, or update the one already there. ``id`` is what makes it the same."""
+        """Put one node in, or update the one already there. ``id`` is what makes it the same.
+
+        Whatever the caller carries beyond the columns — the messages a node was read from, a
+        flag of its own — rides along in ``data`` and comes back untouched.
+        """
         self._conn.execute(
             "MERGE (n:Node {id: $id}) SET n.kind=$kind, n.label=$label, "
-            "n.mentions=$mentions, n.attrs=$attrs",
+            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data",
             {"id": str(node["id"]), "kind": str(node.get("kind") or ""),
              "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
-             "attrs": _json(node.get("attrs"))})
+             "attrs": _json(node.get("attrs")),
+             "data": _json({k: v for k, v in node.items() if k not in NODE_COLUMNS})})
 
     def upsert_edge(self, edge: Mapping[str, Any]) -> bool:
         """Put one edge in. False when either end is not in the store."""
@@ -112,16 +124,22 @@ class GraphStore:
             "RETURN e.rel AS rel",
             {"s": str(edge["source"]), "t": str(edge["target"]), "rel": str(edge.get("rel") or ""),
              "weight": int(edge.get("weight") or 1),
-             "data": _json({k: v for k, v in edge.items()
-                            if k not in ("source", "target", "rel", "weight")})})
+             "data": _json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})})
         return bool(rows)
 
     def write(self, graph: Mapping[str, Any]) -> dict[str, int]:
-        """A whole graph as built. Nodes first, so no edge arrives before its ends."""
+        """A whole graph as built. Nodes first, so no edge arrives before its ends.
+
+        Anything alongside ``nodes`` and ``edges`` — what the graph counts, when it was built,
+        the messages behind it — is kept as a document under its own key.
+        """
         nodes = list(graph.get("nodes") or ())
         for node in nodes:
             self.upsert_node(node)
         kept = sum(1 for edge in (graph.get("edges") or ()) if self.upsert_edge(edge))
+        for key, value in graph.items():
+            if key not in ("nodes", "edges"):
+                self.put_doc(key, value)
         return {"nodes": len(nodes), "edges": kept}
 
     # -- reading back
@@ -130,9 +148,10 @@ class GraphStore:
         rows = self.query(
             "MATCH (n:Node) " + ("WHERE n.kind = $kind " if kind else "")
             + "RETURN n.id AS id, n.kind AS kind, n.label AS label, "
-              "n.mentions AS mentions, n.attrs AS attrs ORDER BY n.id",
+              "n.mentions AS mentions, n.attrs AS attrs, n.data AS data ORDER BY n.id",
             {"kind": kind} if kind else None)
-        return [{**r, "attrs": _unjson(r["attrs"])} for r in rows]
+        return [{**{k: v for k, v in r.items() if k != "data"},
+                 "attrs": _unjson(r["attrs"]), **_unjson(r["data"])} for r in rows]
 
     def edges(self, rel: str | None = None) -> list[dict[str, Any]]:
         rows = self.query(
@@ -142,9 +161,22 @@ class GraphStore:
             {"rel": rel} if rel else None)
         return [{**{k: v for k, v in r.items() if k != "data"}, **_unjson(r["data"])} for r in rows]
 
+    def put_doc(self, key: str, value: Any) -> None:
+        """Something about the graph as a whole: where it came from, what it counts."""
+        self._conn.execute("MERGE (d:Doc {key: $key}) SET d.value = $value",
+                           {"key": str(key), "value": _json(value)})
+
+    def get_doc(self, key: str, default: Any = None) -> Any:
+        rows = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value", {"key": str(key)})
+        return _unjson(rows[0]["value"]) if rows else default
+
+    def docs(self) -> dict[str, Any]:
+        return {r["key"]: _unjson(r["value"])
+                for r in self.query("MATCH (d:Doc) RETURN d.key AS key, d.value AS value")}
+
     def read(self) -> dict[str, Any]:
-        """The graph in the shape it went in as."""
-        return {"nodes": self.nodes(), "edges": self.edges()}
+        """The graph in the shape it went in as, whole."""
+        return {**self.docs(), "nodes": self.nodes(), "edges": self.edges()}
 
     def neighbours(self, node_id: str) -> list[dict[str, Any]]:
         """Everything joined to this node, whichever way the edge points."""

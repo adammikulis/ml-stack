@@ -95,3 +95,32 @@ def test_any_question_can_be_asked_in_cypher(tmp_path):
         assert rows == [{"who": "Ada Lovelace", "what": "compilers"},
                         {"who": "Bea Marlow", "what": "compilers"}]
         assert [n["id"] for n in store.nodes(kind="place")] == ["place:turin"]
+
+
+def test_a_node_keeps_what_it_carries_beyond_the_columns(tmp_path):
+    """A node's own messages are the evidence for it; losing them loses the point of it."""
+    with GraphStore(tmp_path / "g") as store:
+        store.write({"nodes": [{"id": "person:ada", "kind": "person", "label": "Ada Lovelace",
+                                "mentions": 1, "attrs": {"role": "analyst"},
+                                "messages": ["C1-1.1", "C1-1.2"], "session": True}],
+                     "edges": []})
+    with GraphStore(tmp_path / "g") as reopened:
+        ada = reopened.nodes()[0]
+    assert ada["messages"] == ["C1-1.1", "C1-1.2"]
+    assert ada["session"] is True
+    assert ada["attrs"] == {"role": "analyst"}
+
+
+def test_what_is_about_the_graph_is_kept_with_it(tmp_path):
+    graph = {**GRAPH, "stats": {"nodes": 4, "edges": 3},
+             "meta": {"built_at": "2026-08-31T10:00:00"},
+             "messages": {"C1-1.1": {"text": "Hello", "read": {"model": "a-model.gguf"}}}}
+    with GraphStore(tmp_path / "g") as store:
+        store.write(graph)
+    with GraphStore(tmp_path / "g") as reopened:
+        back = reopened.read()
+        assert reopened.get_doc("stats") == {"nodes": 4, "edges": 3}
+        assert reopened.get_doc("nowhere", "fallback") == "fallback"
+    assert back["meta"]["built_at"] == "2026-08-31T10:00:00"
+    assert back["messages"]["C1-1.1"]["read"]["model"] == "a-model.gguf"
+    assert {n["id"] for n in back["nodes"]} == {n["id"] for n in GRAPH["nodes"]}
