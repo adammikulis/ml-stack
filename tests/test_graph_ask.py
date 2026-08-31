@@ -178,3 +178,24 @@ def test_an_unknown_held_id_is_dropped_silently():
     out = converse("hello", GRAPH, model, held=["person:ghost"])
     assert out.ids == []
     assert "Currently highlighted" not in model.seen[0][0]["content"]
+
+
+def test_a_model_that_goes_quiet_is_told_to_answer():
+    """Rounds exhausted, the no-tools re-ask comes back empty: one plain nudge gets words."""
+
+    class Quiet(ScriptedModel):
+        def __init__(self, script):
+            super().__init__(script)
+            self.silences = 1
+
+        def chat(self, messages, tools=None, **kw):
+            if not tools and self.silences:
+                self.silences -= 1
+                self.seen.append(list(messages))
+                return Reply(content="")
+            return super().chat(messages, tools=tools, **kw)
+
+    model = Quiet([("look_up", {"text": "compilers"})] * 5)
+    out = converse("who works on compilers?", GRAPH, model, rounds=5)
+    assert out.content
+    assert "plain words" in model.seen[-1][-1]["content"]

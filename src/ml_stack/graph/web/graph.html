@@ -844,6 +844,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       e.stopPropagation();
       if (e.shiftKey || e.ctrlKey || e.metaKey) pick('link:' + links.indexOf(l)); else selectEdge(l);
     })
+    .on('contextmenu', (e, l) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); pick('link:' + links.indexOf(l)); } })
     .on('mousemove', (e, l) => tip(e, `${shown(l.source)} → ${shown(l.target)}`, `${l.rel.replace(/_/g, ' ')} · seen in ${l.messages.length} message${l.messages.length === 1 ? '' : 's'}`))
     .on('mouseleave', hideTip);
   const node = root.append('g').selectAll('g').data(nodes).join('g').attr('class', d => 'node k-' + d.kind).attr('tabindex', 0)
@@ -866,6 +867,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   measure();
   if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
   node.on('click', (e, d) => ((e.shiftKey || e.ctrlKey || e.metaKey) ? pick('node:' + d.id) : select(d.id)))
+    // macOS folds a ctrl-click into the context menu and the click never arrives
+    .on('contextmenu', (e, d) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); pick('node:' + d.id); } })
     .on('keydown', (e, d) => { if (e.key === 'Enter') select(d.id); })
     .on('mousemove', (e, d) => tip(e, d.label, `${d.attrs.type || d.kind} · in ${d.mentions} message${d.mentions === 1 ? '' : 's'}${d.attrs.location ? ' · ' + d.attrs.location : ''}`))
     .on('mouseleave', hideTip);
@@ -1303,9 +1306,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     }
     return best;
   }
-  for (const kind of ['pointerdown', 'pointerup', 'click']) {
+  for (const kind of ['pointerdown', 'pointerup', 'click', 'contextmenu']) {
     wrap.addEventListener(kind, e => {
       if (!is3d) return;
+      // the pick for a ctrl-press fires on pointerdown; the menu the OS folds it into is noise
+      if (kind === 'contextmenu') { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); } return; }
       if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.button === 0) {
         e.preventDefault();
         e.stopPropagation();

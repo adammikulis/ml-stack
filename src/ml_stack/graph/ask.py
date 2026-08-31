@@ -26,7 +26,8 @@ SYSTEM = (
     "you have been given. Look up the names in the question to get their ids, read what is held "
     "on them, and when the question is about how two things relate, trace the path between "
     "them. When some entries are named as currently highlighted and the question builds on what "
-    "is already shown, look at those entries again so they stay in the answer; when it moves to "
+    "is already shown, re-read them together with one look_at of their ids so they stay in "
+    "the answer; when it moves to "
     "something else, leave them.\n\n"
     "Then write the answer. Do not narrate what you looked up — the reader can see that "
     "already. Say what the entries add up to: what they have in common, where they differ, "
@@ -271,6 +272,10 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # more with the tools taken away, so the question is answered rather than dropped.
         if spent:
             reply = client.chat(messages, think=False)
+            if not (getattr(reply, "content", "") or "").strip():
+                # a thinking model sometimes hands back an empty message: tell it outright
+                messages.append({"role": "user", "content": "Answer the question now, in plain words."})
+                reply = client.chat(messages, think=False)
     out.content = (getattr(reply, "content", "") or "").strip()
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
