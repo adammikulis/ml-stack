@@ -49,3 +49,5 @@ Ada of Turin
 Bea of Turin
 typeof topojson
 Hugging Face
+Ada Lovelace's son
+Ada Lovelace's
