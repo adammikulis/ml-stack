@@ -8,7 +8,7 @@ graph. What is asserted is what the tools returned and what came back as touched
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
+from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between, tools_for
 
 GRAPH = {
     "nodes": [
@@ -103,6 +103,38 @@ def test_an_id_the_model_invents_is_not_lit_up():
     model = ScriptedModel([call("look_at", ids=["person:ada", "person:ghost"])])
     out = converse("who?", GRAPH, model)
     assert out.ids == ["person:ada"]
+
+
+def test_a_tool_the_caller_adds_is_offered_and_called():
+    seen = {}
+
+    def census(args):
+        seen["args"] = dict(args)
+        return {"people": 2}
+
+    schema = {"type": "function", "function": {
+        "name": "head_count",
+        "description": "How many entries of a kind the graph holds.",
+        "parameters": {"type": "object", "properties": {"kind": {"type": "string"}},
+                       "required": ["kind"]}}}
+    model = ScriptedModel([call("head_count", kind="person")])
+    out = converse("how many people?", GRAPH, model,
+                   tools=[*tools_for(GRAPH), (schema, census)])
+    assert seen["args"] == {"kind": "person"}
+    assert out.steps == ["used head_count"]
+    tool_turns = [m for turn in model.seen for m in turn if m.get("role") == "tool"]
+    assert any('"people": 2' in m["content"] for m in tool_turns)
+
+
+def test_what_was_read_is_told_apart_from_what_was_merely_found():
+    model = ScriptedModel([call("look_up", text="compil"),
+                           call("look_at", ids=["person:bea"])])
+    out = converse("what does Bea do?", GRAPH, model, limit=2)
+    assert out.found == ["topic:compilers", "person:ada", "person:bea"]
+    assert out.read == ["person:bea"]
+    assert out.path == []
+    # the cap keeps what was read; only what was merely found falls off
+    assert out.ids == ["person:bea", "topic:compilers"]
 
 
 def test_a_question_needing_no_tools_still_answers():

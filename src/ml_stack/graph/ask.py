@@ -71,10 +71,18 @@ TOOLS = [
 
 @dataclass
 class Answer:
-    """What to say, what to light up, and what was done to find out."""
+    """What to say, what to light up, and what was done to find out.
+
+    ``found`` holds what look_up returned, ``read`` what look_at was given, ``path`` what
+    path_between traversed. ``ids`` is their union — read first, then path, then found —
+    capped at converse's ``limit``.
+    """
 
     content: str = ""
     ids: list[str] = field(default_factory=list)
+    found: list[str] = field(default_factory=list)
+    read: list[str] = field(default_factory=list)
+    path: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
 
     @property
@@ -157,22 +165,53 @@ def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, A
             "reads": " → ".join(label.get(i, i) for i in ids)}
 
 
+def tools_for(graph: Mapping[str, Any], *, finder: Any = None) -> list[tuple[dict[str, Any], Any]]:
+    """The built-in tools over that graph, as ``(schema, callable)`` pairs.
+
+    Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
+    it takes the text and returns ``[{"id", "label", "kind"}, ...]``.
+    """
+    def find(args: Mapping[str, Any]) -> list[dict[str, str]]:
+        text = str(args.get("text") or "")
+        return finder(text) if finder is not None else look_up(graph, text)
+
+    def read(args: Mapping[str, Any]) -> str:
+        return look_at(graph, [str(i) for i in (args.get("ids") or ())])
+
+    def trace(args: Mapping[str, Any]) -> dict[str, Any]:
+        return path_between(graph, str(args.get("from_id") or ""), str(args.get("to_id") or ""))
+
+    return [(TOOLS[0], find), (TOOLS[1], read), (TOOLS[2], trace)]
+
+
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
-             rounds: int = ROUNDS, limit: int = LIT, finder: Any = None) -> Answer:
+             rounds: int = ROUNDS, limit: int = LIT,
+             tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
+             finder: Any = None) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
-    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does. ``finder`` replaces how
-    looking up works, for a caller that can do better than matching characters.
+    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does. ``tools`` is
+    ``[(schema, callable), ...]``, each callable taking the parsed arguments mapping;
+    ``tools_for(graph)`` by default. ``finder`` replaces just look_up's callable.
     """
+    if tools is None:
+        tools = tools_for(graph, finder=finder)
+    elif finder is not None:
+        tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
+                 else (schema, lambda args: finder(str(args.get("text") or "")))
+                 for schema, fn in tools]
+    schemas = [schema for schema, _ in tools]
+    run = {str((schema.get("function") or {}).get("name") or ""): fn for schema, fn in tools}
+
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
     out = Answer()
 
-    def note(ids: Sequence[str]) -> None:
+    def note(into: list[str], ids: Sequence[str]) -> None:
         for one in ids:
-            if str(one) in known and str(one) not in out.ids:
-                out.ids.append(str(one))
+            if str(one) in known and str(one) not in into:
+                into.append(str(one))
 
     said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
              "content": str(t.get("content") or "")[:4000]}
@@ -182,7 +221,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     spent = False
     reply = None
     for _ in range(rounds):
-        reply = client.chat(messages, tools=TOOLS, think=False)
+        reply = client.chat(messages, tools=schemas, think=False)
         calls = getattr(reply, "tool_calls", None) or []
         if not calls:
             break
@@ -195,25 +234,27 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 args = json.loads(fn.get("arguments") or "{}")
             except ValueError:
                 args = {}
-            if name == "look_up":
-                asked = str(args.get("text") or "")
-                result: Any = finder(asked) if finder is not None else look_up(graph, asked)
-                note([r["id"] for r in result])
+            do = run.get(name)
+            if do is None:
+                result: Any = {"error": f"no such tool: {name}"}
+            elif name == "look_up":
+                result = do(args)
+                note(out.found, [r["id"] for r in result])
                 out.steps.append(f"looked up {str(args.get('text'))!r}")
             elif name == "look_at":
                 # one guard, in note: an id the model made up is neither read nor lit up
                 ids = [str(i) for i in (args.get("ids") or ())]
-                note(ids)
-                result = look_at(graph, ids) or "nothing on those"
+                note(out.read, ids)
+                result = do(args) or "nothing on those"
                 real = sum(1 for i in ids if i in known)
                 out.steps.append(f"read {real} entr" + ("y" if real == 1 else "ies"))
             elif name == "path_between":
-                result = path_between(graph, str(args.get("from_id") or ""),
-                                      str(args.get("to_id") or ""))
-                note(result.get("path") or [])
+                result = do(args)
+                note(out.path, result.get("path") or [])
                 out.steps.append("traced a path" if result.get("path") else "found no path")
             else:
-                result = {"error": f"no such tool: {name}"}
+                result = do(args)
+                out.steps.append(f"used {name}")
             messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
                              "name": name, "content": json.dumps(result, ensure_ascii=False)[:6000]})
     else:
@@ -222,5 +263,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
         if spent:
             reply = client.chat(messages, think=False)
     out.content = (getattr(reply, "content", "") or "").strip()
+    for one in (*out.read, *out.path, *out.found):
+        if one not in out.ids:
+            out.ids.append(one)
     out.ids = out.ids[:limit]
     return out
