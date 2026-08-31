@@ -1895,7 +1895,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     const asText = `[${body.kind}] ${body.text}\n\nAbout: ${body.targets.map(t => t.label).join(', ') || '(nothing selected)'}`;
     try {
       await navigator.clipboard.writeText(asText);
-      askNote.textContent = 'Copied — paste it to Adam or in the channel.';
+      askNote.textContent = 'Copied — paste it in the channel, or send it to whoever runs this page.';
     } catch (err) {
       askNote.textContent = 'Copy this and send it: ' + asText;
     }
