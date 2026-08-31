@@ -1282,6 +1282,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   }
 
   let raf = 0;
+  // after a node drag ends — and a plain press on a node is a zero-length drag — the
+  // library resets the camera controls by synthesizing a "touch" pointerup on the
+  // document; the controls then read a touch position they never stored and throw.
+  // Their real reset has already run by then, so the synthetic event is swallowed
+  document.addEventListener('pointerup', e => {
+    if (!e.isTrusted && e.pointerType === 'touch') e.stopImmediatePropagation();
+  }, true);
   function frame3d() { place3dLabels(); raf = requestAnimationFrame(frame3d); }
   function flyTo(id) {
     if (!g3) return;
