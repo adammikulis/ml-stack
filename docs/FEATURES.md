@@ -283,6 +283,80 @@ python packaging/build.py            # wheels
 python packaging/build.py --bundle   # and a standalone app for this platform
 ```
 
+## Graphs
+
+A graph is a mapping with `nodes` and `edges`. What a project calls its kinds and its
+relations is the project's business; nothing here has an opinion about either.
+
+**Where it lives.** An embedded property graph in one file — no server, native Cypher,
+shortest paths worked out by the engine rather than by a loop. Nodes and edges go in as plain
+dictionaries and come back as the same ones: whatever a caller carries beyond the columns, the
+messages a node was read from, a flag of its own, rides along untouched. Anything about the
+graph as a whole — what it counts, when it was built — is kept beside it.
+
+**It cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty graph,
+and an empty graph looks exactly like "remove everything" to anything that trusts it. A write
+that would take most of a store raises rather than runs, and says what it thinks went wrong
+upstream. One that would take a tenth leaves a verified copy behind on the way past. Copies
+are verified by reopening them on a fresh handle and counting — a copy nobody opened is not a
+backup — and a restore saves what is there first, because restoring the wrong one must not be
+the second unrecoverable act of the day. On a filesystem with copy-on-write this costs
+milliseconds and no disk; everywhere else it says loudly that it is copying for real.
+
+**Two processes cannot corrupt one.** The database's own lock already stops the second writer
+with an IO exception. What is added is the part it does not do: which process is in your way
+and for how long, waiting for a turn rather than failing instantly, and giving up a read
+handle when a writer wants in — because a read handle parked in an idle process wedges every
+writer for no benefit. A dead owner's record is cleared on the way in; a live one's never is.
+
+**Finding things, three ways at once.** Matching characters finds a name typed exactly.
+A word index stems, so "compiler" finds "compilers". Vectors find meaning, so "who fixes
+machines" finds a robotics technician. All three run and the rankings are fused, without
+anyone pretending a cosine similarity and a BM25 score are the same kind of number. Whichever
+is unavailable simply does not vote.
+
+**Asking a model about it.** Handing a model the whole graph does not scale, and handing it a
+pre-chosen slice makes the choosing the answer. It gets three things it can do instead — find
+entries by name, read what is held on them, trace how two connect — and what it touched comes
+back with the words, so a caller can show the working rather than a second guess at it. An id
+the model invents is refused in one place.
+
+**Looking at it.** One self-contained page: force layout in two dimensions and three, labels
+that do not collide and that hold their place as the camera turns, a legend that filters, a
+layout that re-settles when a kind is switched off, a map, and evidence for everything drawn.
+Everything ships inside the file, which is what makes it mailable and also what limits it —
+whoever has the file has the graph, so anything private is served rather than sent.
+
+## Reading a site
+
+Every project that reads a conversation out of a web app writes the same scraper: find the
+rows, find who wrote each and what it says, find the identifier that makes a row the same row
+tomorrow. Only the selectors differ, so the selectors are data — `website`, `slack` and
+`discord` to start with, and a preset can be adjusted without being rewritten.
+
+- **Virtualised lists.** A row scrolled far enough away is removed from the document, not
+  hidden, so scrolling to the top and reading once returns the oldest screenful and looks
+  exactly like a short conversation. Rows are collected after every step instead.
+- **Signing in happens once, by hand.** The browser runs on a profile directory that persists.
+  That also sets the etiquette: a profile is a real session, the account looks online while it
+  is open, and reading fast enough to notice is how a session stops working. Hours can be held
+  and requests paced unevenly, because evenly spaced ones are a signature.
+- **Second runs are cheap.** A watermark per source for what is new, and a mark beside it for
+  what is old and grew — which a watermark cannot see.
+
+## Entities
+
+- **Resolving names.** Folding duplicates, canonical forms, and telling a handle from a name.
+- **Spelling.** Whether two words are one word typed twice. A doubled letter is its own case at
+  any length, because it is the commonest way to write a name wrong; a substitution in a short
+  word is not, because two four-letter names one letter apart are two people.
+- **Paths.** The best-evidenced way from one node to another. Weight is how many sources agree,
+  so cost is its reciprocal and two well-attested hops beat one nobody corroborates. Dijkstra,
+  not A*: the graph has no geometry to guess distance from, so any admissible heuristic is
+  zero, and A* with a zero heuristic is Dijkstra with extra words.
+- **Edits.** A request in ordinary words becomes edits against ids that exist, checked before
+  anything is applied.
+
 ## Known limits
 
 - **Several daemons on one machine share a discovery port**, and only one of them

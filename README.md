@@ -179,13 +179,44 @@ instead of six hours.
 | `ml_stack.speech` | ASR / TTS / VAD behind three protocols and one resolver |
 | `ml_stack.vision` | Image payloads, and a gate that verifies a model can see |
 | `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
-| `ml_stack.graph` | Graphs as tensors: message passing, DAG sweeps, topology |
+| `ml_stack.graph` | A graph: stored, searched, asked about, drawn — and as tensors |
+| `ml_stack.entities` | Resolving names, planning edits, spelling, paths through a graph |
+| `ml_stack.scrape` | Reading a site you are signed in to, with presets to start from |
 | `ml_stack.train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
 | `ml_stack.testing` | Cross-backend numerical parity harness |
 
 Everything above ships in one package. The extras carry what a module needs beyond the
-standard library: `[app] [train] [serve] [gguf] [graph] [vision] [testing] [torch] [mlx]
-[telemetry]`, and `[all]`.
+standard library: `[app] [train] [serve] [gguf] [graph] [store] [scrape] [vision] [testing]
+[torch] [mlx] [telemetry]`, and `[all]`.
+
+## Working with a graph
+
+A graph here is a mapping with `nodes` and `edges` and nothing else agreed in advance —
+what a project calls its kinds and its relations is the project's business.
+
+```python
+from ml_stack.graph import GraphStore, replace, converse, render, hybrid
+
+replace("graph.ladybug", graph)              # safely: see below
+with GraphStore("graph.ladybug") as store:
+    store.set_embedding("person:ada", vector)
+    store.similar(vector)                    # nearest by meaning
+    store.search("compiler")                 # stemmed, so it finds "compilers"
+    store.shortest_path("person:ada", "person:bea")
+
+hybrid(graph, "who fixes machines", store=store, vector=asked)   # all three at once
+converse("how are these two connected?", graph, client)          # the model, with tools
+open("page.html", "w").write(render(graph, title="Who knows what"))
+```
+
+**A store cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty
+graph, and an empty graph looks exactly like "remove everything". `replace` refuses a write
+that would take most of a store, and leaves a verified snapshot when it would take a tenth.
+`snapshot` and `roll_back` are there directly, and a restore saves what is there first.
+
+**Two processes cannot corrupt one.** The database's own lock stops the second writer with an
+IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
+and letting go of a read handle when a writer wants in.
 
 ## Serving a model
 

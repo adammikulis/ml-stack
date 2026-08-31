@@ -74,6 +74,7 @@ def from_database():
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
 PHONE = re.compile(r"\+?\d[\d ().-]{8,}\d")
 DATEISH = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
+TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}")
 FRACTION = re.compile(r"\.\d{4,}")
 # a recogniser reaches for anything capitalised; these shapes are code, not people
 IDENTIFIER = re.compile(r"[_\[\](){}\"\n@/=]|^[a-z]+$")
@@ -92,6 +93,10 @@ def contacts(line, allowed):
         if not (text.startswith("+") or "(" in text or "-" in text):
             continue
         if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text):
+            continue
+        # a timestamp is digits and dashes and so is a phone number, but no phone number has a
+        # year-month-day in it
+        if TIMESTAMP.search(text):
             continue
         if 7 <= sum(c.isdigit() for c in text) <= 15:
             yield "something shaped like a phone number", text

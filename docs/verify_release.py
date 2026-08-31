@@ -827,6 +827,144 @@ def _():
 
 
 # -- report --------------------------------------------------------------
+# -- graphs --------------------------------------------------------------
+@check("Graphs", "a store keeps everything a graph carries, across a reopen")
+def _():
+    import pytest
+    pytest.importorskip("ladybug")
+    from ml_stack.graph import GraphStore
+    path = TMP / "graph" / "g"
+    graph = {"nodes": [{"id": "p:a", "kind": "person", "label": "Ada", "mentions": 2,
+                        "attrs": {"role": "analyst"}, "messages": ["m1"]},
+                       {"id": "t:c", "kind": "topic", "label": "compilers", "mentions": 1,
+                        "attrs": {}, "messages": ["m1"]}],
+             "edges": [{"source": "p:a", "target": "t:c", "rel": "interested_in", "weight": 2,
+                        "messages": ["m1"]}],
+             "stats": {"nodes": 2}}
+    with GraphStore(path) as store:
+        store.write(graph)
+    with GraphStore(path) as reopened:
+        back = reopened.read()
+    assert back["nodes"][0]["messages"] == ["m1"], "a node lost what it carried"
+    assert back["stats"] == {"nodes": 2}
+    assert back["edges"][0]["messages"] == ["m1"]
+    return "nodes, edges and documents round-trip"
+
+
+@check("Graphs", "a write that would take most of a store is refused")
+def _():
+    import pytest
+    pytest.importorskip("ladybug")
+    from ml_stack.graph import GraphStore, WouldLoseTooMuch, count_store, replace
+    path = TMP / "guard" / "g"
+    with GraphStore(path) as store:
+        store.write({"nodes": [{"id": f"n{i}", "kind": "t", "label": str(i), "mentions": 1,
+                                "attrs": {}} for i in range(10)], "edges": []})
+    try:
+        replace(path, {"nodes": [], "edges": []})
+    except WouldLoseTooMuch:
+        pass
+    else:
+        raise AssertionError("it emptied the store")
+    assert count_store(path)["nodes"] == 10
+    return "10 of 10 refused; the store is intact"
+
+
+@check("Graphs", "a snapshot is verified by reopening it, and a restore is undoable")
+def _():
+    import pytest
+    pytest.importorskip("ladybug")
+    from ml_stack.graph import GraphStore, count_store, roll_back, snapshot
+    from ml_stack.graph.snapshots import snapshots
+    path = TMP / "snap" / "g"
+    with GraphStore(path) as store:
+        store.write({"nodes": [{"id": f"n{i}", "kind": "t", "label": str(i), "mentions": 1,
+                                "attrs": {}} for i in range(6)], "edges": []})
+    kept = snapshot(path, reason="verifying the release")
+    with GraphStore(path) as store:
+        store.drop([f"n{i}" for i in range(6)], force=True)
+    assert count_store(path)["nodes"] == 0
+    roll_back(kept.path)
+    assert count_store(path)["nodes"] == 6
+    assert any("before restoring" in r.reason for r in snapshots(path))
+    return f"{kept.method}, restored 6 nodes"
+
+
+@check("Graphs", "finding things fuses characters, words and meaning")
+def _():
+    from ml_stack.graph.search import hybrid, lexical, rrf
+    graph = {"nodes": [{"id": "t:r", "kind": "topic", "label": "robotics", "mentions": 2,
+                        "attrs": {}, "messages": []},
+                       {"id": "p:b", "kind": "person", "label": "Bea", "mentions": 1,
+                        "attrs": {}, "messages": []}],
+             "edges": [], "messages": {}}
+
+    class Store:
+        def search(self, text, limit=10):
+            return [{"id": "t:r"}]
+
+        def similar(self, vector, model="", limit=10):
+            return [{"id": "p:b"}]
+
+    assert rrf(["a", "b"], ["c", "b"], limit=1) == ["b"], "fusion did not prefer the agreed one"
+    assert lexical(graph, "robotics") == ["t:r"]
+    got = [h["id"] for h in hybrid(graph, "robotics", store=Store(), vector=[0.1])]
+    assert set(got) == {"t:r", "p:b"}
+    return "all three vote"
+
+
+@check("Graphs", "the model reads a graph with tools, and invented ids are refused")
+def _():
+    from dataclasses import dataclass
+    from ml_stack.graph.ask import converse
+    graph = {"nodes": [{"id": "p:a", "kind": "person", "label": "Ada", "mentions": 1,
+                        "attrs": {}, "messages": []}], "edges": [], "messages": {}}
+
+    @dataclass
+    class Reply:
+        content: str = ""
+        tool_calls: list | None = None
+
+    class Model:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.turn += 1
+            if tools and self.turn == 1:
+                return Reply(tool_calls=[{"id": "1", "function": {
+                    "name": "look_at", "arguments": '{"ids": ["p:a", "p:ghost"]}'}}])
+            return Reply(content="Ada is here.")
+
+    out = converse("who?", graph, Model())
+    assert out.ids == ["p:a"], f"an invented id got through: {out.ids}"
+    return "one real id kept, one invented id refused"
+
+
+# -- reading a site ------------------------------------------------------
+@check("Reading a site", "a virtualised list is read all the way, not one screenful")
+def _():
+    from ml_stack.scrape import SLACK, preset, read_all
+    rows = [{"key": f"17879371{i:02d}.000000", "author": "x", "text": f"row {i}"}
+            for i in range(9)]
+
+    class Virtual:
+        def __init__(self):
+            self.top = 6
+
+        def evaluate(self, js, arg=None):
+            if "scrollTop" in js:
+                was, self.top = self.top, max(0, self.top - 3)
+                return self.top != was
+            return [dict(r) for r in rows[self.top:self.top + 3]]
+
+    seen = read_all(Virtual(), SLACK)
+    assert len(seen) == 9, f"only {len(seen)} of 9 rows were read"
+    assert preset("discord").key_pattern == ""
+    return "9 of 9 rows, three at a time"
+
+
+
 def main() -> int:
     width = max(len(c) for _, c, _, _ in RESULTS) + 2
     area = ""
