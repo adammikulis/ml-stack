@@ -52,7 +52,7 @@ def _embedded(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
 
-def render(graph: Mapping[str, Any], *, title: str = "Graph",
+def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
            kinds: Sequence[Mapping[str, Any]] | None = None,
            copy: Mapping[str, str] | None = None,
            points: Sequence[Mapping[str, Any]] = (),
@@ -60,8 +60,9 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph",
            author: str = "", extra: Mapping[str, Any] | None = None) -> str:
     """The whole page, as one string.
 
-    ``points`` are ``{id, label, place, lat, lon}`` for anything to show on the map; passing
-    none leaves the map empty. ``extra`` is merged into the payload the page reads, for
+    ``brand`` names whatever made the page, on the bar above it; ``title`` names the graph,
+    over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to show
+    on the map; passing none leaves the map empty. ``extra`` is merged into the payload the page reads, for
     whatever a caller's own panels need.
     """
     template = (WEB / "graph.html").read_text(encoding="utf-8")
@@ -69,6 +70,7 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph",
                "kinds": list(kinds) if kinds is not None else kinds_of(graph),
                "copy": dict(copy or {}), "author": author, **dict(extra or {})}
     return (template
+            .replace("__BRAND__", brand or title)
             .replace("__TITLE__", title)
             .replace("__DATA__", _embedded(payload))
             .replace("__WORLD__", _embedded(world if world is not None else world_outline())))
