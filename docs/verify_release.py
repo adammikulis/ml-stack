@@ -17,6 +17,9 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+# claims must hold for this tree, not whatever an older install left on the path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
 RESULTS: list[tuple[str, str, bool, str]] = []
 
 
