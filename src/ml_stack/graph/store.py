@@ -42,6 +42,18 @@ class GraphStoreUnavailable(RuntimeError):
     """Ladybug is not installed. `pip install ml-stack[store]`."""
 
 
+class WouldLoseTooMuch(RuntimeError):
+    """A write would have removed most of the store, which is a fault rather than a rebuild."""
+
+
+# How much of a store one write may remove before it stops being a rebuild. A pipeline that
+# read nothing produces an empty graph, and an empty graph looks exactly like "delete
+# everything" to anything that trusts it.
+MOST = 0.5
+# and how much before a verified copy is taken on the way past
+COPY_OVER = 0.1
+
+
 def _json(value: Any) -> str:
     try:
         return json.dumps(value or {}, ensure_ascii=False, default=str)
@@ -57,6 +69,37 @@ def _unjson(raw: Any) -> dict[str, Any]:
     except (TypeError, ValueError):
         return {}
     return out if isinstance(out, dict) else {}
+
+
+def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
+            keep_copy: bool = True) -> dict[str, int]:
+    """Make the store hold this graph and nothing else, safely.
+
+    The safe part is the point. Anything no longer in the graph goes, but a write that would
+    take most of the store is refused rather than performed, and one that would take a tenth
+    leaves a verified copy behind first. A rebuild is a normal thing to do; losing a graph to
+    one is not.
+    """
+    from ml_stack.graph.snapshots import take
+
+    live = {str(n["id"]) for n in (graph.get("nodes") or ())}
+    if not Path(path).expanduser().exists():
+        # nothing to lose yet
+        with GraphStore(path) as store:
+            return store.write(graph)
+    with GraphStore(path, read_only=True) as reader:
+        held = [n["id"] for n in reader.nodes()]
+    gone = [i for i in held if i not in live]
+    if not force and held and len(gone) > len(held) * MOST:
+        raise WouldLoseTooMuch(
+            f"{len(gone)} of {len(held)} nodes would go in one write. If that is really meant, "
+            "pass force=True; if it is not, something upstream read nothing.")
+    if keep_copy and held and len(gone) > len(held) * COPY_OVER:
+        take(path, reason=f"before dropping {len(gone)} of {len(held)} nodes",
+             count=count_store, fold=fold_log)
+    with GraphStore(path) as store:
+        store.drop(gone, force=True)      # already judged, above, against the whole store
+        return store.write(graph)
 
 
 def count_store(path: str | Path) -> dict[str, int]:
@@ -375,10 +418,22 @@ class GraphStore:
         self.drop([remove])
         return moved
 
-    def drop(self, node_ids: Iterable[str]) -> int:
-        """Take nodes out, and every edge that touched them."""
+    def drop(self, node_ids: Iterable[str], *, force: bool = False) -> int:
+        """Take nodes out, and every edge that touched them.
+
+        Removing most of a store in one call is refused unless it is asked for outright: it is
+        what a caller does when something upstream of it went wrong, and the store is the only
+        copy of what it is about to lose.
+        """
+        wanted = [str(i) for i in node_ids]
+        if not force and wanted:
+            held = self.counts()["nodes"]
+            if held and len(wanted) > held * MOST:
+                raise WouldLoseTooMuch(
+                    f"{len(wanted)} of {held} nodes would go in one write. If that is really "
+                    "meant, pass force=True; if it is not, something upstream read nothing.")
         gone = 0
-        for node_id in node_ids:
+        for node_id in wanted:
             if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": node_id}):
                 self._conn.execute("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": node_id})
                 gone += 1

@@ -139,8 +139,8 @@ def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     kept = snapshot(path, reason="before a rebuild")
     assert kept.counts == {"nodes": 5, "edges": 3, "docs": 0}
 
-    with GraphStore(path) as store:      # the rebuild goes wrong
-        store.drop([n["id"] for n in GRAPH["nodes"]])
+    with GraphStore(path) as store:      # the rebuild goes wrong, and insists
+        store.drop([n["id"] for n in GRAPH["nodes"]], force=True)
     assert count_store(path)["nodes"] == 0
 
     roll_back(kept.path)
@@ -204,3 +204,67 @@ def test_folding_one_node_into_another_moves_what_was_joined_to_it(tmp_path):
     assert ("person:ada", "interested_in", "topic:compilers") in joined
     assert not any(e[0] == "person:bea" or e[2] == "person:bea" for e in joined)
     assert len(joined) == 2   # ada->compilers and ada->turin
+
+
+def a_store_of(tmp_path, n):
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write({"nodes": [{"id": f"n{i}", "kind": "topic", "label": f"t{i}",
+                                "mentions": 1, "attrs": {}} for i in range(n)], "edges": []})
+    return path
+
+
+def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
+    """A pipeline that read nothing produces an empty graph, which looks exactly like this."""
+    from ml_stack.graph.store import WouldLoseTooMuch, count_store, replace
+
+    path = a_store_of(tmp_path, 10)
+    with pytest.raises(WouldLoseTooMuch, match="10 of 10"):
+        replace(path, {"nodes": [], "edges": []})
+    assert count_store(path)["nodes"] == 10, "it went ahead anyway"
+
+    # and when it really is meant
+    replace(path, {"nodes": [], "edges": []}, force=True, keep_copy=False)
+    assert count_store(path)["nodes"] == 0
+
+
+def test_an_ordinary_rebuild_still_goes_through(tmp_path):
+    from ml_stack.graph.store import count_store, replace
+
+    path = a_store_of(tmp_path, 10)
+    keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 2, "attrs": {}}
+            for i in range(9)]
+    assert replace(path, {"nodes": keep, "edges": []}) == {"nodes": 9, "edges": 0}
+    assert count_store(path)["nodes"] == 9
+
+
+def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
+    from ml_stack.graph.snapshots import snapshots
+    from ml_stack.graph.store import replace
+
+    path = a_store_of(tmp_path, 10)
+    keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 1, "attrs": {}}
+            for i in range(8)]
+    replace(path, {"nodes": keep, "edges": []})
+    kept = snapshots(path)
+    assert kept and kept[0].counts["nodes"] == 10
+    assert "before dropping 2 of 10" in kept[0].reason
+
+
+def test_dropping_most_of_a_store_by_hand_is_refused_too(tmp_path):
+    from ml_stack.graph.store import WouldLoseTooMuch
+
+    path = a_store_of(tmp_path, 10)
+    with GraphStore(path) as store:
+        with pytest.raises(WouldLoseTooMuch):
+            store.drop([f"n{i}" for i in range(9)])
+        assert len(store.nodes()) == 10
+        assert store.drop([f"n{i}" for i in range(9)], force=True) == 9
+
+
+def test_a_store_that_does_not_exist_yet_is_simply_written(tmp_path):
+    from ml_stack.graph.store import count_store, replace
+
+    fresh = tmp_path / "new" / "g"
+    assert replace(fresh, GRAPH) == {"nodes": 5, "edges": 3}
+    assert count_store(fresh)["nodes"] == 5
