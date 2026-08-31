@@ -18,8 +18,9 @@ reviewer most needs asked. All of that is settled here, before a person reads a 
 
 from __future__ import annotations
 
+import dataclasses
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -210,3 +211,50 @@ def proposing(graph: Mapping[str, Any]) -> tuple[list[dict[str, Any]],
         return out
 
     return tools_for(graph), gather
+
+
+def _ident(change: Change) -> str:
+    return f"{change.name}:{change.value.strip().casefold().replace(' ', '-')}"
+
+
+def _land(store: Any, change: Change, ident: Callable[[Change], str]) -> bool:
+    if change.op == "add_node":
+        store.upsert_node({"id": ident(change), "kind": change.name, "label": change.value,
+                           "mentions": 0, "attrs": {}})
+        return True
+    if change.op == "add_edge":
+        return store.upsert_edge({"source": change.target, "target": change.other,
+                                  "rel": change.name, "weight": 1})
+    if change.op == "rename":
+        return store.rename(change.target, change.value)
+    if change.op == "set_attribute":
+        return store.set_attribute(change.target, change.name, change.value)
+    if change.op == "remove_node":
+        return bool(store.drop([change.target]))
+    if change.op == "remove_edge":
+        return store.remove_edge(change.target, change.other, change.name)
+    if change.op == "merge_nodes":
+        store.merge_nodes(change.target, change.other)
+        return True
+    return False
+
+
+def apply(store: Any, changes: Iterable[Change], *,
+          ident: Callable[[Change], str] | None = None) -> dict[str, list[Change]]:
+    """Make the sound changes, together or not at all. Returns what landed and what did not.
+
+    Each change is checked again against the store as it stands, so a change that went stale
+    between proposing and applying is skipped with its problems filled in, and an earlier
+    change in the batch can make a later one sound.
+    """
+    ident = ident or _ident
+    applied: list[Change] = []
+    skipped: list[Change] = []
+    with store.transaction():
+        for change in changes:
+            checked = check(store.read(), dataclasses.replace(change, problems=[]))
+            if not checked.sound:
+                skipped.append(checked)
+                continue
+            (applied if _land(store, checked, ident) else skipped).append(checked)
+    return {"applied": applied, "skipped": skipped}

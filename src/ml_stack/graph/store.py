@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -37,9 +38,17 @@ NODE_COLUMNS = ("id", "kind", "label", "mentions", "attrs")
 EDGE_COLUMNS = ("source", "target", "rel", "weight")
 MAX_HOPS = 6
 
+# doc keys starting "_" belong to the store itself, not to the graph
+SCHEMA_VERSION = 2
+SCHEMA_KEY = "_schema"
+
 
 class GraphStoreUnavailable(RuntimeError):
     """Ladybug is not installed. `pip install ml-stack[store]`."""
+
+
+class StoreNeedsUpgrade(RuntimeError):
+    """This store was written by an older ml-stack. Open it once for writing to upgrade."""
 
 
 class WouldLoseTooMuch(RuntimeError):
@@ -98,8 +107,9 @@ def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
         take(path, reason=f"before dropping {len(gone)} of {len(held)} nodes",
              count=count_store, fold=fold_log)
     with GraphStore(path) as store:
-        store.drop(gone, force=True)      # already judged, above, against the whole store
-        return store.write(graph)
+        with store.transaction():
+            store.drop(gone, force=True)  # already judged, above, against the whole store
+            return store.write(graph)
 
 
 def count_store(path: str | Path) -> dict[str, int]:
@@ -146,13 +156,42 @@ class GraphStore:
         self._db = lb.Database(str(self.path), read_only=read_only)
         self._conn = lb.Connection(self._db)
         self.read_only = read_only
+        self._in_tx = False
+        self._extensions: set[str] = set()
+        self._indexed: set[str] = set()
         if not read_only:
             self._conn.execute(NODE_TABLE)
             self._conn.execute(EDGE_TABLE)
             self._conn.execute(DOC_TABLE)
             self._conn.execute(ASSET_TABLE)
-        self._extensions: set[str] = set()
-        self._indexed: set[str] = set()
+            self._upgrade()
+        else:
+            try:
+                self._require_current()
+            except StoreNeedsUpgrade:
+                self.close()
+                raise
+
+    def _upgrade(self) -> None:
+        """Bring a store written by an older ml-stack up to the current schema, in place."""
+        for table in ("Node", "Edge"):
+            cols = {r["name"] for r in self.query(f"CALL TABLE_INFO('{table}') RETURN *")}
+            if "data" not in cols:
+                self._conn.execute(f"ALTER TABLE {table} ADD data STRING")
+        if self.get_doc(SCHEMA_KEY, {}).get("version") != SCHEMA_VERSION:
+            self.put_doc(SCHEMA_KEY, {"version": SCHEMA_VERSION})
+
+    def _require_current(self) -> None:
+        """Raise StoreNeedsUpgrade when a read-only open finds an older schema."""
+        try:
+            cols = {r["name"] for r in self.query("CALL TABLE_INFO('Node') RETURN *")}
+        except RuntimeError:
+            return                    # no Node table: an empty store, not an old one
+        tables = {r["name"] for r in self.query("CALL SHOW_TABLES() RETURN *")}
+        if "data" not in cols or "Doc" not in tables:
+            raise StoreNeedsUpgrade(
+                f"{self.path} was written by an older ml-stack. "
+                "Open it once for writing (GraphStore(path)) to upgrade it in place.")
 
     # -- lifetime
 
@@ -180,6 +219,27 @@ class GraphStore:
         return [dict(zip(names, row)) for row in result.get_all()]
 
     # -- writing
+
+    @contextmanager
+    def transaction(self):
+        """Everything inside lands together, or none of it does."""
+        if self._in_tx:
+            yield
+            return
+        self._conn.execute("BEGIN TRANSACTION")
+        self._in_tx = True
+        try:
+            yield
+        except BaseException:
+            try:
+                self._conn.execute("ROLLBACK")
+            except RuntimeError:
+                pass              # a failed statement already rolled the transaction back
+            raise
+        else:
+            self._conn.execute("COMMIT")
+        finally:
+            self._in_tx = False
 
     def upsert_node(self, node: Mapping[str, Any]) -> None:
         """Put one node in, or update the one already there. ``id`` is what makes it the same.
@@ -213,13 +273,45 @@ class GraphStore:
         the messages behind it — is kept as a document under its own key.
         """
         nodes = list(graph.get("nodes") or ())
-        for node in nodes:
-            self.upsert_node(node)
-        kept = sum(1 for edge in (graph.get("edges") or ()) if self.upsert_edge(edge))
-        for key, value in graph.items():
-            if key not in ("nodes", "edges"):
-                self.put_doc(key, value)
+        with self.transaction():
+            for node in nodes:
+                self.upsert_node(node)
+            kept = sum(1 for edge in (graph.get("edges") or ()) if self.upsert_edge(edge))
+            for key, value in graph.items():
+                if key not in ("nodes", "edges"):
+                    self.put_doc(key, value)
         return {"nodes": len(nodes), "edges": kept}
+
+    def rename(self, node_id: str, label: str) -> bool:
+        """Give a node a different label. False when it is not in the store."""
+        if not self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": str(node_id)}):
+            return False
+        self._conn.execute("MATCH (n:Node {id:$id}) SET n.label = $label",
+                           {"id": str(node_id), "label": str(label)})
+        return True
+
+    def set_attribute(self, node_id: str, name: str, value: Any) -> bool:
+        """Set one attribute of a node, keeping the others. False when it is not in the store."""
+        rows = self.query("MATCH (n:Node {id:$id}) RETURN n.attrs AS attrs", {"id": str(node_id)})
+        if not rows:
+            return False
+        attrs = _unjson(rows[0]["attrs"])
+        attrs[str(name)] = value
+        self._conn.execute("MATCH (n:Node {id:$id}) SET n.attrs = $attrs",
+                           {"id": str(node_id), "attrs": _json(attrs)})
+        return True
+
+    def remove_edge(self, source: str, target: str, rel: str) -> bool:
+        """Take one edge out, leaving both ends. False when it is not in the store."""
+        found = self.query(
+            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) RETURN e.rel AS rel",
+            {"s": str(source), "t": str(target), "rel": str(rel)})
+        if not found:
+            return False
+        self._conn.execute(
+            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) DELETE e",
+            {"s": str(source), "t": str(target), "rel": str(rel)})
+        return True
 
     # -- reading back
 
@@ -251,7 +343,8 @@ class GraphStore:
 
     def docs(self) -> dict[str, Any]:
         return {r["key"]: _unjson(r["value"])
-                for r in self.query("MATCH (d:Doc) RETURN d.key AS key, d.value AS value")}
+                for r in self.query("MATCH (d:Doc) WHERE NOT d.key STARTS WITH '_' "
+                                    "RETURN d.key AS key, d.value AS value")}
 
     def read(self) -> dict[str, Any]:
         """The graph in the shape it went in as, whole."""
@@ -287,7 +380,8 @@ class GraphStore:
         out = {}
         for name, cypher in (("nodes", "MATCH (n:Node) RETURN count(n) AS c"),
                              ("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c"),
-                             ("docs", "MATCH (d:Doc) RETURN count(d) AS c")):
+                             ("docs", "MATCH (d:Doc) WHERE NOT d.key STARTS WITH '_' "
+                                      "RETURN count(d) AS c")):
             rows = self.query(cypher)
             if not rows:
                 # a count that will not run means the store is unreadable or is not shaped the
@@ -408,14 +502,15 @@ class GraphStore:
         if keep == remove:
             return 0
         moved = 0
-        for edge in self.edges():
-            if edge["source"] == remove and edge["target"] != keep:
-                self.upsert_edge({**edge, "source": keep})
-                moved += 1
-            elif edge["target"] == remove and edge["source"] != keep:
-                self.upsert_edge({**edge, "target": keep})
-                moved += 1
-        self.drop([remove])
+        with self.transaction():
+            for edge in self.edges():
+                if edge["source"] == remove and edge["target"] != keep:
+                    self.upsert_edge({**edge, "source": keep})
+                    moved += 1
+                elif edge["target"] == remove and edge["source"] != keep:
+                    self.upsert_edge({**edge, "target": keep})
+                    moved += 1
+            self.drop([remove])
         return moved
 
     def drop(self, node_ids: Iterable[str], *, force: bool = False) -> int:
@@ -433,8 +528,9 @@ class GraphStore:
                     f"{len(wanted)} of {held} nodes would go in one write. If that is really "
                     "meant, pass force=True; if it is not, something upstream read nothing.")
         gone = 0
-        for node_id in wanted:
-            if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": node_id}):
-                self._conn.execute("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": node_id})
-                gone += 1
+        with self.transaction():
+            for node_id in wanted:
+                if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": node_id}):
+                    self._conn.execute("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": node_id})
+                    gone += 1
         return gone
