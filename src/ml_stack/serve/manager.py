@@ -12,6 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.health import serving_params
 from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerBackend,
@@ -105,6 +106,16 @@ class ServerManager:
             raise ServerFailed(
                 f"port {spec.port} already serves {models!r}, not {spec.model!r}. "
                 "Stop it, or lease on a different port."
+            )
+        # the right model in the wrong shape is still the wrong server: a caller that asked for
+        # four slots and adopts a server with one gets a slot that is not there
+        wanted = int(getattr(spec, "parallel", 1) or 1)
+        params = serving_params(base_url)
+        slots = params.total_slots if params else None
+        if slots is not None and slots < wanted:
+            raise ServerFailed(
+                f"port {spec.port} serves {spec.model!r} with {slots} slot(s), "
+                f"and {wanted} were asked for. Stop it, or lease on a different port."
             )
 
         logger.info("adopting the server already healthy on %s", base_url)

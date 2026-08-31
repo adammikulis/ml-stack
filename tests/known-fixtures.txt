@@ -34,3 +34,5 @@ l.target.y - l.source.y
 a.x + b.x
 a.y + b.y
 Group Graph
+assert held.fileno
+assert info

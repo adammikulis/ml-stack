@@ -300,3 +300,31 @@ def test_tail_returns_the_last_lines(tmp_path):
     log = tmp_path / "server.log"
     log.write_text("\n".join(f"line {i}" for i in range(100)))
     assert tail(log, lines=3).splitlines() == ["line 97", "line 98", "line 99"]
+
+
+class TestAdoptingTheWrongShape:
+    """The right model in the wrong shape is still the wrong server."""
+
+    def test_a_server_with_too_few_slots_is_refused(self, monkeypatch):
+        from ml_stack.client.health import ServingParams
+        from ml_stack.serve import manager as mod
+        from ml_stack.serve.manager import ServerFailed, ServerManager, ServerSpec
+
+        monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
+        monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
+        monkeypatch.setattr(mod, "serving_params",
+                            lambda *a, **k: ServingParams(total_slots=1))
+        manager = ServerManager()
+        with pytest.raises(ServerFailed, match="1 slot"):
+            manager.adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
+        # one slot is enough for a caller that wanted one
+        assert manager.adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=1)) is not None
+
+    def test_a_server_that_will_not_say_is_adopted_anyway(self, monkeypatch):
+        from ml_stack.serve import manager as mod
+        from ml_stack.serve.manager import ServerManager, ServerSpec
+
+        monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
+        monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
+        monkeypatch.setattr(mod, "serving_params", lambda *a, **k: None)
+        assert ServerManager().adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
