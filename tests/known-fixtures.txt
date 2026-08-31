@@ -14,3 +14,8 @@ Pelard
 Pellard Foundry
 Pelard Foundry
 Quenlow Robotics
+Bea Marlow
+Ada Lovelace
+attrs STRING
+PRIMARY KEY
+rel STRING

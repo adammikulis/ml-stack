@@ -1,7 +1,9 @@
-"""Graphs as tensors: a container, message passing, DAG sweeps, topology construction."""
+"""Graphs as tensors, and graphs on disk: a container, message passing, DAG sweeps,
+topology construction, and a Cypher-queryable store that outlives the process."""
 
 from __future__ import annotations
 
+from ml_stack.graph.store import GraphStore, GraphStoreUnavailable
 from ml_stack.graph.dag import (
     NotADAG,
     clear_cache,
@@ -56,4 +58,6 @@ __all__ = [
     "scatter_sum",
     "spatial_window_edges",
     "topological_order",
+    "GraphStore",
+    "GraphStoreUnavailable",
 ]
