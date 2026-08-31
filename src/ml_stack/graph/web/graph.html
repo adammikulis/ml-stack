@@ -1097,13 +1097,21 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (e.key === 'Home') { e.preventDefault(); g3.zoomToFit(500, 70); }
     if (e.key === '.' && selected) { e.preventDefault(); flyTo(selected); }
   });
+  // The engine resolves a link's ends from ids only while it is running. Set new data with the
+  // engine stopped — which is what switching a kind off does — and the links keep bare strings
+  // where objects should be, and the next click hit-tests one and throws inside the library.
+  // Handing it the objects directly leaves nothing to resolve.
   function live3d() {
-    return {
-      nodes: nodes.filter(n => !dropped(n))
-        .map(n => ({ id: n.id, kind: n.kind, label: n.label, mentions: n.mentions, ref: n })),
-      links: links.filter(l => !linkDropped(l))
-        .map(l => ({ source: l.source.id, target: l.target.id, rel: l.rel, weight: l.weight })),
-    };
+    const live = nodes.filter(n => !dropped(n))
+      .map(n => ({ id: n.id, kind: n.kind, label: n.label, mentions: n.mentions, ref: n }));
+    const byId3d = new Map(live.map(n => [n.id, n]));
+    const joined = [];
+    for (const l of links) {
+      if (linkDropped(l)) continue;
+      const a = byId3d.get(l.source.id ?? l.source), b = byId3d.get(l.target.id ?? l.target);
+      if (a && b) joined.push({ source: a, target: b, rel: l.rel, weight: l.weight });
+    }
+    return { nodes: live, links: joined };
   }
   function push3d() { if (g3) { g3.graphData(live3d()); fitted3d = false; } }
   function applyPhysics() {
@@ -1220,6 +1228,39 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       el.style.left = px + 'px'; el.style.top = (py - 7) + 'px'; el.hidden = false;
     }
   }
+  // A shift-click never reaches the library's node handler: its own pointer code throws on a
+  // modified click before the handler runs. So the hit test is done here, against the same
+  // projection the labels use, and the event is stopped before the library sees it.
+  function nodeAt(x, y) {
+    if (!g3) return null;
+    const box = wrap.getBoundingClientRect();
+    const cam = g3.cameraPosition(), tgt = g3.controls().target;
+    let ax = tgt.x - cam.x, ay = tgt.y - cam.y, az = tgt.z - cam.z;
+    const len = Math.hypot(ax, ay, az) || 1; ax /= len; ay /= len; az /= len;
+    const perPx = (wrap.clientHeight / 2) / Math.tan(g3.camera().fov * Math.PI / 360);
+    let best = null, nearest = Infinity;
+    for (const n of g3.graphData().nodes) {
+      if (n.x == null) continue;
+      if ((n.x - cam.x) * ax + (n.y - cam.y) * ay + (n.z - cam.z) * az <= 0) continue;
+      const p = g3.graph2ScreenCoords(n.x, n.y, n.z);
+      const dist = Math.hypot(n.x - cam.x, n.y - cam.y, n.z - cam.z) || 1;
+      const r = Math.max(7, rad3d(n) * perPx / dist);
+      const away = Math.hypot(p.x - (x - box.left), p.y - (y - box.top));
+      if (away <= r && away < nearest) { nearest = away; best = n; }
+    }
+    return best;
+  }
+  for (const kind of ['pointerdown', 'pointerup', 'click']) {
+    wrap.addEventListener(kind, e => {
+      if (!is3d || !e.shiftKey || e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (kind !== 'pointerdown') return;
+      const n = nodeAt(e.clientX, e.clientY);
+      if (n) pick('node:' + n.id);
+    }, true);
+  }
+
   let raf = 0;
   function frame3d() { place3dLabels(); raf = requestAnimationFrame(frame3d); }
   function flyTo(id) {
