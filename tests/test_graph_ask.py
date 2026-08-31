@@ -288,8 +288,7 @@ def test_streaming_reports_tools_and_the_answer_in_order():
 
 
 def test_streaming_passes_deltas_through_as_they_arrive():
-    """A client whose chat takes on_delta streams thinking at once; buffered words that
-    turn out to be the answer arrive whole."""
+    """A client whose chat takes on_delta streams thinking and answer piece by piece."""
 
     class Streamer:
         def chat(self, messages, tools=None, on_delta=None, **kw):
@@ -301,9 +300,10 @@ def test_streaming_passes_deltas_through_as_they_arrive():
 
     events = []
     out = converse_stream("who?", GRAPH, Streamer(), on_event=events.append)
-    assert [e["event"] for e in events] == ["thinking", "thinking", "answer", "done"]
+    assert [e["event"] for e in events] \
+        == ["thinking", "thinking", "answer", "answer", "done"]
     assert [e.get("text") for e in events[:2]] == ["weigh ", "it up"]
-    assert events[2]["text"] == "Ada works on compilers."
+    assert [e.get("text") for e in events[2:4]] == ["Ada works ", "on compilers."]
     assert out.content == "Ada works on compilers."
 
 

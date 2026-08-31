@@ -281,27 +281,22 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         kw: dict[str, Any] = {"tools": schemas} if with_tools else {}
         if emit is None:
             return client.chat(messages, think=False, **kw)
-        pending: list[str] = []
-        streamed = {"any": False}
+        streamed = {"thinking": False, "answer": False}
 
         def on_delta(kind: str, text: str) -> None:
             if not text:
                 return
-            streamed["any"] = True
-            if kind == "thinking":
-                emit({"event": "thinking", "text": text})
-            elif with_tools:
-                pending.append(text)
-            else:
-                emit({"event": "answer", "text": text})
+            name = "thinking" if kind == "thinking" else "answer"
+            streamed[name] = True
+            emit({"event": name, "text": text})
 
         reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
-        if not streamed["any"]:
+        if not streamed["thinking"]:
             trace = (getattr(reply, "thinking", "") or "").strip()
             if trace:
                 emit({"event": "thinking", "text": trace})
-        if not (getattr(reply, "tool_calls", None) or []):
-            whole = "".join(pending) if streamed["any"] else (getattr(reply, "content", "") or "")
+        if not streamed["answer"] and not (getattr(reply, "tool_calls", None) or []):
+            whole = (getattr(reply, "content", "") or "")
             if whole.strip():
                 emit({"event": "answer", "text": whole})
         return reply
