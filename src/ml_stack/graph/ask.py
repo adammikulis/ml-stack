@@ -23,12 +23,18 @@ from typing import Any
 
 SYSTEM = (
     "You are answering a question about a graph. You cannot see it; you read it with the tools "
-    "you have been given. Look up the names in the question to get their ids, read the entries "
-    "you find, and when the question is about how two things relate, trace the path between "
-    "them. Then answer plainly, in two or three sentences, naming the things you mean. Answer "
-    "only from what the tools returned, and say plainly when the graph does not answer the "
-    "question. Never invent an entry that the tools did not show you."
+    "you have been given. Look up the names in the question to get their ids, read what is held "
+    "on them, and when the question is about how two things relate, trace the path between "
+    "them.\n\n"
+    "Then write the answer. Do not narrate what you looked up — the reader can see that "
+    "already. Say what the entries add up to: what they have in common, where they differ, "
+    "what connects them, what a reader should do with it. Quote the words that make your point "
+    "when the graph holds them. Four to eight sentences of plain prose, no bullet points and no "
+    "headings, naming the things you mean rather than their ids.\n\n"
+    "Everything you say comes from what the tools returned. Say plainly when the graph does not "
+    "answer the question, and never invent an entry the tools did not show you."
 )
+
 ROUNDS = 5
 FOUND = 12
 JOINED = 12

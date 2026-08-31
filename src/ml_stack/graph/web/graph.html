@@ -130,18 +130,15 @@ main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr)
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
 aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
-/* one pane, two faces: what you clicked, and what you asked */
-.faces { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid var(--line); }
-.faces button { font: 600 11px var(--font-body); letter-spacing: .05em; text-transform: uppercase;
-  padding: 7px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
-  background: none; color: var(--ink-3); cursor: pointer; margin-bottom: -1px; }
-.faces button:hover { color: var(--ink); }
-.faces button[aria-selected="true"] { color: var(--ink); background: var(--surface);
-  border-color: var(--line); }
-.askpane { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 9px;
-  padding: 14px 18px 16px; min-height: 0; }
-.askpane[hidden] { display: none; }
+/* the question on the left, what it is about on the right */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
+.askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
+  padding: 14px 16px 16px; min-height: 0; border-right: 1px solid var(--line); }
 .askpane .turns { max-height: none; overflow: auto; align-content: start; }
+.pane-title { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-3); margin: 0; }
+@media (max-width: 1180px) { .two { grid-template-columns: 1fr; } .askpane { border-right: 0;
+  border-bottom: 1px solid var(--line); } }
 .ask-box { border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
            box-shadow: var(--shadow); }
 #ask-box { position: absolute; left: 14px; bottom: 12px; z-index: 4; width: 310px; max-width: calc(100% - 28px); }
@@ -370,19 +367,18 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
           <svg id="map"></svg>
         </div>
       </details>
-      <div class="faces" role="tablist" aria-label="What to show">
-        <button id="face-details" role="tab" aria-selected="true">Details</button>
-        <button id="face-ask" role="tab" aria-selected="false">Ask the model</button>
-      </div>
-      <div class="detail" id="detail" role="tabpanel"></div>
-      <div class="askpane" id="askpane" role="tabpanel" hidden>
-        <div class="turns" id="qturns"></div>
-        <form class="chat-row" id="qform">
-          <input id="qmore" type="text" placeholder="Ask about this graph" autocomplete="off">
-          <button type="submit">Send</button>
-        </form>
-        <div class="qfoot"><span class="note" id="qnote" aria-live="polite"></span>
-          <button type="button" id="qclear">clear</button></div>
+      <div class="two">
+        <div class="askpane" id="askpane">
+          <h3 class="pane-title">Ask the model</h3>
+          <div class="turns" id="qturns"></div>
+          <form class="chat-row" id="qform">
+            <input id="qmore" type="text" placeholder="Ask about this graph" autocomplete="off">
+            <button type="submit">Send</button>
+          </form>
+          <div class="qfoot"><span class="note" id="qnote" aria-live="polite"></span>
+            <button type="button" id="qclear">clear</button></div>
+        </div>
+        <div class="detail" id="detail"></div>
       </div>
     </aside>
   </main>
@@ -503,18 +499,11 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   const qBox = document.getElementById('q'), qCount = document.getElementById('qcount');
   const qTurns = document.getElementById('qturns');
   const detailPane = document.getElementById('detail'), askPane = document.getElementById('askpane');
-  const faceDetails = document.getElementById('face-details'), faceAsk = document.getElementById('face-ask');
-  // The pane on the right answers one question at a time: what is this, or what did I ask.
+  // Both panes are on screen at once, so nothing needs switching to. Asking scrolls its own
+  // side; what the answer is about fills the other.
   function face(which) {
-    const asking = which === 'ask';
-    askPane.hidden = !asking;
-    detailPane.hidden = asking;
-    faceAsk.setAttribute('aria-selected', asking);
-    faceDetails.setAttribute('aria-selected', !asking);
-    if (asking) qTurns.scrollTop = qTurns.scrollHeight;
+    if (which === 'ask') qTurns.scrollTop = qTurns.scrollHeight;
   }
-  faceDetails.addEventListener('click', () => face('details'));
-  faceAsk.addEventListener('click', () => face('ask'));
   const qNote = document.getElementById('qnote');
   const turns = [];
   let asking = false;
@@ -601,6 +590,13 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
       turns.push({ role: 'assistant', content: said });
       answer = out.ids.length ? new Set(out.ids) : null;
       query = out.ids.length ? '' : query;
+      // the answer names things; the pane beside it shows the first of them, so reading the
+      // answer and reading what it is about do not take turns
+      if (out.ids.length) {
+        const best = out.ids.map(id => byId.get(id)).filter(Boolean)
+          .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0))[0];
+        if (best) { selected = best.id; refresh(); renderDetail(best); raiseSelected(); }
+      }
       qCount.textContent = out.ids.length ? String(out.ids.length) : '';
       qNote.textContent = (out.ids.length ? `${out.ids.length} lit up` : 'nothing to light up')
         + (out.why ? ` · ${out.why}` : '');
