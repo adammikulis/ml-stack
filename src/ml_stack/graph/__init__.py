@@ -7,6 +7,7 @@ from ml_stack.graph.access import (LockError, holder, reading, release_all, writ
                                    writing)
 from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
 from ml_stack.graph.page import kinds_of, render, world_outline
+from ml_stack.graph.propose import Change, proposing, tools_for
 from ml_stack.graph.search import hybrid, lexical, rrf
 from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
 from ml_stack.graph.store import (GraphStore, GraphStoreUnavailable, WouldLoseTooMuch,
@@ -94,5 +95,8 @@ __all__ = [
     "hybrid",
     "lexical",
     "rrf",
+    "Change",
+    "proposing",
+    "tools_for",
     "writing",
 ]
