@@ -47,3 +47,4 @@ Cyd Marek
 Bea Marlow
 Ada of Turin
 Bea of Turin
+typeof topojson

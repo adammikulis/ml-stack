@@ -10,3 +10,4 @@ dist/
 .build-work/
 packaging/build/
 *.spec.bak
+tests/support/vendor/
