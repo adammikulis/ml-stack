@@ -180,7 +180,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
 .ask-box > summary::before { content: "+"; font-family: var(--font-mono); font-size: 13px; color: var(--line-strong); }
 .ask-box[open] > summary::before { content: "\2212"; }
 .ask-box > summary:hover { color: var(--ink); }
-.ask { padding: 0 18px 14px; display: grid; gap: 6px; }
+.ask { padding: 0 18px 14px; display: grid; gap: 6px; min-width: 0; }
+/* the examples were in the placeholder, which cannot wrap out of a two-row box */
+.for-instance { margin: -2px 0 2px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
 .seat { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--line-strong);
         text-transform: none; letter-spacing: 0; }
 .chat { padding: 0 18px 12px; display: grid; gap: 8px; }
@@ -200,7 +202,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
                   border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
 .chat-row button { padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 8px;
                    background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
-.ask textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+.ask textarea { font: inherit; font-size: 13px; line-height: 1.45; padding: 6px 8px;
+                border: 1px solid var(--line); border-radius: 8px; min-height: 60px;
                 background: var(--surface-2); color: var(--ink); resize: vertical;
                 /* without a border box the padding pushes the field past its column and the
                    whole form scrolls sideways */
@@ -318,6 +321,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
 .node { cursor: pointer; }
 .node .hit { fill: transparent; }
 .node .mark { stroke: var(--surface); stroke-width: 2px; pointer-events: none; }
+.link.onpath { stroke: var(--accent); stroke-opacity: .95; stroke-width: 2.4; }
 .hitline { stroke: transparent; stroke-width: 14; cursor: pointer; }
 .hitline.gone { display: none; }
 .node.dim .mark { opacity: .15; } .node.dim text { opacity: .1; }
@@ -362,6 +366,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       <svg id="graph"></svg>
       <div id="graph3d" aria-label="Knowledge graph, 3D"></div>
       <div id="labels3d" aria-hidden="true"></div>
+      <label class="search">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <input id="gq" type="search" placeholder="Filter the graph" aria-label="Filter the graph">
+        <span class="count" id="qcount" aria-live="polite"></span>
+      </label>
       <div class="banner">
         <h1 id="title">__TITLE__</h1>
         <small id="subtitle"></small>
@@ -382,7 +391,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       <form class="ask" id="ask">
         <div class="kinds-of-ask" id="ask-kind"></div>
         <div class="picked" id="picked"><span class="hint-inline">Shift-click nodes or links to gather what this is about.</span></div>
-        <textarea id="ask-text" rows="2" placeholder="What should change? &quot;drop my location&quot;, &quot;I left that company&quot;, &quot;this is not my topic&quot;"></textarea>
+        <textarea id="ask-text" rows="3" placeholder="What should change?"></textarea>
+        <p class="for-instance">for instance: drop my location · I left that company · this is not my topic</p>
         <label class="who-i-am"><span>Which of these are you?</span>
           <select id="ask-who"><option value="">choose your name</option></select>
         </label>
@@ -397,6 +407,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <button id="spin" class="chip" aria-pressed="false">↻ spin</button>
         <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
         <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
+        <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
       </div>
     </section>
     <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
@@ -416,7 +427,6 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
           <div class="turns" id="qturns"></div>
           <form class="chat-row" id="qform">
             <input id="q" type="text" placeholder="Ask about this graph" autocomplete="off">
-          <span class="count" id="qcount" aria-live="polite" hidden></span>
             <button type="submit">Send</button>
           </form>
           <div class="qfoot"><span class="note" id="qnote" aria-live="polite"></span>
@@ -470,6 +480,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true,
                  map: true, split: 0, mapH: 0 };
   const picked = new Set();
+  let pathLinks = new Set();
   // the same file is served from this machine and published as a flat page; only the served
   // one has a model behind it, and it is served over the tunnel as much as over loopback
   const served = !!window.SLACK_GRAPH_LIVE;
@@ -542,6 +553,17 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
 
   // ---- one box: typing narrows the graph, Enter asks the model about what is in it
   const qBox = document.getElementById('q'), qCount = document.getElementById('qcount');
+  // the filter in the graph is the graph's own; asking the model pushes its answer into it
+  const gBox = document.getElementById('gq');
+  gBox.addEventListener('input', () => {
+    answer = null; pathLinks = new Set();
+    query = gBox.value.trim().toLowerCase();
+    refresh();
+  });
+  gBox.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    gBox.value = ''; query = ''; answer = null; refresh();
+  });
   const qTurns = document.getElementById('qturns');
   const detailPane = document.getElementById('detail'), askPane = document.getElementById('askpane');
   // Both panes are on screen at once, so nothing needs switching to. Asking scrolls its own
@@ -652,13 +674,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       query = out.ids.length ? '' : query;
       // the answer names things; the pane beside it shows the first of them, so reading the
       // answer and reading what it is about do not take turns
-      if (out.ids.length || said) {
-        const lit = new Set([...out.ids, ...namedIn(said).map(n => n.id)]);
-        answer = lit.size ? lit : null;
-        qCount.textContent = lit.size ? String(lit.size) : '';
+      if (out.ids.length) {
+        answer = new Set(out.ids);
+        pathLinks = new Set();
+        qCount.textContent = String(out.ids.length);
         refresh();
-        renderFound([...lit], said);
-        replayable(pending, [...lit], said);
+        renderFound(out.ids, said);
+        replayable(pending, out.ids, said);
         qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
         pending.classList.add('here');
       }
@@ -1303,6 +1325,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         .classed('dim', l => !vis.has(l.source.id) || !vis.has(l.target.id) || (focus && l.source.id !== selected && l.target.id !== selected))
         .classed('on', l => focus && (l.source.id === selected || l.target.id === selected));
     dots.classed('on', p => p.id === selected || !!(focus && focus.has(p.id)));
+    link.classed('onpath', l => pathLinks.has(l));
     node.classed('near', d => !!(found && found.near.has(d.id)))
         .classed('answer', d => !!(answer && answer.has(d.id)));
     qCount.textContent = found && !nothingFound()
@@ -1376,9 +1399,72 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     fit();
   }
 
+  // These were registered beside the legend chips, and went with them when those were removed.
+  // Attached next to what they call, where a later edit cannot lose them without noticing.
+  // What is lit up is a set of things; the question a set of things raises is how they join.
+  // Each one is drawn to whichever of the already-joined it can reach most cheaply, so the
+  // result is one connected piece rather than every pair's path laid on top of each other.
+  function nearestPath(from, targets) {
+    const cost = new Map([...from].map(id => [id, 0]));
+    const came = new Map();
+    const queue = [...from];
+    let best = null;
+    while (queue.length) {
+      queue.sort((a, b) => cost.get(a) - cost.get(b));
+      const here = queue.shift();
+      if (targets.has(here) && !from.has(here)) { best = here; break; }
+      for (const l of links) {
+        if (linkGone(l)) continue;
+        const a = l.source.id, b = l.target.id;
+        const other = a === here ? b : (b === here ? a : null);
+        if (!other) continue;
+        const through = cost.get(here) + 1 / Math.max(1, l.weight || 1);
+        if (through < (cost.has(other) ? cost.get(other) : Infinity)) {
+          cost.set(other, through);
+          came.set(other, [here, l]);
+          queue.push(other);
+        }
+      }
+    }
+    if (best === null) return null;
+    const walk = { nodes: [best], links: [] };
+    let here = best;
+    while (came.has(here)) {
+      const [previous, edge] = came.get(here);
+      walk.links.push(edge);
+      walk.nodes.push(previous);
+      here = previous;
+    }
+    return walk;
+  }
+  function findPaths() {
+    const lit = [...(answer || new Set([...(selected ? [selected] : []),
+      ...nodes.filter(n => matches(n) && found).map(n => n.id)]))];
+    const wanted = new Set(lit.filter(id => byId.has(id)));
+    if (wanted.size < 2) { qCount.textContent = 'pick two or more'; return; }
+    const joined = new Set([[...wanted][0]]);
+    const onPath = new Set();
+    let left = wanted.size - 1;
+    for (let guard = 0; guard < wanted.size + 4 && left > 0; guard++) {
+      const walk = nearestPath(joined, wanted);
+      if (!walk) break;
+      walk.nodes.forEach(id => joined.add(id));
+      walk.links.forEach(l => onPath.add(l));
+      left = [...wanted].filter(id => !joined.has(id)).length;
+    }
+    answer = joined;
+    pathLinks = onPath;
+    qCount.textContent = `${joined.size} joined` + (left ? `, ${left} unreachable` : '');
+    refresh();
+    renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '));
+  }
+  document.getElementById('findpath').addEventListener('click', findPaths);
+  document.getElementById('arrange').addEventListener('click', () => arrange());
+  document.getElementById('recenter').addEventListener('click', () => recenter());
+
   function select(id) {
     // an answer's highlight is a filter; choosing something yourself is how you take it back
-    if (id && answer) { answer = null; qCount.textContent = ''; }
+    if (id && answer) { answer = null; pathLinks = new Set(); qCount.textContent = ''; }
     selected = id;
     refresh();
     renderDetail(id ? byId.get(id) : null);
@@ -1471,15 +1557,20 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     });
   }
   function renderFound(ids, said) {
-    const named = namedIn(said)
-      .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0));
-    const shown = named.length ? named : ids.map(id => byId.get(id)).filter(Boolean).slice(0, 8);
+    // What is lit up is what the search found, never what the prose says. An answer is written
+    // for a person and uses ordinary words — "the community's fintech conversation" — and
+    // reading nodes out of it lights up whatever happens to share a name with one.
+    const here = ids.map(id => byId.get(id)).filter(Boolean);
+    const spoken = new Set(namedIn(said).map(n => n.id));
+    // the ones the answer talks about come first; the rest are the working behind it
+    const shown = here.sort((a, b) => (spoken.has(b.id) - spoken.has(a.id))
+      || PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0));
     fromAnswer = { ids, said };
     const el = document.getElementById('detail');
     el.innerHTML = `<h3>In this answer · ${shown.length}</h3>
       <div class="links">${shown.map(n => `<button data-id="${esc(n.id)}">${swatch(n.kind, 9)}<span class="rel">${esc(n.kind)}</span>${esc(n.label)}</button>`).join('')}</div>
-      ${(() => { const extra = ids.filter(id => !shown.some(n => n.id === id)).length;
-                 return extra ? `<p class="aside-note">${extra} more were read but not named.</p>` : ''; })()}
+      ${spoken.size && spoken.size < shown.length
+          ? `<p class="aside-note">The first ${spoken.size} are named in the answer; the rest are what it read to get there.</p>` : ''}
       ${footer()}`;
     wireRefs(el);
     el.scrollTop = 0;
