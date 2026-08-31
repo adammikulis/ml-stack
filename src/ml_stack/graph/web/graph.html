@@ -427,7 +427,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         <span class="count" id="qcount" aria-live="polite"></span>
       </label>
       <details class="ask-box" id="ask-box">
-      <summary>Ask for a change</summary>
+      <summary id="ask-summary">Ask for a change</summary>
       <form class="ask" id="ask">
         <div class="kinds-of-ask" id="ask-kind"></div>
         <div class="picked" id="picked"><span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span></div>
@@ -1300,7 +1300,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       if ((n.x - cam.x) * ax + (n.y - cam.y) * ay + (n.z - cam.z) * az <= 0) continue;
       const p = g3.graph2ScreenCoords(n.x, n.y, n.z);
       const dist = Math.hypot(n.x - cam.x, n.y - cam.y, n.z - cam.z) || 1;
-      const r = Math.max(7, rad3d(n) * perPx / dist);
+      // an honest click wobbles: the target is never smaller than 14px, plus a pad
+      const r = Math.max(14, rad3d(n) * perPx / dist + 4);
       const away = Math.hypot(p.x - (x - box.left), p.y - (y - box.top));
       if (away <= r && away < nearest) { nearest = away; best = n; }
     }
@@ -1992,12 +1993,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     return l ? `${shown(l.source)} ${relText(l.rel)} ${shown(l.target)}` : key;
   };
   function pick(key) {
-    if (!picked.size) document.getElementById('ask-box').open = true;
     picked.has(key) ? picked.delete(key) : picked.add(key);
     renderPicked();
     refresh();
   }
   function renderPicked() {
+    // the panel stays shut so the graph stays clickable; the summary says what is gathered
+    document.getElementById('ask-summary').textContent =
+      picked.size ? `Ask for a change · ${picked.size} gathered` : 'Ask for a change';
     if (!picked.size) {
       pickedBox.innerHTML = '<span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span>';
       return;
@@ -2285,10 +2288,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     const stamp = t => String(t || '').replace('T', ' ').slice(0, 16);
     const editHtml = e => `<div class="edit">${esc(editSaid(e))}${(e.problems || [])
       .map(x => `<div class="warn">the graph says: ${esc(x)}</div>`).join('')}</div>`;
+    let showDone = false;
     function paintReview(rows) {
       reviewBox.hidden = false;
-      reviewCount.textContent = rows.length;
-      reviewList.innerHTML = rows.map(p => `<div class="req">
+      // an addressed request leaves the list; a small toggle keeps it reachable for Undo
+      const settled = p => p.status === 'accepted' || p.status === 'refused';
+      const open = rows.filter(p => !settled(p)), done = rows.filter(settled);
+      reviewCount.textContent = open.length;
+      const req = p => `<div class="req">
         <div class="meta"><span>${esc(stamp(p.at))}</span><span>${esc(p.kind || '')}</span>
           <span class="status">${esc(p.status || '')}</span>
           <span>${p.attested ? 'attested' : 'NOT ATTESTED'}</span></div>
@@ -2301,7 +2308,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
           ? `<button type="button" data-id="${esc(p.id)}" data-act="undo">Undo</button>`
           : `<button type="button" data-id="${esc(p.id)}" data-act="accept">Accept</button>
              <button type="button" data-id="${esc(p.id)}" data-act="refuse">Refuse</button>`}</div>
-      </div>`).join('');
+      </div>`;
+      reviewList.innerHTML = open.map(req).join('')
+        + (open.length ? '' : '<div class="edit">nothing waiting</div>')
+        + (done.length ? `<button type="button" class="chip" id="review-done">${done.length} addressed · ${showDone ? 'hide' : 'show'}</button>` : '')
+        + (showDone ? done.map(req).join('') : '');
+      const toggle = document.getElementById('review-done');
+      if (toggle) toggle.addEventListener('click', () => { showDone = !showDone; paintReview(rows); });
       reviewList.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', async () => {
         b.disabled = true;
         try {

@@ -356,21 +356,28 @@ def test_the_review_panel_lists_what_the_server_sent(open_page):
     """Fails when the loadReview() call at the bottom of the review block is deleted."""
     page, errors = open_page(served=True, review=REVIEW, origin="http://127.0.0.1/")
     page.wait_for_selector("#review-box:not([hidden])", state="attached")
-    assert page.text_content("#review-count") == "2"
+    # an addressed request has left the list; the count is what still waits
+    assert page.text_content("#review-count") == "1"
     page.eval_on_selector("#review-box", "el => { el.open = true }")
     reqs = page.locator("#review-list .req")
-    assert reqs.count() == 2
+    assert reqs.count() == 1
     first = reqs.nth(0).inner_text()
     assert "2026-01-02 09:00" in first and "Fix my information" in first
     assert "attested" in first and "NOT ATTESTED" not in first
     assert "from: Ada Lovelace" in first
     assert "unjoin person:ada -works_on-> topic:iron — asked to" in first
+    assert reqs.nth(0).locator('button[data-act="accept"]').count() == 1
+    assert reqs.nth(0).locator('button[data-act="refuse"]').count() == 1
+    # the addressed one is a toggle away, so Undo stays reachable
+    toggle = page.locator("#review-done")
+    assert "1 addressed" in toggle.inner_text()
+    toggle.click()
+    reqs = page.locator("#review-list .req")
+    assert reqs.count() == 2
     second = reqs.nth(1).inner_text()
     assert "NOT ATTESTED" in second
     assert "not attested as their own information" in second
     assert "the graph says: the entry 'org:quenlow' is not in the graph" in second
-    assert reqs.nth(0).locator('button[data-act="accept"]').count() == 1
-    assert reqs.nth(0).locator('button[data-act="refuse"]').count() == 1
     assert reqs.nth(1).locator('button[data-act="undo"]').count() == 1
     assert "Refresh graph" in page.text_content("#review-box .review-note")
     assert errors == []
