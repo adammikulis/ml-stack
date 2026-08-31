@@ -256,3 +256,21 @@ def test_hidden_beats_any_display_rule(open_page):
         " el.hidden = false; return d; }")
     assert shown == "none"
     assert errors == []
+
+
+def test_a_second_ask_carries_what_is_lit(open_page):
+    """Fails when the held array is dropped from the /ask POST body."""
+    reply = {"content": "Ada Lovelace works on iron.",
+             "ids": ["person:ada", "topic:iron"], "why": ""}
+    page, errors = open_page(served=True, ask_reply=reply)
+    page.wait_for_selector("#stats b")
+    page.fill("#q", "who works on iron?")
+    with page.expect_request("**/ask") as first:
+        page.press("#q", "Enter")
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer \u00b7 2")
+    page.fill("#q", "and the org?")
+    with page.expect_request("**/ask") as second:
+        page.press("#q", "Enter")
+    assert "held" not in json.loads(first.value.post_data)
+    assert json.loads(second.value.post_data)["held"] == ["person:ada", "topic:iron"]
+    assert errors == []

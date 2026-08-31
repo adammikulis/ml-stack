@@ -25,7 +25,9 @@ SYSTEM = (
     "You are answering a question about a graph. You cannot see it; you read it with the tools "
     "you have been given. Look up the names in the question to get their ids, read what is held "
     "on them, and when the question is about how two things relate, trace the path between "
-    "them.\n\n"
+    "them. When some entries are named as currently highlighted and the question builds on what "
+    "is already shown, look at those entries again so they stay in the answer; when it moves to "
+    "something else, leave them.\n\n"
     "Then write the answer. Do not narrate what you looked up — the reader can see that "
     "already. Say what the entries add up to: what they have in common, where they differ, "
     "what connects them, what a reader should do with it. Quote the words that make your point "
@@ -188,13 +190,15 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
              rounds: int = ROUNDS, limit: int = LIT,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
-             finder: Any = None) -> Answer:
+             finder: Any = None, held: Sequence[str] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
     ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does. ``tools`` is
     ``[(schema, callable), ...]``, each callable taking the parsed arguments mapping;
     ``tools_for(graph)`` by default. ``finder`` replaces just look_up's callable.
+    ``held`` names entries already highlighted for the reader: they are told to the model
+    by label and id, and enter ``ids`` only if a tool call touches them.
     """
     if tools is None:
         tools = tools_for(graph, finder=finder)
@@ -206,6 +210,11 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     run = {str((schema.get("function") or {}).get("name") or ""): fn for schema, fn in tools}
 
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
+    lit = [str(h) for h in held if str(h) in known]
+    if lit:
+        label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
+        system = (system + "\n\nCurrently highlighted: "
+                  + ", ".join(f"{label[h]} ({h})" for h in lit))
     out = Answer()
 
     def note(into: list[str], ids: Sequence[str]) -> None:

@@ -659,6 +659,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (e) e.preventDefault();
     const question = qBox.value.trim();
     if (!question) return;
+    // what is lit right now rides along, so the model can keep it or leave it
+    const held = answer ? [...answer] : [];
+    if (selected && !held.includes(selected)) held.push(selected);
     // the plain text search runs first, so something is lit up while the model thinks
     query = question.toLowerCase();
     answer = null;
@@ -683,7 +686,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     const pending = say('assistant', '…');
     try {
       const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ question, turns: turns.slice(0, -1) }) });
+                                      body: JSON.stringify({ question, turns: turns.slice(0, -1),
+                                                             ...(held.length ? { held } : {}) }) });
       const out = await r.json();
       if (!r.ok) {
         pending.textContent = out.error || 'the model did not answer';
