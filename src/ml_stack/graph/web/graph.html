@@ -52,7 +52,8 @@ header h1 small { display: block; font: 400 12px/1.4 var(--font-body); color: va
 .stats b { color: var(--ink); font-weight: 600; font-family: var(--font-mono); }
 .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
 .chip[aria-pressed="true"] { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
-.chip .sw { width: 10px; height: 10px; }
+.chip .sw { width: 9px; height: 9px; }
+.panel .sw, .links .sw { width: 9px; height: 9px; flex: none; }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { padding: 5px 12px; border: 0; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
 .seg button + button { border-left: 1px solid var(--line); }
@@ -123,13 +124,20 @@ header h1 small { display: block; font: 400 12px/1.4 var(--font-body); color: va
 #qclear:hover { color: var(--ink); }
 
 header { position: relative; }
-main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); min-height: 0; }
+main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 6px minmax(300px, 1fr);
+  min-height: 0; }
+/* the borders are handles: a graph is never the right size for everyone */
+.grip { background: var(--line); position: relative; z-index: 4; touch-action: none; }
+.grip::after { content: ""; position: absolute; inset: -3px; }
+.grip:hover, .grip.dragging { background: var(--accent); }
+.grip.vertical { cursor: col-resize; }
+.grip.horizontal { cursor: row-resize; height: 6px; }
 .graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
 .graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
 .hint { position: absolute; right: 14px; top: 50px; font-size: 11px; color: var(--ink-3); text-align: right; }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
-aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
+aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
 /* the question on the left, what it is about on the right */
 .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
 .askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
@@ -160,6 +168,13 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
 .turns .t { padding: 6px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2);
             white-space: pre-wrap; overflow-wrap: anywhere; }
 .turns .t.mine { background: var(--ink); color: var(--bg); justify-self: end; max-width: 85%; }
+.turns .t.replay { cursor: pointer; }
+.turns .t.replay:hover { background: var(--surface); outline: 1px solid var(--line-strong); }
+.turns .t.here { outline: 2px solid var(--accent); }
+.show-again { display: block; margin-top: 8px; padding: 3px 9px; font: inherit; font-size: 11px;
+  cursor: pointer; border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface); color: var(--ink-2); }
+.show-again:hover { color: var(--ink); border-color: var(--accent); }
 .chat-row { display: flex; gap: 7px; }
 .chat-row input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 6px 9px;
                   border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
@@ -199,7 +214,7 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
 .map-box > summary:hover { color: var(--ink); }
 .map-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
 .map-wrap { position: relative; background: var(--sea); }
-.map-wrap svg { width: 100%; height: auto; display: block; }
+.map-wrap svg { width: 100%; height: var(--map-h, auto); display: block; }
 .detail { overflow: auto; padding: 16px 18px 24px; }
 .detail[hidden] { display: none; }
 .detail h2 { font: 700 20px/1.15 var(--font-display); margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
@@ -207,6 +222,11 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
 .attrs { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0 14px; }
 .attrs dt { color: var(--ink-3); } .attrs dd { margin: 0; }
 .detail h3 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
+.detail h3:first-child { margin-top: 0; }
+.aside-note { font-size: 11px; color: var(--ink-3); margin: 8px 0 0; }
+.back { margin-top: 14px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.back:hover { color: var(--ink); }
 .read { margin-top: 7px; }
 .read > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
   font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--line-strong); }
@@ -360,6 +380,8 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
         <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
       </div>
     </section>
+    <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
+         aria-label="Resize the graph"></div>
     <aside>
       <details class="map-box" id="map-box" open>
         <summary><b id="located">0</b> <span id="on-map">on the map</span></summary>
@@ -367,6 +389,8 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
           <svg id="map"></svg>
         </div>
       </details>
+      <div class="grip horizontal" id="grip-y" role="separator" aria-orientation="horizontal"
+           aria-label="Resize the map"></div>
       <div class="two">
         <div class="askpane" id="askpane">
           <h3 class="pane-title">Ask the model</h3>
@@ -410,7 +434,7 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   const p2pCount = G.edges.filter(e => kindById[e.source] === 'person'
                                     && kindById[e.target] === 'person').length;
   const color = k => `var(--k-${k})`;
-  const swatch = (k, size = 10) => `<svg class="sw" width="${size}" height="${size}" viewBox="-6 -6 12 12"><path d="${d3.symbol().type(kindOf[k].shape).size(56)()}" fill="${color(k)}"/></svg>`;
+  const swatch = (k, size = 9) => `<svg class="sw" width="${size}" height="${size}" viewBox="-7 -7 14 14"><path d="${d3.symbol().type(kindOf[k].shape).size(40)()}" fill="${color(k)}"/></svg>`;
   // show: drawn. hide: masked, but still shaping the layout. remove: out of the simulation, so
   // everything else re-settles without it.
   const STATES = ['show', 'hide', 'remove'];
@@ -423,7 +447,8 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   // switch of their own on top of the per-relation ones
   display.between = 'show';
   const colors = {};
-  const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true, map: true };
+  const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true,
+                 map: true, split: 0, mapH: 0 };
   const picked = new Set();
   // the same file is served from this machine and published as a flat page; only the served
   // one has a model behind it, and it is served over the tunnel as much as over loopback
@@ -516,6 +541,27 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
     qTurns.scrollTop = qTurns.scrollHeight;
     return el;
   }
+  // Every answer stays clickable: what it lit up and what it was about come back with it, so
+  // the conversation is the history of the graph as much as of the words.
+  function replayable(el, ids, said) {
+    el.classList.add('replay');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'show-again';
+    button.textContent = `show these ${ids.length} on the graph`;
+    el.appendChild(button);
+    const again = () => {
+      selected = null;
+      answer = ids.length ? new Set(ids) : null;
+      qCount.textContent = ids.length ? String(ids.length) : '';
+      refresh();
+      renderFound(ids, said);
+      qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
+      el.classList.add('here');
+    };
+    button.addEventListener('click', e => { e.stopPropagation(); again(); });
+    el.addEventListener('click', again);
+  }
   function openAnswers(note) {
     face('ask');
     if (note !== undefined) qNote.textContent = note;
@@ -592,10 +638,15 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
       query = out.ids.length ? '' : query;
       // the answer names things; the pane beside it shows the first of them, so reading the
       // answer and reading what it is about do not take turns
-      if (out.ids.length) {
-        const best = out.ids.map(id => byId.get(id)).filter(Boolean)
-          .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0))[0];
-        if (best) { selected = best.id; refresh(); renderDetail(best); raiseSelected(); }
+      if (out.ids.length || said) {
+        const lit = new Set([...out.ids, ...namedIn(said).map(n => n.id)]);
+        answer = lit.size ? lit : null;
+        qCount.textContent = lit.size ? String(lit.size) : '';
+        refresh();
+        renderFound([...lit], said);
+        replayable(pending, [...lit], said);
+        qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
+        pending.classList.add('here');
       }
       qCount.textContent = out.ids.length ? String(out.ids.length) : '';
       qNote.textContent = (out.ids.length ? `${out.ids.length} lit up` : 'nothing to light up')
@@ -613,6 +664,21 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   const links = G.edges.filter(e => byId.has(e.source) && byId.has(e.target)).map(e => ({ ...e }));
   // Who counts as joined to whom follows what is on screen. Reaching through a relation you
   // have switched off lit up nodes with no visible edge to explain them.
+  // A pair joined more than once — A mentions B and B replied to A — used to be one line with
+  // one arrowhead, because both were drawn on exactly the same two points. Each edge is nudged
+  // off the centre line instead, so both are there to see and to click.
+  (() => {
+    const bundles = new Map();
+    for (const l of links) {
+      const pair = [l.source, l.target].sort().join('\u0000');
+      (bundles.get(pair) || bundles.set(pair, []).get(pair)).push(l);
+    }
+    for (const together of bundles.values()) {
+      if (together.length < 2) { together[0].bend = 0; continue; }
+      together.forEach((l, i) => { l.bend = (i - (together.length - 1) / 2) * 9; });
+    }
+  })();
+
   const neighbors = new Map();
   const endOf = x => (typeof x === 'object' ? x : byId.get(x));
   function buildNeighbors() {
@@ -756,18 +822,29 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
 
   sim.on('tick', () => {
     const k = d3.zoomTransform(svg.node()).k;
-    link.each(function (l) {
+    // where an edge sits, once it is nudged clear of anything sharing its two ends
+    const ends = l => {
       const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
       const d = Math.hypot(dx, dy) || 1;
+      const off = (l.bend || 0), ox = -dy / d * off, oy = dx / d * off;
       const head = radius(l.target) + 5 / k, tail = radius(l.source) + 1;
-      this.setAttribute('x1', l.source.x + dx / d * tail);
-      this.setAttribute('y1', l.source.y + dy / d * tail);
-      this.setAttribute('x2', l.target.x - dx / d * head);
-      this.setAttribute('y2', l.target.y - dy / d * head);
+      return [l.source.x + dx / d * tail + ox, l.source.y + dy / d * tail + oy,
+              l.target.x - dx / d * head + ox, l.target.y - dy / d * head + oy];
+    };
+    link.each(function (l) {
+      const [x1, y1, x2, y2] = ends(l);
+      this.setAttribute('x1', x1); this.setAttribute('y1', y1);
+      this.setAttribute('x2', x2); this.setAttribute('y2', y2);
     });
-    hitline.attr('x1', l => l.source.x).attr('y1', l => l.source.y)
-           .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
-    elabel.attr('transform', l => `translate(${(l.source.x + l.target.x) / 2},${(l.source.y + l.target.y) / 2}) scale(${1 / k})`);
+    hitline.each(function (l) {
+      const [x1, y1, x2, y2] = ends(l);
+      this.setAttribute('x1', x1); this.setAttribute('y1', y1);
+      this.setAttribute('x2', x2); this.setAttribute('y2', y2);
+    });
+    elabel.attr('transform', l => {
+      const [x1, y1, x2, y2] = ends(l);
+      return `translate(${(x1 + x2) / 2},${(y1 + y2) / 2}) scale(${1 / k})`;
+    });
     node.attr('transform', d => `translate(${d.x},${d.y})`);
     if (sim.alpha() < 0.06) layoutLabels();
   });
@@ -796,10 +873,56 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   sim.on('end', () => { if (!fitted || needsFit) { needsFit = false; fit(); } });
   setTimeout(() => { if (!fitted) fit(); }, 1500);
   svg.on('click', e => { if (e.target === svg.node()) select(null); });
+  if (view.split) setSplit(view.split);
+  if (view.mapH) setMapHeight(view.mapH);
   new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
   if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html('<div><b>No messages yet.</b><br>The graph fills in as the channels are read.</div>');
 
   // ---- map
+  // ---- the two borders are handles
+  function draggable(grip, apply) {
+    let dragging = false;
+    const stop = () => {
+      if (!dragging) return;
+      dragging = false;
+      grip.classList.remove('dragging');
+      document.body.style.userSelect = '';
+      saveDisplay();
+    };
+    grip.addEventListener('pointerdown', e => {
+      dragging = true;
+      grip.classList.add('dragging');
+      document.body.style.userSelect = 'none';
+      grip.setPointerCapture(e.pointerId);
+    });
+    grip.addEventListener('pointermove', e => { if (dragging) { apply(e); e.preventDefault(); } });
+    grip.addEventListener('pointerup', stop);
+    grip.addEventListener('pointercancel', stop);
+    // a double click puts it back where it started, which is easier than aiming for it
+    grip.addEventListener('dblclick', () => { apply(null); saveDisplay(); });
+  }
+
+  const appMain = document.querySelector('main');
+  function setSplit(px) {
+    view.split = px;
+    document.documentElement.style.setProperty('--split', px ? px + 'px' : '1.6fr');
+    W = wrap.clientWidth; H = wrap.clientHeight;
+    sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.15).restart();
+    if (g3) { g3.width(W); g3.height(H); }
+    layoutLabels();
+  }
+  function setMapHeight(px) {
+    view.mapH = px;
+    document.documentElement.style.setProperty('--map-h', px ? px + 'px' : 'auto');
+  }
+  draggable(document.getElementById('grip-x'), e => setSplit(
+    e ? Math.max(240, Math.min(e.clientX - appMain.getBoundingClientRect().left,
+                               appMain.clientWidth - 306)) : 0));
+  draggable(document.getElementById('grip-y'), e => {
+    const top = document.querySelector('.map-wrap').getBoundingClientRect().top;
+    setMapHeight(e ? Math.max(90, Math.min(e.clientY - top, window.innerHeight - 240)) : 0);
+  });
+
   const mapBox = document.getElementById('map-box');
   mapBox.open = view.map !== false;
   mapBox.addEventListener('toggle', () => { view.map = mapBox.open; saveDisplay(); });
@@ -1239,6 +1362,8 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
   }
 
   function select(id) {
+    // an answer's highlight is a filter; choosing something yourself is how you take it back
+    if (id && answer) { answer = null; qCount.textContent = ''; }
     selected = id;
     refresh();
     renderDetail(id ? byId.get(id) : null);
@@ -1313,10 +1438,42 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
         <button data-id="${esc(r.b.id)}">${esc(r.b.label)}</button>
       </div>`).join('')}</div>`;
   }
+  // The ids that come back are everything the tools touched — the working, not the answer.
+  // Filling this pane with all of it buries what was asked about, so the pane lists the
+  // entries the answer actually names, and the rest merely light up on the graph.
+  let fromAnswer = null;
+  // An answer names things the tools never handed back as ids — it reads a quote and names the
+  // person in it. So the match is against the whole graph, on whole words, and anything the
+  // tools opened without the answer mentioning is counted rather than listed.
+  const words = t => ' ' + String(t).toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim() + ' ';
+  function namedIn(said) {
+    const text = words(said);
+    return nodes.filter(n => {
+      const label = words(n.label);
+      // a label that normalises to nothing would match the gap between any two words
+      return label.length > 2 && n.label.length >= 3 && !gone(n) && text.includes(label);
+    });
+  }
+  function renderFound(ids, said) {
+    const named = namedIn(said)
+      .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0));
+    const shown = named.length ? named : ids.map(id => byId.get(id)).filter(Boolean).slice(0, 8);
+    fromAnswer = { ids, said };
+    const el = document.getElementById('detail');
+    el.innerHTML = `<h3>In this answer · ${shown.length}</h3>
+      <div class="links">${shown.map(n => `<button data-id="${esc(n.id)}">${swatch(n.kind, 9)}<span class="rel">${esc(n.kind)}</span>${esc(n.label)}</button>`).join('')}</div>
+      ${(() => { const extra = ids.filter(id => !shown.some(n => n.id === id)).length;
+                 return extra ? `<p class="aside-note">${extra} more were read but not named.</p>` : ''; })()}
+      ${footer()}`;
+    wireRefs(el);
+    el.scrollTop = 0;
+  }
+
   function renderDetail(n) {
     const el = document.getElementById('detail');
     if (!n) {
-      el.innerHTML = `<div class="placeholder"><h2 style="color:var(--ink)">${esc(COPY.heading)}</h2><p>${esc(COPY.blurb)}</p>${groundHtml()}${closeHtml()}${COPY.note ? `<p>${esc(COPY.note)}</p>` : ''}${footer()}</div>`;
+      el.innerHTML = `<div class="placeholder"><h3>${esc(COPY.heading)}</h3>${groundHtml()}${closeHtml()}${COPY.note ? `<p class="aside-note">${esc(COPY.note)}</p>` : ''}${footer()}</div>`;
       wireRefs(el);
       return;
     }
@@ -1337,8 +1494,11 @@ aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height:
       ${attrs.length ? `<dl class="attrs">${attrs.map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${k === 'url' ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd>`).join('')}</dl>` : ''}
       ${rels.length ? `<details class="fold"><summary>Connections · ${rels.length}${hiddenRels ? ` <span class="muted">(${hiddenRels} hidden)</span>` : ''}</summary><div class="links">${rels.map(l => { const o = l.source.id === n.id ? l.target : l.source; return `<button data-id="${esc(o.id)}">${swatch(o.kind, 9)}<span class="rel">${l.source.id === n.id ? l.rel : '← ' + l.rel}</span>${esc(o.label)}</button>`; }).join('')}</div></details>` : ''}
       ${quotes.length ? `<h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}` : ''}
+      ${fromAnswer ? `<button class="back" id="back-to-answer">← back to the answer</button>` : ''}
       ${footer()}`;
     wireRefs(el);
+    const back = document.getElementById('back-to-answer');
+    if (back) back.addEventListener('click', () => renderFound(fromAnswer.ids, fromAnswer.said));
     el.scrollTop = 0;
   }
   function wireRefs(el) {
