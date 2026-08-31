@@ -202,6 +202,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   font-family: var(--font-mono); font-size: 10px; color: var(--line-strong); }
 .turns .t.replay:hover { background: var(--surface); outline: 1px solid var(--line-strong); }
 .turns .t.here { outline: 2px solid var(--accent); }
+/* an answer that is a receipt rather than an answer: the graph has not moved */
+.turns .t .queued { display: block; margin-top: 6px; font-size: 11px; color: var(--k-org); }
 .show-again { display: block; margin-top: 8px; padding: 3px 9px; font: inherit; font-size: 11px;
   cursor: pointer; border: 1px solid var(--line-strong); border-radius: 8px;
   background: var(--surface); color: var(--ink-2); }
@@ -736,6 +738,16 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       }
       const said = out.content || out.why || 'Nothing in the graph answers that.';
       pending.textContent = said;
+      // asking for a change is not asking a question: it went to the review queue, and saying
+      // so on the bubble is the only place the difference is visible
+      if ((out.raised || []).length) {
+        const note = document.createElement('span');
+        note.className = 'queued';
+        const n = out.raised.length;
+        note.textContent = `${n} change request${n === 1 ? '' : 's'} awaiting review — the graph is unchanged.`;
+        pending.appendChild(note);
+        if (window.reloadReview) window.reloadReview();
+      }
       turns.push({ role: 'assistant', content: said });
       // what the model read and traced is the answer; what it merely found is a search
       // result, and lighting search results floods the graph
@@ -2341,6 +2353,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       } catch (err) {}
     }
     loadReview();
+    // the chat can raise a request too, and it is declared far above this block
+    window.reloadReview = loadReview;
   }
 })();
 </script>
