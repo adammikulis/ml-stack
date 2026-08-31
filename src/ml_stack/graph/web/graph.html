@@ -1661,9 +1661,18 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     }).join('');
     return `<blockquote class="msg">${m.url ? `<a class="open" href="${esc(m.url)}" target="_blank" rel="noopener">Open in Slack ↗</a>` : ''}<span class="who">${esc(m.sender)}</span><span class="when">${esc(m.channel)} · ${when(m.ts)}</span><br>${linkify(m.text)}${facts ? `<ul class="facts">${facts}</ul>` : ''}${readHtml(m)}</blockquote>`;
   }
+  // A model has a name; the file it arrived in has a filename, and nobody wants to read
+  // "-mxfp4-00001-of-00003.gguf" to find out which model read their messages.
+  function modelName(file) {
+    return String(file).replace(/\.(gguf|safetensors|bin)$/i, '')
+      .replace(/-\d{5}-of-\d{5}$/i, '')
+      .replace(/[-_.](mxfp4|q\d[_a-z0-9]*|iq\d[_a-z0-9]*|ud|bf16|f16|f32|fp16|moe)$/gi, '')
+      .replace(/[-_.](mxfp4|q\d[_a-z0-9]*|iq\d[_a-z0-9]*|ud|bf16|f16|f32|fp16|moe)$/gi, '')
+      .replace(/[-_.]+$/, '');
+  }
   function footer() {
     const meta = G.meta || {};
-    return `<div class="foot">${DATA.author ? esc(DATA.author) + ' · ' : ''}built ${meta.built_at ? esc(meta.built_at.replace('T', ' ').slice(0, 16)) : '—'}${meta.model ? ' · ' + esc(meta.model) : ''} · every node and link lists the messages it came from</div>`;
+    return `<div class="foot">${DATA.author ? esc(DATA.author) + ' · ' : ''}built ${meta.built_at ? esc(meta.built_at.replace('T', ' ').slice(0, 16)) : '—'}${meta.model ? ' · ' + esc(modelName(meta.model)) : ''}</div>`;
   }
   function selectEdge(l) {
     selected = null; refresh();
@@ -1950,8 +1959,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     const about = document.createElement('div');
     about.className = 'about';
     about.innerHTML = [
-      ['read by', meta.model || '—'],
-      ['embedded by', DATA.embedModel || '—'],
+      ['read by', meta.model ? modelName(meta.model) : '—'],
+      ['embedded by', DATA.embedModel ? modelName(DATA.embedModel) : '—'],
       ['built', (meta.built_at || '').replace('T', ' ').slice(0, 16) || '—'],
       ['channels', (meta.channels || []).join(', ') || '—'],
       ['created by', DATA.author || '—'],
