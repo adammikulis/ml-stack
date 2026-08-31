@@ -7,6 +7,7 @@ nothing about it.
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import textwrap
@@ -16,8 +17,8 @@ from pathlib import Path
 import pytest
 
 from ml_stack.graph import access
-from ml_stack.graph.access import (LockError, holder, lock_path, pid_alive, reading,
-                                   recover_stale, release_all, write_lock, writing)
+from ml_stack.graph.access import (LockError, ReaderCache, holder, lock_path, pid_alive,
+                                   reading, recover_stale, release_all, write_lock, writing)
 
 
 class Fake:
@@ -172,3 +173,63 @@ def test_releasing_closes_what_this_process_is_holding(tmp_path):
         pass
     assert release_all() == [str(path)]
     assert Fake.closed == 1
+
+
+def until(condition, timeout_s=2.0):
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.01)
+    return condition()
+
+
+def a_live_foreign_holder(path):
+    # pid 1 exists, is somebody else's, and is not this process
+    lock_path(path).write_text(json.dumps(
+        {"pid": 1, "host": socket.gethostname(), "since": time.time()}), encoding="utf-8")
+
+
+def test_an_idle_reader_is_closed_by_the_reaper(tmp_path):
+    cache = ReaderCache(idle_ttl_s=0.05, reap_interval_s=0.02)
+    path = a_store(tmp_path)
+    with cache.reading(path, Fake):
+        pass
+    assert Fake.closed == 0
+    assert until(lambda: Fake.closed == 1)
+    assert cache._readers == {}
+
+
+def test_the_reaper_ends_itself_once_the_cache_is_empty(tmp_path):
+    cache = ReaderCache(idle_ttl_s=0.05, reap_interval_s=0.02)
+    path = a_store(tmp_path)
+    with cache.reading(path, Fake):
+        thread = cache._reaper
+        assert thread is not None and thread.is_alive()
+    assert until(lambda: cache._reaper is None)
+    thread.join(timeout=2)
+    assert not thread.is_alive()
+
+
+def test_the_reaper_evicts_a_reader_a_writer_is_waiting_on(tmp_path):
+    cache = ReaderCache(reap_interval_s=0.02)
+    path = a_store(tmp_path)
+    with cache.reading(path, Fake):
+        a_live_foreign_holder(path)
+        entry = cache._readers[str(path)]
+        assert until(lambda: entry.evicted)
+        assert Fake.closed == 0               # still in use; evicted, not yanked
+    assert Fake.closed == 1                   # let go the moment the last reader left
+    assert cache._readers == {}
+
+
+def test_a_new_reader_lets_go_of_a_cached_handle_while_a_writer_waits(tmp_path):
+    cache = ReaderCache(poll_s=0.01)
+    path = a_store(tmp_path)
+    with cache.reading(path, Fake):
+        pass
+    assert Fake.closed == 0
+    a_live_foreign_holder(path)
+    cache._yield_to_writer(str(path), timeout_s=0.1)
+    assert Fake.closed == 1
+    assert cache._readers == {}

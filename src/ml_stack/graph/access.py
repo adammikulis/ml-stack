@@ -220,135 +220,169 @@ class _Cached:
     evicted: bool = False
 
 
-_readers: dict[str, _Cached] = {}
-_guard = threading.Lock()
-_reaper: threading.Thread | None = None
-
-
-def _close(key: str, entry: _Cached) -> None:
-    _readers.pop(key, None)
-    try:
-        entry.store.close()
-    except Exception:  # noqa: BLE001 - closing twice is not worth an error
-        pass
-
-
-def _expire(now: float) -> None:
-    for key, entry in list(_readers.items()):
-        idle = entry.refs == 0 and now - entry.last_used >= READER_IDLE_TTL_S
-        if idle or (entry.refs == 0 and entry.evicted):
-            _close(key, entry)
-
-
 def _writer_waiting(key: str) -> bool:
     who = holder(key)
     return who is not None and who.alive and who.pid != os.getpid()
 
 
-def _reap() -> None:
-    while True:
-        time.sleep(_REAPER_INTERVAL_S)
-        with _guard:
-            if not _readers:
-                globals()["_reaper"] = None
-                return
-            _expire(time.monotonic())
-            for key, entry in list(_readers.items()):
-                # a writer is waiting on a file this process is only holding out of habit
-                if _writer_waiting(key):
-                    entry.evicted = True
-                    if entry.refs == 0:
-                        _close(key, entry)
+class ReaderCache:
+    """The cached read-only handles of one process: the cache, its guard, and the reaper
+    thread that closes idle handles. Timings are instance attributes."""
+
+    def __init__(self, *, idle_ttl_s: float = READER_IDLE_TTL_S,
+                 write_timeout_s: float = WRITE_LEASE_TIMEOUT_S,
+                 yield_timeout_s: float = READER_YIELD_TIMEOUT_S,
+                 reap_interval_s: float = _REAPER_INTERVAL_S,
+                 poll_s: float = _READER_POLL_S) -> None:
+        self.idle_ttl_s = idle_ttl_s
+        self.write_timeout_s = write_timeout_s
+        self.yield_timeout_s = yield_timeout_s
+        self.reap_interval_s = reap_interval_s
+        self.poll_s = poll_s
+        self._readers: dict[str, _Cached] = {}
+        self._guard = threading.Lock()
+        self._reaper: threading.Thread | None = None
+
+    def _close(self, key: str, entry: _Cached) -> None:
+        self._readers.pop(key, None)
+        try:
+            entry.store.close()
+        except Exception:  # noqa: BLE001 - closing twice is not worth an error
+            pass
+
+    def _expire(self, now: float) -> None:
+        for key, entry in list(self._readers.items()):
+            idle = entry.refs == 0 and now - entry.last_used >= self.idle_ttl_s
+            if idle or (entry.refs == 0 and entry.evicted):
+                self._close(key, entry)
+
+    def _reap(self) -> None:
+        while True:
+            time.sleep(self.reap_interval_s)
+            with self._guard:
+                if not self._readers:
+                    self._reaper = None
+                    return
+                self._expire(time.monotonic())
+                for key, entry in list(self._readers.items()):
+                    # a writer is waiting on a file this process is only holding out of habit
+                    if _writer_waiting(key):
+                        entry.evicted = True
+                        if entry.refs == 0:
+                            self._close(key, entry)
+
+    def _ensure_reaper(self) -> None:
+        if self._reaper is None or not self._reaper.is_alive():
+            self._reaper = threading.Thread(target=self._reap, name="ml-stack-store-reaper",
+                                            daemon=True)
+            self._reaper.start()
+
+    def _yield_to_writer(self, key: str, *, timeout_s: float | None = None) -> None:
+        """Wait while somebody else is writing, rather than failing into their lock."""
+        wait = self.yield_timeout_s if timeout_s is None else timeout_s
+        deadline = time.monotonic() + wait
+        while _writer_waiting(key) and time.monotonic() < deadline:
+            with self._guard:
+                entry = self._readers.get(key)
+                if entry is not None and entry.refs == 0:
+                    self._close(key, entry)
+            time.sleep(self.poll_s)
+
+    @contextmanager
+    def reading(self, path: str | Path, opener: Callable[[Path], Any]) -> Iterator[Any]:
+        """A read-only handle for the length of the block.
+
+        Handles are cached and reference counted, so readers in one process share one and it
+        is closed once idle — a parked handle blocks writers in other processes for no
+        benefit.
+        """
+        key = str(Path(path).expanduser())
+        if not Path(key).exists():
+            # opening read-only cannot create a store, and silently creating one would hand
+            # back an empty graph instead of a bad path
+            raise FileNotFoundError(f"no store at {key}")
+        self._yield_to_writer(key)
+        with self._guard:
+            self._expire(time.monotonic())
+            entry = self._readers.get(key)
+            if entry is None:
+                try:
+                    entry = _Cached(store=opener(Path(key)))
+                except Exception as exc:  # noqa: BLE001 - whatever the opener raises
+                    who = holder(key)
+                    raise LockError(
+                        f"could not open {key} read-only" +
+                        (f": {who.describe()} holds it" if who else f": {exc}")) from exc
+                self._readers[key] = entry
+                self._ensure_reaper()
+            entry.refs += 1
+        try:
+            yield entry.store
+        finally:
+            with self._guard:
+                entry.refs -= 1
+                entry.last_used = time.monotonic()
+                now_close = entry.evicted and entry.refs == 0
+            if now_close:
+                self._close(key, entry)
+
+    @contextmanager
+    def writing(self, path: str | Path, opener: Callable[[Path], Any], *,
+                timeout_s: float | None = None,
+                before: Callable[[Path], Any] | None = None) -> Iterator[Any]:
+        """The exclusive turn, and a writable handle, for the length of the block.
+
+        ``before`` runs inside the lock and before the store is opened — where a snapshot
+        goes, so that what is about to change is recoverable.
+        """
+        key = Path(path).expanduser()
+        wait = self.write_timeout_s if timeout_s is None else timeout_s
+        with write_lock(key, timeout_s=wait):
+            with self._guard:              # our own readers hold the file against us
+                for cached_key, entry in list(self._readers.items()):
+                    if cached_key == str(key):
+                        entry.evicted = True
+                        if entry.refs == 0:
+                            self._close(cached_key, entry)
+            if before is not None:
+                before(key)
+            store = opener(key)
+            try:
+                yield store
+            finally:
+                try:
+                    store.close()
+                except Exception:  # noqa: BLE001
+                    pass
+
+    def release_all(self) -> list[str]:
+        """Close every cached reader this process holds. Returns what was closed."""
+        with self._guard:
+            keys = list(self._readers)
+            for key in keys:
+                self._close(key, self._readers[key])
+        return keys
 
 
-def _ensure_reaper() -> None:
-    global _reaper
-    if _reaper is None or not _reaper.is_alive():
-        _reaper = threading.Thread(target=_reap, name="ml-stack-store-reaper", daemon=True)
-        _reaper.start()
-
-
-def _yield_to_writer(key: str, *, timeout_s: float = READER_YIELD_TIMEOUT_S) -> None:
-    """Wait while somebody else is writing, rather than failing into their lock."""
-    deadline = time.monotonic() + timeout_s
-    while _writer_waiting(key) and time.monotonic() < deadline:
-        with _guard:
-            entry = _readers.get(key)
-            if entry is not None and entry.refs == 0:
-                _close(key, entry)
-        time.sleep(_READER_POLL_S)
+_cache = ReaderCache()
 
 
 @contextmanager
 def reading(path: str | Path, opener: Callable[[Path], Any]) -> Iterator[Any]:
-    """A read-only handle for the length of the block.
-
-    Handles are cached and reference counted, so readers in one process share one and it is
-    closed once idle — a parked handle blocks writers in other processes for no benefit.
-    """
-    key = str(Path(path).expanduser())
-    if not Path(key).exists():
-        # opening read-only cannot create a store, and silently creating one would hand back an
-        # empty graph instead of a bad path
-        raise FileNotFoundError(f"no store at {key}")
-    _yield_to_writer(key)
-    with _guard:
-        _expire(time.monotonic())
-        entry = _readers.get(key)
-        if entry is None:
-            try:
-                entry = _Cached(store=opener(Path(key)))
-            except Exception as exc:  # noqa: BLE001 - whatever the opener raises
-                who = holder(key)
-                raise LockError(f"could not open {key} read-only" +
-                                (f": {who.describe()} holds it" if who else f": {exc}")) from exc
-            _readers[key] = entry
-            _ensure_reaper()
-        entry.refs += 1
-    try:
-        yield entry.store
-    finally:
-        with _guard:
-            entry.refs -= 1
-            entry.last_used = time.monotonic()
-            now_close = entry.evicted and entry.refs == 0
-        if now_close:
-            _close(key, entry)
+    """A read-only handle for the length of the block, from the process-wide cache."""
+    with _cache.reading(path, opener) as store:
+        yield store
 
 
 @contextmanager
 def writing(path: str | Path, opener: Callable[[Path], Any], *,
             timeout_s: float = WRITE_LEASE_TIMEOUT_S,
             before: Callable[[Path], Any] | None = None) -> Iterator[Any]:
-    """The exclusive turn, and a writable handle, for the length of the block.
-
-    ``before`` runs inside the lock and before the store is opened — where a snapshot goes, so
-    that what is about to change is recoverable.
-    """
-    key = Path(path).expanduser()
-    with write_lock(key, timeout_s=timeout_s):
-        with _guard:                       # our own readers hold the file against us
-            for cached_key, entry in list(_readers.items()):
-                if cached_key == str(key):
-                    entry.evicted = True
-                    if entry.refs == 0:
-                        _close(cached_key, entry)
-        if before is not None:
-            before(key)
-        store = opener(key)
-        try:
-            yield store
-        finally:
-            try:
-                store.close()
-            except Exception:  # noqa: BLE001
-                pass
+    """The exclusive turn, and a writable handle, for the length of the block."""
+    with _cache.writing(path, opener, timeout_s=timeout_s, before=before) as store:
+        yield store
 
 
 def release_all() -> list[str]:
     """Close every cached reader this process holds. Returns what was closed."""
-    with _guard:
-        keys = list(_readers)
-        for key in keys:
-            _close(key, _readers[key])
-    return keys
+    return _cache.release_all()
