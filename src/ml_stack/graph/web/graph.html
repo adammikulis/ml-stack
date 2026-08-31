@@ -500,7 +500,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   let pathLinks = new Set();
   // the same file is served from this machine and published as a flat page; only the served
   // one has a model behind it, and it is served over the tunnel as much as over loopback
-  const served = !!window.SLACK_GRAPH_LIVE;
+  const served = !!window.GRAPH_LIVE;
   let answer = null;
   let query = '';
   let selected = null;
@@ -526,10 +526,10 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     document.documentElement.style.setProperty(`--k-${kind}`, hex);
   }
   function saveDisplay() {
-    try { localStorage.setItem('velanir-graph-display', JSON.stringify({ display, colors, view })); } catch (e) {}
+    try { localStorage.setItem('graph-display', JSON.stringify({ display, colors, view })); } catch (e) {}
   }
   try {
-    const saved = JSON.parse(localStorage.getItem('velanir-graph-display') || 'null');
+    const saved = JSON.parse(localStorage.getItem('graph-display') || 'null');
     if (saved && saved.view) Object.assign(view, saved.view);
     if (saved && saved.display) {
       Object.assign(display.node, saved.display.node || {});
@@ -1323,7 +1323,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       cancelAnimationFrame(raf); raf = 0;
       if (g3) setSpin(false, true);
     }
-    try { localStorage.setItem('velanir-graph-view', is3d ? '3d' : '2d'); } catch (e) {}
+    try { localStorage.setItem('graph-view', is3d ? '3d' : '2d'); } catch (e) {}
   }
   let spinTouched = false;
   function setSpin(on, quiet) {
@@ -1338,7 +1338,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   new ResizeObserver(() => { if (g3) g3.width(wrap.clientWidth).height(wrap.clientHeight); }).observe(wrap);
   matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (g3) { g3.backgroundColor(cssVar('--bg')); g3.nodeColor(g3.nodeColor()); g3.linkColor(g3.linkColor()); } });
   let want3d = true;
-  try { want3d = (localStorage.getItem('velanir-graph-view') || '3d') === '3d'; } catch (e) {}
+  try { want3d = (localStorage.getItem('graph-view') || '3d') === '3d'; } catch (e) {}
   if (want3d && nodes.length && typeof ForceGraph3D === 'function') setView(true);
 
   // ---- state
@@ -2086,7 +2086,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   }
   buildPanel();
 
-  // ---- local refresh (only when served by slack_graph.serve on this machine)
+  // ---- local refresh (only when a host process serves this page on this machine)
   const local = /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
   if (local) {
     const box = document.getElementById('refresh'), btn = document.getElementById('refresh-btn'), st = document.getElementById('refresh-stage');
