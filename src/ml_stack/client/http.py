@@ -77,3 +77,38 @@ def request_json(
 
     assert last is not None
     raise last
+
+
+def request_stream(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    timeout: float = 180.0,
+    headers: dict[str, str] | None = None,
+):
+    """POST a JSON request and yield each SSE ``data:`` payload, parsed, until ``[DONE]``."""
+    data = json.dumps(payload).encode("utf-8")
+    request_headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
+    if headers:
+        request_headers.update(headers)
+    request = urllib.request.Request(url, data=data, method="POST", headers=request_headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            for raw in response:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                body = line[5:].strip()
+                if body == "[DONE]":
+                    return
+                try:
+                    yield json.loads(body)
+                except json.JSONDecodeError:
+                    continue
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:500]
+        raise ServerError(
+            f"{url} -> HTTP {exc.code}: {detail}", status=exc.code, body=detail
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
+        raise ServerUnreachable(f"cannot reach {url} ({exc})") from exc

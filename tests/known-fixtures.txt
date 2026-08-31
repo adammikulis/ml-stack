@@ -51,3 +51,7 @@ typeof topojson
 Hugging Face
 Ada Lovelace's son
 Ada Lovelace's
+OpenAI
+lambda k
+Real Qwen BPE
+t .think

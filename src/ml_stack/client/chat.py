@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.client.http import ServerError, request_json, request_stream
 
 _THINK = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
 
@@ -142,18 +142,33 @@ class Client:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str = "auto",
         timeout: float | None = None,
+        on_delta: Callable[[str, str], None] | None = None,
         **extra: Any,
     ) -> Reply:
-        """One chat completion."""
-        body = self.build_body(messages, tools=tools, tool_choice=tool_choice, **extra)
-        payload = request_json(
+        """One chat completion.
+
+        With ``on_delta`` the completion is streamed: it is called with
+        ``("thinking", text)`` and ``("content", text)`` as pieces arrive, and the
+        assembled Reply is returned as usual.
+        """
+        body = self.build_body(messages, tools=tools, tool_choice=tool_choice,
+                               stream=on_delta is not None, **extra)
+        if on_delta is None:
+            payload = request_json(
+                f"{self.base_url}/v1/chat/completions",
+                payload=body,
+                timeout=timeout or self.timeout,
+                tries=self.tries,
+                headers=self._headers(),
+            )
+            return self.normalize(payload)
+        chunks = request_stream(
             f"{self.base_url}/v1/chat/completions",
             payload=body,
             timeout=timeout or self.timeout,
-            tries=self.tries,
             headers=self._headers(),
         )
-        return self.normalize(payload)
+        return self.normalize(gather_stream(chunks, on_delta))
 
     def complete(
         self,
@@ -359,6 +374,10 @@ class Client:
             ]
 
         content, thinking = strip_thinking(message.get("content"))
+        # gpt-oss and other harmony-format models carry the trace in its own field
+        reasoned = str(message.get("reasoning_content") or message.get("reasoning") or "").strip()
+        if reasoned:
+            thinking = f"{reasoned}\n{thinking}" if thinking else reasoned
         return Reply(
             content=content,
             tool_calls=tool_calls,
@@ -366,6 +385,51 @@ class Client:
             thinking=thinking,
             raw=payload,
         )
+
+
+def gather_stream(chunks: Any, on_delta: Callable[[str, str], None]) -> dict[str, Any]:
+    """Assemble streamed chat chunks into one completion payload, reporting each piece.
+
+    ``on_delta`` is called with ``("thinking", text)`` for reasoning pieces and
+    ``("content", text)`` for answer pieces, in arrival order.
+    """
+    content: list[str] = []
+    thinking: list[str] = []
+    calls: dict[int, dict[str, Any]] = {}
+    finish: str | None = None
+    for chunk in chunks:
+        if not isinstance(chunk, dict):
+            continue
+        choices = chunk.get("choices") or []
+        if not choices:
+            continue
+        choice = choices[0] or {}
+        finish = choice.get("finish_reason") or finish
+        delta = choice.get("delta") or {}
+        piece = delta.get("reasoning_content") or delta.get("reasoning")
+        if piece:
+            thinking.append(str(piece))
+            on_delta("thinking", str(piece))
+        piece = delta.get("content")
+        if piece:
+            content.append(str(piece))
+            on_delta("content", str(piece))
+        for one in delta.get("tool_calls") or []:
+            slot = calls.setdefault(int(one.get("index") or 0), {
+                "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
+            if one.get("id"):
+                slot["id"] = one["id"]
+            fn = one.get("function") or {}
+            if fn.get("name"):
+                slot["function"]["name"] = fn["name"]
+            if fn.get("arguments"):
+                slot["function"]["arguments"] += fn["arguments"]
+    message: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+    if thinking:
+        message["reasoning_content"] = "".join(thinking)
+    if calls:
+        message["tool_calls"] = [calls[i] for i in sorted(calls)]
+    return {"choices": [{"message": message, "finish_reason": finish}]}
 
 
 def _rejection(objections: list[str]) -> str:

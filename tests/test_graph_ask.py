@@ -8,7 +8,8 @@ graph. What is asserted is what the tools returned and what came back as touched
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between, tools_for
+from ml_stack.graph.ask import (Answer, converse, converse_stream, look_at, look_up,
+                                path_between, tools_for)
 
 GRAPH = {
     "nodes": [
@@ -37,6 +38,7 @@ GRAPH = {
 class Reply:
     content: str = ""
     tool_calls: list | None = None
+    thinking: str | None = None
 
 
 class ScriptedModel:
@@ -225,3 +227,98 @@ def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
     out = converse("who works on compilers?", GRAPH, model, rounds=5)
     assert out.content == "Ada works on compilers."
     assert "plain words" in model.seen[-1][-1]["content"]
+
+
+def test_an_answer_that_arrives_only_as_thinking_is_not_lost():
+    """gpt-oss can put every word in the reasoning channel and none in content."""
+
+    class Reasoner(ScriptedModel):
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            if tools and self.script:
+                import json
+                name, args = self.script.pop(0)
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": name, "arguments": json.dumps(args)}}])
+            return Reply(content="", thinking="Ada is the one working on compilers.")
+
+    model = Reasoner([call("look_at", ids=["person:ada"])])
+    out = converse("who works on compilers?", GRAPH, model)
+    assert out.content == "Ada is the one working on compilers."
+    assert "plain words" in model.seen[-1][-1]["content"]
+
+
+def test_a_model_that_only_searched_gets_the_top_finds_read_to_it():
+    """All look_ups and no look_at: the finds are read out before the final ask."""
+
+    class Searcher(ScriptedModel):
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            if tools and self.script:
+                import json
+                name, args = self.script.pop(0)
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": name, "arguments": json.dumps(args)}}])
+            if any("What the graph holds" in str(m.get("content") or "")
+                   for m in messages if m.get("role") == "user"):
+                return Reply(content="Ada and Bea, going by what they said.")
+            return Reply(content="")
+
+    model = Searcher([call("look_up", text="compilers")] * 3)
+    out = converse("who works on compilers?", GRAPH, model, rounds=3)
+    assert out.content == "Ada and Bea, going by what they said."
+    assert out.read == ["topic:compilers", "person:ada", "person:bea"]
+    assert out.steps[-1] == "read the top 3 finds"
+    handed = model.seen[-1][-1]["content"]
+    assert "Ada Lovelace (person)" in handed and "plain words" in handed
+
+
+def test_streaming_reports_tools_and_the_answer_in_order():
+    events = []
+    model = ScriptedModel([call("look_up", text="Ada Lovelace"),
+                           call("look_at", ids=["person:ada"])])
+    out = converse_stream("who is Ada?", GRAPH, model, on_event=events.append)
+    assert [e["event"] for e in events] \
+        == ["tool", "tool_result", "tool", "tool_result", "answer", "done"]
+    assert events[0] == {"event": "tool", "name": "look_up", "detail": "'Ada Lovelace'"}
+    assert events[1] == {"event": "tool_result", "name": "look_up", "count": 1}
+    assert events[2]["detail"] == "1 id"
+    assert events[4]["text"] == out.content == "Ada and Bea both work on compilers."
+    assert out.ids == ["person:ada"]
+
+
+def test_streaming_passes_deltas_through_as_they_arrive():
+    """A client whose chat takes on_delta streams thinking at once; buffered words that
+    turn out to be the answer arrive whole."""
+
+    class Streamer:
+        def chat(self, messages, tools=None, on_delta=None, **kw):
+            for piece in ("weigh ", "it up"):
+                on_delta("thinking", piece)
+            for piece in ("Ada works ", "on compilers."):
+                on_delta("content", piece)
+            return Reply(content="Ada works on compilers.", thinking="weigh it up")
+
+    events = []
+    out = converse_stream("who?", GRAPH, Streamer(), on_event=events.append)
+    assert [e["event"] for e in events] == ["thinking", "thinking", "answer", "done"]
+    assert [e.get("text") for e in events[:2]] == ["weigh ", "it up"]
+    assert events[2]["text"] == "Ada works on compilers."
+    assert out.content == "Ada works on compilers."
+
+
+def test_a_client_without_deltas_still_streams_whole_pieces():
+    """The scripted client ignores on_delta; its thinking and answer arrive as one event
+    each."""
+
+    class Muser(ScriptedModel):
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            return Reply(content="Nobody here.", thinking="an empty room")
+
+    events = []
+    out = converse_stream("who?", GRAPH, Muser([]), on_event=events.append)
+    assert [e["event"] for e in events] == ["thinking", "answer", "done"]
+    assert events[0]["text"] == "an empty room"
+    assert events[1]["text"] == "Nobody here."
+    assert out.content == "Nobody here."

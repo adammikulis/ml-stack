@@ -107,6 +107,20 @@ class TestNormalize:
             Client.normalize(["not", "a", "response"])
 
 
+    def test_a_reasoning_field_is_carried_as_thinking(self):
+        reply = Client.normalize({"choices": [{"message": {
+            "role": "assistant", "content": "",
+            "reasoning_content": "count the people first"}, "finish_reason": "stop"}]})
+        assert reply.content == "" and reply.thinking == "count the people first"
+
+    def test_reasoning_and_think_tags_both_survive(self):
+        reply = Client.normalize({"choices": [{"message": {
+            "role": "assistant", "content": "<think>tags</think>42",
+            "reasoning": "field"}, "finish_reason": "stop"}]})
+        assert reply.content == "42"
+        assert reply.thinking == "field\ntags"
+
+
 class TestStripThinking:
     def test_separates_the_trace_from_the_answer(self):
         visible, thinking = strip_thinking("<think>weigh it up</think>The answer is 4.")
@@ -252,6 +266,38 @@ class TestChat:
         _, path, body = instance.requests[-1]
         assert path == "/v1/chat/completions"
         assert json.loads(body)["id_slot"] == 7
+
+
+    def test_streaming_deltas_are_reported_and_assembled(self, server):
+        chunks = [
+            {"choices": [{"delta": {"reasoning_content": "hmm "}}]},
+            {"choices": [{"delta": {"reasoning_content": "ok"}}]},
+            {"choices": [{"delta": {"content": "4"}}]},
+            {"choices": [{"delta": {"content": "2"}, "finish_reason": "stop"}]},
+        ]
+        body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        instance = server(lambda m, p, b: (200, body.encode()))
+        got: list[tuple[str, str]] = []
+        reply = Client(instance.base_url).chat(
+            [{"role": "user", "content": "x"}], on_delta=lambda k, t: got.append((k, t)))
+        assert reply.content == "42" and reply.thinking == "hmm ok"
+        assert reply.finish_reason == "stop"
+        assert got == [("thinking", "hmm "), ("thinking", "ok"),
+                       ("content", "4"), ("content", "2")]
+        assert json.loads(instance.requests[-1][2])["stream"] is True
+
+    def test_streamed_tool_calls_are_assembled_across_chunks(self, server):
+        chunks = [
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c9", "function": {
+                "name": "look_up", "arguments": "{\"te"}}]}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {
+                "arguments": "xt\": \"iron\"}"}}]}, "finish_reason": "tool_calls"}]},
+        ]
+        body = "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+        instance = server(lambda m, p, b: (200, body.encode()))
+        reply = Client(instance.base_url).chat([], on_delta=lambda k, t: None)
+        assert reply.tool_calls == [{"id": "c9", "type": "function", "function": {
+            "name": "look_up", "arguments": '{"text": "iron"}'}}]
 
 
 class TestGrammarTripwire:

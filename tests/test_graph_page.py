@@ -118,8 +118,8 @@ def open_page(browser, vendored):
     """Opens the page in a fresh context; returns ``(page, errors)``."""
     contexts = []
 
-    def _open(graph=None, *, view="2d", served=False, ask_reply=None, review=None,
-              origin="http://graph.test/"):
+    def _open(graph=None, *, view="2d", served=False, ask_reply=None, ask_stream=None,
+              review=None, origin="http://graph.test/"):
         html = document(graph if graph is not None else sample_graph(), served=served)
         ctx = browser.new_context(viewport={"width": 1400, "height": 900})
         contexts.append(ctx)
@@ -135,6 +135,9 @@ def open_page(browser, vendored):
             elif url == origin + "ask" and r.request.method == "POST" \
                     and ask_reply is not None:
                 r.fulfill(body=json.dumps(ask_reply), content_type="application/json")
+            elif url == origin + "ask/stream" and r.request.method == "POST" \
+                    and ask_stream is not None:
+                r.fulfill(body=ask_stream, content_type="text/event-stream")
             elif url == origin + "review" and review is not None:
                 r.fulfill(body=json.dumps({"ok": True, "problems": []}
                                           if r.request.method == "POST" else review),
@@ -430,4 +433,32 @@ def test_what_was_read_lights_up_not_everything_found(open_page):
     page.press("#q", "Enter")
     pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
     assert page.input_value("#q") == ""
+    assert errors == []
+
+
+def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
+    """Fails when the SSE loop in askStream stops feeding events into the bubble."""
+    events = [
+        {"event": "thinking", "text": "find who works iron. "},
+        {"event": "tool", "name": "look_up", "detail": "'iron'"},
+        {"event": "tool_result", "name": "look_up", "count": 2},
+        {"event": "answer", "text": "Ada Lovelace "},
+        {"event": "answer", "text": "works on iron."},
+        {"event": "done", "content": "Ada Lovelace works on iron.",
+         "ids": ["person:ada", "topic:iron"], "read": ["person:ada"], "path": [],
+         "found": ["topic:iron"], "why": "looked up 'iron'"},
+    ]
+    body = "".join(f"data: {json.dumps(e)}\n\n" for e in events)
+    page, errors = open_page(served=True, ask_stream=body)
+    page.wait_for_selector("#stats b")
+    page.fill("#q", "who works on iron?")
+    page.press("#q", "Enter")
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
+    trace = page.locator("#qturns .t .think .trace").text_content()
+    assert "find who works iron." in trace
+    assert "look_up 'iron'" in trace and "2 back" in trace
+    assert page.locator("#qturns .t .said").inner_text() == "Ada Lovelace works on iron."
+    # the trace folds away once the answer has landed
+    assert page.get_attribute("#qturns .t .think", "open") is None
+    assert "1 lit up" in page.text_content("#qnote")
     assert errors == []

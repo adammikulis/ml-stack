@@ -201,6 +201,54 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``held`` names entries already highlighted for the reader: they are told to the model
     by label and id, and enter ``ids`` only if a tool call touches them.
     """
+    return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
+                     limit=limit, tools=tools, finder=finder, held=held, emit=None)
+
+
+def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
+                    on_event: Any,
+                    turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
+                    rounds: int = ROUNDS, limit: int = LIT,
+                    tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
+                    finder: Any = None, held: Sequence[str] = ()) -> Answer:
+    """converse, reporting what is happening to ``on_event`` as it happens.
+
+    ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
+    model thinks, ``{"event": "tool", "name", "detail"}`` when it calls a tool,
+    ``{"event": "tool_result", "name", "count"}`` with how much came back,
+    ``{"event": "answer", "text"}`` as the answer arrives, then ``{"event": "done"}``.
+    A client whose ``chat`` takes ``on_delta`` streams the text a piece at a time;
+    any other client's text arrives whole.
+    """
+    return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
+                     limit=limit, tools=tools, finder=finder, held=held, emit=on_event)
+
+
+def _call_detail(name: str, args: Mapping[str, Any]) -> str:
+    if name == "look_up":
+        return repr(str(args.get("text") or ""))
+    if name == "look_at":
+        ids = list(args.get("ids") or ())
+        return f"{len(ids)} id" + ("" if len(ids) == 1 else "s")
+    if name == "path_between":
+        return f"{args.get('from_id')} → {args.get('to_id')}"
+    return json.dumps(args, ensure_ascii=False)[:80]
+
+
+def _result_count(result: Any) -> int:
+    if isinstance(result, (list, tuple)):
+        return len(result)
+    if isinstance(result, Mapping) and "path" in result:
+        return len(result.get("path") or ())
+    if isinstance(result, str):
+        return len(result.splitlines()) if result.strip() else 0
+    return 1 if result else 0
+
+
+def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
+              turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
+              tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
+              finder: Any, held: Sequence[str], emit: Any) -> Answer:
     if tools is None:
         tools = tools_for(graph, finder=finder)
     elif finder is not None:
@@ -228,10 +276,40 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
             for t in turns if str(t.get("content") or "").strip()]
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said,
                                       {"role": "user", "content": question}]
+
+    def step(with_tools: bool) -> Any:
+        kw: dict[str, Any] = {"tools": schemas} if with_tools else {}
+        if emit is None:
+            return client.chat(messages, think=False, **kw)
+        pending: list[str] = []
+        streamed = {"any": False}
+
+        def on_delta(kind: str, text: str) -> None:
+            if not text:
+                return
+            streamed["any"] = True
+            if kind == "thinking":
+                emit({"event": "thinking", "text": text})
+            elif with_tools:
+                pending.append(text)
+            else:
+                emit({"event": "answer", "text": text})
+
+        reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
+        if not streamed["any"]:
+            trace = (getattr(reply, "thinking", "") or "").strip()
+            if trace:
+                emit({"event": "thinking", "text": trace})
+        if not (getattr(reply, "tool_calls", None) or []):
+            whole = "".join(pending) if streamed["any"] else (getattr(reply, "content", "") or "")
+            if whole.strip():
+                emit({"event": "answer", "text": whole})
+        return reply
+
     spent = False
     reply = None
     for _ in range(rounds):
-        reply = client.chat(messages, tools=schemas, think=False)
+        reply = step(True)
         calls = getattr(reply, "tool_calls", None) or []
         if not calls:
             break
@@ -244,6 +322,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 args = json.loads(fn.get("arguments") or "{}")
             except ValueError:
                 args = {}
+            if emit is not None:
+                emit({"event": "tool", "name": name, "detail": _call_detail(name, args)})
             do = run.get(name)
             if do is None:
                 result: Any = {"error": f"no such tool: {name}"}
@@ -265,21 +345,44 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
             else:
                 result = do(args)
                 out.steps.append(f"used {name}")
+            if emit is not None:
+                emit({"event": "tool_result", "name": name, "count": _result_count(result)})
             messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
                              "name": name, "content": json.dumps(result, ensure_ascii=False)[:6000]})
     else:
         # the rounds ran out mid-loop: the last reply is a tool call, not an answer. Ask once
         # more with the tools taken away, so the question is answered rather than dropped.
         if spent:
-            reply = client.chat(messages, think=False)
+            reply = step(False)
     # a thinking model can stop calling tools and still say nothing, and it can run out of
-    # rounds the same way. Either silence gets one plain instruction to answer
+    # rounds the same way. Either silence gets one plain instruction to answer; one that
+    # only ever searched also gets the top finds read to it first
     if spent and not (getattr(reply, "content", "") or "").strip():
-        messages.append({"role": "user", "content": "Answer the question now, in plain words."})
-        reply = client.chat(messages, think=False)
+        nudge = "Answer the question now, in plain words."
+        if not out.read and out.found:
+            top = out.found[:FOUND]
+            do = run.get("look_at")
+            material = (do({"ids": top}) if do is not None else look_at(graph, top)) or ""
+            note(out.read, top)
+            out.steps.append(f"read the top {len(top)} find" + ("" if len(top) == 1 else "s"))
+            if emit is not None:
+                emit({"event": "tool", "name": "look_at", "detail": f"{len(top)} ids"})
+                emit({"event": "tool_result", "name": "look_at",
+                      "count": _result_count(material)})
+            nudge = ("What the graph holds on what you found:\n" + str(material)
+                     + "\n\n" + nudge)
+        messages.append({"role": "user", "content": nudge})
+        reply = step(False)
     out.content = (getattr(reply, "content", "") or "").strip()
+    if not out.content:
+        # a model can put every word of its answer in the thinking channel
+        out.content = (getattr(reply, "thinking", "") or "").strip()
+        if out.content and emit is not None:
+            emit({"event": "answer", "text": out.content})
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
             out.ids.append(one)
     out.ids = out.ids[:limit]
+    if emit is not None:
+        emit({"event": "done"})
     return out

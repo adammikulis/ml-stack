@@ -19,7 +19,7 @@ from ml_stack.client.health import (
     serving_params,
     wait_for_health,
 )
-from ml_stack.client.http import ServerError, ServerUnreachable, request_json
+from ml_stack.client.http import ServerError, ServerUnreachable, request_json, request_stream
 from ml_stack.client.tokens import estimate_tokens, heuristic_tokens, set_token_counter
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     "quant_from_model_path",
     "reported_models",
     "request_json",
+    "request_stream",
     "serving_params",
     "set_token_counter",
     "strip_thinking",

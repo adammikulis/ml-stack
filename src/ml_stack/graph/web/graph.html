@@ -208,6 +208,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   cursor: pointer; border: 1px solid var(--line-strong); border-radius: 8px;
   background: var(--surface); color: var(--ink-2); }
 .show-again:hover { color: var(--ink); border-color: var(--accent); }
+.turns .t .think { margin: 0 0 5px; font-size: 11px; line-height: 1.45; color: var(--ink-3); }
+.turns .t .think summary { cursor: pointer; list-style: none; color: var(--ink-3); }
+.turns .t .think summary::-webkit-details-marker { display: none; }
+.turns .t .think summary::before { content: "+ "; font-family: var(--font-mono); }
+.turns .t .think[open] summary::before { content: "\2212 "; }
+.turns .t .think .trace { margin-top: 3px; max-height: 20vh; overflow: auto;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.turns .t .think .step { font-family: var(--font-mono); font-size: 10px; }
 .chat-row { display: flex; gap: 7px; }
 .chat-row input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 6px 9px;
                   border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
@@ -728,16 +736,25 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     turns.push({ role: 'user', content: question });
     const pending = say('assistant', '…');
     try {
-      const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ question, turns: turns.slice(0, -1),
-                                                             ...(held.length ? { held } : {}) }) });
-      const out = await r.json();
-      if (!r.ok) {
-        pending.textContent = out.error || 'the model did not answer';
+      const payload = JSON.stringify({ question, turns: turns.slice(0, -1),
+                                       ...(held.length ? { held } : {}) });
+      // the streaming route shows the work as it happens; a server without it gets one POST
+      let out = await askStream(payload, pending);
+      if (out === null) {
+        const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                        body: payload });
+        out = await r.json();
+        if (!r.ok) {
+          sayInto(pending, out.error || 'the model did not answer');
+          qNote.textContent = ''; turns.pop(); return;
+        }
+      }
+      if (out.error) {
+        sayInto(pending, out.error);
         qNote.textContent = ''; turns.pop(); return;
       }
       const said = out.content || out.why || 'Nothing in the graph answers that.';
-      pending.textContent = said;
+      sayInto(pending, said);
       // asking for a change is not asking a question: it went to the review queue, and saying
       // so on the bubble is the only place the difference is visible
       if ((out.raised || []).length) {
@@ -772,11 +789,84 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         + (out.why ? ` · ${out.why}` : '');
       refresh();
     } catch (err) {
-      pending.textContent = 'no answer from the server';
+      sayInto(pending, 'no answer from the server');
       qNote.textContent = ''; turns.pop();
     } finally { asking = false; }
   }
   qBox.addEventListener('keydown', ask);
+
+  // the answer bubble may hold a thinking trace; only the spoken part is replaced
+  function sayInto(el, text) {
+    const spoken = el.querySelector('.said');
+    if (spoken) spoken.textContent = text; else el.textContent = text;
+  }
+
+  // POST /ask/stream and fill the bubble live: the thinking dim and folded away, tool
+  // steps as they run, the answer streaming in. null means the server has no such route.
+  async function askStream(payload, pending) {
+    let r;
+    try {
+      r = await fetch('/ask/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: payload });
+    } catch (err) { return null; }
+    if (r.status === 404) return null;
+    if (!r.ok) {
+      try { return await r.json(); } catch (err) { return { error: 'the model did not answer' }; }
+    }
+    const think = document.createElement('details');
+    think.className = 'think';
+    think.open = true;
+    const label = document.createElement('summary');
+    label.textContent = 'thinking';
+    const trace = document.createElement('div');
+    trace.className = 'trace';
+    think.append(label, trace);
+    const spoken = document.createElement('span');
+    spoken.className = 'said';
+    pending.textContent = '';
+    pending.append(think, spoken);
+    let out = null;
+    const feed = ev => {
+      if (ev.event === 'thinking') {
+        trace.append(ev.text || '');
+      } else if (ev.event === 'tool') {
+        const line = document.createElement('div');
+        line.className = 'step';
+        line.textContent = `▸ ${ev.name} ${ev.detail || ''}`;
+        trace.appendChild(line);
+      } else if (ev.event === 'tool_result') {
+        const line = document.createElement('div');
+        line.className = 'step';
+        line.textContent = `  → ${ev.count} back`;
+        trace.appendChild(line);
+      } else if (ev.event === 'answer') {
+        spoken.textContent += ev.text || '';
+      } else if (ev.event === 'done' || ev.event === 'error') {
+        out = ev;
+      }
+      qTurns.scrollTop = qTurns.scrollHeight;
+    };
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffered = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffered += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buffered.indexOf('\n\n')) >= 0) {
+        const chunk = buffered.slice(0, cut);
+        buffered = buffered.slice(cut + 2);
+        for (const line of chunk.split('\n')) {
+          if (!line.startsWith('data:')) continue;
+          try { feed(JSON.parse(line.slice(5))); } catch (err) {}
+        }
+      }
+    }
+    think.open = false;
+    if (!trace.childNodes.length) think.remove();
+    return out || { error: 'the stream ended without an answer' };
+  }
 
   // ---- graph
   const nodes = G.nodes.map(n => ({ ...n }));
