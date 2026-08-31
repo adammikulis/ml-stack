@@ -43,15 +43,18 @@ EMPTY_WORLD = {"type": "Topology",
 
 
 def sample_graph():
-    """Four nodes, two edges, one quoted message. Names from tests/known-fixtures.txt."""
+    """Four nodes, two edges, two quoted messages a day apart.
+
+    Names from tests/known-fixtures.txt.
+    """
     return {
         "nodes": [
             {"id": "person:ada", "label": "Ada Lovelace", "kind": "person", "mentions": 3,
              "attrs": {"member": True}, "messages": ["m1"]},
             {"id": "person:grace", "label": "Grace Hopper", "kind": "person", "mentions": 2,
-             "attrs": {"member": True}, "messages": []},
+             "attrs": {"member": True}, "messages": ["m2"]},
             {"id": "org:quenlow", "label": "Quenlow Robotics", "kind": "org", "mentions": 1,
-             "attrs": {}, "messages": []},
+             "attrs": {}, "messages": ["m2"]},
             {"id": "topic:iron", "label": "iron", "kind": "topic", "mentions": 2,
              "attrs": {}, "messages": ["m1"]},
         ],
@@ -59,12 +62,14 @@ def sample_graph():
             {"source": "person:ada", "target": "topic:iron", "rel": "works_on",
              "weight": 2, "messages": ["m1"]},
             {"source": "person:grace", "target": "org:quenlow", "rel": "works_at",
-             "weight": 1, "messages": []},
+             "weight": 1, "messages": ["m2"]},
         ],
         # "environment" holds "iron" mid-word; only the standalone "iron" is a link
         "messages": {"m1": {"text": "We talked about iron all day; the environment came up too.",
-                            "ts": "1700000000", "channel": "#general", "sender": "Ada Lovelace"}},
-        "stats": {"messages": 1},
+                            "ts": "1700000000", "channel": "#general", "sender": "Ada Lovelace"},
+                     "m2": {"text": "I started at Quenlow Robotics this week.",
+                            "ts": "1700086400", "channel": "#general", "sender": "Grace Hopper"}},
+        "stats": {"messages": 2},
         "meta": {},
     }
 
@@ -273,4 +278,52 @@ def test_a_second_ask_carries_what_is_lit(open_page):
         page.press("#q", "Enter")
     assert "held" not in json.loads(first.value.post_data)
     assert json.loads(second.value.post_data)["held"] == ["person:ada", "topic:iron"]
+    assert errors == []
+
+
+def test_history_replays_the_messages_in_order(open_page):
+    """Fails when the chronological sort in buildHistory runs newest-first."""
+    page, errors = open_page()
+    settle(page)
+    assert page.locator(".tools #history").count() == 1
+    page.evaluate("window.__historyClock = 3000")
+    page.click("#history")
+    assert page.text_content("#history") == "■ stop"
+    assert page.get_attribute("#history", "aria-pressed") == "true"
+    # the first pulse lights exactly one edge: the older message's — works_on, index 0
+    first = page.wait_for_function(
+        "() => { const lit = [...document.querySelectorAll('#graph .link')]"
+        ".flatMap((l, i) => (l.classList.contains('lit') ? [i] : []));"
+        " return lit.length === 1 ? lit[0] + 1 : false; }"
+    ).json_value() - 1
+    assert first == 0
+    page.wait_for_selector("#graph circle.pulse", state="attached")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#graph .node.lit').length === 2")
+    caption = page.text_content("#history-when")
+    assert caption and "Ada" not in caption and "iron" not in caption
+    page.click("#history")
+    assert page.locator("#graph circle.pulse").count() == 0
+    assert page.locator("#graph .link.lit").count() == 0
+    assert page.locator("#graph .node.lit").count() == 0
+    assert page.text_content("#history") == "▶ history"
+    assert page.get_attribute("#history", "aria-pressed") == "false"
+    assert page.is_hidden("#history-when")
+    assert errors == []
+
+
+def test_a_finished_history_run_leaves_nothing_behind(open_page):
+    """Fails when the closing stopHistory timer is dropped from playHistory."""
+    page, errors = open_page()
+    settle(page)
+    page.evaluate("window.__historyClock = 400")
+    page.click("#history")
+    assert page.get_attribute("#history", "aria-pressed") == "true"
+    page.wait_for_function(
+        "() => document.getElementById('history').getAttribute('aria-pressed') === 'false'")
+    assert page.locator("#graph circle.pulse").count() == 0
+    assert page.locator("#graph .link.lit").count() == 0
+    assert page.locator("#graph .node.lit").count() == 0
+    assert page.text_content("#history") == "▶ history"
+    assert page.is_hidden("#history-when")
     assert errors == []
