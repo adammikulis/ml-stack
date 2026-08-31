@@ -199,3 +199,29 @@ def test_a_model_that_goes_quiet_is_told_to_answer():
     out = converse("who works on compilers?", GRAPH, model, rounds=5)
     assert out.content
     assert "plain words" in model.seen[-1][-1]["content"]
+
+
+def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
+    """It ran its tools, then returned an empty message rather than an answer."""
+
+    class Silent(ScriptedModel):
+        def __init__(self, script):
+            super().__init__(script)
+            self.quiet = True
+
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            if self.script and tools:
+                import json
+                name, args = self.script.pop(0)
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": name, "arguments": json.dumps(args)}}])
+            if self.quiet:
+                self.quiet = False
+                return Reply(content="   ")
+            return Reply(content="Ada works on compilers.")
+
+    model = Silent([("look_up", {"text": "compilers"})])
+    out = converse("who works on compilers?", GRAPH, model, rounds=5)
+    assert out.content == "Ada works on compilers."
+    assert "plain words" in model.seen[-1][-1]["content"]

@@ -272,10 +272,11 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # more with the tools taken away, so the question is answered rather than dropped.
         if spent:
             reply = client.chat(messages, think=False)
-            if not (getattr(reply, "content", "") or "").strip():
-                # a thinking model sometimes hands back an empty message: tell it outright
-                messages.append({"role": "user", "content": "Answer the question now, in plain words."})
-                reply = client.chat(messages, think=False)
+    # a thinking model can stop calling tools and still say nothing, and it can run out of
+    # rounds the same way. Either silence gets one plain instruction to answer
+    if spent and not (getattr(reply, "content", "") or "").strip():
+        messages.append({"role": "user", "content": "Answer the question now, in plain words."})
+        reply = client.chat(messages, think=False)
     out.content = (getattr(reply, "content", "") or "").strip()
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
