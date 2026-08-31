@@ -229,10 +229,17 @@ def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
     assert "plain words" in model.seen[-1][-1]["content"]
 
 
-def test_an_answer_that_arrives_only_as_thinking_is_not_lost():
-    """gpt-oss can put every word in the reasoning channel and none in content."""
+SCRATCH = "Actually the look_at shows Ada; need to check Bea. Wait \u2014 maybe compilers?"
+
+
+def test_an_answer_left_in_the_thinking_channel_is_asked_for_again():
+    """gpt-oss can put everything in the reasoning channel and none in content."""
 
     class Reasoner(ScriptedModel):
+        def __init__(self, script):
+            super().__init__(script)
+            self.reasoned = False
+
         def chat(self, messages, tools=None, **kw):
             self.seen.append(list(messages))
             if tools and self.script:
@@ -240,12 +247,37 @@ def test_an_answer_that_arrives_only_as_thinking_is_not_lost():
                 name, args = self.script.pop(0)
                 return Reply(tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
-            return Reply(content="", thinking="Ada is the one working on compilers.")
+            if not self.reasoned:
+                self.reasoned = True
+                return Reply(content="", thinking=SCRATCH)
+            return Reply(content="Ada works on compilers.")
 
     model = Reasoner([call("look_at", ids=["person:ada"])])
     out = converse("who works on compilers?", GRAPH, model)
-    assert out.content == "Ada is the one working on compilers."
-    assert "plain words" in model.seen[-1][-1]["content"]
+    assert out.content == "Ada works on compilers."
+    # recovered by whichever ask reached it first — the plain nudge or the one that offers
+    # the notes back; both are asking for the answer rather than printing the working
+    asked = model.seen[-1][-1]["content"]
+    assert "plain words" in asked or "working towards" in asked
+
+
+def test_the_working_out_is_never_shown_as_the_answer():
+    """A scratchpad reads as a broken machine: say plainly that no answer came."""
+
+    class OnlyThinks(ScriptedModel):
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            if tools and self.script:
+                import json
+                name, args = self.script.pop(0)
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": name, "arguments": json.dumps(args)}}])
+            return Reply(content="", thinking=SCRATCH)
+
+    out = converse("who works on compilers?", GRAPH, OnlyThinks([call("look_at", ids=["person:ada"])]))
+    assert SCRATCH not in out.content
+    assert "did not finish an answer" in out.content
+    assert out.read == ["person:ada"]
 
 
 def test_a_model_that_only_searched_gets_the_top_finds_read_to_it():

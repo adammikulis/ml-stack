@@ -370,9 +370,24 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         reply = step(False)
     out.content = (getattr(reply, "content", "") or "").strip()
     if not out.content:
-        # a model can put every word of its answer in the thinking channel
-        out.content = (getattr(reply, "thinking", "") or "").strip()
-        if out.content and emit is not None:
+        # Thinking is a scratchpad — "Actually the look_at shows… need to check X" — and
+        # showing it as the answer reads as a broken machine. It is offered back as
+        # material and asked for the answer it was working towards; only prose that reads
+        # like an answer is used, never the working itself.
+        trace = (getattr(reply, "thinking", "") or "").strip()
+        if trace:
+            messages.append({"role": "user", "content":
+                             "Write the answer your notes were working towards, in plain "
+                             "prose for someone who cannot see them. Do not narrate what you "
+                             "looked up."})
+            said = (getattr(client.chat(messages, think=False), "content", "") or "").strip()
+            out.content = said
+            if said and emit is not None:
+                emit({"event": "answer", "text": said})
+    if not out.content:
+        out.content = ("The model did not finish an answer. What it opened is lit up on the "
+                       "graph; asking again, or more narrowly, usually gets one.")
+        if emit is not None:
             emit({"event": "answer", "text": out.content})
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
