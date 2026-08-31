@@ -3,13 +3,23 @@
 #
 # Nothing in this repository may name a person. Test data is invented, always.
 #
-# Presidio's recogniser reads every staged file and refuses a person it finds, including one
-# it has never seen before. Where the recogniser has no feel for a name, a shape rule catches
-# anything that looks like one inside a quoted string. Names that are deliberately made up
-# live in tests/known-fixtures.txt.
+# Two detectors, because each misses what the other catches:
+#   - Presidio's recogniser reads every staged file and refuses a person it finds, including
+#     one it has never seen before. Where the recogniser has no feel for a name, a shape rule
+#     catches anything that looks like one inside a quoted string.
+#   - An exact list read from a local database catches lowercase handles that a recogniser
+#     does not read as names. Neither list is written down: the names are read at commit time.
 #
-# Install:  ln -sf ../../scripts/hooks/no-real-names .git/hooks/pre-commit
-#           pip install presidio-analyzer && python -m spacy download en_core_web_sm
+# Configuration, all by environment variable so another repo can wrap this file:
+#   NAMES_GRAPH     a graph JSON; its person and org entries and its message senders
+#                   are refused (default: none)
+#   NAMES_SCRAPE    a JSONL file whose "sender" fields are refused (default: none)
+#   NAMES_FIXTURES  the allow-list of invented names (default: tests/known-fixtures.txt,
+#                   relative to the repo root; an absolute path is used as given)
+#   PYTHON          the interpreter to run (default: python3)
+#
+# Install:  scripts/install-hooks.sh
+#           pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
 # Override: SKIP_NAME_CHECK=1 git commit ...   only after reading what it flagged.
 
 [ -n "$SKIP_NAME_CHECK" ] && exit 0
@@ -20,10 +30,10 @@ PY="${PYTHON:-python3}"
 import json, os, re, subprocess, sys
 
 HOME = os.path.expanduser("~")
-GRAPH = ""
-SCRAPE = ""
+GRAPH = os.environ.get("NAMES_GRAPH", "")
+SCRAPE = os.environ.get("NAMES_SCRAPE", "")
 ALLOW = f"{HOME}/.config/pii-allow.txt"
-FIXTURES = "tests/known-fixtures.txt"
+FIXTURES = os.environ.get("NAMES_FIXTURES", "tests/known-fixtures.txt")
 SKIP_SUFFIX = (".png", ".jpg", ".gguf", ".lock", ".min.js", ".map")
 FLOOR = 0.6
 
@@ -36,7 +46,8 @@ def permitted():
     """Invented names, and anything deliberately allowed."""
     out = set()
     root = run("git", "rev-parse", "--show-toplevel").strip()
-    for path in (f"{root}/{FIXTURES}", ALLOW):
+    fixtures = FIXTURES if os.path.isabs(FIXTURES) else f"{root}/{FIXTURES}"
+    for path in (fixtures, f"{root}/tests/known-fixtures.txt", ALLOW):
         try:
             for line in open(path, encoding="utf-8"):
                 body = line.split("#")[0].strip()
@@ -48,11 +59,18 @@ def permitted():
 
 
 def from_database():
-    """Everyone the machine already knows about."""
+    """Everyone, and every organization, the machine already knows about.
+
+    A member's employer is their business as much as their name is, and an org name that came
+    out of a scrape is data, not something to reach for when a test needs a company.
+    """
     names = set()
     try:
         graph = json.load(open(GRAPH, encoding="utf-8"))
         names |= {n["label"] for n in graph.get("nodes", []) if n.get("kind") == "person"}
+        # an org has to look named to count: a one-word lowercase label is an ordinary word
+        names |= {n["label"] for n in graph.get("nodes", []) if n.get("kind") == "org"
+                  and len(n["label"]) > 4 and n["label"][:1].isupper()}
         names |= {m["sender"] for m in (graph.get("messages") or {}).values() if m.get("sender")}
     except (OSError, ValueError):
         pass
@@ -147,7 +165,7 @@ for path in staged:
     for hit in engine.analyze(text=blob, language="en"):
         if hit.entity_type != "PERSON" or hit.score < FLOOR:
             continue
-        body = blob[hit.start:hit.end].strip().strip("\u2019\u2018'\"`,.:; ")
+        body = blob[hit.start:hit.end].strip().strip("’‘'\"`,.:; ")
         # a person has a given name and a family name; one CamelCase token is a class
         if not body or " " not in body or body.casefold() in allowed or IDENTIFIER.search(body):
             continue
@@ -167,8 +185,8 @@ if bad:
         print(f"           {path}:{line}  {why}", file=sys.stderr)
     if len(unique) > 25:
         print(f"           ...and {len(unique) - 25} more", file=sys.stderr)
-    print("           invent the data. If the name is made up, add it to "
-          "tests/known-fixtures.txt.", file=sys.stderr)
+    print(f"           invent the data. If the name is made up, add it to {FIXTURES}.",
+          file=sys.stderr)
     sys.exit(1)
 PY
 exit 0

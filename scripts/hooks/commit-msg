@@ -1,20 +1,30 @@
 #!/bin/sh
 # A commit message is source too. Refuse one that names a real person.
+#
+# Configured by the same environment variables as no-real-names: NAMES_GRAPH, NAMES_SCRAPE,
+# NAMES_FIXTURES, PYTHON. With no database configured, only ~/.config/pii-deny.txt is refused.
+#
+# Install:  scripts/install-hooks.sh
+# Override: SKIP_NAME_CHECK=1 git commit ...   only after reading what it flagged.
 [ -n "$SKIP_NAME_CHECK" ] && exit 0
 MSG="$1"
-python3 - "$MSG" <<'PY' || exit 1
+PY="${PYTHON:-python3}"
+"$PY" - "$MSG" <<'PY' || exit 1
 import json, os, re, sys
 
 HOME = os.path.expanduser("~")
+GRAPH = os.environ.get("NAMES_GRAPH", "")
+SCRAPE = os.environ.get("NAMES_SCRAPE", "")
+FIXTURES = os.environ.get("NAMES_FIXTURES", "tests/known-fixtures.txt")
 names = set()
 try:
-    graph = json.load(open(f"{HOME}/ai_ceo/data/graph.json", encoding="utf-8"))
+    graph = json.load(open(GRAPH, encoding="utf-8"))
     names |= {n["label"] for n in graph.get("nodes", []) if n.get("kind") == "person"}
     names |= {m["sender"] for m in (graph.get("messages") or {}).values() if m.get("sender")}
 except (OSError, ValueError):
     pass
 try:
-    for line in open(f"{HOME}/ai_ceo/data/messages.jsonl", encoding="utf-8"):
+    for line in open(SCRAPE, encoding="utf-8"):
         try:
             row = json.loads(line)
         except ValueError:
@@ -31,8 +41,8 @@ for path in (f"{HOME}/.config/pii-deny.txt",):
 # the same allow-lists the pre-commit hook reads: what is invented, or deliberately permitted
 allowed = set()
 root = os.popen("git rev-parse --show-toplevel").read().strip()
-for path in (f"{root}/services/known-fixtures.txt", f"{HOME}/ai_ceo/services/known-fixtures.txt",
-             f"{root}/tests/known-fixtures.txt", f"{HOME}/.config/pii-allow.txt"):
+fixtures = FIXTURES if os.path.isabs(FIXTURES) else f"{root}/{FIXTURES}"
+for path in (fixtures, f"{root}/tests/known-fixtures.txt", f"{HOME}/.config/pii-allow.txt"):
     try:
         for line in open(path, encoding="utf-8"):
             body = line.split("#")[0].strip()

@@ -153,10 +153,15 @@ not in source, not in a test, not in a fixture, not in a docstring, not in a com
 Test data is invented. If a real value revealed a bug, reproduce its *shape* — the casing, the
 punctuation, a dot in a handle, a missing surname — never its content.
 
-`scripts/hooks/no-real-names` enforces it and is worth installing:
+`scripts/hooks/` enforces it — `no-real-names` on staged files, `commit-msg` on the
+message — and is worth installing:
 
-    ln -sf ../../scripts/hooks/no-real-names .git/hooks/pre-commit
+    scripts/install-hooks.sh
     pip install -e '.[privacy]' && python -m spacy download en_core_web_sm
 
 It refuses a person it has never seen, not merely a list of known names. Invented names go in
-`tests/known-fixtures.txt`.
+`tests/known-fixtures.txt`. Both hooks read `NAMES_GRAPH`, `NAMES_SCRAPE`, `NAMES_FIXTURES`
+and `PYTHON` from the environment, so a machine holding a local database of names can wrap
+them with an untracked `.git/hooks/` script that exports those and execs the tracked one —
+the installer leaves such a wrapper alone. Other repositories may wrap these files the same
+way; this repository knows nothing about them.
