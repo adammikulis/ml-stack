@@ -1,0 +1,207 @@
+"""Asking a model a question about a graph.
+
+Handing a model the whole graph does not scale and handing it a pre-chosen slice makes the
+choosing the answer. This gives it three things it can do instead — find entries by name, read
+what is held on them, trace how two of them connect — and lets it decide which to use. What it
+touched comes back with the answer, which is what a caller needs to show its working.
+
+The graph is a mapping with ``nodes`` and ``edges``; nothing here cares what a project calls
+its kinds or relations.
+
+    reply = converse("how are Ada and Bea connected?", graph, client)
+    reply.content   # what to say
+    reply.ids       # what to light up
+    reply.steps     # what it did to find out
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+SYSTEM = (
+    "You are answering a question about a graph. You cannot see it; you read it with the tools "
+    "you have been given. Look up the names in the question to get their ids, read the entries "
+    "you find, and when the question is about how two things relate, trace the path between "
+    "them. Then answer plainly, in two or three sentences, naming the things you mean. Answer "
+    "only from what the tools returned, and say plainly when the graph does not answer the "
+    "question. Never invent an entry that the tools did not show you."
+)
+ROUNDS = 5
+FOUND = 12
+JOINED = 12
+SAID = 2
+SAID_CHARS = 220
+LIT = 25
+
+TOOLS = [
+    {"type": "function", "function": {
+        "name": "look_up",
+        "description": "Find entries in the graph whose name or attached words match some text. "
+                       "Use it to turn a name in the question into ids you can work with.",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "what to look for"}},
+            "required": ["text"]}}},
+    {"type": "function", "function": {
+        "name": "look_at",
+        "description": "What the graph holds on some entries: their attributes, what they are "
+                       "joined to, and a line or two of what was actually said.",
+        "parameters": {"type": "object", "properties": {
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "entry ids, as returned by look_up"}},
+            "required": ["ids"]}}},
+    {"type": "function", "function": {
+        "name": "path_between",
+        "description": "How two entries are connected, as the chain of entries between them. "
+                       "Use it when a question is about how two things relate and they are not "
+                       "joined directly.",
+        "parameters": {"type": "object", "properties": {
+            "from_id": {"type": "string"}, "to_id": {"type": "string"}},
+            "required": ["from_id", "to_id"]}}},
+]
+
+
+@dataclass
+class Answer:
+    """What to say, what to light up, and what was done to find out."""
+
+    content: str = ""
+    ids: list[str] = field(default_factory=list)
+    steps: list[str] = field(default_factory=list)
+
+    @property
+    def why(self) -> str:
+        return "; ".join(self.steps)
+
+
+def look_up(graph: Mapping[str, Any], text: str, *, limit: int = FOUND) -> list[dict[str, str]]:
+    """Entries whose name, attributes or own words carry that text, best match first."""
+    want = " ".join((text or "").split()).casefold()
+    if not want:
+        return []
+    messages = graph.get("messages") or {}
+    scored: list[tuple[int, int, Mapping[str, Any]]] = []
+    for node in graph.get("nodes") or ():
+        label = str(node.get("label") or "").casefold()
+        attrs = node.get("attrs") or {}
+        if label == want:
+            score = 4
+        elif want in label:
+            score = 3
+        elif any(want in str(v).casefold() for v in attrs.values()):
+            score = 2
+        elif any(want in str((messages.get(mid) or {}).get("text") or "").casefold()
+                 for mid in (node.get("messages") or ())[:20]):
+            score = 1
+        else:
+            continue
+        scored.append((score, int(node.get("mentions") or 0), node))
+    scored.sort(key=lambda row: (-row[0], -row[1], str(row[2].get("label") or "")))
+    return [{"id": str(n["id"]), "label": str(n.get("label") or ""), "kind": str(n.get("kind") or "")}
+            for _, _, n in scored[:limit]]
+
+
+def look_at(graph: Mapping[str, Any], ids: Sequence[str]) -> str:
+    """What the graph holds on those entries, as text a model can answer from."""
+    by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
+    messages = graph.get("messages") or {}
+    lines: list[str] = []
+    for node_id in ids:
+        node = by_id.get(str(node_id))
+        if node is None:
+            continue
+        attrs = node.get("attrs") or {}
+        joined = [f"{e.get('rel', 'joined to')} {by_id[e['target']].get('label')}"
+                  for e in (graph.get("edges") or ())
+                  if e.get("source") == node_id and e.get("target") in by_id]
+        joined += [f"{by_id[e['source']].get('label')} {e.get('rel', 'joined to')} this"
+                   for e in (graph.get("edges") or ())
+                   if e.get("target") == node_id and e.get("source") in by_id]
+        line = f"- {node.get('label')} ({attrs.get('type') or node.get('kind') or 'entry'})"
+        for key in ("role", "location"):
+            if attrs.get(key):
+                line += f", {attrs[key]}"
+        if joined:
+            line += ": " + "; ".join(joined[:JOINED])
+        lines.append(line)
+        for mid in (node.get("messages") or ())[:SAID]:
+            text = str((messages.get(mid) or {}).get("text") or "")
+            if text:
+                lines.append(f'    said: "{" ".join(text.split())[:SAID_CHARS]}"')
+    return "\n".join(lines)
+
+
+def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, Any]:
+    """The chain of entries from one to another, and how it reads."""
+    from ml_stack.entities.paths import between, shortest_path
+
+    edges = list(graph.get("edges") or ())
+    ids = between(edges, start, goal)
+    if not ids:
+        return {"path": [], "why": "nothing in the graph joins those two"}
+    label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
+    steps = shortest_path(edges, start, goal)
+    return {"path": ids, "rels": [e.get("rel", "") for e in steps],
+            "reads": " → ".join(label.get(i, i) for i in ids)}
+
+
+def converse(question: str, graph: Mapping[str, Any], client: Any, *,
+             turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
+             rounds: int = ROUNDS, limit: int = LIT) -> Answer:
+    """One question, answered with the graph in hand.
+
+    ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
+    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does.
+    """
+    known = {str(n["id"]) for n in (graph.get("nodes") or ())}
+    out = Answer()
+
+    def note(ids: Sequence[str]) -> None:
+        for one in ids:
+            if str(one) in known and str(one) not in out.ids:
+                out.ids.append(str(one))
+
+    said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
+             "content": str(t.get("content") or "")[:4000]}
+            for t in turns if str(t.get("content") or "").strip()]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said,
+                                      {"role": "user", "content": question}]
+    reply = None
+    for _ in range(rounds):
+        reply = client.chat(messages, tools=TOOLS, think=False)
+        calls = getattr(reply, "tool_calls", None) or []
+        if not calls:
+            break
+        messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": calls})
+        for call in calls:
+            fn = call.get("function") or {}
+            name = fn.get("name") or ""
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except ValueError:
+                args = {}
+            if name == "look_up":
+                result: Any = look_up(graph, str(args.get("text") or ""))
+                note([r["id"] for r in result])
+                out.steps.append(f"looked up {str(args.get('text'))!r}")
+            elif name == "look_at":
+                # one guard, in note: an id the model made up is neither read nor lit up
+                ids = [str(i) for i in (args.get("ids") or ())]
+                note(ids)
+                result = look_at(graph, ids) or "nothing on those"
+                real = sum(1 for i in ids if i in known)
+                out.steps.append(f"read {real} entr" + ("y" if real == 1 else "ies"))
+            elif name == "path_between":
+                result = path_between(graph, str(args.get("from_id") or ""),
+                                      str(args.get("to_id") or ""))
+                note(result.get("path") or [])
+                out.steps.append("traced a path" if result.get("path") else "found no path")
+            else:
+                result = {"error": f"no such tool: {name}"}
+            messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
+                             "name": name, "content": json.dumps(result, ensure_ascii=False)[:6000]})
+    out.content = (getattr(reply, "content", "") or "").strip()
+    out.ids = out.ids[:limit]
+    return out

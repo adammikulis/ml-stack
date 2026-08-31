@@ -19,3 +19,5 @@ Ada Lovelace
 attrs STRING
 PRIMARY KEY
 rel STRING
+Ada Lovelace'
+Pellard Foundry

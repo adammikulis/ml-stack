@@ -3,6 +3,7 @@ topology construction, and a Cypher-queryable store that outlives the process.""
 
 from __future__ import annotations
 
+from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
 from ml_stack.graph.store import GraphStore, GraphStoreUnavailable
 from ml_stack.graph.dag import (
     NotADAG,
@@ -60,4 +61,9 @@ __all__ = [
     "topological_order",
     "GraphStore",
     "GraphStoreUnavailable",
+    "Answer",
+    "converse",
+    "look_at",
+    "look_up",
+    "path_between",
 ]
