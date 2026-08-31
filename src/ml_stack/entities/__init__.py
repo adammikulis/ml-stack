@@ -5,9 +5,11 @@ from .edits import (EDIT_INSTRUCTIONS, EDITS_SCHEMA, OPERATIONS, Edit, ids_of, o
 from .pick import PICK_INSTRUCTIONS, PICK_SCHEMA, pick, validate_pick
 from .resolve import (STOPWORDS, canonical, fold_duplicates, fold_key, looks_like_handle,
                       stem)
+from .paths import adjacency, between, shortest_path
 from .spelling import close, distance, nearest, spelled_in
 
 __all__ = ["EDITS_SCHEMA", "EDIT_INSTRUCTIONS", "OPERATIONS", "PICK_INSTRUCTIONS", "PICK_SCHEMA",
-           "STOPWORDS", "Edit", "canonical", "close", "distance", "fold_duplicates", "fold_key",
+           "STOPWORDS", "Edit", "adjacency", "between", "canonical", "close", "distance",
+           "fold_duplicates", "fold_key",
            "ids_of", "looks_like_handle", "nearest", "objections", "pick", "plan_edits",
-           "spelled_in", "stem", "validate_edits", "validate_pick"]
+           "shortest_path", "spelled_in", "stem", "validate_edits", "validate_pick"]
