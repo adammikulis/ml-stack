@@ -27,6 +27,9 @@ dependencies = []
 
 # Nothing here is needed to find the other machines and pass work between them.
 # Each extra is what one part of ml_stack needs to do its own job.
+[tool.setuptools.package-data]
+"ml_stack.graph" = ["web/*.html", "web/*.json"]
+
 [project.optional-dependencies]
 privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
 app = ["pywebview>=5.0"]

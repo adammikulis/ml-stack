@@ -21,3 +21,16 @@ PRIMARY KEY
 rel STRING
 Ada Lovelace'
 Pellard Foundry
+
+# typefaces and code fragments the recogniser reads as people
+Bricolage Grotesque
+Avenir Next
+Helvetica Neue
+IBM Plex Sans
+IBM Plex Mono
+Ocean Ter
+d.x * k - r
+l.target.y - l.source.y
+a.x + b.x
+a.y + b.y
+Group Graph

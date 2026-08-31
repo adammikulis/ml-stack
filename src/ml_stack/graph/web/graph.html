@@ -1,0 +1,1725 @@
+<title>__TITLE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f7f7f4; --surface: #ffffff; --surface-2: #efeeea; --line: #dcdbd4; --line-strong: #b9b8b0;
+  --ink: #1c1c1a; --ink-2: #5a5a55; --ink-3: #8a8983; --accent: #2a78d6; --accent-ink: #ffffff;
+  --land: #e6e5df; --land-line: #cfcec6; --sea: #f2f3f0;
+  --k-person: #2a78d6; --k-org: #eb6834; --k-place: #1baf7a; --k-topic: #eda100; --k-opportunity: #e87ba4;
+  --shadow: 0 1px 2px rgba(20,20,18,.06), 0 8px 24px rgba(20,20,18,.06);
+  --link-op: .55;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161715; --surface: #1e1f1c; --surface-2: #262723; --line: #33342f; --line-strong: #4a4b45;
+    --ink: #f1f0ea; --ink-2: #b9b8b0; --ink-3: #82817a; --accent: #3987e5; --accent-ink: #ffffff;
+    --land: #2a2b27; --land-line: #3a3b36; --sea: #1a1b18;
+    --k-person: #3987e5; --k-org: #d95926; --k-place: #199e70; --k-topic: #c98500; --k-opportunity: #d55181;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --link-op: .8;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161715; --surface: #1e1f1c; --surface-2: #262723; --line: #33342f; --line-strong: #4a4b45;
+  --ink: #f1f0ea; --ink-2: #b9b8b0; --ink-3: #82817a; --accent: #3987e5; --accent-ink: #ffffff;
+  --land: #2a2b27; --land-line: #3a3b36; --sea: #1a1b18;
+  --k-person: #3987e5; --k-org: #d95926; --k-place: #199e70; --k-topic: #c98500; --k-opportunity: #d55181;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  --link-op: .8;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font-body); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; padding: 12px 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+header h1 { font: 500 22px/1.1 var(--font-display); letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
+header h1 small { display: block; font: 400 12px/1.4 var(--font-body); color: var(--ink-3); letter-spacing: 0; margin-top: 2px; }
+.stats { display: flex; gap: 14px; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; }
+.stats b { color: var(--ink); font-weight: 600; font-family: var(--font-mono); }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.chip[aria-pressed="true"] { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
+.chip .sw { width: 10px; height: 10px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { padding: 5px 12px; border: 0; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+#refresh { display: none; align-items: center; gap: 8px; }
+#refresh.local { display: inline-flex; }
+#refresh .stage { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono); max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#refresh button { padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
+#refresh button[disabled] { opacity: .6; cursor: progress; }
+#spin { display: none; }
+.graph-wrap.is3d #spin { display: inline-flex; }
+.tools { position: absolute; right: 14px; top: 70px; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+#graph3d { position: absolute; inset: 0; display: none; }
+.graph-wrap.is3d #graph3d { display: block; }
+#labels3d { position: absolute; inset: 0; overflow: hidden; pointer-events: none; display: none; }
+.graph-wrap.is3d #labels3d { display: block; }
+.l3 { position: absolute; transform: translate(-50%, 0); white-space: nowrap; font: 500 calc(13px * var(--label-scale, 1)) var(--font-body);
+      color: var(--ink-2); text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
+.l3.k-person { font: 600 calc(15px * var(--label-scale, 1)) var(--font-body); color: var(--ink); }
+.l3.k-topic { font-size: calc(12px * var(--label-scale, 1)); color: var(--ink-3); }
+.l3.edge { font: 500 calc(10px * var(--elabel-scale, 1)) var(--font-body); color: var(--ink-3); }
+.graph-wrap.is3d > svg { visibility: hidden; }
+/* in the graph's own top-left corner, where what it controls is */
+.menu { position: absolute; left: 14px; top: 12px; z-index: 9; }
+.menu .chip { backdrop-filter: blur(6px); }
+/* hung off its own button: opening it across the window read as a different control */
+.panel { position: absolute; left: 0; top: calc(100% + 10px); z-index: 9; width: 350px;
+         max-height: 74vh; overflow: auto; background: var(--surface); border: 1px solid var(--line);
+         border-radius: 10px; box-shadow: var(--shadow); padding: 12px 14px 14px; display: none; }
+.menu.display-open .panel { display: block; }
+/* a small notch so the panel reads as belonging to the button above it */
+.menu.display-open .panel::before { content: ""; position: absolute; left: 16px; top: -6px;
+  width: 10px; height: 10px; background: var(--surface); border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line); transform: rotate(45deg); }
+.panel h4 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
+            color: var(--ink-3); margin: 14px 0 6px; }
+.panel h4:first-child { margin-top: 0; }
+.panel .row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 2px 0; }
+.panel .name { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.panel .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel .n { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+.panel input[type="color"] { width: 24px; height: 19px; padding: 0; border: 1px solid var(--line);
+                             border-radius: 4px; background: none; cursor: pointer; }
+.three { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.three button { padding: 2px 7px; border: 0; background: var(--surface); font-size: 11px;
+                color: var(--ink-3); cursor: pointer; }
+.three button + button { border-left: 1px solid var(--line); }
+.three button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.bulk { display: flex; gap: 6px; margin: 8px 0 2px; }
+.bulk button { font-size: 11px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px;
+               background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.bulk button:hover { border-color: var(--line-strong); color: var(--ink); }
+.about { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; font-size: 11px;
+         font-family: var(--font-mono); color: var(--ink-2); margin-bottom: 8px; }
+.about .k { color: var(--ink-3); }
+/* the search sits in the graph, because the graph is what it searches */
+.search { position: absolute; right: 14px; top: 12px; z-index: 3; }
+.search input { width: 300px; padding: 6px 10px 6px 30px; border: 1px solid var(--line); border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent); backdrop-filter: blur(6px); }
+.search svg { position: absolute; left: 9px; top: 8px; width: 14px; height: 14px; color: var(--ink-3); }
+.node.answer .mark { stroke: var(--k-opportunity); stroke-width: 4px; }
+.search .count { position: absolute; right: 26px; top: 7px; font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.qfoot { display: flex; align-items: center; gap: 8px; }
+.qfoot .note { flex: 1; font-size: 11px; color: var(--ink-3); }
+#qclear { padding: 2px 9px; font: inherit; font-size: 11px; border: 1px solid var(--line-strong);
+  border-radius: 7px; background: var(--surface-2); color: var(--ink-2); cursor: pointer; }
+#qclear:hover { color: var(--ink); }
+
+header { position: relative; }
+main { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); min-height: 0; }
+.graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
+.graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
+.hint { position: absolute; right: 14px; top: 50px; font-size: 11px; color: var(--ink-3); text-align: right; }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
+
+aside { display: grid; grid-template-rows: auto auto minmax(0, 1fr); min-height: 0; }
+/* one pane, two faces: what you clicked, and what you asked */
+.faces { display: flex; gap: 2px; padding: 8px 18px 0; border-bottom: 1px solid var(--line); }
+.faces button { font: 600 11px var(--font-body); letter-spacing: .05em; text-transform: uppercase;
+  padding: 7px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0;
+  background: none; color: var(--ink-3); cursor: pointer; margin-bottom: -1px; }
+.faces button:hover { color: var(--ink); }
+.faces button[aria-selected="true"] { color: var(--ink); background: var(--surface);
+  border-color: var(--line); }
+.askpane { display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 9px;
+  padding: 14px 18px 16px; min-height: 0; }
+.askpane[hidden] { display: none; }
+.askpane .turns { max-height: none; overflow: auto; align-content: start; }
+.ask-box { border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+           box-shadow: var(--shadow); }
+#ask-box { position: absolute; left: 14px; bottom: 12px; z-index: 4; width: 310px; max-width: calc(100% - 28px); }
+#ask-box[open] { max-height: calc(100% - 24px); overflow: auto; }
+#chat-box { border-left: 0; border-right: 0; border-radius: 0; border-top: 0;
+  border-bottom: 1px solid var(--line); box-shadow: none; }
+.ask-box > summary { list-style: none; cursor: pointer; padding: 9px 18px;
+  font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; align-items: center; gap: 7px; }
+.ask-box > summary::-webkit-details-marker { display: none; }
+.ask-box > summary::before { content: "+"; font-family: var(--font-mono); font-size: 13px; color: var(--line-strong); }
+.ask-box[open] > summary::before { content: "\2212"; }
+.ask-box > summary:hover { color: var(--ink); }
+.ask { padding: 0 18px 14px; display: grid; gap: 6px; }
+.seat { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--line-strong);
+        text-transform: none; letter-spacing: 0; }
+.chat { padding: 0 18px 12px; display: grid; gap: 8px; }
+.turns { display: grid; gap: 7px; max-height: 30vh; overflow: auto; font-size: 13px; }
+.turns .t { padding: 6px 9px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2);
+            white-space: pre-wrap; overflow-wrap: anywhere; }
+.turns .t.mine { background: var(--ink); color: var(--bg); justify-self: end; max-width: 85%; }
+.chat-row { display: flex; gap: 7px; }
+.chat-row input { flex: 1; min-width: 0; font: inherit; font-size: 13px; padding: 6px 9px;
+                  border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--ink); }
+.chat-row button { padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 8px;
+                   background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
+.ask textarea { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+                background: var(--surface-2); color: var(--ink); resize: vertical;
+                /* without a border box the padding pushes the field past its column and the
+                   whole form scrolls sideways */
+                width: 100%; max-width: 100%; box-sizing: border-box; }
+.ask .ask-row { display: flex; align-items: center; gap: 10px; }
+.ask button { padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 8px;
+              background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
+.ask .note { font-size: 11px; color: var(--ink-3); }
+.who-i-am { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.who-i-am select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line);
+                   border-radius: 6px; background: var(--surface-2); color: var(--ink); flex: 1; min-width: 0; }
+.attest { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+.attest input { margin-top: 2px; }
+.kinds-of-ask { display: flex; flex-wrap: wrap; gap: 4px; }
+.kinds-of-ask button { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line);
+                       border-radius: 999px; background: var(--surface); color: var(--ink-3); cursor: pointer; }
+.kinds-of-ask button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.picked { display: flex; flex-wrap: wrap; gap: 4px; }
+.picked .hint-inline { font-size: 11px; color: var(--ink-3); }
+.picked button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px;
+                 border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+                 color: var(--ink-2); cursor: pointer; }
+.node.picked .mark { stroke: var(--accent); stroke-width: 3px; }
+.link.picked { stroke: var(--accent); stroke-opacity: 1; }
+.map-box { border-bottom: 1px solid var(--line); }
+.map-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
+  font: 500 12px var(--font-body); color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; }
+.map-box > summary::-webkit-details-marker { display: none; }
+.map-box > summary::after { content: "\2212"; margin-left: auto; font-family: var(--font-mono); color: var(--line-strong); }
+.map-box:not([open]) > summary::after { content: "+"; }
+.map-box > summary:hover { color: var(--ink); }
+.map-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+.map-wrap { position: relative; background: var(--sea); }
+.map-wrap svg { width: 100%; height: auto; display: block; }
+.detail { overflow: auto; padding: 16px 18px 24px; }
+.detail[hidden] { display: none; }
+.detail h2 { font: 700 20px/1.15 var(--font-display); margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
+.kind { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; }
+.attrs { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0 14px; }
+.attrs dt { color: var(--ink-3); } .attrs dd { margin: 0; }
+.detail h3 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
+.read { margin-top: 7px; }
+.read > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--line-strong); }
+.read > summary::-webkit-details-marker { display: none; }
+.read > summary::before { content: "\24D8"; font-size: 12px; }
+.read > summary:hover { color: var(--ink-2); }
+.read dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0;
+  font-size: 11px; font-family: var(--font-mono); color: var(--ink-3); }
+.read dt { color: var(--line-strong); }
+.read dd { margin: 0; overflow-wrap: anywhere; }
+/* a well-joined node has dozens of links; folded, the evidence for it stays in reach */
+.fold { margin: 18px 0 8px; }
+.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "+"; font-family: var(--font-mono); color: var(--line-strong); }
+.fold[open] > summary::before { content: "\2212"; }
+.fold > summary:hover { color: var(--ink); }
+.fold .muted { text-transform: none; letter-spacing: 0; color: var(--line-strong); }
+.fold .links { margin-top: 8px; }
+.fold:not([open]) .links { display: none; }   /* the list sets its own display, which wins */
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 12px; }
+.links button:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.links .rel { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+.msg .open { float: right; font-size: 11px; color: var(--accent); text-decoration: none; margin-left: 8px; }
+.msg .open:hover { text-decoration: underline; }
+.facts { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink-3); }
+.facts li::before { content: "↳ "; color: var(--line-strong); }
+.ref { border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer;
+       border-bottom: 1px solid var(--line-strong); }
+.ref:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.ref.rel { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); border: 1px solid var(--line);
+           border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.link { cursor: pointer; }
+.link:hover { stroke-opacity: 1; }
+.edge-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
+.edge-head .rel { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; }
+.msg { border-left: 2px solid var(--line-strong); padding: 6px 10px; margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.msg .who { color: var(--ink); font-weight: 500; }
+.msg .when { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; margin-left: 6px; }
+.placeholder { color: var(--ink-3); }
+.placeholder p { max-width: 42ch; }
+.shared { display: grid; gap: 8px; margin: 4px 0 20px; }
+.shared .row { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; align-items: baseline; }
+.shared .chip { cursor: pointer; }
+.shared .who { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.shared .who button { border: 0; padding: 0; background: none; cursor: pointer; font-size: 13px;
+                      color: var(--ink); border-bottom: 1px solid var(--line); }
+.shared .who button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.caveat { font-size: 12px; margin: -4px 0 8px; }
+.close { display: grid; gap: 6px; margin-bottom: 20px; }
+.close .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.close button { border: 0; padding: 0; background: none; cursor: pointer; font-size: 13px;
+                color: var(--ink); border-bottom: 1px solid var(--line); }
+.close button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.close .tilde { color: var(--ink-3); font-family: var(--font-mono); }
+.tip { position: fixed; pointer-events: none; z-index: 10; padding: 6px 9px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 12px; box-shadow: var(--shadow); opacity: 0; transition: opacity .12s; max-width: 260px; }
+.tip.on { opacity: 1; }
+.tip .sub { color: color-mix(in srgb, var(--bg) 70%, transparent); font-size: 11px; }
+
+.link { stroke: var(--line-strong); stroke-opacity: var(--link-op); marker-end: url(#arrow); }
+/* opacity, not stroke-opacity: a marker does not inherit the stroke's alpha */
+.link.dim { opacity: .14; }
+.link.on { stroke: var(--accent); stroke-opacity: .9; }
+.arrow { fill: context-stroke; }
+.node.gone, .link.gone { display: none; }
+.node { cursor: pointer; }
+.node .hit { fill: transparent; }
+.node .mark { stroke: var(--surface); stroke-width: 2px; pointer-events: none; }
+.hitline { stroke: transparent; stroke-width: 14; cursor: pointer; }
+.hitline.gone { display: none; }
+.node.dim .mark { opacity: .15; } .node.dim text { opacity: .1; }
+/* close to what was asked for, not it */
+.node.near .mark { opacity: .5; } .node.near text { opacity: .65; font-style: italic; }
+.node.on .mark { stroke: var(--accent); stroke-width: 3px; }
+.node text { font: 500 calc(13px * var(--label-scale, 1)) var(--font-body); fill: var(--ink-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.node.k-person text { font: 600 calc(15px * var(--label-scale, 1)) var(--font-body); fill: var(--ink); }
+.node.k-topic text { font-size: calc(12px * var(--label-scale, 1)); fill: var(--ink-3); }
+.node.on text, .node.on.k-topic text { fill: var(--ink); font-weight: 700; stroke-width: 5px; }
+.node.on text, .node.on.k-topic text, .node.k-person.on text { paint-order: stroke; stroke: var(--bg); }
+.l3.on { color: var(--ink); font-weight: 700; }
+/* a label the layout pass could not place without an overlap */
+.node.hushed text { opacity: 0; }
+.graph-wrap.settling .node text, .graph-wrap.settling .elabel { opacity: 0; }
+.elabel { font: 500 calc(12px * var(--elabel-scale, 1)) var(--font-body); fill: var(--ink-3); paint-order: stroke; stroke: var(--bg);
+          stroke-width: 3px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.elabel.hushed { opacity: 0; }
+.land { fill: var(--land); stroke: var(--land-line); stroke-width: .5; }
+.dot { fill: var(--k-person); stroke: var(--surface); stroke-width: 1.5; cursor: pointer; }
+.dot.on { stroke: var(--accent); stroke-width: 3; }
+.leader { stroke: var(--line-strong); stroke-width: 1; stroke-opacity: .65; }
+.dot-label { font: 10px var(--font-body); fill: var(--ink); paint-order: stroke; stroke: var(--sea); stroke-width: 3px; pointer-events: none; }
+
+@media (max-width: 900px) {
+  .app { height: auto; }
+  main { grid-template-columns: 1fr; }
+  .graph-wrap { height: 70vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .search input { width: 160px; }
+}
+@media (max-width: 640px) {
+  header { position: relative; }
+  .graph-wrap { height: 62vh; }
+}
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+</style>
+
+<div class="app">
+  <header>
+    <h1 id="title">__TITLE__<small id="subtitle"></small></h1>
+    <div class="stats" id="stats"></div>
+    <div id="refresh"><button id="refresh-btn">Refresh graph</button><span class="stage" id="refresh-stage"></span></div>
+    <div class="seg" role="group" aria-label="View">
+      <button id="v2d" aria-pressed="true">2D</button><button id="v3d" aria-pressed="false">3D</button>
+    </div>
+  </header>
+  <main>
+    <section class="graph-wrap" aria-label="Knowledge graph">
+      <svg id="graph"></svg>
+      <div id="graph3d" aria-label="Knowledge graph, 3D"></div>
+      <div id="labels3d" aria-hidden="true"></div>
+      <div class="menu">
+        <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
+        <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
+      </div>
+      <label class="search">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <input id="q" type="search" placeholder="Search, or ask a question and press enter" aria-label="Search or ask">
+        <span class="count" id="qcount" aria-live="polite"></span>
+      </label>
+      <details class="ask-box" id="ask-box">
+      <summary>Ask for a change</summary>
+      <form class="ask" id="ask">
+        <div class="kinds-of-ask" id="ask-kind"></div>
+        <div class="picked" id="picked"><span class="hint-inline">Shift-click nodes or links to gather what this is about.</span></div>
+        <textarea id="ask-text" rows="2" placeholder="What should change? &quot;drop my location&quot;, &quot;I left that company&quot;, &quot;this is not my topic&quot;"></textarea>
+        <label class="who-i-am"><span>Which of these are you?</span>
+          <select id="ask-who"><option value="">choose your name</option></select>
+        </label>
+        <label class="attest"><input type="checkbox" id="ask-attest">
+          <span>I am the person this is about, and I am asking for my own information to change.</span>
+        </label>
+        <div class="ask-row"><button type="submit">Send</button><span class="note" id="ask-note"></span></div>
+      </form>
+      </details>
+      <div class="hint">drag to move · scroll to zoom · click to inspect</div>
+      <div class="tools">
+        <button id="spin" class="chip" aria-pressed="false">↻ spin</button>
+        <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
+        <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
+      </div>
+    </section>
+    <aside>
+      <details class="map-box" id="map-box" open>
+        <summary><b id="located">0</b> <span id="on-map">on the map</span></summary>
+        <div class="map-wrap" aria-label="Member map">
+          <svg id="map"></svg>
+        </div>
+      </details>
+      <div class="faces" role="tablist" aria-label="What to show">
+        <button id="face-details" role="tab" aria-selected="true">Details</button>
+        <button id="face-ask" role="tab" aria-selected="false">Ask the model</button>
+      </div>
+      <div class="detail" id="detail" role="tabpanel"></div>
+      <div class="askpane" id="askpane" role="tabpanel" hidden>
+        <div class="turns" id="qturns"></div>
+        <form class="chat-row" id="qform">
+          <input id="qmore" type="text" placeholder="Ask about this graph" autocomplete="off">
+          <button type="submit">Send</button>
+        </form>
+        <div class="qfoot"><span class="note" id="qnote" aria-live="polite"></span>
+          <button type="button" id="qclear">clear</button></div>
+      </div>
+    </aside>
+  </main>
+</div>
+<div class="tip" id="tip"></div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script id="world" type="application/json">__WORLD__</script>
+<script>
+(function () {
+  const DATA = JSON.parse(document.getElementById('data').textContent);
+  const WORLD = JSON.parse(document.getElementById('world').textContent);
+  const G = DATA.graph;
+  // What kinds a graph has, what each is called and what shape it takes, are the caller's.
+  const SHAPES = { circle: d3.symbolCircle, square: d3.symbolSquare, diamond: d3.symbolDiamond,
+                   triangle: d3.symbolTriangle, wye: d3.symbolWye, star: d3.symbolStar,
+                   cross: d3.symbolCross };
+  const KINDS = (DATA.kinds || []).map(k => ({ ...k, shape: SHAPES[k.shape] || d3.symbolCircle }));
+  const kindOf = Object.fromEntries(KINDS.map(k => [k.k, k]));
+  const COPY = Object.assign({
+    heading: 'What is here, and how it joins up',
+    blurb: 'Click anything to see what it was read from.',
+    note: '',
+    onMap: 'on the map',
+    ground: 'Shared ground',
+  }, DATA.copy || {});
+  document.getElementById('on-map').textContent = COPY.onMap;
+  const kindById = Object.fromEntries(G.nodes.map(n => [n.id, n.kind]));
+  const p2pCount = G.edges.filter(e => kindById[e.source] === 'person'
+                                    && kindById[e.target] === 'person').length;
+  const color = k => `var(--k-${k})`;
+  const swatch = (k, size = 10) => `<svg class="sw" width="${size}" height="${size}" viewBox="-6 -6 12 12"><path d="${d3.symbol().type(kindOf[k].shape).size(56)()}" fill="${color(k)}"/></svg>`;
+  // show: drawn. hide: masked, but still shaping the layout. remove: out of the simulation, so
+  // everything else re-settles without it.
+  const STATES = ['show', 'hide', 'remove'];
+  const display = { node: {}, link: {}, source: {}, edgeLabels: 'show' };
+  KINDS.forEach(k => { display.node[k.k] = 'show'; });
+  // Working sessions are the making of this graph, not the community in it. They start out of the
+  // picture so the layout settles around what people actually said; the Display panel puts them back.
+  display.source.session = 'remove';
+  // person-to-person edges are what turns a readable graph into a hairball, so they get a
+  // switch of their own on top of the per-relation ones
+  display.between = 'show';
+  const colors = {};
+  const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true, map: true };
+  const picked = new Set();
+  // the same file is served from this machine and published as a flat page; only the served
+  // one has a model behind it, and it is served over the tunnel as much as over loopback
+  const served = !!window.SLACK_GRAPH_LIVE;
+  let answer = null;
+  let query = '';
+  let selected = null;
+
+  const bothPeople = l => {
+    const a = typeof l.source === 'object' ? l.source : byId.get(l.source);
+    const b = typeof l.target === 'object' ? l.target : byId.get(l.target);
+    return !!a && !!b && a.kind === 'person' && b.kind === 'person';
+  };
+  const linkP2PGone = l => display.between !== 'show' && bothPeople(l);
+  const linkP2PDropped = l => display.between === 'remove' && bothPeople(l);
+  const srcGone = d => d.session && display.source.session !== 'show';
+  const srcDropped = d => d.session && display.source.session === 'remove';
+  const gone = d => display.node[d.kind] !== 'show' || srcGone(d);
+  const dropped = d => display.node[d.kind] === 'remove' || srcDropped(d);
+  const linkGone = l => display.link[l.rel] !== 'show' || srcGone(l) || linkP2PGone(l)
+    || gone(l.source) || gone(l.target);
+  const linkDropped = l => display.link[l.rel] === 'remove' || srcDropped(l) || linkP2PDropped(l)
+    || dropped(l.source) || dropped(l.target);
+
+  function paint(kind, hex) {
+    colors[kind] = hex;
+    document.documentElement.style.setProperty(`--k-${kind}`, hex);
+  }
+  function saveDisplay() {
+    try { localStorage.setItem('velanir-graph-display', JSON.stringify({ display, colors, view })); } catch (e) {}
+  }
+  try {
+    const saved = JSON.parse(localStorage.getItem('velanir-graph-display') || 'null');
+    if (saved && saved.view) Object.assign(view, saved.view);
+    if (saved && saved.display) {
+      Object.assign(display.node, saved.display.node || {});
+      Object.assign(display.link, saved.display.link || {});
+      Object.assign(display.source, saved.display.source || {});
+      if (saved.display.between) display.between = saved.display.between;
+      if (saved.display.edgeLabels) display.edgeLabels = saved.display.edgeLabels;
+    }
+    Object.entries((saved && saved.colors) || {}).forEach(([k, v]) => paint(k, v));
+  } catch (e) {}
+
+  // ---- header
+  const st = G.stats || {};
+  // the header counts what is in the picture, so dropping the working sessions changes it
+  function counted() {
+    const out = { nodes: 0, edges: 0, members: 0, by_kind: {} };
+    for (const n of G.nodes) {
+      if (srcDropped(n)) continue;
+      out.nodes++;
+      out.by_kind[n.kind] = (out.by_kind[n.kind] || 0) + 1;
+      if (n.attrs && n.attrs.member) out.members++;
+    }
+    out.edges = G.edges.filter(e => !srcDropped(e)).length;
+    return out;
+  }
+  function paintCounts() {
+    const c = counted();
+    document.getElementById('stats').innerHTML =
+      `<span><b>${st.messages ?? 0}</b> messages</span><span><b>${c.members}</b> members</span><span><b>${c.nodes}</b> nodes</span><span><b>${c.edges}</b> links</span>`;
+  }
+  const msgs = Object.values(G.messages || {});
+  if (msgs.length) {
+    const ts = msgs.map(m => +m.ts).sort((a, b) => a - b);
+    const f = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+    document.getElementById('subtitle').textContent = `${f(ts[0])} – ${f(ts[ts.length - 1])} · ${[...new Set(msgs.map(m => m.channel).filter(Boolean))].join(', ')}`;
+  }
+  paintCounts();
+
+  // ---- one box: typing narrows the graph, Enter asks the model about what is in it
+  const qBox = document.getElementById('q'), qCount = document.getElementById('qcount');
+  const qTurns = document.getElementById('qturns');
+  const detailPane = document.getElementById('detail'), askPane = document.getElementById('askpane');
+  const faceDetails = document.getElementById('face-details'), faceAsk = document.getElementById('face-ask');
+  // The pane on the right answers one question at a time: what is this, or what did I ask.
+  function face(which) {
+    const asking = which === 'ask';
+    askPane.hidden = !asking;
+    detailPane.hidden = asking;
+    faceAsk.setAttribute('aria-selected', asking);
+    faceDetails.setAttribute('aria-selected', !asking);
+    if (asking) qTurns.scrollTop = qTurns.scrollHeight;
+  }
+  faceDetails.addEventListener('click', () => face('details'));
+  faceAsk.addEventListener('click', () => face('ask'));
+  const qNote = document.getElementById('qnote');
+  const turns = [];
+  let asking = false;
+
+  function say(role, text) {
+    const el = document.createElement('div');
+    el.className = 't' + (role === 'user' ? ' mine' : '');
+    el.textContent = text;
+    qTurns.appendChild(el);
+    qTurns.scrollTop = qTurns.scrollHeight;
+    return el;
+  }
+  function openAnswers(note) {
+    face('ask');
+    if (note !== undefined) qNote.textContent = note;
+  }
+  function closeAnswers() {
+    qTurns.textContent = '';
+    qNote.textContent = '';
+    turns.length = 0;
+    face('details');
+  }
+  document.getElementById('qclear').addEventListener('click', () => {
+    qBox.value = ''; query = ''; answer = null; qCount.textContent = '';
+    closeAnswers(); refresh(); qBox.focus();
+  });
+
+  // Typing used to filter on every keystroke, so the graph lurched about while a question was
+  // still being written. Nothing moves until enter.
+  qBox.addEventListener('input', () => {
+    if (!qBox.value.trim() && (query || answer)) {
+      query = ''; answer = null; qCount.textContent = ''; refresh();
+    }
+  });
+  document.getElementById('qform').addEventListener('submit', e => {
+    e.preventDefault();
+    const more = document.getElementById('qmore');
+    if (!more.value.trim()) return;
+    qBox.value = more.value; more.value = '';
+    qBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  });
+
+  qBox.addEventListener('keydown', async e => {
+    if (e.key === 'Escape') {
+      qBox.value = ''; query = ''; answer = null; qCount.textContent = '';
+      closeAnswers(); refresh(); return;
+    }
+    if (e.key !== 'Enter' || asking) return;
+    e.preventDefault();
+    const question = qBox.value.trim();
+    if (!question) return;
+    // the plain text search runs first, so something is lit up while the model thinks
+    query = question.toLowerCase();
+    answer = null;
+    refresh();
+    if (!served) {
+      // a published page cannot run a model, so the best lexical hit is the answer
+      search();
+      const best = nodes.filter(n => found && found.direct.has(n.id))
+        .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || b.mentions - a.mentions)[0];
+      openAnswers(best ? '' : `nothing here matches “${question}”`);
+      say('user', question);
+      say('assistant', best
+        ? `The closest thing in the graph is ${best.label}. Asking in words needs the page served from the machine that holds the model.`
+        : 'Nothing in the graph matches that, and asking in words needs the page served from the machine that holds the model.');
+      if (best) select(best.id);
+      return;
+    }
+    asking = true;
+    openAnswers('thinking…');
+    say('user', question);
+    turns.push({ role: 'user', content: question });
+    const pending = say('assistant', '…');
+    try {
+      const r = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ question, turns: turns.slice(0, -1) }) });
+      const out = await r.json();
+      if (!r.ok) {
+        pending.textContent = out.error || 'the model did not answer';
+        qNote.textContent = ''; turns.pop(); return;
+      }
+      const said = out.content || out.why || 'Nothing in the graph answers that.';
+      pending.textContent = said;
+      turns.push({ role: 'assistant', content: said });
+      answer = out.ids.length ? new Set(out.ids) : null;
+      query = out.ids.length ? '' : query;
+      qCount.textContent = out.ids.length ? String(out.ids.length) : '';
+      qNote.textContent = (out.ids.length ? `${out.ids.length} lit up` : 'nothing to light up')
+        + (out.why ? ` · ${out.why}` : '');
+      refresh();
+    } catch (err) {
+      pending.textContent = 'no answer from the server';
+      qNote.textContent = ''; turns.pop();
+    } finally { asking = false; }
+  });
+
+  // ---- graph
+  const nodes = G.nodes.map(n => ({ ...n }));
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const links = G.edges.filter(e => byId.has(e.source) && byId.has(e.target)).map(e => ({ ...e }));
+  // Who counts as joined to whom follows what is on screen. Reaching through a relation you
+  // have switched off lit up nodes with no visible edge to explain them.
+  const neighbors = new Map();
+  const endOf = x => (typeof x === 'object' ? x : byId.get(x));
+  function buildNeighbors() {
+    neighbors.clear();
+    for (const l of links) {
+      // resolved by hand rather than through linkGone: before the simulation runs, an end is
+      // still an id, and asking a string for its kind hides every edge on the page
+      const a = endOf(l.source), b = endOf(l.target);
+      if (!a || !b) continue;
+      // a relation with no state yet is shown, the same as when the states are first filled in
+      if ((display.link[l.rel] || 'show') !== 'show' || srcGone(l) || linkP2PGone(l)
+          || gone(a) || gone(b)) continue;
+      if (!neighbors.has(a.id)) neighbors.set(a.id, new Set());
+      if (!neighbors.has(b.id)) neighbors.set(b.id, new Set());
+      neighbors.get(a.id).add(b.id); neighbors.get(b.id).add(a.id);
+    }
+  }
+  buildNeighbors();
+  const NONE = new Set();
+  const relCount = new Map();
+  links.forEach(l => relCount.set(l.rel, (relCount.get(l.rel) || 0) + 1));
+  const RELS = [...relCount.keys()].sort((a, b) => relCount.get(b) - relCount.get(a) || a.localeCompare(b));
+  const relText = r => r.replace(/_/g, ' ');
+  const degree = id => (neighbors.get(id) || NONE).size;
+  // a topic only one person named once is background texture: no label until you look closer
+  const minor = n => n.kind === 'topic' && degree(n.id) < 2 && (n.mentions || 1) < 2;
+  // people are the point of the page, so they are drawn last and sit on top
+  const PAINT = { topic: 0, place: 1, org: 2, opportunity: 3, person: 4 };
+  nodes.sort((a, b) => PAINT[a.kind] - PAINT[b.kind]);
+
+  const svg = d3.select('#graph');
+  svg.append('defs').append('marker').attr('id', 'arrow').attr('viewBox', '0 0 8 8')
+    .attr('refX', 7).attr('refY', 4).attr('markerWidth', 5).attr('markerHeight', 5)
+    .attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
+    .append('path').attr('class', 'arrow').attr('d', 'M0,0 L8,4 L0,8 Z');
+  const root = svg.append('g');
+  const wrap = document.querySelector('.graph-wrap');
+  wrap.classList.add('settling');
+  let W = wrap.clientWidth, H = wrap.clientHeight;
+  const SIZE = { person: [9, 2.6], org: [5, 1.9], place: [5, 1.9], opportunity: [5, 1.9], topic: [3.5, 1.6] };
+  const radius = n => { const [base, per] = SIZE[n.kind]; return base + Math.sqrt(n.mentions || 1) * per; };
+  const sim = d3.forceSimulation(nodes)
+    .force('link', d3.forceLink(links).id(d => d.id).distance(l => 90 + 20 / Math.sqrt(l.weight || 1)).strength(l => 0.2 + Math.min(0.4, (l.weight || 1) / 10)))
+    .force('charge', d3.forceManyBody().strength(-420).distanceMax(500))
+    .force('collide', d3.forceCollide(n => radius(n) + (n.kind === 'person' ? 34 : 20)))
+    .force('center', d3.forceCenter(W / 2, H / 2))
+    .force('x', d3.forceX(W / 2).strength(0.03)).force('y', d3.forceY(H / 2).strength(0.03));
+  // "mentions" is the relation the model reaches for when no better one fits, and it is a third
+  // of the edges. Off to start with, the graph reads as who is interested in what, who works
+  // where, and who answered whom; the Links section switches it back on.
+  RELS.forEach(r => { if (!display.link[r]) display.link[r] = r === 'mentions' ? 'hide' : 'show'; });
+  const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link').attr('stroke-width', l => Math.min(4, 0.8 + Math.sqrt(l.weight)));
+  // a one-pixel line is not something anyone can hit; the events live on a wide clear one
+  const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
+    .on('click', (e, l) => {
+      e.stopPropagation();
+      if (e.shiftKey) pick('link:' + links.indexOf(l)); else selectEdge(l);
+    })
+    .on('mousemove', (e, l) => tip(e, `${shown(l.source)} → ${shown(l.target)}`, `${l.rel.replace(/_/g, ' ')} · seen in ${l.messages.length} message${l.messages.length === 1 ? '' : 's'}`))
+    .on('mouseleave', hideTip);
+  const node = root.append('g').selectAll('g').data(nodes).join('g').attr('class', d => 'node k-' + d.kind).attr('tabindex', 0)
+    .call(d3.drag().on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+      .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+      .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+  node.append('circle').attr('class', 'hit').attr('r', d => radius(d) + 5);
+  node.append('path').attr('class', 'mark').attr('fill', d => color(d.kind)).attr('d', d => d3.symbol().type(kindOf[d.kind].shape).size(Math.PI * radius(d) ** 2 * 1.3)());
+  const shown = n => (n.attrs && n.attrs.handle ? '@' : '') + n.label;
+  const labelText = n => { const s = shown(n); return s.length > 26 ? s.slice(0, 24) + '…' : s; };
+  const label = node.append('text').attr('text-anchor', 'middle').attr('dy', d => radius(d) + 13).text(labelText);
+  const elabel = root.append('g').selectAll('text').data(links).join('text')
+    .attr('class', 'elabel').attr('text-anchor', 'middle').text(l => relText(l.rel));
+  const measure = () => {
+    label.each(function (d) { d.lw = this.getComputedTextLength(); });
+    elabel.each(function (l) { l.lw = this.getComputedTextLength(); });
+  };
+  measure();
+  if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
+  node.on('click', (e, d) => (e.shiftKey ? pick('node:' + d.id) : select(d.id)))
+    .on('keydown', (e, d) => { if (e.key === 'Enter') select(d.id); })
+    .on('mousemove', (e, d) => tip(e, d.label, `${d.attrs.type || d.kind} · in ${d.mentions} message${d.mentions === 1 ? '' : 's'}${d.attrs.location ? ' · ' + d.attrs.location : ''}`))
+    .on('mouseleave', hideTip);
+
+  // Labels hold a constant size on screen — scale(1/k) undoes the zoom — so placement is done in
+  // screen pixels. The node that matters most claims its box first, below the mark and then above
+  // it; whatever still collides is left unlabelled rather than drawn over a neighbour, and zooming
+  // in spreads the marks apart until those labels fit.
+  const labelDy = (d, k) => radius(d) * k + 13;
+  // density 0 keeps only what fits with room to spare; 100 lets labels sit shoulder to shoulder
+  const gap = () => 14 - (view.density / 100) * 13;
+  let was2d = new Set();
+  function layoutLabels() {
+    const k = d3.zoomTransform(svg.node()).k;
+    const focus = selected ? new Set([selected, ...(neighbors.get(selected) || NONE)]) : null;
+    const rank = d => (d.id === selected ? 9 : PAINT[d.kind] - (minor(d) ? 1 : 0));
+    const queue = nodes.filter(d => d.x != null && matches(d) && (!focus || focus.has(d.id)))
+      .sort((a, b) => (was2d.has(b.id) - was2d.has(a.id))
+        || rank(b) - rank(a) || (b.mentions || 0) - (a.mentions || 0));
+    // every visible mark is an obstacle too, so a label never lands on another node's shape
+    const boxes = queue.map(d => {
+      const r = radius(d) * k;
+      return { x0: d.x * k - r, x1: d.x * k + r, y0: d.y * k - r, y1: d.y * k + r };
+    });
+    const show = new Set();
+    // A name you asked to see is never dropped for want of room. Collision decides which of the
+    // rest fit; the selected node and the ones joined to it are placed whatever they overlap.
+    const insist = d => d.id === selected || (focus && focus.has(d.id));
+    for (const d of queue) {
+      const half = (d.lw || 40) / 2 + gap(), cx = d.x * k, cy = d.y * k;
+      let placed = false;
+      for (const dy of [labelDy(d, k), -(radius(d) * k + 6)]) {
+        const box = { x0: cx - half, x1: cx + half, y0: cy + dy - 12, y1: cy + dy + 4 };
+        if (boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+        boxes.push(box); show.add(d.id); d.dy = dy; placed = true;
+        break;
+      }
+      if (!placed && insist(d)) { show.add(d.id); d.dy = labelDy(d, k); }
+    }
+    was2d = show;
+    node.classed('hushed', d => !show.has(d.id));
+    label.attr('transform', `scale(${1 / k})`).attr('dy', d => d.dy ?? labelDy(d, k));
+
+    // Edge names go in after the node names, so a relation never costs a person their label.
+    // With every kind switched on most of them lose; removing a relation is what frees the room.
+    const showEdge = new Set();
+    if (display.edgeLabels === 'show') {
+      const near = selected ? l => (l.source.id === selected || l.target.id === selected) : () => false;
+      const edges = links.filter(l => !linkGone(l) && !linkDropped(l) && l.source.x != null
+                                      && (!focus || near(l)))
+        .sort((a, b) => (near(b) - near(a)) || (b.weight || 0) - (a.weight || 0));
+      for (const l of edges) {
+        const half = (l.lw || 30) / 2 + gap();
+        const cx = (l.source.x + l.target.x) / 2 * k, cy = (l.source.y + l.target.y) / 2 * k;
+        const box = { x0: cx - half, x1: cx + half, y0: cy - 7, y1: cy + 5 };
+        const mine = selected && (l.source.id === selected || l.target.id === selected);
+        if (!mine && boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+        boxes.push(box); showEdge.add(l);
+      }
+    }
+    elabel.classed('hushed', l => !showEdge.has(l));
+  }
+
+  sim.on('tick', () => {
+    const k = d3.zoomTransform(svg.node()).k;
+    link.each(function (l) {
+      const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
+      const d = Math.hypot(dx, dy) || 1;
+      const head = radius(l.target) + 5 / k, tail = radius(l.source) + 1;
+      this.setAttribute('x1', l.source.x + dx / d * tail);
+      this.setAttribute('y1', l.source.y + dy / d * tail);
+      this.setAttribute('x2', l.target.x - dx / d * head);
+      this.setAttribute('y2', l.target.y - dy / d * head);
+    });
+    hitline.attr('x1', l => l.source.x).attr('y1', l => l.source.y)
+           .attr('x2', l => l.target.x).attr('y2', l => l.target.y);
+    elabel.attr('transform', l => `translate(${(l.source.x + l.target.x) / 2},${(l.source.y + l.target.y) / 2}) scale(${1 / k})`);
+    node.attr('transform', d => `translate(${d.x},${d.y})`);
+    if (sim.alpha() < 0.06) layoutLabels();
+  });
+  let fitK = 1, lastK = 1;
+  const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => {
+    root.attr('transform', e.transform);
+    label.attr('transform', `scale(${1 / e.transform.k})`);
+    if (Math.abs(e.transform.k - lastK) > lastK * 0.08) { lastK = e.transform.k; layoutLabels(); }
+  });
+  svg.call(zoom).on('dblclick.zoom', null);
+  let fitted = false;
+  function fit() {
+    if (!nodes.length) return;
+    const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+    const x0 = Math.min(...xs) - 60, x1 = Math.max(...xs) + 60, y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
+    const k = Math.min(2.2, 0.92 / Math.max((x1 - x0) / W, (y1 - y0) / H));
+    const t = d3.zoomIdentity.translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2).scale(k);
+    const dur = fitted ? 400 : 0;
+    fitK = lastK = k;
+    fitted = true;
+    // the labels are placed in screen pixels, so they have to be placed against the zoom this
+    // transition lands on, not the one it starts from
+    svg.transition().duration(dur).call(zoom.transform, t)
+      .on('end interrupt', () => { lastK = d3.zoomTransform(svg.node()).k; layoutLabels(); wrap.classList.remove('settling'); });
+  }
+  sim.on('end', () => { if (!fitted || needsFit) { needsFit = false; fit(); } });
+  setTimeout(() => { if (!fitted) fit(); }, 1500);
+  svg.on('click', e => { if (e.target === svg.node()) select(null); });
+  new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
+  if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html('<div><b>No messages yet.</b><br>The graph fills in as the channels are read.</div>');
+
+  // ---- map
+  const mapBox = document.getElementById('map-box');
+  mapBox.open = view.map !== false;
+  mapBox.addEventListener('toggle', () => { view.map = mapBox.open; saveDisplay(); });
+
+  const mapSvg = d3.select('#map');
+  const MW = 640, MH = 330;
+  mapSvg.attr('viewBox', `0 0 ${MW} ${MH}`).attr('preserveAspectRatio', 'xMidYMid meet');
+  const placed = DATA.points || [];
+  // Frame the people, not the planet — a whole sphere spends this panel on empty ocean. The floor
+  // on the span keeps one city from zooming the map to street level.
+  function extent() {
+    if (!placed.length) return { type: 'Sphere' };
+    const lons = placed.map(p => p.lon), lats = placed.map(p => p.lat);
+    let x0 = Math.min(...lons), x1 = Math.max(...lons), y0 = Math.min(...lats), y1 = Math.max(...lats);
+    const growX = Math.max(18, (x1 - x0) * 0.25, (70 - (x1 - x0)) / 2);
+    const growY = Math.max(12, (y1 - y0) * 0.25, (40 - (y1 - y0)) / 2);
+    x0 = Math.max(-180, x0 - growX); x1 = Math.min(180, x1 + growX);
+    y0 = Math.max(-84, y0 - growY); y1 = Math.min(84, y1 + growY);
+    return { type: 'MultiPoint', coordinates: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
+  }
+  const proj = d3.geoNaturalEarth1().fitExtent([[6, 6], [MW - 6, MH - 6]], extent());
+  const path = d3.geoPath(proj);
+  mapSvg.append('path').attr('d', path({ type: 'Sphere' })).attr('fill', 'var(--sea)');
+  mapSvg.append('path').attr('class', 'land').attr('d', path(topojson.feature(WORLD, WORLD.objects.land)));
+  const pts = placed.map(p => ({ ...p, xy: proj([p.lon, p.lat]) })).filter(p => p.xy);
+  document.getElementById('located').textContent = pts.length;
+  const dots = mapSvg.append('g').selectAll('circle').data(pts).join('circle').attr('class', 'dot')
+    .attr('cx', p => p.xy[0]).attr('cy', p => p.xy[1]).attr('r', 5)
+    .on('click', (e, p) => select(p.id))
+    .on('mousemove', (e, p) => tip(e, p.label, p.place)).on('mouseleave', hideTip);
+  const dotLabels = mapSvg.append('g').selectAll('text').data(pts).join('text').attr('class', 'dot-label')
+    .text(p => p.label.split(' ')[0]);
+  // two members a couple of degrees apart stack their names on top of each other; try each side
+  const dotBoxes = pts.map(q => ({ x0: q.xy[0] - 6, x1: q.xy[0] + 6, y0: q.xy[1] - 6, y1: q.xy[1] + 6 }));
+  const leaders = mapSvg.append('g');
+  dotLabels.each(function (p) {
+    const w = this.getComputedTextLength() || 30;
+    // near spots first, then further out: two members a couple of degrees apart leave no room
+    // beside their own dots, so the name steps back and a hairline says which dot it belongs to
+    const spots = [[7, 3], [-7 - w, 3], [-w / 2, -8], [-w / 2, 15], [10, -9], [-10 - w, -9],
+                   [10, 16], [-10 - w, 16], [17, -17], [-17 - w, -17], [17, 23], [-17 - w, 23],
+                   [28, -26], [-28 - w, -26], [28, 32], [-28 - w, 32]];
+    for (const [dx, dy] of spots) {
+      const box = { x0: p.xy[0] + dx - 2, x1: p.xy[0] + dx + w + 2, y0: p.xy[1] + dy - 9, y1: p.xy[1] + dy + 3 };
+      if (dotBoxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+      dotBoxes.push(box);
+      d3.select(this).attr('x', p.xy[0] + dx).attr('y', p.xy[1] + dy);
+      if (Math.abs(dy - 3) > 12 || Math.abs(dx) > 12) {
+        leaders.append('line').attr('class', 'leader')
+          .attr('x1', p.xy[0]).attr('y1', p.xy[1])
+          .attr('x2', p.xy[0] + (dx < 0 ? dx + w + 2 : dx - 2)).attr('y2', p.xy[1] + dy - 3);
+      }
+      return;
+    }
+    d3.select(this).attr('display', 'none');
+  });
+
+  // ---- 3D view (lazy; three.js only spins up when asked for)
+  let g3 = null, is3d = false, fitted3d = false;
+  const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function init3d() {
+    if (g3 || typeof ForceGraph3D !== 'function') return;
+    const el = document.getElementById('graph3d');
+    g3 = ForceGraph3D({ controlType: 'orbit' })(el)
+      .width(wrap.clientWidth).height(wrap.clientHeight)
+      .backgroundColor(cssVar('--bg'))
+      .graphData(live3d())
+      .nodeVal(val3d)
+      .nodeVisibility(n => !gone(n.ref))
+      .linkVisibility(l => !srcGone(l) && !linkP2PGone(l) && display.link[l.rel] === 'show'
+        && !gone(byId.get(l.source.id ?? l.source)) && !gone(byId.get(l.target.id ?? l.target)))
+      .linkDirectionalArrowLength(3.5)
+      .linkDirectionalArrowRelPos(1)
+      .linkDirectionalArrowColor(l => link3d(l))
+      .nodeRelSize(5)
+      .nodeColor(n => shade3d(n))
+      .nodeOpacity(0.95)
+      .nodeLabel(n => `<div style="font:12px ${cssVar('--font-body')};padding:4px 7px;border-radius:6px;background:${cssVar('--ink')};color:${cssVar('--bg')}">${shown(n.ref)}<div style="opacity:.7;font-size:11px">${n.ref.attrs.type || n.kind} · ${n.mentions}</div></div>`)
+      .linkColor(l => link3d(l))
+      .linkOpacity(0.5)
+      .linkWidth(l => 0.4 + Math.sqrt(l.weight) * 0.4)
+      .linkDirectionalParticles(l => (selected && (l.source.id === selected || l.target.id === selected)) ? 2 : 0)
+      .linkDirectionalParticleSpeed(0.006)
+      .onNodeClick(n => select(n.id))
+      .onBackgroundClick(() => select(null))
+      .showNavInfo(false)
+      .onEngineStop(() => { if (!fitted3d) { fitted3d = true; g3.zoomToFit(0, 70); setTimeout(() => g3.zoomToFit(500, 70), 300); } });
+    applyPhysics();
+    // without this the disconnected components drift apart and zoomToFit has to frame the gaps,
+    // which is what left the graph a distant speck; the 2D view gets the same pull from forceX/Y
+    g3.d3Force('pull', alpha => {
+      for (const n of g3.graphData().nodes) {
+        const k = alpha * 0.08;
+        n.vx -= n.x * k; n.vy -= n.y * k; n.vz -= n.z * k;
+      }
+    });
+    g3.cooldownTicks(200);
+    const controls = g3.controls();
+    controls.autoRotateSpeed = 0.9;
+    // Blender's scheme: middle drags the view around, shift+middle slides it, the wheel zooms,
+    // and the left button is left alone so a click still picks a node.
+    controls.mouseButtons = { LEFT: null, MIDDLE: 0, RIGHT: 2 };
+    el.addEventListener('pointerdown', e => {
+      if (e.button === 1) {
+        e.preventDefault();
+        controls.mouseButtons = { LEFT: null, MIDDLE: e.shiftKey ? 2 : 0, RIGHT: 2 };
+      }
+    }, true);
+    el.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+  }
+  // Home frames everything, "." frames what is selected — the Blender keys for the same thing
+  addEventListener('keydown', e => {
+    if (!is3d || !g3 || e.target.tagName === 'INPUT') return;
+    if (e.key === 'Home') { e.preventDefault(); g3.zoomToFit(500, 70); }
+    if (e.key === '.' && selected) { e.preventDefault(); flyTo(selected); }
+  });
+  function live3d() {
+    return {
+      nodes: nodes.filter(n => !dropped(n))
+        .map(n => ({ id: n.id, kind: n.kind, label: n.label, mentions: n.mentions, ref: n })),
+      links: links.filter(l => !linkDropped(l))
+        .map(l => ({ source: l.source.id, target: l.target.id, rel: l.rel, weight: l.weight })),
+    };
+  }
+  function push3d() { if (g3) { g3.graphData(live3d()); fitted3d = false; } }
+  function applyPhysics() {
+    if (!g3) return;
+    g3.d3Force('charge').strength(-60 * view.repel);
+    g3.d3Force('link').distance(l => (28 + 10 / Math.sqrt(l.weight || 1)) * view.spring);
+    sim.force('charge').strength(-420 * view.repel);
+    sim.force('link').distance(l => (90 + 20 / Math.sqrt(l.weight || 1)) * view.spring);
+  }
+  // same hierarchy as the 2D view: a person's sphere is about twice a topic's across
+  const VAL3D = { person: [6, 4], org: [2, 1], place: [2, 1], opportunity: [2, 1], topic: [0.6, 0.4] };
+  function val3d(n) { const [base, per] = VAL3D[n.kind]; return base + (n.mentions || 1) * per; }
+
+  // 3D labels are DOM, projected onto the canvas every frame. A three.js text sprite would have to
+  // come from the copy of three bundled inside 3d-force-graph, and one built from a separate global
+  // three does not render; this way the labels also match the 2D type and collision rules exactly.
+  const labelLayer = document.getElementById('labels3d');
+  const els = new Map();
+  const rad3d = n => Math.cbrt(val3d(n)) * 5;
+  function build3dLabels() {
+    const add = (key, cls, text) => {
+      const el = document.createElement('span');
+      el.className = cls;
+      el.textContent = text;
+      el.hidden = true;
+      labelLayer.appendChild(el);
+      els.set(key, el);
+    };
+    nodes.forEach(n => add(n.id, 'l3 k-' + n.kind, labelText(n)));
+    links.forEach(l => add('rel:' + l.source.id + '|' + l.rel + '|' + l.target.id, 'l3 edge', relText(l.rel)));
+  }
+  let was3d = new Set();
+  const slot3d = new Map();
+  function place3dLabels() {
+    if (!is3d || !g3) return;
+    const cam = g3.cameraPosition(), tgt = g3.controls().target;
+    let ax = tgt.x - cam.x, ay = tgt.y - cam.y, az = tgt.z - cam.z;
+    const len = Math.hypot(ax, ay, az) || 1; ax /= len; ay /= len; az /= len;
+    const focus = selected ? new Set([selected, ...(neighbors.get(selected) || NONE)]) : null;
+    const rank = d => (d.id === selected ? 9 : PAINT[d.kind] - (minor(d) ? 1 : 0));
+    const w = wrap.clientWidth, h = wrap.clientHeight;
+    const perPx = (h / 2) / Math.tan(g3.camera().fov * Math.PI / 360);
+    const boxes = [], spheres = [], queue = [], at = new Map();
+    for (const n of g3.graphData().nodes) {
+      const ref = n.ref;
+      if (n.x == null || !matches(ref)) continue;
+      // drop anything behind the camera; graph2ScreenCoords would mirror it into view
+      if ((n.x - cam.x) * ax + (n.y - cam.y) * ay + (n.z - cam.z) * az <= 0) continue;
+      const p = g3.graph2ScreenCoords(n.x, n.y, n.z);
+      const dist = Math.hypot(n.x - cam.x, n.y - cam.y, n.z - cam.z) || 1;
+      const r = rad3d(n) * perPx / dist;
+      // a name may sit beside a small sphere but never over any of them; only the big ones
+      // crowd out another node's name, so the two lists differ
+      const solid = { x0: p.x - r, x1: p.x + r, y0: p.y - r, y1: p.y + r };
+      // a node outside what you are looking at is drawn faint, so a name may sit over it.
+      // Counting it as an obstacle is what left a selected cluster with no labels at all.
+      if (focus && !focus.has(n.id)) continue;
+      spheres.push(solid);
+      if (r >= 10) boxes.push(solid);
+      queue.push({ id: n.id, ref, px: p.x, py: p.y, r });
+      at.set(n.id, p);
+    }
+    // A greedy fit redone every frame changes its mind as the camera moves, and the names blink.
+    // Whatever was up last frame is placed first, so a label keeps its slot until it truly cannot
+    // fit, and only the leftovers compete.
+    queue.sort((a, b) => (was3d.has(b.id) - was3d.has(a.id))
+      || rank(b.ref) - rank(a.ref) || (b.ref.mentions || 0) - (a.ref.mentions || 0));
+    for (const el of els.values()) el.hidden = true;
+    const nowShown = new Set();
+    for (const q of queue) {
+      const half = (q.ref.lw || 40) / 2 + 3;
+      if (q.px < half || q.px > w - half) continue;
+      const insist = q.id === selected || (focus && focus.has(q.id));
+      let placed = false;
+      // the slot this name used last frame is tried first, so a label that keeps its place does
+      // not hop above and below its node as the camera turns
+      const slots = [q.py + q.r + 4, q.py - q.r - 19, q.py - 7];
+      const kept = slot3d.get(q.id);
+      if (kept !== undefined) slots.unshift(slots.splice(kept, 1)[0]);
+      for (const top of slots) {
+        if (top < 2 || top + 15 > h - 2) continue;
+        const box = { x0: q.px - half, x1: q.px + half, y0: top, y1: top + 15 };
+        if (!insist && boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+        boxes.push(box);
+        const el = els.get(q.id);
+        el.style.left = q.px + 'px'; el.style.top = top + 'px'; el.hidden = false;
+        placed = true; nowShown.add(q.id);
+        slot3d.set(q.id, [q.py + q.r + 4, q.py - q.r - 19, q.py - 7].indexOf(top));
+        break;
+      }
+      if (!placed && insist) {
+        const el = els.get(q.id);
+        el.style.left = q.px + 'px'; el.style.top = (q.py - 7) + 'px'; el.hidden = false;
+        nowShown.add(q.id);
+      }
+    }
+    was3d = nowShown;
+    if (display.edgeLabels !== 'show') return;
+    for (const l of g3.graphData().links) {
+      const el = els.get('rel:' + (l.source.id ?? l.source) + '|' + l.rel + '|' + (l.target.id ?? l.target));
+      if (!el) continue;
+      const a = at.get(l.source.id ?? l.source), b = at.get(l.target.id ?? l.target);
+      if (!a || !b || srcGone(l) || linkP2PGone(l) || display.link[l.rel] !== 'show') continue;
+      if (focus && !focus.has(l.source.id ?? l.source) && !focus.has(l.target.id ?? l.target)) continue;
+      const px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
+      const half = el.offsetWidth / 2 + 3;
+      if (px < half || px > w - half || py < 8 || py > h - 8) continue;
+      const box = { x0: px - half, x1: px + half, y0: py - 7, y1: py + 8 };
+      const clear = r => !r.some(x => x.x0 < box.x1 && box.x0 < x.x1 && x.y0 < box.y1 && box.y0 < x.y1);
+      const mine = !!selected && ((l.source.id ?? l.source) === selected
+                                 || (l.target.id ?? l.target) === selected);
+      if (!mine && (!clear(boxes) || !clear(spheres))) continue;
+      boxes.push(box);
+      el.style.left = px + 'px'; el.style.top = (py - 7) + 'px'; el.hidden = false;
+    }
+  }
+  let raf = 0;
+  function frame3d() { place3dLabels(); raf = requestAnimationFrame(frame3d); }
+  function flyTo(id) {
+    if (!g3) return;
+    const all = g3.graphData().nodes;
+    const n = all.find(x => x.id === id);
+    if (!n || n.x == null) return;
+    // frame the node with everything joined to it: flying to the node alone puts the camera
+    // inside the cluster you were trying to look at
+    const near = neighbors.get(id) || NONE;
+    const group = all.filter(x => x.x != null && (x.id === id || near.has(x.id)));
+    let cx = 0, cy = 0, cz = 0;
+    group.forEach(x => { cx += x.x; cy += x.y; cz += x.z; });
+    cx /= group.length; cy /= group.length; cz /= group.length;
+    const spread = Math.max(60, ...group.map(x => Math.hypot(x.x - cx, x.y - cy, x.z - cz)));
+    const back = spread / Math.tan(g3.camera().fov * Math.PI / 360) + spread + 40;
+    const len = Math.hypot(cx - n.x, cy - n.y, cz - n.z) || 1;
+    const ux = (n.x - cx) / len, uy = (n.y - cy) / len, uz = (n.z - cz) / len;
+    g3.cameraPosition({ x: cx + ux * back, y: cy + uy * back, z: cz + uz * back },
+                      { x: cx, y: cy, z: cz }, 900);
+  }
+  function shade3d(n) {
+    const base = cssVar(`--k-${n.kind}`);
+    const vis = matches(n.ref), focus = selected ? (n.id === selected || (neighbors.get(selected) || new Set()).has(n.id)) : true;
+    return (vis && focus) ? base : base + '22';
+  }
+  function link3d(l) {
+    const sid = l.source.id ?? l.source, tid = l.target.id ?? l.target;
+    if (selected && (sid === selected || tid === selected)) return cssVar('--accent');
+    return cssVar('--line-strong') + (selected ? '33' : 'aa');
+  }
+  function setView(three) {
+    is3d = three;
+    wrap.classList.toggle('is3d', is3d);
+    document.getElementById('v2d').setAttribute('aria-pressed', !is3d);
+    document.getElementById('v3d').setAttribute('aria-pressed', is3d);
+    document.querySelector('.hint').textContent =
+      is3d ? 'middle-drag to orbit · right-drag to pan · scroll to zoom · click to inspect'
+           : 'drag to move · scroll to zoom · click to inspect';
+    if (is3d) {
+      init3d();
+      if (g3) {
+        if (!els.size) build3dLabels();
+        if (!raf) frame3d();
+        g3.width(wrap.clientWidth).height(wrap.clientHeight).backgroundColor(cssVar('--bg'));
+        g3.nodeColor(g3.nodeColor());
+        if (fitted3d) setTimeout(() => g3.zoomToFit(400, 70), 60);
+        if (!reduced) setSpin(view.spin, true);
+      }
+    } else {
+      cancelAnimationFrame(raf); raf = 0;
+      if (g3) setSpin(false, true);
+    }
+    try { localStorage.setItem('velanir-graph-view', is3d ? '3d' : '2d'); } catch (e) {}
+  }
+  let spinTouched = false;
+  function setSpin(on, quiet) {
+    if (!g3) return;
+    g3.controls().autoRotate = on;
+    document.getElementById('spin').setAttribute('aria-pressed', on);
+    if (!quiet) spinTouched = true;
+  }
+  document.getElementById('v2d').addEventListener('click', () => setView(false));
+  document.getElementById('v3d').addEventListener('click', () => setView(true));
+  document.getElementById('spin').addEventListener('click', () => setSpin(!g3.controls().autoRotate));
+  new ResizeObserver(() => { if (g3) g3.width(wrap.clientWidth).height(wrap.clientHeight); }).observe(wrap);
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (g3) { g3.backgroundColor(cssVar('--bg')); g3.nodeColor(g3.nodeColor()); g3.linkColor(g3.linkColor()); } });
+  let want3d = true;
+  try { want3d = (localStorage.getItem('velanir-graph-view') || '3d') === '3d'; } catch (e) {}
+  if (want3d && nodes.length && typeof ForceGraph3D === 'function') setView(true);
+
+  // ---- state
+  // A search matches a label, an attribute, or the words the node was read from, and then reaches
+  // one step further through the neighbours embeddinggemma worked out at build time. Those extras
+  // are drawn back a little, because they are close to what was asked for rather than it.
+  let found = null;
+  const NEAR_MAX = 12;
+  const hint = document.querySelector('.hint');
+  function search() {
+    if (!query) { found = null; return; }
+    const direct = new Set();
+    for (const n of nodes) {
+      if (gone(n)) continue;
+      // "Canada" should find the member who wrote "Ontario": what the gazetteer called the
+      // place is searched alongside what they typed
+      const where = (DATA.geo || {})[n.kind === 'place' ? n.label : (n.attrs.location || '')] || '';
+      const hit = n.label.toLowerCase().includes(query)
+        || where.toLowerCase().includes(query)
+        || Object.values(n.attrs).some(v => String(v).toLowerCase().includes(query))
+        || (n.messages || []).some(mid => ((G.messages[mid] || {}).text || '').toLowerCase().includes(query));
+      if (hit) direct.add(n.id);
+    }
+    // a node several hits agree on is closer to the question than one only a single hit reaches
+    const votes = new Map();
+    direct.forEach(id => ((DATA.near || {})[id] || []).forEach(other => {
+      const n = byId.get(other);
+      if (n && !gone(n) && !direct.has(other)) votes.set(other, (votes.get(other) || 0) + 1);
+    }));
+    const near = new Set([...votes.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, NEAR_MAX).map(([id]) => id));
+    found = { direct, near };
+  }
+  const nothingFound = () => !!found && !found.direct.size && !found.near.size;
+  function matches(n) {
+    if (gone(n)) return false;
+    if (answer) return answer.has(n.id);
+    // fading every node to nothing looks like a broken page; a search with no hits leaves
+    // the graph as it was and says so
+    if (!found || nothingFound()) return true;
+    return found.direct.has(n.id) || found.near.has(n.id);
+  }
+  function refresh() {
+    search();
+    const vis = new Set(nodes.filter(matches).map(n => n.id));
+    const focus = selected ? new Set([selected, ...(neighbors.get(selected) || [])]) : null;
+    node.classed('gone', gone).classed('dim', d => !vis.has(d.id) || (focus && !focus.has(d.id)))
+        .classed('on', d => d.id === selected);
+    node.classed('picked', d => picked.has('node:' + d.id));
+    link.classed('picked', l => picked.has('link:' + links.indexOf(l)));
+    hitline.classed('gone', linkGone);
+    link.classed('gone', linkGone)
+        .classed('dim', l => !vis.has(l.source.id) || !vis.has(l.target.id) || (focus && l.source.id !== selected && l.target.id !== selected))
+        .classed('on', l => focus && (l.source.id === selected || l.target.id === selected));
+    dots.classed('on', p => p.id === selected || !!(focus && focus.has(p.id)));
+    node.classed('near', d => !!(found && found.near.has(d.id)))
+        .classed('answer', d => !!(answer && answer.has(d.id)));
+    qCount.textContent = found && !nothingFound()
+      ? `${found.direct.size}${found.near.size ? ' +' + found.near.size : ''}` : '';
+    if (nothingFound()) {
+      openAnswers(`nothing in the graph matches “${qBox.value.trim()}”` +
+                  (served ? ' — press enter to ask the model anyway' : ''));
+    }
+    layoutLabels();
+    if (g3 && is3d) {
+      g3.nodeColor(g3.nodeColor()); g3.linkColor(g3.linkColor());
+      g3.nodeVisibility(g3.nodeVisibility()); g3.linkVisibility(g3.linkVisibility());
+      g3.linkDirectionalParticles(g3.linkDirectionalParticles());
+    }
+  }
+
+  // "remove" takes a kind out of the simulation, so the rest re-settles into the shape it would
+  // have had without it. "hide" only masks, leaving every position where it was.
+  let needsFit = false;
+  function applyRemoval() {
+    const liveNodes = nodes.filter(d => !dropped(d));
+    const liveLinks = links.filter(l => !linkDropped(l));
+    sim.nodes(liveNodes);
+    sim.force('link').links(liveLinks);
+    needsFit = true;
+    sim.alpha(0.7).restart();
+    if (g3) push3d();
+  }
+  // Removing a kind restarts the simulation from where everything already was, which keeps a
+  // shape the removed nodes made. Re-arranging throws the positions away and lets the layout
+  // find the shape of what is left, ForceAtlas2-style: repulsion scaled by how well joined a
+  // node is, so hubs push out and leaves settle around them.
+  function arrange() {
+    const live = nodes.filter(d => !dropped(d));
+    const liveLinks = links.filter(l => !linkDropped(l));
+    const degree = new Map(live.map(d => [d.id, 0]));
+    for (const l of liveLinks) {
+      const a = l.source.id ?? l.source, b = l.target.id ?? l.target;
+      degree.set(a, (degree.get(a) || 0) + 1);
+      degree.set(b, (degree.get(b) || 0) + 1);
+    }
+    const R = Math.min(W, H) * 0.38;
+    live.forEach((d, i) => {
+      const t = (i / live.length) * Math.PI * 2, r = R * (0.35 + 0.65 * Math.random());
+      d.x = W / 2 + Math.cos(t) * r; d.y = H / 2 + Math.sin(t) * r;
+      d.vx = d.vy = 0; d.fx = d.fy = null;
+    });
+    sim.nodes(live);
+    sim.force('link').links(liveLinks);
+    sim.force('charge', d3.forceManyBody()
+      .strength(d => -160 * (1 + Math.sqrt(degree.get(d.id) || 0)) * view.repel)
+      .distanceMax(700));
+    needsFit = true;
+    sim.alpha(1).alphaDecay(0.018).restart();
+    if (g3) { push3d(); if (g3.d3ReheatSimulation) g3.d3ReheatSimulation(); }
+  }
+
+  // A node's name is drawn inside that node's own group, so every circle drawn after it covers
+  // the text. Placing the label was not enough; what you selected has to be drawn last.
+  function raiseSelected() {
+    if (!selected) return;
+    const near = neighbors.get(selected) || NONE;
+    link.filter(l => l.source.id === selected || l.target.id === selected).raise();
+    node.filter(d => near.has(d.id)).raise();
+    node.filter(d => d.id === selected).raise();
+  }
+
+  // Frame everything that is on screen, in whichever view is on screen.
+  function recenter() {
+    if (is3d && g3) { g3.zoomToFit(500, 70); return; }
+    fit();
+  }
+
+  function select(id) {
+    selected = id;
+    refresh();
+    renderDetail(id ? byId.get(id) : null);
+    if (id) face('details');
+    raiseSelected();
+    if (!id) return;
+    if (is3d) flyTo(id); else bringIntoView(byId.get(id));
+  }
+  // a node already well inside the frame is left where it is: recentring everything on every
+  // click makes the graph feel like it is fighting you. Only an edge case is pulled in, and the
+  // zoom never changes, so the labels around it keep their placement.
+  function bringIntoView(d) {
+    if (!d || d.x == null) return;
+    const t = d3.zoomTransform(svg.node()), x = t.applyX(d.x), y = t.applyY(d.y);
+    if (x > W * 0.18 && x < W * 0.82 && y > H * 0.18 && y < H * 0.82) return;
+    svg.transition().duration(450).call(zoom.transform,
+      d3.zoomIdentity.translate(W / 2 - t.k * d.x, H / 2 - t.k * d.y).scale(t.k));
+  }
+  // The question the page exists to answer: which subjects more than one member brought up, and
+  // who those members are. Computed once, after the simulation has resolved the link endpoints.
+  let ground = null;
+  function sharedGround() {
+    if (ground) return ground;
+    const byTopic = new Map();
+    for (const l of links) {
+      for (const [t, who] of [[l.source, l.target], [l.target, l.source]]) {
+        if (t.kind !== 'topic' || who.kind !== 'person' || !who.attrs.member) continue;
+        if (!byTopic.has(t.id)) byTopic.set(t.id, new Set());
+        byTopic.get(t.id).add(who.id);
+      }
+    }
+    ground = [...byTopic]
+      .filter(([, who]) => who.size > 1)
+      .map(([id, who]) => ({ topic: byId.get(id), people: [...who].map(x => byId.get(x)) }))
+      .sort((a, b) => b.people.length - a.people.length || a.topic.label.localeCompare(b.topic.label));
+    return ground;
+  }
+  function groundHtml() {
+    const rows = sharedGround();
+    if (!rows.length) return '';
+    const pairs = new Set();
+    rows.forEach(r => r.people.forEach((a, i) => r.people.slice(i + 1)
+      .forEach(b => pairs.add([a.id, b.id].sort().join('|')))));
+    return `<h3>${esc(COPY.ground)} · ${pairs.size} pair${pairs.size === 1 ? '' : 's'}</h3>
+      <div class="shared">${rows.map(r => `<div class="row">
+        <button class="chip" data-id="${esc(r.topic.id)}">${swatch('topic', 9)}${esc(r.topic.label)}</button>
+        <span class="who">${r.people.map(x => `<button data-id="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</span>
+      </div>`).join('')}</div>`;
+  }
+  // Ranked by how alike two members' own words read, which is a hint about who to introduce and
+  // not a claim that they said the same thing. Only the closest few, and only pairs the exact
+  // shared-topic list already misses, so the two blocks never say the same thing twice.
+  const CLOSE_FRACTION = 0.15, CLOSE_MAX = 5;
+  function closeByBackground() {
+    const ranked = DATA.affinity || [];
+    if (ranked.length < 4) return [];
+    const already = new Set();
+    sharedGround().forEach(r => r.people.forEach((a, i) => r.people.slice(i + 1)
+      .forEach(b => already.add([a.id, b.id].sort().join('|')))));
+    return ranked.slice(0, Math.ceil(ranked.length * CLOSE_FRACTION))
+      .filter(([a, b]) => !already.has([a, b].sort().join('|')) && byId.has(a) && byId.has(b))
+      .slice(0, CLOSE_MAX)
+      .map(([a, b, score]) => ({ a: byId.get(a), b: byId.get(b), score }));
+  }
+  function closeHtml() {
+    const rows = closeByBackground();
+    if (!rows.length) return '';
+    return `<h3>Close by background</h3>
+      <p class="caveat">How alike their introductions read. Not a shared topic — read both and judge.</p>
+      <div class="close">${rows.map(r => `<div class="row">
+        <button data-id="${esc(r.a.id)}">${esc(r.a.label)}</button><span class="tilde">~</span>
+        <button data-id="${esc(r.b.id)}">${esc(r.b.label)}</button>
+      </div>`).join('')}</div>`;
+  }
+  function renderDetail(n) {
+    const el = document.getElementById('detail');
+    if (!n) {
+      el.innerHTML = `<div class="placeholder"><h2 style="color:var(--ink)">${esc(COPY.heading)}</h2><p>${esc(COPY.blurb)}</p>${groundHtml()}${closeHtml()}${COPY.note ? `<p>${esc(COPY.note)}</p>` : ''}${footer()}</div>`;
+      wireRefs(el);
+      return;
+    }
+    const attrs = Object.entries(n.attrs).filter(([k, v]) => !k.endsWith('_message') && k !== 'member' && k !== 'type' && k !== 'handle' && !(k === 'stated_location' && v === n.attrs.location)).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]);
+    // the panel lists what the graph is showing; a relation you have switched off is counted,
+    // not listed, so the two never disagree about what this node is joined to
+    const joined = links.filter(l => l.source.id === n.id || l.target.id === n.id);
+    const rels = joined.filter(l => !linkGone(l)).sort((a, b) => b.weight - a.weight);
+    const hiddenRels = joined.length - rels.length;
+    // evidence follows the same switch the nodes do: with working sessions out of the picture,
+    // a transcript turn is not what this member said
+    const fromSession = m => m.channel === '#sessions' && display.source.session !== 'show';
+    const quotes = (n.messages || []).map(id => G.messages[id]).filter(Boolean)
+      .filter(m => !fromSession(m)).sort((a, b) => +b.ts - +a.ts).slice(0, 12);
+    el.innerHTML = `
+      <div class="kind">${swatch(n.kind)}${n.kind}${n.attrs.type ? ' · ' + esc(n.attrs.type) : ''}${n.attrs.member ? ' · member' : ''}</div>
+      <h2>${esc(shown(n))}</h2>
+      ${attrs.length ? `<dl class="attrs">${attrs.map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${k === 'url' ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd>`).join('')}</dl>` : ''}
+      ${rels.length ? `<details class="fold"><summary>Connections · ${rels.length}${hiddenRels ? ` <span class="muted">(${hiddenRels} hidden)</span>` : ''}</summary><div class="links">${rels.map(l => { const o = l.source.id === n.id ? l.target : l.source; return `<button data-id="${esc(o.id)}">${swatch(o.kind, 9)}<span class="rel">${l.source.id === n.id ? l.rel : '← ' + l.rel}</span>${esc(o.label)}</button>`; }).join('')}</div></details>` : ''}
+      ${quotes.length ? `<h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}` : ''}
+      ${footer()}`;
+    wireRefs(el);
+    el.scrollTop = 0;
+  }
+  function wireRefs(el) {
+    el.querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => select(b.dataset.id)));
+    el.querySelectorAll('button[data-edge]').forEach(b =>
+      b.addEventListener('click', () => selectEdge(links[+b.dataset.edge])));
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const when = ts => new Date(+ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  // Every node label that appears in a quote becomes a way into that node, so the evidence is a
+  // route through the graph rather than a dead end. Longest label wins where two overlap.
+  const linkable = nodes.filter(n => n.label.length >= 3)
+    .sort((a, b) => b.label.length - a.label.length);
+  const reSafe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function linkify(text) {
+    const hits = [];
+    for (const n of linkable) {
+      const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${reSafe(n.label)})(?![\\p{L}\\p{N}])`, 'giu');
+      let m;
+      while ((m = re.exec(text))) {
+        const start = m.index + m[1].length;
+        hits.push({ start, end: start + m[2].length, id: n.id });
+        re.lastIndex = start + m[2].length;
+      }
+    }
+    hits.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+    let out = '', at = 0;
+    for (const h of hits) {
+      if (h.start < at) continue;
+      out += esc(text.slice(at, h.start));
+      out += `<button class="ref" data-id="${esc(h.id)}">${esc(text.slice(h.start, h.end))}</button>`;
+      at = h.end;
+    }
+    return out + esc(text.slice(at));
+  }
+  const factEdge = fact => links.findIndex(l =>
+    fact === `${l.source.label} ${relText(l.rel)} ${l.target.label}`);
+  // How a reading was made, for anyone who wants to know whether to trust it. Out of the way
+  // until asked for: the answer to "which model said this" is rarely the reason you are here.
+  const READ_ORDER = ['model', 'version', 'prompt', 'context', 'n_predict', 'at'];
+  const READ_NAME = { n_predict: 'answer limit', at: 'read on', version: 'extractor' };
+  function readHtml(m) {
+    const read = m.read || {};
+    const rows = READ_ORDER.filter(k => read[k] !== undefined && read[k] !== '')
+      .map(k => `<dt>${esc(READ_NAME[k] || k)}</dt><dd>${esc(String(read[k]).replace('T', ' ').slice(0, 40))}</dd>`)
+      .join('');
+    if (!rows) return '';
+    return `<details class="read"><summary title="How this message was read">how it was read</summary><dl>${rows}</dl></details>`;
+  }
+  function quoteHtml(m) {
+    const facts = (m.facts || []).map(f => {
+      const i = factEdge(f);
+      return `<li>${linkify(f)}${i < 0 ? '' : ` <button class="ref rel" data-edge="${i}">link</button>`}</li>`;
+    }).join('');
+    return `<blockquote class="msg">${m.url ? `<a class="open" href="${esc(m.url)}" target="_blank" rel="noopener">Open in Slack ↗</a>` : ''}<span class="who">${esc(m.sender)}</span><span class="when">${esc(m.channel)} · ${when(m.ts)}</span><br>${linkify(m.text)}${facts ? `<ul class="facts">${facts}</ul>` : ''}${readHtml(m)}</blockquote>`;
+  }
+  function footer() {
+    const meta = G.meta || {};
+    return `<div class="foot">${DATA.author ? esc(DATA.author) + ' · ' : ''}built ${meta.built_at ? esc(meta.built_at.replace('T', ' ').slice(0, 16)) : '—'}${meta.model ? ' · ' + esc(meta.model) : ''} · every node and link lists the messages it came from</div>`;
+  }
+  function selectEdge(l) {
+    selected = null; refresh();
+    link.classed('on', x => x === l).classed('dim', x => x !== l);
+    node.classed('dim', d => d !== l.source && d !== l.target).classed('hushed', d => d !== l.source && d !== l.target);
+    const el = document.getElementById('detail');
+    const quotes = (l.messages || []).map(id => G.messages[id]).filter(Boolean)
+      .filter(m => !(m.channel === '#sessions' && display.source.session !== 'show'))
+      .sort((a, b) => +b.ts - +a.ts);
+    el.innerHTML = `
+      <div class="kind">link</div>
+      <div class="edge-head"><button class="chip" data-id="${esc(l.source.id)}">${swatch(l.source.kind, 9)}${esc(shown(l.source))}</button><span class="rel">${esc(l.rel.replace(/_/g, ' '))}</span><button class="chip" data-id="${esc(l.target.id)}">${swatch(l.target.kind, 9)}${esc(shown(l.target))}</button></div>
+      <h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}${footer()}`;
+    wireRefs(el);
+    el.scrollTop = 0;
+  }
+  const tipEl = document.getElementById('tip');
+  function tip(e, a, b) { tipEl.innerHTML = `<div>${a}</div><div class="sub">${b || ''}</div>`; tipEl.style.left = (e.clientX + 12) + 'px'; tipEl.style.top = (e.clientY + 12) + 'px'; tipEl.classList.add('on'); }
+  function hideTip() { tipEl.classList.remove('on'); }
+  select(null);
+
+  // ---- asking for a change
+  // These are statements about real people, so a request is recorded and shown to whoever
+  // curates the graph. Nothing here edits the graph on its own.
+  const ASK_KINDS = ['Fix my information', 'Remove something', 'New feature', 'Bug', 'Something else'];
+  let askKind = ASK_KINDS[0];
+  const askKindBox = document.getElementById('ask-kind');
+  const syncAskKinds = () => [...askKindBox.children].forEach(b =>
+    b.setAttribute('aria-pressed', String(b.textContent === askKind)));
+  ASK_KINDS.forEach(k => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = k;
+    b.addEventListener('click', () => { askKind = k; syncAskKinds(); });
+    askKindBox.appendChild(b);
+  });
+  syncAskKinds();
+
+  const pickedBox = document.getElementById('picked');
+  const askForm = document.getElementById('ask');
+  const askText = document.getElementById('ask-text');
+  const askNote = document.getElementById('ask-note');
+
+  const pickLabel = key => {
+    if (key.startsWith('node:')) return (byId.get(key.slice(5)) || {}).label || key;
+    const l = links[+key.slice(5)];
+    return l ? `${shown(l.source)} ${relText(l.rel)} ${shown(l.target)}` : key;
+  };
+  function pick(key) {
+    if (!picked.size) document.getElementById('ask-box').open = true;
+    picked.has(key) ? picked.delete(key) : picked.add(key);
+    renderPicked();
+    refresh();
+  }
+  function renderPicked() {
+    if (!picked.size) {
+      pickedBox.innerHTML = '<span class="hint-inline">Shift-click nodes or links to gather what this is about.</span>';
+      return;
+    }
+    pickedBox.innerHTML = '';
+    picked.forEach(key => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${pickLabel(key)} ✕`;
+      b.addEventListener('click', () => pick(key));
+      pickedBox.appendChild(b);
+    });
+  }
+  renderPicked();
+
+  const askWho = document.getElementById('ask-who');
+  const askAttest = document.getElementById('ask-attest');
+  nodes.filter(n => n.kind === 'person' && n.attrs.member)
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .forEach(n => {
+      const opt = document.createElement('option');
+      opt.value = n.id;
+      opt.textContent = n.label;
+      askWho.appendChild(opt);
+    });
+
+  askForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = askText.value.trim();
+    if (!text) { askNote.textContent = 'Say what should change.'; return; }
+    if (!askWho.value) { askNote.textContent = 'Choose which of these is you.'; return; }
+    if (!askAttest.checked) {
+      askNote.textContent = 'Tick the box to say this is your own information.';
+      return;
+    }
+    const body = {
+      at: new Date().toISOString(),
+      kind: askKind,
+      claimed: askWho.value,
+      claimedLabel: (byId.get(askWho.value) || {}).label || '',
+      attested: true,
+      text,
+      targets: [...picked].map(key => ({ key, label: pickLabel(key) })),
+    };
+    if (served) {
+      try {
+        const r = await fetch('/request', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify(body) });
+        askNote.textContent = r.ok ? 'Saved. It will be reviewed before anything changes.' : 'Could not save.';
+        if (r.ok) { askText.value = ''; askAttest.checked = false; picked.clear(); renderPicked(); refresh(); }
+      } catch (err) { askNote.textContent = 'Could not reach the local server.'; }
+      return;
+    }
+    const asText = `[${body.kind}] ${body.text}\n\nAbout: ${body.targets.map(t => t.label).join(', ') || '(nothing selected)'}`;
+    try {
+      await navigator.clipboard.writeText(asText);
+      askNote.textContent = 'Copied — paste it to Adam or in the channel.';
+    } catch (err) {
+      askNote.textContent = 'Copy this and send it: ' + asText;
+    }
+  });
+
+  // ---- display panel
+  const panel = document.getElementById('panel');
+  const displayBtn = document.getElementById('display-btn');
+  const syncers = [];
+  let liveSig = '';
+
+  const menu = displayBtn.closest('.menu');
+  displayBtn.addEventListener('click', () => {
+    displayBtn.setAttribute('aria-expanded', menu.classList.toggle('display-open'));
+  });
+  document.addEventListener('click', e => {
+    if (!panel.contains(e.target) && e.target !== displayBtn) {
+      menu.classList.remove('display-open');
+      displayBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && menu.classList.contains('display-open')) {
+      menu.classList.remove('display-open');
+      displayBtn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  function settingsChanged() {
+    syncers.forEach(f => f());
+    paintCounts();
+    buildNeighbors();
+    // only a removal reshapes the layout; hiding must leave every position where it was
+    const sig = KINDS.map(k => display.node[k.k] === 'remove').join()
+      + '|' + RELS.map(r => display.link[r] === 'remove').join()
+      + '|' + display.source.session + '|' + display.between;
+    if (sig !== liveSig) { liveSig = sig; applyRemoval(); }
+    refresh();
+    saveDisplay();
+  }
+
+  const hexOf = kind => (getComputedStyle(document.documentElement).getPropertyValue(`--k-${kind}`).trim() || '#888888');
+
+  function stateRow(parent, nameHtml, count, get, set, states, colorKind) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.innerHTML = `${nameHtml}${count == null ? '' : ` <span class="n">${count}</span>`}`;
+    row.appendChild(name);
+    const box = document.createElement('span');
+    box.className = 'three';
+    const buttons = states.map(st => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = st;
+      b.addEventListener('click', () => { set(st); settingsChanged(); });
+      box.appendChild(b);
+      return [st, b];
+    });
+    row.appendChild(box);
+    const slot = document.createElement('span');
+    if (colorKind) {
+      const picker = document.createElement('input');
+      picker.type = 'color';
+      picker.value = hexOf(colorKind);
+      picker.addEventListener('input', () => { paint(colorKind, picker.value); settingsChanged(); });
+      slot.appendChild(picker);
+    }
+    row.appendChild(slot);
+    syncers.push(() => buttons.forEach(([st, b]) => b.setAttribute('aria-pressed', String(get() === st))));
+    parent.appendChild(row);
+  }
+
+  function bulkRow(parent, apply) {
+    const bar = document.createElement('div');
+    bar.className = 'bulk';
+    STATES.forEach(st => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = `${st} all`;
+      b.addEventListener('click', () => { apply(st); settingsChanged(); });
+      bar.appendChild(b);
+    });
+    parent.appendChild(bar);
+  }
+
+  function sliderRow(parent, text, key, min, max, step, apply) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.innerHTML = `<span class="name"><span>${text}</span></span>`;
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = min; input.max = max; input.step = step; input.value = view[key];
+    input.style.width = '120px';
+    input.addEventListener('input', () => { view[key] = +input.value; apply(); saveDisplay(); });
+    row.appendChild(input);
+    row.appendChild(document.createElement('span'));
+    parent.appendChild(row);
+  }
+
+  function heading(text) {
+    const h = document.createElement('h4');
+    h.textContent = text;
+    panel.appendChild(h);
+  }
+
+  function applyLabelScale() {
+    document.documentElement.style.setProperty('--label-scale', view.labelScale);
+    document.documentElement.style.setProperty('--elabel-scale', view.elabelScale);
+    measure();
+    layoutLabels();
+  }
+
+  function buildPanel() {
+    heading('Nodes');
+    KINDS.forEach(k => stateRow(panel, `${swatch(k.k)}<span>${k.label}</span>`, counted().by_kind[k.k] ?? 0,
+      () => display.node[k.k], v => { display.node[k.k] = v; }, STATES, k.k));
+    bulkRow(panel, v => KINDS.forEach(k => { display.node[k.k] = v; }));
+
+    if (st.session_nodes) {
+      heading('Sources');
+      stateRow(panel, '<span>Working sessions</span>', st.session_nodes,
+        () => display.source.session, v => { display.source.session = v; }, STATES);
+    }
+
+    heading('Links');
+    stateRow(panel, '<span>Between two people</span>', p2pCount,
+      () => display.between, v => { display.between = v; }, STATES);
+    RELS.forEach(r => stateRow(panel, `<span>${relText(r)}</span>`, relCount.get(r),
+      () => display.link[r], v => { display.link[r] = v; }, STATES));
+    bulkRow(panel, v => RELS.forEach(r => { display.link[r] = v; }));
+
+    heading('Labels');
+    stateRow(panel, '<span>Edge names</span>', null,
+      () => display.edgeLabels, v => { display.edgeLabels = v; }, ['show', 'hide']);
+    sliderRow(panel, 'How many', 'density', 0, 100, 1, layoutLabels);
+    sliderRow(panel, 'Node size', 'labelScale', 0.7, 2, 0.05, applyLabelScale);
+    sliderRow(panel, 'Edge size', 'elabelScale', 0.7, 2, 0.05, applyLabelScale);
+
+    heading('Physics');
+    stateRow(panel, '<span>Animate (3D)</span>', null,
+      () => (view.spin ? 'show' : 'hide'),
+      v => { view.spin = v === 'show'; setSpin(view.spin); }, ['show', 'hide']);
+    sliderRow(panel, 'Springiness', 'spring', 0.3, 3, 0.05, () => {
+      applyPhysics();
+      sim.alpha(0.4).restart();
+      if (g3) g3.d3ReheatSimulation();
+    });
+    sliderRow(panel, 'Repulsion', 'repel', 0.3, 3, 0.05, () => {
+      applyPhysics();
+      sim.alpha(0.4).restart();
+      if (g3) g3.d3ReheatSimulation();
+    });
+
+    const reset = document.createElement('div');
+    reset.className = 'bulk';
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'reset colours';
+    b.addEventListener('click', () => {
+      KINDS.forEach(k => document.documentElement.style.removeProperty(`--k-${k.k}`));
+      Object.keys(colors).forEach(k => delete colors[k]);
+      panel.querySelectorAll('input[type="color"]').forEach((el, i) => { el.value = hexOf(KINDS[i].k); });
+      settingsChanged();
+    });
+    reset.appendChild(b);
+    panel.appendChild(reset);
+
+    heading('Built');
+    const meta = G.meta || {};
+    const about = document.createElement('div');
+    about.className = 'about';
+    about.innerHTML = [
+      ['read by', meta.model || '—'],
+      ['embedded by', DATA.embedModel || '—'],
+      ['built', (meta.built_at || '').replace('T', ' ').slice(0, 16) || '—'],
+      ['channels', (meta.channels || []).join(', ') || '—'],
+      ['created by', DATA.author || '—'],
+    ].map(([k, v]) => `<span class="k">${esc(k)}</span><span>${esc(v)}</span>`).join('');
+    panel.appendChild(about);
+
+    applyLabelScale();
+    liveSig = KINDS.map(k => display.node[k.k] === 'remove').join()
+      + '|' + RELS.map(r => display.link[r] === 'remove').join()
+      + '|' + display.source.session + '|' + display.between;
+    syncers.forEach(f => f());
+  }
+  buildPanel();
+
+  // ---- local refresh (only when served by slack_graph.serve on this machine)
+  const local = /^(127\.0\.0\.1|localhost)$/.test(location.hostname);
+  if (local) {
+    const box = document.getElementById('refresh'), btn = document.getElementById('refresh-btn'), st = document.getElementById('refresh-stage');
+    box.classList.add('local');
+    btn.addEventListener('click', () => {
+      btn.disabled = true; st.textContent = 'starting…';
+      const es = new EventSource('/refresh');
+      es.onmessage = ev => {
+        const d = JSON.parse(ev.data);
+        st.textContent = `${d.stage}: ${d.detail}`;
+        if (d.stage === 'done') { es.close(); st.textContent = 'done — reloading'; setTimeout(() => location.reload(), 600); }
+        if (d.stage === 'error') { es.close(); btn.disabled = false; }
+      };
+      es.onerror = () => { es.close(); btn.disabled = false; if (!/done|error/.test(st.textContent)) st.textContent = 'refresh already running or server gone'; };
+    });
+  }
+})();
+</script>

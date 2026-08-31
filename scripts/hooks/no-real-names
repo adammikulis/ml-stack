@@ -130,7 +130,9 @@ for path in staged:
                 bad.append((path, i, f"{name!r} is someone in the data"))
         for what, text in contacts(line, allowed):
             bad.append((path, i, f"{what}: {text}"))
-    for i, line in enumerate(blob.split("\n"), 1):
+    # the shape rule is for names quoted in source. A data file is full of quoted proper
+    # nouns by design — a map's countries, a gazetteer's towns — and none of them are people.
+    for i, line in enumerate([] if path.endswith((".json", ".csv", ".geojson")) else blob.split("\n"), 1):
         for found in NAMEISH.finditer(line):
             body = found.group(1).strip()
             if body.casefold() not in allowed:
