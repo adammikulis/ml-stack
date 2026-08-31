@@ -3,6 +3,8 @@ topology construction, and a Cypher-queryable store that outlives the process.""
 
 from __future__ import annotations
 
+from ml_stack.graph.access import (LockError, holder, reading, release_all, write_lock,
+                                   writing)
 from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
 from ml_stack.graph.page import kinds_of, render, world_outline
 from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
@@ -81,4 +83,10 @@ __all__ = [
     "restore",
     "snapshots",
     "take",
+    "LockError",
+    "holder",
+    "reading",
+    "release_all",
+    "write_lock",
+    "writing",
 ]
