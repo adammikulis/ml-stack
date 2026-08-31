@@ -464,3 +464,37 @@ def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
     assert page.get_attribute("#qturns .t .think", "open") is None
     assert "1 lit up" in page.text_content("#qnote")
     assert errors == []
+
+
+def test_gathering_a_node_looks_like_something_in_3d(open_page):
+    """Fails when picked nodes are not accent-coloured in the three-dimensional view.
+
+    The 2D view outlines a gathered node; before this the same click in 3D changed
+    nothing anyone could see, and the feature read as broken.
+    """
+    page, errors = open_page(view="3d")
+    page.wait_for_selector("#graph3d canvas", state="attached")
+    if not page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+        pytest.skip("no WebGL in this chromium")
+    page.wait_for_selector("#labels3d span:not([hidden])")
+    label = page.locator("#labels3d span:not([hidden])").first
+    box = label.bounding_box()
+    page.keyboard.down("Shift")
+    page.mouse.click(box["x"] + box["width"] / 2, box["y"] - 8)
+    page.keyboard.up("Shift")
+    # the colour on screen, not a class name: a class proves nothing a person can see.
+    # A probe painted with the token gives the same rgb() string the browser computes
+    accent = page.evaluate(
+        "() => { const p = document.createElement('i'); p.style.color = 'var(--accent)';"
+        " document.body.appendChild(p); const c = getComputedStyle(p).color;"
+        " p.remove(); return c; }")
+    page.wait_for_function(
+        "a => [...document.querySelectorAll('#labels3d span')]"
+        ".some(e => getComputedStyle(e).color === a)", arg=accent)
+    lit = page.evaluate(
+        "a => [...document.querySelectorAll('#labels3d span')]"
+        ".filter(e => getComputedStyle(e).color === a).length", arg=accent)
+    assert lit == 1
+    # and the summary says so where it can be read without opening anything
+    assert "gathered" in page.text_content("#ask-summary")
+    assert errors == []

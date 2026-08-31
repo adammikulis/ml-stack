@@ -246,6 +246,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
                  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
                  color: var(--ink-2); cursor: pointer; }
 .node.picked .mark { stroke: var(--accent); stroke-width: 3px; }
+#labels3d .l3.picked { color: var(--accent); font-weight: 600; }
 .link.picked { stroke: var(--accent); stroke-opacity: 1; }
 .map-box { border-bottom: 1px solid var(--line); }
 .map-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
@@ -1307,6 +1308,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       els.set(key, el);
     };
     nodes.forEach(n => add(n.id, 'l3 k-' + n.kind, labelText(n)));
+    mark3dPicked();
     links.forEach(l => add('rel:' + l.source.id + '|' + l.rel + '|' + l.target.id, 'l3 edge', relText(l.rel)));
   }
   let was3d = new Set();
@@ -1464,8 +1466,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     g3.cameraPosition({ x: cx + ux * back, y: cy + uy * back, z: cz + uz * back },
                       { x: cx, y: cy, z: cz }, 900);
   }
+  function mark3dPicked() {
+    els.forEach((el, key) => el.classList.toggle('picked', picked.has('node:' + key)));
+  }
   function shade3d(n) {
-    if (glow.has(n.id)) return cssVar('--accent');
+    // gathering must look like something in this view too: 2D outlines the mark, and
+    // before this the same click changed nothing anyone could see
+    if (picked.has('node:' + n.id) || glow.has(n.id)) return cssVar('--accent');
     const base = cssVar(`--k-${n.kind}`);
     const vis = matches(n.ref), focus = selected ? (n.id === selected || (neighbors.get(selected) || new Set()).has(n.id)) : true;
     return (vis && focus) ? base : base + '22';
@@ -2108,6 +2115,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     refresh();
   }
   function renderPicked() {
+    if (g3) { mark3dPicked(); g3.nodeColor(g3.nodeColor()); }
     // the panel stays shut so the graph stays clickable; the summary says what is gathered
     document.getElementById('ask-summary').textContent =
       picked.size ? `Ask for a change · ${picked.size} gathered` : 'Ask for a change';
