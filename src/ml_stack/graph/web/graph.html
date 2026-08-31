@@ -421,6 +421,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
         <button id="snap" class="chip" aria-pressed="true"
                 title="Move the view to a node when you click it">⊙ snap to node</button>
+        <button id="magnitude" class="chip" aria-pressed="true"
+                title="Draw a link's weight: thicker and shorter when more sources agree">≡ weigh links</button>
       </div>
     </section>
     <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
@@ -493,7 +495,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   display.between = 'show';
   const colors = {};
   const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true,
-                 map: true, split: 0, mapH: 0, snap: true };
+                 map: true, split: 0, mapH: 0, snap: true, magnitude: true };
   const picked = new Set();
   let pathLinks = new Set();
   // the same file is served from this machine and published as a flat page; only the served
@@ -777,8 +779,15 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   let W = wrap.clientWidth, H = wrap.clientHeight;
   const SIZE = { person: [9, 2.6], org: [5, 1.9], place: [5, 1.9], opportunity: [5, 1.9], topic: [3.5, 1.6] };
   const radius = n => { const [base, per] = SIZE[n.kind]; return base + Math.sqrt(n.mentions || 1) * per; };
+  // How much a link is worth: how many sources agree on it. Off, every link is a link, which
+  // is what you want when the shape matters more than the evidence. Defined before the
+  // simulation, which reads them the moment it is built.
+  const thickness = l => (view.magnitude === false ? 1.1 : Math.min(4, 0.8 + Math.sqrt(l.weight)));
+  const apart = l => (view.magnitude === false ? 96 : 90 + 20 / Math.sqrt(l.weight || 1));
+  const pull = l => (view.magnitude === false ? 0.3 : 0.2 + Math.min(0.4, (l.weight || 1) / 10));
+
   const sim = d3.forceSimulation(nodes)
-    .force('link', d3.forceLink(links).id(d => d.id).distance(l => 90 + 20 / Math.sqrt(l.weight || 1)).strength(l => 0.2 + Math.min(0.4, (l.weight || 1) / 10)))
+    .force('link', d3.forceLink(links).id(d => d.id).distance(apart).strength(pull))
     .force('charge', d3.forceManyBody().strength(-420).distanceMax(500))
     .force('collide', d3.forceCollide(n => radius(n) + (n.kind === 'person' ? 34 : 20)))
     .force('center', d3.forceCenter(W / 2, H / 2))
@@ -787,7 +796,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   // of the edges. Off to start with, the graph reads as who is interested in what, who works
   // where, and who answered whom; the Links section switches it back on.
   RELS.forEach(r => { if (!display.link[r]) display.link[r] = r === 'mentions' ? 'hide' : 'show'; });
-  const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link').attr('stroke-width', l => Math.min(4, 0.8 + Math.sqrt(l.weight)));
+  const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link').attr('stroke-width', thickness);
   // a one-pixel line is not something anyone can hit; the events live on a wide clear one
   const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
     .on('click', (e, l) => {
@@ -1061,7 +1070,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       .nodeLabel(n => `<div style="font:12px ${cssVar('--font-body')};padding:4px 7px;border-radius:6px;background:${cssVar('--ink')};color:${cssVar('--bg')}">${shown(n.ref)}<div style="opacity:.7;font-size:11px">${n.ref.attrs.type || n.kind} · ${n.mentions}</div></div>`)
       .linkColor(l => link3d(l))
       .linkOpacity(0.5)
-      .linkWidth(l => 0.4 + Math.sqrt(l.weight) * 0.4)
+      .linkWidth(l => (view.magnitude === false ? 0.7 : 0.4 + Math.sqrt(l.weight) * 0.4))
       .linkDirectionalParticles(l => (selected && (l.source.id === selected || l.target.id === selected)) ? 2 : 0)
       .linkDirectionalParticleSpeed(0.006)
       .onNodeClick(n => select(n.id))
@@ -1529,6 +1538,20 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     refresh();
     renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '));
   }
+  const heftBtn = document.getElementById('magnitude');
+  function paintHeft() { heftBtn.setAttribute('aria-pressed', view.magnitude !== false); }
+  heftBtn.addEventListener('click', () => {
+    view.magnitude = view.magnitude === false;
+    paintHeft();
+    link.attr('stroke-width', thickness);
+    if (g3) g3.linkWidth(g3.linkWidth());
+    // distance and pull are read by the force, so it has to settle again to show the change
+    sim.force('link').distance(apart).strength(pull);
+    sim.alpha(0.5).restart();
+    saveDisplay();
+  });
+  paintHeft();
+
   const snapBtn = document.getElementById('snap');
   // Clicking a node moves the view to it, which is what you want while you are following a
   // thread and exactly what you do not want while you are shift-clicking your way around one.
