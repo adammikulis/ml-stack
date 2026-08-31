@@ -9,6 +9,9 @@ A preset is a starting point, not a promise. Sites move their markup, and the da
 the fix is one selector in a copy of a preset rather than a rewrite:
 
     site = SLACK.but(rows="[data-qa='message_container']")
+
+Each preset says where its selectors came from, because they are not equally trustworthy:
+only Slack's have read a real site.
 """
 
 from __future__ import annotations
@@ -52,6 +55,7 @@ class Site:
 # A conversation in Slack. The identifier is the message timestamp, which is the only thing
 # about a Slack message that does not change; it is embedded in two different attributes
 # depending on how the row was rendered, so both are tried.
+# Provenance: taken from a scraper that read a real workspace daily. These are evidence.
 SLACK = Site(
     name="slack",
     rows="[data-qa='message_container'], [role='listitem'][id^='message-list_']",
@@ -65,6 +69,8 @@ SLACK = Site(
 
 # Discord numbers its rows rather than timestamping them, so the identifier is the whole id
 # attribute and there is no pattern to pull out of it.
+# Provenance: UNTRIED. Written from memory of Discord's markup; no run has read a real
+# server with it. Expect to fix a selector on first use.
 DISCORD = Site(
     name="discord",
     rows="li[id^='chat-messages-'], [class*='messageListItem']",
@@ -78,6 +84,7 @@ DISCORD = Site(
 
 # An ordinary page is one row: itself. Reading it is finding the part that is the article and
 # not the furniture around it.
+# Provenance: UNTRIED. A guess at common markup; no run has read a real page with it.
 WEBSITE = Site(
     name="website",
     rows="article, main, [role='main'], .post, .entry-content",
