@@ -39,12 +39,12 @@
   --link-op: .8;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; }
+html, body { height: 100%; overflow: hidden; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font-body); -webkit-font-smoothing: antialiased; }
 button, input { font: inherit; color: inherit; }
 button:focus-visible, input:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; }
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; min-height: 0; overflow: hidden; }
 /* A thin bar with a name on it. Everything about the graph belongs on the graph. */
 header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--line);
   background: var(--surface); }
@@ -246,7 +246,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
                  border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
                  color: var(--ink-2); cursor: pointer; }
 .node.picked .mark { stroke: var(--accent); stroke-width: 3px; }
-#labels3d .l3.picked { color: var(--accent); font-weight: 600; }
+/* colour only: the label widths were measured once, at the normal weight, and the collision
+   boxes are built from those numbers — a bolder face renders wider than its own box */
+#labels3d .l3.picked { color: var(--accent); }
 .link.picked { stroke: var(--accent); stroke-opacity: 1; }
 .map-box { border-bottom: 1px solid var(--line); }
 .map-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
@@ -977,7 +979,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   };
   measure();
   if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
-  node.on('click', (e, d) => ((e.shiftKey || e.ctrlKey || e.metaKey) ? pick('node:' + d.id) : select(d.id)))
+  node.on('click', (e, d) => ((e.shiftKey || e.ctrlKey || e.metaKey)
+    ? pick('node:' + d.id) : (clearPicks(), select(d.id))))
     // macOS folds a ctrl-click into the context menu and the click never arrives
     .on('contextmenu', (e, d) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); pick('node:' + d.id); } })
     .on('keydown', (e, d) => { if (e.key === 'Enter') select(d.id); })
@@ -1231,7 +1234,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       .linkDirectionalParticles(l => (glow.has(key3d(l)) ? 4
         : (selected && (l.source.id === selected || l.target.id === selected)) ? 2 : 0))
       .linkDirectionalParticleSpeed(l => (glow.has(key3d(l)) ? 0.02 : 0.006))
-      .onNodeClick(n => select(n.id))
+      .onNodeClick(n => { clearPicks(); select(n.id); })
       .onBackgroundClick(() => select(null))
       .showNavInfo(false)
       .onEngineStop(() => { if (!fitted3d) { fitted3d = true; g3.zoomToFit(0, 70); setTimeout(() => g3.zoomToFit(500, 70), 300); } });
@@ -1675,8 +1678,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     link.classed('onpath', l => pathLinks.has(l));
     node.classed('near', d => !!(found && found.near.has(d.id)))
         .classed('answer', d => !!(answer && answer.has(d.id)));
-    qCount.textContent = found && !nothingFound()
-      ? `${found.direct.size}${found.near.size ? ' +' + found.near.size : ''}` : '';
+    // a path run or an answer put its own tally here, and the repaint that follows must
+    // not wipe it — only a search owns this line
+    if (found && !nothingFound()) {
+      qCount.textContent = `${found.direct.size}${found.near.size ? ' +' + found.near.size : ''}`;
+    } else if (!pathLinks.size && !answer) {
+      qCount.textContent = '';
+    }
     if (nothingFound()) {
       openAnswers(`nothing in the graph matches “${qBox.value.trim()}”` +
                   (served ? ' — press enter to ask the model anyway' : ''));
@@ -2111,6 +2119,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   };
   function pick(key) {
     picked.has(key) ? picked.delete(key) : picked.add(key);
+    renderPicked();
+    refresh();
+  }
+  function clearPicks() {
+    // a plain click is a fresh start: it selects the node it hit and drops the gathering,
+    // so nobody has to remember which nodes are still held from a minute ago
+    if (!picked.size) return;
+    picked.clear();
     renderPicked();
     refresh();
   }

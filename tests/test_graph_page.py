@@ -498,3 +498,17 @@ def test_gathering_a_node_looks_like_something_in_3d(open_page):
     # and the summary says so where it can be read without opening anything
     assert "gathered" in page.text_content("#ask-summary")
     assert errors == []
+
+
+def test_a_plain_click_drops_what_was_gathered(open_page):
+    """Shift gathers; a plain click starts again, and still selects what it hit."""
+    page, errors = open_page()
+    settle(page)
+    nodes = page.locator("#graph g.node")
+    nodes.nth(0).click(modifiers=["Shift"])
+    nodes.nth(1).click(modifiers=["Shift"])
+    assert page.locator("#graph g.node.picked").count() == 2
+    nodes.nth(2).click()
+    assert page.locator("#graph g.node.picked").count() == 0
+    assert page.locator("#graph g.node.on").count() == 1
+    assert errors == []
