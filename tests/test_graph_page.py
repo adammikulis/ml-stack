@@ -268,8 +268,12 @@ def test_hidden_beats_any_display_rule(open_page):
     assert errors == []
 
 
-def test_a_second_ask_carries_what_is_lit(open_page):
-    """Fails when the held array is dropped from the /ask POST body."""
+def test_a_second_ask_carries_only_what_was_gathered(open_page):
+    """Fails when the held array is dropped, or when it is filled from the last answer.
+
+    An answer's own nodes are not a standing selection: carrying them into the next
+    question drags its strangers along. Only a deliberate pick or selection travels.
+    """
     reply = {"content": "Ada Lovelace works on iron.",
              "ids": ["person:ada", "topic:iron"], "why": ""}
     page, errors = open_page(served=True, ask_reply=reply)
@@ -282,7 +286,14 @@ def test_a_second_ask_carries_what_is_lit(open_page):
     with page.expect_request("**/ask") as second:
         page.press("#q", "Enter")
     assert "held" not in json.loads(first.value.post_data)
-    assert json.loads(second.value.post_data)["held"] == ["person:ada", "topic:iron"]
+    # the answer lit two nodes, and neither was gathered by hand
+    assert "held" not in json.loads(second.value.post_data)
+    # gathering one deliberately does travel
+    page.locator("#graph g.node", has_text="Ada Lovelace").first.click(modifiers=["Shift"])
+    page.fill("#q", "what about them?")
+    with page.expect_request("**/ask") as third:
+        page.press("#q", "Enter")
+    assert json.loads(third.value.post_data)["held"] == ["person:ada"]
     assert errors == []
 
 
@@ -406,4 +417,17 @@ def test_a_page_not_on_loopback_never_shows_review(open_page):
     page.wait_for_timeout(500)
     assert page.locator("#review-box").is_hidden()
     assert page.locator("#review-list .req").count() == 0
+    assert errors == []
+
+
+def test_what_was_read_lights_up_not_everything_found(open_page):
+    """A broad search must not flood the graph: read+path light, found alone is a fallback."""
+    reply = {"content": "Ada works on iron.", "ids": ["person:ada", "topic:iron", "org:quenlow"],
+             "read": ["person:ada"], "path": [], "found": ["topic:iron", "org:quenlow"], "why": ""}
+    page, errors = open_page(served=True, ask_reply=reply)
+    page.wait_for_selector("#stats b")
+    page.fill("#q", "who works on iron?")
+    page.press("#q", "Enter")
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
+    assert page.input_value("#q") == ""
     assert errors == []

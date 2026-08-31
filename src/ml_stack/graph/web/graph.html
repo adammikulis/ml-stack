@@ -697,7 +697,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     const question = qBox.value.trim();
     if (!question) return;
     // what is lit right now rides along, so the model can keep it or leave it
-    const held = answer ? [...answer] : [];
+    // only what the reader deliberately kept travels to the next question: gathered nodes
+    // and the selected one. Carrying a whole previous answer drags its strangers along
+    const held = [...picked].filter(k => k.startsWith('node:')).map(k => k.slice(5));
     if (selected && !held.includes(selected)) held.push(selected);
     // the plain text search runs first, so something is lit up while the model thinks
     query = question.toLowerCase();
@@ -710,6 +712,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         .sort((a, b) => PAINT[b.kind] - PAINT[a.kind] || b.mentions - a.mentions)[0];
       openAnswers(best ? '' : `nothing here matches “${question}”`);
       say('user', question);
+      qBox.value = '';
       say('assistant', best
         ? `The closest thing in the graph is ${best.label}. Asking in words needs the page served from the machine that holds the model.`
         : 'Nothing in the graph matches that, and asking in words needs the page served from the machine that holds the model.');
@@ -719,6 +722,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     asking = true;
     openAnswers('thinking…');
     say('user', question);
+    qBox.value = '';
     turns.push({ role: 'user', content: question });
     const pending = say('assistant', '…');
     try {
@@ -733,22 +737,26 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       const said = out.content || out.why || 'Nothing in the graph answers that.';
       pending.textContent = said;
       turns.push({ role: 'assistant', content: said });
-      answer = out.ids.length ? new Set(out.ids) : null;
-      query = out.ids.length ? '' : query;
+      // what the model read and traced is the answer; what it merely found is a search
+      // result, and lighting search results floods the graph
+      const lit = ((out.read || []).length || (out.path || []).length)
+        ? [...new Set([...(out.read || []), ...(out.path || [])])]
+        : (out.ids || []);
+      query = lit.length ? '' : query;
       // the answer names things; the pane beside it shows the first of them, so reading the
       // answer and reading what it is about do not take turns
-      if (out.ids.length) {
-        answer = new Set(out.ids);
+      if (lit.length) {
+        answer = new Set(lit);
         pathLinks = new Set();
-        qCount.textContent = String(out.ids.length);
+        qCount.textContent = String(lit.length);
         refresh();
-        renderFound(out.ids, said);
-        replayable(pending, out.ids, said);
+        renderFound(lit, said);
+        replayable(pending, lit, said);
         qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
         pending.classList.add('here');
       }
-      qCount.textContent = out.ids.length ? String(out.ids.length) : '';
-      qNote.textContent = (out.ids.length ? `${out.ids.length} lit up` : 'nothing to light up')
+      qCount.textContent = lit.length ? String(lit.length) : '';
+      qNote.textContent = (lit.length ? `${lit.length} lit up` : 'nothing to light up')
         + (out.why ? ` · ${out.why}` : '');
       refresh();
     } catch (err) {
