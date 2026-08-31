@@ -124,3 +124,25 @@ def test_what_is_about_the_graph_is_kept_with_it(tmp_path):
     assert back["meta"]["built_at"] == "2026-08-31T10:00:00"
     assert back["messages"]["C1-1.1"]["read"]["model"] == "a-model.gguf"
     assert {n["id"] for n in back["nodes"]} == {n["id"] for n in GRAPH["nodes"]}
+
+
+def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
+    """The real thing this exists for: a rebuild that goes wrong is not the end of the graph."""
+    from ml_stack.graph.store import count_store, roll_back, snapshot
+
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write(GRAPH)
+    assert count_store(path) == {"nodes": 4, "edges": 3, "docs": 0}
+
+    kept = snapshot(path, reason="before a rebuild")
+    assert kept.counts == {"nodes": 4, "edges": 3, "docs": 0}
+
+    with GraphStore(path) as store:      # the rebuild goes wrong
+        store.drop([n["id"] for n in GRAPH["nodes"]])
+    assert count_store(path)["nodes"] == 0
+
+    roll_back(kept.path)
+    assert count_store(path) == {"nodes": 4, "edges": 3, "docs": 0}
+    with GraphStore(path) as store:
+        assert {n["id"] for n in store.nodes()} == {n["id"] for n in GRAPH["nodes"]}

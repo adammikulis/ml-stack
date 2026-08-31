@@ -57,6 +57,36 @@ def _unjson(raw: Any) -> dict[str, Any]:
     return out if isinstance(out, dict) else {}
 
 
+def count_store(path: str | Path) -> dict[str, int]:
+    """Open a store read-only on a fresh handle and count it.
+
+    The fresh handle is the point, not an implementation detail: a bulk write can report every
+    row written while reading back on the same connection, and be short when reopened. Only a
+    fresh open sees what reached the disk.
+    """
+    with GraphStore(path, read_only=True) as store:
+        return store.counts()
+
+
+def fold_log(path: str | Path) -> None:
+    """Open a store writable once and close it, which checkpoints its log away."""
+    GraphStore(path).close()
+
+
+def snapshot(path: str | Path, *, reason: str, keep: int = 10):
+    """A verified copy of a store, taken before something that cannot be undone."""
+    from ml_stack.graph.snapshots import take
+
+    return take(path, reason=reason, count=count_store, fold=fold_log, keep=keep)
+
+
+def roll_back(snapshot_path: str | Path):
+    """Put a snapshot back, saving what is there now first."""
+    from ml_stack.graph.snapshots import restore
+
+    return restore(snapshot_path, count=count_store, fold=fold_log)
+
+
 class GraphStore:
     """Nodes and edges on disk, asked about in Cypher."""
 
@@ -202,6 +232,20 @@ class GraphStore:
             return []
         # the engine hands back whole nodes; only the ids are wanted here
         return [n["id"] for n in rows[0]["walked"]]
+
+    def counts(self) -> dict[str, int]:
+        """What is in here. What a snapshot is verified against."""
+        out = {}
+        for name, cypher in (("nodes", "MATCH (n:Node) RETURN count(n) AS c"),
+                             ("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c"),
+                             ("docs", "MATCH (d:Doc) RETURN count(d) AS c")):
+            rows = self.query(cypher)
+            if not rows:
+                # a count that will not run means the store is unreadable or is not shaped the
+                # way this expects. That is a store nothing can verify, never a store holding none
+                raise GraphStoreUnavailable(f"could not count {name} in {self.path}")
+            out[name] = int(rows[0]["c"])
+        return out
 
     def drop(self, node_ids: Iterable[str]) -> int:
         """Take nodes out, and every edge that touched them."""

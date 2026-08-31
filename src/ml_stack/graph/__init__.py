@@ -5,7 +5,9 @@ from __future__ import annotations
 
 from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
 from ml_stack.graph.page import kinds_of, render, world_outline
-from ml_stack.graph.store import GraphStore, GraphStoreUnavailable
+from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
+from ml_stack.graph.store import (GraphStore, GraphStoreUnavailable, count_store,
+                                  roll_back, snapshot)
 from ml_stack.graph.dag import (
     NotADAG,
     clear_cache,
@@ -62,6 +64,9 @@ __all__ = [
     "topological_order",
     "GraphStore",
     "GraphStoreUnavailable",
+    "count_store",
+    "roll_back",
+    "snapshot",
     "Answer",
     "converse",
     "look_at",
@@ -70,4 +75,10 @@ __all__ = [
     "kinds_of",
     "render",
     "world_outline",
+    "Snapshot",
+    "SnapshotError",
+    "prune",
+    "restore",
+    "snapshots",
+    "take",
 ]
