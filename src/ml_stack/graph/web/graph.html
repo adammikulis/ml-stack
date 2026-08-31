@@ -353,11 +353,6 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
         <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
       </div>
-      <label class="search">
-        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
-        <input id="q" type="search" placeholder="Search, or ask a question and press enter" aria-label="Search or ask">
-        <span class="count" id="qcount" aria-live="polite"></span>
-      </label>
       <details class="ask-box" id="ask-box">
       <summary>Ask for a change</summary>
       <form class="ask" id="ask">
@@ -396,7 +391,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
           <h3 class="pane-title">Ask the model</h3>
           <div class="turns" id="qturns"></div>
           <form class="chat-row" id="qform">
-            <input id="qmore" type="text" placeholder="Ask about this graph" autocomplete="off">
+            <input id="q" type="text" placeholder="Ask about this graph" autocomplete="off">
+          <span class="count" id="qcount" aria-live="polite" hidden></span>
             <button type="submit">Send</button>
           </form>
           <div class="qfoot"><span class="note" id="qnote" aria-live="polite"></span>
@@ -572,6 +568,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     turns.length = 0;
     face('details');
   }
+  document.getElementById('qform').addEventListener('submit', e => { e.preventDefault(); ask(); });
   document.getElementById('qclear').addEventListener('click', () => {
     qBox.value = ''; query = ''; answer = null; qCount.textContent = '';
     closeAnswers(); refresh(); qBox.focus();
@@ -584,21 +581,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       query = ''; answer = null; qCount.textContent = ''; refresh();
     }
   });
-  document.getElementById('qform').addEventListener('submit', e => {
-    e.preventDefault();
-    const more = document.getElementById('qmore');
-    if (!more.value.trim()) return;
-    qBox.value = more.value; more.value = '';
-    qBox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  });
-
-  qBox.addEventListener('keydown', async e => {
-    if (e.key === 'Escape') {
+  async function ask(e) {
+    if (e && e.key === 'Escape') {
       qBox.value = ''; query = ''; answer = null; qCount.textContent = '';
       closeAnswers(); refresh(); return;
     }
-    if (e.key !== 'Enter' || asking) return;
-    e.preventDefault();
+    if (e && e.key !== 'Enter') return;
+    if (asking) return;
+    if (e) e.preventDefault();
     const question = qBox.value.trim();
     if (!question) return;
     // the plain text search runs first, so something is lit up while the model thinks
@@ -656,7 +646,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       pending.textContent = 'no answer from the server';
       qNote.textContent = ''; turns.pop();
     } finally { asking = false; }
-  });
+  }
+  qBox.addEventListener('keydown', ask);
 
   // ---- graph
   const nodes = G.nodes.map(n => ({ ...n }));

@@ -83,7 +83,11 @@ class Answer:
 
 
 def look_up(graph: Mapping[str, Any], text: str, *, limit: int = FOUND) -> list[dict[str, str]]:
-    """Entries whose name, attributes or own words carry that text, best match first."""
+    """Entries whose name, attributes or own words carry that text, best match first.
+
+    Characters only. For a search that also stems and also knows what a word means, pass
+    ``finder=`` to converse — see ``ml_stack.graph.search.hybrid``.
+    """
     want = " ".join((text or "").split()).casefold()
     if not want:
         return []
@@ -155,11 +159,12 @@ def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, A
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
-             rounds: int = ROUNDS, limit: int = LIT) -> Answer:
+             rounds: int = ROUNDS, limit: int = LIT, finder: Any = None) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
-    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does.
+    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does. ``finder`` replaces how
+    looking up works, for a caller that can do better than matching characters.
     """
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
     out = Answer()
@@ -191,7 +196,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
             except ValueError:
                 args = {}
             if name == "look_up":
-                result: Any = look_up(graph, str(args.get("text") or ""))
+                asked = str(args.get("text") or "")
+                result: Any = finder(asked) if finder is not None else look_up(graph, asked)
                 note([r["id"] for r in result])
                 out.steps.append(f"looked up {str(args.get('text'))!r}")
             elif name == "look_at":
