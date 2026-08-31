@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import json
-import re
+import logging
 from dataclasses import dataclass, field
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from ml_stack.client import families
+from ml_stack.client.families import Family
+from ml_stack.client.health import reported_models
 from ml_stack.client.http import ServerError, request_json, request_stream
 
-_THINK = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
+logger = logging.getLogger(__name__)
 
 _Extractor = tuple[Callable[[Any], str], Callable[[str, list[str]], None]]
 """``(ask(seed) -> raw, reject(raw, objections))`` for one extraction run."""
@@ -54,12 +57,7 @@ class Reply:
 
 def strip_thinking(text: str | None) -> tuple[str | None, str | None]:
     """Split ``<think>`` blocks out of a reply. Returns ``(visible, thinking)``."""
-    if not text:
-        return text, None
-    blocks = [block.strip() for block in _THINK.findall(text)]
-    if not blocks:
-        return text, None
-    return _THINK.sub("", text).strip(), "\n".join(blocks)
+    return families.split_inline(text)
 
 
 class Client:
@@ -75,6 +73,7 @@ class Client:
         timeout: float = 180.0,
         tries: int = 1,
         api_key: str | None = None,
+        family: Family | str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.slot = slot
@@ -83,8 +82,21 @@ class Client:
         self.timeout = timeout
         self.tries = tries
         self.api_key = api_key
+        self.pinned_family = families.resolve(family)
+        self._probed: Family | None = None
 
     # --------------------------------------------------------------- request shape
+
+    @property
+    def family(self) -> Family:
+        """The family this client shapes requests for: the one pinned at construction,
+        else the one the model id at ``/v1/models`` names, else generic. Probed once."""
+        if self.pinned_family is not None:
+            return self.pinned_family
+        if self._probed is None:
+            self._probed = families.for_model_ids(
+                reported_models(self.base_url, timeout=min(self.timeout, 5.0)))
+        return self._probed
 
     @property
     def _is_hosted_openai(self) -> bool:
@@ -161,14 +173,15 @@ class Client:
                 tries=self.tries,
                 headers=self._headers(),
             )
-            return self.normalize(payload)
+            return self.normalize(payload, self.pinned_family)
         chunks = request_stream(
             f"{self.base_url}/v1/chat/completions",
             payload=body,
             timeout=timeout or self.timeout,
             headers=self._headers(),
         )
-        return self.normalize(gather_stream(chunks, on_delta))
+        assembled = gather_stream(chunks, on_delta, self.pinned_family)
+        return self.normalize(assembled, self.pinned_family)
 
     def complete(
         self,
@@ -295,7 +308,7 @@ class Client:
             reply = self.chat(
                 convo,
                 response_format=response_format,
-                chat_template_kwargs={"enable_thinking": think},
+                chat_template_kwargs=self.family.think_kwargs(think),
                 **extra,
             )
             return (reply.content or "").strip()
@@ -358,8 +371,11 @@ class Client:
     # --------------------------------------------------------------- response shape
 
     @staticmethod
-    def normalize(payload: Any) -> Reply:
-        """Flatten the first choice, extract tool calls, split off the thinking."""
+    def normalize(payload: Any, family: Family | str | None = None) -> Reply:
+        """Flatten the first choice, extract tool calls, split off the thinking.
+
+        Without ``family`` the adapter comes from the ``model`` id in the payload.
+        """
         if not isinstance(payload, dict):
             raise ServerError(f"unexpected response shape: {type(payload).__name__}")
 
@@ -367,17 +383,12 @@ class Client:
         choice = choices[0] if choices else {}
         message = choice.get("message") or {}
 
-        tool_calls = message.get("tool_calls") or None
-        if not tool_calls and message.get("function_call"):
-            tool_calls = [
-                {"id": "call_0", "type": "function", "function": message["function_call"]}
-            ]
+        served = payload.get("model")
+        adapter = families.resolve(family) or families.for_model_id(served)
+        tool_calls = adapter.tool_calls(message)
+        content, thinking = families.split(adapter, message)
+        _warn_if_nothing_read(choice, message, adapter, served, content, thinking, tool_calls)
 
-        content, thinking = strip_thinking(message.get("content"))
-        # gpt-oss and other harmony-format models carry the trace in its own field
-        reasoned = str(message.get("reasoning_content") or message.get("reasoning") or "").strip()
-        if reasoned:
-            thinking = f"{reasoned}\n{thinking}" if thinking else reasoned
         return Reply(
             content=content,
             tool_calls=tool_calls,
@@ -387,49 +398,93 @@ class Client:
         )
 
 
-def gather_stream(chunks: Any, on_delta: Callable[[str, str], None]) -> dict[str, Any]:
-    """Assemble streamed chat chunks into one completion payload, reporting each piece.
+def _warn_if_nothing_read(choice: dict[str, Any], message: dict[str, Any],
+                          adapter: Family, served: Any, content: str | None,
+                          thinking: str | None,
+                          tool_calls: list[dict[str, Any]] | None) -> None:
+    """Say so when a reply carried text and nothing came back. Names fields, never text."""
+    if (content or "").strip() or (thinking or "").strip() or tool_calls:
+        return
+    stray = families.unread_text_fields(choice, message, adapter)
+    if stray:
+        logger.warning(
+            "reply came back empty while carrying text in %s, which the %s adapter does "
+            "not read; the server reports model %r",
+            ", ".join(stray), adapter.name, served,
+        )
+
+
+def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
+                  family: Family | str | None = None) -> dict[str, Any]:
+    """Assemble streamed chat chunks into the completion payload they add up to,
+    reporting each piece.
 
     ``on_delta`` is called with ``("thinking", text)`` for reasoning pieces and
-    ``("content", text)`` for answer pieces, in arrival order.
+    ``("content", text)`` for answer pieces, in arrival order. Without ``family`` the
+    adapter comes from the ``model`` id the chunks carry.
     """
+    pinned = families.resolve(family)
     content: list[str] = []
     thinking: list[str] = []
     calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
+    model: str | None = None
+    adapter: Family | None = pinned
+    inline = families.inline_splitter()
+    unread: dict[str, list[str]] = {}
+
     for chunk in chunks:
         if not isinstance(chunk, dict):
             continue
+        if isinstance(chunk.get("model"), str) and not model:
+            model = chunk["model"]
+        if adapter is None:
+            adapter = families.for_model_id(model) if model else families.GENERIC
+
         choices = chunk.get("choices") or []
         if not choices:
             continue
         choice = choices[0] or {}
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta") or {}
-        piece = delta.get("reasoning_content") or delta.get("reasoning")
-        if piece:
-            thinking.append(str(piece))
-            on_delta("thinking", str(piece))
-        piece = delta.get("content")
+
+        for key in adapter.thinking_fields:
+            piece = delta.get(key)
+            if piece:
+                thinking.append(str(piece))
+                on_delta("thinking", str(piece))
+                break
+
+        piece = delta.get(adapter.content_field)
         if piece:
             content.append(str(piece))
-            on_delta("content", str(piece))
-        for one in delta.get("tool_calls") or []:
-            slot = calls.setdefault(int(one.get("index") or 0), {
-                "id": "", "type": "function", "function": {"name": "", "arguments": ""}})
-            if one.get("id"):
-                slot["id"] = one["id"]
-            fn = one.get("function") or {}
-            if fn.get("name"):
-                slot["function"]["name"] = fn["name"]
-            if fn.get("arguments"):
-                slot["function"]["arguments"] += fn["arguments"]
-    message: dict[str, Any] = {"role": "assistant", "content": "".join(content)}
+            if adapter.inline_think:
+                for channel, text in inline(str(piece)):
+                    on_delta(channel, text)
+            else:
+                on_delta("content", str(piece))
+
+        adapter.tool_delta(calls, delta)
+
+        for key in families.unread_text_fields({}, delta, adapter):
+            unread.setdefault(key, []).append(str(delta[key]))
+
+    adapter = adapter or pinned or families.GENERIC
+    if adapter.inline_think:
+        for channel, text in inline("", final=True):
+            on_delta(channel, text)
+
+    message: dict[str, Any] = {"role": "assistant", adapter.content_field: "".join(content)}
     if thinking:
-        message["reasoning_content"] = "".join(thinking)
+        message[adapter.thinking_fields[0]] = "".join(thinking)
     if calls:
         message["tool_calls"] = [calls[i] for i in sorted(calls)]
-    return {"choices": [{"message": message, "finish_reason": finish}]}
+    for key, pieces in unread.items():
+        message[key] = "".join(pieces)
+    assembled: dict[str, Any] = {"choices": [{"message": message, "finish_reason": finish}]}
+    if model:
+        assembled["model"] = model
+    return assembled
 
 
 def _rejection(objections: list[str]) -> str:

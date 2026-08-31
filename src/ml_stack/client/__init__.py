@@ -10,6 +10,9 @@ from ml_stack.client.chat import (
     strip_thinking,
 )
 from ml_stack.client.embed import EmbeddingError, cosine, embed, rank_pairs, top_k
+from ml_stack.client.families import Family
+from ml_stack.client.families import by_name as family_by_name
+from ml_stack.client.families import for_model_id as family_for_model_id
 from ml_stack.client.health import (
     HEALTH_PATHS,
     ServingParams,
@@ -26,6 +29,7 @@ __all__ = [
     "HEALTH_PATHS",
     "Client",
     "EmbeddingError",
+    "Family",
     "GrammarBudgetError",
     "GrammarUnsupportedError",
     "Reply",
@@ -35,6 +39,8 @@ __all__ = [
     "cosine",
     "embed",
     "estimate_tokens",
+    "family_by_name",
+    "family_for_model_id",
     "heuristic_tokens",
     "is_healthy",
     "quant_from_model_path",
