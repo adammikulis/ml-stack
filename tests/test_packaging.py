@@ -42,11 +42,19 @@ def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
     assert any("recipes/" in n and n.endswith(".json") for n in names)
 
 
-def test_every_console_script_points_at_something_that_exists():
+def console_scripts() -> dict:
     import tomllib
 
-    data = tomllib.load((REPO / "pyproject.toml").open("rb"))
-    scripts = data["project"]["scripts"]
+    return tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]["scripts"]
+
+
+def test_serving_a_model_has_a_command_of_its_own():
+    """Without it, answering 'what is serving, on which port' is lsof and curl."""
+    assert console_scripts().get("ml-serve") == "ml_stack.serve.cli:main"
+
+
+def test_every_console_script_points_at_something_that_exists():
+    scripts = console_scripts()
     assert scripts, "the package installs no commands"
     for name, target in scripts.items():
         module, _, attr = target.partition(":")

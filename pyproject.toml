@@ -63,6 +63,7 @@ ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 ml-stack-train-run = "ml_stack.train.run:main"
+ml-serve = "ml_stack.serve.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

@@ -12,7 +12,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 from ml_stack.client import is_healthy, reported_models
-from ml_stack.client.health import serving_params
+from ml_stack.client.health import ServingParams, serving_params
 from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerBackend,
@@ -50,6 +50,54 @@ def model_matches(reported: str, wanted: str | Path) -> bool:
     if not wanted_name or not reported_name:
         return False
     return wanted_name in reported_name or reported_name in wanted_name
+
+
+def shape_mismatch(
+    spec: ServerSpec,
+    models: list[str],
+    params: ServingParams | None,
+) -> list[str]:
+    """Each field in which a running server differs from ``spec``. Empty when it fits."""
+    out: list[str] = []
+
+    if models and not any(model_matches(m, spec.model) for m in models):
+        serving = ", ".join(repr(Path(name).name) for name in models)
+        asked = Path(str(spec.model).removeprefix("hf:")).name
+        out.append(f"model: asked for {asked!r}, serving {serving}")
+
+    if params is None:
+        return out
+
+    slots = max(int(spec.parallel or 1), 1)
+    if params.total_slots is not None and params.total_slots < slots:
+        out.append(f"slots: asked for {slots}, serving {params.total_slots}")
+
+    # llama-server reports the context of one slot: --ctx-size divided by -np.
+    per_slot = int(spec.context) // slots
+    if params.n_ctx is not None and params.n_ctx < per_slot:
+        out.append(f"context: asked for {per_slot} per slot, serving {params.n_ctx}")
+
+    return out
+
+
+def recorded_servers(state_file: Path | None = None) -> dict[int, dict]:
+    """Every server in the lease file, keyed by port."""
+    try:
+        parsed = json.loads((state_file or STATE_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    out: dict[int, dict] = {}
+    for key, entry in parsed.items():
+        if not isinstance(entry, dict):
+            continue
+        try:
+            out[int(entry.get("port", key))] = entry
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 class ServerManager:
@@ -101,21 +149,12 @@ class ServerManager:
         if not is_healthy(base_url, timeout=1.0):
             return None
 
-        models = reported_models(base_url)
-        if models and not any(model_matches(m, spec.model) for m in models):
+        mismatch = shape_mismatch(spec, reported_models(base_url), serving_params(base_url))
+        if mismatch:
             raise ServerFailed(
-                f"port {spec.port} already serves {models!r}, not {spec.model!r}. "
-                "Stop it, or lease on a different port."
-            )
-        # the right model in the wrong shape is still the wrong server: a caller that asked for
-        # four slots and adopts a server with one gets a slot that is not there
-        wanted = int(getattr(spec, "parallel", 1) or 1)
-        params = serving_params(base_url)
-        slots = params.total_slots if params else None
-        if slots is not None and slots < wanted:
-            raise ServerFailed(
-                f"port {spec.port} serves {spec.model!r} with {slots} slot(s), "
-                f"and {wanted} were asked for. Stop it, or lease on a different port."
+                f"port {spec.port} is already serving a different shape -- "
+                + "; ".join(mismatch)
+                + ". Stop it, or lease on a different port."
             )
 
         logger.info("adopting the server already healthy on %s", base_url)
@@ -135,6 +174,17 @@ class ServerManager:
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
         self._forget(info.port)
+
+    def detach(self, info: ServerInfo) -> None:
+        """Record the server under its own pid and stop tracking it in this process."""
+        entry = self._mine.pop(str(info.port), None)
+        if entry is None or not info.pid:
+            self._save()
+            return
+        with self._lock:
+            state = merge_state(self._load(), self._mine, os.getpid())
+            state[str(info.port)] = {**entry, "owner_pid": info.pid}
+            self._write(state)
 
     def stop_all(self, *, grace_s: float = 5.0) -> list[int]:
         """Stop every server this process started."""
@@ -171,13 +221,15 @@ class ServerManager:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    def _write(self, state: dict) -> None:
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.state_file.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+        os.replace(tmp, self.state_file)
+
     def _save(self) -> None:
         with self._lock:
-            merged = merge_state(self._load(), self._mine, os.getpid())
-            self.state_file.parent.mkdir(parents=True, exist_ok=True)
-            tmp = self.state_file.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(merged, indent=2), encoding="utf-8")
-            os.replace(tmp, self.state_file)
+            self._write(merge_state(self._load(), self._mine, os.getpid()))
 
     def _recorded_pid(self, port: int) -> int | None:
         entry = self._load().get(str(port))

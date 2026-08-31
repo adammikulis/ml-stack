@@ -22,7 +22,9 @@ from ml_stack.serve.manager import (
     ServerManager,
     merge_state,
     model_matches,
+    recorded_servers,
     serve,
+    shape_mismatch,
     stop_all_servers,
 )
 from ml_stack.serve.ports import (
@@ -55,9 +57,11 @@ __all__ = [
     "pid_exists",
     "port_is_free",
     "reclaim_port",
+    "recorded_servers",
     "require_binary",
     "serve",
     "server_pids_on_port",
+    "shape_mismatch",
     "stop_all_servers",
     "tail",
 ]

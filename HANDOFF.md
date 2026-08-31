@@ -12,13 +12,20 @@ The owner asked for parity between what the interface can do and what can be dri
 without it. There is not parity.
 
 Twenty-one `/ui/*` routes; `ml-stack-peers` has `setup init key token ls pause resume
-when busy`. Missing from the command line entirely: models, chat, conversations,
-clusters, serving, updates, uninstall, libraries.
+when busy`, and `ml-serve` has `status up down`. Missing from the command line entirely:
+models, chat, conversations, clusters, updates, uninstall, libraries.
 
 Every piece of the logic is already importable and does not need moving — `Models`,
 `fleet.chat`, `Conversations`, `discovery.join`/`leave`/`memberships`, `uninstall.plan`/
-`remove`, `updates.apply_if_newer`, `Environment.install`, `serving.start_model`/
-`stop_model`. A CLI over those is assembly, not design.
+`remove`, `updates.apply_if_newer`, `Environment.install`. A CLI over those is assembly,
+not design.
+
+## A model put up with `ml-serve` is not advertised to the other machines
+
+`ml-serve up` leases through `ml_stack.serve` and records the port in the lease file.
+`fleet.serving.Serving.register` is what puts a port in the beacon, and nothing calls it,
+so a peer asking who is serving does not see it. Either `ml-serve up` registers when a
+daemon is running on this machine, or the daemon learns to read the lease file.
 
 ## Never driven by a person
 

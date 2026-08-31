@@ -55,3 +55,6 @@ OpenAI
 lambda k
 Real Qwen BPE
 t .think
+macOS arm64
+120s Bash
+t@example.com

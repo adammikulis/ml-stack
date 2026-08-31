@@ -16,6 +16,7 @@ import time
 
 import pytest
 from conftest import json_reply
+from ml_stack.client.health import ServingParams
 from ml_stack.serve import (
     LlamaServerBackend,
     ServerFailed,
@@ -27,6 +28,8 @@ from ml_stack.serve import (
     model_matches,
     pid_exists,
     port_is_free,
+    recorded_servers,
+    shape_mismatch,
     tail,
 )
 
@@ -233,7 +236,7 @@ class TestAdoption:
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "some-other.gguf"}]}))
         manager = self._manager(tmp_path, fake_binary)
 
-        with pytest.raises(ServerFailed, match="already serves"):
+        with pytest.raises(ServerFailed, match="model: asked for 'model.gguf'"):
             manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
 
     def test_release_leaves_an_adopted_server_running(self, server, tmp_path, fake_binary):
@@ -289,6 +292,54 @@ class TestStateFile:
         manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
         assert manager._load() == {}
 
+    def test_recorded_servers_is_keyed_by_port(self, tmp_path):
+        state = tmp_path / "servers.json"
+        state.write_text(json.dumps({"8080": {"port": 8080, "pid": 7, "owner_pid": 7}}))
+        assert recorded_servers(state)[8080]["pid"] == 7
+
+    def test_recorded_servers_of_a_missing_file_is_empty(self, tmp_path):
+        assert recorded_servers(tmp_path / "absent.json") == {}
+
+
+class TestDetach:
+    def test_a_detached_server_outlives_the_process_that_started_it(
+            self, tmp_path, fake_binary):
+        """The record is kept against the server's own pid, so a later save that prunes
+        dead owners does not throw the entry away."""
+        state = tmp_path / "servers.json"
+        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            info = ServerInfo(base_url="http://127.0.0.1:9101", port=9101, pid=proc.pid,
+                              backend="llama.cpp")
+            manager._record(ServerSpec(model="m.gguf", port=9101), info)
+            manager.detach(info)
+
+            assert recorded_servers(state)[9101]["owner_pid"] == proc.pid
+
+            # a fresh process saving its own view keeps the entry
+            ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)._save()
+            assert 9101 in recorded_servers(state)
+        finally:
+            proc.kill()
+            proc.wait()
+
+    def test_a_detached_server_is_not_stopped_by_stop_all(self, tmp_path, fake_binary):
+        state = tmp_path / "servers.json"
+        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            info = ServerInfo(base_url="http://127.0.0.1:9102", port=9102, pid=proc.pid,
+                              backend="llama.cpp")
+            manager._record(ServerSpec(model="m.gguf", port=9102), info)
+            manager.detach(info)
+
+            assert manager.stop_all() == []
+            assert proc.poll() is None
+        finally:
+            proc.kill()
+            proc.wait()
+
 
 def test_tail_reports_a_missing_log_rather_than_raising(tmp_path):
     """A start failure with no tail is unactionable, and the tail itself must never be
@@ -302,23 +353,96 @@ def test_tail_returns_the_last_lines(tmp_path):
     assert tail(log, lines=3).splitlines() == ["line 97", "line 98", "line 99"]
 
 
+class TestShapeMismatch:
+    """Which field differs, wanted against found."""
+
+    def test_a_matching_shape_has_no_mismatch(self):
+        params = ServingParams(n_ctx=4096, total_slots=2)
+        spec = ServerSpec(model="a-model.gguf", context=8192, parallel=2)
+        assert shape_mismatch(spec, ["a-model.gguf"], params) == []
+
+    def test_every_differing_field_is_named(self):
+        params = ServingParams(n_ctx=2048, total_slots=1)
+        spec = ServerSpec(model="a-model.gguf", context=32768, parallel=4)
+        assert shape_mismatch(spec, ["some-other.gguf"], params) == [
+            "model: asked for 'a-model.gguf', serving 'some-other.gguf'",
+            "slots: asked for 4, serving 1",
+            "context: asked for 8192 per slot, serving 2048",
+        ]
+
+    def test_a_bigger_server_is_not_a_mismatch(self):
+        """More context and more slots than asked for is still what was asked for."""
+        params = ServingParams(n_ctx=32768, total_slots=8)
+        spec = ServerSpec(model="a-model.gguf", context=4096, parallel=1)
+        assert shape_mismatch(spec, ["a-model.gguf"], params) == []
+
+    def test_a_server_that_reports_nothing_has_no_mismatch(self):
+        spec = ServerSpec(model="a-model.gguf", context=32768, parallel=4)
+        assert shape_mismatch(spec, [], None) == []
+
+
 class TestAdoptingTheWrongShape:
     """The right model in the wrong shape is still the wrong server."""
 
-    def test_a_server_with_too_few_slots_is_refused(self, monkeypatch):
-        from ml_stack.client.health import ServingParams
-        from ml_stack.serve import manager as mod
-        from ml_stack.serve.manager import ServerFailed, ServerManager, ServerSpec
+    def _manager(self, tmp_path, fake_binary):
+        return ServerManager(
+            LlamaServerBackend(binary=fake_binary),
+            state_file=tmp_path / "servers.json",
+        )
 
-        monkeypatch.setattr(mod, "is_healthy", lambda *a, **k: True)
-        monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
-        monkeypatch.setattr(mod, "serving_params",
-                            lambda *a, **k: ServingParams(total_slots=1))
-        manager = ServerManager()
-        with pytest.raises(ServerFailed, match="1 slot"):
-            manager.adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
-        # one slot is enough for a caller that wanted one
-        assert manager.adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=1)) is not None
+    @staticmethod
+    def _handler(model: str, n_ctx: int, slots: int):
+        def handle(method, path, body):
+            if path.startswith("/props"):
+                return json_reply({
+                    "model_path": f"/models/{model}",
+                    "total_slots": slots,
+                    "default_generation_settings": {"n_ctx": n_ctx},
+                })
+            return json_reply({"data": [{"id": model}]})
+
+        return handle
+
+    def test_a_running_server_with_too_few_slots_is_refused(
+            self, server, tmp_path, fake_binary):
+        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+        manager = self._manager(tmp_path, fake_binary)
+
+        with pytest.raises(ServerFailed, match="slots: asked for 4, serving 1"):
+            manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
+                                     context=4096, parallel=4))
+
+    def test_a_running_server_with_a_smaller_context_is_refused(
+            self, server, tmp_path, fake_binary):
+        """A caller that asked for 32k and gets 4k has its prompts truncated instead."""
+        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+        manager = self._manager(tmp_path, fake_binary)
+
+        with pytest.raises(ServerFailed,
+                           match="context: asked for 32768 per slot, serving 4096"):
+            manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
+                                     context=32768))
+
+    def test_context_is_compared_one_slot_at_a_time(self, server, tmp_path, fake_binary):
+        """llama-server splits --ctx-size across -np, and reports one slot's share."""
+        instance = server(self._handler("a-model.gguf", n_ctx=32768, slots=2))
+        manager = self._manager(tmp_path, fake_binary)
+
+        adopted = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
+                                           context=65536, parallel=2))
+        assert adopted is not None and adopted.adopted
+
+        with pytest.raises(ServerFailed, match="context: asked for 65536 per slot"):
+            manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
+                                     context=65536, parallel=1))
+
+    def test_the_shape_that_was_asked_for_is_adopted(self, server, tmp_path, fake_binary):
+        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+        manager = self._manager(tmp_path, fake_binary)
+
+        info = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
+                                        context=4096, parallel=1))
+        assert info is not None and info.adopted
 
     def test_a_server_that_will_not_say_is_adopted_anyway(self, monkeypatch):
         from ml_stack.serve import manager as mod
