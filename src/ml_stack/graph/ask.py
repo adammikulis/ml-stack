@@ -168,12 +168,14 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
             for t in turns if str(t.get("content") or "").strip()]
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said,
                                       {"role": "user", "content": question}]
+    spent = False
     reply = None
     for _ in range(rounds):
         reply = client.chat(messages, tools=TOOLS, think=False)
         calls = getattr(reply, "tool_calls", None) or []
         if not calls:
             break
+        spent = True
         messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": calls})
         for call in calls:
             fn = call.get("function") or {}
@@ -202,6 +204,11 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 result = {"error": f"no such tool: {name}"}
             messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
                              "name": name, "content": json.dumps(result, ensure_ascii=False)[:6000]})
+    else:
+        # the rounds ran out mid-loop: the last reply is a tool call, not an answer. Ask once
+        # more with the tools taken away, so the question is answered rather than dropped.
+        if spent:
+            reply = client.chat(messages, think=False)
     out.content = (getattr(reply, "content", "") or "").strip()
     out.ids = out.ids[:limit]
     return out

@@ -48,7 +48,8 @@ class ScriptedModel:
 
     def chat(self, messages, tools=None, **_):
         self.seen.append(list(messages))
-        if self.script:
+        # with no tools offered there is nothing to call, so it answers in words
+        if tools and self.script:
             name, args = self.script.pop(0)
             import json
             return Reply(tool_calls=[{"id": "c1", "function": {
@@ -107,3 +108,14 @@ def test_an_id_the_model_invents_is_not_lit_up():
 def test_a_question_needing_no_tools_still_answers():
     out = converse("hello", GRAPH, ScriptedModel([]))
     assert out.ids == [] and out.steps == [] and out.content
+
+
+def test_running_out_of_rounds_still_answers():
+    """The last reply of an exhausted loop is a tool call; the question still deserves words."""
+    asking = [call("look_up", text="Ada Lovelace")] * 4
+    model = ScriptedModel(asking)
+    out = converse("who?", GRAPH, model, rounds=2)
+    assert out.content == "Ada and Bea both work on compilers."
+    assert out.ids == ["person:ada"]
+    # the last call was made with no tools offered, which is what let it answer
+    assert len(model.seen) == 3
