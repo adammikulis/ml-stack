@@ -619,6 +619,11 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 emit({"event": "answer", "text": whole})
         return reply
 
+    def _searched(reply: Any) -> bool:
+        """Whether that reply asked for anything other than showing."""
+        return any((call.get("function") or {}).get("name") in searching
+                   for call in (getattr(reply, "tool_calls", None) or []))
+
     spent = False
     spent_on: set[tuple[str, str]] = set()
     repeats = 0
@@ -696,6 +701,13 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         reply = step(True)
         if not dispatch(reply):
             answered = True          # it stopped calling tools, so this reply is the answer
+            break
+        # Once it has said what its answer is about, more searching cannot improve that --
+        # `show` is the last thing a turn does, and a round after it is a round trip spent
+        # to be told the same. Only when the round did nothing else: a turn that showed and
+        # kept looking in the same breath has not finished looking.
+        if out.show and not _searched(reply):
+            out.steps.append("said what to light, so the searching stopped")
             break
     if spent and not answered:
         # The searching is over, one way or another. What is left on the table are the tools

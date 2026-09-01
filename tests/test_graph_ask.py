@@ -698,3 +698,74 @@ def test_the_tools_can_be_said_briefly_or_at_length():
         == [s["function"]["name"] for s, _fn in tools_for(graph)]
     assert tools_for(graph, terse=True)[0][0] is TERSE[0]
     assert tools_for(graph)[0][0] is TOOLS[0]
+
+
+def test_a_turn_stops_as_soon_as_it_has_said_what_to_light():
+    """`show` is the last thing a turn does. A round after it is a round trip spent to be
+    told the same thing."""
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.calls += 1
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if self.calls == 1 and "look_at" in offered:
+                return Reply(tool_calls=[{"id": "a", "function": {
+                    "name": "look_at", "arguments": '{"ids": ["person:ada"]}'}}])
+            if self.calls == 2 and "show" in offered:
+                return Reply(tool_calls=[{"id": "b", "function": {
+                    "name": "show", "arguments": '{"ids": ["person:ada"]}'}}])
+            return Reply(content="Ada works on compilers.")
+
+    model = Model()
+    out = converse("who?", GRAPH, model)
+    assert out.show == ["person:ada"]
+    assert "said what to light, so the searching stopped" in out.steps
+    assert model.calls == 3, f"one search, one show, one answer -- not {model.calls}"
+
+
+def test_a_turn_that_shows_and_keeps_looking_is_not_finished():
+    """Showing in the same breath as another search is not a finished turn."""
+    class Model:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.calls += 1
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if self.calls == 1 and "look_up" in offered:
+                return Reply(tool_calls=[
+                    {"id": "a", "function": {"name": "show",
+                                             "arguments": '{"ids": ["person:ada"]}'}},
+                    {"id": "b", "function": {"name": "look_up",
+                                             "arguments": '{"text": "compilers"}'}}])
+            return Reply(content="Ada works on compilers.")
+
+    model = Model()
+    out = converse("who?", GRAPH, model)
+    assert "said what to light, so the searching stopped" not in out.steps
+    assert len(out.found) > 0, "the search in that round still happened"
+
+
+def test_going_in_circles_costs_a_handful_of_calls_and_stops():
+    """The counter is checked at the top of the round, which is before the next request goes
+    out -- so hitting the limit costs no extra round trip. Checked by measurement: moving
+    the check to just after dispatch changed nothing, five calls either way, and the change
+    was removed rather than kept as an unjustified difference."""
+    class Stubborn:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.calls += 1
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if "look_up" in offered:
+                return Reply(tool_calls=[{"id": "x", "function": {
+                    "name": "look_up", "arguments": '{"text": "compilers"}'}}])
+            return Reply(content="Nothing more to find.")
+
+    model = Stubborn()
+    out = converse("who?", GRAPH, model, rounds=10)
+    assert "stopped searching in circles" in out.steps
+    assert model.calls == 5, f"a circle costs five calls here, not {model.calls}"
