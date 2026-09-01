@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 THINK = re.compile(r"<think>(.*?)</think>\s*", re.DOTALL | re.IGNORECASE)
@@ -61,6 +61,38 @@ def reasoning_effort(on: bool) -> dict[str, Any]:
 # ------------------------------------------------------------------ the family
 
 @dataclass(frozen=True, slots=True)
+class Sampling:
+    """The sampler settings a model's own card asks for. **Informational, not applied.**
+
+    A card is general advice from a publisher who does not know what you are doing with the
+    model. gemma-4's asks for temperature 1.0 / top_p 0.95 / top_k 64 "across all use cases";
+    measured on a graph-answering task where the model must call tools with exact ids, that
+    scored 55% against 70% greedy and took 258s against 140s, because sampling noise there
+    becomes a wrong argument rather than a livelier sentence.
+
+    So this is where a benchmark *starts*, never what a client silently sends. Read it with
+    `ml-stack-models card <repo>`, try it with `ml-stack-bench --card`, and ship whatever the
+    measurement actually favoured.
+
+    Not a house style and not a guess: only what the publisher wrote down. A field left None
+    is one the card did not speak about, and nothing here invents a number to fill it —
+    gpt-oss's cards say nothing about sampling at all.
+    """
+
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    why: str = ""                  # where these came from, for anyone who doubts them
+
+    def asked(self) -> dict[str, Any]:
+        """Only the settings the card actually named."""
+        named = {"temperature": self.temperature, "top_p": self.top_p,
+                 "top_k": self.top_k, "min_p": self.min_p}
+        return {k: v for k, v in named.items() if v is not None}
+
+
+@dataclass(frozen=True, slots=True)
 class Family:
     """How one model family shapes a chat reply, and what a request tells it about thinking."""
 
@@ -72,6 +104,9 @@ class Family:
     tool_calls: Callable[[Mapping[str, Any]], list[dict[str, Any]] | None] = openai_tool_calls
     tool_delta: Callable[[dict[int, dict[str, Any]], Mapping[str, Any]], None] = openai_tool_delta
     think_kwargs: Callable[[bool], dict[str, Any]] = enable_thinking
+    # what the publisher recommends, for a benchmark to start from -- never sent
+    # by a client on its own; see `Sampling`
+    card: Sampling = field(default_factory=Sampling)
 
 
 GENERIC = Family(
@@ -97,7 +132,20 @@ QWEN = Family(
     think_kwargs=enable_thinking,
 )
 
-KNOWN: tuple[Family, ...] = (GPT_OSS, QWEN)
+GEMMA = Family(
+    name="gemma",
+    model_ids=("gemma",),
+    thinking_fields=("reasoning_content", "reasoning"),
+    inline_think=True,
+    think_kwargs=enable_thinking,
+    # "Use the following standardized sampling configuration across all use cases" --
+    # the gemma-4 card, which names all three. Read it again with
+    # `ml-stack-models card unsloth/gemma-4-E4B-it-qat-GGUF` rather than trusting this line.
+    card=Sampling(temperature=1.0, top_p=0.95, top_k=64,
+                  why="gemma-4 card, Best Practices / Sampling Parameters"),
+)
+
+KNOWN: tuple[Family, ...] = (GPT_OSS, QWEN, GEMMA)
 
 
 def by_name(name: str) -> Family:

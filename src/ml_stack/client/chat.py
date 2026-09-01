@@ -34,6 +34,16 @@ _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "n_predict", "cache_prompt", "id_slot", "grammar")
 
 
+# What each server turned out to be serving, so it is asked once rather than per client.
+# Cleared by `forget_families()` when a server is restarted with a different model.
+_FAMILY_BY_URL: dict[str, Any] = {}
+
+
+def forget_families() -> None:
+    """Forget which family each server was serving. Call after restarting one."""
+    _FAMILY_BY_URL.clear()
+
+
 class GrammarBudgetError(ServerError):
     """A grammar-constrained generation ran out of tokens mid-structure."""
 
@@ -68,8 +78,11 @@ class Client:
         base_url: str = "http://127.0.0.1:8080",
         *,
         slot: int | None = None,
-        temperature: float = 0.0,
-        n_predict: int = 512,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        n_predict: int = 16384,
         timeout: float = 180.0,
         tries: int = 1,
         api_key: str | None = None,
@@ -77,7 +90,19 @@ class Client:
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.slot = slot
-        self.temperature = temperature
+        # None means "whatever this model's card asks for", resolved once the family is
+        # known; a number given here is the caller overriding its publisher, which is
+        # sometimes right — a benchmark wants 0.0 so a run can be repeated — and is never
+        # guessed at on their behalf.
+        self.asked_temperature = temperature
+        self.asked_top_p = top_p
+        self.asked_top_k = top_k
+        self.asked_min_p = min_p
+        # A ceiling, not a budget: nothing is spent that is not generated, so a high one
+        # costs nothing and a low one truncates. 512 was set when a reply was a sentence;
+        # a thinking model spends most of a turn reasoning before it writes anything, and
+        # measured here gemma-4 filled 220 tokens with thought and returned empty content.
+        # What a low ceiling cuts is always the answer, never the thinking.
         self.n_predict = n_predict
         self.timeout = timeout
         self.tries = tries
@@ -94,9 +119,48 @@ class Client:
         if self.pinned_family is not None:
             return self.pinned_family
         if self._probed is None:
-            self._probed = families.for_model_ids(
-                reported_models(self.base_url, timeout=min(self.timeout, 5.0)))
+            # Once per server, not once per client. A served model does not change while the
+            # server is up, and callers build a client per request — so probing per client is
+            # a round trip per request to be told the same thing again.
+            known = _FAMILY_BY_URL.get(self.base_url)
+            if known is None:
+                known = families.for_model_ids(
+                    reported_models(self.base_url, timeout=min(self.timeout, 5.0)))
+                _FAMILY_BY_URL[self.base_url] = known
+            self._probed = known
         return self._probed
+
+    @property
+    def sampling(self) -> dict[str, Any]:
+        """What this request will ask for: what the caller chose, and nothing else.
+
+        A model card is deliberately *not* consulted here. It is general advice from a
+        publisher who does not know the task, and applying it silently would mean a library
+        overruling a caller who measured. gemma-4's card asks for temperature 1.0; on a
+        tool-calling task that measured 15 points worse than greedy. The card is worth
+        reading — `ml-stack-models card <repo>`, or `Client.card` — and worth trying —
+        `ml-stack-bench --card` — but what ships is what the benchmark favoured.
+
+        Greedy by default, because a caller who has not chosen wants the repeatable answer.
+        """
+        out: dict[str, Any] = {}
+        for name, value in (("temperature", self.asked_temperature),
+                            ("top_p", self.asked_top_p), ("top_k", self.asked_top_k),
+                            ("min_p", self.asked_min_p)):
+            if value is not None:
+                out[name] = value
+        out.setdefault("temperature", 0.0)
+        return out
+
+    @property
+    def card(self) -> dict[str, Any]:
+        """What this model's publisher recommends. A starting point for a benchmark."""
+        return dict(self.family.card.asked())
+
+    @property
+    def temperature(self) -> float:
+        """What this client will send. Kept as a name because callers read it."""
+        return float(self.sampling.get("temperature", 0.0))
 
     @property
     def _is_hosted_openai(self) -> bool:
@@ -118,7 +182,7 @@ class Client:
         """Build the ``/v1/chat/completions`` body."""
         body: dict[str, Any] = {
             "messages": messages,
-            "temperature": self.temperature,
+            **self.sampling,
             "n_predict": self.n_predict,
             "stream": stream,
         }
@@ -197,7 +261,7 @@ class Client:
         budget = n_predict if n_predict is not None else self.n_predict
         body: dict[str, Any] = {
             "prompt": prompt,
-            "temperature": self.temperature,
+            **self.sampling,
             "n_predict": budget,
             "stream": False,
         }

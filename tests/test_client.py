@@ -681,7 +681,8 @@ class TestGrammarTripwire:
         calls = {"n": 0}
 
         def handler(method: str, path: str, body: bytes):
-            calls["n"] += 1
+            if path.endswith("/completion"):     # the family probe is not a retry
+                calls["n"] += 1
             return json_reply({"content": "cut off", "stopped_limit": True})
 
         instance = server(handler)
@@ -1124,3 +1125,28 @@ class TestStrictSchema:
         _, _, body = instance.requests[-1]
         sent = json.loads(body)["response_format"]["json_schema"]["schema"]
         assert sent["required"] == ["a"] and sent["additionalProperties"] is False
+
+
+def test_a_model_card_informs_but_is_never_sent_on_its_own():
+    """A card is general advice from a publisher who does not know the task.
+
+    Applying it silently would mean the library overruling a caller who measured: gemma-4's
+    card asks for temperature 1.0, which on a tool-calling task measured 15 points worse
+    than greedy. So it is readable, and it is never what goes out.
+    """
+    from ml_stack.client.chat import Client
+    from ml_stack.client.families import GEMMA, GPT_OSS
+
+    gemma = Client("http://nowhere.invalid", family=GEMMA)
+    assert gemma.card == {"temperature": 1.0, "top_p": 0.95, "top_k": 64}
+    assert gemma.sampling == {"temperature": 0.0}          # greedy, whatever the card says
+    assert "top_p" not in gemma.build_body([{"role": "user", "content": "x"}])
+
+    # a caller who chooses gets what they chose, and only that
+    chosen = Client("http://nowhere.invalid", family=GEMMA, temperature=0.7, top_k=40)
+    assert chosen.sampling == {"temperature": 0.7, "top_k": 40}
+
+    # and a card that says nothing leaves an empty record rather than an invented one
+    oss = Client("http://nowhere.invalid", family=GPT_OSS)
+    assert oss.card == {}
+    assert oss.sampling == {"temperature": 0.0}
