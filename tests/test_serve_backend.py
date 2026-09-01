@@ -217,10 +217,41 @@ class TestEmittedFlags:
                      "--lookup-cache-dynamic", "-fa", "--jinja", "--embeddings",
                      "--pooling", "--kv-unified", "--no-kv-unified", "--cache-ram",
                      "--cache-idle-slots", "--no-cache-idle-slots",
-                     "--slot-prompt-similarity", "--slot-save-path"):
+                     "--slot-prompt-similarity", "--slot-save-path", "--cache-type-k",
+                     "--cache-type-v", "--no-mmap", "--mlock"):
             assert flag in flags, flag
         assert len(flags) == len(set(flags))
         assert not any(token.endswith(".gguf") for token in flags)
+
+
+class TestMemoryFlags:
+    """How the KV cache is stored, and whether the weights are mmapped or locked -- typed
+    so a preflight's fit estimate can read the cache type back, and so a bench can vary
+    them the way it varies everything else through ``ServerSpec``."""
+
+    def test_none_on_every_field_emits_nothing(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf"))
+        for flag in ("--cache-type-k", "--cache-type-v", "--no-mmap", "--mlock"):
+            assert flag not in argv, flag
+
+    def test_cache_types_carry_their_values(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf", cache_type_k="q8_0", cache_type_v="q4_0"))
+        assert argv[argv.index("--cache-type-k") + 1] == "q8_0"
+        assert argv[argv.index("--cache-type-v") + 1] == "q4_0"
+
+    def test_mmap_false_emits_no_mmap_and_true_emits_nothing(self, tmp_path):
+        """mmap on is the server's own default and passes no flag either way."""
+        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        assert "--no-mmap" in backend_.command(ServerSpec(model="m.gguf", mmap=False))
+        assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf", mmap=True))
+        assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf"))
+
+    def test_mlock_true_emits_mlock(self, tmp_path):
+        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        assert "--mlock" in backend_.command(ServerSpec(model="m.gguf", mlock=True))
+        assert "--mlock" not in backend_.command(ServerSpec(model="m.gguf", mlock=False))
 
 
 class TestLaunchRefusal:
@@ -280,7 +311,8 @@ class TestLaunchRefusal:
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
         spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
         with pytest.raises(OSError, match="stop here"):
-            LlamaServerBackend(binary=binary).start(spec, timeout=1.0, check_flags=False)
+            LlamaServerBackend(binary=binary).start(
+                spec, timeout=1.0, check_flags=False, preflight=False)
         assert reached == ["popen"]
 
     def test_a_build_that_prints_no_help_is_not_refused(self, tmp_path, monkeypatch):
@@ -293,5 +325,39 @@ class TestLaunchRefusal:
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
         with pytest.raises(OSError, match="stop here"):
+            # preflight=False: this stand-in gguf carries no real metadata, and what this
+            # test is about is the flag check, not the preflight one.
             LlamaServerBackend(binary=silent).start(
-                ServerSpec(model=gguf, extra_args=("--draft-max", "3")), timeout=1.0)
+                ServerSpec(model=gguf, extra_args=("--draft-max", "3")), timeout=1.0,
+                preflight=False)
+
+
+def test_an_hf_reference_keeps_the_file_under_its_directory():
+    """A draft head lives under MTP/; a reference that kept only the last segment fetched
+    nothing and llama-server was started with an empty draft path (measured 2026-09-01).
+    Mutation: `parts[-1]` instead of the join."""
+    from ml_stack.serve.backend import ServerSpec
+
+    repo, name = ServerSpec.hf_parts("hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf")
+    assert (repo, name) == ("owner/repo-GGUF", "MTP/mtp-head-BF16.gguf")
+    assert ServerSpec.hf_parts("hf:owner/repo-GGUF") == ("owner/repo-GGUF", "")
+
+
+def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
+    """`-hfd` takes owner/repo[:quant], never a file, so a head named by file is fetched
+    into the cache first and passed with -md. Mutation: drop resolved_draft() from start."""
+    from ml_stack.serve import backend as be
+
+    head = tmp_path / "mtp-head-BF16.gguf"
+    head.write_bytes(b"GGUF")
+    asked = []
+    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: asked.append(ref) or head)
+    spec = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf")
+    resolved = be.LlamaServerBackend.resolved_draft(spec)
+    assert asked == ["hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf"]
+    argv = be.LlamaServerBackend(binary=tmp_path / "llama-server").command(resolved)
+    assert argv[argv.index("-md") + 1] == str(head)
+    with pytest.raises(be.ServerFailed, match="fetched before serving"):
+        be.LlamaServerBackend(binary=tmp_path / "llama-server").command(spec)
+    quant = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF")
+    assert "-hfd" in be.LlamaServerBackend(binary=tmp_path / "llama-server").command(quant)

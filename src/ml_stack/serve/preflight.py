@@ -1,0 +1,384 @@
+"""What must be true about a model before any process is started for it.
+
+A benchmark that loads five models, some 87G, pays for every one of these mistakes at the
+far end of a load rather than the start of one: an architecture the build does not read, a
+flag a release renamed, a draft head that starts downloading inside the timed window, a
+shard left behind by an interrupted pull. Each of those costs minutes to find out the slow
+way and a fraction of a second to find out here -- a GGUF header is a few hundred bytes read
+off the front of the file, never the tensors that make up the rest of it.
+
+``Preflight`` runs every check and hands back one ``Report``; ``LlamaServerBackend.start``
+raises before ``Popen`` when it fails.
+"""
+
+from __future__ import annotations
+
+import re
+import struct
+from dataclasses import dataclass, field
+from pathlib import Path
+
+__all__ = ["Check", "Preflight", "PreflightFailed", "Report", "read_gguf_header",
+           "shard_names"]
+
+
+class PreflightFailed(RuntimeError):
+    """A preflight check failed. Carries the report's own lines, one failure per line."""
+
+
+@dataclass(frozen=True, slots=True)
+class Check:
+    """One question asked and answered before a load, never during one."""
+
+    name: str
+    ok: bool
+    detail: str = ""
+
+
+@dataclass
+class Report:
+    """Every check ``Preflight`` ran, and what it estimated along the way."""
+
+    checks: list[Check] = field(default_factory=list)
+    weights_bytes: int = 0
+    kv_estimate_bytes: int = 0
+
+    @property
+    def ok(self) -> bool:
+        return all(c.ok for c in self.checks)
+
+    def said(self) -> str:
+        """One line per check, ``ok``/``FAIL`` first -- what ``PreflightFailed`` carries
+        and what ``up --preflight-only`` prints."""
+        return "\n".join(
+            f"{'ok  ' if c.ok else 'FAIL'}  {c.name}" + (f": {c.detail}" if c.detail else "")
+            for c in self.checks
+        )
+
+
+# ---------------------------------------------------------------- a GGUF's own header
+
+_GGUF_MAGIC = b"GGUF"
+# The scalar value kinds the GGUF format defines, and the struct code that reads one.
+# 8 is a string and 9 is an array, handled separately below; the rest are fixed-width.
+_SCALAR_FMT = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?",
+               10: "Q", 11: "q", 12: "d"}
+
+
+def read_gguf_header(path: Path | str) -> dict[str, object]:
+    """Every key/value metadata pair in a GGUF file: strings, ints, floats, bools, arrays.
+
+    Reads the magic, the version, the tensor count, and then each of the key/value pairs
+    that follow -- and stops there. The tensor *list* that comes after names every tensor's
+    shape and file offset, and reading it costs nothing measurable for a small model and a
+    real pause for an 87G one; nothing a preflight needs is in it, so nothing here reads it.
+
+    A minimal reader rather than the ``gguf`` package's own, on purpose: that reader is
+    built to open a file for inference and walks the tensor table as part of doing so. This
+    one is built to answer one question cheaply before any inference is intended.
+    """
+    out: dict[str, object] = {}
+    with Path(path).expanduser().open("rb") as f:
+        if f.read(4) != _GGUF_MAGIC:
+            raise ValueError(f"{path}: not a GGUF file (no GGUF magic at the start)")
+        struct.unpack("<I", f.read(4))                       # version -- unused here
+        struct.unpack("<Q", f.read(8))                        # tensor count -- unread
+        (kv_count,) = struct.unpack("<Q", f.read(8))
+
+        def text() -> str:
+            (n,) = struct.unpack("<Q", f.read(8))
+            return f.read(n).decode("utf-8", "replace")
+
+        def value(kind: int) -> object:
+            if kind == 8:
+                return text()
+            if kind == 9:
+                (item_kind,) = struct.unpack("<I", f.read(4))
+                (count,) = struct.unpack("<Q", f.read(8))
+                return [value(item_kind) for _ in range(count)]
+            code = _SCALAR_FMT[kind]
+            return struct.unpack("<" + code, f.read(struct.calcsize(code)))[0]
+
+        for _ in range(kv_count):
+            name = text()
+            (kind,) = struct.unpack("<I", f.read(4))
+            out[name] = value(kind)
+    return out
+
+
+# ---------------------------------------------------------------- sharded models
+
+_SHARD = re.compile(r"-(\d{5})-of-(\d{5})(?=\.gguf$)", re.IGNORECASE)
+
+
+def shard_names(filename: str) -> list[str]:
+    """Every shard name a sharded GGUF implies, generated from its first file's name.
+
+    Reconstructed rather than globbed for, so a shard that is simply absent is named
+    exactly -- ``model-00002-of-00003.gguf`` -- instead of a directory listing that is
+    merely short one entry and does not say which. A name with no shard marker is not
+    sharded, and is its own single-element answer.
+    """
+    match = _SHARD.search(filename)
+    if not match:
+        return [filename]
+    total = int(match.group(2))
+    prefix, suffix = filename[: match.start()], filename[match.end():]
+    return [f"{prefix}-{i:05d}-of-{total:05d}{suffix}" for i in range(1, total + 1)]
+
+
+def _local_index() -> dict[str, Path]:
+    """Every model file this machine already holds, by filename -- the same disk scan
+    ``ml_stack.hub.held()`` does, kept here with its path rather than only its size,
+    because a preflight has to *open* the file to read its header."""
+    from ml_stack.fleet.models import Models, default_roots
+
+    try:
+        found = Models(roots=default_roots(Path.home() / ".ml-stack"),
+                       store=Path.home() / ".ml-stack").all()
+    except Exception:  # noqa: BLE001 - a machine with no models has no models
+        return {}
+    return {m.path.name: m.path for m in found}
+
+
+def _local_shards(path: Path) -> tuple[int, Path | None, Check]:
+    """Presence and completeness of a local model's shards, from its first file's name."""
+    names = shard_names(path.name)
+    paths = [path.parent / n for n in names]
+    missing: list[str] = []
+    total = 0
+    for p in paths:
+        try:
+            size = p.stat().st_size if p.is_file() else 0
+        except OSError:
+            size = 0
+        if size <= 0:
+            missing.append(p.name)
+        total += size
+    ok = not missing
+    detail = "complete" if ok else "missing or empty: " + ", ".join(missing)
+    first = paths[0] if paths and paths[0].is_file() else None
+    return total, first, Check("shards", ok, detail)
+
+
+def _hf_shards(repo: str, name: str) -> tuple[int, Path | None, Check]:
+    """The same check, for a repository not necessarily downloaded yet -- resolved through
+    the Hub cache the way ``ml-stack-models files`` reports what is already on this machine."""
+    if not name:
+        return 0, None, Check(
+            "shards", True,
+            "no file named in the reference; the server will resolve one, so there is "
+            "nothing yet to check")
+
+    from ml_stack.hub import files as hub_files
+
+    names = shard_names(name)
+    try:
+        listing = dict(hub_files(repo))
+    except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
+        # What the build should hold could not even be asked, which is not the same as
+        # asking and finding a shard absent -- unknown, not a measured contradiction.
+        return 0, None, Check("shards", True,
+                              f"could not read {repo} from the Hub ({exc}); no opinion")
+
+    local = _local_index()
+    missing: list[str] = []
+    total = 0
+    first_path: Path | None = None
+    for shard in names:
+        total += listing.get(shard, 0)
+        basename = shard.rsplit("/", 1)[-1]
+        found = local.get(basename)
+        if found is None or not found.is_file() or found.stat().st_size <= 0:
+            missing.append(shard)
+        elif shard == names[0]:
+            first_path = found
+    ok = not missing
+    detail = "complete on this machine" if ok else "not on this machine yet: " + ", ".join(missing)
+    return total, first_path, Check("shards", ok, detail)
+
+
+def _ref_bytes(ref: str | Path | None) -> int:
+    """Roughly what a companion reference (a draft, an mmproj) will cost, local or on the
+    Hub. Best-effort: a companion that cannot be sized costs nothing to the estimate rather
+    than blocking it -- the shards check is what refuses to load, not this."""
+    if not ref:
+        return 0
+    from ml_stack.serve.backend import ServerSpec
+
+    parts = ServerSpec.hf_parts(ref)
+    if parts is None:
+        try:
+            return Path(ref).stat().st_size
+        except OSError:
+            return 0
+    repo, name = parts
+    if not name:
+        return 0
+    try:
+        from ml_stack.hub import files as hub_files
+
+        return dict(hub_files(repo)).get(name, 0)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+# ---------------------------------------------------------------- architecture
+
+def _architecture_check(first_file: Path | None, binary: str | Path) -> Check:
+    """Same philosophy as ``flags_of``/``unknown_flags``: a fact that cannot be read is
+    unknown, and an unknown build (or an unreadable file) is given no opinion rather than
+    told it is wrong. Only a fact that *was* read, and contradicts what the build reads,
+    fails -- a missing shard is still a fact; a file this cannot even open is not."""
+    if first_file is None:
+        return Check("architecture", True,
+                     "no local copy to read yet; nothing to check until the shards check "
+                     "above has something on disk")
+    try:
+        meta = read_gguf_header(first_file)
+    except Exception as exc:  # noqa: BLE001
+        return Check("architecture", True,
+                     f"could not read {first_file} ({exc}); no opinion")
+
+    arch = str(meta.get("general.architecture") or "")
+    if not arch:
+        return Check("architecture", True,
+                     f"{first_file} names no general.architecture; no opinion")
+
+    from ml_stack.setup import _arches
+
+    known = _arches(binary)
+    if not known:
+        return Check("architecture", True,
+                     f"{arch!r} (this build's own architectures could not be read; no opinion)")
+    if arch in known:
+        return Check("architecture", True, arch)
+    shown = ", ".join(sorted(known)[:6]) + (" ..." if len(known) > 6 else "")
+    return Check("architecture", False, f"{arch!r} -- this build reads {shown}")
+
+
+# ---------------------------------------------------------------- fit (weights + kv + runtime)
+
+# Bytes per cached element for the K/V cache types llama.cpp accepts on --cache-type-k/-v.
+# Block-quantised types carry a scale per 32 elements, so the average is not the nominal
+# quant width -- q8_0 stores 34 bytes per 32 elements, not 32. f16 (2 bytes) is what a
+# server serves with unless told otherwise, which is why it is also the default here.
+_CACHE_BYTES = {
+    "f32": 4.0, "f16": 2.0, "bf16": 2.0,
+    "q8_0": 34 / 32, "q6_0": 28 / 32, "q5_1": 24 / 32, "q5_0": 22 / 32,
+    "q4_1": 20 / 32, "q4_0": 18 / 32, "iq4_nl": 18 / 32,
+}
+
+# A load's own buffers -- the compute graph, the output buffer, the scratch space around
+# the KV cache -- cost real memory beyond the weights and the KV cache itself, and none of
+# it is in the GGUF's metadata. Not measured per model; a fixed floor so the fit check is
+# conservative rather than reporting a load that just barely fails as one that just fits.
+RUNTIME_ALLOWANCE_BYTES = 512 * 1024 * 1024
+
+
+def _kv_estimate_bytes(meta: dict[str, object], context: int,
+                        cache_type_k: str, cache_type_v: str) -> int:
+    """``n_layer * n_kv_heads * head_dim * context * (bytes_k + bytes_v)`` -- 0 when the
+    GGUF does not carry the keys this needs, which is a real answer, not a failure to read."""
+    arch = str(meta.get("general.architecture") or "")
+    if not arch:
+        return 0
+
+    def key(suffix: str) -> object:
+        return meta.get(f"{arch}.{suffix}")
+
+    n_layer = key("block_count")
+    n_kv_heads = key("attention.head_count_kv")
+    head_dim = key("attention.key_length")
+    if not head_dim:
+        embed, n_head = key("embedding_length"), key("attention.head_count")
+        if embed and n_head:
+            head_dim = embed / n_head
+    if not (n_layer and n_kv_heads and head_dim and context):
+        return 0
+
+    bytes_k = _CACHE_BYTES.get(cache_type_k.lower(), 2.0) if cache_type_k else 2.0
+    bytes_v = _CACHE_BYTES.get(cache_type_v.lower(), 2.0) if cache_type_v else 2.0
+    return int(n_layer * n_kv_heads * head_dim * context * (bytes_k + bytes_v))
+
+
+def _human(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "K", "M", "G"):
+        if value < 1024 or unit == "G":
+            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024.0
+    return f"{value:.1f}G"
+
+
+def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes: int,
+              limit_bytes: int) -> Check:
+    total = weights_bytes + draft_bytes + mmproj_bytes + kv_bytes + RUNTIME_ALLOWANCE_BYTES
+    pieces = (f"weights {_human(weights_bytes)}"
+              + (f", draft {_human(draft_bytes)}" if draft_bytes else "")
+              + (f", mmproj {_human(mmproj_bytes)}" if mmproj_bytes else "")
+              + f", kv+runtime est {_human(kv_bytes + RUNTIME_ALLOWANCE_BYTES)}")
+    if not limit_bytes:
+        return Check("fit", True, f"{_human(total)} estimated ({pieces}); "
+                                  "no machine memory limit is known to compare against")
+    ok = total <= limit_bytes
+    verb = "fits under" if ok else "exceeds"
+    return Check("fit", ok,
+                f"{_human(total)} estimated {verb} the {_human(limit_bytes)} this machine "
+                f"may use ({pieces})")
+
+
+# ---------------------------------------------------------------- flags (reuses backend.py)
+
+def _flags_check(spec, binary: str | Path) -> Check:
+    from ml_stack.serve.backend import LlamaServerBackend, flags_of, unknown_flags
+
+    known = flags_of(binary)
+    if not known:
+        return Check("flags", True, "could not read this build's --help; no opinion")
+    argv = LlamaServerBackend(binary=binary).command(spec)
+    lacking = unknown_flags(argv, known)
+    if lacking:
+        detail = "; ".join(f"no {flag}" + (f", it has {near}" if near else "")
+                           for flag, near in lacking)
+        return Check("flags", False, detail)
+    return Check("flags", True, "every flag this spec would emit is one this build accepts")
+
+
+# ---------------------------------------------------------------- the whole thing
+
+def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0) -> Report:
+    """Everything worth knowing about ``spec`` before a process is started for it.
+
+    Every check runs and is recorded even after one fails -- a report that stopped at the
+    first failure would hide a second, unrelated one behind it, and the whole point of
+    asking before the load is asking everything at once rather than one slow round at a time.
+    """
+    report = Report()
+
+    if spec.is_hf_ref:
+        repo, name = spec.hf_parts(spec.model)
+        weights_bytes, first_file, shards = _hf_shards(repo, name)
+    else:
+        weights_bytes, first_file, shards = _local_shards(Path(spec.model))
+    report.checks.append(shards)
+    report.weights_bytes = weights_bytes
+
+    report.checks.append(_architecture_check(first_file, binary))
+
+    meta: dict[str, object] = {}
+    if first_file is not None:
+        try:
+            meta = read_gguf_header(first_file)
+        except Exception:  # noqa: BLE001 - already reported by the architecture check
+            meta = {}
+
+    kv_bytes = _kv_estimate_bytes(meta, spec.context, spec.cache_type_k, spec.cache_type_v)
+    report.kv_estimate_bytes = kv_bytes
+    draft_bytes = _ref_bytes(spec.draft)
+    mmproj_bytes = _ref_bytes(spec.mmproj)
+    report.checks.append(
+        _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes))
+
+    report.checks.append(_flags_check(spec, binary))
+    return report

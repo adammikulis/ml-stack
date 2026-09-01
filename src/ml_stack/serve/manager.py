@@ -36,6 +36,19 @@ UNAVAILABLE_COOLDOWN_S = 3.0
 # exactly swaps instead of serving.
 BESIDE_HEADROOM = 0.8
 
+# The flat timeout this used to be, kept as the floor: a small model that always loaded in
+# ten seconds must not suddenly wait less than 300 just because it is small.
+DEFAULT_TIMEOUT_S = 300.0
+_GB = 1024 ** 3
+
+
+def scaled_timeout(weights_bytes: int, *, base: float = DEFAULT_TIMEOUT_S) -> float:
+    """A load timeout that grows with the weights, so an 87G model is not raced against a
+    timeout sized for a 4G one. 60s plus 1.5s per GB of weights, or ``base`` -- whichever is
+    larger. ``weights_bytes`` is 0 for an `hf:` reference not yet on disk, and 0 leaves the
+    floor untouched: an unknown size is not the same as an enormous one."""
+    return max(base, 60.0 + 1.5 * (weights_bytes / _GB))
+
 
 def free_memory() -> int | None:
     """Bytes this machine could still give a model, or None when it will not say."""
@@ -150,7 +163,7 @@ class ServerManager:
 
     # ------------------------------------------------------------------ leasing
 
-    def lease(self, spec: ServerSpec, *, timeout: float = 300.0,
+    def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
 
@@ -159,6 +172,11 @@ class ServerManager:
         not need the large one evicted, and making a person pick another port by hand is
         work a machine can do. ``roam=False`` for a caller that truly needs *that* port —
         the one that expects every consumer to meet on it.
+
+        ``timeout=None`` (the default) scales with the weights on disk -- see
+        ``scaled_timeout`` -- so a caller that never thought about it still gets a timeout
+        sized for what it is actually waiting on. A caller that passes a number means it,
+        and gets exactly that instead.
         """
         now = time.monotonic()
         until = self._unavailable_until.get(spec.port, 0.0)
@@ -168,12 +186,16 @@ class ServerManager:
                 "not retrying yet (negative cache)"
             )
 
+        resolved_timeout = (
+            timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
+
         with self._port_lock(spec.port):
             try:
                 adopted = self.adopt(spec)
             except ServerFailed:
                 if not roam or not port_is_free(spec.port):
-                    elsewhere = self._beside(spec, timeout=timeout) if roam else None
+                    elsewhere = (self._beside(spec, timeout=resolved_timeout)
+                                if roam else None)
                     if elsewhere is not None:
                         return elsewhere
                 raise
@@ -181,7 +203,7 @@ class ServerManager:
                 return adopted
 
             try:
-                info = self.backend.start(spec, timeout=timeout)
+                info = self.backend.start(spec, timeout=resolved_timeout)
             except ServerFailed:
                 self._unavailable_until[spec.port] = time.monotonic() + UNAVAILABLE_COOLDOWN_S
                 raise
@@ -274,6 +296,8 @@ class ServerManager:
             "model": str(spec.model),
             "owner_pid": os.getpid(),
             "base_url": info.base_url,
+            "load_s": info.load_s,
+            "warmup_s": info.warmup_s,
         }
         self._save()
 
@@ -322,7 +346,7 @@ def serve(
     *,
     port: int | None = None,
     context: int = 4096,
-    timeout: float = 300.0,
+    timeout: float | None = None,
     manager: ServerManager | None = None,
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:

@@ -17,7 +17,7 @@ from ml_stack.fleet.serving import Serving
 from ml_stack.serve import build
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.manager import STATE_FILE, ServerManager, recorded_servers
+from ml_stack.serve.manager import DEFAULT_TIMEOUT_S, STATE_FILE, ServerManager, recorded_servers
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import pid_exists
 
@@ -25,7 +25,7 @@ _SPEC = ServerSpec(model="")
 DEFAULT_PORT = _SPEC.port
 DEFAULT_CONTEXT = _SPEC.context
 DEFAULT_PARALLEL = _SPEC.parallel
-DEFAULT_TIMEOUT = 300.0
+DEFAULT_TIMEOUT = DEFAULT_TIMEOUT_S
 PROBE_TIMEOUT = 2.0
 
 
@@ -43,6 +43,8 @@ class Snapshot:
     owner_pid: int | None = None
     holder_running: bool = False
     recorded: bool = False
+    load_s: float | None = None
+    warmup_s: float | None = None
     verdict: str = ""
     reason: str = ""
 
@@ -53,6 +55,10 @@ def base_url_for(port: int) -> str:
 
 def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) else None
+
+
+def _float_or_none(value: object) -> float | None:
+    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
 def look(port: int, records: dict[int, dict]) -> Snapshot | None:
@@ -80,6 +86,8 @@ def look(port: int, records: dict[int, dict]) -> Snapshot | None:
         owner_pid=owner,
         holder_running=pid_exists(owner),
         recorded=bool(entry),
+        load_s=_float_or_none(entry.get("load_s")),
+        warmup_s=_float_or_none(entry.get("warmup_s")),
     )
 
 
@@ -154,6 +162,9 @@ def cmd_status(args: argparse.Namespace) -> int:
               " per slot")
         print(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
         print(f"  lease    {_lease_line(snapshot)}")
+        if snapshot.load_s is not None:
+            warm = f", warm-up {snapshot.warmup_s:.1f}s" if snapshot.warmup_s is not None else ""
+            print(f"  loaded   in {snapshot.load_s:.1f}s{warm}")
         if snapshot.verdict:
             print("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
                                        args.parallel))
@@ -283,6 +294,20 @@ def cmd_up(args: argparse.Namespace) -> int:
                       lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
                       override_tensor=tuple(getattr(args, "on_cpu", []) or ()),
                       cpu_moe=bool(getattr(args, "cpu_moe", False)))
+
+    if getattr(args, "preflight_only", False):
+        from ml_stack.hub import room
+        from ml_stack.serve.preflight import Preflight
+
+        try:
+            binary_path = manager.backend.binary
+        except (BinaryNotFound, OSError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        report = Preflight(spec, binary=binary_path, limit_bytes=room())
+        print(report.said())
+        return 0 if report.ok else 1
+
     try:
         info = manager.lease(spec, timeout=args.timeout)
     except UnknownFlag as exc:
@@ -462,10 +487,16 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"tokens across all slots (default: {DEFAULT_CONTEXT})")
     up.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
                     help=f"slots to serve at once (default: {DEFAULT_PARALLEL})")
-    up.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT,
-                    help=f"seconds to wait for it to load (default: {DEFAULT_TIMEOUT:.0f})")
+    up.add_argument("--timeout", type=float, default=None,
+                    help="seconds to wait for it to load (default: scales with the "
+                         f"weights on disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)")
     up.add_argument("--json", action="store_true",
                     help="print one JSON object instead of the human line")
+    up.add_argument("--preflight-only", action="store_true",
+                    help="run every check a load would run -- shards present, "
+                         "architecture this build reads, an estimate against what this "
+                         "machine may use, every flag the build accepts -- and print the "
+                         "report without starting or adopting anything. Exits 0 or 1")
     up.add_argument("--root", default=DEFAULT_ROOT,
                     help=f"the fleet root whose beacon to announce in, when there is one "
                          f"(default: {DEFAULT_ROOT})")

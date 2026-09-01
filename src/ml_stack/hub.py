@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = ["Found", "PREFER", "advice", "aside", "beside", "builds", "card",
-           "draft_for", "files", "find", "main", "mmproj_for",
+           "draft_for", "fetch", "files", "find", "main", "mmproj_for",
            "DRAFT_KINDS", "held", "in_gguf", "ref", "room", "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
@@ -395,6 +395,41 @@ def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, 
                                     or name.rsplit("/", 1)[-1] == build)]
 
 
+def fetch(reference: str) -> Path:
+    """Download an `hf:` reference into the Hub cache, without serving it.
+
+    The same cache llama-server's own `-hf` download fills, and `held()` reads back -- so a
+    prefetch here and a lease afterward see the same file, and a benchmark that preflights
+    a model before timing it never pays for the download inside the timed window.
+
+    A sharded model's *every* shard comes down, not only the one named: the file given is
+    one member of a build, and a server started against a partial download fails at the far
+    end of the load complaining about a missing shard, which is exactly the fault a
+    preflight exists to catch first.
+    """
+    from huggingface_hub import hf_hub_download
+
+    from ml_stack.serve.backend import ServerSpec
+
+    parts = ServerSpec.hf_parts(reference)
+    if parts is None or not parts[1]:
+        raise ValueError(f"{reference!r} should look like hf:owner/repo/file.gguf")
+    repo, name = parts
+
+    stem = name.split("/")[0] if "/" in name else _SHARD.sub("", name.rsplit("/", 1)[-1])
+    members = [n for n, _size in files(repo)
+              if (n.split("/")[0] if "/" in n
+                  else _SHARD.sub("", n.rsplit("/", 1)[-1])) == stem] or [name]
+
+    wanted: Path | None = None
+    last: Path | None = None
+    for member in members:
+        last = Path(hf_hub_download(repo, member))
+        if member == name:
+            wanted = last
+    return wanted or last
+
+
 def room() -> int:
     """How much memory a model could actually use here, in bytes, or 0 when unknown.
 
@@ -432,7 +467,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack-models",
         description="Find a model that is newer than anything you remember, and serve it.")
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="{find,files,card}")
+    sub = ap.add_subparsers(dest="cmd", required=True, metavar="{find,files,card,fetch}")
 
     look = sub.add_parser("find", help="repositories matching some words")
     look.add_argument("words", nargs="+", help="e.g. gemma-4 E4B")
@@ -452,6 +487,11 @@ def main(argv: list[str] | None = None) -> int:
                                        "first, because those are what get guessed at")
     said.add_argument("repo", help="owner/name")
     said.add_argument("--full", action="store_true", help="print the whole card as well")
+
+    got = sub.add_parser("fetch", help="download hf: references into the cache, without "
+                                       "serving them -- every shard of a sharded model")
+    got.add_argument("refs", nargs="+", metavar="REF",
+                     help="hf:owner/repo/file.gguf, one or more")
 
     args = ap.parse_args(argv)
     try:
@@ -482,6 +522,13 @@ def main(argv: list[str] | None = None) -> int:
                       f"nobody has chosen one, so the caller's default stands.")
             if args.full:
                 print("\n" + text)
+            return 0
+
+        if args.cmd == "fetch":
+            for one in args.refs:
+                path = fetch(one)
+                size = path.stat().st_size if path.exists() else 0
+                print(f"{_human(size):>8}  {path}")
             return 0
 
         listing = files(args.repo, ending=args.ending)

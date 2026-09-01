@@ -287,3 +287,59 @@ def test_a_head_says_which_kind_of_speculation_it_needs():
     # a whole model used as a draft implements nothing in particular, and says so
     assert spec_for("/models/gpt-oss-20b-MXFP4.gguf") == ""
     assert spec_for("") == ""
+
+
+class TestFetch:
+    """Downloading an `hf:` reference into the cache without serving it -- what a preflight
+    calls so a download never happens inside a benchmark's timed window."""
+
+    def test_every_shard_of_the_named_build_is_downloaded(self, tmp_path, monkeypatch):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        shelves = [
+            ("thing-00001-of-00002.gguf", 4_000_000_000),
+            ("thing-00002-of-00002.gguf", 3_000_000_000),
+            ("mmproj-F32.gguf", 900_000_000),      # a companion, not this build
+        ]
+        monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves)
+
+        downloaded: list[str] = []
+
+        def fake_download(repo_id, filename, **kw):
+            downloaded.append(filename)
+            target = tmp_path / filename
+            target.write_bytes(b"x")
+            return str(target)
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+
+        got = hub.fetch("hf:maker/thing-GGUF/thing-00001-of-00002.gguf")
+        assert downloaded == ["thing-00001-of-00002.gguf", "thing-00002-of-00002.gguf"]
+        assert got.name == "thing-00001-of-00002.gguf"
+
+    def test_an_unsharded_reference_downloads_just_the_one_file(self, tmp_path, monkeypatch):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        monkeypatch.setattr(hub, "files",
+                            lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000_000_000)])
+        downloaded: list[str] = []
+
+        def fake_download(repo_id, filename, **kw):
+            downloaded.append(filename)
+            target = tmp_path / filename
+            target.write_bytes(b"x")
+            return str(target)
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+
+        got = hub.fetch("hf:maker/thing-GGUF/thing-Q4_K_M.gguf")
+        assert downloaded == ["thing-Q4_K_M.gguf"]
+        assert got.name == "thing-Q4_K_M.gguf"
+
+    def test_a_reference_with_no_file_is_rejected(self):
+        import ml_stack.hub as hub
+
+        with pytest.raises(ValueError, match="hf:owner/repo/file.gguf"):
+            hub.fetch("hf:maker/thing-GGUF")

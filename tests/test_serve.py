@@ -277,6 +277,52 @@ class TestNegativeCache:
         assert time.monotonic() - started < 0.5
 
 
+class TestScaledTimeout:
+    """A timeout sized for a 4G model is a race against an 87G one. `lease(timeout=None)`
+    -- the default -- scales with the weights on disk; a caller that passes a number means
+    it, and gets exactly that."""
+
+    def test_it_grows_with_the_weights_and_never_drops_below_the_floor(self):
+        from ml_stack.serve.manager import DEFAULT_TIMEOUT_S, scaled_timeout
+
+        assert scaled_timeout(0) == DEFAULT_TIMEOUT_S
+        # 10 GiB -> 60 + 15 = 75s, still under the 300s floor
+        assert scaled_timeout(10 * 1024**3) == DEFAULT_TIMEOUT_S
+        # 200 GiB -> 60 + 300 = 360s, past the floor
+        assert scaled_timeout(200 * 1024**3) == pytest.approx(360.0, abs=0.5)
+
+    def _fake_backend(self, started: list):
+        class Backend(ServerBackend):
+            name = "fake"
+
+            def command(self, spec):
+                return ["fake"]
+
+            def start(self, spec, *, timeout=300.0):
+                started.append(timeout)
+                return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
+                                  pid=1, backend="fake")
+
+        return Backend()
+
+    def test_an_explicit_timeout_is_passed_through_untouched(self, tmp_path):
+        started: list[float] = []
+        manager = ServerManager(self._fake_backend(started), state_file=tmp_path / "s.json")
+        manager.lease(ServerSpec(model=tmp_path / "big.gguf", port=free_port()), timeout=12.5)
+        assert started == [12.5]
+
+    def test_none_scales_from_the_weights_already_on_disk(self, tmp_path, monkeypatch):
+        from ml_stack.serve import manager as manager_module
+        from ml_stack.serve.manager import scaled_timeout
+
+        monkeypatch.setattr(manager_module, "weight_of", lambda model: 200 * 1024**3)
+        started: list[float] = []
+        manager = ServerManager(self._fake_backend(started), state_file=tmp_path / "s.json")
+        manager.lease(ServerSpec(model=tmp_path / "big.gguf", port=free_port()))
+        assert started == [scaled_timeout(200 * 1024**3)]
+        assert started[0] > 300.0
+
+
 class TestStateFile:
     def test_it_is_written_atomically_and_is_valid_json(self, tmp_path, fake_binary):
         state = tmp_path / "servers.json"
@@ -300,6 +346,19 @@ class TestStateFile:
 
     def test_recorded_servers_of_a_missing_file_is_empty(self, tmp_path):
         assert recorded_servers(tmp_path / "absent.json") == {}
+
+    def test_load_s_and_warmup_s_are_kept_in_the_record(self, tmp_path, fake_binary):
+        """`ml-stack-serve status --json` reads these back -- a fact worth keeping, not a
+        log line to be grepped for later."""
+        state = tmp_path / "servers.json"
+        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        info = ServerInfo(base_url="http://127.0.0.1:9999", port=9999, pid=1,
+                          backend="llama.cpp", load_s=12.5, warmup_s=0.8)
+        manager._record(ServerSpec(model="m.gguf", port=9999), info)
+
+        entry = json.loads(state.read_text())["9999"]
+        assert entry["load_s"] == 12.5
+        assert entry["warmup_s"] == 0.8
 
 
 class TestDetach:
@@ -474,13 +533,21 @@ class TestDrafting:
             ServerSpec(model=tmp_path / "big.gguf", draft=tmp_path / "small.gguf"))
         assert "-md" in argv and argv[argv.index("-md") + 1].endswith("small.gguf")
 
-    def test_a_draft_on_the_hub_is_one_argument(self, tmp_path):
+    def test_a_draft_named_by_repository_is_one_argument(self, tmp_path):
+        """`-hfd` takes owner/repo[:quant]. A draft named by *file* is not one argument --
+        llama-server has no flag for that -- so it is fetched first and served by path
+        (`LlamaServerBackend.resolved_draft`); measured 2026-09-01 when a head under MTP/
+        passed as repo:file started the server with an empty draft path."""
         argv = self.backend(tmp_path).command(ServerSpec(
             model="hf:unsloth/gemma-4-E4B-it-qat-GGUF/big.gguf",
-            draft="hf:unsloth/gemma-4-E2B-it-qat-GGUF/small.gguf"))
+            draft="hf:unsloth/gemma-4-E2B-it-qat-GGUF"))
         assert argv[argv.index("--hf-repo") + 1] == "unsloth/gemma-4-E4B-it-qat-GGUF"
         assert argv[argv.index("--hf-file") + 1] == "big.gguf"
-        assert argv[argv.index("-hfd") + 1] == "unsloth/gemma-4-E2B-it-qat-GGUF:small.gguf"
+        assert argv[argv.index("-hfd") + 1] == "unsloth/gemma-4-E2B-it-qat-GGUF"
+        with pytest.raises(ServerFailed, match="fetched before serving"):
+            self.backend(tmp_path).command(ServerSpec(
+                model="hf:unsloth/gemma-4-E4B-it-qat-GGUF/big.gguf",
+                draft="hf:unsloth/gemma-4-E2B-it-qat-GGUF/small.gguf"))
 
     def test_no_draft_asks_for_none(self, tmp_path):
         argv = self.backend(tmp_path).command(ServerSpec(model=tmp_path / "big.gguf"))

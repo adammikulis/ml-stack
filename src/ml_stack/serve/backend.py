@@ -6,6 +6,7 @@ import difflib
 import logging
 import re
 import subprocess
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -111,11 +112,13 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
         cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
-        slot_prompt_similarity=0.5, slot_save_path="slots")
+        slot_prompt_similarity=0.5, slot_save_path="slots", cache_type_k="q8_0",
+        cache_type_v="q8_0", mlock=True)
     # the `--no-` forms are a third shape for the same reason: True and False exclude
     # each other on one spec
     shapes = (full,
-              ServerSpec(model="model.gguf", kv_unified=False, cache_idle_slots=False),
+              ServerSpec(model="model.gguf", kv_unified=False, cache_idle_slots=False,
+                         mmap=False),
               ServerSpec(model="model.gguf", embedding=True),
               ServerSpec(model="hf:owner/repo/model.gguf", mmproj="hf:owner/repo/mmproj.gguf",
                          draft="hf:owner/repo"))
@@ -221,6 +224,17 @@ class ServerSpec:
     # a different shape of model -- a 35B with 3B active fits a small machine this way.
     cpu_moe: bool = False
     n_cpu_moe: int | None = None
+    # How the *main* model's KV cache is stored -- not the draft's, which
+    # `spec_draft_type_k/v` already covers. "" leaves the server's own default, which is
+    # f16. A preflight's fit estimate reads these back to size the KV cache it predicts.
+    cache_type_k: str = ""
+    cache_type_v: str = ""
+    # mmap is the server's own default; False trades load-time paging for a slower first
+    # load that pages in once rather than on every touch, which matters on a machine where
+    # a model larger than RAM would otherwise thrash. mlock pins what is loaded so it
+    # cannot be swapped back out; True costs the whole model's weight in wired memory.
+    mmap: bool | None = None
+    mlock: bool | None = None
     extra_args: tuple[str, ...] = ()
 
     @property
@@ -237,7 +251,9 @@ class ServerSpec:
         if len(parts) < 2:
             raise ServerFailed(
                 f"malformed HF reference {value!r}; expected hf:owner/repo[/file.gguf]")
-        return f"{parts[0]}/{parts[1]}", (parts[-1] if len(parts) > 2 else "")
+        # the file keeps its subdirectory: a draft head lives under MTP/, and a reference
+        # that lost it fetched nothing and served an empty draft path (measured 2026-09-01)
+        return f"{parts[0]}/{parts[1]}", ("/".join(parts[2:]) if len(parts) > 2 else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,6 +265,13 @@ class ServerInfo:
     adopted: bool = False
     """True when this server was already running and we did not start it."""
     log_path: Path | None = field(default=None, repr=False)
+    # Wall time from the process starting to the health check answering -- a fact, not a
+    # log line to be grepped for later, and where `status --json` reads it from.
+    load_s: float | None = None
+    # Wall time the post-health warm-up completion took, when one was sent. Compiling
+    # shaders and allocating the KV cache happen on the first real request whether or not
+    # anything measures them; this is what makes the *next* one the first that pays for it.
+    warmup_s: float | None = None
 
 
 class ServerBackend(ABC):
@@ -327,9 +350,15 @@ class LlamaServerBackend(ServerBackend):
             drafted = spec.hf_parts(spec.draft)
             if drafted is None:
                 argv += ["-md", str(spec.draft)]
+            elif not drafted[1]:
+                argv += ["-hfd", drafted[0]]
             else:
-                repo, name = drafted
-                argv += ["-hfd", f"{repo}:{name}" if name else repo]
+                # llama-server's -hfd takes owner/repo[:quant], never a file, so a head named
+                # by file is fetched into the cache first (`resolved_draft`) and passed as a
+                # path. Reaching here means start() was bypassed.
+                raise ServerFailed(
+                    f"a draft named by file ({spec.draft}) must be fetched before serving; "
+                    f"LlamaServerBackend.start does that, or `ml-stack-models fetch`")
         if spec.spec_type:
             argv += ["--spec-type", str(spec.spec_type)]
         for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
@@ -371,17 +400,57 @@ class LlamaServerBackend(ServerBackend):
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:
             argv += ["--jinja"]
+        if spec.cache_type_k:
+            argv += ["--cache-type-k", str(spec.cache_type_k)]
+        if spec.cache_type_v:
+            argv += ["--cache-type-v", str(spec.cache_type_v)]
+        if spec.mmap is not None and not spec.mmap:
+            argv += ["--no-mmap"]
+        if spec.mlock:
+            argv += ["--mlock"]
 
         argv += list(spec.extra_args)
         return argv
 
+    @staticmethod
+    def resolved_draft(spec: ServerSpec) -> ServerSpec:
+        """The spec with a draft named by `hf:` file turned into the cached file's path.
+
+        `-hfd` downloads a repository's quant, not a file, and a head under `MTP/` is a file;
+        so the file is fetched (or found in the cache) with `ml_stack.hub.fetch` and served
+        by path. A quant-style reference (`hf:owner/repo`) is left for the server.
+        """
+        parts = spec.hf_parts(spec.draft) if spec.draft else None
+        if not parts or not parts[1]:
+            return spec
+        from dataclasses import replace
+
+        from ml_stack.hub import fetch
+
+        try:
+            return replace(spec, draft=str(fetch(str(spec.draft))))
+        except Exception as exc:  # noqa: BLE001 - whatever the Hub said, say it here
+            raise ServerFailed(f"could not fetch the draft {spec.draft}: {exc}") from exc
+
     def start(self, spec: ServerSpec, *, timeout: float = 300.0,
-              check_flags: bool = True) -> ServerInfo:
+              check_flags: bool = True, preflight: bool = True,
+              warmup_request: bool = True) -> ServerInfo:
         """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail.
 
         A flag this build does not have raises ``UnknownFlag`` before anything is started;
         ``check_flags=False`` skips that, for a stand-in binary that prints no help.
+
+        ``preflight=True`` (the default) runs every other check worth asking before a load
+        -- shards present, architecture read by this build, an estimate against what this
+        machine may use -- and raises ``PreflightFailed`` with the report's own lines when
+        one comes back wrong. It runs after the port is confirmed free and before anything
+        is spawned, so a refusal here still costs nothing: no process, no load, no GPU.
+
+        ``warmup_request=True`` sends one short completion once the health check passes,
+        so shader compilation and the first KV allocation are paid for here rather than by
+        whatever the first real question turns out to be.
         """
+        spec = self.resolved_draft(spec)
         if not spec.is_hf_ref:
             model = Path(spec.model)
             if not model.is_file():
@@ -403,10 +472,19 @@ class LlamaServerBackend(ServerBackend):
                     "refusing to kill it"
                 )
 
+        if preflight:
+            from ml_stack.hub import room
+            from ml_stack.serve.preflight import Preflight, PreflightFailed
+
+            report = Preflight(spec, binary=self.binary, limit_bytes=room())
+            if not report.ok:
+                raise PreflightFailed(report.said())
+
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_path = LOG_DIR / f"llama-server-{spec.port}.log"
         logger.info("starting: %s", " ".join(argv))
 
+        started_at = time.monotonic()
         log_handle = log_path.open("wb")
         process = subprocess.Popen(
             argv,
@@ -433,6 +511,12 @@ class LlamaServerBackend(ServerBackend):
                 + tail(log_path)
             )
 
+        load_s = time.monotonic() - started_at
+
+        warmup_s = None
+        if warmup_request:
+            warmup_s = self._warm_up(base_url, timeout=timeout)
+
         return ServerInfo(
             base_url=base_url,
             port=spec.port,
@@ -440,7 +524,26 @@ class LlamaServerBackend(ServerBackend):
             backend=self.name,
             adopted=False,
             log_path=log_path,
+            load_s=load_s,
+            warmup_s=warmup_s,
         )
+
+    def _warm_up(self, base_url: str, *, timeout: float) -> float | None:
+        """One short completion through the real client, not curl -- shader compilation
+        and the first KV allocation happen on some request; better this one than the first
+        measured question. A warm-up that fails is logged and otherwise ignored: a server
+        that answered health is a server, and what it does with a real prompt is somebody
+        else's check to make."""
+        from ml_stack.client import Client
+
+        started = time.monotonic()
+        try:
+            Client(base_url, n_predict=8, timeout=min(timeout, 60.0)).complete(
+                "hello", n_predict=8)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("warm-up request to %s did not complete: %s", base_url, exc)
+            return None
+        return time.monotonic() - started
 
 
 def tail(path: Path, lines: int = 40) -> str:

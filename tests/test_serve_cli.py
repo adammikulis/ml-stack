@@ -441,3 +441,104 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     err = capsys.readouterr().err
     assert code == 2
     assert err.strip() == "this llama-server has no --draft-max; it has --spec-draft-n-max"
+
+
+_FULL_HELP = (
+    "-m,    --model FNAME                    model path\n"
+    "-c,    --ctx-size N                     size of the prompt context\n"
+    "-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM\n"
+    "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
+    "       --host HOST                      ip address to listen on\n"
+    "       --port PORT                      port to listen on\n"
+    "       --jinja                          use jinja template for chat\n"
+)
+
+
+def _write_gguf(path, metadata):
+    """A real, minimal GGUF v3 file -- see ``tests/test_serve_preflight.py`` for the
+    format this hand-rolls: magic, version, counts, one key/value pair per item, no
+    tensors."""
+    import struct
+
+    def kv(name, value):
+        head = struct.pack("<Q", len(name.encode())) + name.encode()
+        if isinstance(value, bool):
+            return head + struct.pack("<I", 7) + struct.pack("<?", value)
+        if isinstance(value, int):
+            return head + struct.pack("<I", 4) + struct.pack("<I", value)
+        return head + struct.pack("<I", 8) + struct.pack("<Q", len(value.encode())) + value.encode()
+
+    body = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(metadata))
+    for name, value in metadata.items():
+        body += kv(name, value)
+    path.write_bytes(body)
+    return path
+
+
+class TestPreflightOnly:
+    """``up --preflight-only`` runs every check a load would run and prints the report,
+    without ever leasing a server."""
+
+    def _binary(self, tmp_path):
+        binary = tmp_path / "llama-server"
+        binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                          + _FULL_HELP + "HELP\nfi\nexit 0\n")
+        binary.chmod(0o755)
+        return binary
+
+    def test_a_passing_preflight_exits_zero_and_never_leases(self, tmp_path, monkeypatch, capsys):
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+
+        def lease(self, spec, *, timeout=None, roam=True):
+            raise AssertionError("--preflight-only must never lease a server")
+
+        monkeypatch.setattr(cli.ServerManager, "lease", lease)
+
+        gguf = _write_gguf(tmp_path / MODEL, {
+            "general.architecture": "llama", "llama.block_count": 32,
+            "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
+        })
+        binary = self._binary(tmp_path)
+        code = cli.main(["up", str(gguf), "--binary", str(binary), "--preflight-only",
+                         "--port", str(free_port())])
+        out = capsys.readouterr().out
+        assert code == 0
+        assert "ok    shards" in out
+        assert "ok    architecture" in out
+
+    def test_a_failing_preflight_exits_one(self, tmp_path, monkeypatch, capsys):
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not llama
+
+        gguf = _write_gguf(tmp_path / MODEL, {
+            "general.architecture": "llama", "llama.block_count": 32,
+            "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
+        })
+        binary = self._binary(tmp_path)
+        code = cli.main(["up", str(gguf), "--binary", str(binary), "--preflight-only",
+                         "--port", str(free_port())])
+        out = capsys.readouterr().out
+        assert code == 1
+        assert "FAIL  architecture" in out
+
+
+class TestModelsFetch:
+    def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys, tmp_path):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        monkeypatch.setattr(hub, "files", lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000)])
+
+        def fake_download(repo_id, filename, **kw):
+            target = tmp_path / filename
+            target.write_bytes(b"x" * 10)
+            return str(target)
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
+        assert "thing-Q4_K_M.gguf" in capsys.readouterr().out
