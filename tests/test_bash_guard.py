@@ -62,6 +62,7 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git add src/one.py tests/test_one.py && git commit -m "x"',
     'git add -p src/one.py',
     'git commit -m "x"',
+    'git commit -m "docs: the guard refuses git add -A"',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""

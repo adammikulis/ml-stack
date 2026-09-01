@@ -141,3 +141,4 @@ Customer Support
 All Hands
 Hack Week
 Winter Party
+git add -A

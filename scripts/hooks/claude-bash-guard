@@ -32,7 +32,7 @@ import sys
 
 # (what it matches, what to do instead). Ordered: the first match wins.
 REFUSE = [
-    (r"\bgit\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|\bgit\s+commit\s+(-a\b|-am\b|--all\b)",
+    (r"(^|[;&|(]\s*)git\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|(^|[;&|(]\s*)git\s+commit\s+(-a\b|-am\b|--all\b)",
      "Do not stage everything. `git add -A` (and `add .`, `add -u`, `commit -a`) sweeps in "
      "whatever another agent is halfway through writing -- it committed a failing test once, "
      "under somebody else's commit message. Name the files you mean: `git add path/one.py "
