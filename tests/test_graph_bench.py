@@ -1212,3 +1212,448 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
     summary = [ln for ln in after_rule if ln.startswith("tiny-plain")]
     assert len(summary) == 3, said
     assert any("t1 k64" in ln for ln in summary), "the card way was asked with the card"
+
+
+# -- never lose a run -----------------------------------------------------------------------
+
+def test_plain_makes_a_record_the_store_can_keep_without_dropping_anything():
+    from dataclasses import dataclass
+
+    from ml_stack.graph.bench import _plain
+
+    @dataclass
+    class Held:
+        slots: int
+        where: pathlib.Path
+
+    record = {"server": {"per_turn": {(0, 1): 2.0, 3: "x"}, "held": Held(2, pathlib.Path("/m"))},
+              "rows": ({"shown": {"b", "a"}},), "n": None, "ok": True}
+    plain = _plain(record)
+    assert plain == {"server": {"per_turn": {"(0, 1)": 2.0, "3": "x"},
+                                "held": {"slots": 2, "where": "/m"}},
+                     "rows": [{"shown": ["a", "b"]}], "n": None, "ok": True}
+    assert json.loads(json.dumps(plain)) == plain     # no default= needed any more
+
+
+def test_a_run_with_a_field_the_store_could_not_take_is_kept_whole(tmp_path):
+    """The twelve runs that were kept as nothing. Whatever is in the record, it is made
+    plain before the store sees it, and read back before `save` returns."""
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
+    key = save(store, [row], held={"context": 32768, "slots": 2,
+                                   "concurrency": {"per_turn": {(0, 1): 2.0}},
+                                   "where": pathlib.Path("/models/thing.gguf")})
+    back = runs(store)
+    assert [r["key"] for r in back] == [key]
+    assert back[0]["server"]["concurrency"] == {"per_turn": {"(0, 1)": 2.0}}
+    assert back[0]["server"]["where"] == "/models/thing.gguf"
+    assert back[0]["rows"][0]["question"] == "who welds?"
+
+
+def test_save_refuses_to_return_a_run_that_did_not_come_back(tmp_path, monkeypatch):
+    """The store took twelve runs and gave back nothing for each. What `save` returns is a
+    key that `runs` reads, or it is an error."""
+    import ml_stack.graph.bench as bench
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
+
+    monkeypatch.setattr(bench, "runs", lambda where, label="": [])
+    with pytest.raises(bench.RunNotKept, match="did not come back"):
+        bench.save(store, [row])
+
+    honest = runs
+
+    def changed(where, label=""):
+        return [{**r, "rows": []} for r in honest(where, label)]
+
+    monkeypatch.setattr(bench, "runs", changed)
+    with pytest.raises(bench.RunNotKept, match="changed: rows differ"):
+        bench.save(store, [row])
+
+
+def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_path, monkeypatch,
+                                                                       capsys):
+    """The shape that was lost: `sweep --serve` with `--also terse --also card`, a store
+    for the finder, a smoke run. Every run comes back from the store whole, and the
+    summary the smoke prints is read from the store, not from memory."""
+    from contextlib import contextmanager
+
+    import ml_stack.client
+    import ml_stack.serve
+    import ml_stack.graph.bench as bench
+
+    @contextmanager
+    def fake_serve(model, **kw):
+        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
+                                                          "slots": 1, "model": "tiny.gguf"})
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text("\n".join(json.dumps({"q": q, "expect": ["topic:compiler"]})
+                               for q in ("who works on compilers?", "who else?", "and?")) + "\n")
+    kept = tmp_path / "runs.ladybug"
+
+    assert bench.main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                       "--also", "card", "--smoke", "--kept", str(kept), "--graph", str(graph),
+                       "--questions", str(asked), "--store", str(_tiny_store(tmp_path)),
+                       "--serve-port", "1"]) == 0
+    said = capsys.readouterr().out
+    back = {r["label"]: r for r in runs(kept)}
+    assert sorted(back) == ["tiny-plain", "tiny-plain-card", "tiny-plain-terse"]
+    for one in back.values():
+        assert len(one["rows"]) == 2, "a smoke run, read back with both its questions"
+        assert one["server"]["finder"] == "words"
+        assert one["server"]["sampling"]
+    summary = [ln for ln in said.split("\n---", 1)[1].splitlines() if ln.startswith("tiny-plain")]
+    assert len(summary) == 3, said
+
+
+def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who?", "expect": ["topic:compiler"]}) + "\n")
+    honest, calls = runs, []
+
+    def then_nothing(where, label=""):
+        calls.append(1)
+        return honest(where, label) if len(calls) == 1 else []     # save's read-back, then none
+
+    monkeypatch.setattr(bench, "runs", then_nothing)
+    with pytest.raises(bench.RunNotKept, match="did not come back"):
+        bench.main(["run", "tried", "--smoke", "--kept", str(tmp_path / "runs.ladybug"),
+                    "--graph", str(graph), "--questions", str(asked), "--client", "fake:client",
+                    "--store", ""])
+
+
+def test_empty_runs_are_skipped_named_and_forgotten(tmp_path, capsys):
+    from ml_stack.graph.bench import empties, forget
+    from ml_stack.graph.store import GraphStore
+
+    store = tmp_path / "runs.ladybug"
+    save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])])
+    with GraphStore(store) as held:
+        held.put_doc("bench:hollow:20260901T174747", {})
+        held.put_doc("bench:hollow:20260901T180039", {})
+
+    assert [r["label"] for r in runs(store)] == ["tried"], "an empty doc is not a run"
+    assert empties(store) == ["bench:hollow:20260901T174747", "bench:hollow:20260901T180039"]
+
+    import ml_stack.graph.bench as bench
+
+    assert bench._main(["show", "--kept", str(store)]) == 0
+    assert "2 empty run(s) skipped -- ml-stack-bench forget --empty removes them" \
+        in capsys.readouterr().out
+
+    assert bench._main(["forget", "--empty", "--kept", str(store)]) == 0
+    assert "2 empty run(s) removed" in capsys.readouterr().out
+    assert empties(store) == [] and len(runs(store)) == 1
+    assert forget(store, empty=True) == []
+
+
+def test_forgetting_a_label_lists_first_and_deletes_only_with_yes(tmp_path, capsys):
+    import ml_stack.graph.bench as bench
+
+    store = tmp_path / "runs.ladybug"
+    save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])])
+    save(store, [Row(label="other", question="hi")])
+
+    assert bench._main(["forget", "tried", "--kept", str(store)]) == 0
+    said = capsys.readouterr().out
+    assert "bench:tried:" in said and "pass --yes" in said
+    assert len(runs(store)) == 2, "listed, not deleted"
+
+    assert bench._main(["forget", "tried", "--yes", "--kept", str(store)]) == 0
+    assert "1 run(s) labelled 'tried' removed" in capsys.readouterr().out
+    assert [r["label"] for r in runs(store)] == ["other"]
+
+    assert bench._main(["forget", "--kept", str(store)]) == 2, "say what to forget"
+
+
+# -- the measuring subcommands detach themselves -------------------------------------------
+
+def test_detach_reruns_the_command_in_its_own_session_with_a_log_of_its_own(tmp_path, monkeypatch,
+                                                                          capsys):
+    """Not nohup, not &: a sweep started as a backgrounded shell command was killed the
+    moment the agent that started it was resumed, and its log was a hand-made redirect
+    into a scratch directory."""
+    import subprocess
+    import sys
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
+    started = {}
+
+    class FakeChild:
+        pid = 4242
+
+    def fake_popen(command, **kw):
+        started["command"], started["kw"] = command, kw
+        return FakeChild()
+
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    argv = ["sweep", "--serve", "models/tiny.gguf", "--detach", "--also", "terse", "--smoke"]
+    assert bench.main(argv) == 0
+
+    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.graph.bench"]
+    assert started["command"][3:] == [a for a in argv if a != "--detach"]
+    kw = started["kw"]
+    assert kw["start_new_session"] is True and "creationflags" not in kw
+    assert kw["stdin"] is subprocess.DEVNULL and kw["stderr"] is subprocess.STDOUT
+    log = pathlib.Path(kw["stdout"].name)
+    assert log.parent == tmp_path / "home" / "logs"
+    assert log.name.startswith("sweep-tiny-") and log.suffix == ".log"
+    assert len(log.stem.split("-")[-1]) == 15                       # YYYYmmddTHHMMSS
+    assert kw["env"]["PYTHONUNBUFFERED"] == "1"
+
+    held = json.loads((tmp_path / "home" / "measuring.json").read_text())
+    assert held["pid"] == 4242 and held["log"] == str(log)
+    assert held["argv"] == [a for a in argv if a != "--detach"]
+    assert held["started"]
+
+    said = capsys.readouterr().out
+    assert str(log) in said
+    assert "ml-stack-bench status" in said and "ml-stack-bench tail -f" in said
+    assert "ml-stack-bench stop" in said
+
+
+def test_detach_on_windows_asks_for_a_detached_process_group(tmp_path, monkeypatch):
+    import subprocess
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench.platform, "system", lambda: "Windows")
+    seen = {}
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kw: seen.update(kw) or type("C", (), {"pid": 7})())
+    bench.main(["run", "tried", "--detach"])
+    assert seen["creationflags"] == 0x200 | 0x8          # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+    assert "start_new_session" not in seen
+
+
+def test_the_log_is_named_after_the_label_or_the_first_model():
+    from ml_stack.graph.bench import _named_in
+
+    assert _named_in(["run", "with-shortlist", "--smoke"]) == "with-shortlist"
+    assert _named_in(["concurrent", "e2b-4x3"]) == "e2b-4x3"
+    assert _named_in(["sweep", "--serve", "/m/gemma-tiny.gguf", "--serve", "other"]) == "gemma-tiny"
+    assert _named_in(["sweep", "--on", "e4b=http://127.0.0.1:8083"]) == "e4b"
+    assert _named_in(["drafts", "hf:someone/tiny/tiny.gguf"]) == "tiny"
+    assert _named_in(["sweep"]) == "bench", "nothing to name it after is still a name"
+
+
+def _measuring(tmp_path, pid, *, log_lines=("first", "second", "third")):
+    home = tmp_path / "home"
+    (home / "logs").mkdir(parents=True, exist_ok=True)
+    log = home / "logs" / "sweep-tiny-20260901T180000.log"
+    log.write_text("\n".join(log_lines) + "\n")
+    (home / "measuring.json").write_text(json.dumps(
+        {"pid": pid, "argv": ["sweep", "--serve", "tiny"], "log": str(log),
+         "started": "2026-09-01T18:00:00"}))
+    return log
+
+
+def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch, capsys):
+    import os
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    assert bench.main(["status"]) == 0
+    assert capsys.readouterr().out.strip() == "nothing is measuring"
+
+    _measuring(tmp_path, os.getpid())                     # alive: this very process
+    assert bench.main(["status"]) == 0
+    said = capsys.readouterr().out
+    assert f"measuring since 2026-09-01T18:00:00 (pid {os.getpid()})" in said
+    assert "ml-stack-bench sweep --serve tiny" in said
+    assert "sweep-tiny-20260901T180000.log" in said
+    assert "last: third" in said
+
+    _measuring(tmp_path, 2 ** 22 + 12345)                # a pid nobody has
+    assert bench.main(["status"]) == 0, "exit 0 either way"
+    said = capsys.readouterr().out
+    assert said.startswith("nothing is measuring; the last one")
+    assert "has ended" in said and "last: third" in said
+
+
+def test_tail_prints_the_end_of_the_log_and_follows_until_the_pid_is_gone(tmp_path, monkeypatch,
+                                                                         capsys):
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    assert bench.main(["tail"]) == 1
+    assert "nothing has been detached" in capsys.readouterr().err
+
+    _measuring(tmp_path, 2 ** 22 + 12345, log_lines=("one", "two", "three", "four"))
+    assert bench.main(["tail", "-n", "2"]) == 0
+    assert capsys.readouterr().out == "three\nfour\n"
+
+    # -f on a measurement that has ended drains what is there and returns
+    assert bench.main(["tail", "-n", "1", "-f"]) == 0
+    assert capsys.readouterr().out == "four\n"
+
+    # with no measuring.json at all, the latest log under logs/ is the one
+    (tmp_path / "home" / "measuring.json").unlink()
+    assert bench.main(["tail", "-n", "1"]) == 0
+    assert capsys.readouterr().out == "four\n"
+
+
+def test_stop_signals_the_measuring_pid_and_never_a_name(tmp_path, monkeypatch, capsys):
+    import subprocess
+    import sys
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    assert bench.main(["stop"]) == 0
+    assert capsys.readouterr().out.strip() == "nothing is measuring"
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        _measuring(tmp_path, child.pid)
+        assert bench.main(["stop"]) == 0
+        said = capsys.readouterr().out
+        assert said.startswith(f"stopped pid {child.pid}")
+        assert child.wait(timeout=10) != 0, "it was signalled, not left to finish"
+    finally:
+        if child.poll() is None:
+            child.kill()
+    assert bench.main(["status"]) == 0
+    assert capsys.readouterr().out.startswith("nothing is measuring")
+
+
+def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(tmp_path,
+                                                                             monkeypatch):
+    """`stop` sends SIGTERM. Left to the default, that kills the sweep between two lines
+    and leaves the model it put up serving under nobody. As an exception, the `with
+    serve(...)` runs its exit on the way out."""
+    import os
+    import signal
+    from contextlib import contextmanager
+
+    import ml_stack.client
+    import ml_stack.serve
+    import ml_stack.graph.bench as bench
+
+    came_down = []
+
+    @contextmanager
+    def fake_serve(model, **kw):
+        try:
+            yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
+        finally:
+            came_down.append(model)
+
+    def fake_measure(ask, questions, **kw):
+        os.kill(os.getpid(), signal.SIGTERM)            # what `stop` does, from inside
+        raise AssertionError("SIGTERM should have raised before this")
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(bench, "measure", fake_measure)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who?", "expect": ["topic:compiler"]}) + "\n")
+    before = signal.getsignal(signal.SIGTERM)
+
+    with pytest.raises(SystemExit) as left:
+        bench.main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--kept",
+                    str(tmp_path / "runs.ladybug"), "--graph", str(graph),
+                    "--questions", str(asked), "--store", "", "--serve-port", "1"])
+    assert left.value.code == 128 + signal.SIGTERM
+    assert came_down == ["tiny.gguf"], "the server was taken down on the way out"
+    assert signal.getsignal(signal.SIGTERM) is before, "and the handler was put back"
+    from ml_stack.lock import only_one
+    with only_one(tmp_path / "home" / "measuring.lock", wait=False):
+        pass                                             # and the lock was let go
+
+
+# -- a sweep resumes -------------------------------------------------------------------------
+
+def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeypatch, capsys):
+    """A sweep killed on its third model, re-run with --resume, costs the third model."""
+    import time
+    from contextlib import contextmanager
+
+    import ml_stack.client
+    import ml_stack.serve
+    import ml_stack.graph.bench as bench
+
+    served_models = []
+
+    @contextmanager
+    def fake_serve(model, **kw):
+        served_models.append(model)
+        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    kept = tmp_path / "runs.ladybug"
+
+    # two of three ways kept today at this context and slot count, one question each
+    row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"])
+    for label in ("tiny-plain", "tiny-plain-terse"):
+        row.label = label
+        save(kept, [row], held={"context": 32768, "slots": 1})
+    # and a stale one for the third: a different question count, so it does not count
+    row.label = "tiny-plain-card"
+    save(kept, [row, a_row("and?", expected=[], shown=[])], held={"context": 32768, "slots": 1})
+    # and a whole model kept, every way of it, which is then never loaded
+    for label in ("other-plain", "other-plain-terse", "other-plain-card"):
+        row.label = label
+        save(kept, [row], held={"context": 32768, "slots": 1})
+
+    argv = ["sweep", "--serve", "tiny.gguf", "--serve", "other.gguf", "--plain-only",
+            "--also", "terse", "--also", "card", "--kept", str(kept), "--graph", str(graph),
+            "--questions", str(asked), "--store", "", "--serve-port", "1"]
+    assert bench._main([*argv, "--resume"]) == 0
+    said = capsys.readouterr().out
+    assert "skipping tiny-plain: kept at" in said
+    assert "skipping tiny-plain-terse: kept at" in said
+    assert "skipping other-plain: kept at" in said
+    assert served_models == ["tiny.gguf"], "the model with a way still to measure, once"
+    assert len(runs(kept, "tiny-plain-card")) == 2, "the third way was the only one measured"
+    assert len(runs(kept, "tiny-plain")) == 1 and len(runs(kept, "other-plain")) == 1
+
+    # --since after everything kept: nothing counts, and both models are served again
+    served_models.clear()
+    later = time.strftime("%FT%T", time.localtime(time.time() + 3600))
+    assert bench._main([*argv, "--resume", "--since", later]) == 0
+    assert served_models == ["tiny.gguf", "other.gguf"]
+    assert "skipping" not in capsys.readouterr().out
+
+    # and a kept run at another context is another measurement, not this one
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 8192,
+                                                          "slots": 1})
+    already = bench.resumable(kept, questions=1, context=32768, parallel=1)
+    assert already("tiny-plain") is not None
+    assert bench.resumable(kept, questions=1, context=8192, parallel=1)("tiny-plain") is None
+    assert bench.resumable(kept, questions=1, context=65536, parallel=2)("tiny-plain") is None
+    assert already("never-run") is None

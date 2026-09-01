@@ -461,3 +461,73 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
     replace(path, graph)
     with GraphStore(path, read_only=True) as reader:
         assert [r["id"] for r in reader.search("robotics", limit=5)] == ["topic:robotics"]
+
+
+# -- a value the store cannot keep is refused, never kept as nothing ----------------------
+
+def test_a_value_that_will_not_encode_is_refused_by_path_rather_than_kept_as_nothing(tmp_path):
+    """`_json` used to return "{}" when json.dumps raised. A run with one unencodable
+    field anywhere in it was then kept as an empty document, and nothing said so."""
+    from ml_stack.graph.store import _json
+
+    record = {"label": "tried", "server": {"concurrency": {"per_turn": {(0, 1): 2.0}}}}
+    with pytest.raises(ValueError) as why:
+        _json(record)
+    assert "server.concurrency.per_turn[(0, 1)]" in str(why.value)
+    assert "keys must be str" in str(why.value)
+
+    loop: dict = {"rows": []}
+    loop["rows"].append(loop)
+    with pytest.raises(ValueError, match=r"rows\[0\] \(refers to itself\)"):
+        _json(loop)
+
+    with GraphStore(tmp_path / "g") as store:
+        with pytest.raises(ValueError, match="per_turn"):
+            store.put_doc("bench:tried", record)
+        assert store.get_doc("bench:tried") is None, "nothing was kept in its place"
+
+
+def test_a_plain_document_round_trips_whole(tmp_path):
+    doc = {"at": "2026-01-01T00:00:00", "label": "tried", "server": {"slots": 2, "mmapped": True},
+           "rows": [{"question": "who welds?", "seconds": 1.5, "shown": ["person:ada"]}],
+           "unread_named": 0, "nothing": None}
+    with GraphStore(tmp_path / "g") as store:
+        store.put_doc("bench:tried", doc)
+    with GraphStore(tmp_path / "g", read_only=True) as reader:
+        assert reader.get_doc("bench:tried") == doc
+        assert reader.docs() == {"bench:tried": doc}
+        assert reader.doc_keys() == ["bench:tried"]
+
+
+def test_docs_reads_each_value_by_key_and_never_off_a_scan(tmp_path):
+    """Measured on a bench store: a scan of Doc returned '' for every value written after a
+    point while a lookup by key returned all of it. The store below answers the way that
+    one did -- every value blank on a scan, whole on a lookup -- and `docs()` must still
+    hand back the documents."""
+    doc = {"label": "tried", "rows": [{"question": "who welds?"}] * 3}
+    with GraphStore(tmp_path / "g") as store:
+        store.put_doc("bench:tried", doc)
+        store.put_doc("bench:again", doc)
+
+    with GraphStore(tmp_path / "g", read_only=True) as reader:
+        honest = reader.query
+
+        def as_that_store_did(cypher, params=None):
+            rows = honest(cypher, params)
+            if "d.value" in cypher and "{key" not in cypher:      # a scan, not a lookup
+                return [{**r, **({"value": ""} if "value" in r else {})} for r in rows]
+            return rows
+
+        reader.query = as_that_store_did
+        assert reader.docs() == {"bench:again": doc, "bench:tried": doc}
+
+
+def test_a_document_can_be_deleted_and_says_whether_it_was_there(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.put_doc("bench:tried", {"label": "tried"})
+        store.put_doc("bench:kept", {"label": "kept"})
+        assert store.delete_doc("bench:tried") is True
+        assert store.delete_doc("bench:tried") is False
+    with GraphStore(tmp_path / "g", read_only=True) as reader:
+        assert reader.doc_keys() == ["bench:kept"]
+        assert reader.counts()["docs"] == 1

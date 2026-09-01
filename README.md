@@ -462,6 +462,22 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server of the
 wrong shape hands back a lease that cannot do what was asked of it.
 
+**Every load preflights first.** Before a process starts, `LlamaServerBackend.start` checks
+that every shard of the GGUF is present and complete (an `hf:` reference is resolved through
+the Hub cache the way `ml-stack-models files` reports what is already on this machine), that
+`general.architecture` is one this build reads, that the weights plus an estimated KV cache
+fit what `ml-stack-setup` says this machine may use, and that every flag the spec would emit
+is one the build accepts — one fast read of a GGUF's own header, never the tensors, so a
+fault that used to surface at the far end of an 87G load surfaces before anything is
+spawned. `ml-stack-serve up --preflight-only` runs the same report and exits 0 or 1 without
+starting or adopting anything; `ml-stack-models fetch hf:owner/repo/file.gguf` downloads
+every shard of a build into the same cache ahead of time, so a benchmark's timed window never
+pays for the download. A lease also records `load_s` (and `warmup_s`, from one short
+completion sent right after the health check, so the first *measured* question is not the
+one paying for shader compilation) — both show up in `ml-stack-serve status --json`, and the
+load timeout itself scales with the weights on disk (`60s + 1.5s/GB`, floor 300s) rather than
+racing a fixed clock against whichever model is biggest.
+
 **Guessing ahead** comes in two shapes and `--spec TYPE` chooses. A *draft* kind runs a
 second small model — `--draft auto` finds the `mtp-` head a repository ships, wherever the
 publisher put it, and `--draft-ngl` decides how much of it goes on the GPU (without which it
@@ -771,6 +787,32 @@ on a run from before it was counted, because not counted is not none.
 describes the tools briefly, `--also card` asks with the model's own sampling, `--also
 greedy` at temperature 0, and `--also rich` has `look_up` say what matched and why, with a
 topic hit bringing the people joined to it.
+
+```
+ml-stack-bench sweep --serve gemma-4-E2B-it --also terse --also card --detach
+ml-stack-bench status
+ml-stack-bench tail -f
+ml-stack-bench stop
+ml-stack-bench sweep --serve gemma-4-E2B-it --also terse --also card --resume
+```
+
+A measurement is hours, and a child of a shell -- `nohup`, `&`, a redirect into a scratch
+directory -- dies with the shell, or with the agent that opened it; a ranking sweep was
+killed that way half an hour in. So `--detach` on `run`, `sweep`, `drafts` and `concurrent`
+has the command re-run itself in a session of its own, with its output in a log under
+`~/.ml-stack/bench/logs/`, and gives the shell back at once. `status` says what is measuring,
+since when, and the last line of its log; `tail -f` follows the log; `stop` sends the pid
+SIGTERM -- never a name -- which the child takes as an exit, so a model it put up comes
+down with it. `sweep --resume` then skips every model and way already kept today with the
+same questions, context and slots, so the killed sweep costs the model it died on and not
+the ones before it.
+
+The same sweep kept twelve runs as nothing: the store took them and gave back an empty
+string for each, and the smoke run had passed because the summary was printed from memory.
+`save` now reads every run back the way `show` reads it before it returns, and refuses to
+if what comes back is not what went in; a `--smoke` run's summary is read from the store
+for the same reason. `show` counts any run that still reads back empty, and `forget --empty`
+removes them.
 
 ```
 ml-stack-bench concurrent e2b-4x3 --conversations 4 --turns 3 --base-url http://127.0.0.1:8080

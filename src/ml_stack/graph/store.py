@@ -64,10 +64,48 @@ COPY_OVER = 0.1
 
 
 def _json(value: Any) -> str:
+    """A value as the JSON the store keeps, or a ValueError naming what will not encode.
+
+    It used to return ``"{}"`` when ``json.dumps`` raised, which is the one thing a store
+    must never do: a value it cannot keep became a value that was kept as nothing, and
+    nothing said so. Objects go through ``str`` -- a Path, a dataclass, a numpy scalar --
+    because losing their type is better than losing the record; what remains unencodable
+    is a key that is not a string, or a value that refers to itself, and either is a bug at
+    the caller that this names by path rather than hides.
+    """
     try:
         return json.dumps(value or {}, ensure_ascii=False, default=str)
+    except (TypeError, ValueError) as why:
+        raise ValueError(f"{_blame(value)}: {why}") from why
+
+
+def _blame(value: Any, path: str = "value", seen: frozenset[int] = frozenset()) -> str:
+    """The path to the first thing in ``value`` that ``json.dumps`` refuses: a key that is
+    not a string, a container that holds itself, or a leaf ``str`` cannot render."""
+    if isinstance(value, (Mapping, list, tuple)):
+        if id(value) in seen:
+            return f"{path} (refers to itself)"
+        seen = seen | {id(value)}
+    if isinstance(value, Mapping):
+        for key, inner in value.items():
+            if not isinstance(key, (str, int, float, bool)) and key is not None:
+                return f"{path}[{key!r}]"
+            found = _blame(inner, f"{path}.{key}" if isinstance(key, str) else f"{path}[{key!r}]",
+                           seen)
+            if found:
+                return found
+        return ""
+    if isinstance(value, (list, tuple)):
+        for n, inner in enumerate(value):
+            found = _blame(inner, f"{path}[{n}]", seen)
+            if found:
+                return found
+        return ""
+    try:
+        json.dumps(value, default=str)
     except (TypeError, ValueError):
-        return "{}"
+        return path
+    return ""
 
 
 def _unjson(raw: Any) -> dict[str, Any]:
@@ -370,10 +408,33 @@ class GraphStore:
         rows = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value", {"key": str(key)})
         return _unjson(rows[0]["value"]) if rows else default
 
+    def delete_doc(self, key: str) -> bool:
+        """Take one document out. False when there was none under that key."""
+        if not self.query("MATCH (d:Doc {key:$key}) RETURN d.key AS key", {"key": str(key)}):
+            return False
+        self._conn.execute("MATCH (d:Doc {key:$key}) DELETE d", {"key": str(key)})
+        return True
+
+    def doc_keys(self) -> list[str]:
+        """Every document's key, the store's own records aside."""
+        return [r["key"] for r in self.query(
+            "MATCH (d:Doc) WHERE NOT d.key STARTS WITH '_' RETURN d.key AS key ORDER BY d.key")]
+
     def docs(self) -> dict[str, Any]:
-        return {r["key"]: _unjson(r["value"])
-                for r in self.query("MATCH (d:Doc) WHERE NOT d.key STARTS WITH '_' "
-                                    "RETURN d.key AS key, d.value AS value")}
+        """Every document, keyed. The keys are scanned; each value is looked up by key.
+
+        Not one query, on purpose. Measured on a bench store on 2026-09-01: a full scan of
+        ``Doc`` returned ``''`` for ``value`` on every row written after a point -- twelve
+        runs, half an hour of GPU -- while ``MATCH (d:Doc {key:$key})`` returned all
+        28,153 characters of each. ``size(d.value)`` read 0 through the scan and 28,153
+        through the lookup; ``WHERE d.key IN $keys`` and ``UNWIND`` went the scan's way
+        and lost them too. The same records in a fresh store scanned fine, so it is the
+        file's state and not the data, and a new record written into that file was lost
+        the same way. Only the parameterised lookup was ever right, so that is the one
+        reading is done through, at a query per document, which a store of documents can
+        afford and a store of runs cannot afford to be without.
+        """
+        return {key: self.get_doc(key, {}) for key in self.doc_keys()}
 
     def read(self) -> dict[str, Any]:
         """The graph in the shape it went in as, whole."""

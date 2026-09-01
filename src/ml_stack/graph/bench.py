@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import platform
 import re
+import signal
+import subprocess
 import sys
 import threading
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -23,13 +27,34 @@ from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 __all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking",
-           "ask_from", "asking", "compare", "concurrent", "finding", "footprint", "main",
-           "measure", "prepared", "read_questions", "runs", "save", "slot_count", "table",
-           "unread_named"]
+           "ask_from", "asking", "compare", "concurrent", "detach", "empties", "finding",
+           "footprint", "forget", "main", "measure", "measuring", "prepared", "read_questions",
+           "runs", "save", "slot_count", "status", "stop", "table", "tail", "unread_named"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
 HOME = Path("~/.ml-stack/bench").expanduser()
+
+
+def _plain(value: Any) -> Any:
+    """``value`` as nothing but dicts, lists, strings, numbers, booleans and None.
+
+    What `save` writes has to come back, and the store keeps JSON. Keys that are not
+    strings become strings, dataclasses become their fields, sets and tuples become lists,
+    and anything else becomes its ``str`` -- nothing is dropped, because a run that lost
+    a field is not the run that was measured. What comes out is fed to ``json.dumps``
+    with no ``default``, so anything this missed raises before the store sees it.
+    """
+    if is_dataclass(value) and not isinstance(value, type):
+        return _plain(asdict(value))
+    if isinstance(value, Mapping):
+        return {(k if isinstance(k, str) else str(k)): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain(v) for v in (sorted(value, key=str) if isinstance(value, (set, frozenset))
+                                    else value)]
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return str(value)
 
 
 def prepared() -> str:
@@ -599,33 +624,83 @@ def beyond_weights(out: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+class RunNotKept(RuntimeError):
+    """A run was written and did not come back the way `runs` reads it."""
+
+
 def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None) -> str:
-    """Keep a run where it can be compared with another one, later, by anybody."""
+    """Keep a run where it can be compared with another one, later, by anybody.
+
+    Then read it back the way `runs` will, on a fresh handle, and refuse to return until
+    what came back is what went in. Twelve runs -- half an hour of GPU -- were once kept
+    as nothing: the store took them, a scan of it returned an empty string for each, and
+    the sweep printed its summary from memory, so nobody knew until the next morning. The
+    read-back is the only proof that a run exists, and it is cheap next to the run.
+    """
     from ml_stack.graph.store import GraphStore
 
     server = held
     stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
-    with GraphStore(store) as held:
+    record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
+                     "server": server or {}, "rows": [asdict(r) for r in rows],
+                     "unread_named": sum(r.unread_named for r in rows)})
+    record = json.loads(json.dumps(record))      # no default=: anything left raises here
+    with GraphStore(store) as writer:
         # Two runs of one label inside a second used to land on the same key and the later
         # one silently replaced the earlier. A run took minutes when that was written; with
         # answers cached it can take no time at all, so the collision is real now.
         key, n = stem, 1
-        while held.get_doc(key) is not None:
+        while writer.get_doc(key) is not None:
             key, n = f"{stem}-{n}", n + 1
-        held.put_doc(key, {"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
-                           "server": server or {}, "rows": [asdict(r) for r in rows],
-                           "unread_named": sum(r.unread_named for r in rows)})
+        writer.put_doc(key, record)
+    back = next((r for r in runs(store) if r.get("key") == key), None)
+    if back is None:
+        raise RunNotKept(f"{key} was written to {store} and did not come back")
+    back = {k: v for k, v in back.items() if k != "key"}
+    if back != record:
+        differs = sorted(k for k in set(back) | set(record) if back.get(k) != record.get(k))
+        raise RunNotKept(f"{key} came back from {store} changed: {', '.join(differs)} differ")
     return key
 
 
 def runs(store: str | Path, label: str = "") -> list[dict[str, Any]]:
-    """Every run kept in ``store``, newest last, optionally only one label's."""
+    """Every run kept in ``store``, newest last, optionally only one label's.
+
+    Each carries its ``key``. A doc that reads back empty is left out -- it is not a run,
+    and a row of dashes in the table said nothing about why -- and `empties` names them.
+    """
     from ml_stack.graph.store import GraphStore
 
     with GraphStore(store, read_only=True) as held:
         kept = held.docs()
-    found = [kept[k] for k in sorted(kept) if k.startswith("bench:")]
-    return [r for r in found if isinstance(r, dict) and (not label or r.get("label") == label)]
+    found = [{**kept[k], "key": k} for k in sorted(kept)
+             if k.startswith("bench:") and isinstance(kept[k], dict) and kept[k]]
+    return [r for r in found if not label or r.get("label") == label]
+
+
+def empties(store: str | Path) -> list[str]:
+    """The keys of runs that read back as nothing, which `forget --empty` removes."""
+    from ml_stack.graph.store import GraphStore
+
+    if not Path(store).expanduser().exists():
+        return []
+    with GraphStore(store, read_only=True) as held:
+        kept = held.docs()
+    return sorted(k for k, v in kept.items()
+                  if k.startswith("bench:") and not (isinstance(v, dict) and v))
+
+
+def forget(store: str | Path, *, label: str = "", empty: bool = False) -> list[str]:
+    """Delete runs: every empty one, or every run of one label. Returns what went."""
+    from ml_stack.graph.store import GraphStore
+
+    going = empties(store) if empty else [r["key"] for r in runs(store, label)] if label else []
+    if not going:
+        return []
+    with GraphStore(store) as held:
+        for key in going:
+            held.delete_doc(key)
+    return going
 
 
 def _total(rows: Sequence[dict[str, Any]], key: str) -> float:
@@ -1292,7 +1367,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            parallel: int = 1, binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            terse: bool = False, ways: Sequence[Mapping[str, Any]] = (),
-           serve_timeout: float = 900.0, **making: Any) -> list[Row]:
+           serve_timeout: float = 900.0,
+           already: Callable[[str], Mapping[str, Any] | None] | None = None,
+           **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
     The piece that was missing. `sweep` measures servers somebody else started, so anything
@@ -1308,11 +1385,29 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     and not four. Only a change the server itself must be told about, a draft head or a
     context, needs putting it up again. Each way is ``{"label": ..., "terse": ..., }`` plus
     anything a client takes.
+
+    ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
+    passes it -- and a way that has one is skipped before the model is loaded, so a sweep
+    killed on its third model costs the third model to re-run and not the first two.
     """
     from ml_stack.client import Client
     from ml_stack.serve import serve
 
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
+    every = list(ways) or [{}]
+    if already is not None:
+        todo = []
+        for way in every:
+            tag = str(way.get("label", "") or "")
+            here = f"{name}-{tag}" if tag else name
+            kept_as = already(here)
+            if kept_as:
+                print(f"skipping {here}: kept at {kept_as.get('at', '?')}")
+            else:
+                todo.append(way)
+        if not todo:
+            return []
+        every = todo
     extra: dict[str, Any] = {"parallel": parallel}
     if draft:
         from ml_stack.hub import spec_for
@@ -1336,7 +1431,6 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
         loaded = time.time() - began
         print(f"    up in {loaded:.0f}s, look_up by {finding(store, embed_url)}")
-        every = list(ways) or [{}]
         rows = []
         for way in every:
             asked = dict(way)
@@ -1491,8 +1585,9 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     return ask
 
 
-def _main(argv: list[str] | None = None) -> int:
-    """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
+def _parser() -> argparse.ArgumentParser:
+    """The command line of ``ml-stack-bench``, built once per call and shared with `detach`,
+    which needs a label out of an argv before handing it to the child."""
     # allow_abbrev=False on every parser here: a flag that is documented but not defined
     # must be refused by name, not bound by prefix to whichever neighbour shares its
     # first letters -- `--short` became `--shortlist` that way and the error blamed the
@@ -1554,6 +1649,10 @@ def _main(argv: list[str] | None = None) -> int:
                             "every token -- so what is being measured is acceptance and "
                             "wall clock, and a full run spends most of itself proving a "
                             "score that must come out the same")
+    heads.add_argument("--smoke", action="store_true",
+                       help=f"ask only {SMOKE} questions of each head, to prove the whole "
+                            f"path -- serve, ask, save, and read the run back -- before "
+                            f"spending the GPU on it")
 
     conc = sub.add_parser("concurrent", allow_abbrev=False,
                           help="ask N conversations of T turns each at the same time, and "
@@ -1629,6 +1728,14 @@ def _main(argv: list[str] | None = None) -> int:
                        help="a llama-server that reads these models")
     sweep.add_argument("--plain-only", action="store_true",
                        help="skip the shortlist half, just measure each model as it is")
+    sweep.add_argument("--resume", action="store_true",
+                       help="skip any model and way already kept since --since with this "
+                            "many questions at this context and these slots, so a sweep "
+                            "killed on its third model costs the third model and not all "
+                            "three. Says which it skipped and when each was kept")
+    sweep.add_argument("--since", default="", metavar="WHEN",
+                       help="with --resume, how old a kept run may be and still count: an "
+                            "ISO date or date-time (default: the start of today)")
 
     for one in (run, sweep, conc):
         one.add_argument("--sample", type=int, default=0, metavar="N",
@@ -1678,6 +1785,13 @@ def _main(argv: list[str] | None = None) -> int:
                          help="fail at once if another measurement holds the GPU, rather "
                               "than queue behind it. Read before the rest of the line is "
                               "parsed, and listed here so that --help says it exists")
+        one.add_argument("--detach", action="store_true",
+                         help="run this in the background, owned by nobody's terminal: the "
+                              "command re-runs itself in a new session with its output in "
+                              f"a log under {HOME / 'logs'}, prints the log's path and "
+                              "returns at once. `status` says what is measuring, `tail -f` "
+                              "follows the log, `stop` ends it and takes its server down. "
+                              "Read before the rest of the line is parsed, like --no-queue")
 
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
@@ -1716,7 +1830,60 @@ def _main(argv: list[str] | None = None) -> int:
                       choices=("seconds", "paid_tokens", "kv_bytes"),
                       help="which cost the frontier is drawn against (default: %(default)s)")
 
-    args = ap.parse_args(argv)
+    gone = sub.add_parser("forget", allow_abbrev=False,
+                          help="delete kept runs: the empty ones, or every run of one label")
+    gone.add_argument("label", nargs="?", default="",
+                      help="delete every run kept under this label (needs --yes)")
+    gone.add_argument("--empty", action="store_true",
+                      help="delete every run that reads back as nothing")
+    gone.add_argument("--yes", action="store_true",
+                      help="really delete a label's runs; without it they are only listed")
+    gone.add_argument("--kept", default=str(HOME / "runs.ladybug"),
+                      help="the store the runs are in (default: %(default)s)")
+
+    sub.add_parser("status", allow_abbrev=False,
+                   help="whether something is measuring, since when, with what, and where "
+                        "its log is. Exits 0 either way")
+    following = sub.add_parser("tail", allow_abbrev=False,
+                               help="the log of the current measurement, or the latest")
+    following.add_argument("-n", type=int, default=20, metavar="N",
+                           help="how many lines from the end (default: %(default)s)")
+    following.add_argument("-f", action="store_true", dest="follow",
+                           help="keep printing as the log grows, until the measurement ends")
+    sub.add_parser("stop", allow_abbrev=False,
+                   help="end the detached measurement: SIGTERM to its pid, so it takes down "
+                        "any server it put up, then wait up to a minute. Never by name")
+    return ap
+
+
+def _main(argv: list[str] | None = None) -> int:
+    """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
+    args = _parser().parse_args(argv)
+    if args.cmd == "status":
+        print(status())
+        return 0
+    if args.cmd == "tail":
+        return tail(lines=args.n, follow=args.follow)
+    if args.cmd == "stop":
+        print(stop())
+        return 0
+    if args.cmd == "forget":
+        if not args.empty and not args.label:
+            print("error: say what to forget: --empty, or a label", file=sys.stderr)
+            return 2
+        if args.empty:
+            went = forget(args.kept, empty=True)
+            print(f"{len(went)} empty run(s) removed" if went else "no empty runs")
+        if args.label:
+            if not args.yes:
+                would = [r["key"] for r in runs(args.kept, args.label)]
+                print("\n".join(would) if would else f"no run labelled {args.label!r}")
+                if would:
+                    print(f"{len(would)} run(s) would go; pass --yes to delete them")
+                return 0
+            went = forget(args.kept, label=args.label)
+            print(f"{len(went)} run(s) labelled {args.label!r} removed")
+        return 0
     if args.cmd == "sweep":
         from ml_stack.client import Client
         from ml_stack.graph.community import QUESTIONS, graph as invented
@@ -1737,6 +1904,11 @@ def _main(argv: list[str] | None = None) -> int:
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
         ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
+        saved: list[str] = []
+        total_context = args.context or 32768 * max(1, args.parallel)
+        already = (resumable(args.kept, questions=len(questions), context=total_context,
+                             parallel=getattr(args, "parallel", 1), since=args.since)
+                   if args.resume else None)
         # `wanted`, not `named`: the loop variable was `named` once, which rebound the
         # (name, url) list built from --on to the last model's name, and the summary below
         # then unpacked its characters. Every `sweep --serve` answered its questions and
@@ -1762,19 +1934,24 @@ def _main(argv: list[str] | None = None) -> int:
                 # ServerSpec means by it. Dividing by the slot count served a model at a
                 # quarter of the context every other run had, and the only thing that said
                 # so was the `ctx` column reading 8k where the rest read 32k.
+                before = {r["key"] for r in runs(args.kept)} if Path(args.kept).expanduser().exists() else set()
                 served(model, questions, graph, label=f"{stem}-{suffix}", draft=head,
                        ways=_ways(args),
                        port=args.serve_port,
-                       context=args.context or 32768 * max(1, args.parallel),
+                       context=total_context,
                        parallel=getattr(args, "parallel", 1), binary=args.binary,
                        kept=args.kept, shortlist=shortlist,
                        store=args.store or None, embed_url=args.embed_url,
                        embed_model=args.embed_model, terse=getattr(args, "terse", False),
-                       **sampling_from(args))
+                       already=already, **sampling_from(args))
+                saved += [r["key"] for r in runs(args.kept) if r["key"] not in before]
 
         for name, url in named:
             for suffix, shortlist in ways:
                 label = f"{name}-{suffix}"
+                if already is not None and already(label):
+                    print(f"skipping {label}: kept at {already(label).get('at', '?')}")
+                    continue
                 ask = asking(graph, shortlist=shortlist, store=args.store or None,
                              embed_url=args.embed_url, embed_model=args.embed_model,
                              terse=getattr(args, "terse", False), margin=args.margin)
@@ -1788,11 +1965,11 @@ def _main(argv: list[str] | None = None) -> int:
                 used = dict(asking_with.sampling)
                 rows = measure(ask, questions, label=label, client=asking_with, log=print,
                                graph=graph)
-                save(args.kept, rows,
-                     held={**footprint(url), "sampling": used, "graph": _which(graph),
-                           "finder": ask.finder})
+                saved.append(save(args.kept, rows,
+                                  held={**footprint(url), "sampling": used,
+                                        "graph": _which(graph), "finder": ask.finder}))
         print()
-        table(runs(args.kept))
+        table(read_back(args.kept, saved) if args.smoke else runs(args.kept))
         return 0
     if args.cmd == "prepare":
         from ml_stack.graph.community import graph as invented
@@ -1819,13 +1996,18 @@ def _main(argv: list[str] | None = None) -> int:
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
         asked = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                       args.sample)
+                       SMOKE if getattr(args, "smoke", False) else args.sample)
+        before = {r["key"] for r in runs(args.kept)} if Path(args.kept).expanduser().exists() else set()
         rows = drafts(find_model(args.model), args.draft or [""], asked, invented(),
                       port=args.port,
                       context=args.context, parallel=args.parallel, binary=args.binary,
                       kept=args.kept, store=prepared() or None)
         print()
-        table(runs(args.kept))
+        if getattr(args, "smoke", False):
+            saved = [r["key"] for r in runs(args.kept) if r["key"] not in before]
+            table(read_back(args.kept, saved))
+        else:
+            table(runs(args.kept))
         return 0 if rows else 1
 
     if args.cmd == "concurrent":
@@ -1866,6 +2048,8 @@ def _main(argv: list[str] | None = None) -> int:
                    held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
                          "graph": _which(graph), "finder": ask.finder})
         print(f"kept as {key}")
+        if args.smoke:
+            table(read_back(args.kept, [key]))
         return 0
 
     if args.cmd == "show":
@@ -1897,6 +2081,10 @@ def _main(argv: list[str] | None = None) -> int:
             missed(runs(args.kept, args.detail), everything=args.all)
             return 0
         table(runs(args.kept))
+        hollow = empties(args.kept)
+        if hollow:
+            print(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
+                  f"removes them")
         return 0
 
     from ml_stack.graph.community import QUESTIONS, graph as invented
@@ -1928,13 +2116,221 @@ def _main(argv: list[str] | None = None) -> int:
                held={**footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found})
     print(f"kept as {key}")
+    if args.smoke:
+        table(read_back(args.kept, [key]))
     return 0
 
 
+def read_back(store: str | Path, keys: Sequence[str]) -> list[dict[str, Any]]:
+    """The runs under ``keys``, read from the store the way `show` reads them.
+
+    What a smoke run exists to prove: the whole path, and the last step of the path is
+    the store giving the run back. Summarising from memory proved everything but that,
+    and a sweep passed its smoke and then kept twelve runs as nothing.
+    """
+    kept = {r["key"]: r for r in runs(store)}
+    lost = [k for k in keys if k not in kept]
+    if lost:
+        raise RunNotKept(f"{len(lost)} run(s) saved to {store} did not come back: "
+                         + ", ".join(lost))
+    return [kept[k] for k in keys]
+
+
+def resumable(store: str | Path, *, questions: int, context: int, parallel: int,
+              since: str = "") -> Callable[[str], Mapping[str, Any] | None]:
+    """``already(label)``: the run kept under ``label`` that makes measuring it again a
+    waste, or None.
+
+    A kept run counts when it asked this many questions at this context per slot and this
+    many slots -- a run at another context is another measurement, as the `ctx` column
+    says -- and is no older than ``since``, which defaults to the start of today. A run
+    from last week is what the sweep was started to replace.
+    """
+    floor = since or time.strftime("%FT00:00:00")
+    per_slot = int(context) // max(1, int(parallel))
+    kept = runs(store) if Path(store).expanduser().exists() else []
+
+    def already(label: str) -> Mapping[str, Any] | None:
+        for one in reversed(kept):
+            server = one.get("server") or {}
+            if (one.get("label") == label
+                    and str(one.get("at", "")) >= floor
+                    and len(one.get("rows") or ()) == questions
+                    and int(server.get("context") or 0) == per_slot
+                    and int(server.get("slots") or 0) == parallel):
+                return one
+        return None
+
+    return already
 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
 MEASURING = ("run", "sweep", "drafts", "concurrent")
+
+# Windows has no sessions; a child that survives its parent's console is asked for by flag.
+_WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+
+
+def measuring_file() -> Path:
+    """Where the detached measurement's pid, argv, log and start time are written."""
+    return HOME / "measuring.json"
+
+
+def measuring() -> dict[str, Any] | None:
+    """The detached measurement still running, or None. Read from `measuring_file`; a
+    record whose pid has gone is a measurement that finished, not one that is running."""
+    from ml_stack.serve.process import pid_exists
+
+    try:
+        held = json.loads(measuring_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(held, dict) or not pid_exists(held.get("pid")):
+        return None
+    return held
+
+
+def _named_in(argv: Sequence[str]) -> str:
+    """What to call a detached run's log: its label, or the first model it measures."""
+    try:
+        args = _parser().parse_args(list(argv))
+    except SystemExit:
+        return "bench"
+    named = (getattr(args, "label", "") or next(iter(getattr(args, "serve", []) or []), "")
+             or next(iter(getattr(args, "on", []) or []), "").partition("=")[0]
+             or getattr(args, "model", "") or "bench")
+    return re.sub(r"[^\w.-]+", "-", str(named).rsplit("/", 1)[-1].removesuffix(".gguf"))[:40]
+
+
+def detach(argv: Sequence[str]) -> Path:
+    """Run ``ml-stack-bench argv`` in the background, owned by no terminal, and return its log.
+
+    A measurement is hours, and a child of a shell -- `nohup`, `&`, a hand-made redirect
+    into a scratch directory -- dies with the shell, or with the agent that opened it.
+    A ranking sweep was killed that way, thirty minutes in. So the command re-runs itself
+    in a new session with its output in a log under the bench's own home, writes down the
+    pid it started and what it started, and gives the shell back at once. `status`,
+    `tail -f` and `stop` read the same file.
+    """
+    rest = [a for a in argv if a != "--detach"]
+    logs = HOME / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    cmd = next((a for a in rest if a in MEASURING), "bench")
+    log = logs / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    command = [sys.executable, "-m", "ml_stack.graph.bench", *rest]
+    extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
+                             if platform.system() == "Windows" else {"start_new_session": True})
+    with log.open("ab") as out:
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
+                                 stderr=subprocess.STDOUT,
+                                 env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
+    measuring_file().write_text(json.dumps({
+        "pid": child.pid, "argv": list(rest), "log": str(log),
+        "started": time.strftime("%FT%T")}, indent=1), encoding="utf-8")
+    return log
+
+
+def _last_line(log: Path) -> str:
+    try:
+        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    return next((ln for ln in reversed(lines) if ln.strip()), "")
+
+
+def status() -> str:
+    """What is measuring, or that nothing is. Exit 0 either way: a question, not a check."""
+    held = measuring()
+    if held is None:
+        try:
+            last = json.loads(measuring_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return "nothing is measuring"
+        return (f"nothing is measuring; the last one -- ml-stack-bench "
+                f"{' '.join(last.get('argv') or ())} -- started {last.get('started', '?')} and "
+                f"has ended.\n  log: {last.get('log', '?')}\n  last: {_last_line(Path(str(last.get('log', ''))))}")
+    return (f"measuring since {held.get('started', '?')} (pid {held.get('pid')}):\n"
+            f"  ml-stack-bench {' '.join(held.get('argv') or ())}\n"
+            f"  log: {held.get('log', '?')}\n"
+            f"  last: {_last_line(Path(str(held.get('log', ''))))}")
+
+
+def _latest_log() -> Path | None:
+    held = measuring()
+    if held and held.get("log"):
+        return Path(str(held["log"]))
+    try:
+        last = json.loads(measuring_file().read_text(encoding="utf-8"))
+        if last.get("log") and Path(str(last["log"])).exists():
+            return Path(str(last["log"]))
+    except (OSError, ValueError):
+        pass
+    logs = sorted((HOME / "logs").glob("*.log"), key=lambda p: p.stat().st_mtime) \
+        if (HOME / "logs").exists() else []
+    return logs[-1] if logs else None
+
+
+def tail(*, lines: int = 20, follow: bool = False, every: float = 0.5) -> int:
+    """Print the end of the current (or latest) log; ``follow`` keeps printing until the
+    measurement's pid has gone and the log has been drained."""
+    from ml_stack.serve.process import pid_exists
+
+    log = _latest_log()
+    if log is None or not log.exists():
+        print("no log yet: nothing has been detached", file=sys.stderr)
+        return 1
+    with log.open("rb") as fh:
+        text = fh.read().decode("utf-8", "replace")
+        shown = text.splitlines()[-lines:] if lines > 0 else []
+        if shown:
+            print("\n".join(shown))
+        if not follow:
+            return 0
+        held = measuring() or {}
+        pid = held.get("pid")
+        try:
+            while True:
+                more = fh.read().decode("utf-8", "replace")
+                if more:
+                    print(more, end="", flush=True)
+                elif not pid_exists(pid):
+                    break
+                else:
+                    time.sleep(every)
+        except KeyboardInterrupt:
+            pass
+    return 0
+
+
+def stop(*, wait: float = 60.0) -> str:
+    """SIGTERM to the detached measurement -- by pid, never by name -- and wait for it.
+
+    The child's handler turns the signal into a `SystemExit`, so the `serve` block it is
+    in runs its exit and takes its model down; `pkill llama-server` would not, and would
+    take somebody else's server with it.
+    """
+    from ml_stack.serve.process import pid_exists
+
+    held = measuring()
+    if held is None:
+        return "nothing is measuring"
+    pid = int(held["pid"])
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return f"pid {pid} had already gone"
+    began = time.monotonic()
+    while pid_exists(pid) and time.monotonic() - began < wait:
+        time.sleep(0.25)
+    if pid_exists(pid):
+        return (f"asked pid {pid} to stop; it is still running after {wait:.0f}s. Its log: "
+                f"{held.get('log', '?')}")
+    return f"stopped pid {pid} after {time.monotonic() - began:.1f}s; its log: {held.get('log', '?')}"
+
+
+def _stop_on_sigterm(signum: int, frame: Any) -> None:
+    """Turn SIGTERM into an exception, so every `with` on the way out runs its exit."""
+    raise SystemExit(128 + signum)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1943,17 +2339,33 @@ def main(argv: list[str] | None = None) -> int:
     Two runs sharing a GPU produce timings that belong to neither, and the old way of
     arranging that -- a `pgrep` loop in the shell before the command -- could not work and
     said nothing when it did not. Waiting belongs here, where it can be announced.
+
+    A measuring command also takes SIGTERM as an exception rather than as death: `stop`
+    sends it, and a server put up inside a `with serve(...)` comes down on the way out
+    instead of staying up under nobody.
     """
     from ml_stack.lock import Busy, only_one
 
-    known = {*MEASURING, "show", "prepare"}
+    known = {*MEASURING, "show", "prepare", "forget", "status", "tail", "stop"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)
 
     rest = list(argv if argv is not None else sys.argv[1:])
+    if "--detach" in rest:
+        log = detach(rest)
+        print(f"measuring in the background; log: {log}\n"
+              f"  ml-stack-bench status   -- what is measuring, and its last line\n"
+              f"  ml-stack-bench tail -f  -- follow the log\n"
+              f"  ml-stack-bench stop     -- end it, taking its server down")
+        return 0
     refuse = "--no-queue" in rest
     rest = [a for a in rest if a != "--no-queue"]
+    previous = None
+    try:
+        previous = signal.signal(signal.SIGTERM, _stop_on_sigterm)
+    except ValueError:
+        pass                                 # not the main thread: nothing to hand a signal
     try:
         with only_one(HOME / "measuring.lock", wait=not refuse,
                       announce=lambda line: print(line, file=sys.stderr)):
@@ -1962,6 +2374,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {why}. Another measurement is running; wait for it, or pass "
               f"--no-queue to fail fast rather than queue.", file=sys.stderr)
         return 3
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == "__main__":
