@@ -75,3 +75,6 @@ Brayfield
 Calderwick
 Dunmore
 Bea Marlow'
+Katherine Johnson
+Mary Somerville
+Charles Babbage
