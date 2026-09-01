@@ -276,30 +276,52 @@ _CACHE_BYTES = {
 RUNTIME_ALLOWANCE_BYTES = 512 * 1024 * 1024
 
 
+def _per_layer(value: object, n_layer: int) -> list[float]:
+    """A metadata value as one number per layer.
+
+    gemma-4-26B-A4B (measured 2026-09-01) stores `attention.head_count_kv` as an array, one
+    entry per block, where a dense model stores one integer; multiplying the array by a
+    float crashed the preflight and with it the load it existed to protect."""
+    if isinstance(value, (list, tuple)):
+        rows = [float(v) for v in value]
+        if not rows:
+            return []
+        return (rows + [rows[-1]] * n_layer)[:n_layer]
+    return [float(value)] * n_layer
+
+
 def _kv_estimate_bytes(meta: dict[str, object], context: int,
-                        cache_type_k: str, cache_type_v: str) -> int:
-    """``n_layer * n_kv_heads * head_dim * context * (bytes_k + bytes_v)`` -- 0 when the
-    GGUF does not carry the keys this needs, which is a real answer, not a failure to read."""
-    arch = str(meta.get("general.architecture") or "")
-    if not arch:
+                       cache_type_k: str, cache_type_v: str) -> int:
+    """``sum over layers of n_kv_heads * head_dim * context * (bytes_k + bytes_v)`` -- 0 when
+    the GGUF does not carry the keys this needs, which is a real answer, not a failure to
+    read. Never raises: an estimate that cannot be made is unknown, and a preflight that
+    crashes a load has defeated itself."""
+    try:
+        arch = str(meta.get("general.architecture") or "")
+        if not arch:
+            return 0
+
+        def key(suffix: str) -> object:
+            return meta.get(f"{arch}.{suffix}")
+
+        n_layer = int(key("block_count") or 0)
+        if not (n_layer and context):
+            return 0
+        kv_heads = _per_layer(key("attention.head_count_kv") or 0, n_layer)
+        head_dim = key("attention.key_length")
+        if not head_dim:
+            embed, n_head = key("embedding_length"), key("attention.head_count")
+            if embed and n_head:
+                heads = _per_layer(n_head, n_layer)
+                head_dim = [float(embed) / h if h else 0.0 for h in heads]
+        dims = _per_layer(head_dim or 0, n_layer)
+        if not any(kv_heads) or not any(dims):
+            return 0
+        bytes_k = _CACHE_BYTES.get(cache_type_k.lower(), 2.0) if cache_type_k else 2.0
+        bytes_v = _CACHE_BYTES.get(cache_type_v.lower(), 2.0) if cache_type_v else 2.0
+        return int(sum(kh * d for kh, d in zip(kv_heads, dims)) * context * (bytes_k + bytes_v))
+    except Exception:  # noqa: BLE001 - an estimate that cannot be made is 0, never a crash
         return 0
-
-    def key(suffix: str) -> object:
-        return meta.get(f"{arch}.{suffix}")
-
-    n_layer = key("block_count")
-    n_kv_heads = key("attention.head_count_kv")
-    head_dim = key("attention.key_length")
-    if not head_dim:
-        embed, n_head = key("embedding_length"), key("attention.head_count")
-        if embed and n_head:
-            head_dim = embed / n_head
-    if not (n_layer and n_kv_heads and head_dim and context):
-        return 0
-
-    bytes_k = _CACHE_BYTES.get(cache_type_k.lower(), 2.0) if cache_type_k else 2.0
-    bytes_v = _CACHE_BYTES.get(cache_type_v.lower(), 2.0) if cache_type_v else 2.0
-    return int(n_layer * n_kv_heads * head_dim * context * (bytes_k + bytes_v))
 
 
 def _human(size: int) -> str:

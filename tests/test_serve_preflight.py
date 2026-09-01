@@ -498,3 +498,17 @@ class TestLoadTimingAndWarmUp:
             assert info.warmup_s is None
         finally:
             kill_process_tree(info.pid)
+
+
+def test_a_per_layer_head_count_is_summed_not_multiplied():
+    """gemma-4-26B-A4B stores attention.head_count_kv as one entry per block; a dense model
+    stores one integer. Measured 2026-09-01: the array crashed the estimate and with it the
+    load. Mutation: multiply the raw value."""
+    from ml_stack.serve.preflight import _kv_estimate_bytes
+
+    dense = {"general.architecture": "x", "x.block_count": 4, "x.attention.head_count_kv": 2,
+             "x.attention.key_length": 8}
+    per_layer = {**dense, "x.attention.head_count_kv": [2, 2, 4, 4]}
+    assert _kv_estimate_bytes(dense, 100, "", "") == 4 * 2 * 8 * 100 * 4
+    assert _kv_estimate_bytes(per_layer, 100, "", "") == (2 + 2 + 4 + 4) * 8 * 100 * 4
+    assert _kv_estimate_bytes({**dense, "x.attention.head_count_kv": "nonsense"}, 100, "", "") == 0
