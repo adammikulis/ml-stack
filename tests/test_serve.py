@@ -19,6 +19,7 @@ from conftest import json_reply
 from ml_stack.client.health import ServingParams
 from ml_stack.serve import (
     LlamaServerBackend,
+    ServerBackend,
     ServerFailed,
     ServerInfo,
     ServerManager,
@@ -452,3 +453,100 @@ class TestAdoptingTheWrongShape:
         monkeypatch.setattr(mod, "reported_models", lambda *a, **k: ["a-model.gguf"])
         monkeypatch.setattr(mod, "serving_params", lambda *a, **k: None)
         assert ServerManager().adopt(ServerSpec(model="a-model.gguf", port=8099, parallel=4))
+
+
+class TestDrafting:
+    """A small model guesses ahead and the large one checks the guesses in one pass.
+
+    The flags are not the main model's: `-hfd` takes owner/repo[:quant] as one argument,
+    where the model itself takes `--hf-repo` and `--hf-file` separately. Getting that wrong
+    is a server that starts without a draft and is simply slower, which nothing reports.
+    """
+
+    def backend(self, tmp_path):
+        binary = tmp_path / "llama-server"
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        return LlamaServerBackend(binary=binary)
+
+    def test_a_local_draft_is_passed_as_a_path(self, tmp_path):
+        argv = self.backend(tmp_path).command(
+            ServerSpec(model=tmp_path / "big.gguf", draft=tmp_path / "small.gguf"))
+        assert "-md" in argv and argv[argv.index("-md") + 1].endswith("small.gguf")
+
+    def test_a_draft_on_the_hub_is_one_argument(self, tmp_path):
+        argv = self.backend(tmp_path).command(ServerSpec(
+            model="hf:unsloth/gemma-4-E4B-it-qat-GGUF/big.gguf",
+            draft="hf:unsloth/gemma-4-E2B-it-qat-GGUF/small.gguf"))
+        assert argv[argv.index("--hf-repo") + 1] == "unsloth/gemma-4-E4B-it-qat-GGUF"
+        assert argv[argv.index("--hf-file") + 1] == "big.gguf"
+        assert argv[argv.index("-hfd") + 1] == "unsloth/gemma-4-E2B-it-qat-GGUF:small.gguf"
+
+    def test_no_draft_asks_for_none(self, tmp_path):
+        argv = self.backend(tmp_path).command(ServerSpec(model=tmp_path / "big.gguf"))
+        assert "-md" not in argv and "-hfd" not in argv
+
+    def test_a_malformed_reference_says_so_rather_than_serving_without_it(self, tmp_path):
+        with pytest.raises(ServerFailed, match="malformed HF reference"):
+            self.backend(tmp_path).command(ServerSpec(model="m.gguf", draft="hf:onlyowner"))
+
+
+class TestServingBeside:
+    """A small model does not need a large one evicted, and should not need a person either.
+
+    Refusing a busy port and naming the field that differs is right when the caller needs
+    *that* port — everything meeting on one server is the whole point of a lease. It is not
+    right when the caller just wants the model served: this machine has the memory, and
+    picking another port by hand is work a machine can do.
+    """
+
+    def other(self):
+        """A server answering as something entirely different is serving on this port."""
+        def handle(method, path, body):
+            if path.startswith("/props"):
+                return json_reply({"model_path": "/m/somethingelse.gguf", "total_slots": 1,
+                                   "default_generation_settings": {"n_ctx": 4096}})
+            return json_reply({"data": [{"id": "somethingelse.gguf"}]})
+
+        return handle
+
+    def manager(self, tmp_path, started):
+        class Backend(ServerBackend):
+            name = "fake"
+
+            def command(self, spec):
+                return ["fake"]
+
+            def start(self, spec, *, timeout=300.0):
+                started.append(spec)
+                return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
+                                  pid=4242, backend="fake")
+
+        return ServerManager(backend=Backend(), state_file=tmp_path / "servers.json")
+
+    def test_a_busy_port_is_served_beside_rather_than_refused(self, server, tmp_path):
+        instance = server(self.other())
+        started: list[ServerSpec] = []
+        held = self.manager(tmp_path, started)
+        info = held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port))
+        assert info.port != instance.port, "it should have moved rather than refused"
+        assert started and started[0].port == info.port
+        from ml_stack.client import is_healthy
+
+        assert is_healthy(instance.base_url), "the other server is untouched"
+
+    def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, server, tmp_path):
+        instance = server(self.other())
+        held = self.manager(tmp_path, [])
+        with pytest.raises(ServerFailed, match="different shape"):
+            held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
+
+    def test_it_refuses_when_the_machine_has_no_room(self, server, tmp_path, monkeypatch):
+        """Starting a load that will be killed halfway is worse than saying no."""
+        big = tmp_path / "big.gguf"
+        big.write_bytes(b"0" * 4096)
+        instance = server(self.other())
+        monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
+        held = self.manager(tmp_path, [])
+        with pytest.raises(ServerFailed, match="different shape"):
+            held.lease(ServerSpec(model=big, port=instance.port))

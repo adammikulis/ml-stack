@@ -34,12 +34,26 @@ class ServerSpec:
     mmproj: str | Path | None = None
     flash_attn: bool = True
     jinja: bool = True
+    # A small model of the same family, guessing ahead so the large one only has to agree.
+    # Same two forms as `model`: a path, or hf:owner/repo[/file.gguf].
+    draft: str | Path | None = None
     extra_args: tuple[str, ...] = ()
 
     @property
     def is_hf_ref(self) -> bool:
         """``hf:owner/repo/file.gguf`` -- let llama-server do the download and caching."""
         return isinstance(self.model, str) and self.model.startswith("hf:")
+
+    @staticmethod
+    def hf_parts(value: str | Path) -> tuple[str, str] | None:
+        """``hf:owner/repo[/file]`` split into ``(repo, file)``, or None when it is a path."""
+        if not (isinstance(value, str) and value.startswith("hf:")):
+            return None
+        parts = [p for p in str(value).partition("hf:")[2].split("/") if p]
+        if len(parts) < 2:
+            raise ServerFailed(
+                f"malformed HF reference {value!r}; expected hf:owner/repo[/file.gguf]")
+        return f"{parts[0]}/{parts[1]}", (parts[-1] if len(parts) > 2 else "")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,15 +106,10 @@ class LlamaServerBackend(ServerBackend):
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
 
         if spec.is_hf_ref:
-            _, _, ref = str(spec.model).partition("hf:")
-            parts = [p for p in ref.split("/") if p]
-            if len(parts) < 2:
-                raise ServerFailed(
-                    f"malformed HF reference {spec.model!r}; expected hf:owner/repo[/file.gguf]"
-                )
-            argv += ["--hf-repo", f"{parts[0]}/{parts[1]}"]
-            if len(parts) > 2:
-                argv += ["--hf-file", parts[-1]]
+            repo, name = spec.hf_parts(spec.model)
+            argv += ["--hf-repo", repo]
+            if name:
+                argv += ["--hf-file", name]
         else:
             argv += ["-m", str(spec.model)]
 
@@ -117,6 +126,16 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--embeddings", "--pooling", "mean"]
         if spec.mmproj:
             argv += ["--mmproj", str(spec.mmproj)]
+        if spec.draft:
+            # A draft guesses several tokens ahead and the large model checks them in one
+            # pass, so an agreeing run costs about what one token used to. The flags differ
+            # from the main model's: -hfd takes owner/repo[:quant], not a separate file.
+            drafted = spec.hf_parts(spec.draft)
+            if drafted is None:
+                argv += ["-md", str(spec.draft)]
+            else:
+                repo, name = drafted
+                argv += ["-hfd", f"{repo}:{name}" if name else repo]
         if spec.flash_attn:
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:

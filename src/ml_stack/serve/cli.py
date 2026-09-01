@@ -1,8 +1,9 @@
-"""``ml-serve`` -- see what is serving, put a model up, take one down."""
+"""``ml-stack-serve`` -- see what is serving, put a model up, take one down."""
 
 from __future__ import annotations
 
 import argparse
+import pathlib
 import json
 import sys
 from dataclasses import asdict, dataclass, replace
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
+from ml_stack.fleet.serving import Serving
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import STATE_FILE, ServerManager, recorded_servers
@@ -89,19 +91,19 @@ def judge(manager: ServerManager, snapshot: Snapshot, spec: ServerSpec) -> Snaps
 
 def _lease_line(snapshot: Snapshot) -> str:
     if not snapshot.recorded:
-        return "none on record -- 'ml-serve down' will not stop this server"
+        return "none on record -- 'ml-stack-serve down' will not stop this server"
     pid = f"server pid {snapshot.pid}" if snapshot.pid else "server pid not recorded"
     if snapshot.owner_pid is None:
         return pid
     if snapshot.owner_pid == snapshot.pid:
-        return f"{pid}, started by 'ml-serve up'"
+        return f"{pid}, started by 'ml-stack-serve up'"
     if snapshot.holder_running:
         return f"{pid}, held by process {snapshot.owner_pid}"
     return f"{pid}, the process that started it (pid {snapshot.owner_pid}) has gone"
 
 
 def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
-    ask = f"'ml-serve up {model} --parallel {parallel}'"
+    ask = f"'ml-stack-serve up {model} --parallel {parallel}'"
     if snapshot.verdict == "adopt":
         return f"{ask} would adopt this server"
     if snapshot.verdict == "refuse":
@@ -138,7 +140,7 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     if not found:
         print("nothing is serving on port " + ", ".join(str(p) for p in ports) + ".")
-        print(f"  'ml-serve up <model>' would start one on port {args.port}.")
+        print(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
         return 1
 
     for snapshot in found:
@@ -155,10 +157,67 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+# Where the daemon keeps the list of what this machine is serving. Peers read it to find a
+# machine that already has a model loaded, so a server nobody announced is a server nobody
+# else can use.
+DEFAULT_ROOT = "~/.ml-stack/traind"
+
+
+def beacon(root: str) -> Serving | None:
+    """This machine's beacon, or None when no fleet was ever set up here.
+
+    A machine with no daemon has no beacon to write to, and creating one would advertise a
+    model to nobody through a file nothing reads. Announcing is for machines in a fleet.
+    """
+    where = Path(root).expanduser()
+    return Serving(where / "serving.json") if where.is_dir() else None
+
+
+def announce(args: argparse.Namespace, spec: ServerSpec) -> str:
+    """Tell the fleet this machine is serving it. Returns a line to print, or ''."""
+    try:
+        known = beacon(args.root)
+        if known is None:
+            return ""
+        known.register(spec.port, models=[str(spec.model)], slots=spec.parallel)
+        return f"announced to the fleet on port {spec.port}"
+    except Exception as exc:  # noqa: BLE001 - a server that works unannounced still works
+        return f"could not announce it to the fleet: {exc}"
+
+
+def drafted(model: str, asked: str) -> str:
+    """The draft model to serve beside ``model``, resolving 'auto' against the Hub.
+
+    A QAT repository ships a multi-token-prediction head next to its weights, a few tens of
+    megabytes, trained with the model. Finding it by hand means reading a file listing, which
+    is what `hub.draft_for` is for; 'auto' is that, spelled once.
+    """
+    if asked.lower() != "auto":
+        return asked
+    reference = str(model)
+    if reference.startswith("hf:"):
+        repo = "/".join(reference[3:].split("/")[:2])
+        from ml_stack.hub import draft_for
+
+        return draft_for(repo)
+    # "Shipped beside the weights" is literal: a repository downloaded into a cache puts the
+    # mtp- head in the same directory as the model, so a local path can be resolved after
+    # all — by looking, which is cheaper and surer than asking the Hub about a file already
+    # on the disk. mmproj- lives there too and is a vision projector, not a draft.
+    beside = pathlib.Path(reference).expanduser().parent
+    for found in sorted(beside.glob("mtp-*.gguf")):
+        return str(found)
+    return ""
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     manager = ServerManager(state_file=STATE_FILE)
+    draft = drafted(args.model, str(getattr(args, "draft", "") or ""))
+    if str(getattr(args, "draft", "")).lower() == "auto" and not draft:
+        print("no draft head is shipped beside that model; serving without one",
+              file=sys.stderr)
     spec = ServerSpec(model=args.model, port=args.port, context=args.context,
-                      parallel=args.parallel)
+                      parallel=args.parallel, draft=draft or None)
     try:
         info = manager.lease(spec, timeout=args.timeout)
     except (ServerFailed, BinaryNotFound, OSError) as exc:
@@ -168,14 +227,22 @@ def cmd_up(args: argparse.Namespace) -> int:
     if not info.adopted:
         manager.detach(info)
 
+    told = announce(args, spec)
+
     if args.json:
         print(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
                           "adopted": info.adopted, "model": str(spec.model),
-                          "context": spec.context, "parallel": spec.parallel}, indent=2))
+                          "context": spec.context, "parallel": spec.parallel,
+                          "draft": str(spec.draft or ""),
+                          "announced": told.startswith("announced")}, indent=2))
         return 0
 
     where = f" (pid {info.pid})" if info.pid else ""
     print(f"{'adopted' if info.adopted else 'started'} {info.base_url}{where}")
+    if spec.draft:
+        print(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
+    if told:
+        print(f"  {told}")
     return 0
 
 
@@ -207,6 +274,15 @@ def cmd_down(args: argparse.Namespace) -> int:
     ServerManager(state_file=STATE_FILE).release(
         ServerInfo(base_url=str(entry.get("base_url") or url), port=args.port, pid=pid,
                    backend=str(entry.get("backend") or "")))
+    # A registration outlives the server it describes, and the beacon then sends work to a
+    # port nothing answers on. `live()` probes before advertising, so a stale entry is not
+    # fatal — but leaving one behind means every peer pays a timeout to find that out.
+    try:
+        known = beacon(args.root)
+        if known is not None:
+            known.unregister(args.port)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  could not withdraw it from the fleet: {exc}", file=sys.stderr)
 
     if running:
         print(f"stopped {url} (pid {pid})")
@@ -217,7 +293,7 @@ def cmd_down(args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
-        prog="ml-serve",
+        prog="ml-stack-serve",
         description="See which model is being served on this machine, put one up, take it down.")
     sub = ap.add_subparsers(dest="cmd", required=True, metavar="{status,up,down}")
 
@@ -248,10 +324,19 @@ def main(argv: list[str] | None = None) -> int:
                     help=f"seconds to wait for it to load (default: {DEFAULT_TIMEOUT:.0f})")
     up.add_argument("--json", action="store_true",
                     help="print one JSON object instead of the human line")
+    up.add_argument("--root", default=DEFAULT_ROOT,
+                    help=f"the fleet root whose beacon to announce in, when there is one "
+                         f"(default: {DEFAULT_ROOT})")
+    up.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
+                    help="a small model to guess ahead, which the large one checks in one "
+                         "pass -- a path, an hf: reference, or 'auto' to use the draft head "
+                         "shipped beside the weights (the mtp- file in a QAT repository)")
 
     down = sub.add_parser("down", help="stop a server started on this machine")
     down.add_argument("--port", type=int, default=DEFAULT_PORT,
                       help=f"port of the server to stop (default: {DEFAULT_PORT})")
+    down.add_argument("--root", default=DEFAULT_ROOT,
+                      help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})")
 
     args = ap.parse_args(argv)
     return {"status": cmd_status, "up": cmd_up, "down": cmd_down}[args.cmd](args)

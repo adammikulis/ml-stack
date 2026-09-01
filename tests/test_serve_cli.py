@@ -1,4 +1,4 @@
-"""``ml-serve``: what it prints, what it exits with, and what it refuses to do.
+"""``ml-stack-serve``: what it prints, what it exits with, and what it refuses to do.
 
 The adoption paths run against a real HTTP server standing in for a live llama-server,
 so the refusals here are the library's own, reached over a real socket. No model is
@@ -116,7 +116,7 @@ class TestStatus:
         record(state, instance.port, pid=4242, owner_pid=4242)
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
-        assert "started by 'ml-serve up'" in capsys.readouterr().out
+        assert "started by 'ml-stack-serve up'" in capsys.readouterr().out
 
     def test_the_process_holding_the_lease_is_named(self, server, state, capsys):
         instance = server(serving())
@@ -237,3 +237,98 @@ class TestDown:
         port = free_port()
         assert cli.main(["down", "--port", str(port)]) == 1
         assert "nothing is serving" in capsys.readouterr().out
+
+
+class TestTellingTheFleet:
+    """A server nobody announced is a server no other machine can use.
+
+    `ml-stack-serve up` leased and recorded the port in its own state file and stopped there, so a
+    peer asking who is serving a model saw nothing and loaded its own copy — while a working
+    server sat idle on this machine.
+    """
+
+    def beacon(self, root):
+        from ml_stack.fleet.serving import Serving
+
+        return Serving(root / "serving.json")
+
+    def test_putting_a_model_up_announces_it(self, server, state, tmp_path):
+        root = tmp_path / "traind"
+        root.mkdir()
+        instance = server(serving(slots=2))
+        assert cli.main(["up", MODEL, "--port", str(instance.port), "--parallel", "2",
+                         "--root", str(root)]) == 0
+        served = self.beacon(root).all()
+        assert [s.port for s in served] == [instance.port]
+        assert served[0].slots == 2
+        assert served[0].models == [MODEL]
+
+    def test_taking_it_down_withdraws_it(self, state, tmp_path):
+        """A registration outlives its server, and the beacon then points at a dead port."""
+        root = tmp_path / "traind"
+        root.mkdir()
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        port = free_port()
+        record(state, port, pid=proc.pid, owner_pid=proc.pid)
+        self.beacon(root).register(port, models=[MODEL], slots=1)
+        try:
+            assert [s.port for s in self.beacon(root).all()] == [port]
+            assert cli.main(["down", "--port", str(port), "--root", str(root)]) == 0
+        finally:
+            proc.kill()
+            proc.wait(timeout=5)
+        assert self.beacon(root).all() == [], "the beacon still points at a dead port"
+
+    def test_a_machine_with_no_fleet_is_not_given_one(self, server, state, tmp_path):
+        """Announcing is for machines in a fleet; the rest get no stray files."""
+        root = tmp_path / "never-set-up"
+        instance = server(serving())
+        assert cli.main(["up", MODEL, "--port", str(instance.port), "--root", str(root)]) == 0
+        assert not root.exists()
+        assert cli.beacon(str(root)) is None
+
+
+def test_a_draft_is_passed_through_and_auto_finds_the_head_shipped_with_the_model(monkeypatch):
+    """`--draft auto` reads the repository's own listing rather than guessing a filename."""
+    from ml_stack.serve.cli import drafted
+
+    seen = []
+
+    def fake_draft_for(repo):
+        seen.append(repo)
+        return f"hf:{repo}/mtp-model.gguf"
+
+    import ml_stack.hub
+    monkeypatch.setattr(ml_stack.hub, "draft_for", fake_draft_for)
+
+    assert drafted("hf:maker/thing-GGUF/weights.gguf", "auto") == "hf:maker/thing-GGUF/mtp-model.gguf"
+    assert seen == ["maker/thing-GGUF"]
+
+    # anything else is taken as written, and asked for nothing
+    assert drafted("hf:maker/thing-GGUF/weights.gguf", "/models/small.gguf") == "/models/small.gguf"
+    assert drafted("hf:maker/thing-GGUF/weights.gguf", "") == ""
+    assert len(seen) == 1
+
+    # a local file says nothing about which repository it came from, so auto has nowhere to look
+    assert drafted("/models/big.gguf", "auto") == ""
+    assert len(seen) == 1
+
+
+def test_auto_finds_the_draft_head_lying_beside_a_local_model(tmp_path):
+    """A cached repository puts the mtp- head in the model's own directory, so a local path
+    resolves by looking rather than by asking the Hub about a file already on the disk."""
+    from ml_stack.serve.cli import drafted
+
+    where = tmp_path / "snapshots" / "abc123"
+    where.mkdir(parents=True)
+    (where / "thing-it-qat-UD-Q4_K_XL.gguf").write_bytes(b"weights")
+    (where / "mmproj-BF16.gguf").write_bytes(b"vision, not a draft")
+
+    model = where / "thing-it-qat-UD-Q4_K_XL.gguf"
+    assert drafted(str(model), "auto") == ""          # nothing shipped one
+
+    (where / "mtp-thing-it.gguf").write_bytes(b"draft head")
+    assert drafted(str(model), "auto") == str(where / "mtp-thing-it.gguf")
+
+    # and the projector is never mistaken for one
+    assert "mmproj" not in drafted(str(model), "auto")

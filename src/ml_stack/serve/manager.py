@@ -9,6 +9,7 @@ import threading
 import time
 from contextlib import contextmanager
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 from ml_stack.client import is_healthy, reported_models
@@ -21,6 +22,7 @@ from ml_stack.serve.backend import (
     ServerSpec,
 )
 from ml_stack.serve.binary import CACHE_ROOT
+from ml_stack.serve.ports import free_port, port_is_free
 from ml_stack.serve.process import kill_process_tree, pid_exists
 from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
 
@@ -28,6 +30,36 @@ logger = logging.getLogger(__name__)
 
 STATE_FILE = CACHE_ROOT / "servers.json"
 UNAVAILABLE_COOLDOWN_S = 3.0
+
+# How much of what is free a second model may take before it is judged not to fit. Below 1.0
+# because a model needs its weights *and* room to work in, and a machine that fills itself
+# exactly swaps instead of serving.
+BESIDE_HEADROOM = 0.8
+
+
+def free_memory() -> int | None:
+    """Bytes this machine could still give a model, or None when it will not say."""
+    try:
+        import psutil
+    except ImportError:
+        return None
+    return int(psutil.virtual_memory().available)
+
+
+def weight_of(model: str | Path) -> int:
+    """Roughly what a model will take, from the weights on disk. 0 when they are not here.
+
+    A `hf:` reference has not been downloaded yet the first time, so its size is unknown and
+    unknown is not the same as enormous — it is left to the load to find out.
+    """
+    if isinstance(model, str) and model.startswith("hf:"):
+        return 0
+    where = Path(model)
+    if not where.exists():
+        return 0
+    # a sharded model names its first file; the others sit beside it
+    shards = sorted(where.parent.glob(where.name.replace("00001", "*"))) or [where]
+    return sum(s.stat().st_size for s in shards if s.is_file())
 
 
 def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
@@ -118,8 +150,16 @@ class ServerManager:
 
     # ------------------------------------------------------------------ leasing
 
-    def lease(self, spec: ServerSpec, *, timeout: float = 300.0) -> ServerInfo:
-        """A healthy server for ``spec``. Starts one only if there is not one already."""
+    def lease(self, spec: ServerSpec, *, timeout: float = 300.0,
+              roam: bool = True) -> ServerInfo:
+        """A healthy server for ``spec``. Starts one only if there is not one already.
+
+        When the port is busy with something else and this machine has the memory to hold
+        both, it is served beside it on a free port rather than refused: a small model does
+        not need the large one evicted, and making a person pick another port by hand is
+        work a machine can do. ``roam=False`` for a caller that truly needs *that* port —
+        the one that expects every consumer to meet on it.
+        """
         now = time.monotonic()
         until = self._unavailable_until.get(spec.port, 0.0)
         if now < until:
@@ -129,7 +169,14 @@ class ServerManager:
             )
 
         with self._port_lock(spec.port):
-            adopted = self.adopt(spec)
+            try:
+                adopted = self.adopt(spec)
+            except ServerFailed:
+                if not roam or not port_is_free(spec.port):
+                    elsewhere = self._beside(spec, timeout=timeout) if roam else None
+                    if elsewhere is not None:
+                        return elsewhere
+                raise
             if adopted is not None:
                 return adopted
 
@@ -141,6 +188,26 @@ class ServerManager:
 
             self._unavailable_until.pop(spec.port, None)
             self._record(spec, info)
+            return info
+
+    def _beside(self, spec: ServerSpec, *, timeout: float) -> ServerInfo | None:
+        """Serve it next to whatever holds the port, when there is room. None when there is not.
+
+        Room is judged against the weights on disk: a model is roughly its file size in
+        memory, and a machine that cannot hold one more should say so rather than start a
+        load that will be killed halfway or swap the other server to a crawl.
+        """
+        room = free_memory()
+        wanted = weight_of(spec.model)
+        if room is not None and wanted and wanted > room * BESIDE_HEADROOM:
+            return None
+        moved = replace(spec, port=free_port())
+        with self._port_lock(moved.port):
+            try:
+                info = self.backend.start(moved, timeout=timeout)
+            except ServerFailed:
+                return None
+            self._record(moved, info)
             return info
 
     def adopt(self, spec: ServerSpec) -> ServerInfo | None:
