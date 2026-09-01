@@ -225,6 +225,7 @@ and letting go of a read handle when a writer wants in.
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
 | `ml-stack-serve status\|up\|down` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `--binary` runs a build that reads a newer architecture |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
+| `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads, what is already downloaded — and what the stack does without being asked |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
 
 ## Finding a model
@@ -313,6 +314,26 @@ repository. Beware that a `-MTP-GGUF` repository is not always heads: for
 Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 36G of
 weights for `--spec-type draft-mtp`, and `auto` correctly reports no draft rather than
 offering it as one.
+
+## A hierarchy read out of prose or a picture
+
+```python
+from ml_stack.graph.tree import FAMILY, ORG, read, to_graph
+
+rows = read(client, ORG, images=[chart], reader=document_model)   # or text=...
+graph = to_graph(rows, ORG)                                       # entries and links
+```
+
+An org chart, a family tree, a subject taxonomy and a parts breakdown are one object with
+four shapes: named things, and a link from each to the one above it. A `Shape` carries what
+an entry is called, what the link means and how many parents it may have — a family tree
+keeps two, an org chart one, because a second manager there is a misreading.
+
+`reader` is a second model that reads the picture first, which is how a document model gets
+used for what it is good at: it transcribes, `client` structures. A picture needs a server
+started with its projector (`--mmproj auto`), and a picture that cannot be prepared raises
+rather than being dropped — otherwise a model is asked to read a chart with no chart
+attached, and answers confidently about nothing.
 
 ## Which tool a question wants
 
@@ -417,6 +438,22 @@ shared the GPU, which is why `sweep` and `run` refuse a busy server now. And eve
 a thinking model fills that with reasoning and returns an empty answer.
 
 None of this survives a new model release. Re-run it.
+
+The runs themselves are in a graph store under `~/.ml-stack/bench`, which nothing backs up.
+`ml-stack-bench show --export PATH` writes them out, so a day of GPU time is not on one disk.
+**That file does not belong in a repository, and `--export` refuses one**: the numbers
+describe one machine and one llama.cpp build, they go stale with the next model release, and
+`run --graph` takes any graph, including a real community's. Back it up somewhere outside a
+working tree.
+
+What is worth keeping here is the conclusion, not the evidence. `ml-stack-bench show --rank
+FILE.md` writes one line per model -- its best run, and what that run cost -- because that is
+what the defaults in this library are set from, and a default with no recorded reason is a
+default nobody can argue with. Both it and `--export` carry only runs whose recorded graph
+fingerprint is the community that ships with this package, and refuse a run from before that
+marker existed, because not knowing which graph a run read is not the same as knowing it was
+invented. The ranking also ignores anything shorter than a short run, so a `--smoke` run
+cannot rank a model on two questions.
 
 ## Measuring a change to the asking
 

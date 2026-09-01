@@ -115,3 +115,44 @@ def test_an_email_address_is_refused(tmp_path):
 def test_a_clean_file_commits(tmp_path, body):
     where = repo(tmp_path, PEOPLE)
     assert check(where, tmp_path, notes=body + "\n")[0] == 0
+
+
+def test_a_name_from_the_graph_is_refused_inside_a_json_file(tmp_path):
+    """`docs/bench-runs.json` is committed to a public repository, and the shape rule is
+    deliberately off for data files -- so the exact list has to carry json on its own."""
+    where = repo(tmp_path, graph={"nodes": [{"kind": "person", "label": "Marta Quillon"}]})
+    code, said = check(where, tmp_path,
+                       **{"runs.json": '[{"label": "asked by Marta Quillon", "f1": 0.7}]'})
+    assert code == 1
+    assert "Marta Quillon" in said and "runs.json" in said
+
+
+def test_an_org_from_the_graph_is_refused_inside_a_json_file(tmp_path):
+    """A bench label names whatever was measured, and a real community's name is as much a
+    leak as a person's."""
+    where = repo(tmp_path, graph={"nodes": [{"kind": "org", "label": "Brayfield Survey Co"}]})
+    code, said = check(where, tmp_path,
+                       **{"runs.json": '[{"label": "Brayfield Survey Co nightly", "f1": 0.7}]'})
+    assert code == 1
+    assert "Brayfield Survey Co" in said
+
+
+def test_a_data_file_full_of_proper_nouns_still_commits(tmp_path):
+    """The shape rule is off for json/csv on purpose: a gazetteer's towns and a map's
+    countries are quoted proper nouns and none of them are people. Turning it on there would
+    refuse every data file, which is the same as turning the hook off."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path,
+                       **{"places.json": '["Dunmore", "Calderwick", "Ashby Weald"]'})
+    assert code == 0, said
+
+
+def test_the_bench_export_shape_commits(tmp_path):
+    """What `ml-stack-bench show --export` actually writes: totals and server settings, no
+    question, no entry, no answer."""
+    where = repo(tmp_path, graph={"nodes": [{"kind": "person", "label": "Marta Quillon"}]})
+    code, said = check(where, tmp_path, **{"bench-runs.json": json.dumps([{
+        "label": "gptoss-plain", "model": "gpt-oss-120b-mxfp4-00001-of-00003.gguf",
+        "f1": 0.6, "recall": 0.7, "precision": 0.6, "questions": 34, "seconds": 487,
+        "context": 32768, "slots": 2, "sampling": {"temperature": 0.0}}])})
+    assert code == 0, said

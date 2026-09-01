@@ -19,7 +19,7 @@ from typing import Any
 
 from ml_stack.graph.vectors import MARGIN, stands_out
 
-__all__ = ["Counting", "HOME", "Row", "SHORT", "ask_from", "asking", "compare", "footprint",
+__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking", "ask_from", "asking", "compare", "footprint",
            "main", "measure", "read_questions", "runs", "save", "table"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
@@ -36,6 +36,10 @@ HOME = Path("~/.ml-stack/bench").expanduser()
 # against 2.9 on the full set, so a small difference is noise on a short run and signal on
 # a full one. The `n` column on every line is what keeps the two from being read together.
 SHORT = 20
+# Enough to walk the whole path -- serve, ask, score, measure the server, save, summarise --
+# and short enough that finding out it is broken costs a minute. A sweep once answered every
+# question and then raised while writing a summary line, losing all of it.
+SMOKE = 2
 
 
 @dataclass
@@ -172,6 +176,8 @@ def _ways(args: Any) -> list[dict[str, Any]]:
 def _how_many(args: Any) -> int:
     """How many questions to ask: --sample wins, then --short, then all of them."""
     asked = int(getattr(args, "sample", 0) or 0)
+    if getattr(args, "smoke", False):
+        return SMOKE
     return asked or (SHORT if getattr(args, "short", False) else 0)
 
 
@@ -330,17 +336,34 @@ def footprint(base_url: str) -> dict[str, Any]:
     # So it is only reported when the model really is fully resident, and `resident_bytes`
     # is carried either way, because what the process actually holds is the number that
     # decides how many of them fit.
+    try:
+        return beyond_weights(out)
+    except Exception:  # noqa: BLE001 - a summary line is never worth a run's answers
+        return out
+
+
+def beyond_weights(out: dict[str, Any]) -> dict[str, Any]:
+    """Split what the process holds into the weights and everything else.
+
+    Its own function because it is the part that can be wrong without a server: reading
+    `kv_and_run_bytes` when a model is mmapped raised at the *end* of a run, after every
+    question had been answered, and threw away a quarter hour of GPU for a summary line.
+    """
     if "resident_bytes" in out and "weights_bytes" in out:
         beyond = out["resident_bytes"] - out["weights_bytes"]
         if beyond > 0:
             out["kv_and_run_bytes"] = beyond
         else:
+            # Less resident than the weights on disk means llama.cpp mapped the file and
+            # never paged all of it in -- an MoE's unused experts, most often. The
+            # subtraction then says nothing about the cache, so no number is better than a
+            # wrong one.
             out["mmapped"] = True
         # What one more conversation costs, which is the question a number like this is
         # asked for. Held tokens are the context times the slots holding one each; dividing
         # by them makes two models comparable however each happened to be configured.
         held = (out.get("context") or 0) * (out.get("slots") or 0)
-        if held:
+        if held and "kv_and_run_bytes" in out:
             out["bytes_per_1k_context"] = int(out["kv_and_run_bytes"] / (held / 1024))
     return out
 
@@ -681,6 +704,171 @@ def pareto(kept: Sequence[Mapping[str, Any]], *,
     return sorted(front, key=lambda one: derived(one)[cost])
 
 
+def _which(graph: Mapping[str, Any]) -> str:
+    """A fingerprint of the graph a run was asked of, so an export can tell them apart."""
+    from ml_stack.graph.cache import digest
+
+    try:
+        return digest(graph)
+    except Exception:  # noqa: BLE001 - a graph that will not hash is not the invented one
+        return ""
+
+
+def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) -> str:
+    """Which model to choose, as a conclusion rather than as evidence.
+
+    The raw runs are not committed: they describe one machine and one llama.cpp build, go
+    stale with the next model release, and may have been asked of a real community. What
+    survives all of that is the *ranking* -- which model answers best, what it costs, and
+    which draft head and sampling were chosen for it -- because that is what the defaults in
+    this library are set from, and a default with no recorded reason is a default nobody can
+    argue with.
+
+    One line per model: its best run, and the questions and sampling that run used, because
+    a score without them is not comparable to anything.
+    """
+    best: dict[str, Mapping[str, Any]] = {}
+    too_few = 0
+    for row in _exportable(kept)[0]:
+        # A smoke run asks two questions to prove the path works; its score is meaningless
+        # by construction, and it would otherwise rank a model on a coin toss. Anything
+        # below a short run is evidence that something ran, not evidence of how well.
+        if (row.get("questions") or 0) < SHORT:
+            too_few += 1
+            continue
+        name = str(row.get("model") or "?")
+        if name not in best or (row.get("f1") or 0) > (best[name].get("f1") or 0):
+            best[name] = row
+
+    order = sorted(best.values(), key=lambda r: -(r.get("f1") or 0))
+    lines = ["# Which model answers best",
+             "",
+             "Measured over the invented community that ships with this package, by",
+             "`ml-stack-bench`. A conclusion, not evidence: the runs behind it are not in this",
+             "repository. Re-measure after any model release -- none of this survives one.",
+             "",
+             "| model | F1 | recall | precision | questions | seconds | resident | sampling |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for row in order:
+        gb = row.get("resident_bytes")
+        temp = (row.get("sampling") or {}).get("temperature")
+        lines.append(
+            f"| `{row.get('model')}` "
+            f"| {(row.get('f1') or 0) * 100:.0f}% "
+            f"| {(row.get('recall') or 0) * 100:.0f}% "
+            f"| {(row.get('precision') or 0) * 100:.0f}% "
+            f"| {row.get('questions') or '-'} "
+            f"| {row.get('seconds') or 0:.0f} "
+            f"| {f'{gb / 2**30:.1f}G' if gb else '-'} "
+            f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} |")
+    if too_few:
+        lines += ["", f"*{too_few} run(s) not ranked: fewer than {SHORT} questions, which is "
+                      f"a smoke run proving the path works rather than a measurement.*"]
+    body = "\n".join(lines) + "\n"
+    if where is not None:
+        Path(where).expanduser().write_text(body, encoding="utf-8")
+    return body
+
+
+def _inside_a_repo(where: Path) -> Path | None:
+    """The git working tree `where` sits in, if any."""
+    for parent in [where.resolve(), *where.resolve().parents]:
+        if (parent / ".git").exists():
+            return parent
+    return None
+
+
+def invented_digest() -> str:
+    """The fingerprint of the community that ships with this package."""
+    from ml_stack.graph.cache import digest
+    from ml_stack.graph.community import graph as invented
+
+    return digest(invented())
+
+
+def _exportable(kept: Sequence[Mapping[str, Any]], *,
+                anyway: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """The runs that may leave this machine, and how many were held back.
+
+    Shared by `export` and `ranking` so the gate cannot be enforced in one and forgotten in
+    the other: only runs whose recorded graph fingerprint is the community that ships with
+    this package, and never a run from before that marker existed -- not knowing which graph
+    a run read is not the same as knowing it was invented.
+    """
+    mine = "" if anyway else invented_digest()
+    out: list[dict[str, Any]] = []
+    skipped = 0
+    for one in kept:
+        rows = [r for r in (one.get("rows") or []) if r.get("expected")]
+        if not rows:
+            continue
+        if mine and str((one.get("server") or {}).get("graph") or "") != mine:
+            skipped += 1
+            continue
+        got = derived(one)
+        server = one.get("server") or {}
+        out.append({
+            "at": one.get("at", ""), "label": one.get("label", ""),
+            "questions": len(rows),
+            "f1": round(got.get("right", 0), 4),
+            "recall": round(got.get("recall", 0), 4),
+            "precision": round(got.get("precision", 0), 4),
+            "lit_per_question": round(got.get("shown_per_question", 0), 2),
+            "seconds": round(got.get("seconds", 0)),
+            "calls": int(got.get("calls", 0)),
+            "read_tokens": int(_total(rows, "processed_tokens")),
+            "written_tokens": int(_total(rows, "completion_tokens")),
+            "draft_offered": int(_total(rows, "draft_tokens")),
+            "draft_kept": int(_total(rows, "draft_taken")),
+            "context": server.get("context"), "slots": server.get("slots"),
+            "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
+            "resident_bytes": server.get("resident_bytes"),
+            "kv_and_run_bytes": server.get("kv_and_run_bytes"),
+            "mmapped": bool(server.get("mmapped")),
+            "sampling": server.get("sampling") or {},
+        })
+    return out, skipped
+
+
+def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
+           anyway: bool = False) -> str:
+    """Write every run as JSON, so a day of measuring is not in one place on one machine.
+
+    The store lives under ~/.ml-stack and nothing backs it up: it dies with the disk, and a
+    comparison a week from now has nothing to compare against. Everything measured here is
+    asked of an invented community, so the results carry no one's details and can sit in a
+    repository beside the code that produced them.
+
+    Kept small on purpose -- the totals and the server, not every question's row -- because
+    a file nobody will open is a file nobody will notice going stale.
+
+    **Only runs over the community that ships with this package.** `run --graph` takes any
+    graph, so a run may have been asked of a real one, and this file is meant for a public
+    repository. Omitting the questions and the entry ids is what the current field list
+    happens to do; refusing a run that was not over the invented community is what stops the
+    next field from leaking. A run from before the marker existed is refused for the same
+    reason -- not knowing which graph it read is not the same as knowing it was invented.
+
+    ``anyway`` exports everything, for a store that never left the machine.
+    """
+    out, skipped = _exportable(kept, anyway=anyway)
+    out.sort(key=lambda r: (r["label"], r["at"]))
+    target = Path(where).expanduser()
+    repo = _inside_a_repo(target.parent)
+    if repo and not anyway:
+        raise ValueError(
+            f"{target} is inside the git repository at {repo}. These numbers describe one "
+            f"machine and one llama.cpp build, they go stale with the next model release, "
+            f"and a run may have been asked of a real community -- so they are backed up, "
+            f"not committed. Write it somewhere outside a repository.")
+    target.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    if skipped:
+        print(f"{skipped} run(s) left out: not measured over the community that ships with "
+              f"this package, so they may carry a real one's questions. --anyway to include "
+              f"them, but not into a repository.", file=sys.stderr)
+    return str(target)
+
+
 def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
     """Every run by what it cost to be right, frontier marked."""
     if not kept:
@@ -892,7 +1080,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
             got = measure(ask, questions, label=here, client=client, log=print)
             for row in got:
                 row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-            held = {**footprint(server.base_url)}
+            held = {**footprint(server.base_url), "graph": _which(graph)}
             if draft:
                 held["draft_model"] = str(draft).rsplit("/", 1)[-1]
             if kept:
@@ -994,7 +1182,7 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     return ask
 
 
-def main(argv: list[str] | None = None) -> int:
+def _main(argv: list[str] | None = None) -> int:
     """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
     ap = argparse.ArgumentParser(
         prog="ml-stack-bench",
@@ -1105,6 +1293,12 @@ def main(argv: list[str] | None = None) -> int:
                               f"and the same mean number of answers expected, at about half "
                               f"the time. Each question is worth more, so a small difference "
                               f"is noise on a short run and signal on a full one")
+        one.add_argument("--smoke", action="store_true",
+                         help=f"ask only {SMOKE} questions, to prove the whole path works "
+                              f"before spending the GPU on it. Serving, asking, scoring, "
+                              f"measuring and saving all happen, so anything that would "
+                              f"raise at the end raises here instead. The score means "
+                              f"nothing at this size -- run it first, then run it properly")
         one.add_argument("--temperature", type=float, default=None,
                          help="override the sampling temperature; the default is whatever "
                               "the model's own card asks for (gemma-4: 1.0)")
@@ -1145,6 +1339,20 @@ def main(argv: list[str] | None = None) -> int:
     show.add_argument("--rates", action="store_true",
                       help="what each run cost to be right -- accuracy over time, tokens and "
                            "memory -- with the Pareto frontier marked")
+    show.add_argument("--anyway-export", action="store_true", dest="export_anyway",
+                      help="with --export, include runs measured over some other graph. "
+                           "Not into a repository: those may carry a real community's "
+                           "questions")
+    show.add_argument("--export", default="", metavar="FILE.json",
+                      help="write every run as JSON. The store lives under ~/.ml-stack and "
+                           "nothing backs it up: a day of measuring is on one disk, and the "
+                           "results are all of an invented community, so they can be kept "
+                           "beside the code that produced them")
+    show.add_argument("--rank", default="", metavar="FILE.md",
+                      help="write which model answers best, as a conclusion rather than as "
+                           "evidence: one line per model, its best run, and what that run "
+                           "cost. This is the part worth keeping in a repository -- the raw "
+                           "runs are not, since they describe one machine and one build")
     show.add_argument("--plot", default="", metavar="FILE.html",
                       help="write the runs as a scatter of accuracy against --cost, with "
                            "the frontier joined; opens with no network and no packages")
@@ -1220,7 +1428,7 @@ def main(argv: list[str] | None = None) -> int:
                 used = dict(asking_with.sampling)
                 rows = measure(ask, questions, label=label, client=asking_with, log=print)
                 save(args.kept, rows,
-                     held={**footprint(url), "sampling": used})
+                     held={**footprint(url), "sampling": used, "graph": _which(graph)})
         print()
         table(runs(args.kept))
         return 0
@@ -1261,6 +1469,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "show":
         if args.compare:
             print(compare(args.kept, *args.compare))
+            return 0
+        if args.rank:
+            ranking(runs(args.kept), args.rank)
+            print(args.rank)
+            return 0
+        if args.export:
+            print(export(runs(args.kept), args.export,
+                         anyway=getattr(args, "export_anyway", False)))
             return 0
         if args.shape:
             from ml_stack.graph.community import QUESTIONS, graph as invented
@@ -1305,9 +1521,43 @@ def main(argv: list[str] | None = None) -> int:
           + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
     rows = measure(ask, questions, label=args.label, client=client, log=print)
     key = save(args.kept, rows,
-               held={**footprint(args.base_url), "sampling": client.sampling})
+               held={**footprint(args.base_url), "sampling": client.sampling,
+                     "graph": _which(graph)})
     print(f"kept as {key}")
     return 0
+
+
+
+
+# Which subcommands put load on the GPU, and so must never overlap with each other.
+MEASURING = ("run", "sweep", "drafts")
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Measure one thing at a time, waiting for whoever is already measuring.
+
+    Two runs sharing a GPU produce timings that belong to neither, and the old way of
+    arranging that -- a `pgrep` loop in the shell before the command -- could not work and
+    said nothing when it did not. Waiting belongs here, where it can be announced.
+    """
+    from ml_stack.lock import Busy, only_one
+
+    known = {"run", "sweep", "drafts", "show", "prepare"}
+    cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
+    if cmd not in MEASURING:
+        return _main(argv)
+
+    rest = list(argv if argv is not None else sys.argv[1:])
+    refuse = "--no-queue" in rest
+    rest = [a for a in rest if a != "--no-queue"]
+    try:
+        with only_one(HOME / "measuring.lock", wait=not refuse,
+                      announce=lambda line: print(line, file=sys.stderr)):
+            return _main(rest)
+    except Busy as why:
+        print(f"error: {why}. Another measurement is running; wait for it, or pass "
+              f"--no-queue to fail fast rather than queue.", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":

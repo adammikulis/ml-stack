@@ -16,7 +16,7 @@ from pathlib import Path
 
 __all__ = ["Found", "PREFER", "advice", "aside", "beside", "builds", "card",
            "draft_for", "files", "find", "main", "mmproj_for",
-           "held", "in_gguf", "ref", "room"]
+           "DRAFT_KINDS", "held", "in_gguf", "ref", "room", "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -94,6 +94,13 @@ def aside(name: str) -> int:
     return 1 if plain.startswith(("mmproj", "mtp-", "imatrix")) else 0
 
 
+# How a draft head names itself, and the `--spec-type` each one needs. A head is named by
+# the *method* it implements, not by the fact that it is a draft: `mtp-` for
+# multi-token prediction, `eagle3-` for EAGLE3. A rule that knew only one of them reported
+# "no draft" for gpt-oss-20b, which ships two EAGLE3 heads and no mtp- file at all.
+DRAFT_KINDS = {"mtp-": "draft-mtp", "eagle3-": "draft-eagle3"}
+
+
 def draft_for(repo: str) -> str:
     """The draft head shipped beside the weights, as a reference, or ''.
 
@@ -107,9 +114,10 @@ def draft_for(repo: str) -> str:
     reference without a directory is the plainer thing to serve, but take a nested one
     rather than reporting no draft at all.
     """
-    found = beside(repo, "mtp-")
-    if found:
-        return found
+    for prefix in DRAFT_KINDS:
+        found = beside(repo, prefix)
+        if found:
+            return found
     # Some publishers ship the head as its own repository beside the weights. Asking costs
     # one request and is the difference between speculating and not.
     #
@@ -120,9 +128,23 @@ def draft_for(repo: str) -> str:
     # correctly yields nothing rather than a 36G "draft".
     stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
     for sibling in (f"{stem}-MTP-GGUF", f"{stem}-MTP"):
-        found = beside(sibling, "mtp-")
-        if found:
-            return found
+        for prefix in DRAFT_KINDS:
+            found = beside(sibling, prefix)
+            if found:
+                return found
+    return ""
+
+
+def spec_for(draft: str) -> str:
+    """The `--spec-type` a draft head needs, read from what it is called, or ''.
+
+    A head implements one method and only that method: an EAGLE3 head served as
+    `draft-simple` is not slower, it is wrong about what it is being asked to do.
+    """
+    plain = str(draft).lower().rsplit("/", 1)[-1]
+    for prefix, kind in DRAFT_KINDS.items():
+        if plain.startswith(prefix):
+            return kind
     return ""
 
 

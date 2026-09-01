@@ -5,6 +5,7 @@ Every fixture here is invented. Nothing reads a real store, a real graph, or a r
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -552,3 +553,97 @@ def test_how_many_prefers_an_explicit_count():
     assert _how_many(Namespace(sample=0, short=True)) == SHORT
     assert _how_many(Namespace(sample=12, short=True)) == 12, "--sample is the explicit one"
     assert _how_many(Namespace(sample=0, short=False)) == 0, "and neither means all of them"
+
+
+def test_runs_can_be_written_out_so_they_are_not_on_one_disk(tmp_path):
+    """The store lives under ~/.ml-stack and nothing backs it up. A day of measuring sits on
+    one machine, and a comparison a week from now has nothing to compare against."""
+    import json
+
+    from ml_stack.graph.bench import export, invented_digest
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who?", expected=["person:iris", "person:otto"], shown=["person:iris"])
+    row.draft_tokens, row.draft_taken = 54, 41
+    save(store, [row], held={"context": 32768, "slots": 4, "model": "thing.gguf",
+                             "resident_bytes": 12 * 2**30,
+                             "graph": invented_digest(),
+                             "sampling": {"temperature": 0.0}})
+
+    where = export(runs(store), tmp_path / "out.json")
+    got = json.loads(pathlib.Path(where).read_text())
+    assert len(got) == 1
+    one = got[0]
+    assert one["label"] == "tried" and one["questions"] == 1
+    assert one["recall"] == 0.5 and one["precision"] == 1.0
+    assert one["f1"] == pytest.approx(2 / 3, abs=1e-3)
+    assert one["draft_offered"] == 54 and one["draft_kept"] == 41
+    assert one["context"] == 32768 and one["slots"] == 4
+    assert one["sampling"] == {"temperature": 0.0}
+    # the point is that it opens without this package, so nothing exotic may be in it
+    assert json.dumps(got)
+
+
+def test_an_export_skips_runs_with_nothing_to_score(tmp_path):
+    from ml_stack.graph.bench import export
+
+    store = tmp_path / "runs.ladybug"
+    save(store, [Row(label="chatter", question="hi", expected=[], shown=[])])
+    assert json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text()) == []
+
+
+def test_only_runs_over_the_invented_community_are_exported(tmp_path, capsys):
+    """`run --graph` takes any graph, so a run may have been asked of a real community, and
+    this file is meant for a public repository. Omitting the questions and entry ids is what
+    the current field list happens to do; refusing a run that was not over the invented
+    community is what stops the next field added from leaking."""
+    from ml_stack.graph.bench import export, invented_digest
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
+    save(store, [row], held={"graph": invented_digest(), "model": "thing.gguf"})
+    save(store, [row], held={"graph": "some-other-graph", "model": "thing.gguf"})
+    save(store, [row], held={"model": "thing.gguf"})          # from before the marker
+
+    got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
+    assert len(got) == 1, "only the one whose graph is known to be the invented one"
+    said = capsys.readouterr().err
+    assert "2 run(s) left out" in said
+    assert "not into a repository" in said
+
+    everything = json.loads(
+        pathlib.Path(export(runs(store), tmp_path / "all.json", anyway=True)).read_text())
+    assert len(everything) == 3, "--anyway is for a store that never left the machine"
+
+
+def test_an_export_carries_no_question_and_no_entry(tmp_path):
+    """Whatever else changes, the words a community said must not be in here."""
+    from ml_stack.graph.bench import export, invented_digest
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who surveys land in Calderwick?", expected=["person:iris"],
+                shown=["person:iris", "org:brayfield"])
+    save(store, [row], held={"graph": invented_digest()})
+
+    text = pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text()
+    assert "Calderwick" not in text and "surveys" not in text
+    assert "person:iris" not in text and "org:brayfield" not in text
+    assert "recall" in text, "the totals are the point, and they are there"
+
+
+def test_a_mmapped_model_still_measures():
+    """An mmapped model has no kv_and_run_bytes -- the weights are not all resident, so the
+    subtraction says nothing. Reading it anyway raised at the *end* of a run, after every
+    question had been answered, and threw away fourteen minutes of GPU for a summary line."""
+    from ml_stack.graph import bench
+
+    got = bench.beyond_weights({"resident_bytes": 4 * 2**30, "weights_bytes": 60 * 2**30,
+                                "context": 65536, "slots": 2})
+    assert got["mmapped"] is True
+    assert "bytes_per_1k_context" not in got
+    assert got["resident_bytes"] == 4 * 2**30, "what it holds is still reported"
+
+    fully = bench.beyond_weights({"resident_bytes": 70 * 2**30, "weights_bytes": 60 * 2**30,
+                                  "context": 32768, "slots": 2})
+    assert fully["kv_and_run_bytes"] == 10 * 2**30
+    assert fully["bytes_per_1k_context"] > 0 and "mmapped" not in fully
