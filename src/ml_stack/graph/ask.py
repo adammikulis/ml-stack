@@ -203,6 +203,124 @@ TOOLS = [
 ]
 
 
+# The same four tools, said briefly. What a model needs to be told depends entirely on the
+# model: the worked examples above took gemma-4-E4B from 17% to 70% recall, and cost
+# gpt-oss-120b twenty points over the same questions. A model that already reaches for a
+# tool does not need telling to, and being told anyway spends its attention on instructions
+# instead of on the question.
+#
+# So both exist and the caller chooses. `ml-stack-bench --terse` measures which a given
+# model wants, because there is no answering that from first principles.
+TERSE = [
+    {"type": "function", "function": {
+        "name": "look_up",
+        "description": "Find entries in the graph whose name or attached words match some "
+                       "text. Several words in one call cost the same as one.",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "what to look for"},
+            "texts": {"type": "array", "items": {"type": "string"},
+                      "description": "several things to look for, in one call"}},
+            "required": []}}},
+    {"type": "function", "function": {
+        "name": "look_at",
+        "description": "What the graph holds on some entries: their attributes, what they "
+                       "are joined to, and a line or two of what was actually said.",
+        "parameters": {"type": "object", "properties": {
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "entry ids, as returned by look_up"}},
+            "required": ["ids"]}}},
+    {"type": "function", "function": {
+        "name": "path_between",
+        "description": "How two entries are connected, as the chain of entries between "
+                       "them. For a question about how two things relate.",
+        "parameters": {"type": "object", "properties": {
+            "from_id": {"type": "string"}, "to_id": {"type": "string"}},
+            "required": ["from_id", "to_id"]}}},
+    {"type": "function", "function": {
+        "name": "show",
+        "description": "The entries your answer is about, to light up on the graph. Call it "
+                       "once, last, with what you actually wrote about -- not everything "
+                       "you opened on the way.",
+        "parameters": {"type": "object", "properties": {
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "entry ids the answer is about"}},
+            "required": ["ids"]}}},
+]
+
+
+# What a *question* looks like when it wants each tool -- for an embedder to match against,
+# and never sent to the chat model.
+#
+# Two consumers want two different texts. A chat model wants to know what a tool does, in
+# prose: "search the graph for entries whose name or attached words match some text". An
+# embedder wants the opposite. Comparing a user's question to prose *about a capability* is
+# comparing unlike things, and embeddinggemma is measurably poor at it -- the same asymmetry
+# that made DOCUMENT and QUERY prefixes necessary in `graph.vectors`, where telling it which
+# side was which moved a robotics technician from unplaced to second.
+#
+# So these are questions, not descriptions, because a question against questions is
+# like-to-like and that is where the signal is. Putting them in the description instead
+# would serve neither: it lengthens the text the chat model reads, which already measured
+# too long for a large model, to help something that is not reading it.
+# The name for "this question wants no tool at all". Not a tool, so it can never be called;
+# it exists so a router has somewhere to put a greeting other than the nearest search.
+CHAT = "chat"
+
+TOOL_PROMPTS: dict[str, tuple[str, ...]] = {
+    "look_up": (
+        "who knows about robotics?",
+        "is there anyone here who does marketing?",
+        "find me people working on healthcare",
+        "which companies are represented?",
+        "somebody who can sell things",
+        "who fixes machines?",
+    ),
+    "look_at": (
+        "tell me about Iris Bellweather",
+        "what is she good at?",
+        "what does that company do?",
+        "what has this person actually said?",
+        "more detail on those two",
+    ),
+    "path_between": (
+        "how are these two connected?",
+        "who could introduce me to a lawyer?",
+        "what links the foundry and the survey firm?",
+        "is there anyone in common between them?",
+        "how do I reach that person?",
+    ),
+    "show": (
+        "highlight those on the graph",
+        "show me who you mean",
+        "light up the people in that answer",
+    ),
+    # Not a tool: the questions that want *no* graph at all. Without somewhere for these to
+    # go, a greeting is matched against four search tools and wins one of them -- "hi"
+    # scored 0.900 against "highlight them on the graph", because everything is close to
+    # everything in embedding space and the question is only ever "close to what".
+    #
+    # A greeting is not a failed search, it is a different kind of message, and answering it
+    # costs one turn instead of six.
+    CHAT: (
+        "hi",
+        "hello there",
+        "thanks, that is helpful",
+        "tell me a joke",
+        "what can you do?",
+        "how does this work?",
+        "who are you?",
+        "what is the capital of France?",
+        "write me a haiku about rain",
+        "never mind",
+    ),
+}
+
+
+def prompts_for(name: str) -> tuple[str, ...]:
+    """Example questions that should route to ``name``, for an embedder. May be empty."""
+    return TOOL_PROMPTS.get(name, ())
+
+
 @dataclass
 class Answer:
     """What to say, what to light up, and what was done to find out.
@@ -307,7 +425,8 @@ def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, A
             "reads": " → ".join(label.get(i, i) for i in ids)}
 
 
-def tools_for(graph: Mapping[str, Any], *, finder: Any = None) -> list[tuple[dict[str, Any], Any]]:
+def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
+              terse: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
@@ -339,7 +458,8 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None) -> list[tuple[dic
         # the ids are the whole result; the model is told they arrived so it stops calling it
         return f"lit {len(list(args.get('ids') or ()))} on the graph"
 
-    return [(TOOLS[0], find), (TOOLS[1], read), (TOOLS[2], trace), (TOOLS[3], light)]
+    said = TERSE if terse else TOOLS
+    return [(said[0], find), (said[1], read), (said[2], trace), (said[3], light)]
 
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,

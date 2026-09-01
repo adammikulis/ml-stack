@@ -117,6 +117,65 @@ class Counting:
         return getattr(self.client, name)
 
 
+def sample(questions: Sequence[Mapping[str, Any]], n: int,
+           graph: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+    """``n`` questions that still cover every kind of answer, or all of them.
+
+    Not the first n, and not an even stride either. A question set is written in groups --
+    finding people, then joining them, then the ones whose answer is nobody -- so the first
+    eight are eight of one kind, and an even stride over a set that is two-thirds people
+    returns two-thirds people and drops whole kinds. Both measure one thing well and call it
+    a shorter benchmark.
+
+    So it takes one of each kind first -- person, org, place, topic, opportunity, event, and
+    the questions whose right answer is nobody -- and only then fills up in proportion. A
+    short run that has stopped asking about places is not a short run, it is a different one.
+
+    Deterministic, so two short runs compare with each other. They do not compare with a
+    full run, which is what the `n` column on every line is for.
+    """
+    scored = [dict(q) for q in questions]
+    if n <= 0 or n >= len(scored):
+        return scored
+
+    if graph is None:
+        from ml_stack.graph.community import graph as invented
+
+        graph = invented()
+    kind = {str(node.get("id")): str(node.get("kind") or "") for node in
+            (graph.get("nodes") or ())}
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for q in scored:
+        want = q.get("expect") or ()
+        # a question is filed under the rarest kind it asks for, so a kind that appears in
+        # only one question is never crowded out by one that appears in twenty
+        kinds = {kind.get(str(e), "?") for e in want} or {"nobody"}
+        grouped.setdefault(min(kinds, key=lambda k: sum(
+            1 for other in scored
+            if k in ({kind.get(str(e), "?") for e in (other.get("expect") or ())}
+                     or {"nobody"}))), []).append(q)
+
+    taken: list[dict[str, Any]] = []
+    order = sorted(grouped, key=lambda k: len(grouped[k]))
+    for group in order:                       # one of every kind, rarest first
+        if len(taken) < n:
+            taken.append(grouped[group][0])
+    for group in order:                       # then in proportion, evenly within each
+        rest = grouped[group][1:]
+        share = max(0, round((n - len(order)) * len(grouped[group]) / len(scored)))
+        step = (len(rest) / share) if share else 0
+        for i in range(min(share, len(rest))):
+            if len(taken) < n:
+                taken.append(rest[int(i * step)])
+    for q in scored:                          # and top up in order if rounding left room
+        if len(taken) >= n:
+            break
+        if q not in taken:
+            taken.append(q)
+    return [q for q in scored if q in taken][:n]
+
+
 def read_questions(path: str | Path) -> list[dict[str, Any]]:
     """One question per line: a bare string, or ``{"q": ..., "expect": [ids]}``."""
     out = []
@@ -204,8 +263,21 @@ def footprint(base_url: str) -> dict[str, Any]:
             out["weights_bytes"] = sum(s.stat().st_size for s in shards if s.is_file())
     except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
         pass
+    # Resident minus weights, when that means anything. It does not always: llama.cpp mmaps
+    # the weights, so a page is resident only once it has been touched, and an MoE that uses
+    # ten experts of five hundred never touches most of them. Qwen3.8-Flash-Next sat at 63G
+    # resident against 87G of weights on disk -- the subtraction goes negative, clamps to
+    # zero and prints as a dash, which reads as "not measured" rather than "not meaningful".
+    #
+    # So it is only reported when the model really is fully resident, and `resident_bytes`
+    # is carried either way, because what the process actually holds is the number that
+    # decides how many of them fit.
     if "resident_bytes" in out and "weights_bytes" in out:
-        out["kv_and_run_bytes"] = max(0, out["resident_bytes"] - out["weights_bytes"])
+        beyond = out["resident_bytes"] - out["weights_bytes"]
+        if beyond > 0:
+            out["kv_and_run_bytes"] = beyond
+        else:
+            out["mmapped"] = True
         # What one more conversation costs, which is the question a number like this is
         # asked for. Held tokens are the context times the slots holding one each; dividing
         # by them makes two models comparable however each happened to be configured.
@@ -303,8 +375,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # a question was added mid-afternoon and the next run read 85% against an earlier 72%,
     # which meant nothing at all. A column is cheaper than remembering.
     head = (f"{'run':20} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'draft':>6} {'kv+run':>8} {'per 1k':>8} "
-            f"{'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
+            f"{'written':>8} {'cached':>8} {'draft':>6} {'resident':>9} {'kv+run':>8} "
+            f"{'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
     print(head)
     print("-" * len(head))
     for one in kept:
@@ -318,6 +390,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         slots = server.get("slots") or 0
         beyond = server.get("kv_and_run_bytes")
         per1k = server.get("bytes_per_1k_context")
+        rss = server.get("resident_bytes")
         print(f"{str(one.get('label', ''))[:20]:20} "
               f"{(f'{ctx // 1024}k x{slots}' if ctx else '-'):>7} "
               f"{len(scored):>3} "
@@ -326,7 +399,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
               f"{drafting(rows):>6} "
-              f"{(f'{beyond / 2**30:.2f}G' if beyond else '-'):>8} "
+              f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
+              f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
               f"{right:>5} {rec:>5} {prec:>5}  {sampled(server)}")
 
@@ -692,6 +766,57 @@ def busy(base_url: str) -> int:
     return sum(1 for one in slots if isinstance(one, Mapping) and one.get("is_processing"))
 
 
+def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
+           label: str = "", draft: str = "", port: int = 8099, context: int = 32768,
+           parallel: int = 1, binary: str = "", kept: str | Path = "", shortlist: int = 0,
+           store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
+           terse: bool = False,
+           serve_timeout: float = 900.0, **making: Any) -> list[Row]:
+    """Put one model up, ask it the questions, take it down again.
+
+    The piece that was missing. `sweep` measures servers somebody else started, so anything
+    comparing several models meant hand-rolling starts, stops and waits -- which is a shell
+    loop that dies with the terminal, and which was written twice before becoming this.
+
+    One model at a time is not a limitation, it is the point: two servers sharing a GPU
+    produce timings that belong to neither.
+    """
+    from ml_stack.client import Client
+    from ml_stack.serve import serve
+
+    name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
+    extra: dict[str, Any] = {"parallel": parallel}
+    if draft:
+        from ml_stack.hub import spec_for
+
+        extra["draft"] = draft
+        kind = spec_for(draft)
+        if kind:
+            extra["spec_type"] = kind
+    if binary:
+        from ml_stack.serve.backend import LlamaServerBackend
+        from ml_stack.serve.manager import ServerManager
+
+        extra["manager"] = ServerManager(LlamaServerBackend(binary=binary))
+
+    began = time.time()
+    with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
+        loaded = time.time() - began
+        print(f"    up in {loaded:.0f}s")
+        ask = asking(graph, shortlist=shortlist, store=store, embed_url=embed_url,
+                     embed_model=embed_model, terse=terse)
+        rows = measure(ask, questions, label=name,
+                       client=Client(server.base_url, **making), log=print)
+        for row in rows:
+            row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
+        held = {**footprint(server.base_url)}
+        if draft:
+            held["draft_model"] = str(draft).rsplit("/", 1)[-1]
+    if kept:
+        save(kept, rows, held=held)
+    return rows
+
+
 def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
            graph: Mapping[str, Any], *, port: int = 8099, context: int = 32768,
            parallel: int = 1, binary: str = "", kept: str | Path = "",
@@ -707,37 +832,18 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
     Pass "" as a head to measure the model with no draft at all, which is the baseline
     every other row has to beat.
     """
-    from ml_stack.client import Client
-    from ml_stack.serve import serve
-
+    # The base model is loaded again for every head, because `-md` is bound when the server
+    # starts and llama.cpp has no runtime swap: N configurations is N servers. It costs much
+    # less than the first load -- the weights are mmapped and the pages are still cached --
+    # but it is not free, so `served` times it and prints it rather than waving it away.
     out: list[Row] = []
     for head in heads:
-        name = "none" if not head else str(head).rsplit("/", 1)[-1]
+        name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
         print(f"\n--- draft: {name}")
-        extra: dict[str, Any] = {"parallel": parallel}
-        if head:
-            extra["draft"] = head
-        if binary:
-            from ml_stack.serve.backend import LlamaServerBackend
-            from ml_stack.serve.manager import ServerManager
-
-            extra["manager"] = ServerManager(LlamaServerBackend(binary=binary))
-        with serve(model, port=port, context=context, timeout=serve_timeout,
-                   **extra) as server:
-            asking = asking_with_client(graph, Client(server.base_url, **making))
-            rows = measure(asking, questions, label=f"draft:{name}",
-                           client=Client(server.base_url, **making), log=print)
-        if kept:
-            save(kept, rows, held={**footprint(server.base_url), "draft": name})
-        out += rows
+        out += served(model, questions, graph, label=f"draft:{name}", draft=head, port=port,
+                      context=context, parallel=parallel, binary=binary, kept=kept,
+                      serve_timeout=serve_timeout, **making)
     return out
-
-
-def asking_with_client(graph: Mapping[str, Any], client: Any) -> Callable[[str, Any], Any]:
-    """The ordinary asking, for a client already made."""
-    from ml_stack.graph.ask import converse
-
-    return lambda question, _client: converse(question, graph, client)
 
 
 def drafting(rows: Sequence[Mapping[str, Any]]) -> str:
@@ -762,7 +868,7 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 
 
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
-           embed_url: str = "", embed_model: str = "",
+           embed_url: str = "", embed_model: str = "", terse: bool = False,
            margin: float = MARGIN) -> Callable[[str, Any], Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
@@ -796,7 +902,10 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         return [r["id"] for r in found][:shortlist]
 
     def ask(question: str, client: Any) -> Any:
-        return converse(question, graph, client, opening=likely(question))
+        from ml_stack.graph.ask import tools_for
+
+        extra = {"tools": tools_for(graph, terse=True)} if terse else {}
+        return converse(question, graph, client, opening=likely(question), **extra)
 
     return ask
 
@@ -849,6 +958,12 @@ def main(argv: list[str] | None = None) -> int:
     heads.add_argument("--binary", default="", help="a llama-server that reads this model")
     heads.add_argument("--kept", default=str(HOME / "runs.ladybug"))
     heads.add_argument("--questions", default="")
+    heads.add_argument("--sample", type=int, default=10, metavar="N",
+                       help="how many questions to ask each head (default: %(default)s). "
+                            "A draft cannot change an answer -- the large model verifies "
+                            "every token -- so what is being measured is acceptance and "
+                            "wall clock, and a full run spends most of itself proving a "
+                            "score that must come out the same")
 
     ready = sub.add_parser("prepare", help="put a graph in a store and index and embed it")
     ready.add_argument("--store", default=str(HOME / "graph.ladybug"),
@@ -873,6 +988,22 @@ def main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--embed-url", default="", help="a server that embeds, for --shortlist")
     sweep.add_argument("--embed-model", default="", help="the model that embedded the graph")
     sweep.add_argument("--margin", type=float, default=MARGIN)
+    sweep.add_argument("--serve", action="append", default=[], metavar="MODEL",
+                       help="a model to put up, measure and take down again, one at a time. "
+                            "Repeat for each. Without this, --on measures servers somebody "
+                            "else started -- which leaves the starting, stopping and waiting "
+                            "to a shell loop that dies with its terminal")
+    sweep.add_argument("--context", type=int, default=0, metavar="N",
+                       help="total context for a --serve'd model (default: 32768 per slot)")
+    sweep.add_argument("--parallel", type=int, default=1, metavar="N",
+                       help="slots for a --serve'd model (default: %(default)s)")
+    sweep.add_argument("--serve-port", type=int, default=8099,
+                       help="the port each served model gets (default: %(default)s)")
+    sweep.add_argument("--serve-draft", action="append", default=[], metavar="PATH_OR_AUTO",
+                       help="a draft head for the matching --serve, positionally; 'auto' "
+                            "finds the one shipped with it, '' serves without")
+    sweep.add_argument("--binary", default="", metavar="PATH",
+                       help="a llama-server that reads these models")
     sweep.add_argument("--plain-only", action="store_true",
                        help="skip the shortlist half, just measure each model as it is")
 
@@ -929,19 +1060,46 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"error: --on wants NAME=URL, got {one!r}", file=sys.stderr)
                 return 2
             named.append((name, url))
-        if not named:
-            print("error: nothing to measure; pass --on NAME=URL", file=sys.stderr)
+        if not named and not getattr(args, "serve", []):
+            print("error: nothing to measure; pass --on NAME=URL for a server that is "
+                  "already up, or --serve MODEL to put one up", file=sys.stderr)
             return 2
-        questions = read_questions(args.questions) if args.questions else QUESTIONS
+        questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
+                           getattr(args, "sample", 0))
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
         ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
+        for n, model in enumerate(getattr(args, "serve", []) or []):
+            heads = getattr(args, "serve_draft", []) or []
+            head = heads[n] if n < len(heads) else ""
+            if head.lower() == "auto":
+                from ml_stack.serve.cli import drafted
+
+                head = drafted(model, "auto")
+            for suffix, shortlist in ways:
+                stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+                print(f"\n{stem}-{suffix}")
+                # A port nothing answers on is exactly what --serve expects, so the
+                # "would not say whether it is busy" note is noise here. Only a port
+                # somebody is actually using should stop us.
+                if busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
+                        f"http://127.0.0.1:{args.serve_port}", args):
+                    return 3
+                served(model, questions, graph, label=f"{stem}-{suffix}", draft=head,
+                       port=args.serve_port, context=args.context // max(1, args.parallel)
+                       if getattr(args, "context", 0) else 32768,
+                       parallel=getattr(args, "parallel", 1), binary=args.binary,
+                       kept=args.kept, shortlist=shortlist,
+                       store=args.store or None, embed_url=args.embed_url,
+                       embed_model=args.embed_model, terse=getattr(args, "terse", False),
+                       **sampling_from(args))
+
         for name, url in named:
             for suffix, shortlist in ways:
                 label = f"{name}-{suffix}"
                 ask = asking(graph, shortlist=shortlist, store=args.store or None,
                              embed_url=args.embed_url, embed_model=args.embed_model,
-                             margin=args.margin)
+                             terse=getattr(args, "terse", False), margin=args.margin)
                 print(f"\n{label} on {url}")
                 if not _idle(url, args):
                     return 3
@@ -980,7 +1138,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "drafts":
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
-        asked = read_questions(args.questions) if args.questions else QUESTIONS
+        asked = sample(read_questions(args.questions) if args.questions else QUESTIONS,
+                       args.sample)
         rows = drafts(args.model, args.draft or [""], asked, invented(), port=args.port,
                       context=args.context, parallel=args.parallel, binary=args.binary,
                       kept=args.kept)
@@ -1013,7 +1172,8 @@ def main(argv: list[str] | None = None) -> int:
 
     from ml_stack.graph.community import QUESTIONS, graph as invented
 
-    questions = read_questions(args.questions) if args.questions else QUESTIONS
+    questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
+                       getattr(args, "sample", 0))
     if not questions:
         print(f"error: no questions in {args.questions}", file=sys.stderr)
         return 2

@@ -20,7 +20,9 @@ def repo(tmp_path: Path, graph: dict | None = None, fixtures: str = "") -> Path:
     """A git repository with a graph to check against, and nothing staged yet."""
     where = tmp_path / "repo"
     where.mkdir()
-    run = lambda *a: subprocess.run(a, cwd=where, check=True, capture_output=True)
+    def run(*a):
+        return subprocess.run(a, cwd=where, check=True, capture_output=True)
+
     run("git", "init", "-q")
     run("git", "config", "user.email", "nobody@example.invalid")
     run("git", "config", "user.name", "Nobody")

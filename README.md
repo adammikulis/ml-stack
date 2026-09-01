@@ -314,6 +314,39 @@ Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 
 weights for `--spec-type draft-mtp`, and `auto` correctly reports no draft rather than
 offering it as one.
 
+## Which tool a question wants
+
+```python
+from ml_stack.graph.ask import TOOL_PROMPTS, tools_for
+from ml_stack.graph.route import narrow, rank
+
+routed = rank(question, TOOL_PROMPTS, base_url=embedder, model=name)
+tools = narrow(tools_for(graph), routed)      # [] when the question wants no graph
+```
+
+`graph.route` asks a small embedder which tool a question resembles, by comparing it to
+**example questions** rather than to the tools' descriptions. That distinction is the whole
+of it: a question against prose describing a capability is comparing unlike things, and a
+question against questions is like-to-like. The examples live in `ask.TOOL_PROMPTS` and are
+never sent to the chat model, which wants the opposite text — what a tool *does*.
+
+Both sides carry the same embedding prefix, because both are questions. Using the
+asymmetric `QUERY`/`DOCUMENT` pair here scored "tell me about Otto Vance" at 0.409 against
+an example reading "tell me about Iris Bellweather", which is the same sentence; with the
+symmetric prefix it is 0.83.
+
+The useful case is the one that is not a tool at all. `CHAT` collects greetings, jokes and
+asides, and a message routed there is offered **no tools whatsoever** — one model call
+instead of the six a graph question takes. Without somewhere for those to go, a greeting is
+matched against four search tools and wins one of them: "hi" scored 0.900 against
+"highlight them on the graph", because everything is close to everything and the only
+question is close to *what*.
+
+Nothing narrows unless the routing was clear, `show` survives every narrowing, and an
+embedder that will not answer routes nothing rather than defaulting to chat — a real
+question mistaken for small talk is answered without looking anything up, which reads as a
+confident answer and is about nothing.
+
 ## Answering the same question twice
 
 ```python

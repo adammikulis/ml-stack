@@ -6,7 +6,6 @@ graph. What is asserted is what the tools returned and what came back as touched
 """
 
 from dataclasses import dataclass
-from typing import Any
 
 from ml_stack.graph.ask import (Answer, converse, converse_stream, look_at, look_up,
                                 path_between, tools_for)
@@ -672,3 +671,30 @@ def test_the_tool_descriptions_show_a_call_and_never_use_the_bench_community():
         assert fn["name"] in said or "call it" in said
         leaked = sorted(w for w in theirs if w and w in said)
         assert not leaked, f"{fn['name']}'s example uses {leaked}, which the bench asks about"
+
+
+def test_the_tools_can_be_said_briefly_or_at_length():
+    """What a model needs to be told depends on the model. The worked examples took
+    gemma-4-E4B from 17% to 70% recall and cost gpt-oss-120b twenty points over the same
+    questions, so both exist and the caller chooses -- there is no answering that from
+    first principles."""
+    from ml_stack.graph.ask import TERSE, TOOLS, tools_for
+
+    assert [t["function"]["name"] for t in TERSE] \
+        == [t["function"]["name"] for t in TOOLS], "the same four tools, said differently"
+    def shape(schema):
+        """The callable shape: names, types and what is required -- not the prose."""
+        params = schema["function"]["parameters"]
+        return (sorted(params.get("required") or []),
+                {name: prop.get("type") for name, prop in params["properties"].items()})
+
+    for terse, full in zip(TERSE, TOOLS, strict=True):
+        assert shape(terse) == shape(full), \
+            "only the words differ; a model that reads either must call either identically"
+        assert len(terse["function"]["description"]) < len(full["function"]["description"])
+
+    graph = {"nodes": [], "edges": [], "messages": {}}
+    assert [s["function"]["name"] for s, _fn in tools_for(graph, terse=True)] \
+        == [s["function"]["name"] for s, _fn in tools_for(graph)]
+    assert tools_for(graph, terse=True)[0][0] is TERSE[0]
+    assert tools_for(graph)[0][0] is TOOLS[0]

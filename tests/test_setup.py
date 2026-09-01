@@ -7,8 +7,6 @@ guess, because a wrong "supported" is worse than no answer.
 
 from __future__ import annotations
 
-import pytest
-
 from ml_stack.setup import BEHAVIOURS, Finding, ask, explain, look, main
 
 

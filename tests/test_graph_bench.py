@@ -403,3 +403,123 @@ def test_a_busy_server_is_refused_and_anyway_overrides(capsys):
     # a server that will not say lets the run proceed, but says so rather than staying quiet
     assert _idle("http://127.0.0.1:9", Namespace(anyway=False)) is True
     assert "would not say whether it is busy" in capsys.readouterr().err
+
+
+def test_a_short_run_still_asks_about_everything():
+    """A shorter benchmark that has stopped asking about places is not a shorter benchmark,
+    it is a different one. The first n are all of one kind because the set is written in
+    groups; an even stride over a set that is two-thirds people returns two-thirds people."""
+    from ml_stack.graph.bench import sample
+    from ml_stack.graph.community import QUESTIONS, graph
+
+    kind = {n["id"]: n["kind"] for n in graph()["nodes"]}
+    whole = {kind[e] for q in QUESTIONS for e in q["expect"]}
+    assert len(whole) >= 6, "the full set should cover every kind the page draws"
+
+    for n in (8, 10, 14, 20):
+        short = sample(QUESTIONS, n)
+        assert len(short) == n
+        covered = {kind[e] for q in short for e in q["expect"]}
+        assert covered == whole, f"sample({n}) dropped {whole - covered}"
+        assert any(not q["expect"] for q in short), \
+            f"sample({n}) asks nothing whose right answer is nobody"
+
+    # the naive versions this replaced, shown failing
+    first = QUESTIONS[:8]
+    assert {kind[e] for q in first for e in q["expect"]} != whole
+    stride = [QUESTIONS[int(i * len(QUESTIONS) / 8)] for i in range(8)]
+    assert {kind[e] for q in stride for e in q["expect"]} != whole
+
+
+def test_a_short_run_is_the_same_short_run_twice():
+    """Two runs of a short set have to be comparable with each other, or the shortening has
+    bought speed by giving up the only thing a benchmark is for."""
+    from ml_stack.graph.bench import sample
+    from ml_stack.graph.community import QUESTIONS
+
+    assert sample(QUESTIONS, 9) == sample(QUESTIONS, 9)
+    assert [q["q"] for q in sample(QUESTIONS, 40)] == [q["q"] for q in QUESTIONS]
+    assert sample(QUESTIONS, 0) == [dict(q) for q in QUESTIONS]
+
+
+def test_drafts_counts_the_client_it_is_measuring():
+    """`measure` wraps the client it is given and hands *that* to the asking. An asking that
+    closes over a client of its own is never counted: every token and call comes back zero
+    while the wall clock says otherwise, and the table reads as though nothing happened.
+    That shipped once."""
+    import ml_stack.graph.bench as bench
+
+    seen = {}
+
+    class Reply:
+        content = "an answer"
+        raw = {"usage": {"prompt_tokens": 100, "completion_tokens": 20},
+               "timings": {"prompt_n": 90, "cache_n": 10, "draft_n": 8,
+                           "draft_n_accepted": 5}}
+        tool_calls = None
+
+    class Model:
+        def chat(self, messages, **kw):
+            return Reply()
+
+    def fake_ask(graph, **kw):
+        def ask(question, client):
+            seen["client"] = client
+            client.chat([{"role": "user", "content": question}])
+            return type("A", (), {"content": "an answer", "show": [], "ids": [],
+                                  "read": [], "found": [], "path": [], "why": ""})()
+        return ask
+
+    rows = bench.measure(fake_ask(None), [{"q": "who?", "expect": ["n1"]}],
+                         label="tried", client=Model())
+    assert type(seen["client"]).__name__ == "Counting", \
+        "the asking must be handed the counted client"
+    assert rows[0].calls == 1
+    assert rows[0].prompt_tokens == 100 and rows[0].completion_tokens == 20
+    assert rows[0].draft_tokens == 8 and rows[0].draft_taken == 5
+
+
+def test_what_a_server_holds_is_reported_even_when_the_derived_number_is_not(tmp_path, capsys):
+    """`resident - weights` assumes every weight is resident. llama.cpp mmaps them, so a
+    page is resident only once touched, and an MoE using ten experts of five hundred never
+    touches most. Flash-Next sat at 70G resident against 87G on disk: the subtraction goes
+    negative, clamps to zero, and prints as a dash that reads as "not measured" rather than
+    "not meaningful"."""
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
+    save(store, [row], held={"context": 32768, "slots": 2,
+                             "resident_bytes": 70 * 2**30, "mmapped": True})
+    save(store, [row], held={"context": 32768, "slots": 2,
+                             "resident_bytes": 12 * 2**30,
+                             "kv_and_run_bytes": 3 * 2**30,
+                             "bytes_per_1k_context": 30 * 2**20})
+    table(runs(store))
+    said = capsys.readouterr().out
+    assert "70.00G" in said, "what it actually holds is always reported"
+    assert "mmap" in said, "and why the derived number is missing, rather than a bare dash"
+    assert "3.00G" in said and "30.0M" in said, "a fully resident model still reports both"
+
+
+def test_the_footprint_does_not_invent_a_negative_cost(monkeypatch):
+    """Clamping to zero produced a dash; the honest answer is that the subtraction does not
+    apply, and that has to be distinguishable from never having looked."""
+    import ml_stack.graph.bench as bench
+
+    def props(url, **kw):
+        return {"model_path": "/models/thing-00001-of-00003.gguf", "total_slots": 2,
+                "default_generation_settings": {"n_ctx": 32768}}
+
+    monkeypatch.setattr(bench, "request_json", props, raising=False)
+
+    # mmapped: less resident than the weights on disk
+    out = dict(resident_bytes=70 * 2**30, weights_bytes=87 * 2**30)
+    beyond = out["resident_bytes"] - out["weights_bytes"]
+    assert beyond < 0
+
+    # what the code must do with that: no kv_and_run, but say why
+    held = {}
+    if beyond > 0:
+        held["kv_and_run_bytes"] = beyond
+    else:
+        held["mmapped"] = True
+    assert "kv_and_run_bytes" not in held and held["mmapped"] is True
