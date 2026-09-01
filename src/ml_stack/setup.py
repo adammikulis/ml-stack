@@ -16,9 +16,11 @@ pass it along is doing something this deliberately does not.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 __all__ = ["BEHAVIOURS", "Behaviour", "Finding", "ask", "look", "main"]
@@ -145,17 +147,35 @@ def look() -> list[Finding]:
     if binary:
         arches = _arches(binary)
         out.append(Finding(
-            name="llama-server", good=True, said=binary,
+            name="llama-server", good=True,
+            said=f"{binary}  ({_build_label(binary)})",
             note=("reads " + ", ".join(sorted(arches)[:6]) + (" ..." if len(arches) > 6 else ""))
             if arches else "could not read which architectures it supports"))
         for wanted in ("qwen4exp",) if arches else ():
             out.append(Finding(
                 name=f"architecture {wanted}", good=wanted in arches,
                 said="supported" if wanted in arches else "not in this build",
+                fix="" if wanted in arches else "ml-stack-serve build",
                 note="" if wanted in arches else
-                     "a release lags master by an architecture or two; serve with "
-                     "--binary /path/to/a/master/build, or the server exits saying only "
-                     "'unknown model architecture'"))
+                     "a release lags master by an architecture or two; ml-stack-serve "
+                     "build gets one from llama.cpp's own master, or serve with --binary "
+                     "/path/to/a/master/build -- without either the server exits saying "
+                     "only 'unknown model architecture'"))
+        lacking = _lacking_flags(binary)
+        if lacking:
+            # Silent when the build answers every flag; an unknown build (no help text)
+            # is given no opinion. A flag it lacks fails at the far end of the load.
+            out.append(Finding(
+                name="flags this build lacks", good=False,
+                said=", ".join(flag for flag, _ in lacking),
+                fix="ml-stack-serve build",
+                note="; ".join(f"no {flag}" + (f", it has {near}" if near else "")
+                               for flag, near in lacking)
+                     + ". llama.cpp renames flags between releases, and a flag the build "
+                       "does not have exits at the end of the load saying only 'invalid "
+                       "argument'. ml-stack-serve up refuses before loading; "
+                       "ml-stack-serve build gets the current master, or serve with "
+                       "--binary /path/to/another/build"))
 
     try:
         from ml_stack.hub import held
@@ -169,15 +189,96 @@ def look() -> list[Finding]:
     return out
 
 
-def _arches(binary: str) -> set[str]:
+def _lacking_flags(binary: str) -> list[tuple[str, str]]:
+    """Every flag ``ServerSpec`` can emit that this build does not accept, with the nearest.
+
+    Read out of ``--help``, the same cheap way ``_arches`` reads libllama. Empty when the
+    build answers everything -- and empty when it printed no help at all, since a build
+    that could not be read must not be reported as lacking anything.
+    """
+    from ml_stack.serve.backend import (LlamaServerBackend, emitted_flags, flags_of,
+                                        unknown_flags)
+
+    try:
+        return unknown_flags(emitted_flags(LlamaServerBackend(binary=binary)),
+                             flags_of(binary))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _build_label(binary: str) -> str:
+    """Which build this is, and how old -- from ``BUILD.json`` for a build
+    ``ml-stack-serve build`` installed, from ``--version`` otherwise.
+
+    Read rather than assumed: a build that looks the same in every other way can still be
+    six months stale, and that is exactly the fact a release lagging master hides.
+    """
+    manifest = Path(binary).resolve().parent / "BUILD.json"
+    if manifest.is_file():
+        try:
+            info = json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            info = {}
+        commit = info.get("commit", "?")
+        age = _age(str(info.get("built_at", "")))
+        return f"managed build {commit}" + (f", {age} old" if age else "")
+    return _version(binary) or "version unknown"
+
+
+def _version(binary: str) -> str:
+    try:
+        from ml_stack.serve.binary import child_env
+
+        got = subprocess.run([binary, "--version"], capture_output=True, text=True,
+                             timeout=10, env=child_env(binary))
+    except Exception:  # noqa: BLE001
+        return ""
+    text = (got.stdout + got.stderr).strip()
+    return text.splitlines()[0] if text else ""
+
+
+def _age(built_at: str) -> str:
+    if not built_at:
+        return ""
+    try:
+        then = datetime.fromisoformat(built_at)
+    except ValueError:
+        return ""
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - then
+    if delta.days >= 1:
+        return f"{delta.days}d"
+    if delta.seconds >= 3600:
+        return f"{delta.seconds // 3600}h"
+    return f"{max(1, delta.seconds // 60)}m"
+
+
+def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
     """Which model architectures a build reads.
 
     The names live in libllama, not in the server binary: grepping the executable finds
-    nothing and reads as "supports none", which is worse than not looking.
+    nothing and reads as "supports none", which is worse than not looking. ``target`` is
+    either the server binary -- its sibling ``lib/`` and its own directory are searched --
+    or a directory holding the dylibs directly, the flat shape ``ml-stack-serve build``
+    installs into, checked before a new build is trusted enough to switch ``current`` to it.
+
+    A prefix match alone is not precise: measured against a real build, `"phi4"` turned up
+    in libllama and reads exactly like an architecture -- but master's own
+    ``src/llama-arch.cpp`` defines no ``LLM_ARCH_PHI4`` at all. It names a *chat template*
+    (``LLM_CHAT_TEMPLATE_PHI_4`` in ``llama-chat.cpp``) that happens to share the family
+    prefix, and a build missing it is not missing an architecture. Pass ``known`` -- the
+    real names, from ``build._arches_from_source`` against a source checkout -- to restrict
+    the guess to them; without a checkout there is nothing to restrict against, and the
+    prefix guess is what there is.
     """
-    lib = Path(binary).resolve().parent.parent / "lib"
+    path = Path(target)
+    if path.is_dir():
+        dirs: tuple[Path, ...] = (path,)
+    else:
+        dirs = (path.resolve().parent.parent / "lib", path.resolve().parent)
     found: set[str] = set()
-    for where in (lib, Path(binary).resolve().parent):
+    for where in dirs:
         for name in sorted(where.glob("libllama*.dylib")) + sorted(where.glob("libllama*.so")):
             try:
                 got = subprocess.run(["strings", str(name)], capture_output=True, text=True,
@@ -191,9 +292,10 @@ def _arches(binary: str) -> set[str]:
             # Keep looking until an *architecture* turns up, not merely until some word
             # does: the first library in the directory is full of ordinary strings and
             # none of the names, and stopping there reported "supports nothing".
-    return {w for w in found if any(
+    guessed = {w for w in found if any(
         w.startswith(f) for f in ("qwen", "gemma", "llama", "phi", "mistral",
                                   "deepseek", "granite", "olmo", "cohere"))}
+    return guessed & known if known is not None else guessed
 
 
 def ask(findings: list[Finding], *, yes: bool = False) -> int:

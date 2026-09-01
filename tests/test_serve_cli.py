@@ -376,3 +376,68 @@ def test_a_head_named_for_its_method_is_found_and_says_which_kind(tmp_path):
 
     assert drafted(str(model), "") == "", "not asked for, not looked for"
     assert drafted(str(model), "/explicit/path.gguf") == "/explicit/path.gguf"
+
+
+def test_build_subcommand_is_wired_to_cmd_build(monkeypatch):
+    """The parser's job here is just getting every flag to `build.cmd_build` unmangled --
+    what it does with them is `test_serve_build.py`'s job."""
+    from ml_stack.serve import build
+
+    seen: dict[str, object] = {}
+
+    def fake(args):
+        seen.update(vars(args))
+        return 0
+
+    monkeypatch.setattr(build, "cmd_build", fake)
+    assert cli.main(["build", "--commit", "deadbeef", "--jobs", "4", "--from", "release",
+                     "--force"]) == 0
+    assert seen["commit"] == "deadbeef"
+    assert seen["jobs"] == 4
+    assert seen["source_kind"] == "release"
+    assert seen["force"] is True
+    assert seen["check"] is False
+    assert seen["rollback"] is False
+    assert seen["persist"] is False
+
+
+def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch, capsys):
+    """The whole path -- lease, then the backend's launch -- against a stand-in that answers
+    `--help` without `--draft-max`. Nothing is started; the refusal names the nearest."""
+    import subprocess as sp
+    from dataclasses import replace
+
+    from ml_stack.serve import backend
+    from ml_stack.serve.backend import flags_of
+
+    monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                      "-m,    --model FNAME                    model path\n"
+                      "-c,    --ctx-size N                     size of the prompt context\n"
+                      "-ngl,  --gpu-layers, --n-gpu-layers N   layers in VRAM\n"
+                      "       --host HOST                      ip address to listen on\n"
+                      "       --port PORT                      port to listen on\n"
+                      "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
+                      "       --jinja                          use jinja template\n"
+                      "--spec-draft-n-max N                    tokens to draft (default: 3)\n"
+                      "--draft, --draft-max N                  the argument has been removed\n"
+                      "HELP\nfi\nexit 0\n")
+    binary.chmod(0o755)
+    gguf = tmp_path / MODEL
+    gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+    flags_of(binary)    # the help is read here, once; after this nothing may run
+    monkeypatch.setattr(sp, "Popen",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
+
+    def lease(self, spec, *, timeout=300.0, roam=True):
+        # Straight to the launch, with the retired flag on the argv.
+        return self.backend.start(replace(spec, extra_args=("--draft-max", "3")),
+                                  timeout=timeout)
+
+    monkeypatch.setattr(cli.ServerManager, "lease", lease)
+    code = cli.main(["up", str(gguf), "--binary", str(binary), "--port", str(free_port())])
+    err = capsys.readouterr().err
+    assert code == 2
+    assert err.strip() == "this llama-server has no --draft-max; it has --spec-draft-n-max"

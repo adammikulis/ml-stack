@@ -7,6 +7,8 @@ guess, because a wrong "supported" is worse than no answer.
 
 from __future__ import annotations
 
+import json
+
 from ml_stack.setup import BEHAVIOURS, Finding, ask, explain, look, main
 
 
@@ -102,3 +104,117 @@ def test_the_wizard_runs_end_to_end(capsys, monkeypatch):
     code = main(["--quiet"])
     assert code in (0, 1)
     assert "what this machine can do" in capsys.readouterr().out
+
+
+def _server_answering(tmp_path, help_text: str):
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                      + help_text + "HELP\nfi\nexit 0\n")
+    binary.chmod(0o755)
+    return binary
+
+
+def test_a_flag_the_build_lacks_is_reported_with_the_nearest_it_has(tmp_path, monkeypatch):
+    """`--draft-max` became `--spec-draft-n-max`; a build listing only the new name must
+    say so here, before a load finds out."""
+    import ml_stack.serve.binary as binary_module
+    import ml_stack.setup as setup
+    from ml_stack.serve import backend
+
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
+    stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n"
+                                           "--kv-unified   one cache for every slot\n")
+    monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
+    found = [f for f in setup.look() if f.name == "flags this build lacks"]
+    assert found and not found[0].good
+    assert "--kv-unified-per-slot" in found[0].said
+    assert "no --kv-unified-per-slot, it has --kv-unified" in found[0].note
+    assert "--spec-draft-n-max" in found[0].said
+
+
+def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch):
+    import ml_stack.serve.binary as binary_module
+    import ml_stack.setup as setup
+    from ml_stack.serve import backend
+    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
+
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
+    quiet = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
+    everything = "\n".join(f"{flag} X   described" for flag in
+                           emitted_flags(LlamaServerBackend(binary=quiet))) + "\n"
+    stand_in = _server_answering(tmp_path, everything)
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
+    assert not [f for f in setup.look() if f.name == "flags this build lacks"]
+
+
+def test_a_missing_architecture_offers_the_build_fix(monkeypatch):
+    """`ml-stack-serve build` is the fix for a release lagging master by an architecture --
+    `ml-stack-setup --yes` runs whatever a finding's `fix` names, so this is what makes
+    `--yes` actually get a missing architecture rather than just naming the gap."""
+    import ml_stack.setup as setup
+
+    monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
+    found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
+    assert found and found[0].fix == "ml-stack-serve build"
+
+    monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4", "qwen4exp"})
+    found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
+    assert found and found[0].fix == ""
+
+
+def test_lacking_flags_offer_the_build_fix(tmp_path, monkeypatch):
+    import ml_stack.serve.binary as binary_module
+    import ml_stack.setup as setup
+    from ml_stack.serve import backend
+
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
+    stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
+    monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
+    found = [f for f in setup.look() if f.name == "flags this build lacks"]
+    assert found and found[0].fix == "ml-stack-serve build"
+
+
+def test_a_managed_build_is_labelled_by_commit_and_age_not_by_version(tmp_path):
+    """BUILD.json is what tells a managed build apart from a brew one -- read it rather than
+    guessing from the path, since both sit at some arbitrary directory."""
+    import ml_stack.setup as setup
+
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    (tmp_path / "BUILD.json").write_text(json.dumps({
+        "commit": "abc1234", "built_at": "2020-01-01T00:00:00+00:00", "version": "x"}))
+
+    label = setup._build_label(str(binary))
+    assert "abc1234" in label
+    assert "d old" in label, "2020 is certainly more than a day before today"
+
+
+def test_an_unmanaged_build_is_labelled_by_its_own_version_output(tmp_path):
+    import ml_stack.setup as setup
+
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'version: 0.3.0'; fi\n")
+    binary.chmod(0o755)
+
+    assert setup._build_label(str(binary)) == "version: 0.3.0"
+
+
+def test_a_build_that_prints_no_help_is_not_accused_of_lacking_anything(tmp_path, monkeypatch):
+    """Unknown is not none: a stand-in that says nothing must not be reported as lacking
+    every flag there is."""
+    import ml_stack.serve.binary as binary_module
+    import ml_stack.setup as setup
+    from ml_stack.serve import backend
+
+    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(setup, "_arches", lambda binary: set())
+    silent = tmp_path / "llama-server"
+    silent.write_text("#!/bin/sh\nexit 0\n")
+    silent.chmod(0o755)
+    monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: silent)
+    assert not [f for f in setup.look() if f.name == "flags this build lacks"]

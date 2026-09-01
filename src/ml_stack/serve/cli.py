@@ -14,6 +14,7 @@ from pathlib import Path
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
+from ml_stack.serve import build
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import STATE_FILE, ServerManager, recorded_servers
@@ -253,7 +254,7 @@ def drafted(model: str, asked: str) -> str:
 
 
 def cmd_up(args: argparse.Namespace) -> int:
-    from ml_stack.serve.backend import LlamaServerBackend
+    from ml_stack.serve.backend import LlamaServerBackend, UnknownFlag
 
     chosen = str(getattr(args, "binary", "") or "")
     manager = ServerManager(LlamaServerBackend(binary=chosen) if chosen else None,
@@ -284,6 +285,11 @@ def cmd_up(args: argparse.Namespace) -> int:
                       cpu_moe=bool(getattr(args, "cpu_moe", False)))
     try:
         info = manager.lease(spec, timeout=args.timeout)
+    except UnknownFlag as exc:
+        # Refused before the load, not at the end of it: the build was asked what it
+        # accepts and the answer is printed one flag per line, with the nearest it has.
+        print(exc, file=sys.stderr)
+        return 2
     except (ServerFailed, BinaryNotFound, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -431,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack-serve",
         description="See which model is being served on this machine, put one up, take it down.")
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="{status,up,down}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
     status = sub.add_parser("status", help="what is serving, and what a lease would do")
     status.add_argument("--port", type=int, default=DEFAULT_PORT,
@@ -522,9 +528,40 @@ def main(argv: list[str] | None = None) -> int:
     down.add_argument("--root", default=DEFAULT_ROOT,
                       help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})")
 
+    build_p = sub.add_parser(
+        "build", help="build llama-server from llama.cpp's own master (or download the "
+                      "newest release), and switch to it once it is verified")
+    build_p.add_argument("--from", dest="source_kind", default="", choices=["source", "release"],
+                         help="'source' compiles master with cmake, 'release' downloads the "
+                              "newest GitHub release with an asset for this machine. "
+                              "Default: source when a compiler is on PATH, release otherwise")
+    build_p.add_argument("--commit", default="", metavar="SHA",
+                         help="build this commit instead of master's tip (--from source only)")
+    build_p.add_argument("--jobs", type=int, default=0, metavar="N",
+                         help="parallel compile jobs (default: every core)")
+    build_p.add_argument("--source", default="", metavar="DIR",
+                         help="reuse a checkout here instead of cloning/updating the "
+                              "managed one")
+    build_p.add_argument("--force", action="store_true",
+                         help="rebuild or redownload even if this commit/release is "
+                              "already installed")
+    build_p.add_argument("--check", action="store_true",
+                         help="report the installed build's commit, age and "
+                              "architectures -- builds nothing")
+    build_p.add_argument("--rollback", action="store_true",
+                         help="point 'current' back at the previous verified build")
+    build_p.add_argument("--persist", action="store_true",
+                         help="install a weekly refresh (a LaunchAgent on macOS, a "
+                              "Scheduled Task on Windows) that reruns this on its own")
+    build_p.add_argument("--adopt", default="", metavar="DIR",
+                         help="register a flat build directory that already exists -- a "
+                              "hand-built binary, or a release zip unpacked by hand -- as "
+                              "a managed build, verify it, and switch to it now, without "
+                              "compiling or downloading anything")
+
     args = ap.parse_args(argv)
-    return {"status": cmd_status, "up": cmd_up, "down": cmd_down,
-            "memory": cmd_memory}[args.cmd](args)
+    return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "memory": cmd_memory,
+            "build": build.cmd_build}[args.cmd](args)
 
 
 if __name__ == "__main__":

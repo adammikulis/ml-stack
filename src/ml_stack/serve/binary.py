@@ -16,6 +16,13 @@ CACHE_ROOT = Path(
     os.environ.get("ML_STACK_CACHE", Path.home() / ".cache" / "ml_stack")
 ).expanduser()
 
+# Where `ml-stack-serve build` installs what it builds or downloads, and which build is
+# trusted right now. `build.py` only repoints MANAGED_CURRENT once a new build answers
+# --help and reads every architecture the old one did -- so finding it here is finding
+# something already verified, never a build in progress.
+MANAGED_ROOT = Path.home() / ".ml-stack" / "llama.cpp"
+MANAGED_CURRENT = MANAGED_ROOT / "current"
+
 # Directories that are on PATH only in a login shell, so a subprocess never sees them.
 _LOGIN_SHELL_DIRS = (
     Path.home() / "bin",
@@ -60,6 +67,15 @@ def find_binary(
             if path.is_file():
                 return path.resolve()
 
+    if name == "llama-server":
+        # A verified `ml-stack-serve build` outranks a login shell's PATH and the stale
+        # bottle a release lags behind -- but never an explicit path or $LLAMA_CPP_SERVER,
+        # both handled above.
+        for candidate in candidates:
+            path = MANAGED_CURRENT / candidate
+            if path.is_file():
+                return path.resolve()
+
     for directory in (vendor_dir, CACHE_ROOT, *_LOGIN_SHELL_DIRS):
         if directory is None:
             continue
@@ -80,8 +96,12 @@ def require_binary(name: str = "llama-server", **kwargs: object) -> Path:
     if found is not None:
         return found
     raise BinaryNotFound(
-        f"{name} not found. Looked at: $LLAMA_CPP_SERVER, $LLAMA_CPP_DIR, a vendor dir, "
-        f"PATH, {CACHE_ROOT}, and {', '.join(str(d) for d in _LOGIN_SHELL_DIRS)}.\n"
+        f"{name} not found. Looked at: $LLAMA_CPP_SERVER, $LLAMA_CPP_DIR, {MANAGED_CURRENT}, "
+        f"a vendor dir, PATH, {CACHE_ROOT}, and "
+        f"{', '.join(str(d) for d in _LOGIN_SHELL_DIRS)}.\n"
+        f"ml-stack-serve build   builds llama.cpp's own master (or downloads the newest "
+        f"release, on a machine with no compiler) -- usually what you want, since a "
+        f"release lags master by an architecture or two.\n"
         f"On macOS: brew install llama.cpp"
     )
 

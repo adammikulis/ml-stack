@@ -133,3 +133,4 @@ Claude Code
 Flash Attention
 Marlow Dell
 Nowhere Much
+Developer Mode

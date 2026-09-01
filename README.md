@@ -379,9 +379,20 @@ checks ahead of PATH and a login shell's `/opt/homebrew/bin`, though never ahead
 installed build's commit and age without building anything; `--rollback` points `current`
 back; `--persist` installs a weekly refresh (a LaunchAgent on macOS, a Scheduled Task on
 Windows) that reruns it unattended — safe because a refresh that fails verification changes
-nothing. `ml-stack-setup` names the fix directly when an architecture or a flag is missing.
-A one-off binary from somewhere else still works: `ml-stack-serve up --binary
-/path/to/llama-server`.
+nothing. `--adopt DIR` registers a flat build that already exists — a hand-built binary, or
+a release someone unpacked by hand — as a managed build through the same verification,
+without compiling or downloading anything; a compile already running keeps going regardless,
+and only switches `current` itself once it goes on to verify. `ml-stack-setup` names the fix
+directly when an architecture or a flag is missing. A one-off binary from somewhere else
+still works: `ml-stack-serve up --binary /path/to/llama-server`.
+
+Verifying by architecture *name* is only as precise as the name: measured for real, a
+build's `libllama` read `phi4` and looked exactly like a missing architecture next to a
+build that had it — but master's own `src/llama-arch.cpp` defines no `LLM_ARCH_PHI4` at
+all; `phi4` names a chat template (`llama-chat.cpp`), not a model architecture, and Phi-4
+loads through the `phi3` architecture regardless. With a source checkout to read the real
+names from, the comparison is restricted to them; without one, it falls back to guessing by
+family prefix, the same as before.
 
 **A release also renames flags**, and a flag the build does not have fails at the far end
 of the load: `--draft-max` became `--spec-draft-n-max`, and llama.cpp 0.3.0 keeps the old
