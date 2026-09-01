@@ -248,16 +248,36 @@ def test_quote_links_respect_word_boundaries(open_page):
     assert errors == []
 
 
-def test_an_answer_counts_only_the_nodes_it_names(open_page):
-    """Fails when the u flag is dropped from the word-splitting regex in words()."""
+def test_an_answer_lights_only_what_it_names(open_page):
+    """Fails when the u flag is dropped from the word-splitting regex in words().
+
+    A model that does not call ``show`` leaves the prose as the only witness to what its
+    answer was about. Lighting everything the tools touched instead lit the topic a question
+    about people was found through, and left the people dark.
+    """
     reply = {"content": "Ada Lovelace kept coming back to it.",
              "ids": ["person:ada", "topic:iron", "org:quenlow"], "why": ""}
     page, errors = open_page(served=True, ask_reply=reply)
     page.wait_for_selector("#stats b")
     page.fill("#q", "who kept coming back to iron?")
     page.press("#q", "Enter")
-    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 3")
-    assert "The first 1" in page.locator("#detail p.aside-note").inner_text()
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
+    assert page.locator('#detail .links button[data-id="person:ada"]').count() == 1
+    assert page.locator('#detail .links button[data-id="org:quenlow"]').count() == 0
+    assert errors == []
+
+
+def test_show_beats_everything_else_the_tools_touched(open_page):
+    """What lights up is what the model says its answer is about, not its working."""
+    reply = {"content": "They both keep at it.",
+             "ids": ["topic:iron"], "read": ["topic:iron"],
+             "show": ["person:ada", "org:quenlow"], "why": ""}
+    page, errors = open_page(served=True, ask_reply=reply)
+    page.wait_for_selector("#stats b")
+    page.fill("#q", "who keeps at iron?")
+    page.press("#q", "Enter")
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 2")
+    assert page.locator('#detail .links button[data-id="person:ada"]').count() == 1
     assert errors == []
 
 
@@ -318,13 +338,13 @@ def test_history_replays_the_messages_in_order(open_page):
         " return lit.length === 1 ? lit[0] + 1 : false; }"
     ).json_value() - 1
     assert first == 0
-    page.wait_for_selector("#graph circle.pulse", state="attached")
+    page.wait_for_selector("#graph circle.orb-core", state="attached")
     page.wait_for_function(
         "() => document.querySelectorAll('#graph .node.lit').length === 2")
     caption = page.text_content("#history-when")
     assert caption and "Ada" not in caption and "iron" not in caption
     page.click("#history")
-    assert page.locator("#graph circle.pulse").count() == 0
+    assert page.locator("#graph circle.orb-core, #graph circle.orb-halo").count() == 0
     assert page.locator("#graph .link.lit").count() == 0
     assert page.locator("#graph .node.lit").count() == 0
     assert page.text_content("#history") == "▶ history"
@@ -342,7 +362,7 @@ def test_a_finished_history_run_leaves_nothing_behind(open_page):
     assert page.get_attribute("#history", "aria-pressed") == "true"
     page.wait_for_function(
         "() => document.getElementById('history').getAttribute('aria-pressed') === 'false'")
-    assert page.locator("#graph circle.pulse").count() == 0
+    assert page.locator("#graph circle.orb-core, #graph circle.orb-halo").count() == 0
     assert page.locator("#graph .link.lit").count() == 0
     assert page.locator("#graph .node.lit").count() == 0
     assert page.text_content("#history") == "▶ history"
@@ -372,6 +392,7 @@ def test_the_review_panel_lists_what_the_server_sent(open_page):
     """Fails when the loadReview() call at the bottom of the review block is deleted."""
     page, errors = open_page(served=True, review=REVIEW, origin="http://127.0.0.1/")
     page.wait_for_selector("#review-box:not([hidden])", state="attached")
+    page.eval_on_selector("#ask-box", "el => { el.open = true }")
     # an addressed request has left the list; the count is what still waits
     assert page.text_content("#review-count") == "1"
     page.eval_on_selector("#review-box", "el => { el.open = true }")
@@ -403,6 +424,7 @@ def test_accepting_posts_the_id_and_refetches_the_list(open_page):
     """Fails when the POST body in paintReview loses its action field."""
     page, errors = open_page(served=True, review=REVIEW, origin="http://127.0.0.1/")
     page.wait_for_selector("#review-box:not([hidden])", state="attached")
+    page.eval_on_selector("#ask-box", "el => { el.open = true }")
     page.eval_on_selector("#review-box", "el => { el.open = true }")
     with page.expect_request(
             lambda r: r.url == "http://127.0.0.1/review" and r.method == "POST") as posted, \
@@ -455,14 +477,16 @@ def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
     page.wait_for_selector("#stats b")
     page.fill("#q", "who works on iron?")
     page.press("#q", "Enter")
-    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 1")
+    # the answer names Ada and iron, and both are what it is about; before this it lit
+    # whatever look_at had been given, which is the working rather than the answer
+    pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 2")
     trace = page.locator("#qturns .t .think .trace").text_content()
     assert "find who works iron." in trace
     assert "look_up 'iron'" in trace and "2 back" in trace
     assert page.locator("#qturns .t .said").inner_text() == "Ada Lovelace works on iron."
     # the trace folds away once the answer has landed
     assert page.get_attribute("#qturns .t .think", "open") is None
-    assert "1 lit up" in page.text_content("#qnote")
+    assert "2 lit up" in page.text_content("#qnote")
     assert errors == []
 
 
@@ -495,8 +519,9 @@ def test_gathering_a_node_looks_like_something_in_3d(open_page):
         "a => [...document.querySelectorAll('#labels3d span')]"
         ".filter(e => getComputedStyle(e).color === a).length", arg=accent)
     assert lit == 1
-    # and the summary says so where it can be read without opening anything
-    assert "gathered" in page.text_content("#ask-summary")
+    # and the count is readable without opening anything: the panel is an overlay and
+    # opening it would take the clicks meant for the graph, so the graph's hint line says it
+    assert "1 gathered" in page.text_content(".tools .hint")
     assert errors == []
 
 
@@ -511,4 +536,202 @@ def test_a_plain_click_drops_what_was_gathered(open_page):
     nodes.nth(2).click()
     assert page.locator("#graph g.node.picked").count() == 0
     assert page.locator("#graph g.node.on").count() == 1
+    assert errors == []
+
+
+def test_gathering_a_second_node_in_3d_keeps_the_labels_moving(open_page):
+    """Fails when a label freezes on screen while the graph turns under it.
+
+    Gathering two nodes and turning the view left one name pinned to a screen position, and
+    find paths did nothing — both of which are what a dead label loop looks like: the render
+    loop keeps drawing spheres, and the names, which are DOM, stop where they were.
+    """
+    page, errors = open_page(view="3d")
+    page.wait_for_selector("#graph3d canvas", state="attached")
+    if not page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+        pytest.skip("no WebGL in this chromium")
+    page.wait_for_selector("#labels3d span:not([hidden])")
+    for i in range(2):
+        label = page.locator("#labels3d span:not([hidden])").nth(i)
+        box = label.bounding_box()
+        page.keyboard.down("Shift")
+        page.mouse.click(box["x"] + box["width"] / 2, box["y"] - 8)
+        page.keyboard.up("Shift")
+    # the loop is alive if the placement pass keeps running: it stamps a frame counter
+    page.evaluate("() => { window.__frames = 0; }")
+    before = page.evaluate("() => [...document.querySelectorAll('#labels3d span')]"
+                           ".map(e => e.style.left + ',' + e.style.top).join('|')")
+    # turn the view, the way a reader would
+    box = page.locator("#graph3d").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + box["width"] / 2 + 220, box["y"] + box["height"] / 2 + 60,
+                    steps=12)
+    page.mouse.up()
+    page.wait_for_timeout(600)
+    after = page.evaluate("() => [...document.querySelectorAll('#labels3d span')]"
+                          ".map(e => e.style.left + ',' + e.style.top).join('|')")
+    assert after != before, "the labels never moved: the placement loop is dead"
+    assert errors == []
+
+
+def test_find_paths_joins_what_was_gathered_in_3d(open_page):
+    """Fails when find paths lights its nodes and draws no route between them."""
+    page, errors = open_page(view="3d")
+    page.wait_for_selector("#graph3d canvas", state="attached")
+    if not page.evaluate("!!document.createElement('canvas').getContext('webgl2')"):
+        pytest.skip("no WebGL in this chromium")
+    page.wait_for_selector("#labels3d span:not([hidden])")
+    # two named nodes, gathered by their own names: the list re-sorts after every pick, so
+    # clicking "the first" twice clicks one node twice and toggles it straight back off
+    names = page.evaluate("() => [...document.querySelectorAll('#labels3d span')]"
+                          ".filter(e => !e.hidden && !e.className.includes('edge'))"
+                          ".slice(0, 2).map(e => e.textContent)")
+    assert len(names) == 2
+    picked = page.locator("#picked button")
+    for name in names:
+        want = picked.count() + 1
+        label = page.locator("#labels3d span", has_text=name).first
+        box = label.bounding_box()
+        # a name sits above its node, below it, or on it, and only the page knows which, so
+        # the sphere is hunted for around the name rather than assumed to be one way up
+        for dy in (-8, 14, 6, -20, 22, -30):
+            page.keyboard.down("Shift")
+            page.mouse.click(box["x"] + box["width"] / 2, box["y"] + dy)
+            page.keyboard.up("Shift")
+            if picked.count() == want:
+                break
+    assert picked.count() == 2, "a second shift-click gathered nothing"
+    page.click("#findpath")
+    page.wait_for_timeout(300)
+    assert "joined" in page.text_content("#qcount") or page.text_content("#qcount").isdigit()
+    assert errors == []
+
+def joined_only_through_a_topic():
+    """Two members whose only connection is a subject they share, and one direct pair.
+
+    The shared fixture's two people are in different components, so no route exists either
+    way and a test over it cannot tell the two modes apart.
+    """
+    return {
+        "nodes": [
+            {"id": "person:ada", "label": "Ada Lovelace", "kind": "person", "mentions": 3,
+             "attrs": {"member": True}, "messages": []},
+            {"id": "person:grace", "label": "Grace Hopper", "kind": "person", "mentions": 2,
+             "attrs": {"member": True}, "messages": []},
+            {"id": "person:alan", "label": "Alan Turing", "kind": "person", "mentions": 2,
+             "attrs": {"member": True}, "messages": []},
+            {"id": "topic:iron", "label": "iron", "kind": "topic", "mentions": 2,
+             "attrs": {}, "messages": []},
+        ],
+        "edges": [
+            {"source": "person:ada", "target": "topic:iron", "rel": "works_on", "weight": 2,
+             "messages": []},
+            {"source": "person:grace", "target": "topic:iron", "rel": "works_on", "weight": 2,
+             "messages": []},
+            {"source": "person:ada", "target": "person:alan", "rel": "works_with", "weight": 1,
+             "messages": []},
+        ],
+        "messages": {},
+        "stats": {"messages": 0},
+        "meta": {},
+    }
+
+
+def gather(page, *ids):
+    for node_id in ids:
+        page.evaluate(
+            """id => { const g = [...document.querySelectorAll('#graph g.node')]
+                        .find(x => x.__data__.id === id);
+                       const r = g.querySelector('circle.hit').getBoundingClientRect();
+                       g.dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true,
+                         clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 })); }""",
+            node_id)
+
+
+def lit_kinds(page):
+    return page.evaluate(
+        "() => [...document.querySelectorAll('#graph g.node.answer')]"
+        ".map(g => g.className.baseVal.match(/k-(\\w+)/)[1]).sort()")
+
+
+def test_join_like_with_like_narrows_what_a_route_passes_through(open_page):
+    """Fails when the chip does not actually change what a route may pass through.
+
+    Two members joined only by a subject they share is a true connection and often the
+    useful one; it is also how a small answer ends up lighting half the graph. The chip is
+    the choice between the two, and it has to make a difference a reader can see.
+    """
+    page, errors = open_page(joined_only_through_a_topic())
+    settle(page)
+    assert page.get_attribute("#likewise", "aria-pressed") == "false"
+
+    gather(page, "person:ada", "person:grace")
+    assert page.locator("#picked button").count() == 2
+    page.click("#findpath")
+    page.wait_for_timeout(400)
+    # through anything: the subject they share is what joins them, and it lights
+    assert lit_kinds(page) == ["person", "person", "topic"]
+
+    page.click("#likewise")
+    page.wait_for_timeout(500)
+    assert page.get_attribute("#likewise", "aria-pressed") == "true"
+    # like with like: there is no way from one to the other through people alone
+    assert "topic" not in lit_kinds(page)
+    assert "unreachable" in page.text_content("#qcount")
+
+    # and a pair that really is joined person-to-person still joins
+    page.click("#qclear")
+    gather(page, "person:grace")           # drop Grace, keep Ada
+    gather(page, "person:alan")
+    page.click("#findpath")
+    page.wait_for_timeout(400)
+    assert lit_kinds(page) == ["person", "person"]
+    assert errors == []
+
+
+def test_the_details_panel_can_go_back_wherever_you_came_from(open_page):
+    """Fails when back only exists after an answer, or does not step back one at a time.
+
+    Clicking a member, then one of their connections, then one of theirs, is how anyone
+    reads a graph. Until this there was no way back but finding the first one again by eye,
+    and the button only existed if an answer had put you there.
+    """
+    # a graph where a subject really does join two members, so there is a third hop to take
+    page, errors = open_page(joined_only_through_a_topic())
+    settle(page)
+    # straight from the graph, with no answer anywhere: the first view has nothing behind it
+    page.locator("#graph g.node", has_text="Ada Lovelace").first.press("Enter")
+    page.wait_for_selector("#detail h2")
+    assert page.text_content("#detail h2") == "Ada Lovelace"
+    # The panel with nothing chosen is a view too — it is the only place the shared ground is
+    # listed, so opening one of those pairs has to be undoable like any other step.
+    home = page.locator("#detail #panel-back")
+    assert home.count() == 1 and "What is here" in home.inner_text(), home.inner_text()
+    home.click()
+    page.wait_for_selector("#detail .placeholder")
+    assert page.locator("#detail #panel-back").count() == 0, "home has nothing behind it"
+    page.locator("#graph g.node", has_text="Ada Lovelace").first.press("Enter")
+    page.wait_for_selector("#detail h2")
+
+    # follow a connection, and back names where it came from
+    page.click("#detail details.fold summary")
+    page.locator('#detail .links button[data-id="topic:iron"]').click()
+    page.wait_for_selector("#detail h2:text('iron')")
+    back = page.locator("#detail #panel-back")
+    assert back.count() == 1
+    assert "Ada Lovelace" in back.inner_text()
+    # it is at the top of the panel, above everything else in it
+    box, panel = back.bounding_box(), page.locator("#detail").bounding_box()
+    assert box["y"] - panel["y"] < 40 and box["x"] - panel["x"] < 40
+
+    # one more hop, then back twice returns the way it came rather than jumping to the start
+    page.click("#detail details.fold summary")
+    page.locator('#detail .links button[data-id="person:grace"]').first.click()
+    page.wait_for_selector("#detail h2:text('Grace Hopper')")
+    page.click("#detail #panel-back")
+    page.wait_for_selector("#detail h2:text('iron')")
+    page.click("#detail #panel-back")
+    page.wait_for_selector("#detail h2:text('Ada Lovelace')")
+    assert "What is here" in page.locator("#detail #panel-back").inner_text()
     assert errors == []

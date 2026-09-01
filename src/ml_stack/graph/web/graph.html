@@ -1,5 +1,8 @@
 <title>__TITLE__</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- inline, so the page stays one file and asks the server for nothing it has
+     no route for: a bare /favicon.ico 404 is the only error a clean load produced -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%231c1c1a%22%2F%3E%3Cpath%20d%3D%22M9%2022%20L16%2010%20L23%2022%22%20stroke%3D%22%233987e5%22%20stroke-width%3D%222.2%22%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2210%22%20r%3D%223.4%22%20fill%3D%22%233987e5%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%2222%22%20r%3D%222.8%22%20fill%3D%22%23f1f0ea%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2222%22%20r%3D%222.8%22%20fill%3D%22%23f1f0ea%22%2F%3E%3C%2Fsvg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
@@ -161,9 +164,11 @@ main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 
 .graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
 /* first row of the tool column, so however many lines it wraps to, the buttons start below */
 .hint { font-size: 11px; color: var(--ink-3); max-width: 340px; text-align: right; }
+.hint .tally { color: var(--accent); font-family: var(--font-mono); font-weight: 500; }
+.hint .tally::after { content: " · "; color: var(--ink-3); }
 .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
 
-aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-height: 0; }
+aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
 /* the question on the left, what it is about on the right */
 .two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
 .askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
@@ -176,13 +181,17 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   border-bottom: 1px solid var(--line); } }
 .ask-box { border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
            box-shadow: var(--shadow); }
-#ask-box { position: absolute; left: 14px; bottom: 12px; z-index: 4; width: 310px; max-width: calc(100% - 28px); }
-#ask-box[open] { max-height: calc(100% - 24px); overflow: auto; }
+/* Shut, it is a small label in a corner and nothing more — it used to hold its open width
+   whether or not it was open, so a 310px slab sat over the graph the whole time. */
+#ask-box { position: absolute; left: 14px; bottom: 12px; z-index: 4; max-width: calc(100% - 28px); }
+#ask-box:not([open]) { width: auto; }
+#ask-box[open] { width: 310px; max-height: calc(100% - 24px); overflow: auto; }
 #chat-box { border-left: 0; border-right: 0; border-radius: 0; border-top: 0;
   border-bottom: 1px solid var(--line); box-shadow: none; }
-.ask-box > summary { list-style: none; cursor: pointer; padding: 9px 18px;
-  font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
-  color: var(--ink-3); display: flex; align-items: center; gap: 7px; }
+#chat-box > summary { padding: 9px 18px; font-size: 11px; }
+.ask-box > summary { list-style: none; cursor: pointer; padding: 6px 12px;
+  font: 600 10px var(--font-body); letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .ask-box > summary::-webkit-details-marker { display: none; }
 .ask-box > summary::before { content: "+"; font-family: var(--font-mono); font-size: 13px; color: var(--line-strong); }
 .ask-box[open] > summary::before { content: "\2212"; }
@@ -190,6 +199,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
 .ask { padding: 0 18px 14px; display: grid; gap: 6px; min-width: 0; }
 /* the examples were in the placeholder, which cannot wrap out of a two-row box */
 .for-instance { margin: -2px 0 2px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.opt-out { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
+.map-note { color: var(--ink-3); font-weight: 400; }
+.map-note:not(:empty)::before { content: " · "; }
 .seat { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--line-strong);
         text-transform: none; letter-spacing: 0; }
 .chat { padding: 0 18px 12px; display: grid; gap: 8px; }
@@ -208,6 +220,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   cursor: pointer; border: 1px solid var(--line-strong); border-radius: 8px;
   background: var(--surface); color: var(--ink-2); }
 .show-again:hover { color: var(--ink); border-color: var(--accent); }
+.show-again.draft { border-color: var(--accent); color: var(--accent); }
+.note-draft { margin-top: 8px; padding: 9px 11px; border: 1px solid var(--line);
+  border-left: 2px solid var(--accent); border-radius: 6px; background: var(--surface); }
+.note-words { margin: 0 0 7px; font-size: 12px; line-height: 1.6; color: var(--ink);
+  white-space: pre-wrap; }
 .turns .t .think { margin: 0 0 5px; font-size: 11px; line-height: 1.45; color: var(--ink-3); }
 .turns .t .think summary { cursor: pointer; list-style: none; color: var(--ink-3); }
 .turns .t .think summary::-webkit-details-marker { display: none; }
@@ -240,6 +257,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
 .kinds-of-ask button { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line);
                        border-radius: 999px; background: var(--surface); color: var(--ink-3); cursor: pointer; }
 .kinds-of-ask button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.connects { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.connects h4 { margin: 0 0 6px; font-size: 11px; font-weight: 500; letter-spacing: .04em;
+               text-transform: uppercase; color: var(--ink-3); }
+.connects p { margin: 0 0 6px; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+.connects b { color: var(--ink); font-weight: 500; }
+.ways { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); }
+.way { display: block; margin-top: 2px; padding-left: 10px; font-family: var(--font-mono);
+       color: var(--ink-2); }
 .picked { display: flex; flex-wrap: wrap; gap: 4px; }
 .picked .hint-inline { font-size: 11px; color: var(--ink-3); }
 .picked button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px;
@@ -269,7 +294,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
 .review-box:not([open]) > summary::after { content: "+"; }
 .review-box > summary:hover { color: var(--ink); }
 .review-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
-.review { padding: 0 18px 8px; display: grid; gap: 10px; max-height: 40vh; overflow: auto; }
+.review { padding: 0 18px 8px; display: grid; gap: 10px; max-height: 32vh; overflow: auto; }
 .req { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; font-size: 12px; }
 .req .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
 .req .meta .status { color: var(--ink); }
@@ -292,7 +317,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
 .detail h3 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
 .detail h3:first-child { margin-top: 0; }
 .aside-note { font-size: 11px; color: var(--ink-3); margin: 8px 0 0; }
-.back { margin-top: 14px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer;
+.back { margin: 0 0 10px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer;
   border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
 .back:hover { color: var(--ink); }
 .read { margin-top: 7px; }
@@ -367,6 +392,15 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
 .node .hit { fill: transparent; }
 .node .mark { stroke: var(--surface); stroke-width: 2px; pointer-events: none; }
 .link.onpath { stroke: var(--accent); stroke-opacity: .95; stroke-width: 2.4; }
+/* A message crossing an arrow: a bright core inside a soft halo, so what is moving reads as
+   light rather than as a dot. Both ride the edge as it is actually drawn. */
+.orb-halo { fill: var(--accent); opacity: .22; pointer-events: none; }
+.orb-core { fill: var(--accent); stroke: #fff; stroke-opacity: .85; stroke-width: 1; pointer-events: none; }
+@media (prefers-reduced-motion: reduce) {
+  .orb-halo, .orb-core { display: none !important; }
+}
+/* the joining is the point of a path run, so it outranks whatever dimmed everything else */
+.link.onpath.dim { opacity: 1; }
 .hitline { stroke: transparent; stroke-width: 14; cursor: pointer; }
 .hitline.gone { display: none; }
 /* the history run: a dot rides each lit edge, the stroke flares to the accent and fades back */
@@ -446,6 +480,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         <div class="picked" id="picked"><span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span></div>
         <textarea id="ask-text" rows="3" placeholder="What should change?"></textarea>
         <p class="for-instance">for instance: drop my location · I left that company · this is not my topic</p>
+        <p class="for-instance opt-out" id="opt-out"></p>
         <label class="who-i-am"><span>Which of these are you?</span>
           <select id="ask-who"><option value="">choose your name</option></select>
         </label>
@@ -454,9 +489,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         </label>
         <div class="ask-row"><button type="submit">Send</button><span class="note" id="ask-note"></span></div>
       </form>
+      <details class="review-box" id="review-box" hidden>
+        <summary><b id="review-count">0</b> <span>change requests</span></summary>
+        <div class="review" id="review-list"></div>
+        <p class="review-note">Accepted changes reach the picture on the next “Refresh graph”.</p>
+      </details>
       </details>
       <div class="tools">
-        <div class="hint">drag to move · scroll to zoom · click to inspect</div>
+        <div class="hint"><b class="tally" id="gathered-tally" hidden></b><span id="hint-text">drag to move · scroll to zoom · click to inspect</span></div>
         <button id="history" class="chip" aria-pressed="false"
                 title="Play the messages through in order">▶ history</button>
         <div class="when" id="history-when" hidden></div>
@@ -464,17 +504,17 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
         <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
         <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
+        <button id="likewise" class="chip" aria-pressed="false"
+                title="Route only through entries of the kinds being joined — people through people, rather than through whatever topic they happen to share">⇢ join like with like</button>
         <button id="snap" class="chip" aria-pressed="true"
                 title="Move the view to a node when you click it">⊙ snap to node</button>
-        <button id="magnitude" class="chip" aria-pressed="true"
-                title="Draw a link's weight: thicker and shorter when more sources agree">≡ weigh links</button>
       </div>
     </section>
     <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
          aria-label="Resize the graph"></div>
     <aside>
       <details class="map-box" id="map-box" open>
-        <summary><b id="located">0</b> <span id="on-map">on the map</span></summary>
+        <summary><b id="located">0</b> <span id="on-map">on the map</span><span class="map-note" id="map-note"></span></summary>
         <div class="map-wrap" aria-label="Member map">
           <svg id="map"></svg>
         </div>
@@ -496,11 +536,6 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         </div>
         <div class="detail" id="detail"></div>
       </div>
-      <details class="review-box" id="review-box" hidden>
-        <summary><b id="review-count">0</b> <span>change requests</span></summary>
-        <div class="review" id="review-list"></div>
-        <p class="review-note">Accepted changes reach the picture on the next “Refresh graph”.</p>
-      </details>
     </aside>
   </main>
 </div>
@@ -524,9 +559,27 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     blurb: 'Click anything to see what it was read from.',
     note: '',
     onMap: 'on the map',
+    // why the rest are not there; the count on its own reads as a gap in the data
+    unplaced: 'have not said where they are',
+    // How someone leaves entirely, said where they are already being asked what should
+    // change. A graph built from what people said in public still owes them a way out, and
+    // an owner is asked for it before they are asked for anything else.
+    optOut: 'Everything here was said in public. To come out of it '
+            + 'altogether, ask and the whole entry goes.',
     ground: 'Shared ground',
+    // Where a message came from, named by whoever built the page: "Open in Slack", "Open the
+    // thread", "Open the ticket". This page has no idea what it is reading and should not
+    // guess -- naming one company's chat tool here is how a generic page stops being one.
+    openMessage: 'Open ↗',
+    // what a copied note is for, in whatever place this community actually talks
+    copied: 'Copied — send it to whoever it is for.',
+    empty: 'The graph fills in as messages are read.',
   }, DATA.copy || {});
+  // A source whose messages are working notes rather than things members said -- a build log,
+  // a transcript channel. Named by the caller because only it knows; unset, nothing hides.
+  const ASIDE = String(DATA.asideSource || '');
   document.getElementById('on-map').textContent = COPY.onMap;
+  document.getElementById('opt-out').textContent = COPY.optOut || '';
   const kindById = Object.fromEntries(G.nodes.map(n => [n.id, n.kind]));
   const p2pCount = G.edges.filter(e => kindById[e.source] === 'person'
                                     && kindById[e.target] === 'person').length;
@@ -545,7 +598,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   display.between = 'show';
   const colors = {};
   const view = { density: 30, labelScale: 1, elabelScale: 1, spring: 1, repel: 1, spin: true,
-                 map: true, split: 0, mapH: 0, snap: true, magnitude: true };
+                 map: true, split: 0, mapH: 0, snap: true, likewise: false };
   const picked = new Set();
   let pathLinks = new Set();
   // the same file is served from this machine and published as a flat page; only the served
@@ -623,7 +676,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   // the filter in the graph is the graph's own; asking the model pushes its answer into it
   const gBox = document.getElementById('gq');
   gBox.addEventListener('input', () => {
-    answer = null; pathLinks = new Set();
+    answer = null; pathLinks = new Set(); stopSignal();
     query = gBox.value.trim().toLowerCase();
     refresh();
   });
@@ -640,6 +693,18 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   }
   const qNote = document.getElementById('qnote');
   const turns = [];
+  // A name for this conversation, kept so that reopening the page reopens the chat. The
+  // turns themselves live in the graph, joined to the entries each answer drew on; this is
+  // only the label under which to ask for them. localStorage can throw outright in a
+  // private window or a preview, so every touch of it is guarded.
+  const threadName = (() => {
+    try {
+      let held = localStorage.getItem('thread');
+      if (!held) { held = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+                   localStorage.setItem('thread', held); }
+      return held;
+    } catch (e) { return ''; }
+  })();
   let asking = false;
 
   function say(role, text) {
@@ -650,12 +715,31 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     qTurns.scrollTop = qTurns.scrollHeight;
     return el;
   }
+  // Reopen the conversation the store is holding. History used to live only in this array,
+  // which meant closing the tab ended the conversation and no other machine could see it.
+  // A server without the route simply has none, and the chat starts empty as before.
+  async function reopen() {
+    if (!threadName) return;
+    try {
+      const r = await fetch('/thread/' + encodeURIComponent(threadName));
+      if (!r.ok) return;
+      const held = await r.json();
+      for (const t of (held.turns || [])) {
+        if (!t.text) continue;
+        turns.push({ role: t.role, content: t.text });
+        say(t.role, t.text);
+      }
+      if ((held.turns || []).length) openAnswers('');
+    } catch (e) { /* no history is not a broken page */ }
+  }
+  reopen();
+
   // Every answer stays clickable: what it lit up and what it was about come back with it, so
   // the conversation is the history of the graph as much as of the words.
   // Numbered, so an exchange can be referred to out loud, and because a conversation you can
   // point at is one you can carry on rather than restart.
   let exchanges = 0;
-  function replayable(el, ids, said) {
+  function replayable(el, ids, said, asked) {
     el.classList.add('replay');
     el.dataset.n = String(++exchanges);
     const button = document.createElement('button');
@@ -663,11 +747,26 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     button.className = 'show-again';
     button.textContent = `show these ${ids.length} on the graph`;
     el.appendChild(button);
+    // An answer that says who should work together and stops there has done half the job.
+    // The model writes the note; a person reads it and sends it. Nothing here posts
+    // anything anywhere — this page cannot reach the community, and should not be able to.
+    if (served && ids.length > 1) draftable(el, ids, said, asked);
     const again = () => {
       selected = null;
+      // the same three a fresh answer clears: refresh() runs search() first, and a stale
+      // query or path would repaint over the count set just below
+      query = '';
+      pathLinks = new Set();
       answer = ids.length ? new Set(ids) : null;
-      qCount.textContent = ids.length ? String(ids.length) : '';
+      // replaying an answer replays what it showed, connectors included
+      if (ids.length > 1) {
+        const { joined, onPath } = joinUp(ids);
+        answer = joined;
+        pathLinks = onPath;
+        runSignal(routeThrough(ids));
+      }
       refresh();
+      qCount.textContent = ids.length ? String(ids.length) : '';
       renderFound(ids, said);
       qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
       el.classList.add('here');
@@ -740,6 +839,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     const pending = say('assistant', '…');
     try {
       const payload = JSON.stringify({ question, turns: turns.slice(0, -1),
+                                       ...(threadName ? { thread: threadName } : {}),
                                        ...(held.length ? { held } : {}) });
       // the streaming route shows the work as it happens; a server without it gets one POST
       let out = await askStream(payload, pending);
@@ -769,11 +869,21 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         if (window.reloadReview) window.reloadReview();
       }
       turns.push({ role: 'assistant', content: said });
-      // what the model read and traced is the answer; what it merely found is a search
-      // result, and lighting search results floods the graph
-      const lit = ((out.read || []).length || (out.path || []).length)
-        ? [...new Set([...(out.read || []), ...(out.path || [])])]
-        : (out.ids || []);
+      // What lights up is what the answer is ABOUT, which only the model knows: it says so
+      // with `show`. Everything else the server sends back is the working — every id the
+      // tools touched, which includes whatever was already highlighted and re-read, and the
+      // topic it opened to find the people it then wrote about. Lighting the working lights
+      // the search and hides the answer, and that is what it did.
+      // Failing `show`, the prose is the next best witness: the entries the answer names.
+      const named = namedIn(said).map(n => n.id);
+      const candidates = (out.show || []).length ? [...new Set(out.show)]
+        : named.length ? named
+        : ((out.read || []).length || (out.path || []).length)
+          ? [...new Set([...(out.read || []), ...(out.path || [])])]
+          : (out.ids || []);
+      // one array behind every count: the button, the pane header and the note disagreed
+      // whenever the server named something this page was not shipped
+      const lit = candidates.filter(id => byId.has(id));
       query = lit.length ? '' : query;
       // the answer names things; the pane beside it shows the first of them, so reading the
       // answer and reading what it is about do not take turns
@@ -781,14 +891,29 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         answer = new Set(lit);
         pathLinks = new Set();
         qCount.textContent = String(lit.length);
+        // An answer about several entries raises the question of how they join, every time,
+        // so it is answered without being asked: the walk between them is drawn and the
+        // connectors light with them. Asking for two people and being shown two unconnected
+        // dots is the reader having to do the next step by hand.
+        if (lit.length > 1) {
+          const { joined, onPath } = joinUp(lit);
+          answer = joined;
+          pathLinks = onPath;
+          runSignal(routeThrough(lit));
+        }
         refresh();
         renderFound(lit, said);
-        replayable(pending, lit, said);
+        replayable(pending, lit, said, question);
         qTurns.querySelectorAll('.t.here').forEach(x => x.classList.remove('here'));
         pending.classList.add('here');
       }
       qCount.textContent = lit.length ? String(lit.length) : '';
-      qNote.textContent = (lit.length ? `${lit.length} lit up` : 'nothing to light up')
+      // The answer is about `lit`; joining them up lights the entries in between as well, so
+      // a reader counting what is undimmed finds more than the count says. Say both.
+      const joining = (answer ? answer.size : 0) - lit.length;
+      qNote.textContent = (lit.length ? `${lit.length} lit up`
+                             + (joining > 0 ? ` · ${joining} joining them` : '')
+                           : 'nothing to light up')
         + (out.why ? ` · ${out.why}` : '');
       refresh();
     } catch (err) {
@@ -798,6 +923,54 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   }
   qBox.addEventListener('keydown', ask);
 
+  // The note that turns an answer into an introduction. It is offered, never sent: a page
+  // that could post to the community is a page that will, one day, post something nobody
+  // read first.
+  function draftable(el, ids, said, asked) {
+    const write = document.createElement('button');
+    write.type = 'button';
+    write.className = 'show-again draft';
+    write.textContent = 'draft an introduction';
+    el.appendChild(write);
+    write.addEventListener('click', async e => {
+      e.stopPropagation();
+      if (write.disabled) return;
+      write.disabled = true;
+      write.textContent = 'writing…';
+      try {
+        const r = await fetch('/draft', { method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, question: asked || '', answer: said || '' }) });
+        const out = await r.json();
+        write.remove();
+        const box = document.createElement('div');
+        box.className = 'note-draft';
+        if (!out.text) {
+          box.textContent = out.why || out.error || 'no note came back';
+        } else {
+          const words = document.createElement('p');
+          words.className = 'note-words';
+          words.textContent = out.text;
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.className = 'show-again';
+          copy.textContent = 'copy it';
+          copy.addEventListener('click', async ev => {
+            ev.stopPropagation();
+            try { await navigator.clipboard.writeText(out.text); copy.textContent = 'copied'; }
+            catch (err) { copy.textContent = 'select it and copy'; }
+          });
+          // no line saying nothing was sent: a button that only copies says it already
+          box.append(words, copy);
+        }
+        el.appendChild(box);
+        qTurns.scrollTop = qTurns.scrollHeight;
+      } catch (err) {
+        write.disabled = false;
+        write.textContent = 'draft an introduction';
+      }
+    });
+  }
   // the answer bubble may hold a thinking trace; only the spoken part is replaced
   function sayInto(el, text) {
     const spoken = el.querySelector('.said');
@@ -829,7 +1002,15 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     pending.textContent = '';
     pending.append(think, spoken);
     let out = null;
+    // A model serving one shape on a handful of slots queues a question behind whatever is
+    // already running, and a page that only ever says "thinking…" is indistinguishable from
+    // a broken one. If nothing has arrived in a while, say what is actually happening.
+    let heard = false;
+    const waited = setTimeout(() => {
+      if (!heard) qNote.textContent = 'waiting for the model — it may be busy with another question';
+    }, 20000);
     const feed = ev => {
+      heard = true;
       if (ev.event === 'thinking') {
         trace.append(ev.text || '');
       } else if (ev.event === 'tool') {
@@ -841,6 +1022,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         const line = document.createElement('div');
         line.className = 'step';
         line.textContent = `  → ${ev.count} back`;
+        trace.appendChild(line);
+      } else if (ev.event === 'restart') {
+        // it answered without looking anything up and was sent back to search; what is on
+        // screen is about to be replaced rather than added to
+        spoken.textContent = '';
+        const line = document.createElement('div');
+        line.className = 'step';
+        line.textContent = '  ↻ answered without looking — sent back to search';
         trace.appendChild(line);
       } else if (ev.event === 'answer') {
         spoken.textContent += ev.text || '';
@@ -866,6 +1055,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         }
       }
     }
+    clearTimeout(waited);
     think.open = false;
     if (!trace.childNodes.length) think.remove();
     return out || { error: 'the stream ended without an answer' };
@@ -936,9 +1126,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   // How much a link is worth: how many sources agree on it. Off, every link is a link, which
   // is what you want when the shape matters more than the evidence. Defined before the
   // simulation, which reads them the moment it is built.
-  const thickness = l => (view.magnitude === false ? 1.1 : Math.min(4, 0.8 + Math.sqrt(l.weight)));
-  const apart = l => (view.magnitude === false ? 96 : 90 + 20 / Math.sqrt(l.weight || 1));
-  const pull = l => (view.magnitude === false ? 0.3 : 0.2 + Math.min(0.4, (l.weight || 1) / 10));
+  // A link's weight is how many sources agree, and it is always drawn: thicker and shorter
+  // when more do. It used to be a toggle nobody turned off.
+  const thickness = l => Math.min(4, 0.8 + Math.sqrt(l.weight));
+  const apart = l => 90 + 20 / Math.sqrt(l.weight || 1);
+  const pull = l => 0.2 + Math.min(0.4, (l.weight || 1) / 10);
 
   const sim = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(links).id(d => d.id).distance(apart).strength(pull))
@@ -971,6 +1163,12 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   const shown = n => (n.attrs && n.attrs.handle ? '@' : '') + n.label;
   const labelText = n => { const s = shown(n); return s.length > 26 ? s.slice(0, 24) + '…' : s; };
   const label = node.append('text').attr('text-anchor', 'middle').attr('dy', d => radius(d) + 13).text(labelText);
+  // The travelling signal: the same light a message makes crossing an arrow, walking the
+  // whole route a path run found — through every entry in between, to the far end and back.
+  // A highlighted chain says two things are joined; watching light cross it says which way
+  // round, how far, and what it goes through, which is the thing a reader was asking.
+  const signalHalo = root.append('circle').attr('class', 'orb-halo').attr('r', 9).attr('display', 'none');
+  const signalCore = root.append('circle').attr('class', 'orb-core').attr('r', 3.5).attr('display', 'none');
   const elabel = root.append('g').selectAll('text').data(links).join('text')
     .attr('class', 'elabel').attr('text-anchor', 'middle').text(l => relText(l.rel));
   const measure = () => {
@@ -1102,7 +1300,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   if (view.split) setSplit(view.split);
   if (view.mapH) setMapHeight(view.mapH);
   new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
-  if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html('<div><b>No messages yet.</b><br>The graph fills in as the channels are read.</div>');
+  if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html(`<div><b>No messages yet.</b><br>${esc(COPY.empty)}</div>`);
 
   // ---- map
   // ---- the two borders are handles
@@ -1175,6 +1373,17 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   mapSvg.append('path').attr('class', 'land').attr('d', path(topojson.feature(WORLD, WORLD.objects.land)));
   const pts = placed.map(p => ({ ...p, xy: proj([p.lon, p.lat]) })).filter(p => p.xy);
   document.getElementById('located').textContent = pts.length;
+  // "26 on the map" beside "39 members" invites "why not everyone", and the answer is
+  // ordinary: a member is placed only if they said where they are. Saying so is one line;
+  // leaving it out costs the question every time anyone looks at it.
+  const members = nodes.filter(n => n.attrs && n.attrs.member).length;
+  const unplaced = members - pts.length;
+  const mapNote = document.getElementById('map-note');
+  if (mapNote) {
+    mapNote.textContent = unplaced > 0
+      ? `${unplaced} more ${COPY.unplaced || 'have not said where they are'}`
+      : '';
+  }
   const dots = mapSvg.append('g').selectAll('circle').data(pts).join('circle').attr('class', 'dot')
     .attr('cx', p => p.xy[0]).attr('cy', p => p.xy[1]).attr('r', 5)
     .on('click', (e, p) => select(p.id))
@@ -1230,7 +1439,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       .nodeLabel(n => `<div style="font:12px ${cssVar('--font-body')};padding:4px 7px;border-radius:6px;background:${cssVar('--ink')};color:${cssVar('--bg')}">${shown(n.ref)}<div style="opacity:.7;font-size:11px">${n.ref.attrs.type || n.kind} · ${n.mentions}</div></div>`)
       .linkColor(l => link3d(l))
       .linkOpacity(0.5)
-      .linkWidth(l => (view.magnitude === false ? 0.7 : 0.4 + Math.sqrt(l.weight) * 0.4))
+      .linkWidth(l => 0.4 + Math.sqrt(l.weight) * 0.4)
       .linkDirectionalParticles(l => (glow.has(key3d(l)) ? 4
         : (selected && (l.source.id === selected || l.target.id === selected)) ? 2 : 0))
       .linkDirectionalParticleSpeed(l => (glow.has(key3d(l)) ? 0.02 : 0.006))
@@ -1482,8 +1691,12 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   }
   function link3d(l) {
     const sid = l.source.id ?? l.source, tid = l.target.id ?? l.target;
+    // A path run joins things up and the joining is the answer. In 2D that is the .onpath
+    // rule; here nothing read pathLinks at all, so find paths lit its nodes and drew no
+    // route between them — the one thing it was asked for.
+    if (pathLinks.has(l)) return cssVar('--accent');
     if (selected && (sid === selected || tid === selected)) return cssVar('--accent');
-    return cssVar('--line-strong') + (selected ? '33' : 'aa');
+    return cssVar('--line-strong') + (selected ? '33' : (pathLinks.size ? '33' : 'aa'));
   }
   function setView(three) {
     // a run in flight stops on a view switch; the two views pulse differently, and stopping
@@ -1493,7 +1706,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     wrap.classList.toggle('is3d', is3d);
     document.getElementById('v2d').setAttribute('aria-pressed', !is3d);
     document.getElementById('v3d').setAttribute('aria-pressed', is3d);
-    document.querySelector('.hint').textContent =
+    document.getElementById('hint-text').textContent =
       is3d ? 'middle-drag to orbit · right-drag to pan · scroll to zoom · click to inspect'
            : 'drag to move · scroll to zoom · click to inspect';
     if (is3d) {
@@ -1571,12 +1784,21 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     for (const l of edgesOf.get(id) || []) {
       [l.source.id, l.target.id, l, key3d(l)].forEach(up);
       if (!is3d && l.source.x != null) {
-        // a dot rides the edge from source to target, so the direction is on screen
-        const dot = root.append('circle').attr('class', 'pulse').attr('r', 4)
-          .attr('cx', l.source.x).attr('cy', l.source.y);
-        dot.transition().duration(PULSE_MS).ease(d3.easeQuadInOut)
-          .attr('cx', l.target.x).attr('cy', l.target.y)
-          .on('end interrupt', () => dot.remove());
+        // An orb rides the arrow itself — its drawn ends, trimmed clear of both marks and
+        // bent the way the edge is bent — rather than the straight line between two centres,
+        // which crosses whatever else is in the way and leaves the arrow it belongs to.
+        const line = link.nodes()[links.indexOf(l)];
+        const at = a => (line ? +line.getAttribute(a) : null);
+        const x1 = at('x1') ?? l.source.x, y1 = at('y1') ?? l.source.y;
+        const x2 = at('x2') ?? l.target.x, y2 = at('y2') ?? l.target.y;
+        for (const [cls, r] of [['orb-halo', 9], ['orb-core', 3.5]]) {
+          const orb = root.append('circle').attr('class', cls).attr('r', 0)
+            .attr('cx', x1).attr('cy', y1);
+          orb.transition().duration(PULSE_MS).ease(d3.easeQuadInOut)
+            .attr('cx', x2).attr('cy', y2)
+            .attrTween('r', () => t => r * Math.sin(Math.PI * Math.min(1, t * 1.15)))
+            .on('end interrupt', () => orb.remove());
+        }
       }
       later(() => { [l.source.id, l.target.id, l, key3d(l)].forEach(down); paintGlow(); }, PULSE_MS);
     }
@@ -1608,7 +1830,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     histTimers.forEach(clearTimeout);
     histTimers.clear();
     glow.clear();
-    root.selectAll('.pulse').interrupt().remove();
+    root.selectAll('.orb-halo, .orb-core').interrupt().remove();
     histBtn.textContent = '▶ history';
     histBtn.setAttribute('aria-pressed', 'false');
     histWhen.hidden = true;
@@ -1627,7 +1849,6 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   // are drawn back a little, because they are close to what was asked for rather than it.
   let found = null;
   const NEAR_MAX = 12;
-  const hint = document.querySelector('.hint');
   function search() {
     if (!query) { found = null; return; }
     const direct = new Set();
@@ -1641,6 +1862,16 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         || Object.values(n.attrs).some(v => String(v).toLowerCase().includes(query))
         || (n.messages || []).some(mid => ((G.messages[mid] || {}).text || '').toLowerCase().includes(query));
       if (hit) direct.add(n.id);
+    }
+    // Typing the name of a thing should find that thing. Every other rule here is a guess
+    // about what you might have meant — the word appearing in somebody's message, an
+    // attribute holding it, a member the affinity thinks is similar — and a guess has no
+    // business outvoting a name you typed exactly. Searching a topic used to return it, the
+    // three people who had ever written the word, and twelve more it reminded us of.
+    const exact = [...direct].filter(id => (byId.get(id) || {}).label.toLowerCase() === query);
+    if (exact.length) {
+      found = { direct: new Set(exact), near: new Set() };
+      return;
     }
     // a node several hits agree on is closer to the question than one only a single hit reaches
     const votes = new Map();
@@ -1759,7 +1990,34 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   // What is lit up is a set of things; the question a set of things raises is how they join.
   // Each one is drawn to whichever of the already-joined it can reach most cheaply, so the
   // result is one connected piece rather than every pair's path laid on top of each other.
-  function nearestPath(from, targets) {
+  // Which entries a route may pass through. Two people joined through a topic they both
+  // touch is a true connection and often the useful one; it is also how a small answer ends
+  // up lighting half the graph. "Join like with like" narrows it to the kinds being joined,
+  // so people connect through people. Ends are always allowed — they are what was asked for.
+  // A route between two entries of the same kind may pass only through that kind. Taking
+  // the kinds of the whole set instead makes the option inert exactly when it is wanted: an
+  // answer that named people *and* the subject they share then counts the subject as a kind
+  // being joined, and every route runs through it again.
+  // The kind most of a set is, for restricting a walk that joins all of them at once.
+  function mainKind(wanted) {
+    const tally = new Map();
+    for (const id of wanted) {
+      const k = (byId.get(id) || {}).kind;
+      if (k) tally.set(k, (tally.get(k) || 0) + 1);
+    }
+    let best = null, most = 0;
+    for (const [k, n] of tally) if (n > most) { most = n; best = k; }
+    return best ? new Set([best]) : null;
+  }
+  function throughable(a, b) {
+    if (!view.likewise) return null;
+    const ka = (byId.get(a) || {}).kind, kb = (byId.get(b) || {}).kind;
+    return ka && ka === kb ? new Set([ka]) : null;
+  }
+  const passable = (id, kinds, ends) =>
+    !kinds || ends.has(id) || kinds.has((byId.get(id) || {}).kind);
+
+  function nearestPath(from, targets, kinds = null) {
     const cost = new Map([...from].map(id => [id, 0]));
     const came = new Map();
     const queue = [...from];
@@ -1773,6 +2031,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         const a = l.source.id, b = l.target.id;
         const other = a === here ? b : (b === here ? a : null);
         if (!other) continue;
+        if (!passable(other, kinds, targets)) continue;
         const through = cost.get(here) + 1 / Math.max(1, l.weight || 1);
         if (through < (cost.has(other) ? cost.get(other) : Infinity)) {
           cost.set(other, through);
@@ -1801,42 +2060,123 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     if (found) return nodes.filter(n => matches(n)).map(n => n.id);
     return selected ? [selected] : [];
   }
+  // The joining itself, so the button and an answer can both use it rather than each
+  // growing its own copy of the walk.
+  function joinUp(ids) {
+    const wanted = new Set(ids.filter(id => byId.has(id)));
+    const joined = new Set([...wanted].slice(0, 1));
+    const onPath = new Set();
+    let left = wanted.size - 1;
+    // Like with like restricts what the walk may cross to the kind most of the ends are —
+    // people, for a question about people — so two members are joined through other members
+    // rather than through a subject they both happen to touch.
+    const only = view.likewise ? mainKind(wanted) : null;
+    for (let guard = 0; guard < wanted.size + 4 && left > 0; guard++) {
+      const walk = nearestPath(joined, wanted, only);
+      if (!walk) break;
+      walk.nodes.forEach(id => joined.add(id));
+      walk.links.forEach(l => onPath.add(l));
+      left = [...wanted].filter(id => !joined.has(id)).length;
+    }
+    // The other ways round are worth *saying* — they are how else two people could be put in
+    // touch — but not worth lighting. Measured on "who knows robotics": the answer was two
+    // people and a subject, and drawing every alternative route between every pair of them
+    // lit two more people, an org and two topics the question never mentioned. Everything
+    // is connected to everything a few hops out; the highlight is what the answer is about,
+    // plus the one walk that shows they are joined at all.
+    left = [...wanted].filter(id => !joined.has(id)).length;
+    return { wanted, joined, onPath, unreachable: left };
+  }
+  // The route the signal runs: the longest chain among what was joined, so the orb crosses
+  // the whole of it rather than one arbitrary hop of a branching walk.
+  let signalRoute = [], signalRaf = 0, signalFrom = 0;
+  function routeThrough(wanted) {
+    const ends = [...wanted].filter(id => byId.has(id));
+    let best = [];
+    for (let i = 0; i < ends.length; i++) {
+      for (let j = i + 1; j < ends.length; j++) {
+        const walk = hopsBetween(ends[i], ends[j], null, throughable(ends[i], ends[j]));
+        if (walk && walk.length > best.length) best = walk;
+      }
+    }
+    return best;
+  }
+  // The leg a signal crosses: which link joins two neighbours, and which way round, so the
+  // orb rides the arrow as drawn — trimmed clear of both marks, bent the way it is bent.
+  function legBetween(a, b) {
+    for (const l of links) {
+      if (linkGone(l)) continue;
+      if (l.source.id === a && l.target.id === b) return { l, flip: false };
+      if (l.source.id === b && l.target.id === a) return { l, flip: true };
+    }
+    return null;
+  }
+  function stopSignal() {
+    if (signalRaf) cancelAnimationFrame(signalRaf);
+    signalRaf = 0;
+    signalRoute = [];
+    signalHalo.attr('display', 'none');
+    signalCore.attr('display', 'none');
+    if (g3) g3.linkDirectionalParticles(0);
+  }
+  function runSignal(route) {
+    stopSignal();
+    if (route.length < 2) return;
+    signalRoute = route;
+    signalFrom = performance.now();
+    // 3d-force-graph carries its own travelling particles; asking it is better than
+    // reaching into its scene, which is a different three.js from any global here
+    if (g3) {
+      g3.linkDirectionalParticles(l => (pathLinks.has(l) ? 2 : 0))
+        .linkDirectionalParticleWidth(2.2)
+        .linkDirectionalParticleSpeed(0.006)
+        .linkDirectionalParticleColor(() => cssVar('--accent'));
+    }
+    const HOP_MS = 700;
+    const step = now => {
+      if (!signalRoute.length) return;
+      const legs = signalRoute.length - 1;
+      // out and back: the reader watches it reach the far end, then return the way it came
+      const t = ((now - signalFrom) / HOP_MS) % (legs * 2);
+      const along = t <= legs ? t : legs * 2 - t;
+      const leg = Math.min(legs - 1, Math.floor(along));
+      const f = along - leg;
+      const from = signalRoute[leg], to = signalRoute[leg + 1];
+      const seg = legBetween(from, to);
+      const a = byId.get(from), b = byId.get(to);
+      let x1 = a && a.x, y1 = a && a.y, x2 = b && b.x, y2 = b && b.y;
+      if (seg) {
+        const line = link.nodes()[links.indexOf(seg.l)];
+        if (line) {
+          const g = ['x1', 'y1', 'x2', 'y2'].map(k => +line.getAttribute(k));
+          [x1, y1, x2, y2] = seg.flip ? [g[2], g[3], g[0], g[1]] : g;
+        }
+      }
+      if (x1 != null && x2 != null && !Number.isNaN(x1)) {
+        const cx = x1 + (x2 - x1) * f, cy = y1 + (y2 - y1) * f;
+        signalHalo.attr('display', null).attr('cx', cx).attr('cy', cy);
+        signalCore.attr('display', null).attr('cx', cx).attr('cy', cy);
+      }
+      signalRaf = requestAnimationFrame(step);
+    };
+    signalRaf = requestAnimationFrame(step);
+  }
   function findPaths() {
     const wanted = new Set(toJoin().filter(id => byId.has(id)));
     if (wanted.size < 2) {
       qCount.textContent = 'shift-click two or more';
       return;
     }
-    const joined = new Set([[...wanted][0]]);
-    const onPath = new Set();
-    let left = wanted.size - 1;
-    for (let guard = 0; guard < wanted.size + 4 && left > 0; guard++) {
-      const walk = nearestPath(joined, wanted);
-      if (!walk) break;
-      walk.nodes.forEach(id => joined.add(id));
-      walk.links.forEach(l => onPath.add(l));
-      left = [...wanted].filter(id => !joined.has(id)).length;
-    }
+    const { joined, onPath, unreachable } = joinUp([...wanted]);
     answer = joined;
     pathLinks = onPath;
-    qCount.textContent = `${joined.size} joined` + (left ? `, ${left} unreachable` : '');
+    runSignal(routeThrough(wanted));
     refresh();
-    renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '));
+    renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '),
+                [...wanted]);
+    // after refresh(), which runs search() and writes this same readout
+    qCount.textContent = `${joined.size} joined` + (unreachable ? `, ${unreachable} unreachable` : '');
   }
-  const heftBtn = document.getElementById('magnitude');
-  function paintHeft() { heftBtn.setAttribute('aria-pressed', view.magnitude !== false); }
-  heftBtn.addEventListener('click', () => {
-    view.magnitude = view.magnitude === false;
-    paintHeft();
-    link.attr('stroke-width', thickness);
-    if (g3) g3.linkWidth(g3.linkWidth());
-    // distance and pull are read by the force, so it has to settle again to show the change
-    sim.force('link').distance(apart).strength(pull);
-    sim.alpha(0.5).restart();
-    saveDisplay();
-  });
-  paintHeft();
-
   const snapBtn = document.getElementById('snap');
   // Clicking a node moves the view to it, which is what you want while you are following a
   // thread and exactly what you do not want while you are shift-clicking your way around one.
@@ -1847,13 +2187,48 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     saveDisplay();
   });
   paintSnap();
+  // Flipping it re-joins whatever is currently shown, so the difference is visible at once
+  // rather than on the next question.
+  const likeBtn = document.getElementById('likewise');
+  function paintLikewise() { likeBtn.setAttribute('aria-pressed', !!view.likewise); }
+  likeBtn.addEventListener('click', () => {
+    view.likewise = !view.likewise;
+    paintLikewise();
+    saveDisplay();
+    if (fromAnswer) {
+      const ids = (fromAnswer.ends || fromAnswer.ids).filter(id => byId.has(id));
+      answer = ids.length ? new Set(ids) : null;
+      pathLinks = new Set();
+      let short = 0;
+      if (ids.length > 1) {
+        const { joined, onPath, unreachable } = joinUp(ids);
+        answer = joined;
+        pathLinks = onPath;
+        short = unreachable;
+        runSignal(routeThrough(ids));
+      }
+      refresh();
+      renderFound([...(answer || [])], fromAnswer.said, ids);
+      // after refresh(), which runs search() and writes this same readout
+      qCount.textContent = `${answer ? answer.size : 0} joined`
+        + (short ? `, ${short} unreachable` : '');
+    } else if (picked.size) {
+      findPaths();
+    }
+  });
+  paintLikewise();
   document.getElementById('findpath').addEventListener('click', findPaths);
   document.getElementById('arrange').addEventListener('click', () => arrange());
   document.getElementById('recenter').addEventListener('click', () => recenter());
 
   function select(id) {
-    // an answer's highlight is a filter; choosing something yourself is how you take it back
-    if (id && answer) { answer = null; pathLinks = new Set(); qCount.textContent = ''; }
+    // An answer's highlight is a filter, and choosing is how you take it back — including
+    // choosing nothing. The guard used to read `id && answer`, so a click on empty space
+    // dropped the selection and left every other node dimmed with no way back but retyping
+    // the question. Gathered picks are deliberate and survive; only the filter goes.
+    if (answer || pathLinks.size) {
+      answer = null; pathLinks = new Set(); qCount.textContent = ''; stopSignal();
+    }
     selected = id;
     refresh();
     renderDetail(id ? byId.get(id) : null);
@@ -1946,28 +2321,218 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       return label.length > 2 && n.label.length >= 3 && !gone(n) && text.includes(label);
     });
   }
-  function renderFound(ids, said) {
-    // What is lit up is what the search found, never what the prose says. An answer is written
-    // for a person and uses ordinary words — "the community's fintech conversation" — and
-    // reading nodes out of it lights up whatever happens to share a name with one.
+  // The shortest walk between two entries, in steps rather than in weight — "how far apart"
+  // is a thing a reader counts, and a heavily-used link is not a shorter one to them.
+  function hopsBetween(a, b, without = null, kinds = null) {
+    if (a === b) return [a];
+    const ends = new Set([a, b]);
+    const came = new Map([[a, null]]);
+    let edge = [a];
+    while (edge.length) {
+      const next = [];
+      for (const here of edge) {
+        for (const l of links) {
+          if (linkGone(l) || (without && without.has(l))) continue;
+          const ends2 = [l.source.id, l.target.id];
+          const other = ends2[0] === here ? ends2[1] : (ends2[1] === here ? ends2[0] : null);
+          if (other === null || came.has(other)) continue;
+          if (!passable(other, kinds, ends)) continue;
+          came.set(other, here);
+          if (other === b) {
+            const walk = [b];
+            while (came.get(walk[0]) !== null) walk.unshift(came.get(walk[0]));
+            return walk;
+          }
+          next.push(other);
+        }
+      }
+      edge = next;
+    }
+    return null;
+  }
+  // Up to three ways round between two entries, shortest first. One route is a fact; three
+  // is a shape — whether they are joined through one person who could introduce them, or
+  // through half the community whichever way you go.
+  const ROUTES = 3;
+  function routesBetween(a, b, most = ROUTES, kinds = null) {
+    const found = [], banned = new Set();
+    for (let i = 0; i < most; i++) {
+      const walk = hopsBetween(a, b, banned.size ? banned : null, kinds);
+      if (!walk || walk.length < 2) break;
+      found.push(walk);
+      // ban one link of this route — the middle one, so the next way round differs where it
+      // matters rather than only at an end both routes must share anyway
+      const legs = [];
+      for (let j = 0; j < walk.length - 1; j++) {
+        const seg = legBetween(walk[j], walk[j + 1]);
+        if (seg) legs.push(seg.l);
+      }
+      if (!legs.length) break;
+      banned.add(legs[Math.floor(legs.length / 2)]);
+    }
+    return found;
+  }
+  const nameOf = id => (byId.get(id) || {}).label || id;
+  const listOut = xs => xs.length < 2 ? (xs[0] || '')
+    : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+  // What the graph holds about two entries that are not the same one: what stands between
+  // them, and what they both reach. A reader looking at two people wants to know whether
+  // they are already joined, who could put them in touch, or that nothing does.
+  function connectionSaid(a, b) {
+    const ways = routesBetween(a, b, ROUTES, throughable(a, b));
+    const walk = ways[0] || null;
+    // how many ways round there are, said only when there is more than one: two people
+    // joined three different ways are differently connected from two joined by one thread
+    // Measured: a pair joined directly came back with two more ways round as well, four and
+    // five hops long, through people the question never mentioned.
+    // Everything is connected to everything at that distance; only a route about as short
+    // as the best one is telling the reader something.
+    const shortest = walk ? walk.length : 0;
+    const spare = ways.slice(1)
+      .filter(w => w.length > 2 && shortest && w.length <= shortest + 1 && w.length <= 4)
+      .map(w => w.slice(1, -1).map(nameOf)).filter(x => x.length);
+    // each way round drawn as its own chain: a list of lists reads as one long list, and
+    // "through Ada, operations and Grace and Ada, systems and Alan" says nothing
+    const alsoVia = spare.length
+      ? `<span class="ways">${spare.length === 1 ? 'also joined this way:'
+          : `also joined ${spare.length} other ways:`}${spare
+          .map(x => `<span class="way">${esc(x.join(' → '))}</span>`).join('')}</span>`
+      : '';
+    const both = new Set();
+    for (const l of links) {
+      if (linkGone(l)) continue;
+      const ends = [l.source.id, l.target.id];
+      for (const [x, y] of [[a, b], [b, a]]) {
+        const other = ends[0] === x ? ends[1] : (ends[1] === x ? ends[0] : null);
+        if (other !== null && other !== y) both.add(other + '|' + x);
+      }
+    }
+    const near = xs => new Set([...both].filter(k => k.endsWith('|' + xs)).map(k => k.split('|')[0]));
+    const shared = [...near(a)].filter(id => near(b).has(id));
+    const pair = `<b>${esc(nameOf(a))}</b> and <b>${esc(nameOf(b))}</b>`;
+    if (!walk) {
+      return `<p>${pair} are not connected at all in what has been said`
+        + `${shared.length ? ', despite both being tied to ' + esc(listOut(shared.slice(0, 3).map(nameOf))) : ''}.`
+        + ` Nothing here can introduce them.</p>`;
+    }
+    // Joined directly is the end of the question. "They are joined directly, and also this
+    // other way" is a fact about the graph being connected, not about them.
+    if (walk.length === 2) return `<p>${pair} are joined directly.</p>`;
+    const between = walk.slice(1, -1).map(nameOf);
+    if (walk.length === 3) {
+      return `<p>${pair} both meet at <b>${esc(between[0])}</b>`
+        + `${shared.length > 1 ? `, and share ${esc(listOut(shared.slice(0, 3).map(nameOf)))}` : ''}`
+        + ` — that is the ground to open with.${alsoVia}</p>`;
+    }
+    return `<p>${pair} are ${walk.length - 1} steps apart, through ${esc(listOut(between))}.`
+      + ` That is far: any of them could make the introduction`
+      + `${shared.length ? `, and both are already tied to ${esc(listOut(shared.slice(0, 3).map(nameOf)))}` : ''}.${alsoVia}</p>`;
+  }
+  // At most a few pairs: the point is to say how to connect the entries an answer is about,
+  // not to enumerate a set's every combination.
+  function connectHtml(ids) {
+    const real = ids.filter(id => byId.has(id));
+    // Three entries produced three sentences, two of them pairing a member with the subject
+    // they share — which is the link you can already see, said in words. What a reader wants
+    // is how the members reach each other, so the pairs are drawn from whichever kind the
+    // answer is mostly about, and only fall back to everything when there is no such pair.
+    const main = mainKind(new Set(real));
+    const same = main ? real.filter(id => main.has((byId.get(id) || {}).kind)) : [];
+    const here = (same.length > 1 ? same : real).slice(0, 4);
+    if (here.length < 2) return '';
+    const said = [];
+    for (let i = 0; i < here.length; i++) {
+      for (let j = i + 1; j < here.length; j++) {
+        if (said.length < 4) said.push(connectionSaid(here[i], here[j]));
+      }
+    }
+    return `<div class="connects"><h4>How these connect</h4>${said.join('')}</div>`;
+  }
+  // Where the panel has been. Clicking a member, then one of their connections, then one of
+  // theirs, is how anyone reads a graph — and until this there was no way back but finding
+  // the first one again by eye. The button is drawn at the top of the panel, because the
+  // thing you want to undo is the thing you just clicked, and that is where you were looking.
+  const seen = [];
+  let goingBack = false;
+  function remember(where) {
+    if (goingBack) return;
+    const last = seen[seen.length - 1];
+    if (last && last.kind === where.kind && last.id === where.id
+        && String(last.ids) === String(where.ids)) return;
+    seen.push(where);
+    if (seen.length > 40) seen.shift();
+  }
+  function backHtml() {
+    const to = seen[seen.length - 2];
+    if (!to) return '';
+    return `<button class="back" id="panel-back">← back to ${esc(to.name)}</button>`;
+  }
+  function wireBack(el) {
+    const b = el.querySelector('#panel-back');
+    if (!b) return;
+    b.addEventListener('click', () => {
+      seen.pop();                       // where we are
+      const to = seen[seen.length - 1]; // where we were
+      if (!to) return;
+      goingBack = true;
+      try {
+        if (to.kind === 'answer') showAnswerAgain(to);
+        else if (to.kind === 'home') select(null);
+        else if (to.kind === 'node' && byId.has(to.id)) select(to.id);
+        else if (to.kind === 'edge' && links[to.id]) selectEdge(links[to.id]);
+      } finally { goingBack = false; }
+    });
+  }
+  // going back to an answer puts its graph back too, not only its list
+  function showAnswerAgain(to) {
+    const ids = (to.ends || to.ids || []).filter(id => byId.has(id));
+    selected = null;
+    answer = ids.length ? new Set(ids) : null;
+    pathLinks = new Set();
+    if (ids.length > 1) {
+      const { joined, onPath } = joinUp(ids);
+      answer = joined;
+      pathLinks = onPath;
+      runSignal(routeThrough(ids));
+    }
+    refresh();
+    qCount.textContent = ids.length ? String(ids.length) : '';
+    renderFound(to.ids, to.said, to.ends);
+  }
+  function renderFound(ids, said, ends = null) {
+    // `ids` is what the answer is about — the model's own `show`, or the entries its prose
+    // names. The ordering below still puts the named ones first, because a model that lit
+    // more than it wrote about should not bury what it wrote about.
     const here = ids.map(id => byId.get(id)).filter(Boolean);
     const spoken = new Set(namedIn(said).map(n => n.id));
     // the ones the answer talks about come first; the rest are the working behind it
     const shown = here.sort((a, b) => (spoken.has(b.id) - spoken.has(a.id))
       || PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0));
-    fromAnswer = { ids, said };
+    // `ends` is what was asked for; `ids` is that plus whatever joining it added. Re-joining
+    // must start from the ends, or a connector becomes an end and every rule about what a
+    // route may pass through stops applying to it.
+    fromAnswer = { ids, said, ends: ends || ids };
+    remember({ kind: 'answer', name: 'the answer', ids, said, ends: ends || ids });
     const el = document.getElementById('detail');
-    el.innerHTML = `<h3>In this answer · ${shown.length}</h3>
+    el.innerHTML = `${backHtml()}<h3>In this answer · ${shown.length}</h3>
       <div class="links">${shown.map(n => `<button data-id="${esc(n.id)}">${swatch(n.kind, 9)}<span class="rel">${esc(n.kind)}</span>${esc(n.label)}</button>`).join('')}</div>
       ${spoken.size && spoken.size < shown.length
           ? `<p class="aside-note">The first ${spoken.size} are named in the answer; the rest are what it read to get there.</p>` : ''}
+      ${connectHtml(shown.map(n => n.id))}
       ${footer()}`;
     wireRefs(el);
+    wireBack(el);
     el.scrollTop = 0;
   }
 
   function renderDetail(n) {
     const el = document.getElementById('detail');
+    // The panel with nothing chosen is a view like any other, and the only one holding the
+    // shared ground — the pairs who talk about the same things. Somebody who opens one of
+    // those pairs has left the one place it was listed, and until this the only way back to
+    // it was clicking empty space, which nothing on screen tells you.
+    remember(n ? { kind: 'node', name: shown(n), id: n.id }
+               : { kind: 'home', name: COPY.heading, id: '' });
     if (!n) {
       el.innerHTML = `<div class="placeholder"><h3>${esc(COPY.heading)}</h3>${groundHtml()}${closeHtml()}${COPY.note ? `<p class="aside-note">${esc(COPY.note)}</p>` : ''}</div>`;
       wireRefs(el);
@@ -1981,20 +2546,19 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     const hiddenRels = joined.length - rels.length;
     // evidence follows the same switch the nodes do: with working sessions out of the picture,
     // a transcript turn is not what this member said
-    const fromSession = m => m.channel === '#sessions' && display.source.session !== 'show';
+    const fromSession = m => ASIDE && m.channel === ASIDE && display.source.session !== 'show';
     const quotes = (n.messages || []).map(id => G.messages[id]).filter(Boolean)
       .filter(m => !fromSession(m)).sort((a, b) => +b.ts - +a.ts).slice(0, 12);
     el.innerHTML = `
+      ${backHtml()}
       <div class="kind">${swatch(n.kind)}${n.kind}${n.attrs.type ? ' · ' + esc(n.attrs.type) : ''}${n.attrs.member ? ' · member' : ''}</div>
       <h2>${esc(shown(n))}</h2>
       ${attrs.length ? `<dl class="attrs">${attrs.map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${k === 'url' ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd>`).join('')}</dl>` : ''}
       ${rels.length ? `<details class="fold"><summary>Connections · ${rels.length}${hiddenRels ? ` <span class="muted">(${hiddenRels} hidden)</span>` : ''}</summary><div class="links">${rels.map(l => { const o = l.source.id === n.id ? l.target : l.source; return `<button data-id="${esc(o.id)}">${swatch(o.kind, 9)}<span class="rel">${l.source.id === n.id ? l.rel : '← ' + l.rel}</span>${esc(o.label)}</button>`; }).join('')}</div></details>` : ''}
       ${quotes.length ? `<h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}` : ''}
-      ${fromAnswer ? `<button class="back" id="back-to-answer">← back to the answer</button>` : ''}
       ${footer()}`;
     wireRefs(el);
-    const back = document.getElementById('back-to-answer');
-    if (back) back.addEventListener('click', () => renderFound(fromAnswer.ids, fromAnswer.said));
+    wireBack(el);
     el.scrollTop = 0;
   }
   function wireRefs(el) {
@@ -2049,7 +2613,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       const i = factEdge(f);
       return `<li>${linkify(f)}${i < 0 ? '' : ` <button class="ref rel" data-edge="${i}">link</button>`}</li>`;
     }).join('');
-    return `<blockquote class="msg">${m.url ? `<a class="open" href="${esc(m.url)}" target="_blank" rel="noopener">Open in Slack ↗</a>` : ''}<span class="who">${esc(m.sender)}</span><span class="when">${esc(m.channel)} · ${when(m.ts)}</span><br>${linkify(m.text)}${facts ? `<ul class="facts">${facts}</ul>` : ''}${readHtml(m)}</blockquote>`;
+    return `<blockquote class="msg">${m.url ? `<a class="open" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(COPY.openMessage)}</a>` : ''}<span class="who">${esc(m.sender)}</span><span class="when">${esc(m.channel)} · ${when(m.ts)}</span><br>${linkify(m.text)}${facts ? `<ul class="facts">${facts}</ul>` : ''}${readHtml(m)}</blockquote>`;
   }
   // A model has a name; the file it arrived in has a filename, and nobody wants to read
   // "-mxfp4-00001-of-00003.gguf" to find out which model read their messages.
@@ -2071,18 +2635,22 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
       + (meta.model ? ' · ' + modelName(meta.model) : '');
   })();
   function selectEdge(l) {
+    remember({ kind: 'edge', name: `${shown(l.source)} → ${shown(l.target)}`,
+               id: links.indexOf(l) });
     selected = null; refresh();
     link.classed('on', x => x === l).classed('dim', x => x !== l);
     node.classed('dim', d => d !== l.source && d !== l.target).classed('hushed', d => d !== l.source && d !== l.target);
     const el = document.getElementById('detail');
     const quotes = (l.messages || []).map(id => G.messages[id]).filter(Boolean)
-      .filter(m => !(m.channel === '#sessions' && display.source.session !== 'show'))
+      .filter(m => !(ASIDE && m.channel === ASIDE && display.source.session !== 'show'))
       .sort((a, b) => +b.ts - +a.ts);
     el.innerHTML = `
+      ${backHtml()}
       <div class="kind">link</div>
       <div class="edge-head"><button class="chip" data-id="${esc(l.source.id)}">${swatch(l.source.kind, 9)}${esc(shown(l.source))}</button><span class="rel">${esc(l.rel.replace(/_/g, ' '))}</span><button class="chip" data-id="${esc(l.target.id)}">${swatch(l.target.kind, 9)}${esc(shown(l.target))}</button></div>
       <h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}${footer()}`;
     wireRefs(el);
+    wireBack(el);
     el.scrollTop = 0;
   }
   const tipEl = document.getElementById('tip');
@@ -2112,6 +2680,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   const askText = document.getElementById('ask-text');
   const askNote = document.getElementById('ask-note');
 
+  const askBox = document.getElementById('ask-box');
+  const graphTally = document.getElementById('gathered-tally');
   const pickLabel = key => {
     if (key.startsWith('node:')) return (byId.get(key.slice(5)) || {}).label || key;
     const l = links[+key.slice(5)];
@@ -2132,9 +2702,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
   }
   function renderPicked() {
     if (g3) { mark3dPicked(); g3.nodeColor(g3.nodeColor()); }
-    // the panel stays shut so the graph stays clickable; the summary says what is gathered
-    document.getElementById('ask-summary').textContent =
-      picked.size ? `Ask for a change · ${picked.size} gathered` : 'Ask for a change';
+    // The count belongs where the gathering happens, not welded to the button that opens
+    // the form. The panel stays shut so the graph stays clickable — an open one is an
+    // overlay and takes the clicks meant for the nodes underneath it — so the graph's own
+    // hint line says how many are held, and the form lists them when it is opened.
+    if (graphTally) {
+      graphTally.hidden = !picked.size;
+      graphTally.textContent = `${picked.size} gathered`;
+    }
     if (!picked.size) {
       pickedBox.innerHTML = '<span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span>';
       return;
@@ -2184,14 +2759,22 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
         const r = await fetch('/request', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify(body) });
         askNote.textContent = r.ok ? 'Saved. It will be reviewed before anything changes.' : 'Could not save.';
-        if (r.ok) { askText.value = ''; askAttest.checked = false; picked.clear(); renderPicked(); refresh(); }
+        if (r.ok) {
+          askText.value = ''; askAttest.checked = false; picked.clear(); renderPicked(); refresh();
+          // The server works out what the request means after answering, so the review list
+          // is a moment behind it. Asking again a few times is the difference between a
+          // member seeing their request waiting and seeing nothing at all.
+          if (window.reloadReview) {
+            for (const wait of [1200, 4000, 9000, 16000]) setTimeout(window.reloadReview, wait);
+          }
+        }
       } catch (err) { askNote.textContent = 'Could not reach the local server.'; }
       return;
     }
     const asText = `[${body.kind}] ${body.text}\n\nAbout: ${body.targets.map(t => t.label).join(', ') || '(nothing selected)'}`;
     try {
       await navigator.clipboard.writeText(asText);
-      askNote.textContent = 'Copied — paste it in the channel, or send it to whoever runs this page.';
+      askNote.textContent = COPY.copied;
     } catch (err) {
       askNote.textContent = 'Copy this and send it: ' + asText;
     }
@@ -2423,12 +3006,21 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr) auto; min-hei
     const editHtml = e => `<div class="edit">${esc(editSaid(e))}${(e.problems || [])
       .map(x => `<div class="warn">the graph says: ${esc(x)}</div>`).join('')}</div>`;
     let showDone = false;
+    let raisedForReview = false;
     function paintReview(rows) {
       reviewBox.hidden = false;
       // an addressed request leaves the list; a small toggle keeps it reachable for Undo
       const settled = p => p.status === 'accepted' || p.status === 'refused';
       const open = rows.filter(p => !settled(p)), done = rows.filter(settled);
       reviewCount.textContent = open.length;
+      // the list lives inside the panel that raises requests now, so a waiting request has
+      // to say so once — otherwise it is behind a shut panel and nobody curating sees it
+      if (open.length && !raisedForReview) { raisedForReview = true; reviewBox.open = true; }
+      // the list lives inside the panel that raises requests now, so the panel has to say a
+      // request is waiting — otherwise it is behind a shut panel and nobody curating sees it
+      const summary = document.getElementById('ask-summary');
+      summary.textContent = open.length
+        ? `Ask for a change · ${open.length} to review` : 'Ask for a change';
       const req = p => `<div class="req">
         <div class="meta"><span>${esc(stamp(p.at))}</span><span>${esc(p.kind || '')}</span>
           <span class="status">${esc(p.status || '')}</span>
