@@ -68,6 +68,8 @@ ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 ml-stack-train-run = "ml_stack.train.run:main"
+# what this machine can do, and what it does without being asked
+ml-stack-setup = "ml_stack.setup:main"
 ml-stack-serve = "ml_stack.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
 ml-stack-bench = "ml_stack.graph.bench:main"
