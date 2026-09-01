@@ -11,7 +11,10 @@ The graph under test is invented; no test reads any data file.
 from __future__ import annotations
 
 import hashlib
+import http.server
 import json
+import queue
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -121,7 +124,7 @@ def open_page(browser, vendored):
     contexts = []
 
     def _open(graph=None, *, view="2d", served=False, ask_reply=None, ask_stream=None,
-              review=None, origin="http://graph.test/"):
+              stream_from=None, thread=None, review=None, origin="http://graph.test/"):
         html = document(graph if graph is not None else sample_graph(), served=served)
         ctx = browser.new_context(viewport={"width": 1400, "height": 900})
         contexts.append(ctx)
@@ -140,6 +143,12 @@ def open_page(browser, vendored):
             elif url == origin + "ask/stream" and r.request.method == "POST" \
                     and ask_stream is not None:
                 r.fulfill(body=ask_stream, content_type="text/event-stream")
+            elif url == origin + "ask/stream" and r.request.method == "POST" \
+                    and stream_from is not None:
+                # a fulfilled body lands whole; a paced stream shows the page mid-answer
+                r.continue_(url=stream_from)
+            elif url.startswith(origin + "thread/") and thread is not None:
+                r.fulfill(body=json.dumps(thread), content_type="application/json")
             elif url == origin + "review" and review is not None:
                 r.fulfill(body=json.dumps({"ok": True, "problems": []}
                                           if r.request.method == "POST" else review),
@@ -166,6 +175,48 @@ def open_page(browser, vendored):
 
 def settle(page):
     page.wait_for_selector(".graph-wrap:not(.settling)")
+
+
+class PacedStream:
+    """A real local ``/ask/stream`` that lets one event out per ``release()``.
+
+    The page reads the stream as it arrives, so what it shows between events is only
+    visible when the events are held back; a fulfilled body arrives whole.
+    """
+
+    def __init__(self, events):
+        self.gate = queue.Queue()
+        held = [f"data: {json.dumps(e)}\n\n".encode() for e in events]
+        gate = self.gate
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                for chunk in held:
+                    gate.get()
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        # the page must be opened on this origin: Chromium refuses a public-looking page
+        # (graph.test) a fetch into loopback, so the stream and the page share one
+        self.origin = f"http://127.0.0.1:{self.server.server_address[1]}/"
+        self.url = self.origin + "ask/stream"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def release(self):
+        self.gate.put(None)
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
 
 
 def test_the_page_loads_clean(open_page):
@@ -487,6 +538,75 @@ def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
     # the trace folds away once the answer has landed
     assert page.get_attribute("#qturns .t .think", "open") is None
     assert "2 lit up" in page.text_content("#qnote")
+    assert errors == []
+
+
+def test_the_line_above_the_trace_says_what_is_happening_now(open_page):
+    """Fails when feed() in askStream stops writing the summary.now line on each event."""
+    events = [
+        {"event": "tool", "name": "look_up", "detail": "'robotics'"},
+        {"event": "tool_result", "name": "look_up", "count": 4},
+        {"event": "tool", "name": "look_at", "detail": "2 ids"},
+        {"event": "tool_result", "name": "look_at", "count": 2},
+        {"event": "answer", "text": "Grace Hopper "},
+        {"event": "answer", "text": "is at Quenlow Robotics."},
+        {"event": "done", "content": "Grace Hopper is at Quenlow Robotics.",
+         "ids": ["person:grace", "org:quenlow"], "read": ["person:grace", "org:quenlow"],
+         "show": ["person:grace", "org:quenlow"], "path": [], "found": [],
+         "why": "looked up 'robotics'; read 2 entries"},
+    ]
+    paced = PacedStream(events)
+    try:
+        page, errors = open_page(served=True, stream_from=paced.url, origin=paced.origin)
+        page.wait_for_selector("#stats b")
+        page.fill("#q", "who is at the robotics company?")
+        page.press("#q", "Enter")
+        now = page.locator("#qturns .t .think summary.now")
+        # nothing has arrived: the line says so, and it is the fold's own summary, so it
+        # reads the same whether the trace is open or folded away
+        pw.expect(now).to_have_text("thinking")
+        paced.release()
+        pw.expect(now).to_have_text("looking up 'robotics'")
+        paced.release()
+        pw.expect(now).to_have_text("looking up 'robotics' → 4 back")
+        paced.release()
+        pw.expect(now).to_have_text("reading 2 entries")
+        paced.release()
+        pw.expect(now).to_have_text("reading 2 entries → 2 back")
+        paced.release()
+        pw.expect(now).to_have_text("answering")
+        paced.release()
+        pw.expect(now).to_have_text("answering")
+        paced.release()
+        pw.expect(now).to_have_text("looked up 1, read 2 entries")
+        pw.expect(page.locator("#detail h3")).to_have_text("In this answer · 2")
+        # the raw trace underneath is untouched: the same step lines as before the live line
+        assert page.locator("#qturns .t .think .step").all_text_contents() == [
+            "▸ look_up 'robotics'", "  → 4 back", "▸ look_at 2 ids", "  → 2 back"]
+        assert page.locator("#qturns .t .said").inner_text() == "Grace Hopper is at Quenlow Robotics."
+        assert errors == []
+    finally:
+        paced.close()
+
+
+def test_a_reopened_answer_gets_its_tally_back(open_page):
+    """Fails when reopen() stops handing a remembered turn's steps to thoughtOver()."""
+    held = {"thread": "c1", "turns": [
+        {"role": "user", "text": "who is at the robotics company?"},
+        {"role": "assistant", "text": "Grace Hopper is at Quenlow Robotics.",
+         "steps": ["looked up 'robotics'", "read 1 entry"]},
+    ]}
+    page, errors = open_page(served=True, thread=held)
+    page.wait_for_selector("#stats b")
+    pw.expect(page.locator("#qturns .t .think summary.now")).to_have_text(
+        "looked up 'robotics', read 1 entry")
+    # the steps fold away underneath as a trace would, and the words stay the spoken part
+    assert page.get_attribute("#qturns .t .think", "open") is None
+    assert page.locator("#qturns .t .think .step").all_text_contents() == [
+        "▸ looked up 'robotics'", "▸ read 1 entry"]
+    assert page.locator("#qturns .t .said").inner_text() == "Grace Hopper is at Quenlow Robotics."
+    # the question was asked, not answered: no trace on it
+    assert page.locator("#qturns .t.mine .think").count() == 0
     assert errors == []
 
 

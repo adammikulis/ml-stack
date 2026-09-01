@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
+import re
 import subprocess
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -19,6 +21,106 @@ LOG_DIR = CACHE_ROOT / "logs"
 
 class ServerFailed(RuntimeError):
     """The server never became healthy. Carries whatever it managed to say."""
+
+
+class UnknownFlag(ValueError):
+    """The argv names a flag this build of llama-server does not have.
+
+    Raised before the process is started, because the alternative is finding out at the
+    far end of a 70 GB load: `--draft-max` became `--spec-draft-n-max` between releases,
+    and a build that lacks a flag exits saying only "invalid argument". One line per flag,
+    each naming the nearest flag the build does have.
+    """
+
+
+# The option strings a build accepts, keyed by (resolved path, mtime) so a rebuilt binary
+# at the same path is read again and an unchanged one is never read twice.
+_FLAGS: dict[tuple[str, float], frozenset[str]] = {}
+
+# A flag at the start of a help line, or after a comma: llama-server prints
+# `-c,    --ctx-size N`, and `-hfd, -hfrd, --hf-repo-draft REPO`. The first character after
+# the dashes must be a letter, so `(default: -1)` reads as a number and not a flag.
+_FLAG_IN_HELP = re.compile(r"(?:^|,)\s*(-{1,2}[A-Za-z][\w-]*)")
+
+
+def flags_of(binary: str | Path, *, timeout: float = 20.0) -> frozenset[str]:
+    """The option strings a llama-server build accepts, read out of its ``--help``.
+
+    Empty means *unknown* -- the binary is missing, hung, or printed nothing that looks
+    like usage -- and an unknown build is given no opinion, never "supports none". Reading
+    help costs a fraction of a second where loading a model to find out costs minutes.
+    """
+    path = Path(binary)
+    try:
+        key = (str(path.resolve()), path.stat().st_mtime)
+    except OSError:
+        return frozenset()
+    if key in _FLAGS:
+        return _FLAGS[key]
+    try:
+        got = subprocess.run([str(path), "--help"], capture_output=True, text=True,
+                             errors="replace", timeout=timeout, env=child_env(path))
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    found: set[str] = set()
+    for line in (got.stdout + "\n" + got.stderr).splitlines():
+        # A retired flag stays in the parser only to say so: llama.cpp 0.3.0 lists
+        # `--draft, --draft-n, --draft-max N  the argument has been removed. use
+        # --spec-draft-n-max`, and passing it is an error just the same. Not known.
+        if "has been removed" in line:
+            continue
+        found.update(_FLAG_IN_HELP.findall(line))
+    if not found:
+        return frozenset()
+    _FLAGS[key] = frozenset(found)
+    return _FLAGS[key]
+
+
+def unknown_flags(argv: list[str], known: frozenset[str] | set[str]) -> list[tuple[str, str]]:
+    """The flags in ``argv`` that ``known`` lacks, each with the nearest flag it has.
+
+    The nearest is "" when nothing is close. An empty ``known`` is an unknown build, and
+    an unknown build gets no opinion: the result is ``[]``.
+    """
+    if not known:
+        return []
+    lacking: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token in argv:
+        if not (token.startswith("-") and len(token) > 1 and token.lstrip("-")[:1].isalpha()):
+            continue
+        if token in known or token in seen:
+            continue
+        seen.add(token)
+        near = difflib.get_close_matches(token, sorted(known), n=1, cutoff=0.6)
+        lacking.append((token, near[0] if near else ""))
+    return lacking
+
+
+def emitted_flags(backend: LlamaServerBackend) -> list[str]:
+    """Every flag ``backend.command`` can emit, from specs with every field set.
+
+    Two shapes are needed because they exclude each other: an embedding server drops
+    ``--jinja`` for ``--embeddings``, and an ``hf:`` reference swaps ``-m`` for
+    ``--hf-repo``. Values are harmless placeholders; nothing here is run.
+    """
+    full = ServerSpec(
+        model="model.gguf", parallel=2, mmproj="mmproj-model.gguf", draft="draft.gguf",
+        spec_type="draft-simple", spec_draft_max=3, spec_draft_min=1, spec_ngram_min=48,
+        spec_ngram_max=64, spec_draft_ngl=99, spec_draft_type_k="q8_0",
+        spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
+        cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
+        cpu_moe=True, n_cpu_moe=1)
+    shapes = (full,
+              ServerSpec(model="model.gguf", embedding=True),
+              ServerSpec(model="hf:owner/repo/model.gguf", mmproj="hf:owner/repo/mmproj.gguf",
+                         draft="hf:owner/repo"))
+    flags: list[str] = []
+    for shape in shapes:
+        for token in backend.command(shape)[1:]:
+            if token.startswith("-") and token.lstrip("-")[:1].isalpha() and token not in flags:
+                flags.append(token)
+    return flags
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,12 +342,25 @@ class LlamaServerBackend(ServerBackend):
         argv += list(spec.extra_args)
         return argv
 
-    def start(self, spec: ServerSpec, *, timeout: float = 300.0) -> ServerInfo:
-        """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail."""
+    def start(self, spec: ServerSpec, *, timeout: float = 300.0,
+              check_flags: bool = True) -> ServerInfo:
+        """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail.
+
+        A flag this build does not have raises ``UnknownFlag`` before anything is started;
+        ``check_flags=False`` skips that, for a stand-in binary that prints no help.
+        """
         if not spec.is_hf_ref:
             model = Path(spec.model)
             if not model.is_file():
                 raise ServerFailed(f"no model file at {model}")
+
+        argv = self.command(spec)
+        if check_flags:
+            lacking = unknown_flags(argv, flags_of(self.binary))
+            if lacking:
+                raise UnknownFlag("\n".join(
+                    f"this llama-server has no {flag}" + (f"; it has {near}" if near else "")
+                    for flag, near in lacking))
 
         if not port_is_free(spec.port):
             reclaim_port(spec.port)
@@ -257,7 +372,6 @@ class LlamaServerBackend(ServerBackend):
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
         log_path = LOG_DIR / f"llama-server-{spec.port}.log"
-        argv = self.command(spec)
         logger.info("starting: %s", " ".join(argv))
 
         log_handle = log_path.open("wb")

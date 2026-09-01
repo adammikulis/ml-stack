@@ -1,0 +1,231 @@
+"""What a build of llama-server accepts, read before a model is loaded.
+
+llama.cpp renames flags between releases -- `--draft-max` became `--spec-draft-n-max` --
+and a flag the build lacks is an error at the far end of a long load. These tests stand a
+shell script in for the binary, printing a help text of llama.cpp's shape; no server is
+started and nothing on this machine is read.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+
+import pytest
+from ml_stack.serve import backend
+from ml_stack.serve.backend import (
+    LlamaServerBackend,
+    ServerSpec,
+    UnknownFlag,
+    emitted_flags,
+    flags_of,
+    unknown_flags,
+)
+
+HELP = """\
+usage: llama-server [options]
+
+common params:
+
+-h,    --help, --usage                  print usage and exit
+-c,    --ctx-size N                     size of the prompt context (default: 4096, -1 = auto)
+-m,    --model FNAME                    model path (default: models/7B/ggml-model-f16.gguf)
+-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM
+-np,   --parallel N                     number of server slots (default: 1)
+-fa,   --flash-attn [on|off|auto]       set Flash Attention use ('on', 'off', or 'auto', default: 'auto')
+       --host HOST                      ip address to listen on (default: 127.0.0.1)
+       --port PORT                      port to listen on (default: 8080)
+       --jinja                          use jinja template for chat (default: enabled)
+       --mmproj FILE                    path to a multimodal projector file
+-md,   --model-draft FNAME              draft model for speculative decoding (default: unused)
+--spec-draft-n-max N                    number of tokens to draft for speculative decoding (default: 3)
+--spec-draft-n-min N                    minimum number of draft tokens to use for speculative decoding
+--draft, --draft-n, --draft-max N       the argument has been removed. use --spec-draft-n-max or
+                                        LLAMA_ARG_SPEC_DRAFT_N_MAX instead
+       --no-warmup                      skip warming up the model with an empty run
+"""
+
+
+def fake_server(tmp_path, help_text: str = HELP, *, name: str = "llama-server"):
+    """A script that answers ``--help`` the way llama-server does, and nothing else."""
+    path = tmp_path / name
+    path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                    + help_text + "HELP\nexit 0\nfi\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cache(monkeypatch):
+    monkeypatch.setattr(backend, "_FLAGS", {})
+
+
+class TestFlagsOf:
+    def test_it_reads_the_flags_out_of_the_help_text(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        assert {"-c", "--ctx-size", "-m", "--model", "-ngl", "--gpu-layers",
+                "--n-gpu-layers", "--host", "--port", "--spec-draft-n-max",
+                "--no-warmup", "-fa", "--flash-attn"} <= known
+
+    def test_a_flag_the_help_says_was_removed_is_not_known(self, tmp_path):
+        """The build lists `--draft-max` only to say it is gone, and passing it is an
+        error just the same. Measured on llama.cpp 0.3.0."""
+        known = flags_of(fake_server(tmp_path))
+        assert "--draft-max" not in known
+        assert "--draft" not in known
+        assert "--spec-draft-n-max" in known
+
+    def test_words_in_the_descriptions_are_not_flags(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        assert not any(flag.strip("-").isdigit() for flag in known), known
+        assert "-1" not in known
+        assert "LLAMA_ARG_SPEC_DRAFT_N_MAX" not in known
+
+    def test_a_binary_is_read_once_until_it_changes(self, tmp_path):
+        binary = fake_server(tmp_path)
+        first = flags_of(binary)
+        assert "--spec-draft-n-max" in first
+
+        # A rebuild at the same path, with a newer mtime, is read again.
+        fake_server(tmp_path, HELP.replace("--spec-draft-n-max", "--spec-draft-max"))
+        newer = os.stat(binary).st_mtime + 10
+        os.utime(binary, (newer, newer))
+        second = flags_of(binary)
+        assert "--spec-draft-max" in second and "--spec-draft-n-max" not in second
+
+        # The same mtime is the cache, whatever the file now says.
+        fake_server(tmp_path, HELP)
+        os.utime(binary, (newer, newer))
+        assert flags_of(binary) == second
+
+    def test_a_binary_that_prints_no_help_is_unknown_not_empty_handed(self, tmp_path):
+        silent = tmp_path / "llama-server"
+        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.chmod(0o755)
+        assert flags_of(silent) == frozenset()
+
+    def test_a_binary_that_is_not_there_is_unknown(self, tmp_path):
+        assert flags_of(tmp_path / "absent") == frozenset()
+
+    def test_a_binary_that_hangs_is_unknown(self, tmp_path):
+        slow = tmp_path / "llama-server"
+        slow.write_text("#!/bin/sh\nsleep 5\n")
+        slow.chmod(0o755)
+        assert flags_of(slow, timeout=0.2) == frozenset()
+
+    def test_a_binary_that_fails_is_unknown(self, tmp_path):
+        broken = tmp_path / "llama-server"
+        broken.write_text("#!/bin/sh\necho 'dyld: library not loaded' >&2\nexit 1\n")
+        broken.chmod(0o755)
+        assert flags_of(broken) == frozenset()
+
+
+class TestUnknownFlags:
+    def test_a_missing_flag_is_paired_with_the_nearest_the_build_has(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        argv = ["/x/llama-server", "-m", "a.gguf", "--draft-max", "3", "-c", "4096"]
+        assert unknown_flags(argv, known) == [("--draft-max", "--spec-draft-n-max")]
+
+    def test_nothing_close_is_the_empty_string(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        assert unknown_flags(["--zzqx-nothing-like-it"], known) == [("--zzqx-nothing-like-it", "")]
+
+    def test_values_that_start_with_a_dash_are_not_flags(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        assert unknown_flags(["-c", "-1", "--port", "-8"], known) == []
+
+    def test_an_unknown_build_is_given_no_opinion(self):
+        assert unknown_flags(["--draft-max", "3"], frozenset()) == []
+
+    def test_each_flag_is_named_once(self, tmp_path):
+        known = flags_of(fake_server(tmp_path))
+        assert unknown_flags(["--draft-max", "3", "--draft-max", "4"], known) == [
+            ("--draft-max", "--spec-draft-n-max")]
+
+
+class TestEmittedFlags:
+    def test_every_flag_the_argv_builder_knows_appears(self, tmp_path):
+        flags = emitted_flags(LlamaServerBackend(binary=fake_server(tmp_path)))
+        for flag in ("-m", "--hf-repo", "--hf-file", "--mmproj", "--mmproj-url", "-md",
+                     "-hfd", "--spec-type", "--spec-draft-n-max", "--spec-draft-ngl",
+                     "--override-tensor", "--cpu-moe", "--n-cpu-moe", "--cache-reuse",
+                     "--no-warmup", "--kv-unified-per-slot", "--lookup-cache-static",
+                     "--lookup-cache-dynamic", "-fa", "--jinja", "--embeddings",
+                     "--pooling"):
+            assert flag in flags, flag
+        assert len(flags) == len(set(flags))
+        assert not any(token.endswith(".gguf") for token in flags)
+
+
+class TestLaunchRefusal:
+    def test_it_refuses_before_anything_is_started(self, tmp_path, monkeypatch):
+        """A refusal that comes after the load costs the load. Nothing may be started."""
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        binary = fake_server(tmp_path)
+        flags_of(binary)    # the help is read once, here; after this nothing may run
+        started: list[list[str]] = []
+
+        def popen(argv, *a, **k):
+            started.append(argv)
+            raise AssertionError("a process was started")
+
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
+
+        with pytest.raises(UnknownFlag) as caught:
+            LlamaServerBackend(binary=binary).start(spec, timeout=1.0)
+        assert str(caught.value) == "this llama-server has no --draft-max; it has --spec-draft-n-max"
+        assert started == []
+
+    def test_one_line_per_flag(self, tmp_path, monkeypatch):
+        binary = fake_server(tmp_path)
+        flags_of(binary)
+        monkeypatch.setattr(subprocess, "Popen",
+                            lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3", "--zzqx", "1"))
+        with pytest.raises(UnknownFlag) as caught:
+            LlamaServerBackend(binary=binary).start(spec, timeout=1.0)
+        assert str(caught.value).splitlines() == [
+            "this llama-server has no --draft-max; it has --spec-draft-n-max",
+            "this llama-server has no --zzqx",
+        ]
+
+    def test_it_is_a_value_error_and_not_a_failed_server(self, tmp_path):
+        """A ServerFailed puts the port in the negative cache; a wrong flag is a caller's
+        mistake and must read as one."""
+        from ml_stack.serve import ServerFailed
+
+        assert issubclass(UnknownFlag, ValueError)
+        assert not issubclass(UnknownFlag, ServerFailed)
+
+    def test_the_check_can_be_skipped_for_a_stand_in_binary(self, tmp_path, monkeypatch):
+        reached: list[str] = []
+
+        def popen(argv, *a, **k):
+            reached.append("popen")
+            raise OSError("stop here")
+
+        binary = fake_server(tmp_path)
+        monkeypatch.setattr(subprocess, "Popen", popen)
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
+        with pytest.raises(OSError, match="stop here"):
+            LlamaServerBackend(binary=binary).start(spec, timeout=1.0, check_flags=False)
+        assert reached == ["popen"]
+
+    def test_a_build_that_prints_no_help_is_not_refused(self, tmp_path, monkeypatch):
+        """The stand-ins in the other test files print nothing; they must keep working."""
+        monkeypatch.setattr(subprocess, "Popen",
+                            lambda *a, **k: (_ for _ in ()).throw(OSError("stop here")))
+        silent = tmp_path / "llama-server"
+        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.chmod(0o755)
+        gguf = tmp_path / "model.gguf"
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        with pytest.raises(OSError, match="stop here"):
+            LlamaServerBackend(binary=silent).start(
+                ServerSpec(model=gguf, extra_args=("--draft-max", "3")), timeout=1.0)

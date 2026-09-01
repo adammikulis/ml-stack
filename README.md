@@ -209,6 +209,20 @@ converse("how are these two connected?", graph, client)          # the model, wi
 open("page.html", "w").write(render(graph, title="Who knows what"))
 ```
 
+**The model is given five things it can do, not the graph.** `look_up` finds entries by
+name or by the words attached to them, `look_at` reads what is held on them, `path_between`
+traces how two connect, `list_kind` reads out everything of one kind, and `show` says what
+the answer is about. `list_kind` exists for the question no search reaches: "which companies
+do people here work for?" is answered by every `org` in the graph, and no word finds those,
+because nothing is *labelled* company — a small model searched "company", then
+"organization", found nothing and gave up. A kind the graph does not have comes back as the
+kinds it does, with counts, so a wrong guess costs one call rather than a turn. An answer
+that comes back empty says why in `steps` — `no answer: finish_reason=stop, thinking 628
+chars, answer 0 chars` — because the assumption is always the token budget and, measured,
+it almost never is. A tool of the caller's own that returns pictures (`_images` in its
+result) has them shown to the model as a message of their own, since a tool result cannot
+carry an image; a picture that cannot be prepared is a line in `steps`, not a crash.
+
 **A store cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty
 graph, and an empty graph looks exactly like "remove everything". `replace` refuses a write
 that would take most of a store, and leaves a verified snapshot when it would take a tenth.
@@ -217,6 +231,17 @@ that would take most of a store, and leaves a verified snapshot when it would ta
 **Two processes cannot corrupt one.** The database's own lock stops the second writer with an
 IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
 and letting go of a read handle when a writer wants in.
+
+**The files around a graph are the same in every project.** `ml_stack.files.write_json`
+writes beside the file and renames over it, so whatever is reading the graph while a
+pipeline rewrites it sees the old one or the new one and never half of either;
+`prune_orphans` deletes the per-record files (an extraction per message) whose record the
+log has since dropped. `ml_stack.geo.geocode_all` turns the places people write — "Raleigh",
+"MD", "sf" — into points through Nominatim, cached to a JSON file, one request a second,
+picking the answer that is actually *called* what was asked rather than the county Nominatim
+ranks first; pass your own `user_agent`, as its usage policy asks. `ml_stack.redact.names_in`
+reads every name a graph and its message log hold, for a `Redactor` to keep out of anything
+printed.
 
 ## The commands
 
@@ -305,6 +330,15 @@ release reads `gemma4` and `qwen3moe` but not `qwen4exp`, so Qwen3.8-Flash-Next 
 strings "$(dirname "$(which llama-server)")"/../lib/libllama*.dylib | grep -x qwen4exp
 ```
 
+**A release also renames flags**, and a flag the build does not have fails at the far end
+of the load: `--draft-max` became `--spec-draft-n-max`, and llama.cpp 0.3.0 keeps the old
+name only to say it was removed. So `up` asks the build what it accepts (`flags_of` reads
+`--help`, cached per binary and mtime) and refuses before loading, one line per flag with
+the nearest the build has — `this llama-server has no --draft-max; it has
+--spec-draft-n-max`. `ml-stack-setup` lists every flag `ServerSpec` can emit that the
+installed build lacks, and says nothing when it answers them all. A build that prints no
+help is unknown, not empty, and is given no opinion.
+
 `ServerSpec(draft=...)` serves a small model of the same family alongside the large one: it
 guesses several tokens ahead and the large model checks them in one pass, so a run they
 agree on costs about what one token used to. It takes the same two forms as the model — a
@@ -312,7 +346,7 @@ path, or `hf:owner/repo/file.gguf` — and `--draft auto` finds the one a reposi
 wherever the publisher put it: at the root, under `MTP/`, or in a sibling `-MTP-GGUF`
 repository. Beware that a `-MTP-GGUF` repository is not always heads: for
 Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 36G of
-weights for `--spec-type draft-mtp`, and `auto` correctly reports no draft rather than
+weights for `--spec draft-mtp`, and `auto` correctly reports no draft rather than
 offering it as one.
 
 ## A hierarchy read out of prose or a picture
@@ -363,10 +397,23 @@ matched against four search tools and wins one of them: "hi" scored 0.900 agains
 "highlight them on the graph", because everything is close to everything and the only
 question is close to *what*.
 
+"Which companies are here?" is the other question that is not a search. Nothing in a graph
+is labelled company, so `look_up` finds nothing however it is worded, and a question that
+asks what *kinds* of thing are represented routes to `list_kind` instead. Its examples are
+kept apart from `look_up`'s on purpose: one asks for a particular thing, the other for
+everything of one sort.
+
 Nothing narrows unless the routing was clear, `show` survives every narrowing, and an
 embedder that will not answer routes nothing rather than defaulting to chat — a real
 question mistaken for small talk is answered without looking anything up, which reads as a
 confident answer and is about nothing.
+
+When a search has already been run for the question — a shortlist, from the word index and
+the vectors — what it found is read to the model *before* the question, as candidates to
+check, and never after it as material to answer from. Measured on gemma-4-E4B: eight likely
+entries handed over as the last message, phrased "use them if they answer it", took it from
+58% F1 to 33%, because it echoed the list rather than selecting from it. What comes last is
+what a small model answers about, so the question is the last thing it reads.
 
 ## Answering the same question twice
 
@@ -480,6 +527,15 @@ the comparison is of two configurations rather than two models: a model at 8k pe
 faster and holds a smaller cache than the same model at 32k. The table prints `ctx` on every
 line so a mismatch is visible rather than silent.
 
+`look_up` is measured **as the application ships it**. With a store -- `prepare` builds one,
+and `run` and `sweep` take it as their default once it exists -- every `look_up` the model
+makes is `ml_stack.graph.search.hybrid`: the characters, the store's word index and, given
+`--embed-url`, its vectors, fused by rank. Without one it is character matching alone, which
+is what the bench measured for months while the application ran the other thing, so every
+ranking it wrote ranked a `look_up` nobody used. The table prints `find` on every line --
+`chars`, `words` or `meaning` -- beside `draft`, and for the same reason as `ctx`: a run
+with one finder against a run with another is two measurements, not a comparison.
+
 The questions are asked of an invented community that ships with this package, so a number
 means the same thing on any machine and no real person's details are involved. Each question
 may carry the ids a good answer names, which is what makes accuracy measurable rather than
@@ -529,6 +585,38 @@ diagnosis: a model whose wrong answers took *more* calls than its right ones sea
 and missed, while one whose wrong answers took *fewer* never reached for the tools at all,
 and those two failures are fixed by opposite things.
 
+## Searching the web
+
+The graph's tools see the graph and nothing else. `ml_stack.web` adds the web in the same
+`(schema, callable)` shape, so a model can be handed both:
+
+```python
+from ml_stack.graph.ask import converse, tools_for
+from ml_stack.web import PROMPTS, tools as web_tools
+
+converse(question, graph, client, tools=tools_for(graph) + web_tools())
+# and, for routing: rank(question, {**TOOL_PROMPTS, **PROMPTS}, ...)
+```
+
+`web_search(query)` returns titles, links and a line each; `web_read(url)` returns one
+page as text, cut at a sentence, and falls through to a real browser when the plain fetch
+came back thin. `web_tools(vision=True)` adds `web_look(url)` — a full-page screenshot and
+the page's largest pictures, returned under `_images` for the ask loop to hand to a model
+that can see. The descriptions carry worked examples, for the reason measured above.
+
+**A model cannot read the machine it runs on.** `web_read` and `web_look` refuse anything
+that is not http(s) and any host that resolves to a loopback, private or link-local
+address — `file:`, `localhost`, `127/8`, `10/8`, `192.168/16` and their kin — before a
+byte is fetched or a browser navigates. The browser uses its own profile
+(`MLSTACK_WEB_PROFILE`, default `~/.ml-stack/web`), never the scraper's signed-in one.
+
+`MLSTACK_SEARCH` picks the engine. `ddgs` (the default; `pip install 'ml-stack[web]'`) is
+keyless, fronts several engines, and is rate-limited by them: a refusal comes back to the
+model as `{"none": "search unavailable: ..."}` rather than an empty list, so it moves on
+instead of asking again. `searxng` is the robust option when the questions are many: a
+self-hosted instance at `SEARXNG_URL` with its JSON format enabled, reached through the
+stdlib, and nobody rate-limits it but you.
+
 ## `contracts/` is data, not code
 
 `contracts/` holds JSON describing things a runtime and a non-Python host both need to
@@ -542,6 +630,19 @@ Resolution order at runtime: `$ML_STACK_CONTRACTS` → the copy inside the insta
 `contracts/` found by walking up from the source file. The walk-up is last on purpose: if a
 wheel is installed *and* a repo happens to be an ancestor, the wheel's own data should win,
 because that is what its version was tested against.
+
+## Hooks
+
+`scripts/install-hooks.sh` links the git hooks in `scripts/hooks/` into `.git/hooks`:
+`no-real-names` refuses a commit whose staged files carry a person's name, `commit-msg`
+refuses one whose message does. A third hook there is for Claude Code rather than git:
+`scripts/hooks/claude-bash-guard` is a PreToolUse hook on Bash that refuses the shells
+which keep getting written instead of ml-stack commands -- a hand-written `pgrep` waiter,
+`nohup`, `llama-server` started directly, `find`-ing for GGUFs, `hf download`, curl probes
+at the model, killing llama by name, `SKIP_NAME_CHECK=1` -- and names the command to run
+instead. Wire it into a project's `.claude/settings.json` (the docstring shows the JSON);
+`MLSTACK_GUARD=off` disables it for a session. Both hooks are tested:
+`tests/test_no_real_names.py` and `tests/test_bash_guard.py`.
 
 ## Testing
 

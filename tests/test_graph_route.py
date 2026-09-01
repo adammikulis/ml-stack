@@ -125,3 +125,15 @@ def test_the_margin_gates_acting_on_a_routing(margin, expect):
     never sure. Neither may quietly narrow."""
     out = routed("who fixes machines?", margin=margin)
     assert out.clear is expect
+
+
+def test_a_question_about_what_kinds_of_thing_are_here_routes_to_listing_them():
+    """Nothing in a graph is labelled "company", so "which companies are here?" is not a
+    search however it is worded. It wants every entry of one kind, and that is a different
+    tool -- kept apart from look_up's examples, which ask for a particular thing."""
+    assert routed("which companies are here?").order[0] == "list_kind"
+    assert routed("what kinds of places are there?").order[0] == "list_kind"
+    assert routed("which employers are represented here?").order[0] == "list_kind"
+    # asking for one particular thing is still a search
+    assert routed("who fixes machines?").order[0] == "look_up"
+    assert not any(example in TOOL_PROMPTS["look_up"] for example in TOOL_PROMPTS["list_kind"])

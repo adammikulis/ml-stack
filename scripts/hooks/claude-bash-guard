@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""Refuse the shell commands that should have been ml-stack commands.
+
+CLAUDE.md says a shell one-liner, a script in a scratchpad, or a step done by hand twice is
+a missing command -- and saying so has not been enough. Every rule below was written after
+the thing it refuses actually happened and cost real time:
+
+  - two `until ! pgrep` waiters spun for an afternoon because `pgrep -f` matched the waiting
+    shell itself; the draft-head comparison queued behind them never ran, and said nothing
+  - GGUFs were hunted with `find` before `ml-stack-models` existed
+  - a free port was picked by hand after a lease was refused
+  - `nohup ... &` jobs died silently with nobody watching the log
+
+Claude Code runs this before every Bash call. Exit 2 blocks the command and hands the
+message back, so the correction arrives while the work is happening rather than afterwards.
+Set MLSTACK_GUARD=off to disable it for a session.
+
+Wire it in as a PreToolUse hook on Bash in a project's `.claude/settings.json`:
+
+    {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": "$HOME/Documents/repos/ml-stack/scripts/hooks/claude-bash-guard"}]}]}}
+
+A project that wants its own wiring writes a thin `sh` wrapper that execs this file with
+stdin passed through, and exits 0 with a note when this copy is missing -- a missing guard
+must not block every Bash call.
+"""
+
+import json
+import os
+import re
+import sys
+
+# (what it matches, what to do instead). Ordered: the first match wins.
+REFUSE = [
+    (r"until\s*!\s*pgrep|while\s+pgrep|until\s+pgrep",
+     "Do not hand-write a waiter. `pgrep -f` matches the waiting shell's own command line, "
+     "so the loop never exits -- two of them spun for an afternoon and the work queued "
+     "behind them never ran. `ml-stack-bench run|sweep|drafts` now takes a lock and waits "
+     "for whoever is measuring (`ml_stack.lock.only_one`); just start it."),
+    (r"(^|[;&|]\s*|\bthen\s+|\bdo\s+|\bexec\s+)nohup\b",
+     "Do not `nohup ... &`. Use the Bash tool's run_in_background, which reports the exit "
+     "code and keeps the output, or `ml-stack-bench sweep --serve`, which puts one model up "
+     "at a time on purpose. Backgrounded jobs have died silently here before."),
+    (r"(^|[;&|]\s*)(/\S*/)?llama-server\s",
+     "Do not start llama-server by hand. `ml-stack-serve up <model> --port N` leases one "
+     "shape per port, refuses a mismatched lease, and downloads `hf:owner/repo/file` on "
+     "first use. Two shapes on one port made the second caller adopt a server with the "
+     "wrong number of slots."),
+    (r"\bfind\b[^|;]*\.gguf|\bls\b[^|;]*\*\.gguf",
+     "Do not hunt for GGUFs with find/ls. `ml-stack-models find <words>` searches the Hub "
+     "and `ml-stack-models files <repo>` lists what is already on this machine -- a Hub "
+     "cache is symlinks into blobs/, so `ls -l` reports 79 bytes for a 46G shard and reading "
+     "that as 'not downloaded' nearly re-fetched 87G."),
+    (r"\bhuggingface-cli\s+download\b|\bhf\s+download\b",
+     "Do not download by hand. `ml-stack-serve up hf:owner/repo/file` fetches on first use, "
+     "into the same cache, and `ml-stack-models files <repo>` says what is already here."),
+    (r"\bcurl\b[^|;]*(127\.0\.0\.1|localhost)[^|;]*(/v1/|/props|/slots|/completion)",
+     "Do not probe the model with curl. `ml_stack.client.Client` carries the sampling and "
+     "the budgets, and `ml-stack-bench` records what it measured. Ad-hoc curl probes have "
+     "produced numbers that went nowhere and an 80-token budget that returned empty text."),
+    (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
+     "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
+     "killing the process leaves the lease behind and the next `up` refuses."),
+    (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
+     "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
+     "between a real community and a public repository. If it flagged an invented name, add "
+     "it to known-fixtures.txt; if it flagged a real one, the fix is to invent one."),
+]
+
+
+def without_heredocs(command: str) -> str:
+    """Drop heredoc bodies, which are data being written rather than commands being run.
+
+    This guard blocked its own installation twice: the command wrote documentation *about*
+    a forbidden shell into a file through a heredoc, and the pattern matched the prose. A
+    rule that fires on text being written is a rule people learn to switch off -- and it
+    cannot be repaired through the tool it guards, so it must not need repairing often.
+    """
+    kept, lines, i = [], command.split("\n"), 0
+    while i < len(lines):
+        kept.append(lines[i])
+        opened = re.search(r"<<-?\s*['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?", lines[i])
+        if opened:
+            end = opened.group(1)
+            i += 1
+            while i < len(lines) and lines[i].strip() != end:
+                i += 1
+        i += 1
+    return "\n".join(kept)
+
+
+def main() -> int:
+    if os.environ.get("MLSTACK_GUARD") == "off":
+        return 0
+    try:
+        event = json.load(sys.stdin)
+    except Exception:
+        return 0
+    if event.get("tool_name") != "Bash":
+        return 0
+    command = without_heredocs((event.get("tool_input") or {}).get("command") or "")
+    for pattern, instead in REFUSE:
+        if re.search(pattern, command, re.M):
+            print(f"blocked: {instead}\n\n"
+                  f"(ml-stack scripts/hooks/claude-bash-guard. If this is genuinely the right "
+                  f"command, say so and a person can run it, or set MLSTACK_GUARD=off.)",
+                  file=sys.stderr)
+            return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

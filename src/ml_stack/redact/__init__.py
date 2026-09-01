@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
-__all__ = ["Redactor", "tag"]
+__all__ = ["Redactor", "names_in", "tag"]
 
 
 def tag(name: str, prefix: str = "person") -> str:
@@ -30,3 +32,35 @@ class Redactor:
         if self.pattern is None:
             return body
         return self.pattern.sub(lambda m: tag(m.group(0), self.prefix), body)
+
+
+def names_in(graph: Path | None = None, messages: Path | None = None, *,
+             kind: str = "person", field: str = "sender", min_length: int = 3) -> set[str]:
+    """Every name a graph and its message log hold, read fresh, for a :class:`Redactor`.
+
+    The graph is a JSON mapping: the ``label`` of each node of ``kind``, and ``field`` of each
+    value in its ``messages`` mapping. The log is JSON lines, ``field`` of each row. Either
+    may be absent, missing or not JSON, and contributes nothing then. Names shorter than
+    ``min_length`` are left out, since a two-letter name is also a word in most sentences.
+    """
+    names: set[str] = set()
+    if graph is not None:
+        try:
+            g = json.loads(Path(graph).read_text(encoding="utf-8"))
+            names |= {n["label"] for n in g.get("nodes", []) if n.get("kind") == kind}
+            names |= {m[field] for m in (g.get("messages") or {}).values() if m.get(field)}
+        except (OSError, ValueError, KeyError, AttributeError, TypeError):
+            pass
+    if messages is not None:
+        try:
+            lines = Path(messages).read_text(encoding="utf-8").splitlines()
+        except OSError:
+            lines = []
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get(field):
+                names.add(row[field])
+    return {n for n in names if isinstance(n, str) and len(n) >= min_length}

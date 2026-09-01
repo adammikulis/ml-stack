@@ -109,6 +109,22 @@ IDENTIFIER = re.compile(r"[_\[\](){}\"\n@/=]|^[a-z]+$")
 # have either. `{0,20}` costs a few false alarms on things like "Answer B"; those go in
 # known-fixtures.txt once, and a missed person does not get a second chance.
 NAMEISH = re.compile(r"[\"\'`]([A-Z][a-z]{1,20}(?:\s+[A-Z][\w\'’.-]{0,20}){1,3})[\"\'`]")
+# Geography is name-shaped too -- "North Carolina", "Colorado River", "San Francisco" -- and
+# a gazetteer or a geocoder's tests are full of it. A pair whose first word is a direction or
+# a place prefix, or whose last word is a place kind, is a place, not a person. A person can
+# be called North West; the exact list from the graph still catches anyone it holds.
+PLACE_FIRST = {"north", "south", "east", "west", "new", "old", "upper", "lower", "san", "santa",
+               "los", "las", "saint", "st.", "fort", "port", "mount", "lake", "cape", "united",
+               "the", "greater", "central"}
+PLACE_LAST = {"county", "river", "city", "island", "islands", "bay", "area", "kingdom", "states",
+              "emirates", "beach", "lake", "valley", "park", "street", "road", "avenue",
+              "mountain", "mountains", "hills", "falls", "springs", "harbor", "harbour",
+              "coast", "province", "republic", "region", "district", "township", "heights"}
+
+
+def is_place(body):
+    words = body.casefold().split()
+    return words[0] in PLACE_FIRST or words[-1].strip(".,") in PLACE_LAST
 
 
 def contacts(line, allowed):
@@ -168,7 +184,7 @@ for path in staged:
     for i, line in enumerate([] if path.endswith((".json", ".csv", ".geojson")) else blob.split("\n"), 1):
         for found in NAMEISH.finditer(line):
             body = found.group(1).strip()
-            if body.casefold() not in allowed:
+            if body.casefold() not in allowed and not is_place(body):
                 bad.append((path, i, f"{body!r} is shaped like a name"))
     if engine is None:
         continue

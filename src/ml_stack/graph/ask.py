@@ -1,9 +1,10 @@
 """Asking a model a question about a graph.
 
 Handing a model the whole graph does not scale and handing it a pre-chosen slice makes the
-choosing the answer. This gives it three things it can do instead — find entries by name, read
-what is held on them, trace how two of them connect — and lets it decide which to use. What it
-touched comes back with the answer, which is what a caller needs to show its working.
+choosing the answer. This gives it four things it can do instead — find entries by name, read
+what is held on them, trace how two of them connect, list everything of one kind — and lets it
+decide which to use. What it touched comes back with the answer, which is what a caller needs
+to show its working.
 
 The graph is a mapping with ``nodes`` and ``edges``; nothing here cares what a project calls
 its kinds or relations.
@@ -50,6 +51,13 @@ ROUNDS = 10
 # How many times a model may ask for something it has already asked for before the tools are
 # taken away. Two is a stumble; three is a loop, and a loop always ends in no answer at all.
 REPEATS = 2
+
+# The tools that look for something, and so are taken away on the last turn; what is left
+# then is the tools that act (show, and whatever a caller adds -- a change request, say).
+# The web tools are searches too: a model that may still search will search instead of
+# answering, which is the failure the last turn exists to end.
+SEARCHING = frozenset({"look_up", "look_at", "path_between", "list_kind",
+                       "web_search", "web_read", "web_look"})
 # Openings that mean the model is planning rather than answering. gpt-oss puts its analysis
 # in a channel of its own, but when a turn spends its whole budget deciding what to do the
 # reply that comes back IS the analysis — not empty, so nothing caught it, and the reader
@@ -126,6 +134,10 @@ JOINED = 12
 SAID = 2
 SAID_CHARS = 220
 LIT = 25
+# How many entries list_kind reads out of one kind. Enough for every organisation a
+# community of a few hundred people works for; a kind bigger than that is read most
+# mentioned first, and the total is stated so the model knows what it did not see.
+LISTED = 40
 
 # Every example below is invented, and deliberately shares no name with the community the
 # bench asks its questions of: an example that used the bench's own people would be teaching
@@ -183,6 +195,27 @@ TOOLS = [
             "from_id": {"type": "string", "description": "an entry id, e.g. \"person:wren\""},
             "to_id": {"type": "string", "description": "another entry id, e.g. \"person:hollis\""}},
             "required": ["from_id", "to_id"]}}},
+    # The one question no description of look_up reaches: "which companies do people here
+    # work for?" Nothing in the graph is *labelled* company, so a small model searches
+    # "company", then "organization", finds nothing, and gives up. The capability was
+    # absent, not badly described -- the large models got it right only by reading enough
+    # of the graph to have seen every organisation on the way.
+    {"type": "function", "function": {
+        "name": "list_kind",
+        "description": "List every entry of one kind the graph holds — all the organisations, "
+                       "all the topics, all the places — most mentioned first. Use it when "
+                       "the question asks what is represented here rather than for a name: "
+                       "look_up matches words, and no entry is labelled \"company\", so "
+                       "searching for one finds nothing. Companies, organisations, businesses "
+                       "and employers are all the kind \"org\". Examples: for \"Which "
+                       "companies do people here work for?\" call list_kind with "
+                       "{\"kind\": \"org\"}; for \"What topics come up here?\" call list_kind "
+                       "with {\"kind\": \"topic\"}. When the kind you guessed does not exist, "
+                       "the result names the kinds that do — call it again with one of those.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string",
+                     "description": "one kind of entry, e.g. \"org\", \"topic\", \"place\""}},
+            "required": ["kind"]}}},
     {"type": "function", "function": {
         "name": "show",
         "description": "Say which entries your answer is about, so they light up on the graph. "
@@ -203,7 +236,7 @@ TOOLS = [
 ]
 
 
-# The same four tools, said briefly. What a model needs to be told depends entirely on the
+# The same five tools, said briefly. What a model needs to be told depends entirely on the
 # model: the worked examples above took gemma-4-E4B from 17% to 70% recall, and cost
 # gpt-oss-120b twenty points over the same questions. A model that already reaches for a
 # tool does not need telling to, and being told anyway spends its attention on instructions
@@ -236,6 +269,13 @@ TERSE = [
         "parameters": {"type": "object", "properties": {
             "from_id": {"type": "string"}, "to_id": {"type": "string"}},
             "required": ["from_id", "to_id"]}}},
+    {"type": "function", "function": {
+        "name": "list_kind",
+        "description": "Every entry of one kind -- org, topic, place -- most mentioned first. "
+                       "A kind that does not exist is answered with the kinds that do.",
+        "parameters": {"type": "object", "properties": {
+            "kind": {"type": "string", "description": "one kind of entry"}},
+            "required": ["kind"]}}},
     {"type": "function", "function": {
         "name": "show",
         "description": "The entries your answer is about, to light up on the graph. Call it "
@@ -271,9 +311,18 @@ TOOL_PROMPTS: dict[str, tuple[str, ...]] = {
         "who knows about robotics?",
         "is there anyone here who does marketing?",
         "find me people working on healthcare",
-        "which companies are represented?",
         "somebody who can sell things",
         "who fixes machines?",
+    ),
+    # "Which companies are here?" is not a search: nothing is labelled company, so look_up
+    # finds nothing however it is worded. These are the questions that ask what kinds of
+    # thing the graph holds, kept apart from look_up's, which ask for a particular one.
+    "list_kind": (
+        "which companies are here?",
+        "what kinds of organisations are represented?",
+        "list all the topics people talk about",
+        "what places do people live in?",
+        "which employers are represented here?",
     ),
     "look_at": (
         "tell me about Iris Bellweather",
@@ -325,8 +374,8 @@ def prompts_for(name: str) -> tuple[str, ...]:
 class Answer:
     """What to say, what to light up, and what was done to find out.
 
-    ``found`` holds what look_up returned, ``read`` what look_at was given, ``path`` what
-    path_between traversed. ``ids`` is their union — read first, then path, then found —
+    ``found`` holds what look_up and list_kind returned, ``read`` what look_at was given,
+    ``path`` what path_between traversed. ``ids`` is their union — read first, then path, then found —
     capped at converse's ``limit``.
 
     ``show`` is different in kind from all three: they record what the tools *touched*,
@@ -425,6 +474,69 @@ def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, A
             "reads": " → ".join(label.get(i, i) for i in ids)}
 
 
+def _kind_of(node: Mapping[str, Any]) -> str:
+    """A node's kind: what it says, else the ``kind:`` prefix of its id, else nothing."""
+    kind = str(node.get("kind") or "")
+    if kind:
+        return kind
+    head, sep, _rest = str(node.get("id") or "").partition(":")
+    return head if sep else ""
+
+
+def _singular(word: str) -> tuple[str, ...]:
+    """The kind names a word might be asking for: itself, and what it is the plural of."""
+    ways = [word]
+    if word.endswith("ies"):
+        ways.append(word[:-3] + "y")
+    if word.endswith("es"):
+        ways.append(word[:-2])
+    if word.endswith("s"):
+        ways.append(word[:-1])
+    return tuple(ways)
+
+
+def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED) -> dict[str, Any]:
+    """Every entry of one kind, most mentioned first — or the kinds there are.
+
+    For the question a search cannot reach: "which companies do people here work for?" is
+    answered by every ``org`` in the graph, and no word finds those, because nothing is
+    labelled "company". ``kind`` is matched without regard to case or number, so ``Orgs``
+    lists ``org``. A kind the graph does not have comes back as ``{"none": ..., "kinds":
+    {name: count}}``, so a model that guessed wrong learns the real names on its first miss
+    rather than guessing again.
+    """
+    nodes = list(graph.get("nodes") or ())
+    counts: dict[str, int] = {}
+    for node in nodes:
+        named = _kind_of(node)
+        if named:
+            counts[named] = counts.get(named, 0) + 1
+    by_fold = {k.casefold(): k for k in counts}
+    want = " ".join(str(kind or "").split()).casefold()
+    found = next((by_fold[w] for w in _singular(want) if w in by_fold), None)
+    if found is None:
+        kinds = dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+        return {"none": f"no kind {str(kind or '')!r}", "kinds": kinds}
+    rows = [n for n in nodes if _kind_of(n) == found]
+    rows.sort(key=lambda n: (-int(n.get("mentions") or 0), str(n.get("label") or "")))
+    return {"kind": found, "total": len(rows),
+            "entries": [{"id": str(n["id"]), "label": str(n.get("label") or ""),
+                         "mentions": int(n.get("mentions") or 0)} for n in rows[:limit]]}
+
+
+def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, Any]:
+    """The tool schema called ``name``.
+
+    By name, never by position: the order of ``TOOLS`` is the order a model reads them in,
+    which changes when a tool is added, and ``TOOLS[3]`` was ``show`` right up until it
+    was not.
+    """
+    for schema in among:
+        if (schema.get("function") or {}).get("name") == name:
+            return schema
+    raise KeyError(name)
+
+
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
@@ -454,12 +566,18 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     def trace(args: Mapping[str, Any]) -> dict[str, Any]:
         return path_between(graph, str(args.get("from_id") or ""), str(args.get("to_id") or ""))
 
+    def listing(args: Mapping[str, Any]) -> dict[str, Any]:
+        return list_kind(graph, str(args.get("kind") or ""))
+
     def light(args: Mapping[str, Any]) -> str:
         # the ids are the whole result; the model is told they arrived so it stops calling it
         return f"lit {len(list(args.get('ids') or ()))} on the graph"
 
-    said = TERSE if terse else TOOLS
-    return [(said[0], find), (said[1], read), (said[2], trace), (said[3], light)]
+    does = {"look_up": find, "look_at": read, "path_between": trace,
+            "list_kind": listing, "show": light}
+    # in the order the schemas are written, which is the order a model reads them in
+    return [(schema, does[str(schema["function"]["name"])])
+            for schema in (TERSE if terse else TOOLS)]
 
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -511,12 +629,29 @@ def _call_detail(name: str, args: Mapping[str, Any]) -> str:
         return f"{len(ids)} id" + ("" if len(ids) == 1 else "s")
     if name == "path_between":
         return f"{args.get('from_id')} → {args.get('to_id')}"
+    if name == "list_kind":
+        return repr(str(args.get("kind") or ""))
     return json.dumps(args, ensure_ascii=False)[:80]
+
+
+def _plain(value: Any) -> str:
+    """What the JSON encoder says about a value it cannot encode, instead of raising.
+
+    A tool result is whatever a caller's tool returned, and one that carries raw bytes --
+    a picture the `_images` convention did not cover, a path -- must not take the whole
+    answer down with a TypeError. The bytes themselves are never sent: a model reads
+    nothing from them and they are the size of a picture.
+    """
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return f"<{len(value)} bytes>"
+    return repr(value)[:80]
 
 
 def _result_count(result: Any) -> int:
     if isinstance(result, (list, tuple)):
         return len(result)
+    if isinstance(result, Mapping) and "entries" in result:
+        return len(result.get("entries") or ())
     if isinstance(result, Mapping) and "path" in result:
         return len(result.get("path") or ())
     if isinstance(result, str):
@@ -565,8 +700,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
              "content": str(t.get("content") or "")[:4000]}
             for t in turns if str(t.get("content") or "").strip()]
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said,
-                                      {"role": "user", "content": question}]
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said]
 
     # A search has already been run — cheaply, by a small model that only measures meaning —
     # and what it found is read out before the first turn. Most questions are then answered
@@ -574,24 +708,32 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     # through a large model, and the small one costs milliseconds. It is a suggestion, not
     # an answer: the tools are all still there, and the prompt says to go looking when this
     # is not what the question was about.
+    #
+    # It goes *before* the question, as candidates to check, and not after it as the
+    # answer's raw material. Measured on gemma-4-E4B: eight likely entries handed over as
+    # the last message after the question, phrased "use them if they answer it", took it
+    # from 58% F1 to 33% -- it echoed the list rather than selecting from it. What comes
+    # last is what a small model answers about; the question has to be the last thing it
+    # reads, and the list has to arrive as something to verify rather than something to say.
     start = [str(i) for i in opening if str(i) in known][:FOUND]
     if start:
         material = (run.get("look_at") or (lambda a: look_at(graph, a["ids"])))({"ids": start})
         note(out.found, start)
         out.steps.append(f"was handed {len(start)} to start from")
         messages.append({"role": "user", "content":
-                         "A search for this question already found these, most likely first. "
-                         "Use them if they answer it, look for something else if they do not, "
-                         "and say so plainly if nothing here does:\n" + str(material)})
+                         "A search turned up these entries; some may be irrelevant. Look at "
+                         "the ones that seem to answer the question before trusting them, "
+                         "and ignore the rest:\n" + str(material)})
         if emit is not None:
             emit({"event": "tool", "name": "shortlist", "detail": f"{len(start)} to start from"})
+    messages.append({"role": "user", "content": question})
 
     # The tools that go looking. Taking these away is how a turn is made to stop searching
     # and answer; taking away *every* tool is how it was also made unable to act. A message
     # asking for an entry to be changed came in, the search went round in circles, the loop
     # stopped — and the one call left had no `request_change` to reach for, so a member's
     # request became "the model did not finish an answer". Stop the searching, not the rest.
-    searching = {"look_up", "look_at", "path_between"}
+    searching = set(SEARCHING)
     quiet = [x for x in schemas if str((x.get("function") or {}).get("name")) not in searching]
 
     def step(with_tools: bool) -> Any:
@@ -675,6 +817,14 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 result = do(args)
                 note(out.path, result.get("path") or [])
                 out.steps.append("traced a path" if result.get("path") else "found no path")
+            elif name == "list_kind":
+                result = do(args)
+                listed = result.get("entries") if isinstance(result, Mapping) else None
+                if listed is None:
+                    out.steps.append(f"found no kind {str(args.get('kind') or '')!r}")
+                else:
+                    note(out.found, [r["id"] for r in listed])
+                    out.steps.append(f"listed {len(listed)} of kind {result.get('kind')!r}")
             elif name == "show":
                 # the same guard as look_at: an id the model made up is not lit up
                 ids = [str(i) for i in (args.get("ids") or ())]
@@ -686,10 +836,40 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 result = do(args)
                 out.steps.append(f"used {name}")
             spent_on.add(again)
+            # A tool may bring pictures back for a vision model -- `web.tools(vision=True)`
+            # returns what a page looked like under `_images`. llama.cpp cannot carry an
+            # image inside a tool result, so they come out before the result is encoded
+            # and go in as a user message of their own, right after it.
+            seen: dict[str, Any] | None = None
+            kept = 0
+            if isinstance(result, Mapping) and "_images" in result:
+                result = dict(result)
+                pictures = list(result.pop("_images") or ())
+                if pictures:
+                    from ml_stack.vision.payloads import build_message
+
+                    seen, report = build_message(
+                        f"What {name} returned for the call above, as seen:", pictures)
+                    kept = sum(1 for p in seen["content"] if p.get("type") == "image_url")
+                    if not kept:
+                        # a picture that cannot be prepared is said, not sent: a model
+                        # told to look at nothing answers about nothing, confidently
+                        seen = None
+                        why = "; ".join(report.warnings) or "no reason given"
+                        out.steps.append(f"{name} returned {len(pictures)} image"
+                                         + ("" if len(pictures) == 1 else "s")
+                                         + f" and none could be shown: {why}")
+            count = _result_count(result)
+            if kept and isinstance(result, Mapping) and not ({"entries", "path"} & set(result)):
+                count = kept
             if emit is not None:
-                emit({"event": "tool_result", "name": name, "count": _result_count(result)})
+                emit({"event": "tool_result", "name": name, "count": count})
             messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
-                             "name": name, "content": json.dumps(result, ensure_ascii=False)[:6000]})
+                             "name": name,
+                             "content": json.dumps(result, ensure_ascii=False,
+                                                   default=_plain)[:6000]})
+            if seen is not None:
+                messages.append(seen)
         return True
 
     answered = False
@@ -765,11 +945,22 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                              "Write the answer your notes were working towards, in plain "
                              "prose for someone who cannot see them. Do not narrate what you "
                              "looked up."})
-            said = (getattr(client.chat(messages, think=False), "content", "") or "").strip()
+            reply = client.chat(messages, think=False)
+            said = (getattr(reply, "content", "") or "").strip()
             out.content = "" if is_working(said) else without_notes(said)
             if out.content and emit is not None:
                 emit({"event": "answer", "text": out.content})
     if not out.content:
+        # Why there is no answer, from the last reply, because the assumption is always the
+        # token budget and it is almost never that. Measured: the same failing question at
+        # n_predict 2048 and 6144 came back `finish_reason: stop` both times, with 628 and
+        # 767 characters of reasoning and nothing after it. Nothing printed that, so the
+        # ceiling was raised again, which proved nothing. Now the reader is told.
+        why = getattr(reply, "finish_reason", None) or "unknown"
+        thought = len((getattr(reply, "thinking", "") or "").strip())
+        wrote = len((getattr(reply, "content", "") or "").strip())
+        out.steps.append(f"no answer: finish_reason={why}, thinking {thought} chars, "
+                         f"answer {wrote} chars")
         out.content = ("The model did not finish an answer. What it opened is lit up on the "
                        "graph; asking again, or more narrowly, usually gets one.")
         if emit is not None:
@@ -812,7 +1003,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                          "Now call show once with the ids of the entries your answer is "
                          "about — everyone and everything you named in it, including any you "
                          "named from a quote. Nothing you opened and did not write about."})
-        last = client.chat(messages, think=False, tools=[TOOLS[3]])
+        last = client.chat(messages, think=False, tools=[_schema("show")])
         for call in (getattr(last, "tool_calls", None) or []):
             fn = call.get("function") or {}
             if (fn.get("name") or "") != "show":

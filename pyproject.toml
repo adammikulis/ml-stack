@@ -44,6 +44,8 @@ graph = ["numpy>=1.24"]
 store = ["ladybug>=0.18"]
 # a browser that remembers who you are; needs `playwright install chromium` too
 scrape = ["playwright>=1.40"]
+# searching the web beside the graph: ddgs is keyless and rate-limited, SearXNG is not
+web = ["ddgs>=9", "trafilatura>=2"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
 testing = ["numpy>=1.24", "pytest>=7"]
 telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]

@@ -40,3 +40,50 @@ def test_the_prefix_names_what_kind_of_thing_was_hidden():
     assert tag("Quenlow Robotics", "org").startswith("org#")
     hide = Redactor({"Quenlow Robotics"}, prefix="org")
     assert hide("Quenlow Robotics hires") == f"{tag('Quenlow Robotics', 'org')} hires"
+
+
+def _graph_and_log(tmp_path):
+    import json
+
+    graph = {"nodes": [{"id": "person:ada", "kind": "person", "label": "Ada Lovelace"},
+                       {"id": "person:bo", "kind": "person", "label": "Bo"},
+                       {"id": "topic:looms", "kind": "topic", "label": "looms"}],
+             "messages": {"C1-1": {"sender": "Bea Marlow", "text": "hello"}}}
+    (tmp_path / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    rows = [json.dumps({"ts": "1.000001", "sender": "Joan Clarke", "text": "hi"}),
+            "not json", json.dumps(["a", "list"]), json.dumps({"ts": "1.000002", "text": "nobody"})]
+    (tmp_path / "messages.jsonl").write_text("\n".join(rows) + "\n", encoding="utf-8")
+    return tmp_path / "graph.json", tmp_path / "messages.jsonl"
+
+
+def test_names_are_read_from_the_graphs_people_and_from_who_sent_each_message(tmp_path):
+    from ml_stack.redact import names_in
+
+    graph, log = _graph_and_log(tmp_path)
+    assert names_in(graph, log) == {"Ada Lovelace", "Bea Marlow", "Joan Clarke"}
+
+
+def test_a_two_letter_name_is_left_out_because_it_is_also_a_word(tmp_path):
+    from ml_stack.redact import names_in
+
+    graph, log = _graph_and_log(tmp_path)
+    assert "Bo" not in names_in(graph, log)
+    assert "Bo" in names_in(graph, log, min_length=2)
+
+
+def test_a_file_that_is_missing_or_not_json_contributes_nothing(tmp_path):
+    from ml_stack.redact import names_in
+
+    graph, log = _graph_and_log(tmp_path)
+    (tmp_path / "broken.json").write_text("{", encoding="utf-8")
+    assert names_in(tmp_path / "absent.json", log) == {"Joan Clarke"}
+    assert names_in(tmp_path / "broken.json", tmp_path / "absent.jsonl") == set()
+    assert names_in(graph) == {"Ada Lovelace", "Bea Marlow"}
+    assert names_in() == set()
+
+
+def test_what_the_names_are_read_from_can_be_chosen(tmp_path):
+    from ml_stack.redact import names_in
+
+    graph, _ = _graph_and_log(tmp_path)
+    assert names_in(graph, kind="topic", field="nobody") == {"looms"}

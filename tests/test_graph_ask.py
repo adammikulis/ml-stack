@@ -7,8 +7,8 @@ graph. What is asserted is what the tools returned and what came back as touched
 
 from dataclasses import dataclass
 
-from ml_stack.graph.ask import (Answer, converse, converse_stream, look_at, look_up,
-                                path_between, tools_for)
+from ml_stack.graph.ask import (LISTED, Answer, converse, converse_stream, list_kind, look_at,
+                                look_up, path_between, tools_for)
 
 GRAPH = {
     "nodes": [
@@ -38,6 +38,7 @@ class Reply:
     content: str = ""
     tool_calls: list | None = None
     thinking: str | None = None
+    finish_reason: str | None = None
 
 
 class ScriptedModel:
@@ -681,7 +682,7 @@ def test_the_tools_can_be_said_briefly_or_at_length():
     from ml_stack.graph.ask import TERSE, TOOLS, tools_for
 
     assert [t["function"]["name"] for t in TERSE] \
-        == [t["function"]["name"] for t in TOOLS], "the same four tools, said differently"
+        == [t["function"]["name"] for t in TOOLS], "the same five tools, said differently"
     def shape(schema):
         """The callable shape: names, types and what is required -- not the prose."""
         params = schema["function"]["parameters"]
@@ -769,3 +770,263 @@ def test_going_in_circles_costs_a_handful_of_calls_and_stops():
     out = converse("who?", GRAPH, model, rounds=10)
     assert "stopped searching in circles" in out.steps
     assert model.calls == 5, f"a circle costs five calls here, not {model.calls}"
+
+
+def test_list_kind_lists_a_kind_most_mentioned_first_and_names_the_kinds_when_it_misses():
+    """The question no search reaches: nothing is labelled "company", so a small model
+    searching for one finds nothing and gives up. Listing a kind is a capability, not a
+    wording, and a wrong guess at the kind's name is answered with the right ones."""
+    out = list_kind(GRAPH, "person")
+    assert out["kind"] == "person" and out["total"] == 2
+    assert [e["id"] for e in out["entries"]] == ["person:ada", "person:bea"]
+    assert out["entries"][0] == {"id": "person:ada", "label": "Ada Lovelace", "mentions": 4}
+    # case and number are not the model's problem: Orgs is org, topics is topic
+    assert [e["id"] for e in list_kind(GRAPH, "Orgs")["entries"]] == ["org:pellard"]
+    assert list_kind(GRAPH, "Topics")["kind"] == "topic"
+    # a miss says so and names every kind there is, biggest first, so the next call is right
+    missed = list_kind(GRAPH, "company")
+    assert missed == {"none": "no kind 'company'", "kinds": {"person": 2, "org": 1, "topic": 1}}
+    assert list_kind(GRAPH, "")["kinds"] == missed["kinds"]
+
+
+def test_list_kind_reads_the_kind_off_the_id_when_a_node_does_not_say_and_is_capped():
+    graph = {"nodes": [{"id": "place:turin", "label": "Turin", "mentions": 1},
+                       {"id": "place:harrowgate", "label": "Harrowgate", "mentions": 1},
+                       {"id": "place:selby", "label": "Selby", "mentions": 5},
+                       {"id": "loose", "label": "no kind at all"}],
+             "edges": [], "messages": {}}
+    out = list_kind(graph, "places", limit=2)
+    # most mentioned first, then by label; the total says what the cap left out
+    assert [e["id"] for e in out["entries"]] == ["place:selby", "place:harrowgate"]
+    assert out["total"] == 3
+    assert list_kind(graph, "nothing")["kinds"] == {"place": 3}
+    assert LISTED >= 40, "a community's every organisation fits in one listing"
+
+
+def test_a_model_that_lists_a_kind_gets_the_entries_read_back():
+    model = ScriptedModel([call("list_kind", kind="org"),
+                           call("show", ids=["org:pellard"])])
+    out = converse("which companies do people here work for?", GRAPH, model)
+    assert out.found == ["org:pellard"]
+    assert out.show == ["org:pellard"]
+    assert "listed 1 of kind 'org'" in out.steps
+    tool_turns = [m for turn in model.seen for m in turn if m.get("role") == "tool"]
+    assert any("org:pellard" in m["content"] and "Pellard Foundry" in m["content"]
+               for m in tool_turns)
+    # a wrong guess is a step too, and it counts as having gone looking
+    wrong = ScriptedModel([call("list_kind", kind="company")])
+    out = converse("which companies?", GRAPH, wrong)
+    assert "found no kind 'company'" in out.steps
+    assert "answered without looking, so it was sent to look" not in out.steps
+
+
+def test_listing_a_kind_is_a_search_and_is_taken_away_on_the_final_turn():
+    """The final turn is for answering; a tool that goes looking is not offered on it."""
+    offered_by_call: list[set[str]] = []
+
+    class Lister:
+        def chat(self, messages, tools=None, **_):
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            offered_by_call.append(offered)
+            if "list_kind" in offered:
+                return Reply(tool_calls=[{"id": "x", "function": {
+                    "name": "list_kind", "arguments": '{"kind": "org"}'}}])
+            return Reply(content="Pellard Foundry is the only company here.")
+
+    out = converse("which companies?", GRAPH, Lister(), rounds=2)
+    assert out.content == "Pellard Foundry is the only company here."
+    assert "list_kind" in offered_by_call[0]
+    assert "list_kind" not in offered_by_call[2], "the answering turn still offered a search"
+    assert "show" in offered_by_call[2], "the tool that acts was taken away with the searches"
+
+
+def test_show_is_found_by_name_after_the_tools_were_reordered():
+    """Fails when the closing nudge indexes TOOLS by position: adding list_kind before show
+    would offer the model list_kind and ask it to show, and nothing would light up."""
+    from ml_stack.graph.ask import TERSE, TOOLS, _schema
+
+    assert TOOLS[3]["function"]["name"] != "show", "the reorder this test exists for"
+    assert _schema("show")["function"]["name"] == "show"
+    assert _schema("show", TERSE)["function"]["name"] == "show"
+    offered_last: list[set[str]] = []
+
+    class Reader:
+        """Reads once, answers in words, and shows only when show is all it is offered --
+        which is the closing nudge, and nowhere else."""
+
+        def chat(self, messages, tools=None, **_):
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            offered_last.append(offered)
+            if len(offered_last) == 1:
+                return Reply(tool_calls=[{"id": "a", "function": {
+                    "name": "look_at", "arguments": '{"ids": ["person:ada"]}'}}])
+            if offered == {"show"}:
+                return Reply(tool_calls=[{"id": "b", "function": {
+                    "name": "show", "arguments": '{"ids": ["person:ada"]}'}}])
+            return Reply(content="Ada works on compilers.")
+
+    out = converse("who?", GRAPH, Reader())
+    assert len(offered_last) == 3, "one read, one answer, one nudge to say what to light"
+    assert offered_last[-1] == {"show"}
+    assert out.show == ["person:ada"]
+
+
+def test_the_shortlist_comes_before_the_question_as_candidates_to_verify():
+    """Measured on gemma-4-E4B: eight likely entries as the *last* message after the
+    question, phrased "use them if they answer it", took it from 58% F1 to 33% -- it echoed
+    the list instead of selecting from it. So the list arrives before the question, as
+    something to check, and the question is the last thing the model reads."""
+    events = []
+    model = ScriptedModel([call("show", ids=["person:ada"])])
+    out = converse_stream("who works on compilers?", GRAPH, model, on_event=events.append,
+                          opening=["person:ada", "person:ghost"])
+    first = model.seen[0]
+    assert [m["role"] for m in first] == ["system", "user", "user"]
+    assert first[-1]["content"] == "who works on compilers?"
+    handed = first[1]["content"]
+    assert handed.startswith("A search turned up these entries; some may be irrelevant.")
+    assert "before trusting them" in handed and "ignore the rest" in handed
+    assert "Ada Lovelace (person)" in handed
+    assert "Use them if they answer it" not in handed
+    assert out.found == ["person:ada"] and out.steps[0] == "was handed 1 to start from"
+    assert events[0] == {"event": "tool", "name": "shortlist", "detail": "1 to start from"}
+
+
+def test_an_empty_answer_says_why_from_the_last_reply():
+    """Measured: an empty answer is almost never the token budget. The same failing question
+    at n_predict 2048 and 6144 both came back finish_reason=stop with 628-767 characters of
+    reasoning and no answer, and nothing printed that, so the ceiling was raised again and
+    proved nothing. The steps now say what the last reply actually did."""
+
+    class OnlyThinks(ScriptedModel):
+        def chat(self, messages, tools=None, **kw):
+            self.seen.append(list(messages))
+            if tools and self.script:
+                import json
+                name, args = self.script.pop(0)
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": name, "arguments": json.dumps(args)}}])
+            return Reply(content="", thinking=SCRATCH, finish_reason="stop")
+
+    out = converse("who?", GRAPH, OnlyThinks([call("look_at", ids=["person:ada"])]))
+    assert "did not finish an answer" in out.content
+    assert out.steps[-1] == f"no answer: finish_reason=stop, thinking {len(SCRATCH)} chars, " \
+                            "answer 0 chars"
+    # a truncated one says so too, which is the one case where the ceiling is the fix
+    class CutOff(OnlyThinks):
+        def chat(self, messages, tools=None, **kw):
+            out = super().chat(messages, tools=tools, **kw)
+            return Reply(content="", thinking="x" * 50, finish_reason="length") \
+                if out.tool_calls is None else out
+
+    out = converse("who?", GRAPH, CutOff([call("look_at", ids=["person:ada"])]))
+    assert out.steps[-1] == "no answer: finish_reason=length, thinking 50 chars, answer 0 chars"
+
+
+def test_planning_welded_to_the_answer_without_a_space_is_cut_off():
+    """Measured: one sentence of planning arrives stuck to the front of a good answer with
+    no space after the full stop. Splitting on ". " alone keeps them as one sentence, and
+    then cutting the note cuts the answer with it."""
+    from ml_stack.graph.ask import without_notes
+
+    answer = ("Grace Hopper and Ada Lovelace are the two members who have spent years on "
+              "compilers.")
+    assert without_notes("We need to use tool search." + answer) == answer
+    assert without_notes("We need to use tool search. " + answer) == answer
+    # and an answer with no note on it is left exactly as it was
+    assert without_notes(answer) == answer
+
+
+def _tiny_png() -> bytes:
+    """A one-pixel PNG, built by hand so the test owns its own fixture."""
+    import struct
+    import zlib
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (struct.pack(">I", len(data)) + tag + data
+                + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF))
+
+    header = struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)          # 1x1, 8-bit RGB
+    pixel = zlib.compress(b"\x00\x00\x00\x00")                    # filter byte + one pixel
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", pixel) + chunk(b"IEND", b"")
+
+
+def _picture_tool(images):
+    def look(args):
+        return {"url": str(args.get("url") or ""), "title": "Tinsley Works", "text": "a kiln",
+                "_images": images}
+
+    return ({"type": "function", "function": {
+        "name": "web_look",
+        "description": "Fetch a page and what it looks like.",
+        "parameters": {"type": "object", "properties": {"url": {"type": "string"}},
+                       "required": ["url"]}}}, look)
+
+
+def test_pictures_a_tool_brings_back_are_shown_in_a_message_of_their_own():
+    """A tool result cannot carry an image through llama.cpp, so the pictures come out of
+    the result before it is encoded and follow it as a user message the vision model can
+    see. The encoder must never meet the bytes."""
+    import json
+    import pytest
+
+    pytest.importorskip("PIL")
+    model = ScriptedModel([call("web_look", url="https://example.invalid/kiln")])
+    events = []
+    out = converse_stream("what does the page show?", GRAPH, model, on_event=events.append,
+                          tools=[*tools_for(GRAPH), _picture_tool([_tiny_png()])])
+    assert out.steps == ["used web_look"]
+    turn = model.seen[-1]
+    tool_at = next(i for i, m in enumerate(turn) if m.get("role") == "tool")
+    assert "_images" not in turn[tool_at]["content"]
+    assert json.loads(turn[tool_at]["content"])["title"] == "Tinsley Works"
+    shown = turn[tool_at + 1]
+    assert shown["role"] == "user"
+    parts = shown["content"]
+    assert parts[0] == {"type": "text",
+                        "text": "What web_look returned for the call above, as seen:"}
+    assert parts[1]["type"] == "image_url"
+    assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+    assert {"event": "tool_result", "name": "web_look", "count": 1} in events
+
+
+def test_a_picture_that_cannot_be_prepared_is_said_not_sent():
+    """A model told to look at nothing answers about nothing, confidently."""
+    model = ScriptedModel([call("web_look", url="https://example.invalid/kiln")])
+    out = converse("what does the page show?", GRAPH, model,
+                   tools=[*tools_for(GRAPH), _picture_tool([b"not a picture at all"])])
+    assert out.steps[0] == "used web_look"
+    assert out.steps[1].startswith("web_look returned 1 image and none could be shown: ")
+    turn = model.seen[-1]
+    tool_at = next(i for i, m in enumerate(turn) if m.get("role") == "tool")
+    assert "_images" not in turn[tool_at]["content"]
+    assert not any(isinstance(m.get("content"), list) for m in turn), "nothing was shown"
+    # an empty list of pictures is not a picture, and is simply dropped
+    plain = ScriptedModel([call("web_look", url="https://example.invalid/kiln")])
+    converse("?", GRAPH, plain, tools=[*tools_for(GRAPH), _picture_tool([])])
+    assert not any(isinstance(m.get("content"), list) for m in plain.seen[-1])
+
+
+def test_bytes_anywhere_else_in_a_tool_result_never_reach_the_encoder():
+    def leaks(args):
+        return {"raw": b"\x00\x01\x02", "note": "fine"}
+
+    schema = {"type": "function", "function": {
+        "name": "leaky", "description": "returns bytes",
+        "parameters": {"type": "object", "properties": {}, "required": []}}}
+    model = ScriptedModel([call("leaky")])
+    out = converse("?", GRAPH, model, tools=[*tools_for(GRAPH), (schema, leaks)])
+    assert out.steps == ["used leaky"]
+    tool_turn = next(m for m in model.seen[-1] if m.get("role") == "tool")
+    assert '"<3 bytes>"' in tool_turn["content"]
+
+
+def test_the_web_tools_are_searches_and_go_away_with_the_others():
+    """`web_search`, `web_read` and `web_look` look for something, so the last turn -- the one
+    that exists to end the searching -- must not offer them either. Measured before this: the
+    quiet turn offered {'request_change', 'show', 'web_read', 'web_search'}.
+    Mutation: drop the web names from SEARCHING."""
+    from ml_stack.graph.ask import SEARCHING
+
+    assert {"web_search", "web_read", "web_look"} <= SEARCHING
+    assert "show" not in SEARCHING

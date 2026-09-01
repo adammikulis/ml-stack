@@ -647,3 +647,188 @@ def test_a_mmapped_model_still_measures():
                                   "context": 32768, "slots": 2})
     assert fully["kv_and_run_bytes"] == 10 * 2**30
     assert fully["bytes_per_1k_context"] > 0 and "mmapped" not in fully
+
+
+# A graph small enough to read at a glance. "compiler" is the point: the word index stems
+# it, so "compilers" finds it, and character matching does not -- a lexical miss the store
+# catches, which is the difference the bench was not measuring.
+TINY = {
+    "nodes": [
+        {"id": "topic:compiler", "kind": "topic", "label": "compiler", "mentions": 3,
+         "attrs": {}},
+        {"id": "person:ada", "kind": "person", "label": "Ada Quill", "mentions": 1, "attrs": {}},
+    ],
+    "edges": [{"source": "person:ada", "target": "topic:compiler", "rel": "interested_in",
+               "weight": 1}],
+}
+
+
+class _Scripted:
+    """Calls look_up for one text, then answers, and keeps every message it was shown."""
+
+    def __init__(self, text: str = "compilers") -> None:
+        self.text = text
+        self.seen: list[list[dict]] = []
+        self.sampling: dict = {}
+
+    def chat(self, messages, tools=None, **_):
+        self.seen.append(list(messages))
+        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+        if "look_up" in offered and len(self.seen) == 1:
+            return type("R", (), {
+                "content": "", "thinking": None, "raw": {},
+                "tool_calls": [{"id": "c1", "function": {
+                    "name": "look_up", "arguments": json.dumps({"texts": [self.text]})}}]})()
+        return type("R", (), {"content": "a compiler person", "thinking": None, "raw": {},
+                              "tool_calls": None})()
+
+    def told(self) -> str:
+        """What look_up answered, as the model saw it."""
+        return " ".join(m["content"] for turn in self.seen for m in turn
+                        if m.get("role") == "tool")
+
+
+def _tiny_store(tmp_path):
+    from ml_stack.graph.store import GraphStore
+
+    where = tmp_path / "graph.ladybug"
+    with GraphStore(where) as store:
+        store.write(TINY)
+    return where
+
+
+def test_finding_names_what_a_run_measured():
+    from ml_stack.graph.bench import finding
+
+    assert finding(None) == "chars"
+    assert finding("") == "chars"
+    assert finding("some.ladybug") == "words"
+    assert finding("some.ladybug", "http://127.0.0.1:8081") == "meaning"
+
+
+def test_a_run_given_a_store_looks_up_as_the_application_does(tmp_path):
+    """The bench measured character matching for months while the application shipped
+    the hybrid -- characters, the word index and vectors fused -- so every ranking it wrote
+    ranked a look_up nobody ran. Given a store, the model's look_up is the shipped one."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    from ml_stack.graph.bench import asking
+
+    where = _tiny_store(tmp_path)
+
+    with_store = _Scripted()
+    ask = asking(TINY, store=where)
+    assert ask.finder == "words"
+    ask("who works on compilers?", with_store)
+    assert "topic:compiler" in with_store.told(), "the word index stems; characters do not"
+
+    without = _Scripted()
+    plain = asking(TINY)
+    assert plain.finder == "chars"
+    plain("who works on compilers?", without)
+    assert "topic:compiler" not in without.told()
+    assert "Nothing in the graph matches" in without.told()
+
+
+def test_the_terse_tools_look_up_through_the_store_too(tmp_path):
+    """`tools_for(terse=True)` is built here rather than inside converse, so the finder has
+    to be handed to it as well or the terse run measures a different look_up again."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    from ml_stack.graph.bench import asking
+
+    terse = _Scripted()
+    asking(TINY, store=_tiny_store(tmp_path), terse=True)("who?", terse)
+    assert "topic:compiler" in terse.told()
+
+
+def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsys):
+    """Like `ctx`: a run with one finder against a run with another is two measurements,
+    and the only way to know later is to write it down now."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    kept = tmp_path / "runs.ladybug"
+    store = _tiny_store(tmp_path)
+    common = ["--kept", str(kept), "--graph", str(graph), "--questions", str(asked),
+              "--client", "fake:client"]
+
+    assert bench._main(["run", "with-words", "--store", str(store), *common]) == 0
+    assert "with-words: 1 questions" in capsys.readouterr().out.splitlines()[0]
+    assert bench._main(["run", "by-chars", "--store", "", *common]) == 0
+    assert "look_up by chars" in capsys.readouterr().out.splitlines()[0]
+
+    back = {r["label"]: r for r in runs(kept)}
+    assert back["with-words"]["server"]["finder"] == "words"
+    assert back["by-chars"]["server"]["finder"] == "chars"
+
+
+def test_the_first_line_a_run_prints_says_which_finder(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who?", "expect": ["topic:compiler"]}) + "\n")
+    bench._main(["run", "tried", "--kept", str(tmp_path / "runs.ladybug"),
+                 "--graph", str(graph), "--questions", str(asked), "--client", "fake:client",
+                 "--store", str(_tiny_store(tmp_path))])
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first.startswith("tried: 1 questions over") and "look_up by words" in first
+
+
+def test_the_store_prepare_built_is_the_default_once_it_exists(tmp_path, monkeypatch):
+    """A machine that has run `prepare` measures the shipped finder without another flag;
+    one that has not is not pointed at a file that is not there."""
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    assert bench.prepared() == ""
+    (tmp_path / "home").mkdir()
+    (tmp_path / "home" / "graph.ladybug").write_bytes(b"")
+    assert bench.prepared() == str(tmp_path / "home" / "graph.ladybug")
+
+
+def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_path, capsys):
+    from ml_stack.graph.bench import missed
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
+    save(store, [row], held={"context": 32768, "slots": 2, "finder": "meaning"})
+    save(store, [row], held={"context": 32768, "slots": 2})        # from before the column
+    table(runs(store))
+    said = capsys.readouterr().out
+    head, lines = said.splitlines()[0], [ln for ln in said.splitlines() if ln.startswith("tried")]
+    assert "find" in head
+    assert head.split().index("find") == head.split().index("draft") + 1, "beside draft"
+    # "tried  32k x2  1 ..." -- the context field carries a space, so find is the eleventh word
+    assert lines[0].split()[10] == "meaning"
+    assert lines[1].split()[10] == "-"
+
+    missed(runs(store), everything=True)
+    said = capsys.readouterr().out
+    assert "find meaning" in said and "find -" in said
+
+
+def test_an_export_and_the_ranking_carry_the_finder(tmp_path):
+    from ml_stack.graph.bench import SHORT, export, invented_digest, ranking
+
+    store = tmp_path / "runs.ladybug"
+    rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
+            for n in range(SHORT)]
+    save(store, rows, held={"graph": invented_digest(), "model": "thing.gguf",
+                            "finder": "words"})
+    got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
+    assert got[0]["finder"] == "words"
+    said = ranking(runs(store))
+    assert "| find |" in said and "| words |" in said

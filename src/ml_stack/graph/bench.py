@@ -17,14 +17,41 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
-__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking", "ask_from", "asking", "compare", "footprint",
-           "main", "measure", "read_questions", "runs", "save", "table"]
+__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking", "ask_from", "asking", "compare", "finding", "footprint",
+           "main", "measure", "prepared", "read_questions", "runs", "save", "table"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
 HOME = Path("~/.ml-stack/bench").expanduser()
+
+
+def prepared() -> str:
+    """The store `prepare` builds by default, when it has been built, else "".
+
+    `run` and `sweep` take it as their `--store` default so that a machine that has run
+    `prepare` measures the look_up that ships -- characters, the word index and vectors fused
+    -- without being told to. Without one, the bench measures character matching alone, and
+    every run recorded that way ranked something nobody runs.
+    """
+    where = HOME / "graph.ladybug"
+    return str(where) if where.exists() else ""
+
+
+def finding(store: str | Path | None, embed_url: str = "") -> str:
+    """Which look_up a run measures, named so two runs are never read against each other.
+
+    ``chars``: no store, so `look_up` matches characters and nothing else -- what the bench
+    measured for months while the application shipped something better. ``words``: a store's
+    word index votes as well, so "compilers" finds "compiler". ``meaning``: and its vectors,
+    through the embedder at ``embed_url``. Recorded on every run and printed in the table,
+    for the same reason `ctx` is: a comparison across finders is two measurements.
+    """
+    if store is None or not str(store):
+        return "chars"
+    return "meaning" if embed_url else "words"
 
 # How many questions a short run asks. Chosen by measuring what survives, not by feel: at
 # twenty, every kind of answer is still asked about and the mean number of answers expected
@@ -456,8 +483,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # a question was added mid-afternoon and the next run read 85% against an earlier 72%,
     # which meant nothing at all. A column is cheaper than remembering.
     head = (f"{'run':20} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'draft':>6} {'resident':>9} {'kv+run':>8} "
-            f"{'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
+            f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'resident':>9} "
+            f"{'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
     print(head)
     print("-" * len(head))
     for one in kept:
@@ -480,6 +507,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
               f"{drafting(rows):>6} "
+              f"{str(server.get('finder') or '-'):>7} "
               f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
@@ -500,7 +528,8 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
     for one in kept:
         rows = [r for r in (one.get("rows") or []) if r.get("expected")]
         shortfall = [r for r in rows if not everything and _hit(r) < 1.0] if not everything else rows
-        print(f"\n{one.get('label', '')}  ({one.get('at', '')})")
+        found = str((one.get("server") or {}).get("finder") or "-")
+        print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found})")
         if not shortfall:
             print("  every question answered in full")
             continue
@@ -747,8 +776,9 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
              "`ml-stack-bench`. A conclusion, not evidence: the runs behind it are not in this",
              "repository. Re-measure after any model release -- none of this survives one.",
              "",
-             "| model | F1 | recall | precision | questions | seconds | resident | sampling |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+             "| model | F1 | recall | precision | questions | seconds | resident | sampling "
+             "| find |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in order:
         gb = row.get("resident_bytes")
         temp = (row.get("sampling") or {}).get("temperature")
@@ -760,7 +790,8 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
             f"| {row.get('questions') or '-'} "
             f"| {row.get('seconds') or 0:.0f} "
             f"| {f'{gb / 2**30:.1f}G' if gb else '-'} "
-            f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} |")
+            f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
+            f"| {row.get('finder') or '-'} |")
     if too_few:
         lines += ["", f"*{too_few} run(s) not ranked: fewer than {SHORT} questions, which is "
                       f"a smoke run proving the path works rather than a measurement.*"]
@@ -768,14 +799,6 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
     if where is not None:
         Path(where).expanduser().write_text(body, encoding="utf-8")
     return body
-
-
-def _inside_a_repo(where: Path) -> Path | None:
-    """The git working tree `where` sits in, if any."""
-    for parent in [where.resolve(), *where.resolve().parents]:
-        if (parent / ".git").exists():
-            return parent
-    return None
 
 
 def invented_digest() -> str:
@@ -826,6 +849,7 @@ def _exportable(kept: Sequence[Mapping[str, Any]], *,
             "kv_and_run_bytes": server.get("kv_and_run_bytes"),
             "mmapped": bool(server.get("mmapped")),
             "sampling": server.get("sampling") or {},
+            "finder": str(server.get("finder") or ""),
         })
     return out, skipped
 
@@ -854,7 +878,7 @@ def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     out, skipped = _exportable(kept, anyway=anyway)
     out.sort(key=lambda r: (r["label"], r["at"]))
     target = Path(where).expanduser()
-    repo = _inside_a_repo(target.parent)
+    repo = repo_root(target.parent)
     if repo and not anyway:
         raise ValueError(
             f"{target} is inside the git repository at {repo}. These numbers describe one "
@@ -1060,7 +1084,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     began = time.time()
     with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
         loaded = time.time() - began
-        print(f"    up in {loaded:.0f}s")
+        print(f"    up in {loaded:.0f}s, look_up by {finding(store, embed_url)}")
         every = list(ways) or [{}]
         rows = []
         for way in every:
@@ -1080,7 +1104,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
             got = measure(ask, questions, label=here, client=client, log=print)
             for row in got:
                 row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-            held = {**footprint(server.base_url), "graph": _which(graph)}
+            held = {**footprint(server.base_url), "graph": _which(graph),
+                    "finder": getattr(ask, "finder", "")}
             if draft:
                 held["draft_model"] = str(draft).rsplit("/", 1)[-1]
             if kept:
@@ -1092,6 +1117,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
 def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
            graph: Mapping[str, Any], *, port: int = 8099, context: int = 32768,
            parallel: int = 1, binary: str = "", kept: str | Path = "",
+           store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, **making: Any) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
@@ -1114,6 +1140,7 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
         print(f"\n--- draft: {name}")
         out += served(model, questions, graph, label=f"draft:{name}", draft=head, port=port,
                       context=context, parallel=parallel, binary=binary, kept=kept,
+                      store=store, embed_url=embed_url, embed_model=embed_model,
                       serve_timeout=serve_timeout, **making)
     return out
 
@@ -1144,53 +1171,80 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
            margin: float = MARGIN) -> Callable[[str, Any], Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
-    Nothing here is any project's: it is `converse` over the graph you handed in. The only
-    choice is whether a cheap embedder gets to suggest where to look before the large model
-    starts, which is the thing most worth measuring.
+    Nothing here is any project's: it is `converse` over the graph you handed in. Two
+    choices, both about where the looking happens. Whether a cheap embedder gets to suggest
+    where to look before the large model starts (``shortlist``), which is the thing most
+    worth measuring. And what `look_up` is when the model calls it: with a ``store``, the
+    same hybrid the application ships -- characters, the word index and, given
+    ``embed_url``, vectors, fused -- and without one, characters alone. For months the bench
+    had no store on this path and every ranking it wrote measured a look_up nobody ran.
+
+    The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
+    which one it measured.
     """
-    from ml_stack.graph.ask import converse
+    from ml_stack.graph.ask import converse, tools_for
     from ml_stack.graph.search import hybrid
 
-    def likely(question: str) -> list[str]:
-        if not shortlist or store is None:
+    def embedded(text: str) -> list[float] | None:
+        if not embed_url:
+            return None
+        from ml_stack.client.embed import embed
+        from ml_stack.graph.vectors import QUERY
+
+        try:
+            return embed([QUERY + text], base_url=embed_url, model=embed_model)[0]
+        except Exception:  # noqa: BLE001 - the words still vote
+            return None
+
+    def likely(question: str, held: Any) -> list[str]:
+        if not shortlist:
             return []
-        from ml_stack.graph.store import GraphStore
-
-        vector = None
-        if embed_url:
-            from ml_stack.client.embed import embed
-
-            from ml_stack.graph.vectors import QUERY
-            try:
-                vector = embed([QUERY + question], base_url=embed_url, model=embed_model)[0]
-            except Exception:  # noqa: BLE001 - the words still vote
-                vector = None
-        with GraphStore(store, read_only=True) as held:
-            if vector is not None and margin > 0:
-                near = held.similar(vector, model=embed_model, limit=max(shortlist, 8))
-                if not stands_out([r["similarity"] for r in near], margin=margin):
-                    return []            # nothing here stands out: "hi" is not a search
-            found = hybrid(graph, question, store=held, vector=vector, model=embed_model)
+        vector = embedded(question)
+        if vector is not None and margin > 0:
+            near = held.similar(vector, model=embed_model, limit=max(shortlist, 8))
+            if not stands_out([r["similarity"] for r in near], margin=margin):
+                return []            # nothing here stands out: "hi" is not a search
+        found = hybrid(graph, question, store=held, vector=vector, model=embed_model)
         return [r["id"] for r in found][:shortlist]
 
+    def converse_with(question: str, client: Any, finder: Any, opening: Sequence[str]) -> Any:
+        # `finder` goes to both, because `converse` swaps look_up's callable in whichever
+        # tools it is handed, and the terse set is handed in rather than chosen inside
+        extra = {"tools": tools_for(graph, terse=True, finder=finder)} if terse else {}
+        return converse(question, graph, client, opening=opening, finder=finder, **extra)
+
     def ask(question: str, client: Any) -> Any:
-        from ml_stack.graph.ask import tools_for
+        if store is None or not str(store):
+            return converse_with(question, client, None, [])
+        from ml_stack.graph.store import GraphStore
 
-        extra = {"tools": tools_for(graph, terse=True)} if terse else {}
-        return converse(question, graph, client, opening=likely(question), **extra)
+        # one handle for the whole conversation: a question makes several look_ups, and
+        # each is a hybrid search over the store, embedded the same way the question is
+        with GraphStore(store, read_only=True) as held:
+            def finder(text: str) -> list[dict[str, str]]:
+                return hybrid(graph, text, store=held, vector=embedded(text),
+                              model=embed_model)
 
+            return converse_with(question, client, finder, likely(question, held))
+
+    ask.finder = finding(store, embed_url)  # type: ignore[attr-defined]
     return ask
 
 
 def _main(argv: list[str] | None = None) -> int:
     """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
+    # allow_abbrev=False on every parser here: a flag that is documented but not defined
+    # must be refused by name, not bound by prefix to whichever neighbour shares its
+    # first letters -- `--short` became `--shortlist` that way and the error blamed the
+    # wrong flag. The usage line's list of subcommands is generated, not written, so it
+    # cannot go stale the way "{prepare,run,sweep,show}" did when `drafts` arrived.
     ap = argparse.ArgumentParser(
-        prog="ml-stack-bench",
+        prog="ml-stack-bench", allow_abbrev=False,
         description="Time a set of questions through a graph, and compare two runs.")
-    sub = ap.add_subparsers(dest="cmd", required=True,
-                            metavar="{prepare,run,sweep,show}")
+    sub = ap.add_subparsers(dest="cmd", required=True)
 
-    run = sub.add_parser("run", help="ask every question once and keep what it cost")
+    run = sub.add_parser("run", allow_abbrev=False,
+                         help="ask every question once and keep what it cost")
     run.add_argument("label", help="what this run is, e.g. with-shortlist")
     run.add_argument("--kept", default=str(HOME / "runs.ladybug"),
                      help="where to keep the run (default: %(default)s)")
@@ -1204,8 +1258,10 @@ def _main(argv: list[str] | None = None) -> int:
     run.add_argument("--shortlist", type=int, default=0, metavar="N",
                      help="hand the model the N likeliest entries before it starts, found by "
                           "search rather than by asking it to look (default: 0, it looks)")
-    run.add_argument("--store", default="",
-                     help="a graph store with the word index and vectors, for --shortlist")
+    run.add_argument("--store", default=prepared(),
+                     help="a graph store with the word index and vectors: look_up searches it "
+                          "as the application does, and --shortlist reads it first "
+                          "(default: what `prepare` built, when it has been)")
     run.add_argument("--embed-url", default="",
                      help="a server that embeds, for --shortlist to search by meaning")
     run.add_argument("--embed-model", default="", help="the model that embedded the graph")
@@ -1218,8 +1274,9 @@ def _main(argv: list[str] | None = None) -> int:
     run.add_argument("--client", default="",
                      help="module:function returning the model client, instead of --base-url")
 
-    heads = sub.add_parser("drafts", help="serve one model with each draft head in turn "
-                                          "and measure what each is worth")
+    heads = sub.add_parser("drafts", allow_abbrev=False,
+                           help="serve one model with each draft head in turn "
+                                "and measure what each is worth")
     heads.add_argument("model", help="the model to serve: a name, a path, or an hf: "
                                         "reference. A name is looked up on this machine")
     heads.add_argument("--draft", action="append", default=[], metavar="PATH",
@@ -1238,7 +1295,8 @@ def _main(argv: list[str] | None = None) -> int:
                             "wall clock, and a full run spends most of itself proving a "
                             "score that must come out the same")
 
-    ready = sub.add_parser("prepare", help="put a graph in a store and index and embed it")
+    ready = sub.add_parser("prepare", allow_abbrev=False,
+                           help="put a graph in a store and index and embed it")
     ready.add_argument("--store", default=str(HOME / "graph.ladybug"),
                        help="the store to build (default: %(default)s)")
     ready.add_argument("--graph", default="",
@@ -1247,7 +1305,8 @@ def _main(argv: list[str] | None = None) -> int:
                        help="a server that embeds; without one only the word index is built")
     ready.add_argument("--embed-model", default="", help="what to file the vectors under")
 
-    sweep = sub.add_parser("sweep", help="run every model, with and without a shortlist")
+    sweep = sub.add_parser("sweep", allow_abbrev=False,
+                           help="run every model, with and without a shortlist")
     sweep.add_argument("--on", action="append", metavar="NAME=URL", default=[],
                        help="a model to measure, e.g. e4b=http://127.0.0.1:8083; repeatable")
     sweep.add_argument("--kept", default=str(HOME / "runs.ladybug"),
@@ -1256,8 +1315,9 @@ def _main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--questions", default="", help="(default: the ones that go with it)")
     sweep.add_argument("--shortlist", type=int, default=8, metavar="N",
                        help="how many to hand over in the second run (default: %(default)s)")
-    sweep.add_argument("--store", default=str(HOME / "graph.ladybug"),
-                       help="the indexed and embedded graph, for the shortlist")
+    sweep.add_argument("--store", default=prepared(),
+                       help="the indexed and embedded graph, for look_up and the shortlist "
+                            "(default: what `prepare` built, when it has been)")
     sweep.add_argument("--embed-url", default="", help="a server that embeds, for --shortlist")
     sweep.add_argument("--embed-model", default="", help="the model that embedded the graph")
     sweep.add_argument("--margin", type=float, default=MARGIN)
@@ -1324,7 +1384,14 @@ def _main(argv: list[str] | None = None) -> int:
                               "four of them costs one model load rather than four. "
                               "Repeatable")
 
-    show = sub.add_parser("show", help="compare two runs, or list what is kept")
+    for one in (run, sweep, heads):
+        one.add_argument("--no-queue", action="store_true",
+                         help="fail at once if another measurement holds the GPU, rather "
+                              "than queue behind it. Read before the rest of the line is "
+                              "parsed, and listed here so that --help says it exists")
+
+    show = sub.add_parser("show", allow_abbrev=False,
+                          help="compare two runs, or list what is kept")
     show.add_argument("--kept", default=str(HOME / "runs.ladybug"),
                       help="the store the runs are in (default: %(default)s)")
     show.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), default=None)
@@ -1418,7 +1485,7 @@ def _main(argv: list[str] | None = None) -> int:
                 ask = asking(graph, shortlist=shortlist, store=args.store or None,
                              embed_url=args.embed_url, embed_model=args.embed_model,
                              terse=getattr(args, "terse", False), margin=args.margin)
-                print(f"\n{label} on {url}")
+                print(f"\n{label} on {url}, look_up by {ask.finder}")
                 if not _idle(url, args):
                     return 3
                 asking_with = with_card(Client(url, **sampling_from(args)), args)
@@ -1428,7 +1495,8 @@ def _main(argv: list[str] | None = None) -> int:
                 used = dict(asking_with.sampling)
                 rows = measure(ask, questions, label=label, client=asking_with, log=print)
                 save(args.kept, rows,
-                     held={**footprint(url), "sampling": used, "graph": _which(graph)})
+                     held={**footprint(url), "sampling": used, "graph": _which(graph),
+                           "finder": ask.finder})
         print()
         table(runs(args.kept))
         return 0
@@ -1461,7 +1529,7 @@ def _main(argv: list[str] | None = None) -> int:
         rows = drafts(find_model(args.model), args.draft or [""], asked, invented(),
                       port=args.port,
                       context=args.context, parallel=args.parallel, binary=args.binary,
-                      kept=args.kept)
+                      kept=args.kept, store=prepared() or None)
         print()
         table(runs(args.kept))
         return 0 if rows else 1
@@ -1517,12 +1585,14 @@ def _main(argv: list[str] | None = None) -> int:
         graph, shortlist=args.shortlist, store=args.store or None,
         embed_url=args.embed_url, embed_model=args.embed_model, margin=args.margin)
     where = args.graph or "the invented community"
+    found = getattr(ask, "finder", "")
     print(f"{args.label}: {len(questions)} questions over {where}"
+          + (f", look_up by {found}" if found else "")
           + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
     rows = measure(ask, questions, label=args.label, client=client, log=print)
     key = save(args.kept, rows,
                held={**footprint(args.base_url), "sampling": client.sampling,
-                     "graph": _which(graph)})
+                     "graph": _which(graph), "finder": found})
     print(f"kept as {key}")
     return 0
 

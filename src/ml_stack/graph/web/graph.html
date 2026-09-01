@@ -727,7 +727,11 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       for (const t of (held.turns || [])) {
         if (!t.text) continue;
         turns.push({ role: t.role, content: t.text });
-        say(t.role, t.text);
+        const el = say(t.role, t.text);
+        // an answer that arrives with its steps gets its tally back; without them it is
+        // the plain bubble it always was
+        const steps = t.steps || (t.meta && t.meta.steps);
+        if (t.role === 'assistant' && steps) thoughtOver(el, steps);
       }
       if ((held.turns || []).length) openAnswers('');
     } catch (e) { /* no history is not a broken page */ }
@@ -977,6 +981,65 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (spoken) spoken.textContent = text; else el.textContent = text;
   }
 
+  // The trace is the record of what the model did — the first thing to read when an answer
+  // is wrong — and it stays. What it lacked was one sentence above it saying what is
+  // happening now, readable with the trace folded; the summary of the fold is that line.
+  const entries = n => `${n} entr${n === 1 ? 'y' : 'ies'}`;
+  function nowLine(name, detail) {
+    detail = detail || '';
+    const n = parseInt(detail, 10) || 0;
+    switch (name) {
+      case 'look_up': return `looking up ${detail}`;
+      case 'look_at': return `reading ${entries(n)}`;
+      case 'path_between': return `tracing ${detail}`;
+      case 'list_kind': return `listing ${detail}`;
+      case 'show': return 'choosing what to light';
+      case 'shortlist': return `starting from ${entries(n)}`;
+      default: return `${name} ${detail}`.trim();
+    }
+  }
+  // the same events in the past tense, once the answer has landed: zero counts left out
+  function tally(counts) {
+    const parts = [];
+    if (counts.look_up) parts.push(`looked up ${counts.look_up}`);
+    if (counts.look_at) parts.push(`read ${entries(counts.look_at)}`);
+    if (counts.path_between) parts.push(`traced ${counts.path_between} path${counts.path_between === 1 ? '' : 's'}`);
+    if (counts.list_kind) parts.push(`listed ${counts.list_kind} kind${counts.list_kind === 1 ? '' : 's'}`);
+    if (counts.show) parts.push(`lit ${entries(counts.show)}`);
+    for (const name of Object.keys(counts.other || {})) {
+      const k = counts.other[name];
+      parts.push(`used ${name}${k > 1 ? ` ×${k}` : ''}`);
+    }
+    if (counts.restart) parts.push('searched again');
+    return parts.length ? parts.join(', ') : 'thought';
+  }
+  // A replayed answer has no live trace, only what the server remembered it doing: the
+  // tally goes above, and the remembered steps fold away underneath as the trace did.
+  function thoughtOver(el, steps) {
+    const list = Array.isArray(steps) ? steps.map(String) : String(steps).split(/;\s*/);
+    const done = list.filter(Boolean);
+    if (!done.length) return;
+    const think = document.createElement('details');
+    think.className = 'think';
+    const label = document.createElement('summary');
+    label.className = 'now';
+    label.textContent = done.join(', ');
+    const trace = document.createElement('div');
+    trace.className = 'trace';
+    for (const one of done) {
+      const line = document.createElement('div');
+      line.className = 'step';
+      line.textContent = `▸ ${one}`;
+      trace.appendChild(line);
+    }
+    think.append(label, trace);
+    const spoken = document.createElement('span');
+    spoken.className = 'said';
+    spoken.textContent = el.textContent;
+    el.textContent = '';
+    el.append(think, spoken);
+  }
+
   // POST /ask/stream and fill the bubble live: the thinking dim and folded away, tool
   // steps as they run, the answer streaming in. null means the server has no such route.
   async function askStream(payload, pending) {
@@ -993,6 +1056,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     think.className = 'think';
     think.open = true;
     const label = document.createElement('summary');
+    label.className = 'now';
     label.textContent = 'thinking';
     const trace = document.createElement('div');
     trace.className = 'trace';
@@ -1009,6 +1073,10 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     const waited = setTimeout(() => {
       if (!heard) qNote.textContent = 'waiting for the model — it may be busy with another question';
     }, 20000);
+    // what the live line is built from: how often each tool ran, and how much it touched
+    const counts = { look_up: 0, look_at: 0, path_between: 0, list_kind: 0, show: 0,
+                     restart: 0, other: {} };
+    let answering = false;
     const feed = ev => {
       heard = true;
       if (ev.event === 'thinking') {
@@ -1018,23 +1086,34 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         line.className = 'step';
         line.textContent = `▸ ${ev.name} ${ev.detail || ''}`;
         trace.appendChild(line);
+        label.textContent = nowLine(ev.name, ev.detail);
+        const n = parseInt(ev.detail || '', 10) || 0;
+        if (ev.name === 'look_at' || ev.name === 'show') counts[ev.name] += n;
+        else if (ev.name in counts && ev.name !== 'other') counts[ev.name] += 1;
+        else if (ev.name !== 'shortlist') counts.other[ev.name] = (counts.other[ev.name] || 0) + 1;
       } else if (ev.event === 'tool_result') {
         const line = document.createElement('div');
         line.className = 'step';
         line.textContent = `  → ${ev.count} back`;
         trace.appendChild(line);
+        label.textContent += ` → ${ev.count} back`;
       } else if (ev.event === 'restart') {
         // it answered without looking anything up and was sent back to search; what is on
         // screen is about to be replaced rather than added to
         spoken.textContent = '';
+        answering = false;
+        counts.restart += 1;
         const line = document.createElement('div');
         line.className = 'step';
         line.textContent = '  ↻ answered without looking — sent back to search';
         trace.appendChild(line);
+        label.textContent = 'answered without looking — searching again';
       } else if (ev.event === 'answer') {
         spoken.textContent += ev.text || '';
+        if (!answering) { answering = true; label.textContent = 'answering'; }
       } else if (ev.event === 'done' || ev.event === 'error') {
         out = ev;
+        if (ev.event === 'done') label.textContent = tally(counts);
       }
       qTurns.scrollTop = qTurns.scrollHeight;
     };

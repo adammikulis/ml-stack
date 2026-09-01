@@ -156,3 +156,24 @@ def test_the_bench_export_shape_commits(tmp_path):
         "f1": 0.6, "recall": 0.7, "precision": 0.6, "questions": 34, "seconds": 487,
         "context": 32768, "slots": 2, "sampling": {"temperature": 0.0}}])})
     assert code == 0, said
+
+
+def test_geography_is_not_shaped_like_a_person(tmp_path):
+    """"North Carolina", "Colorado River", "San Francisco Bay Area": a gazetteer and a
+    geocoder's tests are full of quoted pairs that look like names and are places. The shape
+    rule stands down when the first word is a direction or place prefix, or the last a place
+    kind. Mutation: drop the `is_place` clause."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"geo.py": (
+        'SHORTHAND = {"nc": "North Carolina", "sf": "San Francisco"}\n'
+        'rows = ["Colorado River", "Raleigh County", "United Kingdom", "The Bay"]\n')})
+    assert code == 0, said
+
+
+def test_a_person_quoted_beside_a_place_is_still_refused(tmp_path):
+    """The place rule must not widen into a hole: an ordinary name-shaped pair on the same
+    line as a place is still flagged."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"geo.py": 'x = ["North Carolina", "Bea Marlow"]\n'})
+    assert code == 1
+    assert "Bea Marlow" in said
