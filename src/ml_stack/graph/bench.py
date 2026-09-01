@@ -692,6 +692,54 @@ def busy(base_url: str) -> int:
     return sum(1 for one in slots if isinstance(one, Mapping) and one.get("is_processing"))
 
 
+def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
+           graph: Mapping[str, Any], *, port: int = 8099, context: int = 32768,
+           parallel: int = 1, binary: str = "", kept: str | Path = "",
+           serve_timeout: float = 900.0, **making: Any) -> list[Row]:
+    """Serve one model with each draft head in turn and measure what each is worth.
+
+    A draft head only *proposes*; the large model verifies every token, so a quantised head
+    cannot make an answer wrong -- it can only be right less often, and each wrong guess
+    costs a verification pass. Whether the extra precision pays for its memory is therefore
+    an empirical question and not an arguable one: it depends on this model, this workload,
+    and how often the head happens to be right about it.
+
+    Pass "" as a head to measure the model with no draft at all, which is the baseline
+    every other row has to beat.
+    """
+    from ml_stack.client import Client
+    from ml_stack.serve import serve
+
+    out: list[Row] = []
+    for head in heads:
+        name = "none" if not head else str(head).rsplit("/", 1)[-1]
+        print(f"\n--- draft: {name}")
+        extra: dict[str, Any] = {"parallel": parallel}
+        if head:
+            extra["draft"] = head
+        if binary:
+            from ml_stack.serve.backend import LlamaServerBackend
+            from ml_stack.serve.manager import ServerManager
+
+            extra["manager"] = ServerManager(LlamaServerBackend(binary=binary))
+        with serve(model, port=port, context=context, timeout=serve_timeout,
+                   **extra) as server:
+            asking = asking_with_client(graph, Client(server.base_url, **making))
+            rows = measure(asking, questions, label=f"draft:{name}",
+                           client=Client(server.base_url, **making), log=print)
+        if kept:
+            save(kept, rows, held={**footprint(server.base_url), "draft": name})
+        out += rows
+    return out
+
+
+def asking_with_client(graph: Mapping[str, Any], client: Any) -> Callable[[str, Any], Any]:
+    """The ordinary asking, for a client already made."""
+    from ml_stack.graph.ask import converse
+
+    return lambda question, _client: converse(question, graph, client)
+
+
 def drafting(rows: Sequence[Mapping[str, Any]]) -> str:
     """How much of what a draft model guessed was kept, as a percentage, or '-' for none.
 
@@ -788,6 +836,19 @@ def main(argv: list[str] | None = None) -> int:
                           "way than the ordinary one")
     run.add_argument("--client", default="",
                      help="module:function returning the model client, instead of --base-url")
+
+    heads = sub.add_parser("drafts", help="serve one model with each draft head in turn "
+                                          "and measure what each is worth")
+    heads.add_argument("model", help="the model to serve, a path or an hf: reference")
+    heads.add_argument("--draft", action="append", default=[], metavar="PATH",
+                       help="a draft head to measure; repeat for each. Pass '' for the "
+                            "baseline with no draft, which every other row must beat")
+    heads.add_argument("--port", type=int, default=8099)
+    heads.add_argument("--context", type=int, default=32768)
+    heads.add_argument("--parallel", type=int, default=1)
+    heads.add_argument("--binary", default="", help="a llama-server that reads this model")
+    heads.add_argument("--kept", default=str(HOME / "runs.ladybug"))
+    heads.add_argument("--questions", default="")
 
     ready = sub.add_parser("prepare", help="put a graph in a store and index and embed it")
     ready.add_argument("--store", default=str(HOME / "graph.ladybug"),
@@ -916,6 +977,17 @@ def main(argv: list[str] | None = None) -> int:
                                model=args.embed_model or "embed", log=print)
         print(f"  {written} embedded")
         return 0
+    if args.cmd == "drafts":
+        from ml_stack.graph.community import QUESTIONS, graph as invented
+
+        asked = read_questions(args.questions) if args.questions else QUESTIONS
+        rows = drafts(args.model, args.draft or [""], asked, invented(), port=args.port,
+                      context=args.context, parallel=args.parallel, binary=args.binary,
+                      kept=args.kept)
+        print()
+        table(runs(args.kept))
+        return 0 if rows else 1
+
     if args.cmd == "show":
         if args.compare:
             print(compare(args.kept, *args.compare))
