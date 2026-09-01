@@ -50,8 +50,11 @@ class ScriptedModel:
 
     def chat(self, messages, tools=None, **_):
         self.seen.append(list(messages))
-        # with no tools offered there is nothing to call, so it answers in words
-        if tools and self.script:
+        # A model can only call what it was offered. The last turn offers the tools that act
+        # but not the ones that search, so a script that wants to search then has nothing to
+        # call and answers in words — which is the whole point of taking them away.
+        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+        if self.script and self.script[0][0] in offered:
             name, args = self.script.pop(0)
             import json
             return Reply(tool_calls=[{"id": "c1", "function": {
@@ -151,8 +154,9 @@ def test_running_out_of_rounds_still_answers():
     out = converse("who?", GRAPH, model, rounds=2)
     assert out.content == "Ada and Bea both work on compilers."
     assert out.ids == ["person:ada"]
-    # the last call was made with no tools offered, which is what let it answer
-    assert len(model.seen) == 3
+    # the last call offers no way to keep searching, which is what let it answer
+    # two rounds of tools, the ask that follows, and the ask for what to light
+    assert len(model.seen) == 4
 
 
 def test_held_entries_are_named_to_the_model_by_label_and_id():
@@ -191,7 +195,10 @@ def test_a_model_that_goes_quiet_is_told_to_answer():
             self.silences = 1
 
         def chat(self, messages, tools=None, **kw):
-            if not tools and self.silences:
+            # the answering turn is the one with no way left to search
+            searching = {"look_up", "look_at", "path_between"}
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if not (offered & searching) and self.silences:
                 self.silences -= 1
                 self.seen.append(list(messages))
                 return Reply(content="")
@@ -200,7 +207,7 @@ def test_a_model_that_goes_quiet_is_told_to_answer():
     model = Quiet([("look_up", {"text": "compilers"})] * 5)
     out = converse("who works on compilers?", GRAPH, model, rounds=5)
     assert out.content
-    assert "plain words" in model.seen[-1][-1]["content"]
+    assert any("plain words" in m["content"] for said in model.seen for m in said)
 
 
 def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
@@ -226,7 +233,7 @@ def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
     model = Silent([("look_up", {"text": "compilers"})])
     out = converse("who works on compilers?", GRAPH, model, rounds=5)
     assert out.content == "Ada works on compilers."
-    assert "plain words" in model.seen[-1][-1]["content"]
+    assert any("plain words" in m["content"] for said in model.seen for m in said)
 
 
 SCRATCH = "Actually the look_at shows Ada; need to check Bea. Wait \u2014 maybe compilers?"
@@ -257,8 +264,8 @@ def test_an_answer_left_in_the_thinking_channel_is_asked_for_again():
     assert out.content == "Ada works on compilers."
     # recovered by whichever ask reached it first — the plain nudge or the one that offers
     # the notes back; both are asking for the answer rather than printing the working
-    asked = model.seen[-1][-1]["content"]
-    assert "plain words" in asked or "working towards" in asked
+    said = [m["content"] for turn in model.seen for m in turn]
+    assert any("plain words" in x or "working towards" in x for x in said)
 
 
 def test_the_working_out_is_never_shown_as_the_answer():
@@ -301,8 +308,8 @@ def test_a_model_that_only_searched_gets_the_top_finds_read_to_it():
     assert out.content == "Ada and Bea, going by what they said."
     assert out.read == ["topic:compilers", "person:ada", "person:bea"]
     assert out.steps[-1] == "read the top 3 finds"
-    handed = model.seen[-1][-1]["content"]
-    assert "Ada Lovelace (person)" in handed and "plain words" in handed
+    handed = [m["content"] for turn in model.seen for m in turn]
+    assert any("Ada Lovelace (person)" in x and "plain words" in x for x in handed)
 
 
 def test_streaming_reports_tools_and_the_answer_in_order():
@@ -332,11 +339,26 @@ def test_streaming_passes_deltas_through_as_they_arrive():
 
     events = []
     out = converse_stream("who?", GRAPH, Streamer(), on_event=events.append)
+    # it answered without searching, so it is sent back to look once and streams again; the
+    # reader is told to start over rather than have the second answer appended to the first
     assert [e["event"] for e in events] \
-        == ["thinking", "thinking", "answer", "answer", "done"]
+        == ["thinking", "thinking", "answer", "answer",
+            "restart", "thinking", "thinking", "answer", "answer", "done"]
     assert [e.get("text") for e in events[:2]] == ["weigh ", "it up"]
     assert [e.get("text") for e in events[2:4]] == ["Ada works ", "on compilers."]
     assert out.content == "Ada works on compilers."
+
+
+def test_a_streamed_answer_that_did_search_is_not_restarted():
+    """The restart is for an answer built on nothing, not for every answer."""
+
+    model = ScriptedModel([call("look_at", ids=["person:ada"]),
+                           call("show", ids=["person:ada"])])
+    events = []
+    out = converse_stream("who?", GRAPH, model, on_event=events.append)
+    assert "restart" not in [e["event"] for e in events]
+    assert out.read == ["person:ada"]
+    assert out.content == "Ada and Bea both work on compilers."
 
 
 def test_a_client_without_deltas_still_streams_whole_pieces():
@@ -350,7 +372,294 @@ def test_a_client_without_deltas_still_streams_whole_pieces():
 
     events = []
     out = converse_stream("who?", GRAPH, Muser([]), on_event=events.append)
-    assert [e["event"] for e in events] == ["thinking", "answer", "done"]
+    assert [e["event"] for e in events] \
+        == ["thinking", "answer", "restart", "thinking", "answer", "done"]
     assert events[0]["text"] == "an empty room"
     assert events[1]["text"] == "Nobody here."
-    assert out.content == "Nobody here."
+    assert out.content == "Nobody here."       # it declined to look again, so it stands
+
+
+def test_show_is_what_the_answer_is_about_not_what_was_opened():
+    """The tools' working is not the answer, and lighting the working hides the answer.
+
+    A question about people is answered by reading the topic they share — so `read` holds a
+    topic, and the people are named from what it returned. Lighting `read` lit the topic and
+    left the people dark, which is what a reader saw on the live page.
+    """
+    model = ScriptedModel([call("look_at", ids=["topic:compilers"]),
+                           call("show", ids=["person:ada", "person:bea"])])
+    out = converse("who works on compilers?", GRAPH, model)
+    assert out.show == ["person:ada", "person:bea"]
+    assert out.read == ["topic:compilers"]
+    assert "topic:compilers" not in out.show
+
+
+def test_show_refuses_an_id_the_model_invented():
+    model = ScriptedModel([call("show", ids=["person:ada", "person:nobody", "person:ada"])])
+    out = converse("who?", GRAPH, model)
+    assert out.show == ["person:ada"]
+
+
+def test_a_held_entry_the_answer_never_names_is_not_shown():
+    """Held entries are told to the model so it knows what the reader is looking at.
+
+    It reads them, so they land in ``read`` — which is exactly how a previous answer's nodes
+    kept lighting up a turn later. They reach ``show`` only if the model puts them there.
+    """
+    model = ScriptedModel([call("look_at", ids=["org:pellard"]),
+                           call("show", ids=["person:bea"])])
+    out = converse("what about Bea?", GRAPH, model, held=["org:pellard"])
+    assert "org:pellard" in out.read
+    assert out.show == ["person:bea"]
+
+
+def test_show_says_what_it_lit_and_is_capped_like_ids():
+    model = ScriptedModel([call("show", ids=["person:ada", "person:bea"])])
+    out = converse("who?", GRAPH, model, limit=1)
+    assert out.show == ["person:ada"]
+    assert "lit 2 entries" in out.steps
+    one = ScriptedModel([call("show", ids=["person:ada"])])
+    assert "lit 1 entry" in converse("who?", GRAPH, one).steps
+
+
+def test_show_is_offered_as_a_tool_over_any_graph():
+    names = [(s.get("function") or {}).get("name") for s, _ in tools_for(GRAPH)]
+    assert "show" in names
+    # a finder replaces look_up's callable and must not drop the others
+    swapped = [(s.get("function") or {}).get("name")
+               for s, _ in tools_for(GRAPH, finder=lambda t: [])]
+    assert swapped == names
+
+
+def test_a_streamed_answer_carries_show_too():
+    events = []
+    model = ScriptedModel([call("show", ids=["person:ada"])])
+    out = converse_stream("who?", GRAPH, model, on_event=events.append)
+    assert out.show == ["person:ada"]
+    assert {e["event"] for e in events} >= {"tool", "tool_result", "done"}
+
+
+def test_notes_are_never_handed_back_as_the_answer():
+    """A model that spends its whole budget planning replies with the plan.
+
+    The empty-reply guard never fired, because the reply was not empty — it was
+    "We need to answer: ... Search for X again maybe missing.", printed to the reader
+    as the answer. Notes are notes however they arrive.
+    """
+    from ml_stack.graph.ask import is_working
+
+    notes = ["We need to answer: who can do this. Need people with both.",
+             "Let me look up the names first.",
+             "From data: one person is interested in it.",
+             "Okay, so the question is about two things.",
+             "The user asks who could help."]
+    answers = ["Ada Lovelace is the one to ask; she has spent years on compilers.",
+               "Nobody in the graph does both.",
+               "The graph does not answer that.",
+               "Two members stand out, and we need not look further than them."]
+    assert [is_working(x) for x in notes] == [True] * len(notes)
+    assert [is_working(x) for x in answers] == [False] * len(answers)
+
+
+def test_a_reply_that_is_only_notes_is_asked_again():
+    class Planning:
+        """Answers with its working, then with an answer when told to."""
+
+        def __init__(self):
+            self.asked = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.asked += 1
+            if tools and self.asked == 1:
+                import json
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": "look_at", "arguments": json.dumps({"ids": ["person:ada"]})}}])
+            if self.asked <= 2:
+                return Reply(content="We need to answer: who works on compilers. Need to check.")
+            return Reply(content="Ada Lovelace has spent years on compilers.")
+
+    model = Planning()
+    out = converse("who works on compilers?", GRAPH, model)
+    assert out.content == "Ada Lovelace has spent years on compilers."
+    assert "answered with its notes, so was asked again" in out.steps
+
+
+def test_look_up_takes_several_words_in_one_call():
+    """A staffing question needs a lookup per skill; one at a time spends every round."""
+    model = ScriptedModel([call("look_up", texts=["compilers", "Bea Marlow"]),
+                           call("show", ids=["person:bea"])])
+    out = converse("who works on compilers?", GRAPH, model)
+    assert set(out.found) == {"topic:compilers", "person:ada", "person:bea"}
+    assert "looked up 'compilers', 'Bea Marlow'" in out.steps
+    # the single-word form still works, and a word that matches nothing says so
+    one = ScriptedModel([call("look_up", text="compilers")])
+    assert converse("?", GRAPH, one).found == ["topic:compilers", "person:ada", "person:bea"]
+
+
+def test_a_finder_is_batched_the_same_way():
+    seen = []
+
+    def finder(text):
+        seen.append(text)
+        return [{"id": "person:ada", "label": "Ada Lovelace", "kind": "person"}]
+
+    tools = tools_for(GRAPH, finder=finder)
+    model = ScriptedModel([call("look_up", texts=["one", "two"])])
+    out = converse("?", GRAPH, model, tools=tools, finder=finder)
+    assert seen == ["one", "two"]
+    assert out.found == ["person:ada"]
+
+
+def test_a_tool_call_written_out_as_prose_is_cut_and_believed():
+    """The last turn has no tools, so a model that wanted `show` writes the call instead.
+
+    Measured on the live graph: a good answer arrived with
+    `show({"ids":[...]})` welded to the end of it, printed to the reader as part of the
+    prose. It is not an answer — but it is the model saying exactly what it meant, and a
+    tighter set than asking it again afterwards.
+    """
+    from ml_stack.graph.ask import spoken_show
+
+    said = ('It would be worthwhile for them to chat about robotics. '
+            'show({"ids":["person:ada","person:bea"]})')
+    text, ids = spoken_show(said)
+    assert text.endswith("chat about robotics.")
+    assert ids == ["person:ada", "person:bea"]
+    # a harmony wrapper around it comes off too
+    wrapped, wrapped_ids = spoken_show('They agree. <|tool_call|>show({"ids": ["person:ada"]})<|end|>')
+    assert wrapped == "They agree." and wrapped_ids == ["person:ada"]
+    # and an ordinary answer that merely uses the word is left alone
+    plain = "She will show you the graph if you ask her nicely."
+    assert spoken_show(plain) == (plain, [])
+
+
+def test_the_written_out_call_is_what_gets_lit():
+    """A model that says what to light in words is not asked to say it again."""
+    class Writes:
+        def __init__(self):
+            self.asked = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.asked += 1
+            if tools and self.asked == 1:
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": "look_at", "arguments": json.dumps({"ids": ["topic:compilers"]})}}])
+            return Reply(content='Ada and Bea both work on compilers. '
+                                 'show({"ids":["person:ada","person:bea"]})')
+
+    import json
+    model = Writes()
+    out = converse("who works on compilers?", GRAPH, model)
+    assert out.show == ["person:ada", "person:bea"]
+    assert out.content == "Ada and Bea both work on compilers."
+    assert "said what to light in words, so it was not asked again" in out.steps
+
+
+def test_a_turn_that_stops_searching_can_still_act():
+    """Fails when the last call is made with no tools at all.
+
+    Measured against a real model: "I moved to Denver, please fix my entry" went round in
+    circles looking the place up, the loop stopped it — and the one call left had nothing to
+    reach for, so a member's request to change their own entry came back as "the model did
+    not finish an answer". Stopping the searching must not stop the acting.
+    """
+    import json as _json
+
+    raised = []
+
+    def record(args):
+        raised.append(str(args.get("text") or ""))
+        return {"recorded": True}
+
+    change = ({"type": "function", "function": {
+        "name": "request_change",
+        "description": "Ask for something in the graph to be different.",
+        "parameters": {"type": "object", "properties": {"text": {"type": "string"}},
+                       "required": ["text"]}}}, record)
+
+    class GoesInCircles:
+        """Searches until it is stopped, then asks for the change it came to ask for."""
+
+        def chat(self, messages, tools=None, **_):
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if "look_up" in offered:
+                return Reply(tool_calls=[{"id": "c", "function": {
+                    "name": "look_up", "arguments": _json.dumps({"text": "Denver"})}}])
+            assert "request_change" in offered, f"nothing left to act with: {offered}"
+            return Reply(content="Recorded.", tool_calls=[{"id": "c", "function": {
+                "name": "request_change",
+                "arguments": _json.dumps({"text": "I moved to Denver"})}}])
+
+    out = converse("I moved to Denver, please fix my entry.", GRAPH, GoesInCircles(),
+                   tools=[*tools_for(GRAPH), change], rounds=2)
+    assert raised == ["I moved to Denver"], "the request never reached the tool"
+    assert "did not finish an answer" not in out.content
+
+
+def test_an_answer_built_on_nothing_is_sent_back_to_search():
+    """A model that answers without touching the graph answered from memory it does not have.
+
+    Measured over the invented community: six of gemma-4-E4B's nine failures were this shape
+    — two model calls, a hundred characters of prose, no search. The `show` nudge could not
+    catch it, because that one only fires for a turn that *did* search and forgot to say what
+    it found. Nothing was correcting the turn that never looked.
+    """
+    class Blurter:
+        def __init__(self):
+            self.turns = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.turns += 1
+            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+            if self.turns == 1:
+                return Reply(content="Probably somebody in engineering.")
+            if "look_up" in offered:
+                return Reply(tool_calls=[{"id": "c1", "function": {
+                    "name": "look_up", "arguments": '{"text": "compilers"}'}}])
+            return Reply(content="Ada works on compilers.")
+
+    model = Blurter()
+    out = converse("who works on compilers?", GRAPH, model)
+    assert "topic:compilers" in out.found                    # it went and looked
+    assert out.content == "Ada works on compilers."           # and the second answer stands
+    assert "answered without looking, so it was sent to look" in out.steps
+
+
+def test_a_model_that_will_not_search_keeps_the_answer_it_gave():
+    """One chance to look, not an argument. Its answer stands rather than being thrown away."""
+    class Stubborn:
+        def chat(self, messages, tools=None, **_):
+            return Reply(content="Nobody here does underwater welding.")
+
+    out = converse("who welds underwater?", GRAPH, Stubborn())
+    assert out.content == "Nobody here does underwater welding."
+    assert out.found == out.read == out.path == []
+    assert "answered without looking, so it was sent to look" not in out.steps
+
+
+def test_the_tool_descriptions_show_a_call_and_never_use_the_bench_community():
+    """Small models need an example, and an example must not be the bench's own answers.
+
+    The descriptions carry worked calls because a model that is only told what a tool is has
+    to infer that it should be called. If those examples used the invented community's own
+    people, a rising bench score would mean the examples had been memorised rather than the
+    convention learned, so the two sets of names are kept apart on purpose.
+    """
+    from ml_stack.graph.ask import TOOLS
+    from ml_stack.graph.community import graph as invented
+
+    nodes = invented()["nodes"]
+    theirs = {n["id"].casefold() for n in nodes}
+    theirs |= {w for n in nodes for w in str(n.get("label") or "").casefold().split() if w}
+    # "repair" leaked in on the first attempt through the look_up example, and it is a topic
+    # label here — so labels are split into words rather than matched whole. Ordinary English
+    # from the questions ("people", "about") is deliberately not in this set: every example
+    # has to be written in some words, and only the graph's own vocabulary can be memorised.
+
+    for schema in TOOLS:
+        fn = schema["function"]
+        said = fn["description"].casefold()
+        assert "{" in said and "example" in said, f"{fn['name']} shows no example call"
+        assert fn["name"] in said or "call it" in said
+        leaked = sorted(w for w in theirs if w and w in said)
+        assert not leaked, f"{fn['name']}'s example uses {leaked}, which the bench asks about"
