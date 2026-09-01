@@ -748,6 +748,17 @@ def compare(store: str | Path, first: str, second: str) -> str:
     return "\n".join(lines)
 
 
+def _shown(label: Any, width: int = 28) -> str:
+    """A label that fits the column with its *end* intact: the end is where a variant lives.
+
+    `gemma-4-E2B-it-plain-terse` cut to 20 characters read as `gemma-4-E2B-it-plain`, and
+    three runs that differed only in the asking printed as one -- measured, and mistaken
+    for a labelling bug before it was seen to be the column.
+    """
+    text = str(label or "")
+    return text if len(text) <= width else "…" + text[-(width - 1):]
+
+
 def table(kept: Sequence[dict[str, Any]]) -> None:
     """Every run, one per line. Two runs compare; more than two want seeing at once."""
     if not kept:
@@ -766,7 +777,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # `conc` is the same lesson again: four conversations at once against one at a time is
     # two measurements, and the wall clock of the first is the run's, not the turns' sum.
     # `made` is what F1 cannot see -- entries the prose named that nothing found or read.
-    head = (f"{'run':20} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
+    head = (f"{'run':28} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5}  {'sampling'}")
@@ -784,7 +795,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         beyond = server.get("kv_and_run_bytes")
         per1k = server.get("bytes_per_1k_context")
         rss = server.get("resident_bytes")
-        print(f"{str(one.get('label', ''))[:20]:20} "
+        print(f"{_shown(one.get('label', '')):28} "
               f"{(f'{ctx // 1024}k x{slots}' if ctx else '-'):>7} "
               f"{len(scored):>3} "
               f"{wall_of(one):>6.0f}s {_total(rows, 'calls'):>6.0f} "
@@ -1225,7 +1236,7 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
         print("nothing kept yet")
         return
     on_front = {id(one) for one in pareto(kept, cost=cost)}
-    head = (f"{'run':20} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
+    head = (f"{'run':28} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
             f"{'F1/min':>8} {'F1/1k tok':>10} {'F1/GB':>7} {'s per':>7} {'tok per':>8}")
     print(head)
     print("-" * len(head))
@@ -1281,7 +1292,7 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     for one, d in sorted(points, key=lambda kv: kv[1][cost]):
         cx, cy = x(d[cost]), y(d["right"])
         on = id(one) in front
-        label = str(one.get("label", ""))[:22]
+        label = _shown(one.get("label", ""), 28)
         dots.append(
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6 if on else 4.5}" '
             f'class="{"front" if on else "dot"}"><title>{label}\n'

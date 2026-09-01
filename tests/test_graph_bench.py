@@ -1657,3 +1657,12 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
     assert bench.resumable(kept, questions=1, context=8192, parallel=1)("tiny-plain") is None
     assert bench.resumable(kept, questions=1, context=65536, parallel=2)("tiny-plain") is None
     assert already("never-run") is None
+
+
+def test_a_long_label_keeps_its_end_in_the_table():
+    """The end of a label is the variant (`-terse`, `-card`); cutting it made three runs
+    print as one. Mutation: cut from the end instead of the front."""
+    from ml_stack.graph.bench import _shown
+
+    assert _shown("gemma-4-E2B-it-plain-terse", 20).endswith("plain-terse")
+    assert _shown("short") == "short"
