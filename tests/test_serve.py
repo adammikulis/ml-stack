@@ -550,3 +550,113 @@ class TestServingBeside:
         held = self.manager(tmp_path, [])
         with pytest.raises(ServerFailed, match="different shape"):
             held.lease(ServerSpec(model=big, port=instance.port))
+
+
+def test_a_projector_reference_becomes_a_url_and_a_path_stays_a_path():
+    """`--mmproj` takes a file on disk. Handing it an `hf:` reference is a path that does
+    not exist, and the server's complaint reads like a corrupt projector rather than a
+    misspelled one."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    backend = LlamaServerBackend(binary="/bin/true")
+
+    argv = backend.command(ServerSpec(model="hf:maker/thing-GGUF/w.gguf", port=1,
+                                      mmproj="hf:maker/thing-GGUF/mmproj-F32.gguf"))
+    assert "--mmproj" not in argv
+    at = argv.index("--mmproj-url")
+    assert argv[at + 1] == "https://huggingface.co/maker/thing-GGUF/resolve/main/mmproj-F32.gguf"
+
+    argv = backend.command(ServerSpec(model="/m/w.gguf", port=1, mmproj="/m/mmproj-F32.gguf"))
+    assert "--mmproj-url" not in argv
+    assert argv[argv.index("--mmproj") + 1] == "/m/mmproj-F32.gguf"
+
+    assert "--mmproj" not in backend.command(ServerSpec(model="/m/w.gguf", port=1))
+
+
+def test_the_most_precise_projector_is_taken_not_the_first_alphabetically():
+    """A projector is a fraction of the weights and carries all of the seeing, so quantising
+    it is a false economy -- and sorted by name, `mmproj-BF16` beats `mmproj-F32` on B."""
+    import tempfile
+    from pathlib import Path
+
+    from ml_stack.serve.cli import alongside
+
+    with tempfile.TemporaryDirectory() as d:
+        where = Path(d)
+        for name in ("mmproj-BF16.gguf", "mmproj-F32.gguf", "mmproj-Q8_0.gguf"):
+            (where / name).write_bytes(b"x")
+        model = where / "thing-Q4_K_M.gguf"
+        model.write_bytes(b"x")
+
+        assert sorted(where.glob("mmproj-*.gguf"))[0].name == "mmproj-BF16.gguf"
+        assert alongside(str(model), "auto", "mmproj-", best=True).endswith("mmproj-F32.gguf")
+        # a draft head is the other way about and takes what is there
+        (where / "mtp-thing-Q4_0.gguf").write_bytes(b"x")
+        assert alongside(str(model), "auto", "mtp-").endswith("mtp-thing-Q4_0.gguf")
+
+
+def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked():
+    """`--spec-type` defaults to `none` on the server. An n-gram kind needs no second model,
+    proposing tokens already seen in the prompt -- which is what suits work that copies from
+    its context, and costs no weights and no memory where a draft head costs both."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    backend = LlamaServerBackend(binary="/bin/true")
+
+    bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
+    for flag in ("--spec-type", "--spec-draft-n-max", "--spec-ngram-mod-n-min",
+                 "--spec-draft-ngl"):
+        assert flag not in bare, f"{flag} should not appear unless asked for"
+
+    argv = backend.command(ServerSpec(
+        model="/m/w.gguf", port=1, spec_type="ngram-mod", spec_draft_max=5,
+        spec_draft_min=1, spec_ngram_min=32, spec_ngram_max=64, spec_draft_ngl=99))
+    pairs = dict(zip(argv, argv[1:]))
+    assert pairs["--spec-type"] == "ngram-mod"
+    assert pairs["--spec-draft-n-max"] == "5" and pairs["--spec-draft-n-min"] == "1"
+    assert pairs["--spec-ngram-mod-n-min"] == "32" and pairs["--spec-ngram-mod-n-max"] == "64"
+    # a draft left on the CPU is slower than the model it guesses for, which is a loss
+    assert pairs["--spec-draft-ngl"] == "99"
+
+    # zero is a choice and must survive, where None means "leave the server's default"
+    assert "--spec-draft-n-min" in backend.command(
+        ServerSpec(model="/m/w.gguf", port=1, spec_draft_min=0))
+
+
+def test_the_lookup_cache_reaches_the_command_line():
+    """Only the ngram-cache kind keeps a table on disk. The other n-gram kinds look up the
+    prompt they already hold and store nothing, which is why none of this is set by default."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    backend = LlamaServerBackend(binary="/bin/true")
+    bare = backend.command(ServerSpec(model="/m/w.gguf", port=1, spec_type="ngram-simple"))
+    assert "--lookup-cache-dynamic" not in bare and "--lookup-cache-static" not in bare
+
+    argv = backend.command(ServerSpec(model="/m/w.gguf", port=1, spec_type="ngram-cache",
+                                      lookup_static="/c/seed.bin",
+                                      lookup_dynamic="/c/learnt.bin"))
+    pairs = dict(zip(argv, argv[1:]))
+    assert pairs["--lookup-cache-static"] == "/c/seed.bin"
+    assert pairs["--lookup-cache-dynamic"] == "/c/learnt.bin"
+
+
+def test_tensors_can_be_kept_off_the_gpu_by_pattern():
+    """Qwen3.8-Flash-Next's N-gram Embedding is 51B of lookup table whose addresses are known
+    in advance, meant to sit in host memory and be prefetched rather than hold GPU. Naming
+    its tensors is how that is arranged -- and it is a different thing from n-gram
+    *speculation*, which is a decoding trick and touches no weights at all."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    backend = LlamaServerBackend(binary="/bin/true")
+    bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
+    assert "--override-tensor" not in bare and "--cpu-moe" not in bare
+
+    argv = backend.command(ServerSpec(model="/m/w.gguf", port=1,
+                                      override_tensor=("ngram.*=CPU", "blk.0.*=CPU"),
+                                      n_cpu_moe=12))
+    assert argv.count("--override-tensor") == 2
+    assert argv[argv.index("--override-tensor") + 1] == "ngram.*=CPU"
+    assert argv[argv.index("--n-cpu-moe") + 1] == "12"
+
+    assert "--cpu-moe" in backend.command(
+        ServerSpec(model="/m/w.gguf", port=1, cpu_moe=True))

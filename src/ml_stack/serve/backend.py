@@ -37,6 +37,46 @@ class ServerSpec:
     # A small model of the same family, guessing ahead so the large one only has to agree.
     # Same two forms as `model`: a path, or hf:owner/repo[/file.gguf].
     draft: str | Path | None = None
+    # How to guess ahead. "" leaves the server's own default, which is `none` -- passing a
+    # draft model turns on draft-simple by itself, but the n-gram kinds must be asked for.
+    #
+    # The n-gram kinds need no second model at all: they propose tokens by looking up
+    # sequences already seen in the prompt, which the large model then checks in one pass.
+    # That suits work that copies from its context -- answering out of retrieved text,
+    # transcribing, summarising -- and costs no weights and no memory, where a draft head
+    # costs both. `ngram-simple`, `ngram-map-k`, `ngram-map-k4v`, `ngram-mod`, `ngram-cache`.
+    spec_type: str = ""
+    spec_draft_max: int | None = None       # tokens guessed ahead (server default 3)
+    spec_draft_min: int | None = None
+    spec_ngram_min: int | None = None       # ngram-mod lookup floor (server default 48)
+    spec_ngram_max: int | None = None
+    spec_draft_ngl: int | None = None       # draft layers on the GPU; without it, the CPU
+    # Where the n-gram table lives. The in-context kinds keep none: they look up sequences
+    # already in the prompt, in memory, and touch no disk. `ngram-cache` is the exception --
+    # `lookup_static` is read and never written, `lookup_dynamic` is updated as it
+    # generates, so it carries what was learnt from one question into the next. That is
+    # worth having when the same names keep coming back, which is what answering about one
+    # community is.
+    lookup_static: str | Path | None = None
+    lookup_dynamic: str | Path | None = None
+    # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
+    # off the GPU without keeping all of it off.
+    #
+    # This is what Qwen3.8-Flash-Next's N-gram Embedding wants, and it is a different thing
+    # entirely from the n-gram *speculation* above. That is a decoding trick; this is
+    # architecture: a 51B-parameter table looked up by the current token and the few before
+    # it, adding capacity at almost no compute per token. Its lookups are known in advance,
+    # so the table is meant to sit in host memory and be prefetched alongside the
+    # computation rather than occupy the GPU permanently. Naming its tensors here is how
+    # that is arranged.
+    #
+    # Find the pattern from the model rather than guessing: `gguf_dump` or llama-server's
+    # own load log lists the tensor names.
+    override_tensor: tuple[str, ...] = ()
+    # MoE experts on the CPU: all of them, or the first N layers' worth. The same trade for
+    # a different shape of model -- a 35B with 3B active fits a small machine this way.
+    cpu_moe: bool = False
+    n_cpu_moe: int | None = None
     extra_args: tuple[str, ...] = ()
 
     @property
@@ -125,7 +165,17 @@ class LlamaServerBackend(ServerBackend):
         if spec.embedding:
             argv += ["--embeddings", "--pooling", "mean"]
         if spec.mmproj:
-            argv += ["--mmproj", str(spec.mmproj)]
+            # `--mmproj` takes a file on disk, so an `hf:` reference has to become the URL
+            # it stands for; `--mmproj-url` fetches it. Passing the reference itself is a
+            # path that does not exist, and llama-server says so in a way that reads like
+            # the projector is corrupt rather than misspelled.
+            seeing = spec.hf_parts(spec.mmproj)
+            if seeing is None:
+                argv += ["--mmproj", str(spec.mmproj)]
+            else:
+                repo, name = seeing
+                argv += ["--mmproj-url",
+                         f"https://huggingface.co/{repo}/resolve/main/{name}"]
         if spec.draft:
             # A draft guesses several tokens ahead and the large model checks them in one
             # pass, so an agreeing run costs about what one token used to. The flags differ
@@ -136,6 +186,25 @@ class LlamaServerBackend(ServerBackend):
             else:
                 repo, name = drafted
                 argv += ["-hfd", f"{repo}:{name}" if name else repo]
+        if spec.spec_type:
+            argv += ["--spec-type", str(spec.spec_type)]
+        for flag, value in (("--spec-draft-n-max", spec.spec_draft_max),
+                            ("--spec-draft-n-min", spec.spec_draft_min),
+                            ("--spec-ngram-mod-n-min", spec.spec_ngram_min),
+                            ("--spec-ngram-mod-n-max", spec.spec_ngram_max),
+                            ("--spec-draft-ngl", spec.spec_draft_ngl)):
+            if value is not None:
+                argv += [flag, str(value)]
+        for pattern in spec.override_tensor:
+            argv += ["--override-tensor", str(pattern)]
+        if spec.cpu_moe:
+            argv += ["--cpu-moe"]
+        if spec.n_cpu_moe is not None:
+            argv += ["--n-cpu-moe", str(spec.n_cpu_moe)]
+        if spec.lookup_static:
+            argv += ["--lookup-cache-static", str(spec.lookup_static)]
+        if spec.lookup_dynamic:
+            argv += ["--lookup-cache-dynamic", str(spec.lookup_dynamic)]
         if spec.flash_attn:
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:
