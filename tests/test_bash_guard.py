@@ -40,6 +40,11 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('hf download unsloth/Qwen3.5-4B-GGUF', "a download by hand"),
     ('pkill -f llama-server', "a kill that leaves the lease behind"),
     ('SKIP_NAME_CHECK=1 git commit -m x', "the name hook is not an agent's to skip"),
+    ('git add -A && git commit -m x', "staging everything sweeps in another agent's half-written work"),
+    ('git add --all', "the long spelling of the same"),
+    ('git add . ', "the dot is the same"),
+    ('git add -u', "every tracked change is the same"),
+    ('git commit -am "x"', "commit -a stages everything too"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -53,6 +58,10 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'pgrep -fl llama-server',
     'grep -rn llama-server src/',
     'ls ~/.cache/huggingface',
+    'git add HANDOFF.md',
+    'git add src/one.py tests/test_one.py && git commit -m "x"',
+    'git add -p src/one.py',
+    'git commit -m "x"',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""

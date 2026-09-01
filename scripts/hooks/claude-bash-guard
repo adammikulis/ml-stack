@@ -32,6 +32,11 @@ import sys
 
 # (what it matches, what to do instead). Ordered: the first match wins.
 REFUSE = [
+    (r"\bgit\s+add\s+(-A\b|--all\b|\.(\s|$)|-u\b|--update\b)|\bgit\s+commit\s+(-a\b|-am\b|--all\b)",
+     "Do not stage everything. `git add -A` (and `add .`, `add -u`, `commit -a`) sweeps in "
+     "whatever another agent is halfway through writing -- it committed a failing test once, "
+     "under somebody else's commit message. Name the files you mean: `git add path/one.py "
+     "path/two.py`."),
     (r"until\s*!\s*pgrep|while\s+pgrep|until\s+pgrep",
      "Do not hand-write a waiter. `pgrep -f` matches the waiting shell's own command line, "
      "so the loop never exits -- two of them spun for an afternoon and the work queued "
