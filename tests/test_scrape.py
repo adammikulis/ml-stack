@@ -123,3 +123,40 @@ def test_an_older_watermark_file_is_still_read(tmp_path):
     path = tmp_path / "seen.json"
     path.write_text(json.dumps({"#general": "1787937181.000000"}), encoding="utf-8")
     assert Seen.load(path).mark("#general") == "1787937181.000000"
+
+
+def test_an_edited_row_is_caught_by_its_own_digest(tmp_path):
+    """A source that keeps a row's id when the wording changes says nothing about the edit.
+
+    The watermark cannot see it — the row is not newer — and a reply count cannot either,
+    because nothing grew. Marking the content is what makes an edit visible at all, and
+    without it an edit is not late, it is never noticed.
+    """
+    from ml_stack.scrape import Seen, digest
+
+    said = {"m1": "we should meet on tuesday", "m2": "agreed"}
+    marks = {k: digest(v) for k, v in said.items()}
+    seen = Seen.load(tmp_path / "seen.json")
+    seen.record("#general", [], counts=marks)
+    seen.save()
+
+    again = Seen.load(tmp_path / "seen.json")
+    assert again.changed("#general", marks) == []          # nothing moved
+    said["m1"] = "we should meet on wednesday"
+    edited = {k: digest(v) for k, v in said.items()}
+    assert again.changed("#general", edited) == ["m1"]
+
+    # a row never marked before is reported alongside the edit, which is right: it has
+    # never been read either
+    edited["m3"] = digest("and bring the notes")
+    assert again.changed("#general", edited) == ["m1", "m3"]
+
+
+def test_a_digest_is_stable_short_and_not_a_copy_of_what_was_read():
+    from ml_stack.scrape import digest
+
+    assert digest("a message") == digest("a message")
+    assert digest("a message") != digest("a messagf")
+    assert len(digest("a message")) == 16
+    assert "message" not in digest("a message")
+    assert digest("") == digest(None)  # a row with no text is not a row that changed

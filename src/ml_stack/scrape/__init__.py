@@ -6,8 +6,8 @@ from ml_stack.scrape.browser import (BrowserUnavailable, Window, browser, pace, 
                                      signed_in, within_hours)
 from ml_stack.scrape.presets import DISCORD, PRESETS, SLACK, WEBSITE, Site, preset
 from ml_stack.scrape.read import Page, read_all, read_once, scroll
-from ml_stack.scrape.seen import Seen
+from ml_stack.scrape.seen import Seen, digest
 
 __all__ = ["BrowserUnavailable", "DISCORD", "PRESETS", "Page", "SLACK", "Seen", "Site",
-           "WEBSITE", "Window", "browser", "pace", "preset", "read_all", "read_once", "scroll",
-           "sign_in", "signed_in", "within_hours"]
+           "WEBSITE", "Window", "browser", "digest", "pace", "preset", "read_all",
+           "read_once", "scroll", "sign_in", "signed_in", "within_hours"]

@@ -7,10 +7,20 @@ watermark cannot tell you, so a small mark is kept beside it and compared.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+
+def digest(text: str) -> str:
+    """A short stable mark for a row's content, to compare against the last sighting.
+
+    Short on purpose: it goes in a state file that is not the store, and must not become a
+    second copy of what was read.
+    """
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()[:16]
 
 
 @dataclass
@@ -47,7 +57,15 @@ class Seen:
         return [r for r in rows if str(r.get(key) or "") > mark] if mark else list(rows)
 
     def changed(self, source: str, counts: dict[str, Any]) -> list[str]:
-        """Which rows have a different mark than last time — something under them grew."""
+        """Which rows have a different mark than last time.
+
+        The mark is whatever tells you a row moved: a reply count says something grew under
+        it, and :func:`digest` of the row's own text says the row itself was rewritten. A
+        source that keeps a row's id when its wording changes — most of them do — says
+        nothing about the edit, so without a mark of the content an edit is not late, it is
+        invisible. A row never marked here counts as changed: it has never been read, and
+        the caller wants it for the same reason.
+        """
         before = self.marks.get(source, {}).get("counts") or {}
         return sorted(k for k, v in counts.items() if str(before.get(k, "")) != str(v))
 
