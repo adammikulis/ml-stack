@@ -1,0 +1,28 @@
+{
+  "id": "tool-calls",
+  "title": "Teach a model to call my tools",
+  "blurb": "Give it conversations that end in a tool call -- ml-stack-train-tools makes them from your tool schemas -- and a small chat model learns which tool a question wants and how to call it.",
+  "data": {
+    "formats": [".jsonl"],
+    "fields": ["messages", "tools"],
+    "needs_split": true,
+    "min_rows": 50
+  },
+  "requires": {"backend": "torch", "min_ram_gb": 8},
+  "sizes": {
+    "270m": {"base": "google/functiongemma-270m-it", "params_m": 270, "needs_gb": 6}
+  },
+  "fields": [
+    {"name": "steps", "type": "int", "default": 300, "min": 20, "max": 100000,
+     "label": "How long to train",
+     "help": "A few hundred steps over a few hundred conversations is a pass or two. Watch the held-out score."},
+    {"name": "context", "type": "int", "default": 2048, "min": 64, "max": 32768,
+     "label": "Longest conversation it reads",
+     "help": "Tokens. The tool declarations are rendered into every row: the five graph tools with their worked examples measured 1,080 tokens through functiongemma's template, and a row the context cuts off is dropped, not taught."},
+    {"name": "batch_size", "type": "int", "default": 8, "min": 1, "max": 128,
+     "label": "Conversations per step"},
+    {"name": "learning_rate", "type": "float", "default": 0.00002, "min": 0.0000001, "max": 0.01,
+     "label": "Learning rate",
+     "help": "A full fine-tune of a pretrained model wants a small one; 3e-3 is for training from scratch."}
+  ]
+}

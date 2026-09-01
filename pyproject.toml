@@ -70,6 +70,8 @@ ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 ml-stack-train-run = "ml_stack.train.run:main"
+# a project's tools -> synthetic conversations -> a fine-tuned caller -> a GGUF
+ml-stack-train-tools = "ml_stack.train.tools:main"
 # what this machine can do, and what it does without being asked
 ml-stack-setup = "ml_stack.setup:main"
 ml-stack-serve = "ml_stack.serve.cli:main"

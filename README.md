@@ -166,6 +166,50 @@ ml-stack-train-run --recipe text-lm --data corpus.jsonl --out runs/lm --dry-run
 `--dry-run` trains twenty steps and writes nothing, so a bad setting costs forty seconds
 instead of six hours.
 
+### Fine-tuning a tool caller
+
+```
+ml-stack-train-tools --tools python:ml_stack.graph.ask:TOOLS \
+    --prompts python:ml_stack.graph.ask:TOOL_PROMPTS --out runs/caller
+```
+
+Plug in a project's tools and end with a GGUF that calls them. One command, three stages,
+each skipped when `--out` already holds its output:
+
+- **synth** writes `data/train.jsonl`, `data/holdout.jsonl` and `data/manifest.json`. The
+  seed is the worked examples the tool descriptions already carry — `for "Which companies
+  do people here work for?" call list_kind with {"kind": "org"}`, or `"What does Quenlow
+  Robotics do?" → web_search(query="Quenlow Robotics")` — because those are what was
+  measured to matter (17% to 70% recall on the same weights, above). The router's example
+  questions come in through `--prompts` (a `chat` key is the messages that want no tool),
+  and all of it is templated into conversations: system, user, an assistant turn that
+  calls the tool — and a share that call nothing, so the model learns when not to.
+  Arguments come from the question where they can (its words, a URL, an enum value it
+  names) and from a worked example where they cannot, so an id-shaped argument is always
+  one a description showed. One seed question in ten is held out by hash, and every
+  paraphrase of it goes with it. `--ask URL` has a served model write more questions per
+  tool with the examples as few-shots, which is also where better arguments come from;
+  `--per-tool` is how many conversations each tool gets.
+- **train** runs the `tool-calls` recipe: `--base` (`google/functiongemma-270m-it` unless
+  told otherwise) with every conversation rendered through its own chat template and the
+  loss on the assistant tokens only, into `run/` — checkpoints, `metrics.jsonl`, resumable.
+  `--set steps=600` and the other recipe fields work as in `ml-stack-train-run`. It is
+  torch whatever the machine's default backend is, on the accelerator unless
+  `ML_STACK_DEVICE=cpu` says otherwise.
+- **export** puts the latest checkpoint back into Hugging Face layout under `model/` and
+  hands it to `ml_stack.gguf.export` — llama.cpp's converter and `llama-quantize`, `--quant
+  Q8_0` — so the GGUF lands in `--out`, ready for `ml-stack-serve up`.
+
+`--dry-run` prints the plan with counts and loads no model; `--only synth|train|export` runs
+one stage. The data is plain JSONL rows of `{"messages", "tools"}`, so `ml-stack-train-run
+--recipe tool-calls --data runs/caller/data` trains on it too, and so does anything else
+that writes that shape. Whether the fine-tune beats its base is measured, never assumed:
+serve the GGUF and `ml-stack-bench run` it beside the model it came from.
+
+The next recipe is embeddinggemma for `graph.route`: a contrastive fine-tune on the same
+question → tool pairs, so the router that chooses which tools to offer learns the project's
+questions as well. It is not built yet.
+
 ## Packages
 
 | Module | What it is |
@@ -248,9 +292,10 @@ printed.
 | | |
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
-| `ml-stack-serve status\|up\|down` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `--binary` runs a build that reads a newer architecture |
+| `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
-| `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads, what is already downloaded — and what the stack does without being asked |
+| `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
+| `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
 
 ## Finding a model
@@ -320,15 +365,23 @@ Where the n-gram table lives depends on the kind. `ngram-simple`, `ngram-map-k`,
 and nothing touches the disk. `ngram-cache` is the exception: `--lookup-cache` is written as
 it generates, so what was learnt answering one question can speculate the next.
 
-**A release lags master by an architecture or two.** Checked on this machine: the current
-release reads `gemma4` and `qwen3moe` but not `qwen4exp`, so Qwen3.8-Flash-Next exits with
-"unknown model architecture" until it is served with a build from master —
-`ml-stack-serve up --binary /path/to/llama-server`. The architecture names live in
-`libllama`, not in the server binary, so grep the library rather than the executable:
-
-```
-strings "$(dirname "$(which llama-server)")"/../lib/libllama*.dylib | grep -x qwen4exp
-```
+**A release lags master by an architecture or two.** Checked on this machine: the newest
+homebrew bottle (`brew outdated` empty) reads `gemma4` and `qwen3moe` but not `qwen4exp`, so
+Qwen3.8-Flash-Next exits with "unknown model architecture" on it. `ml-stack-serve build`
+fixes that permanently rather than once: it clones or fast-forwards llama.cpp's own master
+and builds it (`--from source`, Metal on macOS, CUDA or Vulkan on Windows/Linux when a
+compiler is on PATH), or downloads the newest GitHub release with an asset for this machine
+(`--from release`, the default with no compiler — most Windows installs). Either way the new
+binary is trusted only once it answers `--help` and reads every architecture the build it is
+about to replace did; only then does `~/.ml-stack/llama.cpp/current` — which `find_binary`
+checks ahead of PATH and a login shell's `/opt/homebrew/bin`, though never ahead of
+`--binary` or `$LLAMA_CPP_SERVER` — point at it. `ml-stack-serve build --check` reports the
+installed build's commit and age without building anything; `--rollback` points `current`
+back; `--persist` installs a weekly refresh (a LaunchAgent on macOS, a Scheduled Task on
+Windows) that reruns it unattended — safe because a refresh that fails verification changes
+nothing. `ml-stack-setup` names the fix directly when an architecture or a flag is missing.
+A one-off binary from somewhere else still works: `ml-stack-serve up --binary
+/path/to/llama-server`.
 
 **A release also renames flags**, and a flag the build does not have fails at the far end
 of the load: `--draft-max` became `--spec-draft-n-max`, and llama.cpp 0.3.0 keeps the old
@@ -336,8 +389,9 @@ name only to say it was removed. So `up` asks the build what it accepts (`flags_
 `--help`, cached per binary and mtime) and refuses before loading, one line per flag with
 the nearest the build has — `this llama-server has no --draft-max; it has
 --spec-draft-n-max`. `ml-stack-setup` lists every flag `ServerSpec` can emit that the
-installed build lacks, and says nothing when it answers them all. A build that prints no
-help is unknown, not empty, and is given no opinion.
+installed build lacks, and offers `ml-stack-serve build` as the fix; it says nothing when
+the build answers them all. A build that prints no help is unknown, not empty, and is given
+no opinion.
 
 `ServerSpec(draft=...)` serves a small model of the same family alongside the large one: it
 guesses several tokens ahead and the large model checks them in one pass, so a run they

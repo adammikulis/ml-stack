@@ -81,4 +81,7 @@ def build(recipe_id: str, config: dict[str, Any], data: Path | str,
     if recipe_id == "classify-text":
         from ml_stack.train.recipes.classify_text import build_classifier
         return build_classifier(spec, config, Path(data), framework)
+    if recipe_id == "tool-calls":
+        from ml_stack.train.recipes.tool_calls import build_tool_caller
+        return build_tool_caller(spec, config, Path(data), framework)
     raise ValueError(f"no builder for recipe {recipe_id!r}")
