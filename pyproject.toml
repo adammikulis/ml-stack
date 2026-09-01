@@ -57,13 +57,22 @@ Repository = "https://github.com/adammikulis/ml-stack"
 Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 
 [project.scripts]
+# Every command this package installs starts with `ml-stack`, so `compgen -c ml-stack` (or a
+# tab) lists the whole toolkit. That is not tidiness for its own sake: an agent that cannot
+# enumerate these writes the command again by hand, which is how searching the Hub, timing a
+# question set and picking a free port each got done twice before becoming commands.
+#
 # The one people double-click: starts the daemon and opens the browser on it.
 ml-stack = "ml_stack.fleet.launch:main"
 ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 ml-stack-train-run = "ml_stack.train.run:main"
-ml-serve = "ml_stack.serve.cli:main"
+ml-stack-serve = "ml_stack.serve.cli:main"
+# what a change to the asking costs, and whether it was worth it
+ml-stack-bench = "ml_stack.graph.bench:main"
+# find a model newer than anything the assistant remembers, and print how to serve it
+ml-stack-models = "ml_stack.hub:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

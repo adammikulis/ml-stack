@@ -12,7 +12,7 @@ The owner asked for parity between what the interface can do and what can be dri
 without it. There is not parity.
 
 Twenty-one `/ui/*` routes; `ml-stack-peers` has `setup init key token ls pause resume
-when busy`, and `ml-serve` has `status up down`. Missing from the command line entirely:
+when busy`, and `ml-stack-serve` has `status up down`. Missing from the command line entirely:
 models, chat, conversations, clusters, updates, uninstall, libraries.
 
 Every piece of the logic is already importable and does not need moving — `Models`,
@@ -20,11 +20,11 @@ Every piece of the logic is already importable and does not need moving — `Mod
 `remove`, `updates.apply_if_newer`, `Environment.install`. A CLI over those is assembly,
 not design.
 
-## A model put up with `ml-serve` is not advertised to the other machines
+## A model put up with `ml-stack-serve` is not advertised to the other machines
 
-`ml-serve up` leases through `ml_stack.serve` and records the port in the lease file.
+`ml-stack-serve up` leases through `ml_stack.serve` and records the port in the lease file.
 `fleet.serving.Serving.register` is what puts a port in the beacon, and nothing calls it,
-so a peer asking who is serving does not see it. Either `ml-serve up` registers when a
+so a peer asking who is serving does not see it. Either `ml-stack-serve up` registers when a
 daemon is running on this machine, or the daemon learns to read the lease file.
 
 ## Never driven by a person
@@ -49,25 +49,34 @@ The suite and the release checks do not cover these.
 
 ## Asked for, not built
 
-1. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
+1. **Nothing lists a graph's entries by kind.** `look_up` matches text, so "which companies
+   are represented here?" is unanswerable: the model searched "organization", then "company",
+   and no node is *labelled* either — they are `org:` nodes with company names. Measured over
+   the invented community, it is the one failure no wording of the tool descriptions can
+   reach, because the capability is absent rather than badly explained. A fifth tool taking a
+   kind and returning its entries would close it. gpt-oss gets the question right by reading
+   enough of the graph to infer the answer, which is why it looks fine on the large model and
+   fails on every small one.
+2. **Fleet-wide dataset catalogue.** `POST /fetch` moves files peer-to-peer; nothing
    indexes what datasets each machine holds. Browse every dataset on every machine,
    deduplicated by content digest, so three copies of one path that do not match show as
    three that do not match.
-2. **Two more recipes** — image classification, and fine-tuning from an existing model.
+3. **Two more recipes** — image classification, and fine-tuning from an existing model.
    `text-lm` and `classify-text` work; the shape is the same.
-3. **Local-SGD.** One training run split across machines, averaging safetensors with
+4. **Local-SGD.** One training run split across machines, averaging safetensors with
    numpy so a Mac and an AMD box contribute to one model.
-4. **Semantic search over conversations.** Search is keyword. `embed()`, `cosine()` and
-   `top_k()` in `ml-stack-client` are ready; the cost is underneath them. llama-server
-   cannot serve embeddings and chat at once — `backend.py` drops `--jinja` when
-   `--embeddings` is set — so it needs a second server, a second model download, and a
-   vectors sidecar recording the model and dimension it was built with.
-5. **Sharing conversations across machines.** They stay where they were held.
-6. **A machine holding only a draft model is never asked for it.** Drafts are left out
+5. **Semantic search over conversations.** Search is keyword. The *graph* half of this is
+   built — `graph.vectors` embeds a graph, `GraphStore.set_embedding`/`similar` store and
+   rank it, and a second server on its own port is how the embeddings are served, because
+   llama-server still cannot do embeddings and chat at once (`backend.py` drops `--jinja`
+   when `--embeddings` is set). What is left is the same thing over raw conversations rather
+   than over the entries a graph was built from: nothing chunks or embeds a transcript.
+6. **Sharing conversations across machines.** They stay where they were held.
+7. **A machine holding only a draft model is never asked for it.** Drafts are left out
    of the listing a beacon carries, so `ensure_draft` asks the machines that hold the
    model itself, and falls back to the internet. A machine with the draft and not the
    model is invisible.
-7. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
+8. **`-ngl 99` is not a choice.** `ServerSpec` defaults `n_gpu_layers="auto"`, which is
    every layer, and the draft model gets `-ngld 99`. Pressing Run claims the whole GPU.
    The owner serves their GPU to something else; this should be a setting.
 

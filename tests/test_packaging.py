@@ -50,7 +50,7 @@ def console_scripts() -> dict:
 
 def test_serving_a_model_has_a_command_of_its_own():
     """Without it, answering 'what is serving, on which port' is lsof and curl."""
-    assert console_scripts().get("ml-serve") == "ml_stack.serve.cli:main"
+    assert console_scripts().get("ml-stack-serve") == "ml_stack.serve.cli:main"
 
 
 def test_every_console_script_points_at_something_that_exists():
