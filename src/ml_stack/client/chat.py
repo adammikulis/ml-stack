@@ -109,6 +109,7 @@ class Client:
         self.api_key = api_key
         self.pinned_family = families.resolve(family)
         self._probed: Family | None = None
+        self._carded: dict[str, Any] | None = None
 
     # --------------------------------------------------------------- request shape
 
@@ -154,8 +155,34 @@ class Client:
 
     @property
     def card(self) -> dict[str, Any]:
-        """What this model's publisher recommends. A starting point for a benchmark."""
-        return dict(self.family.card.asked())
+        """What this model's publisher recommends. A starting point for a benchmark.
+
+        Read from the served model's own GGUF when it can be reached -- `general.sampling.*`
+        is written into the file, so it cannot drift from the weights and needs no prose
+        parsed out of a README. The family's table is the fallback for a server whose model
+        is not on this disk.
+
+        It is a recommendation and nothing sends it. `Client.sampling` is what goes out, and
+        that is the caller's choice: the publisher does not know the task.
+        """
+        found = self._from_gguf()
+        return found or dict(self.family.card.asked())
+
+    def _from_gguf(self) -> dict[str, Any]:
+        """The served model's own recommendation, asked of /props for where it lives."""
+        if self._carded is None:
+            self._carded = {}
+            try:
+                from ml_stack.client.http import request_json
+                from ml_stack.hub import in_gguf
+
+                props = request_json(f"{self.base_url}/props", timeout=5.0, method="GET") or {}
+                where = str(props.get("model_path") or "")
+                if where:
+                    self._carded = in_gguf(where)
+            except Exception:  # noqa: BLE001 - a server that will not say leaves the family
+                self._carded = {}
+        return dict(self._carded)
 
     @property
     def temperature(self) -> float:

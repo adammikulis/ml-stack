@@ -223,7 +223,7 @@ and letting go of a read handle when a writer wants in.
 | | |
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
-| `ml-stack-serve status\|up\|down` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` serves the speculative head shipped beside the weights |
+| `ml-stack-serve status\|up\|down` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `--binary` runs a build that reads a newer architecture |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
 
@@ -282,10 +282,37 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server of the
 wrong shape hands back a lease that cannot do what was asked of it.
 
+**Guessing ahead** comes in two shapes and `--spec TYPE` chooses. A *draft* kind runs a
+second small model — `--draft auto` finds the `mtp-` head a repository ships, wherever the
+publisher put it, and `--draft-ngl` decides how much of it goes on the GPU (without which it
+may run on the CPU, and a draft slower than the model it guesses for is a loss). An *n-gram*
+kind runs no second model at all: it proposes tokens by looking up sequences already in the
+prompt, which suits work that copies from its context and costs no weights and no memory.
+
+Where the n-gram table lives depends on the kind. `ngram-simple`, `ngram-map-k`,
+`ngram-map-k4v` and `ngram-mod` keep none — the lookup is over tokens already in memory,
+and nothing touches the disk. `ngram-cache` is the exception: `--lookup-cache` is written as
+it generates, so what was learnt answering one question can speculate the next.
+
+**A release lags master by an architecture or two.** Checked on this machine: the current
+release reads `gemma4` and `qwen3moe` but not `qwen4exp`, so Qwen3.8-Flash-Next exits with
+"unknown model architecture" until it is served with a build from master —
+`ml-stack-serve up --binary /path/to/llama-server`. The architecture names live in
+`libllama`, not in the server binary, so grep the library rather than the executable:
+
+```
+strings "$(dirname "$(which llama-server)")"/../lib/libllama*.dylib | grep -x qwen4exp
+```
+
 `ServerSpec(draft=...)` serves a small model of the same family alongside the large one: it
 guesses several tokens ahead and the large model checks them in one pass, so a run they
 agree on costs about what one token used to. It takes the same two forms as the model — a
-path, or `hf:owner/repo/file.gguf`.
+path, or `hf:owner/repo/file.gguf` — and `--draft auto` finds the one a repository ships
+wherever the publisher put it: at the root, under `MTP/`, or in a sibling `-MTP-GGUF`
+repository. Beware that a `-MTP-GGUF` repository is not always heads: for
+Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 36G of
+weights for `--spec-type draft-mtp`, and `auto` correctly reports no draft rather than
+offering it as one.
 
 ## Answering the same question twice
 
@@ -413,8 +440,12 @@ model spends most of a turn reasoning before it writes anything — measured, ge
 a 220-token ceiling entirely with thought and returned empty content — so what a low
 ceiling cuts is always the answer, never the thinking.
 
-`--card` asks with what the model's own card recommends, which is the only place a card is
-ever applied. A publisher's advice is a hypothesis about a task they have not seen: gemma-4
+`--card` asks with what the model itself recommends, which is the only place a
+recommendation is ever applied. It is read from the served model's **GGUF metadata** where
+that exists — `general.sampling.temp`, `.top_k`, `.top_p` are written into the file, so they
+cannot drift from the weights and need no prose parsed out of a README — and from the card
+otherwise. The two agree where both exist: gemma-4 says temperature 1.0 / top_p 0.95 /
+top_k 64 in each. They are per model, not per family: Qwen3.8-Flash-Next asks for top_k 20. A publisher's advice is a hypothesis about a task they have not seen: gemma-4
 asks for temperature 1.0 across all use cases, and on this one — calling tools with exact
 ids, where sampling noise becomes a wrong argument rather than a livelier sentence — greedy
 measured better on the plain path. Read the card with `ml-stack-models card <repo>`, test it

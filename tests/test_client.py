@@ -64,14 +64,22 @@ class TestBuildBody:
 
     def test_strips_llamacpp_only_keys_for_hosted_openai(self):
         """api.openai.com rejects top_k outright rather than ignoring it."""
-        body = Client("https://api.openai.com/v1", slot=1).build_body([], top_k=40)
+        body = Client("https://api.openai.com/v1", slot=1,
+                      n_predict=512).build_body([], top_k=40)
         assert "top_k" not in body
         assert "n_predict" not in body and body["max_tokens"] == 512
         assert "id_slot" not in body
 
     def test_keeps_them_for_a_local_server(self):
-        body = Client("http://127.0.0.1:8080").build_body([], top_k=40)
+        body = Client("http://127.0.0.1:8080", n_predict=512).build_body([], top_k=40)
         assert body["top_k"] == 40 and body["n_predict"] == 512
+
+    def test_the_token_ceiling_defaults_high(self):
+        """A ceiling is not a budget: nothing is spent that is not generated, so a high one
+        costs nothing and a low one truncates -- and what it truncates is the answer, never
+        the thinking. Measured, gemma-4 filled a 220-token ceiling with reasoning and
+        returned empty content."""
+        assert Client("http://x").build_body([])["n_predict"] >= 8192
 
     def test_tools_only_appear_when_supplied(self):
         tool = {"type": "function", "function": {"name": "ping", "parameters": {}}}
@@ -1150,3 +1158,34 @@ def test_a_model_card_informs_but_is_never_sent_on_its_own():
     oss = Client("http://nowhere.invalid", family=GPT_OSS)
     assert oss.card == {}
     assert oss.sampling == {"temperature": 0.0}
+
+
+def test_the_card_comes_from_the_served_model_before_the_family(monkeypatch, tmp_path):
+    """A family table is a guess about a whole lineage; the GGUF is the file being served.
+    Qwen3.8-Flash-Next asks for top_k 20 where gemma-4 asks for 64 -- one table cannot
+    hold both, and the file already knows."""
+    import struct
+
+    from ml_stack.client.chat import Client
+    from ml_stack.client.families import GEMMA
+
+    blob = bytearray(b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0)
+                     + struct.pack("<Q", 1))
+    key = b"general.sampling.top_k"
+    blob += struct.pack("<Q", len(key)) + key + struct.pack("<I", 6) + struct.pack("<f", 20.0)
+    where = tmp_path / "served.gguf"
+    where.write_bytes(bytes(blob))
+
+    import ml_stack.client.chat as chat
+    monkeypatch.setattr(chat, "request_json", lambda *a, **k: {"model_path": str(where)},
+                        raising=False)
+
+    served = Client("http://nowhere.invalid", family=GEMMA)
+    monkeypatch.setattr(served, "_from_gguf", lambda: {"top_k": 20.0})
+    assert served.card == {"top_k": 20.0}, "the file being served wins"
+    assert served.sampling == {"temperature": 0.0}, "and none of it is sent"
+
+    # a server that will not say falls back to what the family knows
+    quiet = Client("http://nowhere.invalid", family=GEMMA)
+    monkeypatch.setattr(quiet, "_from_gguf", lambda: {})
+    assert quiet.card == {"temperature": 1.0, "top_p": 0.95, "top_k": 64}

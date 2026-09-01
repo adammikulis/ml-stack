@@ -14,8 +14,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Found", "PREFER", "advice", "aside", "card", "draft_for", "files",
-           "find", "main", "ref"]
+__all__ = ["Found", "PREFER", "advice", "aside", "beside", "builds", "card",
+           "draft_for", "files", "find", "main", "mmproj_for",
+           "held", "in_gguf", "ref", "room"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -82,21 +83,104 @@ def files(repo: str, *, ending: str = ".gguf") -> list[tuple[str, int]]:
 
 
 def aside(name: str) -> int:
-    """0 for the weights themselves, 1 for what merely travels alongside them."""
+    """0 for the weights themselves, 1 for what merely travels alongside them.
+
+    A subdirectory does not make something a companion. A large model is published one
+    directory per quantisation -- `UD-Q4_K_XL/thing-00001-of-00004.gguf` -- and calling
+    those "alongside" buries the weights under the projector and prints the model itself as
+    an afterthought. What a file *is* is in its name, not its folder.
+    """
     plain = name.lower().rsplit("/", 1)[-1]
-    return 1 if plain.startswith(("mmproj", "mtp-")) or "/" in name else 0
+    return 1 if plain.startswith(("mmproj", "mtp-", "imatrix")) else 0
 
 
 def draft_for(repo: str) -> str:
     """The draft head shipped beside the weights, as a reference, or ''.
 
-    Gemma's QAT repositories carry an `mtp-` file of a few tens of megabytes — a
-    multi-token-prediction head trained with the model. It is the draft to serve with it.
+    A repository that ships one carries an `mtp-` file — a multi-token-prediction head
+    trained with the model, a few tens of megabytes for a small model and around a gigabyte
+    for a large one. It is the draft to serve with it.
+
+    "Beside" is not always the same directory. Gemma's QAT repositories put the head at the
+    root *and* under `MTP/`; Qwen3.8-27B puts it only under `MTP/`, and a rule that ignored
+    subdirectories found nothing for it. Prefer the root copy when there is one, since a
+    reference without a directory is the plainer thing to serve, but take a nested one
+    rather than reporting no draft at all.
     """
-    for name, _size in files(repo):
-        if name.lower().rsplit("/", 1)[-1].startswith("mtp-") and "/" not in name:
-            return ref(repo, name)
+    found = beside(repo, "mtp-")
+    if found:
+        return found
+    # Some publishers ship the head as its own repository beside the weights. Asking costs
+    # one request and is the difference between speculating and not.
+    #
+    # Beware what a `-MTP-GGUF` repository actually is: for Qwen3.6-35B-A3B it is not a
+    # draft head at all but the *whole model* rebuilt with the multi-token-prediction layers
+    # in it, 36G of weights, to be served with `--spec-type draft-mtp` rather than as a
+    # second model. Only a file actually named `mtp-` is taken here, so that repository
+    # correctly yields nothing rather than a 36G "draft".
+    stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
+    for sibling in (f"{stem}-MTP-GGUF", f"{stem}-MTP"):
+        found = beside(sibling, "mtp-")
+        if found:
+            return found
     return ""
+
+
+# How a file says which precision it is, best first. A repository that ships more than one
+# companion ships one per precision, and which to take depends on what the companion is.
+_QUANTS = ("f32", "bf16", "f16", "q8_0", "q6_k", "q5_k_m", "q5_k", "q4_k_xl", "q4_k_m",
+           "q4_k", "q4_0", "iq4_nl", "q3_k", "q2_k")
+
+
+def _precision(name: str) -> int:
+    """Where a file sits in ``_QUANTS``; lower is more precise. Unmarked sorts last."""
+    plain = name.casefold()
+    for n, quant in enumerate(_QUANTS):
+        if quant in plain:
+            return n
+    return len(_QUANTS)
+
+
+def beside(repo: str, prefix: str, *, best: bool = False) -> str:
+    """A file whose name starts with ``prefix`` in one repository, root copy preferred.
+
+    The things that travel with a model are named by convention and filed wherever the
+    publisher felt like: `mtp-` heads at the root, or under `MTP/`; `mmproj-` projectors
+    usually at the root, and sometimes one per precision. One rule reads all of them.
+
+    ``best`` takes the most precise when a repository offers several. That is what a vision
+    projector wants: it is a fraction of the model's size -- DeepSeek-OCR-2's is 886M against
+    5.5G of weights -- and quantising it costs sight out of all proportion to what it saves,
+    so a Q4 model is still served with an F32 or BF16 projector. A draft head is the other
+    way about and takes whatever is there.
+    """
+    nested: list[str] = []
+    root: list[str] = []
+    try:
+        held = files(repo)
+    except Exception:  # noqa: BLE001 - a repository that is not there holds nothing
+        return ""
+    for name, _size in held:
+        plain = name.lower().rsplit("/", 1)[-1]
+        if not plain.startswith(prefix):
+            continue
+        (nested if "/" in name else root).append(name)
+    for found in (root, nested):
+        if not found:
+            continue
+        return ref(repo, min(found, key=_precision) if best else found[0])
+    return ""
+
+
+def mmproj_for(repo: str) -> str:
+    """The vision projector shipped with a model, most precise first, or ''.
+
+    Without one a multimodal model serves as a text model and says nothing about why an
+    image was ignored -- which is the whole failure, since nothing errors. And a quantised
+    projector is a false economy: it is a fraction of the weights and carries all of the
+    seeing, so the precise one is taken whatever the model's own quantisation is.
+    """
+    return beside(repo, "mmproj-", best=True)
 
 
 # What a card calls a sampler setting, and what llama.cpp calls it. A card writes prose, so
@@ -120,6 +204,53 @@ _ADVISING = re.compile(
     r"^[ \t]*(#{1,6})[ \t]*[^\n]*\b"
     r"(?:sampling|best practice|recommend|inference|usage|parameters)\b",
     re.IGNORECASE | re.MULTILINE)
+
+
+def in_gguf(path: str | Path) -> dict[str, float]:
+    """The sampler settings written into a GGUF's own metadata, or {}.
+
+    Better than the card by every measure: it is in the file being served rather than in
+    prose beside it, it cannot drift from the weights, and it needs no parsing. Qwen3.8
+    carries `general.sampling.temp`, `.top_k` and `.top_p`; many models carry none, which is
+    why the card is still read when this is empty.
+    """
+    import struct
+
+    want = {"temp": "temperature", "temperature": "temperature", "top_k": "top_k",
+            "top_p": "top_p", "min_p": "min_p"}
+    fmt = {0: "B", 1: "b", 2: "H", 3: "h", 4: "I", 5: "i", 6: "f", 7: "?", 10: "Q",
+           11: "q", 12: "d"}
+    out: dict[str, float] = {}
+    try:
+        with Path(path).expanduser().open("rb") as f:
+            if f.read(4) != b"GGUF":
+                return {}
+            struct.unpack("<I", f.read(4))
+            struct.unpack("<Q", f.read(8))                     # tensor count
+            keys = struct.unpack("<Q", f.read(8))[0]
+
+            def text() -> str:
+                return f.read(struct.unpack("<Q", f.read(8))[0]).decode("utf-8", "replace")
+
+            def value(kind: int) -> object:
+                if kind == 8:
+                    return text()
+                if kind == 9:
+                    each = struct.unpack("<I", f.read(4))[0]
+                    return [value(each) for _ in range(struct.unpack("<Q", f.read(8))[0])]
+                return struct.unpack("<" + fmt[kind],
+                                     f.read(struct.calcsize(fmt[kind])))[0]
+
+            for _ in range(keys):
+                name = text()
+                held = value(struct.unpack("<I", f.read(4))[0])
+                if name.startswith("general.sampling."):
+                    tail = name.rsplit(".", 1)[-1]
+                    if tail in want and isinstance(held, (int, float)):
+                        out[want[tail]] = float(held)
+    except Exception:  # noqa: BLE001 - a file that will not parse simply says nothing
+        return {}
+    return out
 
 
 def card(repo: str) -> str:
@@ -181,6 +312,91 @@ def ref(repo: str, name: str = "") -> str:
     return f"hf:{repo}/{name}" if name else f"hf:{repo}"
 
 
+_SHARD = re.compile(r"-\d{5}-of-\d{5}(?=\.gguf$)", re.IGNORECASE)
+
+
+def builds(repo: str, *, ending: str = ".gguf") -> list[tuple[str, int, int]]:
+    """What a repository offers, one row per build rather than per file.
+
+    A large model is published in shards, one directory per quantisation, and a listing of
+    forty files answers no question anybody has. What decides whether a model can be served
+    is the *total* of a build -- Qwen3.8-Flash-Next is 329.7G at BF16 and 87.2G at
+    UD-IQ4_XS, and reading that off a list of individual shards means adding up by hand.
+
+    Returns ``(name, total bytes, shards)``, largest first, companions excluded.
+    """
+    grouped: dict[str, list[int]] = {}
+    for name, size in files(repo, ending=ending):
+        if aside(name):
+            continue
+        # the quantisation is the directory when there is one, else the shard-less filename
+        stem = name.split("/")[0] if "/" in name else _SHARD.sub("", name.rsplit("/", 1)[-1])
+        grouped.setdefault(stem, []).append(size)
+    return sorted(((name, sum(sizes), len(sizes)) for name, sizes in grouped.items()),
+                  key=lambda row: -row[1])
+
+
+def held() -> dict[str, int]:
+    """Every model file already on this machine, by filename, with its real size.
+
+    `ml_stack.fleet.models` has known where they are all along; this asks it, because the
+    alternative is what happened once: reaching for the Hub to fetch 87G that was already
+    on the disk. A listing that does not say what you have invites downloading it twice.
+
+    Sizes are resolved through symlinks on purpose. A Hub cache is symlinks into
+    `blobs/`, so `ls -l` reports 79 bytes for a 46G shard and reading that as "not
+    downloaded" is the same mistake wearing a different hat.
+    """
+    from pathlib import Path
+
+    try:
+        from ml_stack.fleet.models import Models, default_roots
+
+        found = Models(roots=default_roots(Path.home() / ".ml-stack"),
+                       store=Path.home() / ".ml-stack").all()
+    except Exception:  # noqa: BLE001 - a machine with no models has no models
+        return {}
+    out: dict[str, int] = {}
+    for model in found:
+        where = Path(getattr(model, "path", "") or "")
+        try:
+            out[where.name] = where.resolve().stat().st_size
+        except OSError:
+            continue
+    return out
+
+
+def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, int]]:
+    """The filenames belonging to one build of a repository."""
+    return [(name.rsplit("/", 1)[-1], size) for name, size in files(repo, ending=ending)
+            if not aside(name) and (name.split("/")[0] == build
+                                    or name.rsplit("/", 1)[-1] == build)]
+
+
+def room() -> int:
+    """How much memory a model could actually use here, in bytes, or 0 when unknown.
+
+    On a machine with unified memory this is not the whole of RAM: Metal will not wire more
+    than `iogpu.wired_limit_mb`, and a model plus its KV cache has to fit under that. On a
+    machine with a separate card it is that card's memory. Either way it is the number that
+    decides whether a build can be served, and it is not the number `free` reports.
+    """
+    import subprocess
+
+    try:
+        got = subprocess.run(["sysctl", "-n", "iogpu.wired_limit_mb"],
+                             capture_output=True, text=True, timeout=5)
+        if got.returncode == 0 and got.stdout.strip().isdigit():
+            return int(got.stdout.strip()) * 1024 * 1024
+        got = subprocess.run(["sysctl", "-n", "hw.memsize"],
+                             capture_output=True, text=True, timeout=5)
+        if got.returncode == 0 and got.stdout.strip().isdigit():
+            return int(int(got.stdout.strip()) * 0.75)   # Metal's own default share
+    except Exception:  # noqa: BLE001 - not every machine answers, and that is not a failure
+        pass
+    return 0
+
+
 def _human(size: int) -> str:
     for unit in ("B", "K", "M", "G"):
         if size < 1024 or unit == "G":
@@ -206,6 +422,9 @@ def main(argv: list[str] | None = None) -> int:
     what = sub.add_parser("files", help="what is in one repository, and how to serve each")
     what.add_argument("repo", help="owner/name")
     what.add_argument("--ending", default=".gguf")
+    what.add_argument("--every", action="store_true",
+                      help="one line per file rather than per build; a sharded model is "
+                           "forty lines this way and its totals are what you wanted")
 
     said = sub.add_parser("card", help="what a model's own card asks for -- sampler settings "
                                        "first, because those are what get guessed at")
@@ -243,11 +462,34 @@ def main(argv: list[str] | None = None) -> int:
                 print("\n" + text)
             return 0
 
-        held = files(args.repo, ending=args.ending)
-        if not held:
+        listing = files(args.repo, ending=args.ending)
+        if not listing:
             print(f"no {args.ending} in {args.repo}", file=sys.stderr)
             return 1
-        for name, size in held:
+        if not args.every:
+            fits = room()
+            mine = held()
+            grouped = builds(args.repo, ending=args.ending)
+            if fits:
+                print(f"this machine can serve about {_human(fits)}\n")
+            for name, size, shards in grouped:
+                on_disk = sum(1 for f, _s in held_files(args.repo, name, args.ending)
+                              if f in mine)
+                mark = "" if not fits else ("  fits" if size < fits * 0.95 else "  TOO BIG")
+                if on_disk:
+                    mark = ("  ON THIS MACHINE" if on_disk >= shards
+                            else f"  {on_disk}/{shards} downloaded") + mark
+                many = f"  {shards} shards" if shards > 1 else ""
+                print(f"{_human(size):>8}  {name}{many}{mark}")
+            for name, size in listing:
+                if aside(name):
+                    print(f"{_human(size):>8}  {ref(args.repo, name)}  (alongside)")
+            print(f"\nml-stack-models files {args.repo} --every  for individual files")
+            drafted = draft_for(args.repo)
+            if drafted:
+                print(f"draft head shipped with it: {drafted}")
+            return 0
+        for name, size in listing:
             note = "  (alongside)" if aside(name) else ""
             print(f"{_human(size):>8}  {ref(args.repo, name)}{note}")
         drafted = draft_for(args.repo)
