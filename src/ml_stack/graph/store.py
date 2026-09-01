@@ -109,7 +109,9 @@ def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
     with GraphStore(path) as store:
         with store.transaction():
             store.drop(gone, force=True)  # already judged, above, against the whole store
-            return store.write(graph)
+            written = store.write(graph)
+        store.index()                     # outside the transaction: see GraphStore.index
+        return written
 
 
 def count_store(path: str | Path) -> dict[str, int]:
@@ -165,6 +167,13 @@ class GraphStore:
             self._conn.execute(DOC_TABLE)
             self._conn.execute(ASSET_TABLE)
             self._upgrade()
+            # A table carrying an index cannot be written to unless the extension that owns
+            # the index is loaded, and the message when it is not — "trying to insert into an
+            # index on table Node", "trying to delete from an index on table Embedding" —
+            # arrives at the write, nowhere near the index. A writer loads them up front
+            # because a writer may meet either.
+            self._extension("fts")
+            self._extension("vector")
         else:
             try:
                 self._require_current()
@@ -280,7 +289,27 @@ class GraphStore:
             for key, value in graph.items():
                 if key not in ("nodes", "edges"):
                     self.put_doc(key, value)
+        if not self._in_tx:
+            self.index()
         return {"nodes": len(nodes), "edges": kept}
+
+
+    def index(self) -> None:
+        """Build what a reader will search through, while there is write access to do it.
+
+        A read-only handle cannot create an index and does not try, so an index nobody built
+        while writing is one that never exists: :meth:`search` then answers every question
+        with silence, which reads exactly like a graph that holds nothing. Measured on a real
+        store — the word index found nothing through the retrieval handle and everything
+        through a writable one.
+
+        Building one is schema work, and schema work inside a transaction takes the
+        transaction with it, so this waits until there is none.
+        """
+        if self.read_only or self._in_tx:
+            return
+        self._extension("fts")
+        self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
 
     def rename(self, node_id: str, label: str) -> bool:
         """Give a node a different label. False when it is not in the store."""
@@ -459,7 +488,14 @@ class GraphStore:
             far = row.get("distance")
             # cosine distance runs 0 (identical) to 2 (opposite); this reads as a similarity
             near = max(0.0, min(1.0, (2.0 - float(far)) / 2.0)) if isinstance(far, (int, float)) else 0.0
-            out.append({"id": row["id"], "label": label.get(row["id"], ""), "similarity": near})
+            out.append({"id": row["id"], "label": label.get(row["id"], ""), "similarity": near,
+                        "distance": float(far) if isinstance(far, (int, float)) else None})
+        # Nearest first, said and then done. What comes back from the index arrives in its
+        # own order — measured, alphabetical by id — and every caller that fuses rankings
+        # reads position as meaning. Unsorted, the vector half of a search votes at random:
+        # "who fixes machines" put `repair` (0.7375) below `benchsight` (0.7011) purely
+        # because b comes before r.
+        out.sort(key=lambda r: -r["similarity"])
         return out[:limit]
 
     def search(self, text: str, *, limit: int = 10) -> list[dict[str, Any]]:

@@ -407,3 +407,57 @@ def test_the_stores_own_records_are_not_the_graphs_documents(tmp_path):
         assert not any(k.startswith("_") for k in reader.read())
     with GraphStore(path) as writer:
         assert writer.get_doc("_schema") == {"version": 2}
+
+
+def test_the_word_index_is_built_while_writing_so_a_reader_can_use_it(tmp_path):
+    """Fails when the index is left to be built lazily by whoever searches first.
+
+    A read-only handle cannot create an index and does not try, so retrieval — which is
+    always read-only — got silence from every search, which is indistinguishable from a
+    store that holds nothing. Measured on the real store: 0 through the reader, 1 through a
+    writable handle, for a word that plainly matches.
+    """
+    path = tmp_path / "g.ladybug"
+    graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"},
+                       {"id": "person:ada", "label": "Ada Lovelace", "kind": "person"}],
+             "edges": [], "messages": {}}
+    from ml_stack.graph.store import replace
+
+    replace(path, graph)
+
+    with GraphStore(path, read_only=True) as reader:
+        rows = reader.search("robotics", limit=5)
+        assert [r["id"] for r in rows] == ["topic:robotics"], "the reader found nothing"
+        # it stems, which is most of why the index is worth having at all
+        assert [r["id"] for r in reader.search("robot", limit=5)] == ["topic:robotics"]
+
+    # and a store written to again is still writable, which an index on the table can break
+    graph["nodes"].append({"id": "topic:swarms", "label": "swarms", "kind": "topic"})
+    replace(path, graph)
+    with GraphStore(path, read_only=True) as reader:
+        assert [r["id"] for r in reader.search("swarms", limit=5)] == ["topic:swarms"]
+
+
+def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(tmp_path):
+    """Fails when only brand-new stores are indexed.
+
+    Every store that already exists was written before this, and none of them has an index.
+    A rebuild is the moment to give them one — otherwise retrieval stays silent on exactly
+    the graphs people already have.
+    """
+    from ml_stack.graph.store import replace
+
+    path = tmp_path / "old.ladybug"
+    graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"}],
+             "edges": [], "messages": {}}
+    # a store as one written by the old code: the index step inside a transaction is skipped
+    with GraphStore(path) as store:
+        with store.transaction():
+            store.write(graph)
+    with GraphStore(path, read_only=True) as reader:
+        assert reader.search("robotics", limit=5) == [], "this store is meant to lack an index"
+
+    graph["nodes"].append({"id": "topic:swarms", "label": "swarms", "kind": "topic"})
+    replace(path, graph)
+    with GraphStore(path, read_only=True) as reader:
+        assert [r["id"] for r in reader.search("robotics", limit=5)] == ["topic:robotics"]
