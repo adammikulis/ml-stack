@@ -332,3 +332,47 @@ def test_auto_finds_the_draft_head_lying_beside_a_local_model(tmp_path):
 
     # and the projector is never mistaken for one
     assert "mmproj" not in drafted(str(model), "auto")
+
+
+def test_a_head_is_found_across_revisions_of_the_same_repository(tmp_path):
+    """A Hub cache keeps one folder per revision. Weights fetched in August and a draft head
+    fetched today land in different ones, so "beside the weights" finds nothing -- which is
+    what happened: `--draft auto` reported no head for a model that ships three, and would
+    have run a whole experiment unaccelerated without saying so."""
+    from ml_stack.serve.cli import alongside, drafted
+
+    snaps = tmp_path / "models--maker--thing-GGUF" / "snapshots"
+    old = snaps / "aaaaaaaa" / "UD-IQ4_XS"
+    new = snaps / "bbbbbbbb" / "MTP"
+    old.mkdir(parents=True)
+    new.mkdir(parents=True)
+    model = old / "thing-UD-IQ4_XS-00001-of-00003.gguf"
+    model.write_bytes(b"weights")
+    (new / "mtp-thing-Q8_0.gguf").write_bytes(b"head")
+
+    assert not sorted(model.parent.glob("mtp-*.gguf")), "nothing beside the weights"
+    assert drafted(str(model), "auto").endswith("mtp-thing-Q8_0.gguf")
+
+    # the near cases still win over the far one
+    (model.parent / "mtp-thing-right-here.gguf").write_bytes(b"head")
+    assert drafted(str(model), "auto").endswith("mtp-thing-right-here.gguf")
+
+
+def test_a_head_named_for_its_method_is_found_and_says_which_kind(tmp_path):
+    """`mtp-` and `eagle3-` are both draft heads; a rule knowing only one reported no draft
+    for gpt-oss, which ships two EAGLE3 heads and no mtp- file."""
+    from ml_stack.hub import spec_for
+    from ml_stack.serve.cli import drafted
+
+    where = tmp_path / "m"
+    where.mkdir()
+    model = where / "oss-MXFP4.gguf"
+    model.write_bytes(b"weights")
+    (where / "eagle3-oss-Q8_0.gguf").write_bytes(b"head")
+
+    found = drafted(str(model), "auto")
+    assert found.endswith("eagle3-oss-Q8_0.gguf")
+    assert spec_for(found) == "draft-eagle3"
+
+    assert drafted(str(model), "") == "", "not asked for, not looked for"
+    assert drafted(str(model), "/explicit/path.gguf") == "/explicit/path.gguf"

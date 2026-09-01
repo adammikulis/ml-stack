@@ -128,6 +128,47 @@ class Counting:
         return getattr(self.client, name)
 
 
+def find_model(named: str) -> str:
+    """A model by name, path or `hf:` reference -- whichever the caller has to hand.
+
+    `fleet.models` has known where the files are all along, and looking one up by hand with
+    `find ~/.cache/... -name '*.gguf'` was done six times in an afternoon before this
+    existed. A name that matches nothing is returned unchanged, so a path still works and a
+    typo still fails where it would have anyway.
+    """
+    if not named or named.startswith("hf:") or "/" in named:
+        return named
+    try:
+        from ml_stack.fleet.models import Models, default_roots
+
+        home = Path("~/.ml-stack").expanduser()
+        found = Models(roots=default_roots(home), store=home).find(named)
+    except Exception:  # noqa: BLE001 - a machine that cannot look is not a failed run
+        return named
+    return str(found.path) if found else named
+
+
+def _ways(args: Any) -> list[dict[str, Any]]:
+    """The askings to make of one served model: what was asked for, plus each --also.
+
+    Separating these from the serving is where the time goes. A model load is minutes; an
+    asking is minutes too, and repeating the load for a question about the *asking* pays it
+    twice for nothing.
+    """
+    first: dict[str, Any] = {"terse": bool(getattr(args, "terse", False)),
+                             **sampling_from(args)}
+    out = [first]
+    for also in getattr(args, "also", []) or []:
+        if also == "terse":
+            out.append({"label": "terse", "terse": True, **sampling_from(args)})
+        elif also == "greedy":
+            out.append({"label": "greedy", "terse": first["terse"], "temperature": 0.0})
+        elif also == "card":
+            # the card's own settings are read from the served model at ask time
+            out.append({"label": "card", "terse": first["terse"], "_card": True})
+    return out
+
+
 def _how_many(args: Any) -> int:
     """How many questions to ask: --sample wins, then --short, then all of them."""
     asked = int(getattr(args, "sample", 0) or 0)
@@ -787,7 +828,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            label: str = "", draft: str = "", port: int = 8099, context: int = 32768,
            parallel: int = 1, binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           terse: bool = False,
+           terse: bool = False, ways: Sequence[Mapping[str, Any]] = (),
            serve_timeout: float = 900.0, **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
@@ -797,6 +838,13 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
 
     One model at a time is not a limitation, it is the point: two servers sharing a GPU
     produce timings that belong to neither.
+
+    ``ways`` asks the *same* server several times, which is most of the saving available
+    here. Whether the tools are described briefly, and what sampling is used, are questions
+    about the asking and not about the serving -- so measuring four of them costs one load
+    and not four. Only a change the server itself must be told about, a draft head or a
+    context, needs putting it up again. Each way is ``{"label": ..., "terse": ..., }`` plus
+    anything a client takes.
     """
     from ml_stack.client import Client
     from ml_stack.serve import serve
@@ -810,6 +858,11 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
         kind = spec_for(draft)
         if kind:
             extra["spec_type"] = kind
+    # Every question sends the same system prompt and the same tool schemas ahead of itself.
+    # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
+    # free accuracy-wise: the tokens are identical, so the cache is valid.
+    extra.setdefault("cache_reuse", 256)
+    extra.setdefault("warmup", False)
     if binary:
         from ml_stack.serve.backend import LlamaServerBackend
         from ml_stack.serve.manager import ServerManager
@@ -820,17 +873,31 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
         loaded = time.time() - began
         print(f"    up in {loaded:.0f}s")
-        ask = asking(graph, shortlist=shortlist, store=store, embed_url=embed_url,
-                     embed_model=embed_model, terse=terse)
-        rows = measure(ask, questions, label=name,
-                       client=Client(server.base_url, **making), log=print)
-        for row in rows:
-            row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-        held = {**footprint(server.base_url)}
-        if draft:
-            held["draft_model"] = str(draft).rsplit("/", 1)[-1]
-    if kept:
-        save(kept, rows, held=held)
+        every = list(ways) or [{}]
+        rows = []
+        for way in every:
+            asked = dict(way)
+            tag = str(asked.pop("label", "") or "")
+            how = bool(asked.pop("terse", terse))
+            here = f"{name}-{tag}" if tag else name
+            if len(every) > 1:
+                print(f"\n  --- {here}")
+            wants_card = bool(asked.pop("_card", False))
+            client = Client(server.base_url, **{**making, **asked})
+            if wants_card:
+                # what the model itself recommends, read from the GGUF it is serving
+                client = Client(server.base_url, **{**making, **client.card})
+            ask = asking(graph, shortlist=shortlist, store=store, embed_url=embed_url,
+                         embed_model=embed_model, terse=how)
+            got = measure(ask, questions, label=here, client=client, log=print)
+            for row in got:
+                row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
+            held = {**footprint(server.base_url)}
+            if draft:
+                held["draft_model"] = str(draft).rsplit("/", 1)[-1]
+            if kept:
+                save(kept, got, held={**held, "sampling": dict(client.sampling)})
+            rows += got
     return rows
 
 
@@ -965,7 +1032,8 @@ def main(argv: list[str] | None = None) -> int:
 
     heads = sub.add_parser("drafts", help="serve one model with each draft head in turn "
                                           "and measure what each is worth")
-    heads.add_argument("model", help="the model to serve, a path or an hf: reference")
+    heads.add_argument("model", help="the model to serve: a name, a path, or an hf: "
+                                        "reference. A name is looked up on this machine")
     heads.add_argument("--draft", action="append", default=[], metavar="PATH",
                        help="a draft head to measure; repeat for each. Pass '' for the "
                             "baseline with no draft, which every other row must beat")
@@ -1006,7 +1074,9 @@ def main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--embed-model", default="", help="the model that embedded the graph")
     sweep.add_argument("--margin", type=float, default=MARGIN)
     sweep.add_argument("--serve", action="append", default=[], metavar="MODEL",
-                       help="a model to put up, measure and take down again, one at a time. "
+                       help="a model to put up, measure and take down again, one at a time: "
+                            "a name, a path, or an hf: reference. A name is looked up on "
+                            "this machine. "
                             "Repeat for each. Without this, --on measures servers somebody "
                             "else started -- which leaves the starting, stopping and waiting "
                             "to a shell loop that dies with its terminal")
@@ -1025,6 +1095,16 @@ def main(argv: list[str] | None = None) -> int:
                        help="skip the shortlist half, just measure each model as it is")
 
     for one in (run, sweep):
+        one.add_argument("--sample", type=int, default=0, metavar="N",
+                         help="ask only N of the questions, keeping every kind of answer. "
+                              "For a comparison where accuracy is not the variable -- draft "
+                              "heads, sampling, serving flags -- most of a full run is "
+                              "spent re-establishing a score that cannot move")
+        one.add_argument("--short", dest="short", action="store_true",
+                         help=f"the same as --sample {SHORT}: every kind still asked about "
+                              f"and the same mean number of answers expected, at about half "
+                              f"the time. Each question is worth more, so a small difference "
+                              f"is noise on a short run and signal on a full one")
         one.add_argument("--temperature", type=float, default=None,
                          help="override the sampling temperature; the default is whatever "
                               "the model's own card asks for (gemma-4: 1.0)")
@@ -1042,6 +1122,13 @@ def main(argv: list[str] | None = None) -> int:
         one.add_argument("--card", action="store_true",
                          help="ask with what the model's own card recommends, to see whether "
                               "it suits this task -- it is not what a client sends otherwise")
+        one.add_argument("--also", action="append", default=[],
+                         choices=("terse", "card", "greedy"),
+                         help="ask the same served model another way as well. Whether the "
+                              "tools are described briefly and what sampling is used are "
+                              "questions about the asking, not the serving, so measuring "
+                              "four of them costs one model load rather than four. "
+                              "Repeatable")
 
     show = sub.add_parser("show", help="compare two runs, or list what is kept")
     show.add_argument("--kept", default=str(HOME / "runs.ladybug"),
@@ -1086,7 +1173,8 @@ def main(argv: list[str] | None = None) -> int:
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
         ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
-        for n, model in enumerate(getattr(args, "serve", []) or []):
+        for n, named in enumerate(getattr(args, "serve", []) or []):
+            model = find_model(named)
             heads = getattr(args, "serve_draft", []) or []
             head = heads[n] if n < len(heads) else ""
             if head.lower() == "auto":
@@ -1102,9 +1190,14 @@ def main(argv: list[str] | None = None) -> int:
                 if busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
                         f"http://127.0.0.1:{args.serve_port}", args):
                     return 3
+                # `--context` is the total across slots, which is what `-c` takes and what
+                # ServerSpec means by it. Dividing by the slot count served a model at a
+                # quarter of the context every other run had, and the only thing that said
+                # so was the `ctx` column reading 8k where the rest read 32k.
                 served(model, questions, graph, label=f"{stem}-{suffix}", draft=head,
-                       port=args.serve_port, context=args.context // max(1, args.parallel)
-                       if getattr(args, "context", 0) else 32768,
+                       ways=_ways(args),
+                       port=args.serve_port,
+                       context=args.context or 32768 * max(1, args.parallel),
                        parallel=getattr(args, "parallel", 1), binary=args.binary,
                        kept=args.kept, shortlist=shortlist,
                        store=args.store or None, embed_url=args.embed_url,
@@ -1157,7 +1250,8 @@ def main(argv: list[str] | None = None) -> int:
 
         asked = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                        args.sample)
-        rows = drafts(args.model, args.draft or [""], asked, invented(), port=args.port,
+        rows = drafts(find_model(args.model), args.draft or [""], asked, invented(),
+                      port=args.port,
                       context=args.context, parallel=args.parallel, binary=args.binary,
                       kept=args.kept)
         print()

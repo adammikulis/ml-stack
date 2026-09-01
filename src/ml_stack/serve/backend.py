@@ -51,6 +51,13 @@ class ServerSpec:
     spec_ngram_min: int | None = None       # ngram-mod lookup floor (server default 48)
     spec_ngram_max: int | None = None
     spec_draft_ngl: int | None = None       # draft layers on the GPU; without it, the CPU
+    # A draft that is a whole model keeps its **own KV cache**, at the same context as the
+    # target, because it has to read the same prompt to predict against it. That is the real
+    # cost of drafting with a model rather than a head -- on shared memory the two caches
+    # compete for one pool -- and it is why llama.cpp lets the draft's cache be quantised
+    # separately. A head like EAGLE3 reuses the target's own states and keeps almost nothing.
+    spec_draft_type_k: str = ""
+    spec_draft_type_v: str = ""
     # Where the n-gram table lives. The in-context kinds keep none: they look up sequences
     # already in the prompt, in memory, and touch no disk. `ngram-cache` is the exception --
     # `lookup_static` is read and never written, `lookup_dynamic` is updated as it
@@ -59,6 +66,18 @@ class ServerSpec:
     # community is.
     lookup_static: str | Path | None = None
     lookup_dynamic: str | Path | None = None
+    # Carry a KV cache across prompts that merely *share a prefix*, by shifting rather than
+    # reprocessing. Worth having wherever a system prompt and a set of tool schemas go out
+    # ahead of every question -- a benchmark reprocesses that same preamble once per
+    # question otherwise, twenty or thirty times a run.
+    cache_reuse: int | None = None
+    # The empty run at startup. Off saves a little of every load, which matters when a
+    # comparison puts the same model up several times.
+    warmup: bool = True
+    # Context per slot, said directly. The alternative is a total divided by the slot count,
+    # which is arithmetic done at the call site and got wrong once here -- a model served at
+    # 8k per slot against everything else at 32k, visible only because the table prints it.
+    context_per_slot: int | None = None
     # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
     # off the GPU without keeping all of it off.
     #
@@ -188,7 +207,9 @@ class LlamaServerBackend(ServerBackend):
                 argv += ["-hfd", f"{repo}:{name}" if name else repo]
         if spec.spec_type:
             argv += ["--spec-type", str(spec.spec_type)]
-        for flag, value in (("--spec-draft-n-max", spec.spec_draft_max),
+        for flag, value in (("--spec-draft-type-k", spec.spec_draft_type_k or None),
+                            ("--spec-draft-type-v", spec.spec_draft_type_v or None),
+                            ("--spec-draft-n-max", spec.spec_draft_max),
                             ("--spec-draft-n-min", spec.spec_draft_min),
                             ("--spec-ngram-mod-n-min", spec.spec_ngram_min),
                             ("--spec-ngram-mod-n-max", spec.spec_ngram_max),
@@ -201,6 +222,12 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--cpu-moe"]
         if spec.n_cpu_moe is not None:
             argv += ["--n-cpu-moe", str(spec.n_cpu_moe)]
+        if spec.cache_reuse is not None:
+            argv += ["--cache-reuse", str(spec.cache_reuse)]
+        if not spec.warmup:
+            argv += ["--no-warmup"]
+        if spec.context_per_slot is not None:
+            argv += ["--kv-unified-per-slot", str(spec.context_per_slot)]
         if spec.lookup_static:
             argv += ["--lookup-cache-static", str(spec.lookup_static)]
         if spec.lookup_dynamic:

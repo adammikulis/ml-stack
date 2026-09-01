@@ -660,3 +660,34 @@ def test_tensors_can_be_kept_off_the_gpu_by_pattern():
 
     assert "--cpu-moe" in backend.command(
         ServerSpec(model="/m/w.gguf", port=1, cpu_moe=True))
+
+
+def test_the_serving_knobs_that_shorten_a_run():
+    """A benchmark sends the same system prompt and tool schemas ahead of every question, so
+    the prefix is reprocessed twenty or thirty times a run without --cache-reuse. Reusing it
+    is free: the tokens are identical, so the cache is valid.
+
+    `--kv-unified-per-slot` says the per-slot context directly. The alternative is a total
+    divided by the slot count, done at the call site, which was got wrong here once: a model
+    served at 8k per slot against everything else at 32k, and the only thing that said so
+    was the table printing the context on every line."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    backend = LlamaServerBackend(binary="/bin/true")
+    bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
+    for flag in ("--cache-reuse", "--no-warmup", "--kv-unified-per-slot"):
+        assert flag not in bare, f"{flag} must be asked for, not assumed"
+
+    argv = backend.command(ServerSpec(model="/m/w.gguf", port=1, cache_reuse=256,
+                                      warmup=False, context_per_slot=32768))
+    pairs = dict(zip(argv, argv[1:]))
+    assert pairs["--cache-reuse"] == "256"
+    assert pairs["--kv-unified-per-slot"] == "32768"
+    assert "--no-warmup" in argv
+
+    # warmup on is the server's own default and passes no flag either way
+    assert "--no-warmup" not in backend.command(
+        ServerSpec(model="/m/w.gguf", port=1, warmup=True))
+    # zero is a choice: reuse nothing, which is not the same as leaving it unset
+    assert "--cache-reuse" in backend.command(
+        ServerSpec(model="/m/w.gguf", port=1, cache_reuse=0))

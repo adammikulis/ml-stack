@@ -253,3 +253,37 @@ def test_a_file_with_nothing_to_say_says_nothing(tmp_path):
     not_a_gguf = tmp_path / "x.gguf"
     not_a_gguf.write_bytes(b"this is not a gguf at all")
     assert in_gguf(not_a_gguf) == {}
+
+
+def test_a_draft_head_is_found_whatever_method_it_implements(monkeypatch):
+    """A head is named by its method, not by being a draft. Knowing only `mtp-` reported
+    "no draft" for gpt-oss-120b, which ships two EAGLE3 heads and no mtp- file -- so it was
+    served unaccelerated with nothing saying why."""
+    import ml_stack.hub as hub
+
+    shelves = {
+        "maker/oss-GGUF": [("oss-MXFP4.gguf", 60_000_000_000),
+                           ("eagle3-oss-BF16.gguf", 1_500_000_000),
+                           ("eagle3-oss-Q8_0.gguf", 810_000_000)],
+        "maker/gem-GGUF": [("gem-Q4.gguf", 4_000_000_000),
+                           ("mtp-gem.gguf", 56_000_000)],
+        "maker/bare-GGUF": [("bare-Q4.gguf", 9_000_000_000)],
+    }
+    monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves.get(repo, []))
+
+    assert hub.draft_for("maker/oss-GGUF") == "hf:maker/oss-GGUF/eagle3-oss-BF16.gguf"
+    assert hub.draft_for("maker/gem-GGUF") == "hf:maker/gem-GGUF/mtp-gem.gguf"
+    assert hub.draft_for("maker/bare-GGUF") == ""
+
+
+def test_a_head_says_which_kind_of_speculation_it_needs():
+    """A head implements one method. An EAGLE3 head served as draft-simple is not slower,
+    it is being asked to do something it does not do."""
+    from ml_stack.hub import spec_for
+
+    assert spec_for("hf:maker/x/eagle3-oss-Q8_0.gguf") == "draft-eagle3"
+    assert spec_for("/models/mtp-gemma-4-E4B-it.gguf") == "draft-mtp"
+    assert spec_for("MTP/mtp-thing.gguf") == "draft-mtp"
+    # a whole model used as a draft implements nothing in particular, and says so
+    assert spec_for("/models/gpt-oss-20b-MXFP4.gguf") == ""
+    assert spec_for("") == ""

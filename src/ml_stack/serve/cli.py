@@ -205,39 +205,50 @@ def alongside(model: str, asked: str, prefix: str, *, best: bool = False) -> str
     reference = str(model)
     if reference.startswith("hf:"):
         return beside("/".join(reference[3:].split("/")[:2]), prefix, best=best)
-    # The model's own directory first, then the one above it: a sharded download puts the
-    # weights in a per-quantisation folder and leaves the projector at the snapshot root,
-    # so looking only beside the shards finds nothing and reports no projector at all.
+    # "Shipped with this model" means in this repository, not in this directory, and not
+    # even in this revision of it. A Hub cache keeps one folder per revision, so weights
+    # fetched in August and a draft head fetched today land in different ones -- which is
+    # exactly what happened, and `--draft auto` reported no head for a model that ships
+    # three. A sharded download also puts the weights in a per-quantisation subfolder and
+    # leaves the projector at the snapshot root.
+    #
+    # So: beside the file, then the directory above, then every revision of the same
+    # repository. Widening, and stopping at the first place that has one.
     where = pathlib.Path(reference).expanduser().parent
-    for here in (where, where.parent):
-        found = sorted(here.glob(f"{prefix}*.gguf"))
+    places: list[tuple[pathlib.Path, str]] = [(where, f"{prefix}*.gguf"),
+                                              (where.parent, f"{prefix}*.gguf")]
+    for parent in where.parents:
+        if parent.name == "snapshots":
+            places.append((parent, f"*/**/{prefix}*.gguf"))
+            break
+    for here, pattern in places:
+        found = sorted(here.glob(pattern))
         if found:
             return str(min(found, key=lambda f: _precision(f.name)) if best else found[0])
     return ""
 
 
 def drafted(model: str, asked: str) -> str:
-    """The draft model to serve beside ``model``, resolving 'auto' against the Hub.
+    """The draft head to serve with ``model``, resolving 'auto'.
 
-    A QAT repository ships a multi-token-prediction head next to its weights, a few tens of
-    megabytes, trained with the model. Finding it by hand means reading a file listing, which
-    is what `hub.draft_for` is for; 'auto' is that, spelled once.
+    A head is named by the method it implements -- `mtp-` for multi-token prediction,
+    `eagle3-` for EAGLE3 -- so both are looked for, and `hub.spec_for` reads which
+    `--spec-type` the one found needs.
+
+    An `hf:` reference is asked of the Hub, which also knows about a sibling `-MTP-GGUF`
+    repository. Everything else goes through `alongside`, which widens from the file to its
+    directory to every revision of the same repository -- because a Hub cache keeps one
+    folder per revision, and weights fetched in August sit beside nothing that was fetched
+    today.
     """
-    if asked.lower() != "auto":
-        return asked
-    reference = str(model)
-    if reference.startswith("hf:"):
-        repo = "/".join(reference[3:].split("/")[:2])
+    if asked.lower() == "auto" and str(model).startswith("hf:"):
         from ml_stack.hub import draft_for
 
-        return draft_for(repo)
-    # "Shipped beside the weights" is literal: a repository downloaded into a cache puts the
-    # mtp- head in the same directory as the model, so a local path can be resolved after
-    # all — by looking, which is cheaper and surer than asking the Hub about a file already
-    # on the disk. mmproj- lives there too and is a vision projector, not a draft.
-    beside = pathlib.Path(reference).expanduser().parent
-    for found in sorted(beside.glob("mtp-*.gguf")):
-        return str(found)
+        return draft_for("/".join(str(model)[3:].split("/")[:2]))
+    for prefix in ("mtp-", "eagle3-"):
+        found = alongside(model, asked, prefix)
+        if found:
+            return found
     return ""
 
 
@@ -253,12 +264,19 @@ def cmd_up(args: argparse.Namespace) -> int:
               file=sys.stderr)
     seeing = alongside(args.model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
                        best=True)
+    # A head implements one method and says which in its name. Serving an EAGLE3 head
+    # without --spec-type draft-eagle3 is asking it to do something it does not do.
+    kind = str(getattr(args, "spec", "") or "")
+    if draft and not kind:
+        from ml_stack.hub import spec_for
+
+        kind = spec_for(draft)
     if str(getattr(args, "mmproj", "")).lower() == "auto" and not seeing:
         print("no vision projector is shipped beside that model; it will not read pictures",
               file=sys.stderr)
     spec = ServerSpec(model=args.model, port=args.port, context=args.context,
                       parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
-                      spec_type=str(getattr(args, "spec", "") or ""),
+                      spec_type=kind,
                       spec_draft_max=getattr(args, "spec_n_max", None),
                       spec_draft_ngl=getattr(args, "draft_ngl", None),
                       lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
