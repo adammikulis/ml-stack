@@ -96,6 +96,9 @@ def from_database():
 
 
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
+# RFC 2606 / 6761 reserve these for documentation and tests; nobody can be reached at them
+RESERVED_DOMAIN = re.compile(r"(?:^|\.)(?:example|test|invalid|localhost)$|^example\.(?:com|net|org)$", re.I)
+UUIDISH = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 PHONE = re.compile(r"\+?\d[\d ().-]{8,}\d")
 DATEISH = re.compile(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}$")
 TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}")
@@ -130,11 +133,18 @@ def is_place(body):
 def contacts(line, allowed):
     for found in EMAIL.finditer(line):
         # an address on the allow list is the author's own, and their own work may say so
+        domain = found.group(0).rsplit("@", 1)[-1]
+        if RESERVED_DOMAIN.search(domain):
+            continue
         if "noreply" not in found.group(0) and found.group(0).casefold() not in allowed:
             yield "an email address", found.group(0)
+    uuids = [m.group(0) for m in UUIDISH.finditer(line)]
     for found in PHONE.finditer(line):
         text = found.group(0)
         if not (text.startswith("+") or "(" in text or "-" in text):
+            continue
+        # the middle of a uuid is digits and dashes too
+        if any(text in u for u in uuids):
             continue
         if text.count(".") > 1 or DATEISH.match(text) or FRACTION.search(text):
             continue

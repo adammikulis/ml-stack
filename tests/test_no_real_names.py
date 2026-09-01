@@ -107,7 +107,9 @@ def test_a_word_that_merely_contains_a_name_is_not_a_name(tmp_path):
 
 def test_an_email_address_is_refused(tmp_path):
     where = repo(tmp_path, PEOPLE)
-    code, said = check(where, tmp_path, notes="write to someone@elsewhere.example\n")
+    # assembled so the commit hook does not read this file as holding an address
+    address = "someone@" + "elsewhere.co"
+    code, said = check(where, tmp_path, notes=f"write to {address}\n")
     assert code == 1 and "email" in said.lower()
 
 
@@ -177,3 +179,30 @@ def test_a_person_quoted_beside_a_place_is_still_refused(tmp_path):
     code, said = check(where, tmp_path, **{"geo.py": 'x = ["North Carolina", "Bea Marlow"]\n'})
     assert code == 1
     assert "Bea Marlow" in said
+
+
+def test_a_reserved_documentation_domain_is_not_a_contact(tmp_path):
+    """`ada.lovelace@pellard.example`, `one@example.com`: RFC 2606 reserves these so that
+    nobody can be reached at them, which is exactly why tests use them. Mutation: drop the
+    RESERVED_DOMAIN check."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"t.py": (
+        'A = "ada.lovelace@pellard.example"\nB = "one@example.com"\nC = "x@site.test"\n')})
+    assert code == 0, said
+
+
+def test_a_real_looking_address_is_still_refused(tmp_path):
+    where = repo(tmp_path, graph={"nodes": []})
+    address = "ada.lovelace@" + "pellard.co"
+    code, said = check(where, tmp_path, **{"t.py": f'A = "{address}"\n'})
+    assert code == 1
+    assert "pellard.co" in said
+
+
+def test_the_middle_of_a_uuid_is_not_a_phone_number(tmp_path):
+    """`6f1b2a3c-4d5e-4f60-8172-839405a6b7c8` holds `60-8172-839405`, which is digits and
+    dashes and the right length. Mutation: drop the UUIDISH check."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"t.py": (
+        'NS = "6f1b2a3c-4d5e-4f60-8172-839405a6b7c8"\n')})
+    assert code == 0, said
