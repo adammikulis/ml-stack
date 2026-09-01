@@ -386,6 +386,38 @@ def _precision(row: Mapping[str, Any]) -> float:
     return _score(row.get("expected") or (), row.get("shown") or ())[1]
 
 
+def shape(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any]) -> None:
+    """What a question set is made of, so its bias is visible without counting by hand.
+
+    A set that is nine-tenths person-shaped rewards anything that prefers people, whether
+    or not that rule is right. That was the state of this one, and it flattered a filter
+    measured against it -- so the shape of the set is printed rather than assumed.
+    """
+    kinds = {str(n.get("id")): str(n.get("kind") or "") for n in (graph.get("nodes") or ())}
+    scored = [q for q in questions if q.get("expect")]
+    if not scored:
+        print("no scored questions")
+        return
+    counted: dict[str, int] = {}
+    for q in scored:
+        for kind in {kinds.get(str(e), "?") for e in q["expect"]}:
+            counted[kind] = counted.get(kind, 0) + 1
+    peopleless = sum(1 for q in scored
+                     if not any(kinds.get(str(e)) == "person" for e in q["expect"]))
+    print(f"{len(questions)} questions, {len(scored)} scored, "
+          f"{len(questions) - len(scored)} whose right answer is nobody")
+    print(f"graph: {len(graph.get('nodes') or ())} entries, "
+          f"{len(graph.get('edges') or ())} links")
+    for kind, n in sorted(counted.items(), key=lambda kv: -kv[1]):
+        print(f"  {n:>3} question(s) want a {kind}")
+    print(f"  {peopleless:>3} question(s) want no person at all "
+          f"({100 * peopleless / len(scored):.0f}%)")
+    print(f"mean entries expected: {sum(len(q['expect']) for q in scored) / len(scored):.1f}")
+    missing = sorted({str(e) for q in scored for e in q["expect"] if str(e) not in kinds})
+    if missing:
+        print(f"\nEXPECTED IDS THAT DO NOT EXIST IN THE GRAPH: {missing}")
+
+
 def sampled(server: Mapping[str, Any]) -> str:
     """The sampling a run used, short enough for a column: "t1.0 p.95 k64"."""
     held = server.get("sampling") or {}
@@ -811,6 +843,9 @@ def main(argv: list[str] | None = None) -> int:
                            "what it showed, and what it missed. A label narrows it to one run")
     show.add_argument("--all", action="store_true",
                       help="with --detail, every question and not only the ones that missed")
+    show.add_argument("--shape", action="store_true",
+                      help="what the question set is made of -- which kinds its answers "
+                           "want, and how many want no person -- so its bias is visible")
     show.add_argument("--rates", action="store_true",
                       help="what each run cost to be right -- accuracy over time, tokens and "
                            "memory -- with the Pareto frontier marked")
@@ -884,6 +919,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "show":
         if args.compare:
             print(compare(args.kept, *args.compare))
+            return 0
+        if args.shape:
+            from ml_stack.graph.community import QUESTIONS, graph as invented
+
+            questions = read_questions(args.questions) if getattr(args, "questions", "") \
+                else QUESTIONS
+            shape(questions, invented())
             return 0
         if args.plot:
             print(plot(runs(args.kept), args.plot, cost=args.cost))

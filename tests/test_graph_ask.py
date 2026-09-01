@@ -650,7 +650,16 @@ def test_the_tool_descriptions_show_a_call_and_never_use_the_bench_community():
 
     nodes = invented()["nodes"]
     theirs = {n["id"].casefold() for n in nodes}
-    theirs |= {w for n in nodes for w in str(n.get("label") or "").casefold().split() if w}
+    # Words, not fragments: "Brayfield Survey Co" would otherwise flag every use of "co",
+    # which matches inside "costs". A name short enough to collide by accident is not a
+    # name anyone could memorise the answers from.
+    #
+    # And names, not sentences. An opportunity is labelled with a phrase -- "surveying a
+    # site before it is bought" -- whose ordinary words ("before", "site") are nobody's
+    # answer to anything. Only labels short enough to *be* a name contribute their words.
+    theirs |= {w for n in nodes
+               if len(str(n.get("label") or "").split()) <= 3
+               for w in str(n.get("label") or "").casefold().split() if len(w) > 3}
     # "repair" leaked in on the first attempt through the look_up example, and it is a topic
     # label here — so labels are split into words rather than matched whole. Ordinary English
     # from the questions ("people", "about") is deliberately not in this set: every example

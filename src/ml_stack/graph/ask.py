@@ -147,17 +147,17 @@ TOOLS = [
                        "call — it costs the same as one, and asking one at a time is how a "
                        "question runs out of turns. If the question's own words find "
                        "nothing, search the idea behind them instead of asking again with "
-                       "more of them: a broken lathe is looked for as \"maintenance\", "
-                       "\"machines\", \"workshop\", not as \"broken lathe\" again. Example: for "
-                       "\"who surveys land in "
-                       "Calderwick?\" call look_up with "
-                       "{\"texts\": [\"survey\", \"land\", \"Calderwick\"]}, not three "
+                       "more of them: a cracked kiln is looked for as \"ceramics\", "
+                       "\"firing\", \"studio\", not as \"cracked kiln\" again. Example: for "
+                       "\"who runs a pottery studio in "
+                       "Ambleford?\" call look_up with "
+                       "{\"texts\": [\"pottery\", \"studio\", \"Ambleford\"]}, not three "
                        "separate calls.",
         "parameters": {"type": "object", "properties": {
-            "text": {"type": "string", "description": "one thing to look for, e.g. \"surveying\""},
+            "text": {"type": "string", "description": "one thing to look for, e.g. \"glassblowing\""},
             "texts": {"type": "array", "items": {"type": "string"},
                       "description": "several things to look for, in one call, e.g. "
-                                     "[\"survey\", \"land\", \"Calderwick\"]"}},
+                                     "[\"pottery\", \"studio\", \"Ambleford\"]"}},
             "required": []}}},
     {"type": "function", "function": {
         "name": "look_at",
@@ -165,11 +165,11 @@ TOOLS = [
                        "they are joined to, and a line or two of what was actually said. "
                        "look_up gives you names only — this is where the facts to answer from "
                        "come from, so call it on anything you intend to write about. Example: "
-                       "look_at with {\"ids\": [\"person:iris\", \"topic:surveying\"]}.",
+                       "look_at with {\"ids\": [\"person:wren\", \"topic:ceramics\"]}.",
         "parameters": {"type": "object", "properties": {
             "ids": {"type": "array", "items": {"type": "string"},
                     "description": "entry ids exactly as look_up returned them, e.g. "
-                                   "[\"person:iris\", \"org:brayfield\"]"}},
+                                   "[\"person:wren\", \"org:tinsley\"]"}},
             "required": ["ids"]}}},
     {"type": "function", "function": {
         "name": "path_between",
@@ -177,11 +177,11 @@ TOOLS = [
                        "them. Use it when the question is about a relationship rather than a "
                        "fact — who could introduce two people, how someone relates to a "
                        "company — and they are not already joined directly. Example: "
-                       "path_between with {\"from_id\": \"person:iris\", "
-                       "\"to_id\": \"org:brayfield\"}.",
+                       "path_between with {\"from_id\": \"person:wren\", "
+                       "\"to_id\": \"org:tinsley\"}.",
         "parameters": {"type": "object", "properties": {
-            "from_id": {"type": "string", "description": "an entry id, e.g. \"person:iris\""},
-            "to_id": {"type": "string", "description": "another entry id, e.g. \"person:otto\""}},
+            "from_id": {"type": "string", "description": "an entry id, e.g. \"person:wren\""},
+            "to_id": {"type": "string", "description": "another entry id, e.g. \"person:hollis\""}},
             "required": ["from_id", "to_id"]}}},
     {"type": "function", "function": {
         "name": "show",
@@ -192,13 +192,13 @@ TOOLS = [
                        "including anyone you named from a quote — and nothing you merely "
                        "opened on the way. A question that asks *who* is answered by people: "
                        "show the people, not the subject they have in common. Example: having "
-                       "written \"Iris Bellweather surveys "
-                       "land and Otto Vance runs the office\", call show with "
-                       "{\"ids\": [\"person:iris\", \"person:otto\"]}.",
+                       "written \"Wren Halloway fires "
+                       "the kiln and Hollis Fen runs the studio\", call show with "
+                       "{\"ids\": [\"person:wren\", \"person:hollis\"]}.",
         "parameters": {"type": "object", "properties": {
             "ids": {"type": "array", "items": {"type": "string"},
                     "description": "entry ids the answer is about, e.g. "
-                                   "[\"person:iris\", \"person:otto\"]"}},
+                                   "[\"person:wren\", \"person:hollis\"]"}},
             "required": ["ids"]}}},
 ]
 
