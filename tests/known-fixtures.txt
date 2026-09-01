@@ -58,3 +58,19 @@ t .think
 macOS arm64
 120s Bash
 t@example.com
+
+# Invented for the benchmark community in graph/community.py and the worked tool-call
+# examples in graph/ask.py (2026-09-01). The example names are deliberately kept apart
+# from the community's own, so a rising bench score means the calling convention was
+# learned rather than the answers memorised.
+Iris Bellweather
+Iris B.
+Iris B
+Otto Vance
+Bea Marlow
+Harnley Health
+Pellard Foundry
+Quenlow Robotics
+Brayfield
+Calderwick
+Dunmore
