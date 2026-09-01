@@ -100,9 +100,9 @@ def unknown_flags(argv: list[str], known: frozenset[str] | set[str]) -> list[tup
 def emitted_flags(backend: LlamaServerBackend) -> list[str]:
     """Every flag ``backend.command`` can emit, from specs with every field set.
 
-    Two shapes are needed because they exclude each other: an embedding server drops
-    ``--jinja`` for ``--embeddings``, and an ``hf:`` reference swaps ``-m`` for
-    ``--hf-repo``. Values are harmless placeholders; nothing here is run.
+    Several shapes are needed because they exclude each other: an embedding server drops
+    ``--jinja`` for ``--embeddings``, an ``hf:`` reference swaps ``-m`` for ``--hf-repo``,
+    and a ``--no-`` flag is only emitted where its positive form is not. Values are harmless placeholders; nothing here is run.
     """
     full = ServerSpec(
         model="model.gguf", parallel=2, mmproj="mmproj-model.gguf", draft="draft.gguf",
@@ -110,8 +110,12 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         spec_ngram_max=64, spec_draft_ngl=99, spec_draft_type_k="q8_0",
         spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
-        cpu_moe=True, n_cpu_moe=1)
+        cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
+        slot_prompt_similarity=0.5, slot_save_path="slots")
+    # the `--no-` forms are a third shape for the same reason: True and False exclude
+    # each other on one spec
     shapes = (full,
+              ServerSpec(model="model.gguf", kv_unified=False, cache_idle_slots=False),
               ServerSpec(model="model.gguf", embedding=True),
               ServerSpec(model="hf:owner/repo/model.gguf", mmproj="hf:owner/repo/mmproj.gguf",
                          draft="hf:owner/repo"))
@@ -180,6 +184,25 @@ class ServerSpec:
     # which is arithmetic done at the call site and got wrong once here -- a model served at
     # 8k per slot against everything else at 32k, visible only because the table prints it.
     context_per_slot: int | None = None
+    # How the server holds several conversations at once. None on each leaves the build's
+    # own default, so a spec that says nothing about them serves as it always has.
+    #
+    # One KV buffer shared across the slots, rather than one buffer each: a slot that is
+    # idle costs nothing and a busy one may use what the idle ones are not. False emits the
+    # `--no-` form, for a build whose default has gone the other way.
+    kv_unified: bool | None = None
+    # A prompt evicted from a slot is kept in RAM, up to this many MiB, and restored when a
+    # conversation comes back -- the cost of holding more conversations than there are
+    # slots is then a copy rather than a reprocessing of the whole history. 0 disables it.
+    cache_ram_mb: int | None = None
+    # Whether an idle slot's cache is moved to RAM to make room, or left where it is.
+    cache_idle_slots: bool | None = None
+    # How alike (0..1) a new prompt must be to a slot's held one before that slot is chosen
+    # for it, so a returning conversation lands on the slot that still holds its prefix.
+    slot_prompt_similarity: float | None = None
+    # A directory a slot's cache can be saved to and restored from through the `/slots`
+    # API -- a conversation put down and picked up across a restart.
+    slot_save_path: str | Path | None = None
     # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
     # off the GPU without keeping all of it off.
     #
@@ -330,6 +353,16 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--no-warmup"]
         if spec.context_per_slot is not None:
             argv += ["--kv-unified-per-slot", str(spec.context_per_slot)]
+        for flag, choice in (("--kv-unified", spec.kv_unified),
+                             ("--cache-idle-slots", spec.cache_idle_slots)):
+            if choice is not None:
+                argv += [flag if choice else flag.replace("--", "--no-", 1)]
+        if spec.cache_ram_mb is not None:
+            argv += ["--cache-ram", str(spec.cache_ram_mb)]
+        if spec.slot_prompt_similarity is not None:
+            argv += ["--slot-prompt-similarity", str(spec.slot_prompt_similarity)]
+        if spec.slot_save_path:
+            argv += ["--slot-save-path", str(spec.slot_save_path)]
         if spec.lookup_static:
             argv += ["--lookup-cache-static", str(spec.lookup_static)]
         if spec.lookup_dynamic:

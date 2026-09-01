@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
+import threading
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,8 +22,10 @@ from typing import Any
 from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
-__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking", "ask_from", "asking", "compare", "finding", "footprint",
-           "main", "measure", "prepared", "read_questions", "runs", "save", "table"]
+__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking",
+           "ask_from", "asking", "compare", "concurrent", "finding", "footprint", "main",
+           "measure", "prepared", "read_questions", "runs", "save", "slot_count", "table",
+           "unread_named"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
@@ -87,6 +91,15 @@ class Row:
     draft_taken: int = 0           # of those, how many the large model kept
     shown: list[str] = field(default_factory=list)
     expected: list[str] = field(default_factory=list)
+    # Entries the answer's prose names that no tool call found, read, traversed or showed
+    # -- a plausible name the model made up, which F1 cannot see. See `unread_named`.
+    unread: list[str] = field(default_factory=list)
+    unread_named: int = 0
+    # Which conversation and turn this was, when several were asked at once.
+    conversation: int = 0
+    turn: int = 0
+    first_token: float = 0.0       # seconds until the server began generating the first reply
+    queued: float = 0.0            # wall clock the turn spent not being read or generated
     error: str = ""
 
     @property
@@ -131,13 +144,27 @@ class Counting:
         self.completion_tokens = 0
         self.draft_tokens = 0
         self.draft_taken = 0
+        # What the server itself spent reading and generating, so that the difference
+        # between it and the wall clock -- time spent waiting for a slot -- is a number.
+        self.generating_ms = 0.0
+        self.first_token: float | None = None
 
     def chat(self, messages: Any, **kw: Any) -> Any:
         self.calls += 1
+        sent = time.time()
         reply = self.client.chat(messages, **kw)
+        took = time.time() - sent
         raw = getattr(reply, "raw", None) or {}
         usage = raw.get("usage") or {}
         timings = raw.get("timings") or {}
+        prompt_ms = float(timings.get("prompt_ms") or 0)
+        predicted_ms = float(timings.get("predicted_ms") or 0)
+        self.generating_ms += prompt_ms + predicted_ms
+        if self.first_token is None:
+            # Nothing here streams, so the first token is not seen arriving. What is known
+            # is how long the server spent generating; everything before that -- waiting
+            # for a slot, then reading the prompt -- is what the first token waited for.
+            self.first_token = round(max(0.0, took - predicted_ms / 1000), 3)
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
         self.completion_tokens += int(usage.get("completion_tokens") or 0)
         # A conversation re-sends everything every turn, so the prompt total counts the same
@@ -197,6 +224,11 @@ def _ways(args: Any) -> list[dict[str, Any]]:
         elif also == "card":
             # the card's own settings are read from the served model at ask time
             out.append({"label": "card", "terse": first["terse"], "_card": True})
+        elif also == "rich":
+            # look_up results carry a score and why they matched, and a topic hit brings
+            # the people joined to it -- a question about the asking, so one load
+            out.append({"label": "rich", "terse": first["terse"], "rich": True,
+                        **sampling_from(args)})
     return out
 
 
@@ -282,36 +314,208 @@ def read_questions(path: str | Path) -> list[dict[str, Any]]:
     return out
 
 
+# A label or an answer reduced to its words: lower-cased, anything that is not a letter or
+# a digit made a space, and a space at each end so that a whole-word match is a substring
+# match. The page's `namedIn` does the same in JS, so the two agree on what an answer names.
+_NOT_A_WORD = re.compile(r"[^\w]+|_+")
+
+
+def _words(text: Any) -> str:
+    return " " + " ".join(_NOT_A_WORD.sub(" ", str(text or "").casefold()).split()) + " "
+
+
+def unread_named(text: str, graph: Mapping[str, Any],
+                 touched: Iterable[str] = ()) -> list[str]:
+    """The entries an answer names that none of its tool calls produced.
+
+    F1 scores what was lit, and nothing else scored the prose. An answer can name a person
+    the model never found, read or showed -- a plausible name, made up or half-remembered
+    from an earlier question -- and light the right entries around it, and F1 is none the
+    wiser. This is the count that catches it: every entry whose label appears in the
+    answer, as whole words and regardless of case, and whose id is in none of ``touched``
+    (what `look_up` found, `look_at` read, `path_between` walked, `show` lit).
+
+    Labels shorter than three characters are not matched, as on the page: "Al" is in
+    "already". A label another entry shares counts as read if either was touched.
+    """
+    said = _words(text)
+    if not said.strip():
+        return []
+    seen = {str(i) for i in touched}
+    by_label: dict[str, tuple[str, list[str]]] = {}
+    for node in graph.get("nodes") or ():
+        label = str(node.get("label") or "")
+        key = _words(label)
+        if len(label) < 3 or not key.strip():
+            continue
+        by_label.setdefault(key, (label, []))[1].append(str(node.get("id")))
+    return sorted(label for key, (label, ids) in by_label.items()
+                  if key in said and not any(i in seen for i in ids))
+
+
+def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, client: Any,
+              graph: Mapping[str, Any] | None = None, turns: Sequence[Mapping[str, str]] = (),
+              conversation: int = 0, turn: int = 0) -> tuple[Row, str]:
+    """One question through ``ask(question, client)``, and what it cost; with the answer's
+    text, which a conversation carries into its next turn."""
+    counting = Counting(client)
+    row = Row(label=label, question=str(one.get("q") or ""),
+              expected=[str(i) for i in (one.get("expect") or ())],
+              conversation=conversation, turn=turn)
+    said = ""
+    began = time.time()
+    try:
+        out = ask(row.question, counting, **({"turns": list(turns)} if turns else {}))
+        # an Answer, or the payload a project sends its own page; both say the same things
+        read = out.get if isinstance(out, Mapping) else lambda k, d=None: getattr(out, k, d)
+        row.steps = read("why", "") or ""
+        said = str(read("content", "") or "")
+        row.answer_chars = len(said)
+        row.shown = list(read("show", None) or read("ids", None) or [])
+        if graph is not None:
+            touched = [str(i) for key in ("found", "read", "path", "show", "ids")
+                       for i in (read(key, None) or ())]
+            row.unread = unread_named(said, graph, touched)
+            row.unread_named = len(row.unread)
+    except Exception as exc:  # noqa: BLE001 - a failure is a result, not the end of the run
+        row.error = f"{type(exc).__name__}: {exc}"[:200]
+    row.seconds = round(time.time() - began, 2)
+    row.first_token = counting.first_token or 0.0
+    row.queued = round(max(0.0, row.seconds - counting.generating_ms / 1000), 2)
+    row.calls = counting.calls
+    row.prompt_tokens = counting.prompt_tokens
+    row.cached_tokens = counting.cached_tokens
+    row.processed_tokens = counting.processed_tokens
+    row.completion_tokens = counting.completion_tokens
+    row.draft_tokens = counting.draft_tokens
+    row.draft_taken = counting.draft_taken
+    return row, said
+
+
 def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]], *,
-            label: str, client: Any, log: Callable[[str], None] | None = None) -> list[Row]:
-    """Ask each question once through ``ask(question, client)`` and record what it cost."""
+            label: str, client: Any, log: Callable[[str], None] | None = None,
+            graph: Mapping[str, Any] | None = None) -> list[Row]:
+    """Ask each question once through ``ask(question, client)`` and record what it cost.
+
+    Given the ``graph``, each row also counts the entries the answer named that no tool
+    call produced -- see `unread_named`.
+    """
     rows = []
     for one in questions:
-        counting = Counting(client)
-        row = Row(label=label, question=str(one.get("q") or ""),
-                  expected=[str(i) for i in (one.get("expect") or ())])
-        began = time.time()
-        try:
-            out = ask(row.question, counting)
-            # an Answer, or the payload a project sends its own page; both say the same things
-            read = out.get if isinstance(out, Mapping) else lambda k, d=None: getattr(out, k, d)
-            row.steps = read("why", "") or ""
-            row.answer_chars = len(read("content", "") or "")
-            row.shown = list(read("show", None) or read("ids", None) or [])
-        except Exception as exc:  # noqa: BLE001 - a failure is a result, not the end of the run
-            row.error = f"{type(exc).__name__}: {exc}"[:200]
-        row.seconds = round(time.time() - began, 2)
-        row.calls = counting.calls
-        row.prompt_tokens = counting.prompt_tokens
-        row.cached_tokens = counting.cached_tokens
-        row.processed_tokens = counting.processed_tokens
-        row.completion_tokens = counting.completion_tokens
-        row.draft_tokens = counting.draft_tokens
-        row.draft_taken = counting.draft_taken
+        row, _ = _ask_once(ask, one, label=label, client=client, graph=graph)
         rows.append(row)
         if log:
             log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}")
     return rows
+
+
+def slot_count(base_url: str) -> int:
+    """How many slots that server has, read from ``/slots`` as `busy` reads it.
+
+    -1 when it will not say. It is what decides whether concurrent conversations queue:
+    more of them than slots, and a turn waits for a slot before a token is read.
+    """
+    from ml_stack.client.http import request_json
+
+    try:
+        slots = request_json(f"{base_url.rstrip('/')}/slots", timeout=5.0, method="GET")
+    except Exception:  # noqa: BLE001 - a server that will not answer has an unknown count
+        return -1
+    return len(slots) if isinstance(slots, list) else -1
+
+
+class _Peak:
+    """The most a server held while a run was going.
+
+    `footprint` reads resident memory once, after the fact, and a cache that was full while
+    four conversations were in flight has been let go by then. Sampled every second on a
+    thread; ``stop`` returns the footprint with the largest resident figure seen.
+    """
+
+    def __init__(self, base_url: str, every: float = 1.0) -> None:
+        self.base_url = base_url
+        self.every = every
+        self.most = 0
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        self._thread.start()
+
+    def _watch(self) -> None:
+        while not self._stop.is_set():
+            self.most = max(self.most, int(footprint(self.base_url).get("resident_bytes") or 0))
+            self._stop.wait(self.every)
+
+    def stop(self) -> dict[str, Any]:
+        self._stop.set()
+        self._thread.join(timeout=30)
+        out = footprint(self.base_url)
+        if self.most > int(out.get("resident_bytes") or 0):
+            out["resident_bytes"] = self.most
+            for derived_key in ("kv_and_run_bytes", "bytes_per_1k_context", "mmapped"):
+                out.pop(derived_key, None)
+            try:
+                out = beyond_weights(out)
+            except Exception:  # noqa: BLE001 - a summary line is never worth a run's answers
+                pass
+        return out
+
+
+def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], *,
+               conversations: int, turns: int, label: str, client: Any,
+               graph: Mapping[str, Any] | None = None, base_url: str = "",
+               log: Callable[[str], None] | None = None) -> tuple[list[Row], dict[str, Any]]:
+    """N conversations of T turns each, asked of one server at the same time.
+
+    Every other measurement here asks one question at a time, which is right for timing a
+    model and wrong for the question a server is actually asked: how many people can talk
+    to it at once, and what that costs each of them. Each conversation is a chain of
+    questions from the set with the earlier turns carried, run on its own thread, so N of
+    them are in flight together. Per turn: the wall clock, the time until the server began
+    generating, and what it spent waiting -- the wall clock less what the server itself
+    reports reading and generating, which is the queueing when N exceeds the slots. For the
+    run: the wall clock of the whole thing, which is not the sum of the turns, the most the
+    server held while it ran, and F1 as usual, so a setting that answers faster by
+    answering worse is visible.
+
+    Returns the rows and what to keep beside them as the run's ``server``.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    asked = [dict(q) for q in questions]
+    if not asked:
+        raise ValueError("no questions to converse about")
+    if conversations < 1 or turns < 1:
+        raise ValueError("at least one conversation of one turn")
+    # each conversation takes its own stretch of the set, so two of them do not ask the
+    # same question at the same moment and share a prompt cache the real thing would not
+    chains = [[asked[(c * turns + t) % len(asked)] for t in range(turns)]
+              for c in range(conversations)]
+
+    def one_conversation(c: int) -> list[Row]:
+        prior: list[dict[str, str]] = []
+        rows: list[Row] = []
+        for t, question in enumerate(chains[c]):
+            row, said = _ask_once(ask, question, label=label, client=client, graph=graph,
+                                  turns=prior, conversation=c, turn=t)
+            rows.append(row)
+            prior += [{"role": "user", "content": row.question},
+                      {"role": "assistant", "content": said}]
+            if log:
+                log(f"  c{c} t{t} {row.seconds:5.1f}s  first token {row.first_token:4.1f}s"
+                    f"  queued {row.queued:4.1f}s  {row.question[:40]}")
+        return rows
+
+    slots = slot_count(base_url) if base_url else -1
+    watching = _Peak(base_url) if base_url else None
+    began = time.time()
+    with ThreadPoolExecutor(max_workers=conversations) as pool:
+        got = list(pool.map(one_conversation, range(conversations)))
+    wall = round(time.time() - began, 2)
+    rows = [row for chain in got for row in chain]
+    held = watching.stop() if watching else {}
+    held["concurrency"] = {"conversations": conversations, "turns": turns, "slots": slots,
+                           "seconds": wall, "queued": round(sum(r.queued for r in rows), 2)}
+    return rows, held
 
 
 def footprint(base_url: str) -> dict[str, Any]:
@@ -409,7 +613,8 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
         while held.get_doc(key) is not None:
             key, n = f"{stem}-{n}", n + 1
         held.put_doc(key, {"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
-                           "server": server or {}, "rows": [asdict(r) for r in rows]})
+                           "server": server or {}, "rows": [asdict(r) for r in rows],
+                           "unread_named": sum(r.unread_named for r in rows)})
     return key
 
 
@@ -482,9 +687,14 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # different measurements sitting on adjacent lines looking like one. That happened here —
     # a question was added mid-afternoon and the next run read 85% against an earlier 72%,
     # which meant nothing at all. A column is cheaper than remembering.
+    #
+    # `conc` is the same lesson again: four conversations at once against one at a time is
+    # two measurements, and the wall clock of the first is the run's, not the turns' sum.
+    # `made` is what F1 cannot see -- entries the prose named that nothing found or read.
     head = (f"{'run':20} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'resident':>9} "
-            f"{'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
+            f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'conc':>5} "
+            f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
+            f"{'made':>5}  {'sampling'}")
     print(head)
     print("-" * len(head))
     for one in kept:
@@ -502,16 +712,42 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         print(f"{str(one.get('label', ''))[:20]:20} "
               f"{(f'{ctx // 1024}k x{slots}' if ctx else '-'):>7} "
               f"{len(scored):>3} "
-              f"{_total(rows, 'seconds'):>6.0f}s {_total(rows, 'calls'):>6.0f} "
+              f"{wall_of(one):>6.0f}s {_total(rows, 'calls'):>6.0f} "
               f"{_total(rows, 'processed_tokens'):>8.0f} "
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
               f"{drafting(rows):>6} "
               f"{str(server.get('finder') or '-'):>7} "
+              f"{at_once(server):>5} "
               f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
-              f"{right:>5} {rec:>5} {prec:>5}  {sampled(server)}")
+              f"{right:>5} {rec:>5} {prec:>5} {made(one):>5}  {sampled(server)}")
+
+
+def wall_of(one: Mapping[str, Any]) -> float:
+    """What a run took: its turns added up, or, asked at once, the clock over all of them."""
+    at_once_ = (one.get("server") or {}).get("concurrency") or {}
+    if at_once_.get("seconds"):
+        return float(at_once_["seconds"])
+    return _total(one.get("rows") or [], "seconds")
+
+
+def at_once(server: Mapping[str, Any]) -> str:
+    """``4x3`` for four conversations of three turns asked together; "" for one at a time."""
+    held = server.get("concurrency") or {}
+    if not isinstance(held, Mapping) or not held.get("conversations"):
+        return ""
+    return f"{held['conversations']}x{held.get('turns') or 1}"
+
+
+def made(one: Mapping[str, Any]) -> str:
+    """How many entries a run's answers named without ever finding or reading them, over
+    the scored questions; "" for a run from before this was counted."""
+    rows = [r for r in (one.get("rows") or []) if r.get("expected")]
+    if not any("unread_named" in r for r in rows):
+        return ""
+    return str(int(_total(rows, "unread_named")))
 
 
 def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> None:
@@ -528,8 +764,11 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
     for one in kept:
         rows = [r for r in (one.get("rows") or []) if r.get("expected")]
         shortfall = [r for r in rows if not everything and _hit(r) < 1.0] if not everything else rows
-        found = str((one.get("server") or {}).get("finder") or "-")
-        print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found})")
+        server = one.get("server") or {}
+        found = str(server.get("finder") or "-")
+        together = at_once(server)
+        print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
+              + (f", {together} at once" if together else "") + ")")
         if not shortfall:
             print("  every question answered in full")
             continue
@@ -540,8 +779,15 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
             print(f"        showed  {', '.join(sorted(got)) or '(nothing)'}")
             if want - got:
                 print(f"        missed  {', '.join(sorted(want - got))}")
+            if r.get("unread"):
+                # what F1 cannot see: a name in the prose that no tool call produced
+                print(f"        made    {', '.join(r['unread'])}  (named, never found or read)")
             note = (f"{r.get('calls', 0)} calls, {r.get('answer_chars', 0)} chars"
                     + (f", ERROR {r['error']}" if r.get("error") else ""))
+            if together:
+                note += (f"; conversation {r.get('conversation', 0)} turn {r.get('turn', 0)}, "
+                         f"first token {r.get('first_token', 0):.1f}s, "
+                         f"queued {r.get('queued', 0):.1f}s")
             print(f"        {note}")
 
 
@@ -683,7 +929,7 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     precision = sum(_precision(r) for r in rows) / len(rows)
     shown = sum(len(r.get("shown") or ()) for r in rows) / len(rows)
     wanted = sum(len(r.get("expected") or ()) for r in rows) / len(rows)
-    seconds = _total(rows, "seconds")
+    seconds = wall_of(one)
     paid = _total(rows, "processed_tokens") + _total(rows, "completion_tokens")
     server = one.get("server") or {}
     memory = float(server.get("kv_and_run_bytes") or 0)
@@ -777,8 +1023,8 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
              "repository. Re-measure after any model release -- none of this survives one.",
              "",
              "| model | F1 | recall | precision | questions | seconds | resident | sampling "
-             "| find |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+             "| find | made |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in order:
         gb = row.get("resident_bytes")
         temp = (row.get("sampling") or {}).get("temperature")
@@ -791,7 +1037,8 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
             f"| {row.get('seconds') or 0:.0f} "
             f"| {f'{gb / 2**30:.1f}G' if gb else '-'} "
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
-            f"| {row.get('finder') or '-'} |")
+            f"| {row.get('finder') or '-'} "
+            f"| {'-' if row.get('unread_named') is None else row['unread_named']} |")
     if too_few:
         lines += ["", f"*{too_few} run(s) not ranked: fewer than {SHORT} questions, which is "
                       f"a smoke run proving the path works rather than a measurement.*"]
@@ -850,6 +1097,10 @@ def _exportable(kept: Sequence[Mapping[str, Any]], *,
             "mmapped": bool(server.get("mmapped")),
             "sampling": server.get("sampling") or {},
             "finder": str(server.get("finder") or ""),
+            # None, not 0, for a run from before this was counted: not counted is not none
+            "unread_named": (int(_total(rows, "unread_named"))
+                             if any("unread_named" in r for r in rows) else None),
+            "concurrency": dict(server.get("concurrency") or {}) or None,
         })
     return out, skipped
 
@@ -1100,8 +1351,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                 # what the model itself recommends, read from the GGUF it is serving
                 client = Client(server.base_url, **{**making, **client.card})
             ask = asking(graph, shortlist=shortlist, store=store, embed_url=embed_url,
-                         embed_model=embed_model, terse=how)
-            got = measure(ask, questions, label=here, client=client, log=print)
+                         embed_model=embed_model, terse=how,
+                         rich=bool(asked.pop("rich", False)))
+            got = measure(ask, questions, label=here, client=client, log=print, graph=graph)
             for row in got:
                 row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
             held = {**footprint(server.base_url), "graph": _which(graph),
@@ -1168,7 +1420,7 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
            embed_url: str = "", embed_model: str = "", terse: bool = False,
-           margin: float = MARGIN) -> Callable[[str, Any], Any]:
+           margin: float = MARGIN, rich: bool = False) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -1179,8 +1431,12 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     ``embed_url``, vectors, fused -- and without one, characters alone. For months the bench
     had no store on this path and every ranking it wrote measured a look_up nobody ran.
 
+    ``rich`` asks with `converse(..., rich=True)`: look_up results carry a score and why
+    they matched, and a topic hit brings the people joined to it.
+
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
-    which one it measured.
+    which one it measured, and takes ``turns=`` -- the earlier turns of a conversation, as
+    `converse` does -- so `concurrent` can carry one on.
     """
     from ml_stack.graph.ask import converse, tools_for
     from ml_stack.graph.search import hybrid
@@ -1207,15 +1463,19 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         found = hybrid(graph, question, store=held, vector=vector, model=embed_model)
         return [r["id"] for r in found][:shortlist]
 
-    def converse_with(question: str, client: Any, finder: Any, opening: Sequence[str]) -> Any:
+    def converse_with(question: str, client: Any, finder: Any, opening: Sequence[str],
+                      turns: Sequence[Mapping[str, str]]) -> Any:
         # `finder` goes to both, because `converse` swaps look_up's callable in whichever
         # tools it is handed, and the terse set is handed in rather than chosen inside
-        extra = {"tools": tools_for(graph, terse=True, finder=finder)} if terse else {}
-        return converse(question, graph, client, opening=opening, finder=finder, **extra)
+        extra: dict[str, Any] = {"tools": tools_for(graph, terse=True, finder=finder)} if terse else {}
+        if rich:
+            extra["rich"] = True
+        return converse(question, graph, client, opening=opening, finder=finder,
+                        turns=list(turns), **extra)
 
-    def ask(question: str, client: Any) -> Any:
+    def ask(question: str, client: Any, *, turns: Sequence[Mapping[str, str]] = ()) -> Any:
         if store is None or not str(store):
-            return converse_with(question, client, None, [])
+            return converse_with(question, client, None, [], turns)
         from ml_stack.graph.store import GraphStore
 
         # one handle for the whole conversation: a question makes several look_ups, and
@@ -1225,7 +1485,7 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
                 return hybrid(graph, text, store=held, vector=embedded(text),
                               model=embed_model)
 
-            return converse_with(question, client, finder, likely(question, held))
+            return converse_with(question, client, finder, likely(question, held), turns)
 
     ask.finder = finding(store, embed_url)  # type: ignore[attr-defined]
     return ask
@@ -1295,6 +1555,34 @@ def _main(argv: list[str] | None = None) -> int:
                             "wall clock, and a full run spends most of itself proving a "
                             "score that must come out the same")
 
+    conc = sub.add_parser("concurrent", allow_abbrev=False,
+                          help="ask N conversations of T turns each at the same time, and "
+                               "see what the waiting, the memory and the accuracy cost")
+    conc.add_argument("label", help="what this run is, e.g. e2b-4x3")
+    conc.add_argument("--conversations", type=int, default=4, metavar="N",
+                      help="how many conversations are in flight together (default: "
+                           "%(default)s). More than the server has slots, and the turns "
+                           "queue -- which is the thing worth measuring")
+    conc.add_argument("--turns", type=int, default=3, metavar="T",
+                      help="how many questions each conversation asks in turn, the earlier "
+                           "ones carried (default: %(default)s)")
+    conc.add_argument("--kept", default=str(HOME / "runs.ladybug"),
+                      help="where to keep the run (default: %(default)s)")
+    conc.add_argument("--base-url", default="http://127.0.0.1:8080",
+                      help="the model answering (default: %(default)s)")
+    conc.add_argument("--graph", default="",
+                      help="a graph as JSON (default: the invented community that ships here)")
+    conc.add_argument("--questions", default="",
+                      help="one per line, as for run (default: the invented community's)")
+    conc.add_argument("--store", default=prepared(),
+                      help="a graph store with the word index and vectors, so look_up "
+                           "searches as the application does (default: what `prepare` "
+                           "built, when it has been)")
+    conc.add_argument("--embed-url", default="", help="a server that embeds, for the store")
+    conc.add_argument("--embed-model", default="", help="the model that embedded the graph")
+    conc.add_argument("--client", default="",
+                      help="module:function returning the model client, instead of --base-url")
+
     ready = sub.add_parser("prepare", allow_abbrev=False,
                            help="put a graph in a store and index and embed it")
     ready.add_argument("--store", default=str(HOME / "graph.ladybug"),
@@ -1342,7 +1630,7 @@ def _main(argv: list[str] | None = None) -> int:
     sweep.add_argument("--plain-only", action="store_true",
                        help="skip the shortlist half, just measure each model as it is")
 
-    for one in (run, sweep):
+    for one in (run, sweep, conc):
         one.add_argument("--sample", type=int, default=0, metavar="N",
                          help="ask only N of the questions, keeping every kind of answer. "
                               "For a comparison where accuracy is not the variable -- draft "
@@ -1376,15 +1664,16 @@ def _main(argv: list[str] | None = None) -> int:
         one.add_argument("--card", action="store_true",
                          help="ask with what the model's own card recommends, to see whether "
                               "it suits this task -- it is not what a client sends otherwise")
+    for one in (run, sweep):
         one.add_argument("--also", action="append", default=[],
-                         choices=("terse", "card", "greedy"),
+                         choices=("terse", "card", "greedy", "rich"),
                          help="ask the same served model another way as well. Whether the "
-                              "tools are described briefly and what sampling is used are "
-                              "questions about the asking, not the serving, so measuring "
-                              "four of them costs one model load rather than four. "
-                              "Repeatable")
+                              "tools are described briefly, what sampling is used, and "
+                              "whether look_up says why it matched (rich) are questions "
+                              "about the asking, not the serving, so measuring four of them "
+                              "costs one model load rather than four. Repeatable")
 
-    for one in (run, sweep, heads):
+    for one in (run, sweep, heads, conc):
         one.add_argument("--no-queue", action="store_true",
                          help="fail at once if another measurement holds the GPU, rather "
                               "than queue behind it. Read before the rest of the line is "
@@ -1448,8 +1737,12 @@ def _main(argv: list[str] | None = None) -> int:
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
         ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
-        for n, named in enumerate(getattr(args, "serve", []) or []):
-            model = find_model(named)
+        # `wanted`, not `named`: the loop variable was `named` once, which rebound the
+        # (name, url) list built from --on to the last model's name, and the summary below
+        # then unpacked its characters. Every `sweep --serve` answered its questions and
+        # crashed while summarising, and the smoke run is what caught it.
+        for n, wanted in enumerate(getattr(args, "serve", []) or []):
+            model = find_model(wanted)
             heads = getattr(args, "serve_draft", []) or []
             head = heads[n] if n < len(heads) else ""
             if head.lower() == "auto":
@@ -1493,7 +1786,8 @@ def _main(argv: list[str] | None = None) -> int:
                 # one temperature against a run at another is two measurements, and the only
                 # way to know later is to write it down now
                 used = dict(asking_with.sampling)
-                rows = measure(ask, questions, label=label, client=asking_with, log=print)
+                rows = measure(ask, questions, label=label, client=asking_with, log=print,
+                               graph=graph)
                 save(args.kept, rows,
                      held={**footprint(url), "sampling": used, "graph": _which(graph),
                            "finder": ask.finder})
@@ -1533,6 +1827,46 @@ def _main(argv: list[str] | None = None) -> int:
         print()
         table(runs(args.kept))
         return 0 if rows else 1
+
+    if args.cmd == "concurrent":
+        from ml_stack.graph.community import QUESTIONS, graph as invented
+
+        questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
+                           _how_many(args))
+        if not questions:
+            print(f"error: no questions in {args.questions}", file=sys.stderr)
+            return 2
+        graph = (json.loads(Path(args.graph).expanduser().read_text())
+                 if args.graph else invented())
+        if args.client:
+            client = ask_from(args.client)()
+        else:
+            from ml_stack.client import Client
+
+            if not _idle(args.base_url, args):
+                return 3
+            client = with_card(Client(args.base_url, **sampling_from(args)), args)
+        # a smoke run proves the path -- two conversations really overlapping, one turn
+        # each -- and its numbers mean nothing, as with every other --smoke
+        many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
+        ask = asking(graph, store=args.store or None, embed_url=args.embed_url,
+                     embed_model=args.embed_model)
+        where = args.graph or "the invented community"
+        print(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
+              f"look_up by {ask.finder}")
+        rows, held = concurrent(ask, questions, conversations=many, turns=long,
+                                label=args.label, client=client, graph=graph,
+                                base_url="" if args.client else args.base_url, log=print)
+        at = held["concurrency"]
+        slots = at.get("slots") or 0
+        print(f"  {at['seconds']:.1f}s for all of it"
+              + (f", {at['queued']:.1f}s of that queued" if slots and many > slots else "")
+              + (f", {slots} slot(s)" if slots > 0 else ""))
+        key = save(args.kept, rows,
+                   held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
+                         "graph": _which(graph), "finder": ask.finder})
+        print(f"kept as {key}")
+        return 0
 
     if args.cmd == "show":
         if args.compare:
@@ -1589,7 +1923,7 @@ def _main(argv: list[str] | None = None) -> int:
     print(f"{args.label}: {len(questions)} questions over {where}"
           + (f", look_up by {found}" if found else "")
           + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
-    rows = measure(ask, questions, label=args.label, client=client, log=print)
+    rows = measure(ask, questions, label=args.label, client=client, log=print, graph=graph)
     key = save(args.kept, rows,
                held={**footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found})
@@ -1600,7 +1934,7 @@ def _main(argv: list[str] | None = None) -> int:
 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
-MEASURING = ("run", "sweep", "drafts")
+MEASURING = ("run", "sweep", "drafts", "concurrent")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1612,7 +1946,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     from ml_stack.lock import Busy, only_one
 
-    known = {"run", "sweep", "drafts", "show", "prepare"}
+    known = {*MEASURING, "show", "prepare"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

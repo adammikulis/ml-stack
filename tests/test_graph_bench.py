@@ -832,3 +832,383 @@ def test_an_export_and_the_ranking_carry_the_finder(tmp_path):
     assert got[0]["finder"] == "words"
     said = ranking(runs(store))
     assert "| find |" in said and "| words |" in said
+
+
+# -- what F1 cannot see: a name the answer made up ---------------------------------------
+
+NAMED = {
+    "nodes": [
+        {"id": "person:iris", "kind": "person", "label": "Iris Tamsin", "attrs": {}},
+        {"id": "person:otto", "kind": "person", "label": "Otto Brayfield", "attrs": {}},
+        {"id": "org:pellard", "kind": "org", "label": "Pellard", "attrs": {}},
+        {"id": "person:al", "kind": "person", "label": "Al", "attrs": {}},
+    ],
+    "edges": [],
+}
+
+
+def test_an_answer_naming_an_entry_that_was_never_read_counts_one():
+    """F1 scores what was lit. An answer can light the right people and still name one the
+    model never found, read or showed -- a plausible name it made up -- and F1 is none
+    the wiser."""
+    from ml_stack.graph.bench import unread_named
+
+    said = "Iris Tamsin welds; ask Otto Brayfield about the rest."
+    assert unread_named(said, NAMED, touched=["person:iris"]) == ["Otto Brayfield"]
+    assert unread_named(said, NAMED, touched=[]) == ["Iris Tamsin", "Otto Brayfield"]
+
+
+def test_an_answer_naming_only_what_it_read_counts_nothing():
+    from ml_stack.graph.bench import unread_named
+
+    said = "Iris Tamsin welds, and Pellard hires."
+    assert unread_named(said, NAMED, touched=["person:iris", "org:pellard"]) == []
+    # any of found, read, path or show is a tool having produced it; ids from any count
+    assert unread_named(said, NAMED, touched=["org:pellard", "person:iris"]) == []
+
+
+def test_a_label_inside_a_longer_word_does_not_count():
+    """Whole words, as the page's `namedIn` matches: "Pellard" is not in "Pellardsville"."""
+    from ml_stack.graph.bench import unread_named
+
+    assert unread_named("the Pellardsville fair", NAMED) == []
+    assert unread_named("the Pellard fair", NAMED) == ["Pellard"]
+    assert unread_named("PELLARD, again", NAMED) == ["Pellard"], "case and punctuation aside"
+    # a two-letter label is in every "already" and "also": not matched, as on the page
+    assert unread_named("it is already done, also", NAMED) == []
+    assert unread_named("", NAMED) == []
+
+
+def test_measure_counts_what_the_answer_named_but_never_touched():
+    import ml_stack.graph.bench as bench
+
+    class Model:
+        def chat(self, messages, **kw):
+            return type("R", (), {"content": "x", "raw": {}, "tool_calls": None})()
+
+    def ask(question, client):
+        client.chat([])
+        return type("A", (), {"content": "Iris Tamsin and Otto Brayfield.", "show": ["person:iris"],
+                              "ids": ["person:iris"], "read": ["person:iris"], "found": [],
+                              "path": [], "why": ""})()
+
+    rows = bench.measure(ask, [{"q": "who?", "expect": ["person:iris"]}], label="t",
+                         client=Model(), graph=NAMED)
+    assert rows[0].unread == ["Otto Brayfield"] and rows[0].unread_named == 1
+    without = bench.measure(ask, [{"q": "who?", "expect": ["person:iris"]}], label="t",
+                            client=Model())
+    assert without[0].unread_named == 0, "no graph, nothing counted -- not an error"
+
+
+def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, capsys):
+    from ml_stack.graph.bench import SHORT, export, invented_digest, missed, ranking
+    from ml_stack.graph.store import GraphStore
+
+    store = tmp_path / "runs.ladybug"
+    rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
+            for n in range(SHORT)]
+    rows[0].unread, rows[0].unread_named = ["Otto Brayfield"], 1
+    rows[1].unread, rows[1].unread_named = ["Pellard", "Otto Brayfield"], 2
+    save(store, rows, held={"graph": invented_digest(), "model": "thing.gguf",
+                            "finder": "words"})
+    # a run kept before the count existed has rows without the key
+    with GraphStore(store) as held:
+        held.put_doc("bench:older:20260101T000000", {
+            "at": "2026-01-01T00:00:00", "label": "older", "server": {},
+            "rows": [{"question": "q?", "expected": ["person:iris"], "shown": ["person:iris"]}]})
+
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0]
+    assert "made" in head
+    assert head.split().index("made") == head.split().index("prec") + 1, "beside the scores"
+    by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("tried", "older"))}
+    assert by_label["tried"].rstrip().endswith("100%     3  -"), "the total over the run"
+    assert by_label["older"].rstrip().endswith("100%        -"), "blank for a run from before, not 0"
+
+    missed(runs(store, "tried"), everything=True)
+    said = capsys.readouterr().out
+    assert "made    Pellard, Otto Brayfield" in said and "never found or read" in said
+
+    got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
+    assert {r["label"]: r["unread_named"] for r in got} == {"tried": 3}
+    assert "| made |" in ranking(runs(store)) and "| words | 3 |" in ranking(runs(store))
+
+
+# -- --also rich --------------------------------------------------------------------------
+
+def test_rich_is_asked_for_the_way_terse_is():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _ways
+
+    ways = _ways(Namespace(also=["rich"], terse=False, temperature=0.0))
+    assert ways[1]["label"] == "rich" and ways[1]["rich"] is True
+    assert ways[1]["temperature"] == 0.0, "the run's sampling, as terse carries it"
+    assert "rich" not in ways[0], "the first way is what was asked for, unchanged"
+
+
+def test_rich_reaches_converse_as_a_keyword(monkeypatch):
+    """`converse(..., rich=True)` is another agent's keyword; this only has to hand it on."""
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.bench import asking
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    asking(TINY, rich=True)("who?", _Scripted())
+    assert reached.get("rich") is True
+    reached.clear()
+    asking(TINY)("who?", _Scripted())
+    assert "rich" not in reached, "not asked for, not sent -- the default is converse's own"
+
+
+# -- several conversations at once --------------------------------------------------------
+
+class _Overlapping:
+    """Answers after a pause and keeps the interval of every call, so a test can see
+    whether two calls were ever in flight together. Looks up one thing that matches
+    nothing, then names a person it never found. How many calls a turn takes after that
+    is `converse`'s business -- it nudges an answer that lit nothing -- not this fake's."""
+
+    def __init__(self, pause: float = 0.1) -> None:
+        import threading
+
+        self.pause = pause
+        self.calls: list[tuple[float, float, list[dict]]] = []
+        self._lock = threading.Lock()
+        self.sampling: dict = {}
+
+    def chat(self, messages, tools=None, **_):
+        import time
+
+        began = time.time()
+        time.sleep(self.pause)
+        with self._lock:
+            self.calls.append((began, time.time(), list(messages)))
+        raw = {"usage": {"prompt_tokens": 40, "completion_tokens": 8},
+               "timings": {"prompt_n": 30, "cache_n": 10, "prompt_ms": 20.0,
+                           "predicted_ms": 30.0}}
+        if tools and not any(m.get("role") == "tool" for m in messages):
+            return type("R", (), {"content": "", "thinking": None, "raw": raw, "tool_calls": [
+                {"id": "c1", "function": {"name": "look_up",
+                                          "arguments": json.dumps({"texts": ["zzqx"]})}}]})()
+        return type("R", (), {"content": "Ada Quill works on compilers.", "thinking": None,
+                              "raw": raw, "tool_calls": None})()
+
+    def asked(self, question: str) -> list[dict]:
+        """The messages the first call of the turn that asked ``question`` was shown."""
+        return next(m for _, _, m in self.calls if m[-1].get("content") == question)
+
+    def overlapped(self) -> bool:
+        spans = [(a, b) for a, b, _ in self.calls]
+        return any(a1 < b2 and a2 < b1
+                   for i, (a1, b1) in enumerate(spans) for (a2, b2) in spans[i + 1:])
+
+
+def test_conversations_really_run_at_the_same_time():
+    from ml_stack.graph.bench import asking, concurrent
+
+    model = _Overlapping()
+    rows, held = concurrent(asking(TINY), [{"q": f"q{n}?", "expect": ["person:ada"]}
+                                           for n in range(6)],
+                            conversations=3, turns=2, label="t", client=model, graph=TINY)
+    assert len(rows) == 6 and len(model.calls) == sum(r.calls for r in rows)
+    assert all(r.calls >= 2 for r in rows), "a look_up and an answer at the least"
+    assert model.overlapped(), "three conversations on threads must overlap"
+    assert held["concurrency"]["seconds"] < sum(r.seconds for r in rows), \
+        "the run's clock is over all of them, not their sum"
+
+
+def test_a_conversation_carries_its_earlier_turns():
+    from ml_stack.graph.bench import asking, concurrent
+
+    model = _Overlapping(pause=0.0)
+    rows, _ = concurrent(asking(TINY), [{"q": "first?"}, {"q": "second?"}, {"q": "third?"}],
+                         conversations=1, turns=3, label="t", client=model, graph=TINY)
+    assert [(r.conversation, r.turn, r.question) for r in rows] == [
+        (0, 0, "first?"), (0, 1, "second?"), (0, 2, "third?")]
+    last = model.asked("third?")
+    said = [(m["role"], m["content"]) for m in last if m["role"] in ("user", "assistant")]
+    assert said == [("user", "first?"), ("assistant", "Ada Quill works on compilers."),
+                    ("user", "second?"), ("assistant", "Ada Quill works on compilers."),
+                    ("user", "third?")]
+    assert not any(m["role"] == "tool" for m in last), "the working is not carried, the answer is"
+
+
+def test_each_conversation_asks_its_own_stretch_of_the_questions():
+    from ml_stack.graph.bench import asking, concurrent
+
+    rows, _ = concurrent(asking(TINY), [{"q": f"q{n}?"} for n in range(4)],
+                         conversations=2, turns=2, label="t", client=_Overlapping(0.0))
+    assert [(r.conversation, r.question) for r in rows] == [
+        (0, "q0?"), (0, "q1?"), (1, "q2?"), (1, "q3?")]
+    # fewer questions than turns: it wraps rather than stopping short
+    rows, _ = concurrent(asking(TINY), [{"q": "only?"}], conversations=2, turns=2,
+                         label="t", client=_Overlapping(0.0))
+    assert [r.question for r in rows] == ["only?"] * 4
+
+
+def test_a_turn_records_its_first_token_and_what_it_spent_waiting():
+    """The server says what it spent reading and generating; the wall clock less that is
+    the waiting, which is the queueing once there are more conversations than slots."""
+    from ml_stack.graph.bench import asking, concurrent
+
+    rows, held = concurrent(asking(TINY), [{"q": "q?", "expect": ["person:ada"]}],
+                            conversations=1, turns=1, label="t", client=_Overlapping(0.1),
+                            graph=TINY)
+    row = rows[0]
+    assert row.calls >= 2 and row.seconds >= 0.1 * row.calls
+    # 30ms of generating out of a 100ms pause: the first token waited about 70ms
+    assert 0.05 <= row.first_token <= 0.15
+    # every call is 20ms reading and 30ms generating by the server's account
+    assert row.queued == pytest.approx(row.seconds - 0.05 * row.calls, abs=0.02)
+    assert row.cached_tokens == 10 * row.calls and row.processed_tokens == 30 * row.calls
+    assert row.unread == ["Ada Quill"], "named, never looked up"
+    assert row.shown == [] and row.hit == 0.0, "and F1 is scored as ever"
+    assert held["concurrency"]["queued"] == pytest.approx(row.queued)
+
+
+def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch):
+    import ml_stack.graph.bench as bench
+
+    seen = iter([{"base_url": "u", "resident_bytes": 3 * 2**30, "weights_bytes": 2**30},
+                 {"base_url": "u", "resident_bytes": 2**30, "weights_bytes": 2**30}])
+    monkeypatch.setattr(bench, "footprint", lambda url: dict(next(seen)))
+    srv, url = _server(lambda p: [{"is_processing": False}, {"is_processing": False}])
+    try:
+        assert bench.slot_count(url) == 2
+        rows, held = bench.concurrent(bench.asking(TINY), [{"q": "q?"}], conversations=1,
+                                      turns=1, label="t", client=_Overlapping(0.0),
+                                      base_url=url)
+    finally:
+        srv.shutdown()
+    assert held["concurrency"]["slots"] == 2
+    assert held["resident_bytes"] == 3 * 2**30, "the peak, not what was left afterwards"
+    assert held["kv_and_run_bytes"] == 2 * 2**30, "and the derived figure follows it"
+    assert bench.slot_count("http://127.0.0.1:9") == -1
+
+
+def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
+    from ml_stack.graph.bench import asking, concurrent, missed
+
+    store = tmp_path / "runs.ladybug"
+    rows, held = concurrent(asking(TINY), [{"q": f"q{n}?", "expect": ["person:ada"]}
+                                           for n in range(6)],
+                            conversations=2, turns=3, label="together",
+                            client=_Overlapping(0.0), graph=TINY)
+    save(store, rows, held={**held, "context": 32768, "slots": 2, "finder": "chars"})
+    save(store, [a_row("q?", expected=["person:ada"], shown=["person:ada"])],
+         held={"context": 32768, "slots": 2, "finder": "chars"})
+
+    back = {r["label"]: r for r in runs(store)}
+    kept = back["together"]["server"]["concurrency"]
+    assert kept["conversations"] == 2 and kept["turns"] == 3 and kept["slots"] == -1
+    assert kept["seconds"] >= 0 and kept["queued"] >= 0
+    assert {(r["conversation"], r["turn"]) for r in back["together"]["rows"]} == {
+        (c, t) for c in range(2) for t in range(3)}
+    assert all("first_token" in r and "queued" in r for r in back["together"]["rows"])
+    assert back["together"]["unread_named"] == 6
+
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0]
+    assert head.split().index("conc") == head.split().index("find") + 1, "beside find"
+    lines = {ln.split()[0]: ln for ln in said.splitlines() if ln[:1].isalpha() and ln[:3] != "run"}
+    assert lines["together"].split()[11] == "2x3"
+    assert lines["tried"].split()[11] != "2x3" and "x" not in lines["tried"].split()[11]
+
+    missed(runs(store, "together"), everything=True)
+    said = capsys.readouterr().out
+    assert "2x3 at once" in said
+    assert "conversation 1 turn 2" in said and "first token" in said and "queued" in said
+
+
+def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path, monkeypatch, capsys):
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
+    monkeypatch.setattr(bench, "ask_from", lambda spec: _Overlapping)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text("\n".join(json.dumps({"q": f"q{n}?", "expect": ["person:ada"]})
+                               for n in range(5)) + "\n")
+    kept = tmp_path / "runs.ladybug"
+    assert bench.main(["concurrent", "two-at-once", "--smoke", "--conversations", "9",
+                       "--turns", "9", "--kept", str(kept), "--graph", str(graph),
+                       "--questions", str(asked), "--client", "fake:client",
+                       "--store", ""]) == 0
+    said = capsys.readouterr().out
+    assert said.splitlines()[0].startswith("two-at-once: 2 conversations of 1 turn(s) at once")
+    assert "kept as bench:two-at-once:" in said
+
+    back = runs(kept)[0]
+    assert back["server"]["concurrency"]["conversations"] == 2
+    assert back["server"]["concurrency"]["turns"] == 1
+    assert back["server"]["finder"] == "chars"
+    assert len(back["rows"]) == 2
+
+
+def test_concurrent_is_a_measuring_subcommand_and_takes_the_lock():
+    """Two of anything on the GPU at once is two measurements of nothing; the lock is what
+    `main` takes for every subcommand in MEASURING, so this one has to be in it."""
+    from ml_stack.graph.bench import MEASURING
+
+    assert "concurrent" in MEASURING
+
+
+# -- sweep --serve, which had no test through _main -----------------------------------------
+
+class _ServedModel(_Scripted):
+    """The client `served` builds for each way: takes a base_url and the way's sampling,
+    and has the card a `--also card` way reads."""
+
+    def __init__(self, base_url: str = "", **sampling) -> None:
+        super().__init__()
+        self.base_url = base_url
+        self.sampling = dict(sampling)
+        self.card = {"temperature": 1.0, "top_k": 64}
+
+
+def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatch, capsys):
+    """This path had no test. The `--serve` loop's variable was `named`, the same name as
+    the (name, url) list `--on` builds, so after serving, the summary unpacked the last
+    model's name a character at a time and every `sweep --serve` crashed after answering
+    everything. A smoke run caught it; this is the test that should have."""
+    from contextlib import contextmanager
+
+    import ml_stack.client
+    import ml_stack.serve
+    import ml_stack.graph.bench as bench
+
+    @contextmanager
+    def fake_serve(model, **kw):
+        yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    kept = tmp_path / "runs.ladybug"
+
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                        "--also", "card", "--kept", str(kept), "--graph", str(graph),
+                        "--questions", str(asked), "--store", "", "--serve-port", "1"]) == 0
+    said = capsys.readouterr().out
+    labels = [r["label"] for r in runs(kept)]
+    assert sorted(labels) == sorted(["tiny-plain", "tiny-plain-terse", "tiny-plain-card"])
+    after_rule = said.split("\n---", 1)[1].splitlines()[1:]
+    summary = [ln for ln in after_rule if ln.startswith("tiny-plain")]
+    assert len(summary) == 3, said
+    assert any("t1 k64" in ln for ln in summary), "the card way was asked with the card"

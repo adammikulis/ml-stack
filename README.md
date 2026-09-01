@@ -267,6 +267,26 @@ it almost never is. A tool of the caller's own that returns pictures (`_images` 
 result) has them shown to the model as a message of their own, since a tool result cannot
 carry an image; a picture that cannot be prepared is a line in `steps`, not a crash.
 
+**A hit that says why it matched, and who is joined to it, is behind a flag until it is
+measured.** `look_up` returns `{id, label, kind}` and nothing else, so a model cannot tell an
+exact label from one word in one quote, and a topic it finds is only halfway to the people
+who have it — measured against a real graph, every staffing question spent rounds guessing
+spellings. `tools_for(graph, rich=True)` (and `converse(..., rich=True)`, `hybrid(...,
+rich=True)`) adds `score`, `matched` — which of `label`, `attribute`, `said`, `words`,
+`meaning` found it — and, on anything that is not a person, `joined`: the eight
+most-mentioned people on any edge to it. The look_up description gains one sentence saying
+so, on a copy. With the flag off nothing observable changes, byte for byte, because the
+answer cache fingerprints those descriptions and a sweep of the current behaviour has to stay
+comparable with the one that measures this.
+
+**The page's routes come with the page.** `graph.html` streams its answers from
+`/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
+`ml_stack.graph.serve.AskRoutes` is that server side for any `http.server` handler. A
+subclass says how a question is answered (`asker`) and where conversations are kept
+(`threads`), and hangs its own journal or queue off `answered`; the SSE framing, the `done`
+frame carrying the whole answer, the history handed back to the model and the turns
+remembered with their `steps` are the library's. Who may ask is still the project's policy.
+
 **A store cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty
 graph, and an empty graph looks exactly like "remove everything". `replace` refuses a write
 that would take most of a store, and leaves a verified snapshot when it would take a tenth.
@@ -649,6 +669,39 @@ every question rather than only the ones that fell short. It is what turns a num
 diagnosis: a model whose wrong answers took *more* calls than its right ones searched hard
 and missed, while one whose wrong answers took *fewer* never reached for the tools at all,
 and those two failures are fixed by opposite things.
+
+F1 scores what was lit, and nothing else scored the prose. An answer can light the right
+entries and still name one the model never found, read or showed -- a plausible name it
+made up, or half-remembered from the question before -- and F1 is none the wiser. So every
+row also counts the entry labels that appear in the answer's text (whole words, case aside,
+as the page matches them) that no tool call produced, and `show` prints the total per run
+as `made`, beside the scores; `--detail` names them, and `--rank` carries the column. Blank
+on a run from before it was counted, because not counted is not none.
+
+`sweep --serve` asks the same served model in several ways for one load: `--also terse`
+describes the tools briefly, `--also card` asks with the model's own sampling, `--also
+greedy` at temperature 0, and `--also rich` has `look_up` say what matched and why, with a
+topic hit bringing the people joined to it.
+
+```
+ml-stack-bench concurrent e2b-4x3 --conversations 4 --turns 3 --base-url http://127.0.0.1:8080
+```
+
+Everything above asks one question at a time, which is right for timing a model and wrong
+for the question a server is actually asked: how many people can talk to it at once, and
+what that costs each of them. `concurrent` runs N conversations of T turns each on threads
+against one server, each a chain of questions with the earlier turns carried, and records
+per turn the wall clock, the time until the server began generating, and what the turn
+spent waiting -- its wall clock less what the server itself reports reading and generating,
+which is the queueing once N exceeds the slots `/slots` reports. For the run it keeps the
+wall clock over all of them (not the sum of the turns), the most the server held while they
+were in flight, sampled rather than read afterwards, and F1 as usual, so a setting that
+answers faster by answering worse is visible. `show` marks such a run `4x3` in the `conc`
+column; the flags a build has for holding conversations -- `--kv-unified`, `--cache-ram`,
+`--cache-idle-slots`, `--slot-prompt-similarity`, `--slot-save-path` -- are typed on
+`ServerSpec`, so they can be varied and the build asked whether it has them before a load.
+It takes the same lock as `run` and `sweep`, and `--smoke` runs two conversations of one
+turn to prove the path.
 
 ## Searching the web
 

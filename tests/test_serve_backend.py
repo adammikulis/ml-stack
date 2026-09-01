@@ -43,6 +43,14 @@ common params:
 --draft, --draft-n, --draft-max N       the argument has been removed. use --spec-draft-n-max or
                                         LLAMA_ARG_SPEC_DRAFT_N_MAX instead
        --no-warmup                      skip warming up the model with an empty run
+-kvu,  --kv-unified, --no-kv-unified    use single unified KV buffer shared across all sequences (default: disabled)
+       --kv-unified-per-slot N          context per slot with a unified KV buffer
+-cram, --cache-ram N                    set the maximum cache size in MiB (default: 8192; -1 = no limit, 0 = disable)
+       --cache-idle-slots, --no-cache-idle-slots
+                                        cache prompts of idle slots (default: enabled)
+-sps,  --slot-prompt-similarity SIMILARITY
+                                        how much the prompt of a request must match the prompt of a slot in order to use that slot (default: 0.10, 0.0 = disabled)
+       --slot-save-path PATH            path to save slot kv cache (default: disabled)
 """
 
 
@@ -143,6 +151,62 @@ class TestUnknownFlags:
             ("--draft-max", "--spec-draft-n-max")]
 
 
+class TestConversationCacheFlags:
+    """How many conversations a server holds at once is llama.cpp's business, through
+    flags a spec had no field for. Typed here so a bench can vary them and the build can
+    be asked whether it has them before a load."""
+
+    def test_none_on_every_field_emits_nothing(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf"))
+        for flag in ("--kv-unified", "--no-kv-unified", "--cache-ram", "--cache-idle-slots",
+                     "--no-cache-idle-slots", "--slot-prompt-similarity", "--slot-save-path"):
+            assert flag not in argv, flag
+
+    def test_true_and_false_emit_the_flag_and_its_no_form(self, tmp_path):
+        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        on = backend_.command(ServerSpec(model="m.gguf", kv_unified=True, cache_idle_slots=True))
+        assert "--kv-unified" in on and "--cache-idle-slots" in on
+        assert "--no-kv-unified" not in on and "--no-cache-idle-slots" not in on
+        off = backend_.command(ServerSpec(model="m.gguf", kv_unified=False,
+                                          cache_idle_slots=False))
+        assert "--no-kv-unified" in off and "--no-cache-idle-slots" in off
+        assert "--kv-unified" not in off and "--cache-idle-slots" not in off
+
+    def test_the_valued_flags_carry_their_values(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf", cache_ram_mb=4096, slot_prompt_similarity=0.25,
+                       slot_save_path=tmp_path / "slots"))
+        assert argv[argv.index("--cache-ram") + 1] == "4096"
+        assert argv[argv.index("--slot-prompt-similarity") + 1] == "0.25"
+        assert argv[argv.index("--slot-save-path") + 1] == str(tmp_path / "slots")
+        # nought is a choice, not an absence: --cache-ram 0 disables the cache
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf", cache_ram_mb=0, slot_prompt_similarity=0.0))
+        assert argv[argv.index("--cache-ram") + 1] == "0"
+        assert argv[argv.index("--slot-prompt-similarity") + 1] == "0.0"
+
+    def test_a_build_that_lists_them_accepts_them(self, tmp_path):
+        binary = fake_server(tmp_path)
+        known = flags_of(binary)
+        assert {"--kv-unified", "--no-kv-unified", "--cache-ram", "--cache-idle-slots",
+                "--no-cache-idle-slots", "--slot-prompt-similarity", "--slot-save-path"} <= known
+        argv = LlamaServerBackend(binary=binary).command(
+            ServerSpec(model="m.gguf", kv_unified=False, cache_ram_mb=8192,
+                       cache_idle_slots=True, slot_prompt_similarity=0.5,
+                       slot_save_path="slots"))
+        assert unknown_flags(argv, known) == []
+
+    def test_a_build_without_them_names_them_before_the_load(self, tmp_path):
+        older = fake_server(tmp_path, "\n".join(
+            line for line in HELP.splitlines()
+            if "kv-unified," not in line and "cache-ram" not in line) + "\n")
+        argv = LlamaServerBackend(binary=older).command(
+            ServerSpec(model="m.gguf", kv_unified=True, cache_ram_mb=8192))
+        lacking = dict(unknown_flags(argv, flags_of(older)))
+        assert set(lacking) == {"--kv-unified", "--cache-ram"}
+
+
 class TestEmittedFlags:
     def test_every_flag_the_argv_builder_knows_appears(self, tmp_path):
         flags = emitted_flags(LlamaServerBackend(binary=fake_server(tmp_path)))
@@ -151,7 +215,9 @@ class TestEmittedFlags:
                      "--override-tensor", "--cpu-moe", "--n-cpu-moe", "--cache-reuse",
                      "--no-warmup", "--kv-unified-per-slot", "--lookup-cache-static",
                      "--lookup-cache-dynamic", "-fa", "--jinja", "--embeddings",
-                     "--pooling"):
+                     "--pooling", "--kv-unified", "--no-kv-unified", "--cache-ram",
+                     "--cache-idle-slots", "--no-cache-idle-slots",
+                     "--slot-prompt-similarity", "--slot-save-path"):
             assert flag in flags, flag
         assert len(flags) == len(set(flags))
         assert not any(token.endswith(".gguf") for token in flags)
