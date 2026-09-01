@@ -108,3 +108,19 @@ Vexley Print
 Merrivale Tooling
 Ganthorpe Works
 Stroud & Hale
+
+# Invented for the hierarchy reader and for the name-check's own tests (2026-09-01).
+# "Jane O" and "Bo Ng" are here because they are the cases that check a one-letter surname
+# and a two-letter name survive the length floor -- the hook flags them, which is the point.
+Jane O
+Bo Ng
+Answer B
+Jo Ash
+Jo  Ash
+Shift Lead
+The Board
+Elowen Trewin
+Osric Trewin
+Verity Trewin
+nobody@example.invalid
+someone@elsewhere.example
