@@ -17,11 +17,14 @@ its kinds or relations.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+
+from ml_stack.graph.search import MATCHED_BY_RANK
 
 SYSTEM = (
     "You are answering a question about a graph. You cannot see it; you read it with the tools "
@@ -131,6 +134,11 @@ def is_working(said: str) -> bool:
 
 FOUND = 12
 JOINED = 12
+# How many people a rich look_up hit brings with it. A topic found is only halfway to who
+# has it, and measured against a real graph every staffing question spent rounds guessing
+# spellings because nothing joined a skill to its people in one call. Eight is enough to
+# staff from and few enough that a hit with its people is still a line, not a page.
+JOINED_HITS = 8
 SAID = 2
 SAID_CHARS = 220
 LIT = 25
@@ -288,6 +296,26 @@ TERSE = [
 ]
 
 
+# What look_up says when its hits carry why they matched and who is joined to them. It is
+# added to a *copy*: the base descriptions are what the answer cache fingerprints and what
+# the bench is measuring, so with the flag off they stay byte for byte as they were.
+RICH_SENTENCE = ("Each hit says why it matched and, for a topic or a place, who is joined to "
+                 "it — read those people rather than searching for them.")
+
+
+def _rich(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Those schemas, copied, with look_up told what its hits now carry."""
+    out = copy.deepcopy(list(schemas))
+    for schema in out:
+        if schema["function"]["name"] == "look_up":
+            schema["function"]["description"] += " " + RICH_SENTENCE
+    return out
+
+
+RICH = _rich(TOOLS)
+RICH_TERSE = _rich(TERSE)
+
+
 # What a *question* looks like when it wants each tool -- for an embedder to match against,
 # and never sent to the chat model.
 #
@@ -399,11 +427,15 @@ class Answer:
         return "; ".join(self.steps)
 
 
-def look_up(graph: Mapping[str, Any], text: str, *, limit: int = FOUND) -> list[dict[str, str]]:
+def look_up(graph: Mapping[str, Any], text: str, *, limit: int = FOUND,
+            rich: bool = False) -> list[dict[str, Any]]:
     """Entries whose name, attributes or own words carry that text, best match first.
 
     Characters only. For a search that also stems and also knows what a word means, pass
-    ``finder=`` to converse — see ``ml_stack.graph.search.hybrid``.
+    ``finder=`` to converse — see ``ml_stack.graph.search.hybrid``. With ``rich``, each hit
+    also carries ``"score"`` (the rank it was found at) and ``"matched"`` (what found it:
+    ``label``, ``attribute`` or ``said``), so an exact name is told apart from one word in
+    one quote. Off, a hit is ``{"id", "label", "kind"}`` and nothing else.
     """
     want = " ".join((text or "").split()).casefold()
     if not want:
@@ -426,8 +458,57 @@ def look_up(graph: Mapping[str, Any], text: str, *, limit: int = FOUND) -> list[
             continue
         scored.append((score, int(node.get("mentions") or 0), node))
     scored.sort(key=lambda row: (-row[0], -row[1], str(row[2].get("label") or "")))
-    return [{"id": str(n["id"]), "label": str(n.get("label") or ""), "kind": str(n.get("kind") or "")}
-            for _, _, n in scored[:limit]]
+    rows: list[dict[str, Any]] = []
+    for score, _, n in scored[:limit]:
+        row: dict[str, Any] = {"id": str(n["id"]), "label": str(n.get("label") or ""),
+                               "kind": str(n.get("kind") or "")}
+        if rich:
+            row["score"] = score
+            row["matched"] = [MATCHED_BY_RANK[score]]
+        rows.append(row)
+    return rows
+
+
+def joined_people(graph: Mapping[str, Any], node_id: str, *,
+                  limit: int = JOINED_HITS) -> list[dict[str, str]]:
+    """The people joined to an entry by any edge, in either direction, most mentioned first.
+
+    For the staffing question: a topic found is halfway to who has it, and reading the
+    people off the topic in the same call is what saves the rounds spent guessing their
+    spellings. A person is whatever the graph calls ``person``, by kind or by id prefix.
+    """
+    by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
+    people: dict[str, Mapping[str, Any]] = {}
+    for edge in graph.get("edges") or ():
+        source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+        other = target if source == node_id else source if target == node_id else ""
+        if not other or other == node_id:
+            continue
+        node = by_id.get(other)
+        if node is not None and _kind_of(node) == "person":
+            people[other] = node
+    rows = sorted(people.values(), key=lambda n: (-int(n.get("mentions") or 0),
+                                                  str(n.get("label") or ""), str(n["id"])))
+    return [{"id": str(n["id"]), "label": str(n.get("label") or "")} for n in rows[:limit]]
+
+
+def _enriched(graph: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """look_up's hits with, on each that is not a person, the people joined to it.
+
+    A finder of the caller's own may already say why a hit matched (``score``,
+    ``matched``); what it did not say is left out rather than guessed, and ``joined`` is
+    read from the graph either way. The caller's rows are copied, never written to.
+    """
+    by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        row = dict(r)
+        node = by_id.get(str(row.get("id") or ""))
+        kind = str(row.get("kind") or "") or (_kind_of(node) if node is not None else "")
+        if kind != "person":
+            row["joined"] = joined_people(graph, str(row.get("id") or ""))
+        out.append(row)
+    return out
 
 
 def look_at(graph: Mapping[str, Any], ids: Sequence[str]) -> str:
@@ -538,11 +619,17 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 
 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
-              terse: bool = False) -> list[tuple[dict[str, Any], Any]]:
+              terse: bool = False, rich: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
     it takes the text and returns ``[{"id", "label", "kind"}, ...]``.
+
+    ``rich`` is a retrieval change still being measured, so it is off unless asked for:
+    each look_up hit then says why it matched (``score``, ``matched``) and, when it is not a
+    person, who is joined to it (``joined``), and the look_up description says so. Off,
+    nothing observable changes -- the same descriptions byte for byte, the same result
+    shape -- so a sweep of the current behaviour stays comparable with one before it.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -552,10 +639,12 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
             wanted = [str(args["text"])]
         rows, seen = [], set()
         for text in wanted:
-            for r in (finder(text) if finder is not None else look_up(graph, text)):
+            for r in (finder(text) if finder is not None else look_up(graph, text, rich=rich)):
                 if r["id"] not in seen:
                     seen.add(r["id"])
                     rows.append(r)
+        if rich:
+            rows = _enriched(graph, rows)
         # an empty list reads as "try again"; saying nothing matched reads as "move on"
         return rows or {"none": f"Nothing in the graph matches {', '.join(map(repr, wanted))}. "
                                 "Try different words, or answer with what you already have."}
@@ -575,9 +664,12 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
 
     does = {"look_up": find, "look_at": read, "path_between": trace,
             "list_kind": listing, "show": light}
+    if rich:
+        schemas = RICH_TERSE if terse else RICH
+    else:
+        schemas = TERSE if terse else TOOLS
     # in the order the schemas are written, which is the order a model reads them in
-    return [(schema, does[str(schema["function"]["name"])])
-            for schema in (TERSE if terse else TOOLS)]
+    return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
 
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -585,7 +677,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              rounds: int = ROUNDS, limit: int = LIT,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
-             opening: Sequence[str] = ()) -> Answer:
+             opening: Sequence[str] = (), rich: bool = False) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -593,11 +685,12 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``[(schema, callable), ...]``, each callable taking the parsed arguments mapping;
     ``tools_for(graph)`` by default. ``finder`` replaces just look_up's callable.
     ``held`` names entries already highlighted for the reader: they are told to the model
-    by label and id, and enter ``ids`` only if a tool call touches them.
+    by label and id, and enter ``ids`` only if a tool call touches them. ``rich`` is
+    ``tools_for``'s: look_up hits that say why they matched and who is joined to them.
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
-                     opening=opening)
+                     opening=opening, rich=rich)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -606,7 +699,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     rounds: int = ROUNDS, limit: int = LIT,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
-                    opening: Sequence[str] = ()) -> Answer:
+                    opening: Sequence[str] = (), rich: bool = False) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -618,7 +711,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
-                     opening=opening)
+                     opening=opening, rich=rich)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -662,9 +755,10 @@ def _result_count(result: Any) -> int:
 def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
-              finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = ()) -> Answer:
+              finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
+              rich: bool = False) -> Answer:
     if tools is None:
-        tools = tools_for(graph, finder=finder)
+        tools = tools_for(graph, finder=finder, rich=rich)
     elif finder is not None:
         def _found(args: Mapping[str, Any]) -> Any:
             wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
@@ -676,7 +770,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                     if r["id"] not in seen:
                         seen.add(r["id"])
                         rows.append(r)
-            return rows
+            return _enriched(graph, rows) if rich else rows
 
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
                  else (schema, _found)

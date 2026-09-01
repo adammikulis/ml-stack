@@ -22,21 +22,41 @@ from typing import Any
 RRF_K = 60
 LIMIT = 12
 
+# What a lexical rank means, for a hit to say why it matched. The whole label and part of it
+# are both "label" -- what tells them apart is the rank, and the score carries that. The
+# names are the voters a rich `hybrid` hit lists under "matched", beside the store's two.
+MATCHED_BY_RANK = {4: "label", 3: "label", 2: "attribute", 1: "said"}
+WORDS = "words"
+MEANING = "meaning"
 
-def rrf(*rankings: Sequence[str], k: int = RRF_K, limit: int = LIMIT) -> list[str]:
-    """Fuse ranked lists of ids. Appearing well in two beats appearing first in one."""
+
+def rrf_scored(*rankings: Sequence[str], k: int = RRF_K,
+               limit: int = LIMIT) -> list[tuple[str, float]]:
+    """Fused ids with the score that placed them, best first.
+
+    For a hit that says how well it did: one vote at the top is worth 1/(k+1), and the
+    number only means something against the others in the same list.
+    """
     score: dict[str, float] = {}
     for ranking in rankings:
         for rank, node_id in enumerate(ranking):
             score[node_id] = score.get(node_id, 0.0) + 1.0 / (k + rank + 1)
-    return [node_id for node_id, _ in
-            sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))][:limit]
+    return sorted(score.items(), key=lambda kv: (-kv[1], kv[0]))[:limit]
 
 
-def lexical(graph: Mapping[str, Any], text: str, *, limit: int = LIMIT) -> list[str]:
+def rrf(*rankings: Sequence[str], k: int = RRF_K, limit: int = LIMIT) -> list[str]:
+    """Fuse ranked lists of ids. Appearing well in two beats appearing first in one."""
+    return [node_id for node_id, _ in rrf_scored(*rankings, k=k, limit=limit)]
+
+
+def lexical(graph: Mapping[str, Any], text: str, *, limit: int = LIMIT,
+            rich: bool = False) -> list[Any]:
     """Ids whose label, attributes or own words carry the characters, best first.
 
     Ranked: the whole label, then part of it, then an attribute, then something that was said.
+    With ``rich``, each comes as ``{"id", "score", "matched"}`` -- the rank it was found at
+    and the one thing that found it, named as ``hybrid`` names its voters -- so a caller can
+    tell an exact label from one word in one quote.
     """
     want = " ".join((text or "").split()).casefold()
     if not want:
@@ -59,31 +79,58 @@ def lexical(graph: Mapping[str, Any], text: str, *, limit: int = LIMIT) -> list[
             continue
         scored.append((rank, int(node.get("mentions") or 0), str(node["id"])))
     scored.sort(key=lambda row: (-row[0], -row[1], row[2]))
-    return [node_id for _, _, node_id in scored[:limit]]
+    if not rich:
+        return [node_id for _, _, node_id in scored[:limit]]
+    return [{"id": node_id, "score": rank, "matched": [MATCHED_BY_RANK[rank]]}
+            for rank, _, node_id in scored[:limit]]
 
 
 def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
            vector: Sequence[float] | None = None, model: str = "",
-           limit: int = LIMIT) -> list[dict[str, str]]:
+           limit: int = LIMIT, rich: bool = False) -> list[dict[str, Any]]:
     """The three ways, fused. Whatever is unavailable simply does not vote.
 
     ``store`` supplies the word index and the vectors; ``vector`` is the question already
     embedded, which the caller does because only it knows which embedder the graph was built
     with.
+
+    Each hit is ``{"id", "label", "kind"}``. With ``rich`` it also says how it got there:
+    ``"score"`` is the fused score to three places, and ``"matched"`` names the voters that
+    found it -- ``"label"``, ``"attribute"`` or ``"said"`` from the characters, ``"words"``
+    from the word index, ``"meaning"`` from the vectors -- so a reader can tell an exact
+    label from one word in one quote. Off, the hit is exactly what it always was.
     """
-    rankings: list[list[str]] = [lexical(graph, text, limit=limit * 2)]
+    found = lexical(graph, text, limit=limit * 2, rich=True)
+    rankings: list[list[str]] = [[r["id"] for r in found]]
+    voters: dict[str, list[str]] = {r["id"]: list(r["matched"]) for r in found}
+
+    def vote(ranking: list[str], name: str) -> None:
+        rankings.append(ranking)
+        for node_id in ranking:
+            mine = voters.setdefault(node_id, [])
+            if name not in mine:
+                mine.append(name)
+
     if store is not None:
         try:
-            rankings.append([r["id"] for r in store.search(text, limit=limit * 2)])
+            vote([r["id"] for r in store.search(text, limit=limit * 2)], WORDS)
         except Exception:  # noqa: BLE001 - no index yet is not an error, it is one fewer vote
             pass
         if vector is not None:
             try:
-                rankings.append([r["id"] for r in
-                                 store.similar(vector, model=model, limit=limit * 2)])
+                vote([r["id"] for r in store.similar(vector, model=model, limit=limit * 2)],
+                     MEANING)
             except Exception:  # noqa: BLE001
                 pass
     known = {str(n["id"]): n for n in (graph.get("nodes") or ())}
-    return [{"id": i, "label": str(known[i].get("label") or ""),
-             "kind": str(known[i].get("kind") or "")}
-            for i in rrf(*rankings, limit=limit) if i in known]
+    rows: list[dict[str, Any]] = []
+    for node_id, score in rrf_scored(*rankings, limit=limit):
+        if node_id not in known:
+            continue
+        row: dict[str, Any] = {"id": node_id, "label": str(known[node_id].get("label") or ""),
+                               "kind": str(known[node_id].get("kind") or "")}
+        if rich:
+            row["score"] = round(score, 3)
+            row["matched"] = list(voters.get(node_id, ()))
+        rows.append(row)
+    return rows

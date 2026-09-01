@@ -84,3 +84,52 @@ def test_meaning_finds_what_the_characters_cannot():
 def test_an_id_the_store_knows_but_the_graph_does_not_is_dropped():
     store = Store(by_word=["t:gone"], by_meaning=["t:gone"])
     assert "t:gone" not in [h["id"] for h in hybrid(GRAPH, "compilers", store=store, vector=[0.1])]
+
+
+def test_fusion_can_say_what_placed_each_id():
+    """The ids alone are what `rrf` always gave; the scores are for a hit to say how well
+    it did, and the two must agree."""
+    from ml_stack.graph.search import rrf_scored
+
+    scored = rrf_scored(["a", "b"], ["c", "b"], limit=3)
+    assert [i for i, _ in scored] == rrf(["a", "b"], ["c", "b"], limit=3)
+    assert scored[0][1] > scored[1][1] > 0
+
+
+def test_without_rich_a_hit_carries_exactly_what_it_always_did():
+    """A benchmark of the current behaviour is about to run; the flag off must be invisible."""
+    store = Store(by_word=["t:compilers"], by_meaning=["p:ada"])
+    for hit in hybrid(GRAPH, "compilers", store=store, vector=[0.1]):
+        assert set(hit) == {"id", "label", "kind"}
+    assert lexical(GRAPH, "compilers") == ["t:compilers", "p:ada"]
+
+
+def test_the_characters_say_what_they_matched_on():
+    assert lexical(GRAPH, "analyst", rich=True) == [
+        {"id": "p:ada", "score": 2, "matched": ["attribute"]}]
+    assert lexical(GRAPH, "compilers", rich=True)[0] == \
+        {"id": "t:compilers", "score": 4, "matched": ["label"]}
+    assert lexical(GRAPH, "machines", rich=True)[1]["matched"] == ["said"]
+
+
+def test_a_rich_hit_names_the_voters_that_actually_fired():
+    """An exact label and one word in one quote both come back as hits; what tells them
+    apart is which of the three ways found them, so that is said."""
+    # the characters alone: the label found the topic, and a quote found the person
+    alone = hybrid(GRAPH, "compilers", rich=True, limit=3)
+    assert [(h["id"], h["matched"]) for h in alone] == \
+        [("t:compilers", ["label"]), ("p:ada", ["said"])]
+    assert all(isinstance(h["score"], float) and h["score"] > 0 for h in alone)
+    # the characters and the word index, no vectors
+    words = Store(by_word=["t:compilers"])
+    with_words = hybrid(GRAPH, "compilers", store=words, rich=True, limit=3)
+    assert with_words[0]["matched"] == ["label", "words"]
+    assert with_words[0]["score"] == round(2 / 61, 3)
+    assert with_words[1]["matched"] == ["said"]
+    # all three, and one the vectors alone found
+    both = Store(by_word=["t:compilers"], by_meaning=["t:compilers", "p:bea"])
+    with_meaning = hybrid(GRAPH, "compilers", store=both, vector=[0.1], rich=True)
+    by_id = {h["id"]: h["matched"] for h in with_meaning}
+    assert by_id["t:compilers"] == ["label", "words", "meaning"]
+    assert by_id["p:bea"] == ["meaning"]
+    assert by_id["p:ada"] == ["said"]

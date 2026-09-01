@@ -1030,3 +1030,136 @@ def test_the_web_tools_are_searches_and_go_away_with_the_others():
 
     assert {"web_search", "web_read", "web_look"} <= SEARCHING
     assert "show" not in SEARCHING
+
+
+def _staffing_graph(people=10):
+    """A topic with more people joined to it than a rich hit carries, plus one person joined
+    to nothing and one place, so the cap, the order and the kinds can each be checked."""
+    nodes = [{"id": "topic:welding", "kind": "topic", "label": "welding", "mentions": 20,
+              "attrs": {}, "messages": []},
+             {"id": "place:ambleford", "kind": "place", "label": "Ambleford", "mentions": 5,
+              "attrs": {}, "messages": []},
+             {"id": "org:tinsley", "kind": "org", "label": "Tinsley Works", "mentions": 2,
+              "attrs": {}, "messages": []},
+             {"id": "person:loner", "kind": "person", "label": "Orla Quist", "mentions": 9,
+              "attrs": {}, "messages": []}]
+    edges = []
+    for n in range(people):
+        pid = f"person:w{n}"
+        nodes.append({"id": pid, "kind": "person", "label": f"Welder {n:02d}",
+                      "mentions": n, "attrs": {}, "messages": []})
+        # both directions, so an edge into the topic counts the same as one out of it
+        if n % 2:
+            edges.append({"source": pid, "target": "topic:welding", "rel": "interested_in"})
+        else:
+            edges.append({"source": "topic:welding", "target": pid, "rel": "has_member"})
+    edges.append({"source": "topic:welding", "target": "org:tinsley", "rel": "related"})
+    edges.append({"source": "person:w3", "target": "place:ambleford", "rel": "lives_in"})
+    return {"nodes": nodes, "edges": edges, "messages": {}}
+
+
+def test_with_rich_off_look_up_returns_exactly_what_it_always_did():
+    """The comparability guarantee: a sweep of the current behaviour is about to run, and
+    the answer cache fingerprints the tool descriptions, so the flag off is invisible --
+    the same schema object, the same keys in the JSON the model reads."""
+    import json
+
+    from ml_stack.graph.ask import RICH_SENTENCE, TOOLS
+
+    assert tools_for(GRAPH)[0][0] is TOOLS[0]
+    assert RICH_SENTENCE not in TOOLS[0]["function"]["description"]
+    model = ScriptedModel([call("look_up", text="compilers")])
+    converse("?", GRAPH, model)
+    handed = [m for m in model.seen[-1] if m.get("role") == "tool"]
+    rows = json.loads(handed[0]["content"])
+    assert rows and all(set(r) == {"id", "label", "kind"} for r in rows)
+    assert all(set(r) == {"id", "label", "kind"} for r in look_up(GRAPH, "compilers"))
+
+
+def test_a_rich_topic_hit_says_why_and_brings_its_people_most_mentioned_first_and_capped():
+    from ml_stack.graph.ask import JOINED_HITS, joined_people
+
+    graph = _staffing_graph()
+    find = tools_for(graph, rich=True)[0][1]
+    rows = find({"text": "welding"})
+    assert rows[0]["id"] == "topic:welding"
+    assert rows[0]["score"] == 4 and rows[0]["matched"] == ["label"]
+    joined = rows[0]["joined"]
+    assert len(joined) == JOINED_HITS == 8
+    # ten people are joined; the eight most mentioned come, best first, from both directions
+    assert [j["id"] for j in joined] == [f"person:w{n}" for n in range(9, 1, -1)]
+    assert joined[0] == {"id": "person:w9", "label": "Welder 09"}
+    assert "org:tinsley" not in {j["id"] for j in joined}, "only people are brought"
+    # a place brings its one person; an org with nobody says so, plainly
+    assert joined_people(graph, "place:ambleford") == [{"id": "person:w3", "label": "Welder 03"}]
+    assert joined_people(graph, "org:tinsley") == []
+    assert find({"text": "tinsley"})[0]["joined"] == []
+
+
+def test_a_rich_person_hit_has_no_joined_list():
+    graph = _staffing_graph()
+    find = tools_for(graph, rich=True)[0][1]
+    rows = find({"text": "Orla"})
+    assert rows[0]["id"] == "person:loner"
+    assert "joined" not in rows[0]
+    assert set(rows[0]) == {"id", "label", "kind", "score", "matched"}
+
+
+def test_a_finder_that_does_not_say_why_still_brings_the_people():
+    """The app's finder returns plain rows; the wrapper adds what it can read from the graph
+    and leaves out what it would only be guessing at."""
+    graph = _staffing_graph()
+
+    def finder(text):
+        return [{"id": "topic:welding", "label": "welding", "kind": "topic"},
+                {"id": "person:w1", "label": "Welder 01", "kind": "person"}]
+
+    plain = tools_for(graph, finder=finder)[0][1]({"text": "x"})
+    assert all(set(r) == {"id", "label", "kind"} for r in plain)
+    rich = tools_for(graph, finder=finder, rich=True)[0][1]({"text": "x"})
+    assert set(rich[0]) == {"id", "label", "kind", "joined"}
+    assert len(rich[0]["joined"]) == 8
+    assert set(rich[1]) == {"id", "label", "kind"}
+    # a finder that does say why keeps its word, and the finder's own rows are untouched
+    said = [{"id": "topic:welding", "label": "welding", "kind": "topic",
+             "score": 0.033, "matched": ["label", "words"]}]
+    out = tools_for(graph, finder=lambda t: said, rich=True)[0][1]({"text": "x"})
+    assert out[0]["matched"] == ["label", "words"] and out[0]["score"] == 0.033
+    assert "joined" in out[0] and "joined" not in said[0]
+
+
+def test_the_rich_sentence_is_only_in_the_rich_schema():
+    from ml_stack.graph.ask import RICH_SENTENCE, TERSE, TOOLS
+
+    for terse, base in ((False, TOOLS), (True, TERSE)):
+        rich = tools_for(GRAPH, terse=terse, rich=True)[0][0]
+        assert rich is not base[0]
+        assert rich["function"]["description"].endswith(RICH_SENTENCE)
+        assert RICH_SENTENCE not in base[0]["function"]["description"]
+        assert rich["function"]["parameters"] == base[0]["function"]["parameters"]
+        assert rich["function"]["description"] == \
+            base[0]["function"]["description"] + " " + RICH_SENTENCE
+        # the other four are the same words
+        for r, b in zip(tools_for(GRAPH, terse=terse, rich=True)[1:],
+                        tools_for(GRAPH, terse=terse)[1:], strict=True):
+            assert r[0] == b[0]
+
+
+def test_converse_rich_reaches_the_tool():
+    import json
+
+    model = ScriptedModel([call("look_up", text="compilers")])
+    out = converse("who does compilers?", GRAPH, model, rich=True)
+    assert out.found[0] == "topic:compilers"
+    handed = [m for m in model.seen[-1] if m.get("role") == "tool"]
+    rows = json.loads(handed[0]["content"])
+    topic = next(r for r in rows if r["id"] == "topic:compilers")
+    assert topic["matched"] == ["label"] and topic["score"] == 4
+    assert topic["joined"] == [{"id": "person:ada", "label": "Ada Lovelace"},
+                               {"id": "person:bea", "label": "Bea Marlow"}]
+    # the streamed path takes the same flag
+    events = []
+    streamed = ScriptedModel([call("look_up", text="compilers")])
+    converse_stream("who does compilers?", GRAPH, streamed, on_event=events.append, rich=True)
+    handed = [m for m in streamed.seen[-1] if m.get("role") == "tool"]
+    assert "joined" in json.loads(handed[0]["content"])[0]
