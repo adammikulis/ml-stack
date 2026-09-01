@@ -314,6 +314,42 @@ A rebuilt graph misses on its own, but does not sweep on its own: pass
 ever gave. Entries live under keys beginning `_`, which `GraphStore.docs` skips, so a cache
 in the same store as a graph never leaks into `read()`.
 
+## What this measured, and what it changed
+
+Answering a graph is the case this was built for, so the numbers are here rather than in
+somebody's notes. Ten questions over the invented community, 32k per slot, greedy, one run
+at a time on an otherwise idle machine:
+
+| run | right | wall | calls | tokens paid | KV + runtime |
+| --- | --- | --- | --- | --- | --- |
+| **e2b-shortlist** | **80%** | **64s** | 30 | 20,264 | **3.50G** |
+| e2b-plain | 55% | 59s | 42 | 17,072 | 3.21G |
+| e4b-plain | 70% | 159s | 60 | 29,148 | 7.75G |
+| e4b-shortlist | 70% | 300s | 64 | 51,944 | 8.34G |
+| gptoss-plain | 65% | 127s | 61 | 25,368 | 11.89G |
+| gptoss-shortlist | 70% | 198s | 69 | 34,313 | 11.89G |
+
+**A 2B model with a shortlist beat a 120B on all four at once** — ten points more accurate,
+three times faster, three times less memory, 41% fewer tokens. Not a trade: run
+`show --rates --cost seconds|paid_tokens|kv_bytes` and the Pareto frontier is the same two
+E2B rows whichever cost you draw it against. Every other configuration is dominated, so
+there is no budget at which you would choose one.
+
+**What moved it was not the model.** E4B scored 17% before the tool descriptions carried a
+worked call, and 72% after — the same weights, the same questions. Six of its nine failures
+had been the identical shape: two model calls, a hundred characters of prose, no search at
+all. A description that says what a tool *is* leaves a small model to infer that it should
+be called. The large models never needed telling, which is why this went unseen until a
+small one was measured — and why the descriptions in `graph.ask` read the way they do.
+
+Two things this cost before the numbers meant anything. Timings were measured while other
+runs shared the GPU, which is why `sweep` and `run` refuse a busy server now. And every
+model had a 512-token ceiling for thinking, tool calls and answer together, because
+`n_predict` defaulted low: a thinking model fills that with reasoning and returns an empty
+answer, so what a low ceiling truncates is never the thinking.
+
+None of this survives a new model release. Re-run it.
+
 ## Measuring a change to the asking
 
 ```
