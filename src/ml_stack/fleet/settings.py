@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
-import tempfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import write_json
 
 __all__ = ["Settings", "Suggestion", "suggest"]
 
@@ -48,15 +48,8 @@ class Settings:
     def save(self, path: Path | str) -> Path:
         """Written atomically -- a half-written settings file reads as no settings."""
         p = Path(path).expanduser()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=p.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump(asdict(self), fh, indent=2, sort_keys=True)
-            os.replace(tmp, p)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        # Every field is flat, so sorting the top level is what sort_keys did.
+        write_json(p, dict(sorted(asdict(self).items())))
         return p
 
     def public(self) -> dict[str, Any]:

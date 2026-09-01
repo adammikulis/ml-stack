@@ -155,7 +155,7 @@ def conversation_batches(rendered: Sequence[tuple[list[int], list[int]]], *, bat
 # -- the model ------------------------------------------------------------------------------------
 
 def load_base(base: str, *, device: Any = None) -> tuple[Any, Any]:
-    """``(model, tokenizer)`` for a Hugging Face causal LM, the model wrapped for checkpointing.
+    """``(model, tokenizer)`` for a Hugging Face causal LM, on ``device``.
 
     Whatever ``transformers`` cannot import is reported as the seam it is, rather than as
     a missing attribute three frames down.
@@ -177,61 +177,7 @@ def load_base(base: str, *, device: Any = None) -> tuple[Any, Any]:
     model = AutoModelForCausalLM.from_pretrained(base, dtype=torch.float32)
     model.config.use_cache = False
     model.to(device or device_for())
-    return checkpointable(model), tokenizer
-
-
-_CHECKPOINTABLE: Any = None
-
-
-def checkpointable(lm: Any) -> Any:
-    """A Hugging Face causal LM wrapped so its state dict names each tensor once.
-
-    Measured on a Gemma3 model: ``state_dict()`` holds ``lm_head.weight`` and
-    ``model.embed_tokens.weight`` as one storage under two names, and safetensors refuses
-    to write shared tensors — so the existing ``TorchStep`` would fail at its first
-    checkpoint. Here the duplicate is dropped on the way out and re-tied on the way back
-    in, which is what ``save_pretrained`` does too, and the trainer is used unchanged.
-    The wrapper's ``lm`` is the model itself, for ``save_pretrained`` and generation.
-
-    The class is built on first use so that importing this module needs no torch.
-    """
-    global _CHECKPOINTABLE
-    if _CHECKPOINTABLE is None:
-        import torch.nn as nn
-
-        class Checkpointable(nn.Module):
-            def __init__(self, lm: Any) -> None:
-                super().__init__()
-                self.lm = lm
-                seen: dict[int, str] = {}
-                self.tied: dict[str, str] = {}
-                for name, tensor in lm.state_dict().items():
-                    key = tensor.data_ptr()
-                    if key in seen and tensor.numel():
-                        self.tied[name] = seen[key]
-                    else:
-                        seen[key] = name
-
-            def forward(self, *args: Any, **kwargs: Any) -> Any:
-                return self.lm(*args, **kwargs)
-
-            def state_dict(self, *args: Any, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
-                return {k: v for k, v in self.lm.state_dict(*args, **kwargs).items()
-                        if k not in self.tied}
-
-            def load_state_dict(self, state: Mapping[str, Any],  # type: ignore[override]
-                                strict: bool = True) -> Any:
-                result = self.lm.load_state_dict(dict(state), strict=False)
-                missing = [k for k in result.missing_keys if k not in self.tied]
-                if strict and (missing or result.unexpected_keys):
-                    raise KeyError(f"checkpoint does not fit the model: missing {missing}, "
-                                   f"unexpected {list(result.unexpected_keys)}")
-                if any(name in result.missing_keys for name in self.tied):
-                    self.lm.tie_weights()
-                return result
-
-        _CHECKPOINTABLE = Checkpointable
-    return _CHECKPOINTABLE(lm)
+    return model, tokenizer
 
 
 # -- the recipe ------------------------------------------------------------------------------------
@@ -296,6 +242,7 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
 def save_pretrained(run_dir: Path | str, base: str, out_dir: Path | str) -> Path:
     """The run's latest checkpoint as a Hugging Face directory, which is what a GGUF converter reads."""
     from ml_stack.train.checkpoint import find_latest, load_tensors
+    from ml_stack.train.step import load_state_once
 
     run_dir, out_dir = Path(run_dir).expanduser(), Path(out_dir).expanduser()
     latest = find_latest(run_dir)
@@ -304,8 +251,8 @@ def save_pretrained(run_dir: Path | str, base: str, out_dir: Path | str) -> Path
     from safetensors.torch import load_file
 
     model, tokenizer = load_base(base, device="cpu")
-    model.load_state_dict(load_tensors(latest, read_tensors=lambda p: dict(load_file(str(p)))))
+    load_state_once(model, load_tensors(latest, read_tensors=lambda p: dict(load_file(str(p)))))
     out_dir.mkdir(parents=True, exist_ok=True)
-    model.lm.save_pretrained(out_dir)
+    model.save_pretrained(out_dir)
     tokenizer.save_pretrained(out_dir)
     return out_dir

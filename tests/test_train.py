@@ -637,3 +637,86 @@ class TestFertility:
         from ml_stack.train import report_markdown
         assert "no measurements" in report_markdown([], d_model=512,
                                                     non_embedding_params=1)
+
+
+class TestTorchStepTiedWeights:
+    """A Gemma checkpoint ties ``lm_head.weight`` to ``model.embed_tokens.weight`` -- one
+    storage under two names -- and safetensors refuses to write a shared tensor twice. The
+    same shape, in the smallest module that has it."""
+
+    @staticmethod
+    def tied_module():
+        torch = pytest.importorskip("torch")
+        nn = torch.nn
+
+        class Tied(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.embed = nn.Embedding(7, 4)
+                self.head = nn.Linear(4, 7, bias=False)
+                self.head.weight = self.embed.weight
+                self.scale = nn.Parameter(torch.ones(4))
+
+            def forward(self, ids):
+                return self.head(self.embed(ids) * self.scale)
+
+        torch.manual_seed(0)
+        return Tied()
+
+    @staticmethod
+    def step_for(model):
+        import torch
+
+        from ml_stack.train.step import TorchStep
+
+        def loss(m, batch):
+            return m(batch).float().pow(2).mean()
+
+        return TorchStep(model, torch.optim.SGD(model.parameters(), lr=0.1), loss)
+
+    def test_a_tied_weight_is_named_once_and_safetensors_writes_it(self, tmp_path):
+        from safetensors.torch import load_file, save_file
+
+        step = self.step_for(self.tied_module())
+        tensors = step.parameters()
+
+        assert "embed.weight" in tensors and "head.weight" not in tensors
+        assert "scale" in tensors
+        save_file(tensors, str(tmp_path / "model.safetensors"))
+        assert set(load_file(str(tmp_path / "model.safetensors"))) == set(tensors)
+
+    def test_a_resume_reties_the_name_the_checkpoint_left_out(self, tmp_path):
+        import torch
+        from safetensors.torch import load_file, save_file
+
+        trained = self.tied_module()
+        step = self.step_for(trained)
+        step(torch.tensor([[1, 2, 3]]))
+        save_file(step.parameters(), str(tmp_path / "model.safetensors"))
+
+        fresh = self.tied_module()
+        with torch.no_grad():
+            fresh.embed.weight.add_(1.0)
+        self.step_for(fresh).restore(load_file(str(tmp_path / "model.safetensors")), None)
+
+        assert torch.equal(fresh.embed.weight, trained.embed.weight)
+        assert torch.equal(fresh.head.weight, trained.embed.weight)
+        assert fresh.head.weight.data_ptr() == fresh.embed.weight.data_ptr(), \
+            "the resume must leave one storage under two names, as the model was built"
+        ids = torch.tensor([[4, 5]])
+        assert torch.equal(fresh(ids), trained(ids))
+
+    def test_a_checkpoint_missing_an_untied_tensor_is_still_refused(self):
+        step = self.step_for(self.tied_module())
+        tensors = step.parameters()
+        del tensors["scale"]
+        with pytest.raises(CheckpointError, match="scale"):
+            step.restore(tensors, None)
+
+    def test_a_checkpoint_with_a_tensor_the_model_lacks_is_refused(self):
+        import torch
+
+        step = self.step_for(self.tied_module())
+        tensors = {**step.parameters(), "extra": torch.zeros(1)}
+        with pytest.raises(CheckpointError, match="extra"):
+            step.restore(tensors, None)

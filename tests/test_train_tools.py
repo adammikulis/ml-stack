@@ -311,7 +311,8 @@ class TestRecipe:
     def test_the_tiny_base_trains_and_checkpoints_through_the_existing_trainer(self, dataset,
                                                                                tmp_path):
         """Tied embeddings are the case: safetensors refuses a state dict that names one
-        storage twice, and a Gemma checkpoint does. The wrapper is what makes this pass."""
+        storage twice, and a Gemma checkpoint does. The trainer names each storage once
+        on the way out and re-ties on the way back, so this model needs no wrapper."""
         from ml_stack.train import read
         from ml_stack.train.run import run
 

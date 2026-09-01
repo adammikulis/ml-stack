@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
-import tempfile
 import time
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import write_json
 
 __all__ = ["Endpoint", "Served", "Serving", "Started", "discover_serving",
            "start_model", "stop_model"]
@@ -96,15 +96,7 @@ class Serving:
 
     def _write(self, rows: list[Served]) -> None:
         self._live = (0.0, [])
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump([s.public() for s in rows], fh, indent=2)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        write_json(self.path, [s.public() for s in rows])
 
 
 @dataclass(frozen=True, slots=True)

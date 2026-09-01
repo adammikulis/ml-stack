@@ -6,7 +6,8 @@ import math
 from collections.abc import Callable
 from typing import Any, Protocol
 
-__all__ = ["Step", "TorchStep", "MLXStep", "step_for"]
+__all__ = ["Step", "TorchStep", "MLXStep", "step_for",
+           "tied_names", "state_once", "load_state_once"]
 
 Batch = Any
 Loss = Callable[[Any, Batch], Any]
@@ -73,7 +74,7 @@ class TorchStep:
             return float(self.loss(self.model, batch))
 
     def parameters(self) -> dict[str, Any]:
-        return {k: v.detach().cpu() for k, v in self.model.state_dict().items()}
+        return {k: v.detach().cpu() for k, v in state_once(self.model).items()}
 
     def optimizer_state(self) -> dict[str, Any]:
         import torch
@@ -94,7 +95,7 @@ class TorchStep:
         return out
 
     def restore(self, tensors: dict[str, Any], optimizer: dict[str, Any] | None) -> None:
-        self.model.load_state_dict(tensors)
+        load_state_once(self.model, tensors)
         if not optimizer:
             return
         names = [n for n, _ in self.model.named_parameters()]
@@ -169,6 +170,54 @@ class MLXStep:
         if optimizer:
             self.opt.state = tree_unflatten(list(optimizer.items()))
         self.mx.eval(self.model.parameters())
+
+
+def tied_names(model: Any) -> dict[str, str]:
+    """Each state-dict name that is a second name for a storage listed earlier, and the first.
+
+    Measured on a Gemma checkpoint: ``lm_head.weight`` and ``model.embed_tokens.weight`` are
+    one storage under two names, and safetensors refuses to write a shared tensor twice, so
+    a state dict taken as it comes fails at the first checkpoint. An empty tensor shares
+    nothing, whatever its pointer says.
+    """
+    seen: dict[int, str] = {}
+    tied: dict[str, str] = {}
+    for name, tensor in model.state_dict().items():
+        if not tensor.numel():
+            continue
+        key = tensor.data_ptr()
+        if key in seen:
+            tied[name] = seen[key]
+        else:
+            seen[key] = name
+    return tied
+
+
+def state_once(model: Any) -> dict[str, Any]:
+    """A torch module's state dict with every storage under one name, as safetensors wants it."""
+    tied = tied_names(model)
+    return {k: v for k, v in model.state_dict().items() if k not in tied}
+
+
+def load_state_once(model: Any, tensors: dict[str, Any]) -> None:
+    """Put a ``state_once`` dict back into the module, re-tying what it left out.
+
+    Strict in every other way: a tensor the module has and the file lacks, or the reverse,
+    is a checkpoint that does not fit, and nothing of it is kept.
+    """
+    from ml_stack.train.checkpoint import CheckpointError
+
+    tied = tied_names(model)
+    missing = [k for k in state_once(model) if k not in tensors]
+    unexpected = [k for k in tensors if k not in model.state_dict()]
+    if missing or unexpected:
+        raise CheckpointError(
+            f"checkpoint does not fit the model: missing {missing}, unexpected {unexpected}")
+    model.load_state_dict(dict(tensors), strict=False)
+    # Copying into one name of a shared Parameter filled the other; a model that ties
+    # explicitly (a Hugging Face one) is asked to as well, in case a load untied it.
+    if any(name not in tensors for name in tied) and callable(getattr(model, "tie_weights", None)):
+        model.tie_weights()
 
 
 def step_for(model: Any, optimizer: Any, loss: Loss,

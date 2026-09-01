@@ -11,7 +11,6 @@ import os
 import secrets
 import socket
 import struct
-import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -19,6 +18,8 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import write_json
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
@@ -197,16 +198,7 @@ def _write_memberships(rows: list[Membership],
                        path: Path | str | None = None) -> None:
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
-    listed.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=listed.parent, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w") as fh:
-            json.dump([{"group": m.group, "key": m.key.decode()} for m in rows], fh,
-                      indent=2)
-        os.replace(tmp, listed)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+    write_json(listed, [{"group": m.group, "key": m.key.decode()} for m in rows])
     listed.chmod(0o600)
 
 

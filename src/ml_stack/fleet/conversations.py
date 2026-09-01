@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import write_json
 
 __all__ = ["Conversation", "Conversations", "Message"]
 
@@ -133,15 +133,7 @@ class Conversations:
                             messages=messages)
 
     def _write(self, chat: Conversation) -> None:
-        self.root.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.root, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump(chat.public(), fh, indent=2)
-            os.replace(tmp, self._path(chat.id))
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        write_json(self._path(chat.id), chat.public())
 
 
 def _safe(cid: str) -> bool:

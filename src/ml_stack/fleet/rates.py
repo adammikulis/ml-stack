@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from pathlib import Path
+
+from ml_stack.files import write_json
 
 __all__ = ["Rates", "default_path"]
 
@@ -59,15 +60,8 @@ class Rates:
 
     def save(self) -> Path:
         """Write atomically. Two coordinators finishing at once must not leave a file"""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w") as fh:
-                json.dump(self._seen, fh, indent=2, sort_keys=True)
-            os.replace(tmp, self.path)
-        except BaseException:
-            Path(tmp).unlink(missing_ok=True)
-            raise
+        # Sorted so the file diffs cleanly whatever order the rates were observed in.
+        write_json(self.path, dict(sorted(self._seen.items())))
         return self.path
 
     def __len__(self) -> int:
