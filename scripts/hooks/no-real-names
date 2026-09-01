@@ -125,6 +125,25 @@ PLACE_LAST = {"county", "river", "city", "island", "islands", "bay", "area", "ki
               "coast", "province", "republic", "region", "district", "township", "heights"}
 
 
+# A job title is name-shaped too -- "Software Engineer", "Account Manager" -- and a role
+# catalogue is a page of them. A pair whose last word names a role is a role, not a person.
+ROLE_LAST = {"engineer", "manager", "designer", "analyst", "specialist", "writer", "marketer",
+             "executive", "representative", "partner", "director", "lead", "officer",
+             "scientist", "researcher", "developer", "administrator", "coordinator", "recruiter",
+             "accountant", "counsel", "architect", "consultant", "technician", "assistant",
+             "associate", "intern", "head", "chief", "professor", "fellow", "student", "lecturer",
+             "maintainer", "contributor", "volunteer", "moderator", "founder", "president",
+             "responder", "worker", "agent", "buyer", "clerk", "auditor", "nurse", "guide",
+             "treasurer", "secretary", "controller", "strategist", "planner", "operator",
+             "generalist", "advocate", "evangelist", "trainer", "educator", "librarian",
+             "support", "success", "operations", "sales", "marketing", "finance", "legal",
+             "security", "reliability", "quality", "product", "platform", "data", "people"}
+
+
+def is_role(body):
+    return body.casefold().split()[-1].strip(".,") in ROLE_LAST
+
+
 def is_place(body):
     words = body.casefold().split()
     return words[0] in PLACE_FIRST or words[-1].strip(".,") in PLACE_LAST
@@ -191,10 +210,14 @@ for path in staged:
             bad.append((path, i, f"{what}: {text}"))
     # the shape rule is for names quoted in source. A data file is full of quoted proper
     # nouns by design — a map's countries, a gazetteer's towns — and none of them are people.
-    for i, line in enumerate([] if path.endswith((".json", ".csv", ".geojson")) else blob.split("\n"), 1):
+    # A file may say it is a catalogue of invented labels -- job titles, event names, a role
+    # table -- and switch the shape rule off for itself. The exact list from the graph and the
+    # recogniser still run over it, so a real name in a catalogue is still caught.
+    shapes_off = "no-real-names: shapes off" in blob[:2000]
+    for i, line in enumerate([] if shapes_off or path.endswith((".json", ".csv", ".geojson")) else blob.split("\n"), 1):
         for found in NAMEISH.finditer(line):
             body = found.group(1).strip()
-            if body.casefold() not in allowed and not is_place(body):
+            if body.casefold() not in allowed and not is_place(body) and not is_role(body):
                 bad.append((path, i, f"{body!r} is shaped like a name"))
     if engine is None:
         continue

@@ -49,7 +49,7 @@ class World:
     """A company as a graph, plus what the graph cannot hold: how each person writes.
 
     `graph` is `{"nodes": [...], "edges": [...]}` in `ml_stack.graph.community`'s schema
-    (node: id, kind, label, mentions, attrs; edge: source, target, relation, plus whatever
+    (node: id, kind, label, mentions, attrs; edge: source, target, rel, plus whatever
     the community writes). `people` lists the person ids. `personas[id]` is
     `{"voice": str, "system": str, "knows": [ids]}` -- the voice in a sentence, the system
     prompt a writer speaks with, and the subgraph that person would know. `calendar` is a

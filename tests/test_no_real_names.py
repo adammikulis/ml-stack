@@ -206,3 +206,27 @@ def test_the_middle_of_a_uuid_is_not_a_phone_number(tmp_path):
     code, said = check(where, tmp_path, **{"t.py": (
         'NS = "6f1b2a3c-4d5e-4f60-8172-839405a6b7c8"\n')})
     assert code == 0, said
+
+
+def test_a_job_title_is_not_shaped_like_a_person(tmp_path):
+    """A role catalogue is a page of "Software Engineer", "Account Manager", "Site Reliability
+    Engineer". Mutation: drop the `is_role` clause."""
+    where = repo(tmp_path, graph={"nodes": []})
+    code, said = check(where, tmp_path, **{"roles.py": (
+        'TITLES = ["Software Engineer", "Account Manager", "Site Reliability Engineer",\n'
+        '          "Payroll Specialist", "People Partner", "Technical Writer"]\n')})
+    assert code == 0, said
+
+
+def test_a_file_may_declare_itself_a_catalogue_of_invented_labels(tmp_path):
+    """"All Hands", "Hack Week", "Winter Party": a catalogue of event names is name-shaped
+    and no heuristic will ever know every shape. A file saying `no-real-names: shapes off`
+    in its first lines turns off the shape rule for itself and nothing else -- a name from
+    the graph in that file is still refused. Mutation: drop the `shapes_off` clause."""
+    where = repo(tmp_path, PEOPLE)
+    catalogue = ('"""Event names.  no-real-names: shapes off"""\n'
+                 'EVENTS = ["All Hands", "Hack Week", "Winter Party"]\n')
+    code, said = check(where, tmp_path, **{"events.py": catalogue})
+    assert code == 0, said
+    code, said = check(where, tmp_path, **{"events.py": catalogue + 'X = "Ada Lovelace"\n'})
+    assert code == 1 and "Ada Lovelace" in said

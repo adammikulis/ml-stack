@@ -79,6 +79,9 @@ ml-stack-serve = "ml_stack.serve.cli:main"
 ml-stack-bench = "ml_stack.graph.bench:main"
 # find a model newer than anything the assistant remembers, and print how to serve it
 ml-stack-models = "ml_stack.hub:main"
+# an invented organised group -- company, community, university, open-source, nonprofit --
+# as a graph with people who could talk, and questions about it with known answers
+ml-stack-world = "ml_stack.world.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]
