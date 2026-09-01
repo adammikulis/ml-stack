@@ -271,3 +271,87 @@ def test_the_plot_is_self_contained_and_names_what_it_drew(tmp_path):
     assert "<svg" in said and "tried" in said
     assert "http://" not in said and "https://" not in said     # nothing to fetch
     assert "<script" not in said
+
+
+def _server(handler):
+    """A tiny HTTP server answering /slots, for the busy check."""
+    import json as _json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class H(BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = _json.dumps(handler(self.path)).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+
+
+def test_busy_counts_the_slots_that_are_working():
+    from ml_stack.graph.bench import busy
+
+    srv, url = _server(lambda p: [{"is_processing": True}, {"is_processing": False},
+                                  {"is_processing": True}])
+    try:
+        assert busy(url) == 2
+    finally:
+        srv.shutdown()
+
+    srv, url = _server(lambda p: [{"is_processing": False}, {"is_processing": False}])
+    try:
+        assert busy(url) == 0
+    finally:
+        srv.shutdown()
+
+
+def test_a_server_that_will_not_say_is_not_treated_as_idle():
+    """Unknown is not idle. Guessing idle is how the guard would fail open."""
+    from ml_stack.graph.bench import busy
+
+    assert busy("http://127.0.0.1:9") == -1          # nothing listening
+    srv, url = _server(lambda p: {"not": "a list"})
+    try:
+        assert busy(url) == -1
+    finally:
+        srv.shutdown()
+
+
+def test_a_busy_server_is_refused_and_anyway_overrides(capsys):
+    """A timing taken while another run has the same GPU is not a timing.
+
+    This happened: several sweeps were left running in the background against one server,
+    and every wall clock measured during the overlap was two runs sharing a machine.
+    """
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _idle
+
+    srv, url = _server(lambda p: [{"is_processing": True}])
+    try:
+        assert _idle(url, Namespace(anyway=False)) is False
+        said = capsys.readouterr().err
+        assert "already working on 1 request" in said
+        assert "--anyway" in said                     # and how to proceed on purpose
+
+        assert _idle(url, Namespace(anyway=True)) is True
+    finally:
+        srv.shutdown()
+
+    srv, url = _server(lambda p: [{"is_processing": False}])
+    try:
+        assert _idle(url, Namespace(anyway=False)) is True
+    finally:
+        srv.shutdown()
+
+    # a server that will not say lets the run proceed, but says so rather than staying quiet
+    assert _idle("http://127.0.0.1:9", Namespace(anyway=False)) is True
+    assert "would not say whether it is busy" in capsys.readouterr().err

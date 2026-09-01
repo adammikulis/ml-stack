@@ -362,6 +362,20 @@ def sampled(server: Mapping[str, Any]) -> str:
     return " ".join(bits) or "-"
 
 
+def _idle(url: str, args: Any) -> bool:
+    """Refuse to time a server somebody else is using, unless told not to care."""
+    working = busy(url)
+    if working <= 0:
+        if working < 0:
+            print(f"note: {url} would not say whether it is busy; timings may not be alone",
+                  file=sys.stderr)
+        return True
+    print(f"error: {url} is already working on {working} request(s). A timing taken while "
+          f"another run has the same GPU is not a timing.\n"
+          f"       Wait for it, or pass --anyway to measure regardless.", file=sys.stderr)
+    return bool(getattr(args, "anyway", False))
+
+
 def sampling_from(args: Any) -> dict[str, Any]:
     """The sampler overrides asked for on the command line, and nothing else.
 
@@ -577,6 +591,26 @@ choosing a better run. Hover a point for its numbers.</p>
     return str(out)
 
 
+def busy(base_url: str) -> int:
+    """How many requests that server is already working on.
+
+    A timing taken while somebody else is using the same GPU is not a timing. This is the
+    cheapest way to know: llama.cpp's /slots says what each slot is doing, and anything
+    above zero means the number about to be measured belongs to two callers at once.
+
+    -1 when the server will not say, which is not the same as idle and is not treated as it.
+    """
+    from ml_stack.client.http import request_json
+
+    try:
+        slots = request_json(f"{base_url.rstrip('/')}/slots", timeout=5.0, method="GET")
+    except Exception:  # noqa: BLE001 - a server that will not answer is not known to be idle
+        return -1
+    if not isinstance(slots, list):
+        return -1
+    return sum(1 for one in slots if isinstance(one, Mapping) and one.get("is_processing"))
+
+
 def drafting(rows: Sequence[Mapping[str, Any]]) -> str:
     """How much of what a draft model guessed was kept, as a percentage, or '-' for none.
 
@@ -712,6 +746,9 @@ def main(argv: list[str] | None = None) -> int:
                               "answer together. A thinking model spends most of a turn "
                               "reasoning, so a low ceiling truncates the answer rather than "
                               "the thought (default: %(default)s)")
+        one.add_argument("--anyway", action="store_true",
+                         help="measure even when the server is already busy; the wall clock "
+                              "will then be two runs sharing a GPU, not one run")
         one.add_argument("--card", action="store_true",
                          help="ask with what the model's own card recommends, to see whether "
                               "it suits this task -- it is not what a client sends otherwise")
@@ -761,6 +798,8 @@ def main(argv: list[str] | None = None) -> int:
                              embed_url=args.embed_url, embed_model=args.embed_model,
                              margin=args.margin)
                 print(f"\n{label} on {url}")
+                if not _idle(url, args):
+                    return 3
                 asking_with = with_card(Client(url, **sampling_from(args)), args)
                 # what it will actually send, card and overrides together: a run measured at
                 # one temperature against a run at another is two measurements, and the only
@@ -821,6 +860,8 @@ def main(argv: list[str] | None = None) -> int:
     else:
         from ml_stack.client import Client
 
+        if not _idle(args.base_url, args):
+            return 3
         client = with_card(Client(args.base_url, **sampling_from(args)), args)
     ask = ask_from(args.ask) if args.ask else asking(
         graph, shortlist=args.shortlist, store=args.store or None,

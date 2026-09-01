@@ -218,14 +218,43 @@ that would take most of a store, and leaves a verified snapshot when it would ta
 IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
 and letting go of a read handle when a writer wants in.
 
+## The commands
+
+| | |
+| --- | --- |
+| `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
+| `ml-stack-serve status\|up\|down` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` serves the speculative head shipped beside the weights |
+| `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
+| `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
+
+## Finding a model
+
+The Hub has models newer than anything in this README, and newer than anything an assistant
+was trained on. Look rather than remember:
+
+```
+$ ml-stack-models find gemma-4 E4B
+    588135  unsloth/gemma-4-E4B-it-qat-GGUF
+    563542  unsloth/gemma-4-E4B-it-GGUF
+    307153  ggml-org/gemma-4-E4B-it-GGUF
+$ ml-stack-models files unsloth/gemma-4-E4B-it-qat-GGUF
+    4.1G  hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
+```
+
+Publishers in `PREFER` are ranked first — the Hub's own ordering puts whatever is popular
+at the top, which for a model released last week is somebody's remix rather than the
+release. The printed reference is what `ml-stack-serve up` takes; llama-server downloads and
+caches it on first use, so there is no separate fetching step.
+
 ## Serving a model
 
 From a shell:
 
 ```
-ml-serve up model.gguf --context 32768 --parallel 2
-ml-serve status
-ml-serve down
+ml-stack-serve up model.gguf --context 32768 --parallel 2
+ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
+ml-stack-serve status
+ml-stack-serve down
 ```
 
 `status` prints the port, the model, the context each slot gets, how many slots there are
@@ -252,6 +281,108 @@ and leaves an adopted server alone on exit. It only stops what it started.
 A port already serving something else is refused, with the field that differs named —
 the model, the number of slots, or the context each slot gets. Adopting a server of the
 wrong shape hands back a lease that cannot do what was asked of it.
+
+`ServerSpec(draft=...)` serves a small model of the same family alongside the large one: it
+guesses several tokens ahead and the large model checks them in one pass, so a run they
+agree on costs about what one token used to. It takes the same two forms as the model — a
+path, or `hf:owner/repo/file.gguf`.
+
+## Answering the same question twice
+
+```python
+from ml_stack.graph.ask import Answer, converse
+from ml_stack.graph.cache import asked, digest, forget
+
+out, again = asked(store, question, lambda: converse(question, graph, client),
+                   kind=Answer, graph=graph, model=name, system=SYSTEM, tools=tools)
+```
+
+`asked` hands back the answer already given when nothing that shaped it has changed, and
+calls the model only on a miss — measured at 27.9s against 0.00s for the repeat. What makes
+that safe is the fingerprint, which covers the graph, the model, the system prompt, **the
+tool schemas including their descriptions**, the shortlist and whatever `context=` the
+caller adds (the turns before this one, most obviously). Rewording a tool changes what the
+model does with it, so it misses — which is right: rewording them moved every score in the
+bench.
+
+`keep=` refuses an answer that should not be served twice — one whose turn also *did*
+something, like filing a change request. Its answer is a receipt, and handing it out again
+would tell the next person their request was filed when it was not.
+
+A rebuilt graph misses on its own, but does not sweep on its own: pass
+`forget(store, keeping=digest(graph))` after a rebuild or the store keeps every answer it
+ever gave. Entries live under keys beginning `_`, which `GraphStore.docs` skips, so a cache
+in the same store as a graph never leaks into `read()`.
+
+## Measuring a change to the asking
+
+```
+ml-stack-bench prepare --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-300M-Q8_0.gguf
+ml-stack-bench sweep --on gptoss=http://127.0.0.1:8080 --on e4b=http://127.0.0.1:8083 \
+    --embed-url http://127.0.0.1:8081 --embed-model embeddinggemma-300M-Q8_0.gguf
+ml-stack-bench show
+```
+
+`sweep` measures each model twice — as it is, and with a search run before it — and prints
+them all in one table. `run` does one of those on its own, and `show --compare A B` puts two
+side by side with the difference.
+
+`sweep` and `run` **refuse a server that is already working**, because a timing taken while
+another run has the same GPU is not a timing. It is a real failure and not a hypothetical:
+several sweeps left running in the background against one server produced wall clocks that
+were two runs sharing a machine, and nothing in the numbers said so. A server that will not
+answer `/slots` is reported as unknown rather than assumed idle. `--anyway` proceeds on
+purpose.
+
+Serve every model being compared with the **same context and the same number of slots**, or
+the comparison is of two configurations rather than two models: a model at 8k per slot is
+faster and holds a smaller cache than the same model at 32k. The table prints `ctx` on every
+line so a mismatch is visible rather than silent.
+
+The questions are asked of an invented community that ships with this package, so a number
+means the same thing on any machine and no real person's details are involved. Each question
+may carry the ids a good answer names, which is what makes accuracy measurable rather than
+impressionistic. Runs are kept in a graph store under `~/.ml-stack/bench`, so one can be
+compared with another a week later.
+
+`show` reports wall clock, model calls, prompt tokens **and how many of them were cached** —
+a conversation re-sends itself every turn, so the tokens shown and the tokens actually read
+are different numbers and only the second is a cost.
+
+It also reports what the server costs to keep up beyond its weights (`kv+run`: the KV cache
+and the runtime around it, measured as resident memory minus the weights on disk) and that
+figure per 1k of held context (`per 1k`). The second is the one to compare: it says what one
+more conversation costs, whatever context each server happened to be given, and it is what
+decides how many conversations a machine can hold at once.
+
+`show --rates` puts accuracy over each of the three scarcities — time, tokens, and the
+memory a conversation holds — because a score alone cannot choose between a model that is
+better and one that is cheaper. It marks the **Pareto frontier**: the runs nothing else
+beats on both accuracy and cost, which are the only ones there is ever a reason to choose.
+`--cost seconds|paid_tokens|kv_bytes` redraws it against whichever is scarce, and
+`--plot out.html` writes it as a scatter with the frontier joined — hand-built SVG, no
+library and no network, so it opens on any machine.
+
+`--n-predict` is a **ceiling, not a budget**: nothing is spent that is not generated, so a
+high one costs nothing and a low one truncates. It defaults high on purpose. A thinking
+model spends most of a turn reasoning before it writes anything — measured, gemma-4 filled
+a 220-token ceiling entirely with thought and returned empty content — so what a low
+ceiling cuts is always the answer, never the thinking.
+
+`--card` asks with what the model's own card recommends, which is the only place a card is
+ever applied. A publisher's advice is a hypothesis about a task they have not seen: gemma-4
+asks for temperature 1.0 across all use cases, and on this one — calling tools with exact
+ids, where sampling noise becomes a wrong argument rather than a livelier sentence — greedy
+measured better on the plain path. Read the card with `ml-stack-models card <repo>`, test it
+with `--card`, and ship what the measurement favoured.
+
+A score is only worth acting on when you can see which questions made it, so
+`show --detail` prints the questions themselves — what each one wanted, what the answer
+showed, what it missed, and what it cost — with `--detail LABEL` for one run and `--all` for
+every question rather than only the ones that fell short. It is what turns a number into a
+diagnosis: a model whose wrong answers took *more* calls than its right ones searched hard
+and missed, while one whose wrong answers took *fewer* never reached for the tools at all,
+and those two failures are fixed by opposite things.
 
 ## `contracts/` is data, not code
 
