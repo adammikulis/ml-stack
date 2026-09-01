@@ -49,10 +49,28 @@ class Row:
 
     @property
     def hit(self) -> float:
-        """How much of what was expected the answer actually showed. -1 when nothing is."""
-        if not self.expected:
-            return -1.0
-        return len(set(self.expected) & set(self.shown)) / len(self.expected)
+        """How well what was shown matches what was wanted: F1, -1 when nothing is expected.
+
+        Recall alone is not a score. It was, for one afternoon, and it said a 2B model was
+        more accurate than a 120B -- because showing more is free under it and the small
+        model showed six entries where 1.7 were wanted, while the large one showed two. A
+        model that lit every entry in the graph on every question scored 100%.
+
+        Precision alone is no better: showing nothing is perfect by it. F1 is the pair held
+        together, and it is also what the page actually needs -- lighting up people who have
+        nothing to do with the question is the complaint this whole thing began with.
+        """
+        return _score(self.expected, self.shown)[2]
+
+    @property
+    def recall(self) -> float:
+        """How much of what was wanted was shown."""
+        return _score(self.expected, self.shown)[0]
+
+    @property
+    def precision(self) -> float:
+        """How much of what was shown was wanted."""
+        return _score(self.expected, self.shown)[1]
 
 
 class Counting:
@@ -286,15 +304,16 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # which meant nothing at all. A column is cheaper than remembering.
     head = (f"{'run':20} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'draft':>6} {'kv+run':>8} {'per 1k':>8} "
-            f"{'right':>6}  {'sampling'}")
+            f"{'F1':>5} {'rec':>5} {'prec':>5}  {'sampling'}")
     print(head)
     print("-" * len(head))
     for one in kept:
         rows = one.get("rows") or []
         server = one.get("server") or {}
         scored = [r for r in rows if r.get("expected")]
-        got = [len(set(r["expected"]) & set(r["shown"])) / len(r["expected"]) for r in scored]
-        right = f"{100 * sum(got) / len(got):.0f}%" if got else "-"
+        def mean(f: Callable[[Mapping[str, Any]], float]) -> str:
+            return f"{100 * sum(f(r) for r in scored) / len(scored):.0f}%" if scored else "-"
+        right, rec, prec = mean(_hit), mean(_recall), mean(_precision)
         ctx = server.get("context") or 0
         slots = server.get("slots") or 0
         beyond = server.get("kv_and_run_bytes")
@@ -308,8 +327,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'cached_tokens'):>8.0f} "
               f"{drafting(rows):>6} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else '-'):>8} "
-              f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} {right:>6}  "
-              f"{sampled(server)}")
+              f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
+              f"{right:>5} {rec:>5} {prec:>5}  {sampled(server)}")
 
 
 def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> None:
@@ -342,10 +361,29 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
             print(f"        {note}")
 
 
+def _score(expected: Sequence[str], shown: Sequence[str]) -> tuple[float, float, float]:
+    """``(recall, precision, f1)`` for one answer. All -1 when nothing was expected."""
+    want, got = set(expected or ()), set(shown or ())
+    if not want:
+        return (-1.0, -1.0, -1.0)
+    hit = len(want & got)
+    recall = hit / len(want)
+    precision = hit / len(got) if got else 0.0
+    f1 = 0.0 if recall + precision == 0 else 2 * recall * precision / (recall + precision)
+    return (recall, precision, f1)
+
+
 def _hit(row: Mapping[str, Any]) -> float:
-    """How much of what was expected a kept row actually showed."""
-    want = set(row.get("expected") or ())
-    return len(want & set(row.get("shown") or ())) / len(want) if want else -1.0
+    """How well a kept row's answer matched what was wanted, as F1."""
+    return _score(row.get("expected") or (), row.get("shown") or ())[2]
+
+
+def _recall(row: Mapping[str, Any]) -> float:
+    return _score(row.get("expected") or (), row.get("shown") or ())[0]
+
+
+def _precision(row: Mapping[str, Any]) -> float:
+    return _score(row.get("expected") or (), row.get("shown") or ())[1]
 
 
 def sampled(server: Mapping[str, Any]) -> str:
@@ -425,11 +463,20 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     if not rows:
         return {}
     got = sum(_hit(r) for r in rows) / len(rows)
+    recall = sum(_recall(r) for r in rows) / len(rows)
+    precision = sum(_precision(r) for r in rows) / len(rows)
+    shown = sum(len(r.get("shown") or ()) for r in rows) / len(rows)
+    wanted = sum(len(r.get("expected") or ()) for r in rows) / len(rows)
     seconds = _total(rows, "seconds")
     paid = _total(rows, "processed_tokens") + _total(rows, "completion_tokens")
     server = one.get("server") or {}
     memory = float(server.get("kv_and_run_bytes") or 0)
-    out = {"right": got, "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
+    # `right` is F1. Recall and precision are kept beside it because the pair is what says
+    # *how* a run was wrong: a model that lights everything has high recall and no precision,
+    # and under recall alone it looked like the most accurate model there was.
+    out = {"right": got, "recall": recall, "precision": precision,
+           "shown_per_question": shown, "wanted_per_question": wanted,
+           "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
            "kv_bytes": memory, "questions": float(len(rows))}
     # Rates, guarded: a run that took no time or paid nothing has nothing to divide by, and
     # a zero score is a real answer rather than a missing one.
@@ -476,8 +523,8 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
         print("nothing kept yet")
         return
     on_front = {id(one) for one in pareto(kept, cost=cost)}
-    head = (f"{'run':20} {'n':>3} {'right':>6} {'right/min':>10} {'right/1k tok':>13} "
-            f"{'right/GB':>9} {'s per right':>12} {'tok per right':>14}")
+    head = (f"{'run':20} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
+            f"{'F1/min':>8} {'F1/1k tok':>10} {'F1/GB':>7} {'s per':>7} {'tok per':>8}")
     print(head)
     print("-" * len(head))
     for one in sorted(kept, key=lambda o: -(derived(o).get("right") or 0)):
@@ -488,9 +535,11 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
             return format(d[key], fmt) if key in d else "-"
         mark = " *" if id(one) in on_front else "  "
         print(f"{str(one.get('label',''))[:18]:18}{mark} {d['questions']:>3.0f} "
-              f"{100 * d['right']:>5.0f}% {num('right_per_minute', '10.2f')} "
-              f"{num('right_per_1k', '13.4f')} {num('right_per_gb', '9.3f')} "
-              f"{num('seconds_per_right', '12.1f')} {num('tokens_per_right', '14.0f')}")
+              f"{100 * d['right']:>4.0f}% {100 * d['recall']:>4.0f}% "
+              f"{100 * d['precision']:>4.0f}% {d['shown_per_question']:>6.1f} "
+              f"{num('right_per_minute', '8.2f')} {num('right_per_1k', '10.4f')} "
+              f"{num('right_per_gb', '7.3f')} {num('seconds_per_right', '7.1f')} "
+              f"{num('tokens_per_right', '8.0f')}")
     print(f"\n* on the frontier for accuracy against {cost}: nothing is both more accurate "
           f"and cheaper.")
 

@@ -18,14 +18,61 @@ def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 
                calls=calls, answer_chars=chars, error=error)
 
 
-def test_hit_is_how_much_of_what_was_wanted_was_shown():
+def test_hit_is_how_well_what_was_shown_matched_what_was_wanted():
+    """F1, not recall. Recall alone made a 2B model look more accurate than a 120B, because
+    it showed six entries where fewer than two were wanted and was charged nothing for it."""
     assert _hit({"expected": ["person:iris"], "shown": ["person:iris"]}) == 1.0
-    assert _hit({"expected": ["person:iris", "person:otto"], "shown": ["person:iris"]}) == 0.5
     assert _hit({"expected": ["person:iris"], "shown": []}) == 0.0
     assert _hit({"expected": ["person:iris"], "shown": ["topic:welding"]}) == 0.0
-    # showing more than was asked for is not punished: the question is whether it was found
-    assert _hit({"expected": ["person:iris"], "shown": ["person:iris", "org:pellard"]}) == 1.0
     assert _hit({"expected": [], "shown": ["person:iris"]}) == -1.0    # nothing to score
+
+    # half of what was wanted, and all of what was shown was wanted
+    assert _hit({"expected": ["person:iris", "person:otto"],
+                 "shown": ["person:iris"]}) == pytest.approx(2 / 3)
+    # everything wanted was found, but half of what was shown was noise
+    assert _hit({"expected": ["person:iris"],
+                 "shown": ["person:iris", "org:pellard"]}) == pytest.approx(2 / 3)
+
+
+def test_showing_everything_does_not_score_well():
+    """The test that was missing. A model that lights the whole graph on every question had
+    a perfect score under recall, which is how a gameable metric goes unnoticed for a day."""
+    from ml_stack.graph.bench import _precision, _recall
+
+    graph_ids = [f"n{i}" for i in range(17)]
+    everything = {"expected": ["n3", "n9"], "shown": graph_ids}
+
+    assert _recall(everything) == 1.0            # it did find them, technically
+    assert _precision(everything) == pytest.approx(2 / 17)
+    assert _hit(everything) < 0.25               # and it is not a good answer
+
+    # a precise answer that misses one beats a complete answer that shows everything
+    careful = {"expected": ["n3", "n9"], "shown": ["n3"]}
+    assert _recall(careful) < _recall(everything)
+    assert _hit(careful) > _hit(everything)
+
+
+def test_showing_nothing_does_not_score_well_either():
+    """Precision alone is the opposite trap: saying nothing is perfect by it."""
+    from ml_stack.graph.bench import _precision
+
+    silent = {"expected": ["n3"], "shown": []}
+    assert _precision(silent) == 0.0
+    assert _hit(silent) == 0.0
+
+
+def test_recall_and_precision_are_kept_beside_the_score():
+    """The pair is what says *how* a run was wrong; the single number cannot."""
+    from ml_stack.graph.bench import derived
+
+    spraying = {"rows": [{"expected": ["n1"], "shown": ["n1", "n2", "n3", "n4"],
+                          "seconds": 1.0, "processed_tokens": 10, "completion_tokens": 1}],
+                "server": {}}
+    d = derived(spraying)
+    assert d["recall"] == 1.0
+    assert d["precision"] == pytest.approx(0.25)
+    assert d["shown_per_question"] == 4.0 and d["wanted_per_question"] == 1.0
+    assert d["right"] == pytest.approx(0.4)
 
 
 def test_row_hit_and_the_kept_form_agree():
@@ -33,7 +80,8 @@ def test_row_hit_and_the_kept_form_agree():
     row = a_row("who welds?", expected=["person:iris", "person:otto"], shown=["person:otto"])
     from dataclasses import asdict
 
-    assert row.hit == _hit(asdict(row)) == 0.5
+    assert row.hit == _hit(asdict(row)) == pytest.approx(2 / 3)
+    assert row.recall == 0.5 and row.precision == 1.0
 
 
 def test_missed_prints_the_questions_that_fell_short_and_not_the_others(capsys):

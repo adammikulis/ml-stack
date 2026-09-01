@@ -318,35 +318,43 @@ in the same store as a graph never leaks into `read()`.
 
 Answering a graph is the case this was built for, so the numbers are here rather than in
 somebody's notes. Ten questions over the invented community, 32k per slot, greedy, one run
-at a time on an otherwise idle machine:
+at a time on an otherwise idle machine. **F1** over the entries an answer lights, with the
+pair behind it, because the pair is what says how a run was wrong:
 
-| run | right | wall | calls | tokens paid | KV + runtime |
-| --- | --- | --- | --- | --- | --- |
-| **e2b-shortlist** | **80%** | **64s** | 30 | 20,264 | **3.50G** |
-| e2b-plain | 55% | 59s | 42 | 17,072 | 3.21G |
-| e4b-plain | 70% | 159s | 60 | 29,148 | 7.75G |
-| e4b-shortlist | 70% | 300s | 64 | 51,944 | 8.34G |
-| gptoss-plain | 65% | 127s | 61 | 25,368 | 11.89G |
-| gptoss-shortlist | 70% | 198s | 69 | 34,313 | 11.89G |
+| run | F1 | recall | precision | lit per question | wall | KV + runtime |
+| --- | --- | --- | --- | --- | --- | --- |
+| gptoss-shortlist | **62%** | 70% | 59% | 2.0 | 198s | 11.89G |
+| gptoss-plain | 61% | 65% | 62% | 2.0 | 127s | 11.89G |
+| e4b-plain | 58% | 70% | 51% | 2.0 | 159s | 7.75G |
+| e2b-plain | 41% | 55% | 39% | 2.3 | 59s | 3.21G |
+| e4b-shortlist | 33% | 70% | 25% | 4.5 | 300s | 8.34G |
+| e2b-shortlist | 29% | 80% | 18% | 6.1 | 64s | 3.50G |
 
-**A 2B model with a shortlist beat a 120B on all four at once** — ten points more accurate,
-three times faster, three times less memory, 41% fewer tokens. Not a trade: run
-`show --rates --cost seconds|paid_tokens|kv_bytes` and the Pareto frontier is the same two
-E2B rows whichever cost you draw it against. Every other configuration is dominated, so
-there is no budget at which you would choose one.
+A good answer lights about **1.7** entries. Read the last column against that and the table
+explains itself.
 
-**What moved it was not the model.** E4B scored 17% before the tool descriptions carried a
-worked call, and 72% after — the same weights, the same questions. Six of its nine failures
-had been the identical shape: two model calls, a hundred characters of prose, no search at
-all. A description that says what a tool *is* leaves a small model to infer that it should
-be called. The large models never needed telling, which is why this went unseen until a
-small one was measured — and why the descriptions in `graph.ask` read the way they do.
+**Scoring on recall alone said the opposite, and it was wrong.** Under it, `e2b-shortlist`
+was the most accurate run there was at 80%, beating the 120B — because showing more costs
+nothing under recall, and it lit six entries where fewer than two were wanted. A model that
+lit every entry in the graph on every question scored 100%. That metric survived a day and
+twenty-four green tests, none of which asked what the degenerate strategy would score. One
+does now.
 
-Two things this cost before the numbers meant anything. Timings were measured while other
-runs shared the GPU, which is why `sweep` and `run` refuse a busy server now. And every
-model had a 512-token ceiling for thinking, tool calls and answer together, because
-`n_predict` defaulted low: a thinking model fills that with reasoning and returns an empty
-answer, so what a low ceiling truncates is never the thinking.
+**A shortlist handed to a small model is echoed, not selected from.** It is the single
+largest effect here: E4B 58% → 33%, E2B 41% → 29%, precision halving while recall rises.
+The same shortlist does nothing for the 120B either way. The idea is sound and the machinery
+is worth keeping; what is missing is teaching a model that a shortlist is somewhere to look.
+
+**What the tool descriptions changed was real.** E4B answered 17% before they carried a
+worked call and 70% recall after, on the same weights and the same questions. Six of its
+nine failures had been the identical shape: two model calls, a hundred characters of prose,
+no search at all. The large models never needed telling, which is why this went unseen until
+a small one was measured.
+
+Two mistakes cost the earlier numbers their meaning. Timings were taken while other runs
+shared the GPU, which is why `sweep` and `run` refuse a busy server now. And every model had
+512 tokens for thinking, tool calls and answer together, because `n_predict` defaulted low:
+a thinking model fills that with reasoning and returns an empty answer.
 
 None of this survives a new model release. Re-run it.
 
