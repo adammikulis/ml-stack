@@ -19,12 +19,23 @@ from typing import Any
 
 from ml_stack.graph.vectors import MARGIN, stands_out
 
-__all__ = ["Counting", "HOME", "Row", "ask_from", "asking", "compare", "footprint",
+__all__ = ["Counting", "HOME", "Row", "SHORT", "ask_from", "asking", "compare", "footprint",
            "main", "measure", "read_questions", "runs", "save", "table"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
 HOME = Path("~/.ml-stack/bench").expanduser()
+
+# How many questions a short run asks. Chosen by measuring what survives, not by feel: at
+# twenty, every kind of answer is still asked about and the mean number of answers expected
+# is 2.2 -- the same as the whole set, so the difficulty is preserved and not only the
+# variety. Below about fourteen the rarer kinds start to go, and a shorter benchmark that
+# has stopped asking about places is not a shorter benchmark but a different one.
+#
+# The cost is granularity: eighteen scored questions make each one worth 5.6 points of F1
+# against 2.9 on the full set, so a small difference is noise on a short run and signal on
+# a full one. The `n` column on every line is what keeps the two from being read together.
+SHORT = 20
 
 
 @dataclass
@@ -115,6 +126,12 @@ class Counting:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)
+
+
+def _how_many(args: Any) -> int:
+    """How many questions to ask: --sample wins, then --short, then all of them."""
+    asked = int(getattr(args, "sample", 0) or 0)
+    return asked or (SHORT if getattr(args, "short", False) else 0)
 
 
 def sample(questions: Sequence[Mapping[str, Any]], n: int,
@@ -958,7 +975,7 @@ def main(argv: list[str] | None = None) -> int:
     heads.add_argument("--binary", default="", help="a llama-server that reads this model")
     heads.add_argument("--kept", default=str(HOME / "runs.ladybug"))
     heads.add_argument("--questions", default="")
-    heads.add_argument("--sample", type=int, default=10, metavar="N",
+    heads.add_argument("--sample", type=int, default=SHORT, metavar="N",
                        help="how many questions to ask each head (default: %(default)s). "
                             "A draft cannot change an answer -- the large model verifies "
                             "every token -- so what is being measured is acceptance and "
@@ -1065,7 +1082,7 @@ def main(argv: list[str] | None = None) -> int:
                   "already up, or --serve MODEL to put one up", file=sys.stderr)
             return 2
         questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                           getattr(args, "sample", 0))
+                           _how_many(args))
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
         ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
@@ -1173,7 +1190,7 @@ def main(argv: list[str] | None = None) -> int:
     from ml_stack.graph.community import QUESTIONS, graph as invented
 
     questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                       getattr(args, "sample", 0))
+                       _how_many(args))
     if not questions:
         print(f"error: no questions in {args.questions}", file=sys.stderr)
         return 2

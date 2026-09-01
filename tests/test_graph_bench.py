@@ -409,14 +409,14 @@ def test_a_short_run_still_asks_about_everything():
     """A shorter benchmark that has stopped asking about places is not a shorter benchmark,
     it is a different one. The first n are all of one kind because the set is written in
     groups; an even stride over a set that is two-thirds people returns two-thirds people."""
-    from ml_stack.graph.bench import sample
+    from ml_stack.graph.bench import SHORT, sample
     from ml_stack.graph.community import QUESTIONS, graph
 
     kind = {n["id"]: n["kind"] for n in graph()["nodes"]}
     whole = {kind[e] for q in QUESTIONS for e in q["expect"]}
     assert len(whole) >= 6, "the full set should cover every kind the page draws"
 
-    for n in (8, 10, 14, 20):
+    for n in (SHORT, 8, 10, 14, 24):
         short = sample(QUESTIONS, n)
         assert len(short) == n
         covered = {kind[e] for q in short for e in q["expect"]}
@@ -523,3 +523,32 @@ def test_the_footprint_does_not_invent_a_negative_cost(monkeypatch):
     else:
         held["mmapped"] = True
     assert "kv_and_run_bytes" not in held and held["mmapped"] is True
+
+
+def test_a_short_run_keeps_the_difficulty_and_not_only_the_variety():
+    """Every kind still asked about is half of it. The other half is that the questions are
+    as hard: a short run made only of one-answer questions would score higher for a reason
+    that has nothing to do with the model."""
+    from ml_stack.graph.bench import SHORT, sample
+    from ml_stack.graph.community import QUESTIONS
+
+    whole = [q for q in QUESTIONS if q["expect"]]
+    short = [q for q in sample(QUESTIONS, SHORT) if q["expect"]]
+
+    def mean(qs):
+        return sum(len(q["expect"]) for q in qs) / len(qs)
+
+    assert abs(mean(short) - mean(whole)) < 0.35, "the short run must be about as hard"
+    assert any(len(q["expect"]) == 1 for q in short), "questions with one right answer"
+    assert any(len(q["expect"]) > 2 for q in short), "and questions with several"
+    assert len(short) < len(whole)
+
+
+def test_how_many_prefers_an_explicit_count():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import SHORT, _how_many
+
+    assert _how_many(Namespace(sample=0, short=True)) == SHORT
+    assert _how_many(Namespace(sample=12, short=True)) == 12, "--sample is the explicit one"
+    assert _how_many(Namespace(sample=0, short=False)) == 0, "and neither means all of them"
