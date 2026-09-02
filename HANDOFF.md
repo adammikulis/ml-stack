@@ -10,20 +10,13 @@ Slack-specific.
 
 ## From 2026-09-02, ranked by the time each would have saved that day
 
-Six of ten landed that day (fakes, history, the store's check, the head chooser, the
-hook's shapes, the doctor); `ml-stack-bench history` still needs its one-line registration
-in `bench.py` and the detach header should write `commit:` (see `bench_history.py`'s
-docstring); the bench's `--serve-draft auto` should call `hub.choose_head(model,
-binary=args.binary)`.
+Seven of ten landed (fakes, history, the store's check, the head chooser, the hook's
+shapes, the doctor, the split into `graph/bench/`); the registrations are in.
 
 - [ ] **A `Run` object instead of twenty keyword arguments.** `served()` forwards most of what
   it takes; what is about the serving, the asking and the client is implicit, which is how
   `tight` and `rich` leaked. Build one typed object from argv with three sections and pass
   it; the boundary becomes a type.
-- [ ] **Split `bench.py`.** Past 2,500 lines — serving, measuring, scoring, the table, the
-  ranking, detach and locking — so every agent is told "touch only this region". Five
-  modules behind the same CLI: `bench/serve.py`, `measure.py`, `score.py`, `show.py`,
-  `run.py`.
 - [ ] **Prompt-cache accounting per turn.** `cached` is per run; per turn it would show when a
   change to the asking breaks the prefix — the cheapest speed lever there is, invisible.
 - [ ] **Estimates in the runner.** Before any measuring run, seconds per question from the
@@ -31,22 +24,16 @@ binary=args.binary)`.
 
 ## Conversations of any length (asked 2026-09-02)
 
-- [ ] **A conversation that never loses the thread.** Today the ask path re-sends the last six
-  turns and the graph supplies the facts; older turns leave the model's view. Build in
-  `graph.thread` and the ask path: (1) `recall(thread, question)` — the thread store's word
-  index and vectors over turns pick the two or three earlier turns (and what they drew on)
-  that match the new question, sent after the window; (2) a rolling `summary` turn, written
-  by the small model every K turns (what is established, what the asker wants, what is
-  open, the ids it rests on), always sent first and changed rarely so it stays inside the
-  cached prefix; (3) facts stated in conversation become nodes and edges through the
-  change-request path so the tools find them next time. Window = summary + recalled + last
-  N + question. Test: a fact from turn one answered right at turn two hundred, on the fake
-  model; measure the `cached` share per turn with `ml-stack-bench concurrent` so a summary
-  that changes too often is caught.
+Landed in ml-stack (`thread.recall`, `summarise`, `WINDOW = 10`, `converse(summary=,
+recalled=)`); the app has to pass them and add them to the answer cache's context.
+
 
 ## Measuring across the fleet (asked 2026-09-02)
 
-- [ ] **`ml-stack-bench sweep --fleet`.** Ready today: `--on name=http://peer:port` measures a
+- [ ] **`ml-stack-bench sweep --fleet`.** The bench side landed 2026-09-02 (host and commit on
+  every run, the host rule in the ranking, the `--fleet` flag calling `fleet.bench`'s
+  `plan`/`dispatch`/`wait`/`gather`); the fleet side, the Windows daemon and the one-command
+  join are in progress. Ready before that: `--on name=http://peer:port` measures a
   server anywhere, `ml-stack-serve up --root` announces one and `ml-stack-peers` finds it,
   and the community, the question sets and worlds are in the package or made from a seed.
   Missing: (1) dispatch — assign each model to the peer whose reported memory fits it, start
