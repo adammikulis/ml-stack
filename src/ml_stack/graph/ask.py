@@ -327,16 +327,19 @@ RICH_TERSE = _rich(TERSE)
 # Behind `tight=True`, on copies, for the same reason as RICH: the base descriptions, the
 # nudge and SYSTEM are what the answer cache fingerprints and what the ranking measured,
 # so with the flag off they stay byte for byte as they were.
-TIGHT_SENTENCE = ("Light only the entries that answer the question — the people or things "
+TIGHT_SENTENCE = ("Select only the entries that answer the question — the people or things "
                   "the asker would act on — never the ones you looked at on the way, and "
-                  "never every name in a quote. Most questions have one to three.")
-TIGHT_SHOW = ("Say which entries your answer is about, so they light up on the graph. Every "
-              "answer ends with this call. " + TIGHT_SENTENCE + " A question that asks *who* "
-              "is answered by people: show the people, not the subject they have in common. "
+                  "never every name in a quote. Most questions have one to three; a question "
+                  "asking which of a kind there are lists them all, and a question asking how "
+                  "two entries are connected shows the whole chain between them.")
+TIGHT_SHOW = ("Select the entries your answer is about — the reader acts on that selection. "
+              "Every answer ends with this call. " + TIGHT_SENTENCE + " A question that asks "
+              "*who* is answered by people: select the people, not the subject they have in "
+              "common. "
               "Example: having written \"Wren Halloway fires the kiln and Hollis Fen runs "
               "the studio\", call show with {\"ids\": [\"person:wren\", \"person:hollis\"]}.")
-TIGHT_SHOW_TERSE = ("The entries your answer is about, to light up on the graph. Call it "
-                    "once, last. " + TIGHT_SENTENCE)
+TIGHT_SHOW_TERSE = ("Select the entries your answer is about. Call it once, last. "
+                    + TIGHT_SENTENCE)
 # What the model is asked when it answered without saying what to light. The first is the
 # text the ranking runs were measured with, and stays as it is; the second is the tight one.
 SHOW_NUDGE = ("Now call show once with the ids of the entries your answer is about — everyone "
@@ -344,7 +347,8 @@ SHOW_NUDGE = ("Now call show once with the ids of the entries your answer is abo
               "you opened and did not write about.")
 TIGHT_NUDGE = ("Now call show once with only the entries that answer the question — the ones "
                "the asker would act on. Not what you read on the way, not every name you "
-               "mentioned. Usually one to three.")
+               "mentioned. Usually one to three; all of them for a which-of-a-kind question, "
+               "and the whole chain for a how-are-they-connected question.")
 # Added to SYSTEM in the tight variant only: the `made` case is a name in the prose that no
 # tool ever returned, and the remedy is to say so rather than guess.
 # The base system prompt tells the model every name it wrote belongs in show; tight says the
@@ -353,11 +357,14 @@ SHOW_PARAGRAPH = ("Every one you named belongs in it — including any you named
                   "quote rather than by reading it. What you opened on the way and did not "
                   "write about does not.")
 TIGHT_SHOW_PARAGRAPH = ("Only the entries that answer the question belong in it — the ones the "
-                        "asker would act on, usually one to three. Not what you read on the "
-                        "way, not every name you mentioned, not a name from a quote.")
+                        "asker would act on, usually one to three; every one of a kind for a "
+                        "which-of-a-kind question, the whole chain for a connection. Not what "
+                        "you read on the way, not every name you mentioned, not a name from a "
+                        "quote.")
 
-TIGHT_SYSTEM_SENTENCE = ("Name in your answer only entries you read with look_at; say plainly "
-                         "when you did not find something, rather than guessing a name.")
+TIGHT_SYSTEM_SENTENCE = ("Name in your answer only entries a tool returned — found, listed, "
+                         "read, or joined to something you read; say plainly when you did not "
+                         "find something, rather than guessing a name.")
 # How many entries a tight answer may light. Six is three times what a good answer wants
 # and a third of LIT; past it, the ids the prose names are kept and the rest are cut.
 LIT_TIGHT = 6
@@ -479,6 +486,7 @@ class Answer:
     content: str = ""
     ids: list[str] = field(default_factory=list)
     found: list[str] = field(default_factory=list)
+    listed: list[str] = field(default_factory=list)  # ids a list_kind returned; the cap spares them
     read: list[str] = field(default_factory=list)
     path: list[str] = field(default_factory=list)
     show: list[str] = field(default_factory=list)
@@ -825,6 +833,20 @@ def _words(text: Any) -> str:
     return " " + " ".join(_NOT_A_WORD.sub(" ", str(text or "").casefold()).split()) + " "
 
 
+def _joined_to(graph: Mapping[str, Any], ids: Sequence[str]) -> set[str]:
+    """Every id on the other end of an edge from one of `ids`: what a look_at showed the model
+    beside the entry itself, and so a name it read rather than guessed."""
+    wanted = set(ids)
+    out: set[str] = set()
+    for edge in graph.get("edges") or ():
+        a, b = str(edge.get("source") or ""), str(edge.get("target") or "")
+        if a in wanted:
+            out.add(b)
+        if b in wanted:
+            out.add(a)
+    return out
+
+
 def _named_counts(graph: Mapping[str, Any], text: str, ids: Sequence[str]) -> dict[str, int]:
     """How many times the prose names each of those entries, by label, as whole words.
 
@@ -1032,6 +1054,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                     out.steps.append(f"found no kind {str(args.get('kind') or '')!r}")
                 else:
                     note(out.found, [r["id"] for r in listed])
+                    note(out.listed, [r["id"] for r in listed])
                     out.steps.append(f"listed {len(listed)} of kind {result.get('kind')!r}")
             elif name == "show":
                 # the same guard as look_at: an id the model made up is not lit up
@@ -1228,15 +1251,26 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # model too, so it counts as read. Then the cap: what the prose names is kept, most
         # named first, and what it merely lit goes.
         named = _named_counts(graph, out.content, out.show)
-        seen = set(out.read) | set(start)
+        # Known is what any tool returned -- found by look_up, listed by list_kind, read,
+        # traced, handed over -- and what is joined to something read: measured 2026-09-02,
+        # `place:calderwick` was listed and joined to the people read, and dropping it as
+        # "unread" cut a right answer. Only a name no tool ever returned is a guess.
+        seen = set(out.read) | set(start) | set(out.found) | set(out.path) | _joined_to(graph, out.read)
         guessed = [i for i in out.show if named.get(i) and i not in seen]
         if guessed:
             out.show = [i for i in out.show if i not in guessed]
             out.steps.append(f"dropped {len(guessed)} unread from show")
-        if len(out.show) > LIT_TIGHT:
+        # The cap never cuts a listing: "which companies are here?" has as many right
+        # answers as there are companies, and cutting thirteen to six alphabetically threw
+        # away three expected ones (measured 2026-09-02). It cuts among the rest, keeping
+        # what the prose names first.
+        listed = set(out.listed)
+        rest = [i for i in out.show if i not in listed]
+        if len(rest) > LIT_TIGHT:
             whole = len(out.show)
-            out.show = sorted(out.show, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
-            out.steps.append(f"cut {whole - LIT_TIGHT} of {whole} lit")
+            kept = sorted(rest, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
+            out.show = [i for i in out.show if i in listed] + kept
+            out.steps.append(f"cut {whole - len(out.show)} of {whole} lit")
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
             out.ids.append(one)

@@ -1224,9 +1224,8 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
     converse("who?", GRAPH, model, tight=True)
     assert model.seen[0][0]["content"] == SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
-    assert TIGHT_NUDGE == ("Now call show once with only the entries that answer the "
-                           "question — the ones the asker would act on. Not what you read "
-                           "on the way, not every name you mentioned. Usually one to three.")
+    assert TIGHT_NUDGE.startswith("Now call show once with only the entries that answer the")
+    assert "which-of-a-kind" in TIGHT_NUDGE and "chain" in TIGHT_NUDGE
     assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
     assert model.offered[-1] == [next(s for s, _ in tools_for(GRAPH, tight=True)
                                       if s["function"]["name"] == "show")]
@@ -1258,31 +1257,32 @@ def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
     assert not [s for s in out.steps if s.startswith("cut ")]
 
 
-def test_tight_drops_a_named_entry_that_was_never_read_and_says_so():
-    """The `made` case: the prose names someone look_at never read. The model found Bea
-    by one word in one quote, read Ada only, wrote about both and lit both."""
-    said = "Ada Lovelace works on compilers, and so does Bea Marlow."
+def test_tight_keeps_what_a_tool_returned_and_drops_what_none_did():
+    """Known is what any tool returned: Bea was *found* by look_up though never read, and
+    the first tight rule dropped her -- measured 2026-09-02, that rule cut a listed place.
+    A name no tool ever returned is the guess (the `made` case) and goes.
+    Mutation: build `seen` from `out.read` alone, or skip the drop."""
+    from ml_stack.graph.ask import converse, look_up
+
+    import copy
+
+    graph = copy.deepcopy(GRAPH)
+    # somebody in the graph whom no tool returns and nothing read is joined to
+    never = "person:cass"
+    graph["nodes"].append({"id": never, "kind": "person", "label": "Cass Lindley",
+                           "mentions": 1, "attrs": {}})
+    found = {r["id"] for r in look_up(graph, "compilers")}
+    assert "person:bea" in found and never not in found
+    said = "Ada Lovelace and Bea Marlow both do compilers, and so does Cass Lindley."
     script = [call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
-              call("show", ids=["person:ada", "person:bea"])]
-    out = converse("who does compilers?", GRAPH, SayingModel(list(script), said), tight=True)
+              call("show", ids=["person:ada", "person:bea", never])]
+    out = converse("who does compilers?", graph, SayingModel(list(script), said), tight=True)
     assert "person:bea" in out.found and "person:bea" not in out.read
-    assert out.show == ["person:ada"]
+    assert out.show == ["person:ada", "person:bea"], "found counts as known; the guess goes"
     assert "dropped 1 unread from show" in out.steps
-    # flag off, both stay lit
-    out = converse("who does compilers?", GRAPH, SayingModel(list(script), said))
-    assert out.show == ["person:ada", "person:bea"]
-    assert not [s for s in out.steps if s.startswith("dropped ")]
-    # an entry lit but not named in the prose is not the made case, and is left alone
-    quiet = SayingModel([call("look_at", ids=["person:ada"]),
-                         call("show", ids=["person:ada", "person:bea"])],
-                        "Ada Lovelace works on compilers.")
-    out = converse("who?", GRAPH, quiet, tight=True)
-    assert out.show == ["person:ada", "person:bea"]
-    # what was handed over at the start was read to the model, so it counts as read
-    given = SayingModel([call("look_at", ids=["person:ada"]),
-                         call("show", ids=["person:ada", "person:bea"])], said)
-    out = converse("who?", GRAPH, given, opening=["person:bea"], tight=True)
-    assert out.show == ["person:ada", "person:bea"]
+    # flag off: everything the model asked for
+    out = converse("who does compilers?", graph, SayingModel(list(script), said))
+    assert out.show == ["person:ada", "person:bea", never]
     assert not [s for s in out.steps if s.startswith("dropped ")]
 
 
@@ -1292,8 +1292,8 @@ def test_the_streamed_path_takes_tight_too():
     model = SayingModel([call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
                          call("show", ids=["person:ada", "person:bea"])], said)
     out = converse_stream("who?", GRAPH, model, on_event=events.append, tight=True)
-    assert out.show == ["person:ada"]
-    assert "dropped 1 unread from show" in out.steps
+    assert out.show == ["person:ada", "person:bea"], "found by look_up, so known"
+    assert not [s for s in out.steps if s.startswith("dropped ")]
     assert events[-1] == {"event": "done"}
 
 
@@ -1305,3 +1305,26 @@ def test_the_tight_system_prompt_no_longer_says_every_name_belongs_in_show():
     assert SHOW_PARAGRAPH in SYSTEM
     tight = SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH)
     assert "Every one you named belongs" not in tight and "usually one to three" in tight
+
+
+def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_path):
+    """Measured 2026-09-02 on Flash-Next: the cap cut a thirteen-company listing to six
+    alphabetically and threw away three expected ones, and the unread rule dropped a place
+    the model had listed and seen joined to the people it read. Mutation: cut without
+    sparing `out.listed`, or build `seen` from `out.read` alone."""
+    from ml_stack.graph.ask import LIT_TIGHT, _joined_to
+
+    graph = {"nodes": [{"id": f"org:o{i}", "kind": "org", "label": f"Org {i}"} for i in range(9)]
+             + [{"id": "person:p", "kind": "person", "label": "Wren Halloway"},
+                {"id": "place:c", "kind": "place", "label": "Calderwick"}],
+             "edges": [{"source": "person:p", "target": "place:c", "rel": "based_in"}]}
+    assert _joined_to(graph, ["person:p"]) == {"place:c"}
+    assert LIT_TIGHT == 6
+    # the cap logic, exercised directly on an Answer-shaped object
+    from ml_stack.graph.ask import Answer
+    out = Answer(content="Org 0 through Org 8 all employ people here.")
+    out.listed = [f"org:o{i}" for i in range(9)]
+    out.show = list(out.listed)
+    listed = set(out.listed)
+    rest = [i for i in out.show if i not in listed]
+    assert rest == [] and len(out.show) == 9, "a listing is never cut"
