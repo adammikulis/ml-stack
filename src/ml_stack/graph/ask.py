@@ -1292,7 +1292,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             ids = [str(i) for i in (args.get("ids") or ())]
             note(out.show, ids)
         if out.show:
-            out.steps.append(f"lit {len(out.show)} entr" + ("y" if len(out.show) == 1 else "ies"))
+            out.steps.append(f"selected {len(out.show)} entr" + ("y" if len(out.show) == 1 else "ies"))
     if tight and out.show:
         # The `made` case: a name in the prose that look_at never read is a guess, and
         # lighting it endorses the guess. What was handed over at the start was read to the
