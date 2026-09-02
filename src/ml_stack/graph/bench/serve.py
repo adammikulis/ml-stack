@@ -102,6 +102,11 @@ def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
         raise SmokeFailed(f"{what}: every question failed -- {rows[0].get('error') or 'timed out'}")
 
 
+# A head that lives inside the weights: `--draft embedded` serves the model with
+# --spec-type draft-mtp and no -md. Qwen3.8-27B ships its nextn layers in the main GGUF.
+EMBEDDED = "embedded"
+
+
 def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
            label: str = "", draft: str = "", port: int = 8099, context: int = 32768,
            parallel: int = 1, binary: str = "", kept: str | Path = "", shortlist: int = 0,
@@ -112,6 +117,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            spec_draft_max: int | None = None, cache_type: str = "",
            per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
            smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
+           spec_type: str = "",
            **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
@@ -185,6 +191,11 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
             return []
         every = todo
     extra: dict[str, Any] = {"parallel": parallel}
+    if draft == EMBEDDED:
+        # the head is inside the weights (Qwen3.8-27B ships its nextn layers in the main
+        # GGUF): no -md, only the speculative type, and the draft length if asked
+        draft = ""
+        extra["spec_type"] = "draft-mtp"
     if draft:
         from ml_stack.hub import spec_for
 
@@ -192,8 +203,10 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
         kind = spec_for(draft)
         if kind:
             extra["spec_type"] = kind
-        if spec_draft_max is not None:
-            extra["spec_draft_max"] = int(spec_draft_max)
+    if spec_type:
+        extra["spec_type"] = spec_type
+    if (draft or extra.get("spec_type")) and spec_draft_max is not None:
+        extra["spec_draft_max"] = int(spec_draft_max)
     if cache_type:
         extra["cache_type_k"] = extra["cache_type_v"] = cache_type
     if reasoning_budget is not None:
@@ -355,7 +368,8 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
     lengths = list(n_max) or [None]
     before = {r.get("key") for r in bench._kept(kept)} if kept else set()
     for head in heads:
-        name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
+        name = "none" if not head else "embedded-mtp" if head == EMBEDDED else \
+            str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
         for length in (lengths if head else [None]):
             tagged = f"{name}@n{length}" if length is not None else name
             print(f"\n--- draft: {tagged}")

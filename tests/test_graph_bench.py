@@ -3342,3 +3342,33 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
     said = capsys.readouterr().out
     assert len(started) == 1 and started[0][-1] == "--yes"
     assert said.startswith("estimate: 4 min (tiny") and "measuring in the background" in said
+
+
+def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypatch, tmp_path):
+    """Qwen3.8-27B ships its nextn layers inside the main GGUF: `--draft embedded` means
+    --spec-type draft-mtp and no -md, with the draft length if asked (Adam, 2026-09-02:
+    "we need to test the mtp of the newest 27b"). Mutation: drop the EMBEDDED branch."""
+    import ml_stack.client
+    import ml_stack.serve
+    from ml_stack.graph import bench
+    from ml_stack.testing import FakeClient, FakeServe
+
+    fake = FakeServe()
+    monkeypatch.setattr(ml_stack.serve, "serve", fake)
+    monkeypatch.setattr(ml_stack.client, "Client", FakeClient.scripted([]))
+    monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
+    monkeypatch.setattr(bench, "asking", lambda *a, **k: (lambda *x, **y: None))
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    _preflight_ok(monkeypatch)
+    bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
+                 draft=bench.EMBEDDED, spec_draft_max=2, kept="", smoke=())
+    spec = fake.leased[-1]
+    assert spec.spec_type == "draft-mtp" and not spec.draft and spec.spec_draft_max == 2
+
+    seen = []
+    monkeypatch.setattr(bench, "served", lambda model, *a, **k: seen.append((k.get("label"), k.get("draft"))) or [])
+    bench.drafts("tiny.gguf", ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
+                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="")
+    assert seen == [("draft:none", ""), ("draft:embedded-mtp@n2", "embedded"),
+                    ("draft:embedded-mtp@n8", "embedded")]

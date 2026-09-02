@@ -129,7 +129,8 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     table,
     timeouts,
 )
-from ml_stack.graph.bench.serve import (  # noqa: F401
+from ml_stack.graph.bench.serve import (
+    EMBEDDED,  # noqa: F401
     SmokeFailed,
     drafts,
     find_model,
