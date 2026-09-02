@@ -418,6 +418,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
+| `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
 
@@ -881,6 +882,17 @@ down with it. `sweep --resume` then skips every model and way already kept today
 same questions, context and slots, so the killed sweep costs the model it died on and not
 the ones before it.
 
+`history` answers "how much GPU time did that day cost, and how much of it kept nothing"
+from the logs directory alone, one line per detached measurement, oldest first:
+`started  sub  model/label  est  actual  exit  kept`. The start comes from the log's header
+or its filename stamp, the end from the log's last write, the exit from what the log says --
+`done`, `killed`, `crashed: <the exception line>`, `running` while `measuring.json` names a
+pid that is alive -- the estimate from an `estimate:` line beside what it actually took,
+and `kept` is every run in the store whose `at` falls inside that window. The last line is
+the total: runs, GPU hours, and the hours that produced no kept run, which is the number to
+be embarrassed by. `--since today|24h|7d|<date>` narrows it, `--json` dumps the entries,
+`--home` and `--kept` point it elsewhere.
+
 The same sweep kept twelve runs as nothing: the store took them and gave back an empty
 string for each, and the smoke run had passed because the summary was printed from memory.
 `save` now reads every run back the way `show` reads it before it returns, and refuses to
@@ -1129,6 +1141,19 @@ instead. Wire it into a project's `.claude/settings.json` (the docstring shows t
 `MLSTACK_GUARD=off` disables it for a session. Both hooks are tested:
 `tests/test_no_real_names.py` and `tests/test_bash_guard.py`.
 
+What `no-real-names` takes for a name, and what stands a name-shaped pair down, is data:
+`contracts/name-shapes.json` holds the place prefixes and suffixes (a gazetteer's
+"North Carolina", "Colorado River"), the job-title endings (a role catalogue's
+"Software Engineer"), the `no-real-names: shapes off` file marker and the data-file
+suffixes it implies, the RFC 2606 reserved domains, the `noreply` mailboxes, the uuid
+and name patterns, and the file suffixes never read -- each section with a `why` saying
+what it is for and when it was learned. A refusal names the rule (`patterns: nameish;
+nothing stood it down`), and `NAMES_WHY=1` (or `python -m ml_stack.redact.hook --why`)
+prints, for every pair a rule cleared, which section and which word did it
+(`'North Carolina' cleared by place_first: north`), so the next exception is a word added
+to a known section rather than a code change. `NAMES_SHAPES=path.json` reads another
+rules file instead of the shipped one.
+
 ## Testing
 
 ```
@@ -1144,6 +1169,16 @@ The fleet tests go further: they boot real `ml-stack-traind` subprocesses and sp
 UDP on a real interface, on randomised ports so a run never answers -- or gets answered
 by -- a daemon you actually have running on your LAN. A forged beacon, a replayed reply,
 a multicast group a router quietly drops: a fake socket reproduces none of those either.
+
+What *is* faked -- the model's answers, a `serve()` that would load 87G, a preflight that
+would read it -- is faked once, in `ml_stack.testing.fakes`, with the real signature.
+`FakeClient` is built exactly as `Client` is built, `fake_serve` / `FakeServe` take what
+`serve()` takes, `FakePreflight` returns a real `Report`, and `ScriptedModel` replays tool
+calls through `Client.chat`'s signature. None takes a `**kwargs` the real one lacks: a fake
+that accepts every keyword lets a test pass on a keyword the real thing refuses, which is
+how a `--also tight` flag once reached `Client.__init__` in a benchmark and took the load
+down with it. `tests/test_testing_fakes.py` diffs every fake's signature against the real
+one (`mirrors`, `drift`), so a change to the real one fails the suite until the fake follows.
 
 ## Licence
 
