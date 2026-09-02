@@ -258,7 +258,30 @@ class AskRoutes:
 
     def answered(self, ask: Ask, out: Any, payload: dict[str, Any]) -> dict[str, Any]:
         self.remember(ask, out)
+        if ask.thread:
+            # the whole conversation's cost so far, this answer included -- the page shows
+            # it as "this session", beside what the one answer spent
+            session = self.session(ask.thread)
+            if session and session.get("answers"):
+                payload["session"] = session
         return payload
+
+    def session(self, thread: str) -> dict[str, Any] | None:
+        """`Spent.totals` over every answer remembered in ``thread``, or None without a
+        store: what the session has cost, not just the last turn."""
+        from ml_stack.client.spent import Spent
+        from ml_stack.graph.thread import follow
+
+        try:
+            with self._opened() as held:
+                if held is None:
+                    return None
+                records = [(t.meta or {}).get("spent") for t in follow(held, str(thread)[:64],
+                                                                     working=False)
+                           if t.role == "assistant"]
+        except Exception:  # noqa: BLE001 - a session that cannot be read is no session
+            return None
+        return Spent.totals(records)
 
     def failed(self, ask: Ask, exc: BaseException) -> None:
         print(f"{time.strftime('%FT%T')} ask failed: {exc}", file=sys.stderr)
@@ -335,7 +358,14 @@ class AskRoutes:
         try:
             with self._opened() as held:
                 turns = [] if held is None else [t.as_dict() for t in follow(held, name, working=working)]
-            return self.send_json(200, {"thread": name, "turns": turns})
+            from ml_stack.client.spent import Spent
+
+            session = Spent.totals([(t.get("meta") or {}).get("spent") for t in turns
+                                    if t.get("role") == "assistant"])
+            held_back = {"thread": name, "turns": turns}
+            if session.get("answers"):
+                held_back["session"] = session      # nothing spent is nothing to show
+            return self.send_json(200, held_back)
         except Exception as exc:  # noqa: BLE001
             return self.send_json(200, {"thread": name, "turns": [], "note": str(exc)[:120]})
 
@@ -400,7 +430,9 @@ class AskRoutes:
                               embedder=embed)
                 remember_turn(held, thread=ask.thread, role="assistant",
                               text=str(payload.get("content") or ""), drew=drew_on(payload),
-                              meta={"why": payload.get("why", ""), "steps": payload.get("steps", [])},
+                              meta={"why": payload.get("why", ""), "steps": payload.get("steps", []),
+                                    "model": payload.get("model", ""),
+                                    "spent": payload.get("spent")},
                               embedder=embed)
                 writer = self.summariser()
                 if writer is not None:

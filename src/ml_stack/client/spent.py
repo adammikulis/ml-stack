@@ -8,6 +8,7 @@ the served model is and what it spent, without a benchmark.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -77,6 +78,47 @@ class Spent:
         """Completion tokens over the server's generating time."""
         return (self.completion_tokens / (self.generating_ms / 1000)
                 if self.generating_ms and self.completion_tokens else None)
+
+    @staticmethod
+    def totals(records: Any) -> dict[str, Any]:
+        """Every `public()` record of a session added up: the counts and tokens summed, the
+        derived rates recomputed over the sums, the models named once each, and ``answers``
+        for how many records went in. What the page shows as "this session"."""
+        summed = {k: 0 for k in ("calls", "seconds", "generating_ms", "prompt_tokens",
+                                 "completion_tokens", "read_tokens", "cached_tokens",
+                                 "draft_tokens", "draft_taken", "thinking_chars",
+                                 "answer_chars", "tool_calls")}
+        models: list[str] = []
+        answers = 0
+        truncated = 0
+        firsts: list[float] = []
+        for one in records or ():
+            if not isinstance(one, Mapping) or not one.get("calls"):
+                continue
+            answers += 1
+            for k in summed:
+                summed[k] += one.get(k) or 0
+            name = str(one.get("model") or "")
+            if name and name not in models:
+                models.append(name)
+            truncated += 1 if one.get("truncated") else 0
+            if one.get("first_token") is not None:
+                firsts.append(float(one["first_token"]))
+        out: dict[str, Any] = {"answers": answers, **summed}
+        out["seconds"] = round(float(summed["seconds"]), 3)
+        out["generating_ms"] = round(float(summed["generating_ms"]), 1)
+        out["models"] = models
+        out["model"] = models[-1] if models else ""
+        out["truncated"] = truncated
+        out["drafted"] = summed["draft_tokens"] > 0
+        out["acceptance"] = (round(summed["draft_taken"] / summed["draft_tokens"], 3)
+                             if summed["draft_tokens"] else None)
+        out["tokens_per_second"] = (round(summed["completion_tokens"]
+                                          / (summed["generating_ms"] / 1000), 1)
+                                    if summed["generating_ms"] and summed["completion_tokens"]
+                                    else None)
+        out["first_token_mean"] = round(sum(firsts) / len(firsts), 3) if firsts else None
+        return out
 
     def public(self) -> dict[str, Any]:
         """Every field plus the derived ones, JSON-ready."""

@@ -175,6 +175,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   padding: 14px 16px 16px; min-height: 0; border-right: 1px solid var(--line); }
 .askpane .turns { max-height: none; overflow: auto; align-content: start; }
 .pane-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.session { font: 11px var(--font-body); opacity: .7; margin: 2px 0 6px; }
 .pane-title { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
   color: var(--ink-3); margin: 0; }
 @media (max-width: 1180px) { .two { grid-template-columns: 1fr; } .askpane { border-right: 0;
@@ -527,6 +528,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
             <h3 class="pane-title" id="askpane-title">Ask the model</h3>
             <button type="button" id="qclear">clear</button>
           </div>
+          <div class="session" id="askpane-session" hidden></div>
           <div class="turns" id="qturns"></div>
           <form class="chat-row" id="qform">
             <input id="q" type="text" placeholder="Ask about this graph" autocomplete="off">
@@ -731,6 +733,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       const r = await fetch('/thread/' + encodeURIComponent(threadName));
       if (!r.ok) return;
       const held = await r.json();
+      if (held.session) sessionLine(held.session);
       for (const t of (held.turns || [])) {
         if (!t.text) continue;
         turns.push({ role: t.role, content: t.text });
@@ -1026,6 +1029,23 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (sp.truncated) bits.push('cut by the ceiling');
     return ' · ' + bits.join(' · ');
   }
+  // the whole conversation's cost so far, from the answer's `session` (or the thread's)
+  function sessionLine(sess) {
+    const el = document.getElementById('askpane-session');
+    if (!el) return;
+    if (!sess || !sess.answers) { el.hidden = true; return; }
+    const bits = ['this session: ' + sess.answers + ' answer' + (sess.answers === 1 ? '' : 's')];
+    if (sess.seconds) bits.push(Math.round(sess.seconds) + 's');
+    if (sess.calls) bits.push(sess.calls + ' calls');
+    bits.push('read ' + (sess.read_tokens || 0) + ', cached ' + (sess.cached_tokens || 0) + ', wrote ' + (sess.completion_tokens || 0));
+    if (sess.tokens_per_second) bits.push(sess.tokens_per_second + ' tok/s');
+    if (sess.drafted && sess.acceptance != null) bits.push('draft ' + Math.round(sess.acceptance * 100) + '%');
+    if (sess.models && sess.models.length > 1) bits.push(sess.models.length + ' models');
+    if (sess.truncated) bits.push(sess.truncated + ' cut by the ceiling');
+    el.textContent = bits.join(' · ');
+    el.title = JSON.stringify(sess, null, 1);
+    el.hidden = false;
+  }
   function tally(counts) {
     const parts = [];
     if (counts.look_up) parts.push(`looked up ${counts.look_up}`);
@@ -1140,7 +1160,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         if (!answering) { answering = true; label.textContent = 'answering'; }
       } else if (ev.event === 'done' || ev.event === 'error') {
         out = ev;
-        if (ev.event === 'done') { label.textContent = tally(counts) + spentLine(ev); if (ev.spent) label.title = JSON.stringify(ev.spent, null, 1); }
+        if (ev.event === 'done') { label.textContent = tally(counts) + spentLine(ev); if (ev.spent) label.title = JSON.stringify(ev.spent, null, 1); if (ev.session) sessionLine(ev.session); }
       }
       qTurns.scrollTop = qTurns.scrollHeight;
     };

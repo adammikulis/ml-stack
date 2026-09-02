@@ -509,3 +509,53 @@ def test_the_page_shows_the_served_model_and_what_each_answer_spent():
     html = (Path(graph_package.__file__).parent / "web" / "graph.html").read_text(encoding="utf-8")
     assert "fetch('/ask/model')" in html and "answered by" in html
     assert "askpane-title" in html and "ev.spent" in html
+
+
+def test_the_session_totals_add_up_every_answer_in_the_thread(served):
+    """Each remembered answer keeps its `spent`; the done frame and `/thread` carry the
+    session's totals -- the conversation's cost so far, not the last turn's."""
+    from urllib.request import urlopen
+
+    from urllib.request import Request, urlopen
+
+    def post(where, body):
+        req = Request(where, data=json.dumps(body).encode("utf-8"),
+                      headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    url, handler = served
+    kept = handler.answer
+    try:
+        from ml_stack.client.chat import Reply
+
+        out = Answer(content="Iris surveys land.", ids=["person:iris"], read=["person:iris"],
+                     show=["person:iris"], steps=["found 2 entries"])
+        out.spent.note(Reply(content="x", raw={"model": "tiny-Q4.gguf",
+                                               "usage": {"prompt_tokens": 100, "completion_tokens": 10},
+                                               "timings": {"prompt_n": 60, "cache_n": 40,
+                                                           "predicted_ms": 200.0}}), took=0.5)
+        handler.answer = out
+        first = post(url + "/ask", {"question": "who surveys?", "thread": "totals"})
+        assert first["spent"]["calls"] == 1
+        assert first["session"]["answers"] == 1 and first["session"]["read_tokens"] == 60
+        _, raw = stream(url + "/ask/stream", {"question": "and again?", "thread": "totals"})
+        done = frames(raw)[-1]
+        assert done["session"]["answers"] == 2
+        assert done["session"]["read_tokens"] == 120 and done["session"]["cached_tokens"] == 80
+        assert done["session"]["completion_tokens"] == 20 and done["session"]["calls"] == 2
+        assert done["session"]["models"] == ["tiny-Q4.gguf"]
+        assert done["session"]["tokens_per_second"] == 50.0
+        with urlopen(url + "/thread/totals", timeout=5) as r:
+            thread = json.loads(r.read())
+        assert thread["session"]["answers"] == 2
+        assert [t["meta"]["spent"]["calls"] for t in thread["turns"] if t["role"] == "assistant"] == [1, 1]
+    finally:
+        handler.answer = kept
+
+
+def test_totals_over_nothing_is_an_empty_session():
+    from ml_stack.client.spent import Spent
+
+    assert Spent.totals([])["answers"] == 0
+    assert Spent.totals([None, {"calls": 0}])["answers"] == 0
