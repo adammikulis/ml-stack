@@ -496,7 +496,7 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
     from ml_stack.serve import fit as fit_mod
     from ml_stack.serve.backend import LlamaServerBackend
     from ml_stack.serve.manager import weight_of
-    from ml_stack.serve.preflight import _ref_bytes
+    from ml_stack.serve.preflight import _ref_bytes, _shards_of
 
     binary = str(getattr(args, "binary", "") or "")
     build_name = str(getattr(args, "build", "") or "")
@@ -531,7 +531,10 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
                   "was recorded.", file=sys.stderr)
             return 2
         record = fit_mod.Fit.of(
-            measured, model=Path(model).name, weights=weight_of(model),
+            # named as the person named it: a bare file name, the file in an hf: reference,
+            # or a path's last part -- never the Hub cache's blob hash `located` resolves to
+            measured, model=Path(str(named).rsplit("/", 1)[-1]).name,
+            weights=_shards_of(spec)[0] or weight_of(model),
             draft=_ref_bytes(draft or None), room=room,
             cache_type=kv or measured.cache_type, spec=kind, context=args.context,
             parallel=slots)

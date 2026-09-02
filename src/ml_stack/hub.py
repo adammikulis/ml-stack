@@ -458,9 +458,9 @@ def located(name: str, *, cache: Path | None = None) -> Path | None:
     asking `fleet.models` where the file is; this is the same idea narrowed to the Hub cache
     itself and to an *exact* filename match, which is what a preflight is actually handed.
 
-    Resolved through the symlink: a Hub cache entry is a name in `snapshots/<rev>/` pointing
-    into `blobs/`, and reading the symlink's own size reports a few bytes rather than the
-    weights it stands for.
+    The `snapshots/<rev>/` path itself -- a symlink into `blobs/` -- never the blob: the
+    name is what llama.cpp needs to find a sharded model's other shards, and a size read
+    off the link with `stat()` (which follows it) is the weights it stands for.
 
     A sharded build's first shard is found when ``name`` is the shard-less stem -- what the
     quantisation itself is called, e.g. `thing-UD-Q4_K_XL.gguf`, rather than any one file
@@ -477,7 +477,11 @@ def located(name: str, *, cache: Path | None = None) -> Path | None:
                 continue
             for candidate in sorted(snapshot.rglob(pattern)):
                 if candidate.is_file():
-                    return candidate.resolve()
+                    # the snapshot path, not the blob it links to: llama.cpp finds a
+                    # sharded model's other shards by the name -- handed the blob hash it
+                    # says "invalid split file name" (gpt-oss-120b, 2026-09-02). Sizes
+                    # must still be read through the link; callers `stat()` the target.
+                    return candidate
         return None
 
     found = _search(wanted)

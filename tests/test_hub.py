@@ -423,7 +423,7 @@ class TestLocated:
     copied out of `ml-stack-models files` as a relative path and reporting shards missing
     for a model that was on the machine the whole time."""
 
-    def test_an_exact_filename_is_found_and_resolved_through_the_symlink(self, tmp_path):
+    def test_an_exact_filename_is_found_as_the_link_whose_size_reads_through(self, tmp_path):
         import ml_stack.hub as hub
 
         cache = tmp_path / "hub"
@@ -435,7 +435,10 @@ class TestLocated:
         (snapshot / "thing-Q4_K_M.gguf").symlink_to(blob)
 
         found = hub.located("thing-Q4_K_M.gguf", cache=cache)
-        assert found == blob.resolve()
+        # the link, by name -- what llama.cpp needs to find a sharded model's other
+        # shards -- with the blob's size readable through it
+        assert found == snapshot / "thing-Q4_K_M.gguf" and found.is_symlink()
+        assert found.stat().st_size == blob.stat().st_size
 
     def test_a_shard_less_stem_finds_the_first_shard(self, tmp_path):
         import ml_stack.hub as hub

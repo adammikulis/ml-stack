@@ -740,3 +740,26 @@ def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, ca
                      "--draft", "hf:owner/repo-GGUF/MTP/mtp-head-Q8_0.gguf"])
     assert code == 0, capsys.readouterr()
     assert preflight.seen[0].draft == str(head)
+
+
+def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_path, monkeypatch):
+    """A Hub cache entry is a symlink into blobs/; llama.cpp finds the other shards by the
+    name, and handed the blob path said 'invalid split file name' (gpt-oss-120b, 2026-09-02).
+    The link is returned, and its size still reads through to the blob."""
+    from pathlib import Path
+
+    import ml_stack.hub as hub_module
+
+    cache = tmp_path / "hub"
+    blobs = cache / "models--maker--big-GGUF" / "blobs"
+    snapshot = cache / "models--maker--big-GGUF" / "snapshots" / "abc123"
+    blobs.mkdir(parents=True)
+    snapshot.mkdir(parents=True)
+    for n, blob in ((1, "aa" * 32), (2, "bb" * 32)):
+        (blobs / blob).write_bytes(b"x" * (100 * n))
+        (snapshot / f"big-Q4_K_M-0000{n}-of-00002.gguf").symlink_to(blobs / blob)
+    monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+
+    found = cli.resolve_model("big-Q4_K_M-00001-of-00002.gguf")
+    assert found == str(snapshot / "big-Q4_K_M-00001-of-00002.gguf")
+    assert Path(found).is_symlink() and Path(found).stat().st_size == 100
