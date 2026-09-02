@@ -29,6 +29,21 @@ binary=args.binary)`.
 - [ ] **Estimates in the runner.** Before any measuring run, seconds per question from the
   store × questions × ways × models printed, and a refusal over a ceiling without `--yes`.
 
+## Conversations of any length (asked 2026-09-02)
+
+- [ ] **A conversation that never loses the thread.** Today the ask path re-sends the last six
+  turns and the graph supplies the facts; older turns leave the model's view. Build in
+  `graph.thread` and the ask path: (1) `recall(thread, question)` — the thread store's word
+  index and vectors over turns pick the two or three earlier turns (and what they drew on)
+  that match the new question, sent after the window; (2) a rolling `summary` turn, written
+  by the small model every K turns (what is established, what the asker wants, what is
+  open, the ids it rests on), always sent first and changed rarely so it stays inside the
+  cached prefix; (3) facts stated in conversation become nodes and edges through the
+  change-request path so the tools find them next time. Window = summary + recalled + last
+  N + question. Test: a fact from turn one answered right at turn two hundred, on the fake
+  model; measure the `cached` share per turn with `ml-stack-bench concurrent` so a summary
+  that changes too often is caught.
+
 ## Verifying
 
 ```bash
