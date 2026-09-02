@@ -485,6 +485,8 @@ def test_the_done_frame_and_the_plain_answer_say_which_model_answered_and_what_i
     assert spent["calls"] == 1 and spent["read_tokens"] == 300 and spent["cached_tokens"] == 600
     assert spent["completion_tokens"] == 40 and spent["drafted"] is True
     assert spent["acceptance"] == 0.75 and spent["tokens_per_second"] == 80.0
+    # the model's own pace is decode alone; reading the prompt is its own number
+    assert spent["decode_tokens_per_second"] == 100.0 and spent["prompt_tokens_per_second"] == 3000
     assert spent["first_token"] == 0.4
     assert json.dumps(payload)                      # JSON-ready, derived fields included
 

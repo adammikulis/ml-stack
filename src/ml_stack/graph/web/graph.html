@@ -1033,7 +1033,8 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (sp.calls) bits.push(sp.calls + ' call' + (sp.calls === 1 ? '' : 's'));
     if (sp.read_tokens || sp.cached_tokens) bits.push('read ' + (sp.read_tokens || 0) + ', cached ' + (sp.cached_tokens || 0));
     if (sp.completion_tokens) bits.push('wrote ' + sp.completion_tokens);
-    if (sp.tokens_per_second) bits.push(sp.tokens_per_second + ' tok/s');
+    if (sp.decode_tokens_per_second) bits.push('wrote at ' + sp.decode_tokens_per_second + ' tok/s' + (sp.prompt_ms ? ', read ' + (sp.prompt_ms / 1000).toFixed(1) + 's' : ''));
+    else if (sp.tokens_per_second) bits.push(sp.tokens_per_second + ' tok/s');
     if (sp.drafted && sp.acceptance != null) bits.push('draft ' + Math.round(sp.acceptance * 100) + '%');
     if (sp.context_peak) bits.push('context ' + kTokens(sp.context_peak) + (slotContext ? ' of ' + kTokens(slotContext) : ''));
     if (sp.truncated) bits.push('cut by the ceiling');
@@ -1048,7 +1049,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (sess.seconds) bits.push(Math.round(sess.seconds) + 's');
     if (sess.calls) bits.push(sess.calls + ' calls');
     bits.push('read ' + (sess.read_tokens || 0) + ', cached ' + (sess.cached_tokens || 0) + ', wrote ' + (sess.completion_tokens || 0));
-    if (sess.tokens_per_second) bits.push(sess.tokens_per_second + ' tok/s');
+    if (sess.decode_tokens_per_second) bits.push('wrote at ' + sess.decode_tokens_per_second + ' tok/s'); else if (sess.tokens_per_second) bits.push(sess.tokens_per_second + ' tok/s');
     if (sess.drafted && sess.acceptance != null) bits.push('draft ' + Math.round(sess.acceptance * 100) + '%');
     if (sess.models && sess.models.length > 1) bits.push(sess.models.length + ' models');
     if (sess.context_peak) bits.push('peak context ' + kTokens(sess.context_peak) + (slotContext ? ' of ' + kTokens(slotContext) : ''));

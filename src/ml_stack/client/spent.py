@@ -19,6 +19,8 @@ class Spent:
     calls: int = 0
     seconds: float = 0.0            # wall, on the asking side, across every call
     generating_ms: float = 0.0      # what the server spent reading and writing
+    prompt_ms: float = 0.0          # of that, reading the prompt (prefill)
+    predicted_ms: float = 0.0       # and writing the answer (decode)
     first_token: float | None = None  # seconds before the first call's answer began
     prompt_tokens: int = 0          # every token sent, every call (the conversation re-sends)
     completion_tokens: int = 0
@@ -56,6 +58,8 @@ class Spent:
         prompt_ms = float(timings.get("prompt_ms") or 0)
         predicted_ms = float(timings.get("predicted_ms") or 0)
         self.generating_ms += prompt_ms + predicted_ms
+        self.prompt_ms += prompt_ms
+        self.predicted_ms += predicted_ms
         if self.first_token is None:
             self.first_token = round(max(0.0, float(took) - predicted_ms / 1000), 3)
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
@@ -101,16 +105,32 @@ class Spent:
 
     @property
     def tokens_per_second(self) -> float | None:
-        """Completion tokens over the server's generating time."""
+        """Completion tokens over the server's whole generating time, reading included --
+        what a person waits on. `decode_tokens_per_second` is the model's own pace."""
         return (self.completion_tokens / (self.generating_ms / 1000)
                 if self.generating_ms and self.completion_tokens else None)
+
+    @property
+    def decode_tokens_per_second(self) -> float | None:
+        """Completion tokens over decode time alone: the speed the hardware writes at.
+        The page showed 15 tok/s where the model decoded at 28 (2026-09-02) -- the
+        difference was reading two thousand new tokens of tool results before each call."""
+        return (self.completion_tokens / (self.predicted_ms / 1000)
+                if self.predicted_ms and self.completion_tokens else None)
+
+    @property
+    def prompt_tokens_per_second(self) -> float | None:
+        """Tokens read (not cached) over prefill time."""
+        return (self.read_tokens / (self.prompt_ms / 1000)
+                if self.prompt_ms and self.read_tokens else None)
 
     @staticmethod
     def totals(records: Any) -> dict[str, Any]:
         """Every `public()` record of a session added up: the counts and tokens summed, the
         derived rates recomputed over the sums, the models named once each, and ``answers``
         for how many records went in. What the page shows as "this session"."""
-        summed = {k: 0 for k in ("calls", "seconds", "generating_ms", "prompt_tokens",
+        summed = {k: 0 for k in ("calls", "seconds", "generating_ms", "prompt_ms", "predicted_ms",
+                                 "prompt_tokens",
                                  "completion_tokens", "read_tokens", "cached_tokens",
                                  "draft_tokens", "draft_taken", "thinking_chars",
                                  "answer_chars", "tool_calls")}
@@ -151,6 +171,12 @@ class Spent:
                                     if summed["generating_ms"] and summed["completion_tokens"]
                                     else None)
         out["first_token_mean"] = round(sum(firsts) / len(firsts), 3) if firsts else None
+        out["decode_tokens_per_second"] = (round(summed["completion_tokens"]
+                                                 / (summed["predicted_ms"] / 1000), 1)
+                                           if summed["predicted_ms"] and summed["completion_tokens"]
+                                           else None)
+        out["prompt_tokens_per_second"] = (round(summed["read_tokens"] / (summed["prompt_ms"] / 1000))
+                                           if summed["prompt_ms"] and summed["read_tokens"] else None)
         out["context_peak"] = peak
         out["context_mean"] = round(sum(peaks) / len(peaks)) if peaks else 0
         out["parts"] = parts
@@ -166,4 +192,10 @@ class Spent:
         out["acceptance"] = (round(self.acceptance, 3) if self.acceptance is not None else None)
         out["tokens_per_second"] = (round(self.tokens_per_second, 1)
                                     if self.tokens_per_second is not None else None)
+        out["decode_tokens_per_second"] = (round(self.decode_tokens_per_second, 1)
+                                           if self.decode_tokens_per_second is not None else None)
+        out["prompt_tokens_per_second"] = (round(self.prompt_tokens_per_second, 0)
+                                           if self.prompt_tokens_per_second is not None else None)
+        out["prompt_ms"] = round(self.prompt_ms, 1)
+        out["predicted_ms"] = round(self.predicted_ms, 1)
         return out
