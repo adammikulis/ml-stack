@@ -795,3 +795,13 @@ class TestShardsBeside:
         got = shards_beside(tmp_path / "thing-Q4_K_M-00001-of-00003.gguf")
         assert [p.name for p in got] == [f"thing-Q4_K_M-0000{n}-of-00003.gguf" for n in (1, 2, 3)]
         assert shards_beside(tmp_path / "thing-Q4_K_M.gguf") == [tmp_path / "thing-Q4_K_M.gguf"]
+
+
+def test_an_iq_build_is_marked_as_the_slow_choice_on_a_mac_only():
+    from ml_stack.hub import iq_on_metal
+
+    assert iq_on_metal("thing-UD-IQ4_XS", platform="darwin")
+    assert iq_on_metal("thing-IQ2_M.gguf", platform="darwin")
+    assert not iq_on_metal("thing-UD-Q4_K_XL", platform="darwin")
+    assert not iq_on_metal("thing-UD-IQ4_XS", platform="linux")
+    assert not iq_on_metal("thing-UD-IQ4_XS", platform="win32")

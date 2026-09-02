@@ -384,6 +384,17 @@ def ref(repo: str, name: str = "") -> str:
     return f"hf:{repo}/{name}" if name else f"hf:{repo}"
 
 
+def iq_on_metal(name: str, platform: str | None = None) -> bool:
+    """Whether ``name`` is an IQ-quantised build being considered on Apple silicon, where
+    its lookup-table kernels run slower than a K-quant's (measured 2026-09-02: the 87 GB
+    IQ4_XS took 70 s a question where the 104 GB Q4_K_XL took 44). ``platform`` overrides
+    ``sys.platform`` for a test."""
+    import sys
+
+    where = platform if platform is not None else sys.platform
+    return where == "darwin" and bool(re.search(r"(^|[-_.])IQ\d", name, re.IGNORECASE))
+
+
 def shards_beside(path: Path) -> list[Path]:
     """``path`` and every other shard of its build in the same directory, in order -- just
     ``[path]`` for a model that is one file."""
@@ -837,7 +848,10 @@ def main(argv: list[str] | None = None) -> int:
                     mark = ("  ON THIS MACHINE" if on_disk >= shards
                             else f"  {on_disk}/{shards} downloaded") + mark
                 many = f"  {shards} shards" if shards > 1 else ""
-                print(f"{_human(size):>8}  {name}{many}{mark}")
+                # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
+                # smaller IQ file was the slower model (README, "What this measured")
+                slow = "  IQ: slower on Metal, take a K-quant" if iq_on_metal(name) else ""
+                print(f"{_human(size):>8}  {name}{many}{mark}{slow}")
             for name, size in listing:
                 if aside(name):
                     print(f"{_human(size):>8}  {ref(args.repo, name)}  (alongside)")

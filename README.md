@@ -324,19 +324,20 @@ so, on a copy. With the flag off nothing observable changes, byte for byte, beca
 answer cache fingerprints those descriptions and a sweep of the current behaviour has to stay
 comparable with the one that measures this.
 
-**Lighting only what answers the question is behind a flag too, for the same reason.** A
-model that finds nearly everything can then light nearly everything: measured over the
-invented community, 34 questions at 32k, Qwen3.8-Flash-Next reached 92% recall at 44%
-precision, and named 70 entries its tools never found, read or showed, where a good answer
-lights about two. `converse(..., tight=True)` (and `tools_for(graph, tight=True)`) changes
-the words about `show`, on a copy — light only the entries that answer the question, the
-ones the asker would act on, never what was looked at on the way, usually one to three —
-says the same in the closing nudge, adds one sentence to the system prompt (name only what
-`look_at` read; say when something was not found rather than guess a name), caps `show` at
-`LIT_TIGHT` (six, the ids the prose names kept first, `cut N of M lit` in `steps`), and drops
-from `show` an entry the prose names that was never read (`dropped N unread from show`). Off,
-nothing observable changes, byte for byte. `ml-stack-bench --also tight` measures it against
-plain on the same load.
+**Lighting only what answers the question is the asking, not a variant.** A model that
+finds nearly everything can then light nearly everything: measured over the invented
+community, 34 questions at 32k, Qwen3.8-Flash-Next reached 92% recall at 44% precision, and
+named 70 entries its tools never found, read or showed, where a good answer lights about
+two. So `converse` and `tools_for` ask tight by default — the words about `show` change, on
+a copy: light only the entries that answer the question, the ones the asker would act on,
+never what was looked at on the way, usually one to three — the closing nudge says the same,
+one sentence is added to the system prompt (name only what a tool returned; say when
+something was not found rather than guess a name), `show` is capped at `LIT_TIGHT` (six, the
+ids the prose names kept first, `cut N of M lit` in `steps`), and an entry the prose names
+that no tool ever returned is dropped (`dropped N unread from show`). `tight=False` is the
+loose asking kept as a **control** — the words the ranking runs and the answer cache
+fingerprinted, the same schema objects, byte for byte as they were — and
+`ml-stack-bench --also loose` measures it against the default on the same load.
 
 **The page's routes come with the page.** `graph.html` streams its answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
@@ -924,6 +925,17 @@ thread; only an entry makes the tools find it next time, in any thread.
 
 ## What this measured, and what it changed
 
+**IQ quantisations are the slow choice on Apple silicon.** Measured 2026-09-02, the same
+ten questions, the same fork build, the same 32k x 2 slots, Qwen3.8-Flash-Next answering
+plain with thinking on: `UD-IQ4_XS` (87 GB) took 70 s a question at 54% F1; `UD-Q4_K_XL`
+(104 GB) took 44 s at 64%. The IQ formats decode through lookup tables that Metal runs
+markedly slower than the K-quant kernels, so on a Mac the smaller file is the slower
+model, and at ten questions the accuracy gap is suggestive rather than settled. Rule: on
+macOS take a K-quant (`Q4_K_M`, unsloth's `UD-Q4_K_XL`) and spend the memory; take an IQ
+build only when a K-quant does not fit at all. `ml-stack-models files` marks IQ builds on
+a Mac so the choice is made knowingly. On a CUDA card the IQ kernels are fine, and the
+memory saved is worth having.
+
 Answering a graph is the case this was built for, so the numbers are here rather than in
 somebody's notes. Ten questions over the invented community, 32k per slot, greedy, one run
 at a time on an otherwise idle machine. **F1** over the entries an answer lights, with the
@@ -1118,8 +1130,10 @@ on a run from before it was counted, because not counted is not none.
 
 `sweep --serve` asks the same served model in several ways for one load: `--also terse`
 describes the tools briefly, `--also card` asks with the model's own sampling, `--also
-greedy` at temperature 0, and `--also rich` has `look_up` say what matched and why, with a
-topic hit bringing the people joined to it.
+greedy` at temperature 0, `--also rich` has `look_up` say what matched and why, with a
+topic hit bringing the people joined to it, and `--also loose` asks the old way — `show`
+told to name what the answer is about, uncapped — as a control against the tight asking
+every run now uses. (`--also tight` is what the first way already does, and says so.)
 
 ```
 ml-stack-bench sweep --serve gemma-4-E2B-it --also terse --also card --detach
