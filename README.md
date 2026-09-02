@@ -814,6 +814,42 @@ if what comes back is not what went in; a `--smoke` run's summary is read from t
 for the same reason. `show` counts any run that still reads back empty, and `forget --empty`
 removes them.
 
+**A load is fetched, checked and timed before it is measured.** Every `hf:` reference a
+measuring command names -- the models `--serve` puts up, the heads `--serve-draft` and
+`--draft` name -- is downloaded through `hub.fetch` *before the measuring lock is taken*,
+one line each with its size, because a download inside the timed window is a timing of the
+network and holding the lock through it makes the next run wait for the Hub;
+`--no-prefetch` skips it. Then each served model is preflighted -- shards present,
+architecture read by this build, weights plus an estimated KV cache under what this machine
+may wire, every flag one the build accepts -- and the report is printed under the `up in`
+line, so the estimate sits beside what `kv+run` then measures; it is kept on the run as
+`server.preflight`. A refused preflight prints the reason and moves to the next model
+instead of ending the sweep: a sweep of five must not die on the one that does not fit. The
+lease's own `load_s` and `warmup_s` are kept on the run too -- not a stopwatch around the
+serve, which also holds an adopted server's nothing -- and `show` prints `load` next to
+`wall`, blank for a run from before it was recorded; `--detail`'s header names it and
+`--rank` carries it.
+
+```
+ml-stack-bench sweep --serve gemma-4-E2B-it --serve gemma-4-E4B-it --serve gpt-oss-120b \
+    --shortlist-for e2b,e4b --serve-kv q8_0
+ml-stack-bench drafts gemma-4-E4B-it --draft '' --draft auto --n-max 4 --n-max 8 --n-max 16
+```
+
+`sweep --shortlist-for e2b,e4b` gives the shortlist half only to the models whose name holds
+one of those; the rest are measured plain. Either way both halves of a model are asked of
+**one load** -- the shortlist is a question about the asking, like `--also terse`, and
+loading the model twice to answer it measured nothing about the asking. `--plain-only`
+still means no shortlist half for anyone.
+
+`--serve-kv q8_0` quantises the KV cache of every served model. The label ends `-kv-q8_0`
+and the `ctx` column reads `32k x1/q8`, because a run with a quantised cache against one at
+f16 is a comparison of configurations, and the column is what stops it being read as a
+comparison of models. `drafts --n-max N`, repeated, serves each head once per value --
+`--spec-draft-n-max` is bound when the server starts, like the head itself -- labelled
+`draft:<head>@n8`, so the table shows acceptance and wall clock per (head, n-max). Without
+it, once at the build's own default. The baseline with no head is measured once.
+
 ```
 ml-stack-bench concurrent e2b-4x3 --conversations 4 --turns 3 --base-url http://127.0.0.1:8080
 ```

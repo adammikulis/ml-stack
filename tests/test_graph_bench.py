@@ -1175,6 +1175,32 @@ class _ServedModel(_Scripted):
         self.card = {"temperature": 1.0, "top_k": 64}
 
 
+def _preflight_ok(monkeypatch, *, refuse=(), kv_estimate=3 * 2**30, weights=5 * 2**30):
+    """A preflight that reads nothing: every check passes, unless the model's name holds
+    one of ``refuse``, in which case the shards check fails the way a missing file would.
+    `room` is faked too, so no test asks sysctl what this machine may wire."""
+    import ml_stack.hub
+    import ml_stack.serve.preflight as preflight
+    from ml_stack.serve.preflight import Check, Report
+
+    seen = []
+
+    def fake_preflight(spec, *, binary, limit_bytes=0):
+        seen.append(spec)
+        bad = any(word in str(spec.model) for word in refuse)
+        return Report(checks=[
+            Check("shards", not bad, "missing or empty: " + str(spec.model) if bad else "complete"),
+            Check("architecture", True, "gemma4"),
+            Check("fit", True, f"{(weights + kv_estimate) / 2**30:.1f}G estimated fits under "
+                               f"{limit_bytes / 2**30:.1f}G"),
+            Check("flags", True, "every flag this spec would emit is one this build accepts"),
+        ], weights_bytes=weights, kv_estimate_bytes=kv_estimate)
+
+    monkeypatch.setattr(preflight, "Preflight", fake_preflight)
+    monkeypatch.setattr(ml_stack.hub, "room", lambda: 110 * 2**30)
+    return seen
+
+
 def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatch, capsys):
     """This path had no test. The `--serve` loop's variable was `named`, the same name as
     the (name, url) list `--on` builds, so after serving, the summary unpacked the last
@@ -1195,6 +1221,7 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
     graph.write_text(json.dumps(TINY))
     asked = tmp_path / "q.jsonl"
@@ -1293,6 +1320,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
     graph.write_text(json.dumps(TINY))
     asked = tmp_path / "q.jsonl"
@@ -1569,6 +1597,7 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
     monkeypatch.setattr(bench, "measure", fake_measure)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
     graph.write_text(json.dumps(TINY))
     asked = tmp_path / "q.jsonl"
@@ -1610,6 +1639,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    _preflight_ok(monkeypatch)
     graph = tmp_path / "g.json"
     graph.write_text(json.dumps(TINY))
     asked = tmp_path / "q.jsonl"
@@ -1666,3 +1696,329 @@ def test_a_long_label_keeps_its_end_in_the_table():
 
     assert _shown("gemma-4-E2B-it-plain-terse", 20).endswith("plain-terse")
     assert _shown("short") == "short"
+
+
+# -- a load is paid for once, checked first, and written down ------------------------------
+
+def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
+    """Everything a `sweep --serve` or `drafts` needs faked, and what each fake saw.
+
+    The lease yields a real `ServerInfo` carrying ``load_s`` and ``warmup_s``, as the
+    backend records them; a model whose name holds one of ``fail_for`` has the lease raise
+    `PreflightFailed` instead -- the backend's own preflight refusing what this one passed.
+    """
+    from contextlib import contextmanager
+
+    import ml_stack.client
+    import ml_stack.serve
+    import ml_stack.graph.bench as bench
+    from ml_stack.serve import ServerInfo
+    from ml_stack.serve.preflight import PreflightFailed
+
+    seen = {"models": [], "kwargs": [], "preflights": _preflight_ok(monkeypatch)}
+
+    @contextmanager
+    def fake_serve(model, **kw):
+        seen["models"].append(model)
+        seen["kwargs"].append(dict(kw))
+        if any(word in str(model) for word in fail_for):
+            raise PreflightFailed(f"FAIL  shards: not on this machine yet: {model}")
+        yield ServerInfo(base_url="http://127.0.0.1:1", port=1, pid=None, backend="fake",
+                         load_s=load_s, warmup_s=warmup_s)
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
+                                                          "slots": 1, "model": "tiny.gguf"})
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
+    monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    seen["common"] = ["--kept", str(tmp_path / "runs.ladybug"), "--graph", str(graph),
+                      "--questions", str(asked), "--store", "", "--serve-port", "1"]
+    seen["kept"] = tmp_path / "runs.ladybug"
+    return seen
+
+
+def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(tmp_path,
+                                                                                monkeypatch,
+                                                                                capsys):
+    """A download inside the timed window is a timing of the network. The fetch is also
+    before the *lock*: minutes of Hub and no GPU are not a reason to make the next run wait."""
+    import ml_stack.hub
+    import ml_stack.graph.bench as bench
+    from ml_stack.lock import only_one
+
+    seen = _serving(monkeypatch, tmp_path)
+    fetched = []
+
+    def fake_fetch(reference):
+        # the measuring lock must not be held while the Hub is being waited on
+        with only_one(tmp_path / "home" / "measuring.lock", wait=False):
+            pass
+        fetched.append(reference)
+        where = tmp_path / reference.rsplit("/", 1)[-1]
+        where.write_bytes(b"x" * 2048)
+        return where
+
+    monkeypatch.setattr(ml_stack.hub, "fetch", fake_fetch)
+    argv = ["sweep", "--serve", "hf:someone/tiny-GGUF/tiny.gguf", "--serve", "local.gguf",
+            "--serve-draft", "hf:someone/tiny-GGUF/mtp-tiny.gguf", "--plain-only",
+            *seen["common"]]
+    assert bench.main(argv) == 0
+    said = capsys.readouterr().out
+    assert fetched == ["hf:someone/tiny-GGUF/tiny.gguf", "hf:someone/tiny-GGUF/mtp-tiny.gguf"], \
+        "each hf: reference once, a local path never"
+    first_lines = said.splitlines()[:2]
+    assert first_lines[0].startswith("fetched hf:someone/tiny-GGUF/tiny.gguf: 0.00G at ")
+    assert first_lines[1].startswith("fetched hf:someone/tiny-GGUF/mtp-tiny.gguf: 0.00G at ")
+
+    fetched.clear()
+    assert bench.main([*argv, "--no-prefetch"]) == 0
+    assert fetched == [] and "fetched" not in capsys.readouterr().out
+
+
+def test_references_are_read_from_every_measuring_subcommand():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import references_in
+
+    assert references_in(Namespace(serve=["hf:a/b/c.gguf", "d.gguf"], serve_draft=["auto", ""])) \
+        == ["hf:a/b/c.gguf"]
+    assert references_in(Namespace(model="hf:a/b/c.gguf", draft=["hf:a/b/mtp.gguf", "",
+                                                                  "hf:a/b/c.gguf"])) \
+        == ["hf:a/b/c.gguf", "hf:a/b/mtp.gguf"], "the model, then each head, each once"
+    assert references_in(Namespace(label="x")) == [], "run has nothing to fetch"
+
+
+def test_a_fetch_that_fails_is_said_and_the_rest_still_come_down(capsys):
+    import ml_stack.hub
+    import ml_stack.graph.bench as bench
+
+    def flaky(reference):
+        if "gone" in reference:
+            raise OSError("no such repository")
+        return pathlib.Path("/dev/null")
+
+    import pytest as _pytest
+    with _pytest.MonkeyPatch.context() as mp:
+        mp.setattr(ml_stack.hub, "fetch", flaky)
+        got = bench.prefetch(["hf:a/gone/x.gguf", "hf:a/b/c.gguf"])
+    assert [ref for ref, _ in got] == ["hf:a/b/c.gguf"]
+    assert "could not fetch hf:a/gone/x.gguf: no such repository" in capsys.readouterr().err
+
+
+def test_the_preflight_is_printed_under_the_up_line_and_kept_beside_the_measured_cache(
+        tmp_path, monkeypatch, capsys):
+    """The estimate and the measurement on adjacent lines is the point: a KV estimate that
+    reads 3G against a `kv+run` that measures 9G is a model whose runtime is not the cache."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
+    said = capsys.readouterr().out.splitlines()
+    up = next(i for i, ln in enumerate(said) if ln.strip().startswith("up in "))
+    assert "load 12.5s" in said[up] and "warm-up 1.2s" in said[up]
+    assert said[up + 1].strip() == "ok    shards: complete"
+    assert said[up + 3].strip().startswith("ok    fit: 8.0G estimated fits under 110.0G")
+    assert len(seen["preflights"]) == 1
+    spec = seen["preflights"][0]
+    assert spec.model == "tiny.gguf" and spec.context == 32768 and spec.port == 1
+
+    back = runs(seen["kept"])[0]["server"]
+    assert back["preflight"] == {"kv_estimate_bytes": 3 * 2**30, "weights_bytes": 5 * 2**30,
+                                 "ok": True}
+
+
+def test_a_refused_preflight_skips_the_model_and_the_sweep_goes_on(tmp_path, monkeypatch,
+                                                                    capsys):
+    """A sweep of five must not end on the one that does not fit. Two refusals, both
+    caught per model: this preflight's own, and the backend's raised out of the lease."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path, fail_for=("wrongbuild",))
+    _preflight_ok(monkeypatch, refuse=("toobig",))
+    assert bench._main(["sweep", "--serve", "toobig.gguf", "--serve", "wrongbuild.gguf",
+                        "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
+    said = capsys.readouterr().out
+    assert "preflight refused toobig; not loaded:" in said
+    assert "FAIL  shards: missing or empty: toobig.gguf" in said
+    assert "preflight refused wrongbuild; not loaded:" in said
+    assert "not on this machine yet: wrongbuild.gguf" in said
+    assert seen["models"] == ["wrongbuild.gguf", "tiny.gguf"], \
+        "the one this refused was never leased; the one the lease refused did not stop the rest"
+    assert [r["label"] for r in runs(seen["kept"])] == ["tiny-plain"]
+
+
+def test_a_sweep_refused_everywhere_still_prints_its_table(tmp_path, monkeypatch, capsys):
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    _preflight_ok(monkeypatch, refuse=("tiny",))
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
+    assert "nothing kept yet" in capsys.readouterr().out
+    assert not seen["kept"].exists()
+
+
+def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_path, monkeypatch,
+                                                                         capsys):
+    """Not a stopwatch around `serve()`: that also holds an adopted server's nothing and a
+    warm-up's something. Blank for a run kept before the lease recorded it, and `n` stays
+    the fourth word of every row, old or new."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import SHORT, export, invented_digest, missed, ranking
+
+    seen = _serving(monkeypatch, tmp_path, load_s=41.6, warmup_s=None)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
+    capsys.readouterr()
+    back = runs(seen["kept"])[0]["server"]
+    assert back["load_s"] == 41.6 and back["warmup_s"] is None
+
+    # an older run beside it, kept before the lease said how long it took
+    save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768, "slots": 1})
+    table(runs(seen["kept"]))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0].split()
+    assert head.index("load") == head.index("wall") + 1, "next to wall"
+    new = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain"))
+    old = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert new.split()[3] == "1" and old.split()[3] == "1", "n is the fourth word of both"
+    assert new.split()[5] == "42s", "the load, rounded, after the wall clock"
+    assert old.split()[5] != "42s" and not old.split()[5].endswith("s"), "blank, not 0s"
+
+    missed(runs(seen["kept"], "tiny-plain"), everything=True)
+    assert "load 42s" in capsys.readouterr().out.splitlines()[1]
+
+    rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
+            for n in range(SHORT)]
+    save(seen["kept"], rows, held={"graph": invented_digest(), "model": "thing.gguf",
+                                   "load_s": 41.6})
+    got = json.loads(pathlib.Path(export(runs(seen["kept"]), tmp_path / "o.json")).read_text())
+    assert {r["load_s"] for r in got} == {41.6}
+    ranked = ranking(runs(seen["kept"]))
+    assert "| load |" in ranked and "| 42s |" in ranked
+
+
+def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, monkeypatch,
+                                                                     capsys):
+    """`--spec-draft-n-max` is bound at start like the head, so N lengths is N servers --
+    labelled so the table shows acceptance and wall per (head, n-max)."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    assert bench._main(["drafts", "tiny.gguf", "--draft", "", "--draft", "mtp-tiny.gguf",
+                        "--n-max", "4", "--n-max", "8", "--smoke", "--kept", str(kept),
+                        "--questions", str(asked), "--port", "1"]) == 0
+    said = capsys.readouterr().out
+    assert sorted(r["label"] for r in runs(kept)) == sorted(
+        ["draft:none", "draft:mtp-tiny@n4", "draft:mtp-tiny@n8"])
+    assert seen["models"] == ["tiny.gguf"] * 3
+    assert [kw.get("spec_draft_max") for kw in seen["kwargs"]] == [None, 4, 8]
+    assert [kw.get("draft") for kw in seen["kwargs"]] == [None, "mtp-tiny.gguf", "mtp-tiny.gguf"]
+    by_label = {r["label"]: r["server"] for r in runs(kept)}
+    assert by_label["draft:mtp-tiny@n8"]["spec_draft_max"] == 8
+    assert "spec_draft_max" not in by_label["draft:none"]
+    assert "--- draft: mtp-tiny@n4" in said and "--- draft: mtp-tiny@n8" in said
+    summary = [ln for ln in said.split("\n---", 1)[1].splitlines() if ln.startswith("draft:")]
+    assert len(summary) == 3, "one row per (head, n-max), and the baseline"
+
+    # without --n-max: once, at the build's own default, and the label says nothing of it
+    seen["models"].clear()
+    seen["kwargs"].clear()
+    assert bench._main(["drafts", "tiny.gguf", "--draft", "mtp-tiny.gguf", "--smoke",
+                        "--kept", str(kept), "--questions", str(asked), "--port", "1"]) == 0
+    capsys.readouterr()
+    assert seen["models"] == ["tiny.gguf"] and "spec_draft_max" not in seen["kwargs"][0]
+    assert len(runs(kept, "draft:mtp-tiny")) == 1
+
+
+def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path, monkeypatch,
+                                                                       capsys):
+    """A run with a q8 cache against one at f16 is two configurations. The label carries it
+    where the variant lives, at the end, and `ctx` shows it beside the context it sizes."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import kv_short
+
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                        "--serve-kv", "q8_0", *seen["common"]]) == 0
+    capsys.readouterr()
+    assert seen["kwargs"][0]["cache_type_k"] == "q8_0"
+    assert seen["kwargs"][0]["cache_type_v"] == "q8_0"
+    assert seen["preflights"][0].cache_type_k == "q8_0", "and the preflight sized that cache"
+    assert sorted(r["label"] for r in runs(seen["kept"])) == \
+        ["tiny-plain-kv-q8_0", "tiny-plain-terse-kv-q8_0"]
+    assert all(r["server"]["cache_type"] == "q8_0" for r in runs(seen["kept"]))
+
+    save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768, "slots": 1})
+    table(runs(seen["kept"]))
+    said = capsys.readouterr().out
+    quantised = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-kv"))
+    plain = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert quantised.split()[1:4] == ["32k", "x1/q8", "1"], "ctx says so, n still fourth"
+    assert plain.split()[1:4] == ["32k", "x1", "1"]
+
+    assert kv_short("q8_0") == "q8" and kv_short("q4_0") == "q4"
+    assert kv_short("q5_1") == "q5_1", "q5_0 also exists; two types as one is the bug"
+    assert kv_short("f16") == "f16" and kv_short("") == ""
+
+
+def test_shortlist_for_gives_both_halves_to_the_models_named_in_one_load(tmp_path, monkeypatch,
+                                                                         capsys):
+    """One load per model, whatever it is asked: the shortlist half used to cost a second
+    load that measured nothing about the asking. `--shortlist-for` narrows who gets it."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--serve", "other.gguf",
+                        "--shortlist-for", "e2b,e4b", "--shortlist", "5",
+                        *seen["common"]]) == 0
+    said = capsys.readouterr().out
+    assert seen["models"] == ["gemma-E2B.gguf", "other.gguf"], "each once, both halves inside"
+    assert sorted(r["label"] for r in runs(seen["kept"])) == \
+        ["gemma-E2B-plain", "gemma-E2B-shortlist", "other-plain"]
+    assert "gemma-E2B: plain, shortlist" in said and "other: plain" in said
+
+    # without --shortlist-for every model gets both halves, still in one load each
+    seen["models"].clear()
+    assert bench._main(["sweep", "--serve", "other.gguf", *seen["common"]]) == 0
+    capsys.readouterr()
+    assert seen["models"] == ["other.gguf"]
+    assert len(runs(seen["kept"], "other-shortlist")) == 1
+
+    # and --plain-only still means none, named or not
+    seen["models"].clear()
+    assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--shortlist-for", "e2b",
+                        "--plain-only", *seen["common"]]) == 0
+    capsys.readouterr()
+    assert len(runs(seen["kept"], "gemma-E2B-shortlist")) == 1, "no second shortlist run"
+    assert len(runs(seen["kept"], "gemma-E2B-plain")) == 2
+
+
+def test_halves_and_the_ways_they_cross():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _asked, halves
+
+    args = Namespace(plain_only=False, shortlist_for="e2b,E4B", shortlist=8, also=["terse"],
+                     terse=False)
+    assert halves(args, "gemma-4-E2B-it") == [("plain", 0), ("shortlist", 8)]
+    assert halves(args, "/models/gemma-4-e4b-it.gguf") == [("plain", 0), ("shortlist", 8)]
+    assert halves(args, "gpt-oss-120b") == [("plain", 0)]
+    assert halves(Namespace(plain_only=False, shortlist_for="", shortlist=8), "anything") \
+        == [("plain", 0), ("shortlist", 8)]
+    assert halves(Namespace(plain_only=True, shortlist_for="e2b", shortlist=8), "e2b") \
+        == [("plain", 0)]
+    ways = _asked(args, halves(args, "e2b"))
+    assert [(w["label"], w["shortlist"], w["terse"]) for w in ways] == [
+        ("plain", 0, False), ("plain-terse", 0, True),
+        ("shortlist", 8, False), ("shortlist-terse", 8, True)]

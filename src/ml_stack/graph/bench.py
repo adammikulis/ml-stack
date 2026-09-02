@@ -28,8 +28,9 @@ from ml_stack.graph.vectors import MARGIN, stands_out
 
 __all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking",
            "ask_from", "asking", "compare", "concurrent", "detach", "empties", "finding",
-           "footprint", "forget", "main", "measure", "measuring", "prepared", "read_questions",
-           "runs", "save", "slot_count", "status", "stop", "table", "tail", "unread_named"]
+           "footprint", "forget", "halves", "kv_short", "main", "measure", "measuring",
+           "prefetch", "prepared", "read_questions", "references_in", "runs", "save",
+           "slot_count", "status", "stop", "table", "tail", "unread_named"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
@@ -254,6 +255,87 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # the people joined to it -- a question about the asking, so one load
             out.append({"label": "rich", "terse": first["terse"], "rich": True,
                         **sampling_from(args)})
+    return out
+
+
+def halves(args: Any, model: str = "") -> list[tuple[str, int]]:
+    """The ``(suffix, shortlist)`` halves a sweep asks of one model: plain, and shortlisted.
+
+    Every model gets its plain half. The shortlist half goes to every model too, unless
+    ``--shortlist-for`` names substrings of the models that should have it -- `e2b,e4b` --
+    in which case a model matching none of them is measured plain only. ``--plain-only``
+    still means no shortlist half for anything. Matched case aside, against the name the
+    model was asked for by and the file it resolved to, so `e2b` finds `gemma-4-E2B-it`.
+    """
+    if getattr(args, "plain_only", False):
+        return [("plain", 0)]
+    wanted = [w.strip().lower() for w in str(getattr(args, "shortlist_for", "") or "").split(",")
+              if w.strip()]
+    if wanted and not any(w in str(model).lower() for w in wanted):
+        return [("plain", 0)]
+    return [("plain", 0), ("shortlist", int(getattr(args, "shortlist", 0) or 0))]
+
+
+def _asked(args: Any, parts: Sequence[tuple[str, int]]) -> list[dict[str, Any]]:
+    """Every way one served model is asked, both halves in one load: each half of ``parts``
+    crossed with each `_ways` variant, labelled ``plain``, ``plain-terse``, ``shortlist``...
+
+    Loading the model once per half was how the sweep began, and a load is minutes that
+    say nothing about the asking. Whether a shortlist is handed over is a question about
+    the asking, so it rides on the way like `terse` does and the server is put up once.
+    """
+    out: list[dict[str, Any]] = []
+    for suffix, shortlist in parts:
+        for way in _ways(args):
+            tag = str(way.get("label", "") or "")
+            out.append({**way, "label": f"{suffix}-{tag}" if tag else suffix,
+                        "shortlist": shortlist})
+    return out
+
+
+def kv_short(cache_type: str) -> str:
+    """``q8_0`` as the table shows it beside the context: ``q8``. A trailing ``_0`` is the
+    common case and says nothing; ``q5_1`` keeps its ``_1`` because ``q5_0`` also exists,
+    and two cache types printed as one is exactly what the column is there to prevent."""
+    return str(cache_type or "").removesuffix("_0")
+
+
+def references_in(args: Any) -> list[str]:
+    """Every ``hf:`` reference a measuring command would otherwise download inside the
+    timed window: the models ``--serve`` names, the heads ``--serve-draft`` and ``--draft``
+    name, and the model `drafts` is given. Models first, then heads, each once: the
+    weights are what a preflight sizes."""
+    out: list[str] = []
+    named = [getattr(args, "model", ""), *(getattr(args, "serve", None) or []),
+             *(getattr(args, "serve_draft", None) or []), *(getattr(args, "draft", None) or [])]
+    for one in named:
+        if isinstance(one, str) and one.startswith("hf:") and one not in out:
+            out.append(one)
+    return out
+
+
+def prefetch(references: Sequence[str], log: Callable[[str], None] = print) -> list[tuple[str, int]]:
+    """Download every reference into the Hub cache before the lock is taken, one line each.
+
+    A download inside the timed window is a timing of the network: the first model of a
+    sweep once showed a load three times the second's, and the difference was the fetch.
+    `hub.fetch` brings down every shard of a build, so a preflight afterwards finds the
+    weights complete. A reference that cannot be fetched is said and left -- the preflight
+    on that model is what refuses it, with the shard named.
+    """
+    from ml_stack import hub
+    from ml_stack.serve.manager import weight_of
+
+    out: list[tuple[str, int]] = []
+    for ref in references:
+        try:
+            where = hub.fetch(ref)
+        except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
+            print(f"could not fetch {ref}: {exc}", file=sys.stderr)
+            continue
+        size = weight_of(where)
+        log(f"fetched {ref}: {size / 2**30:.2f}G at {where}")
+        out.append((ref, size))
     return out
 
 
@@ -777,7 +859,12 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # `conc` is the same lesson again: four conversations at once against one at a time is
     # two measurements, and the wall clock of the first is the run's, not the turns' sum.
     # `made` is what F1 cannot see -- entries the prose named that nothing found or read.
-    head = (f"{'run':28} {'ctx':>7} {'n':>3} {'wall':>7} {'calls':>6} {'read':>8} "
+    #
+    # `ctx` carries the KV cache type when the run's server record names one (`32k x1/q8`):
+    # a run with a quantised cache against one at f16 is two configurations, not two
+    # models. `load` is what the server took to come up, from the lease itself and not a
+    # stopwatch around it; blank for a run kept before the lease recorded one.
+    head = (f"{'run':28} {'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5}  {'sampling'}")
@@ -792,13 +879,17 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         right, rec, prec = mean(_hit), mean(_recall), mean(_precision)
         ctx = server.get("context") or 0
         slots = server.get("slots") or 0
+        kv = kv_short(str(server.get("cache_type") or ""))
         beyond = server.get("kv_and_run_bytes")
         per1k = server.get("bytes_per_1k_context")
         rss = server.get("resident_bytes")
+        load = server.get("load_s")
         print(f"{_shown(one.get('label', '')):28} "
-              f"{(f'{ctx // 1024}k x{slots}' if ctx else '-'):>7} "
+              f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') if ctx else '-'):>10} "
               f"{len(scored):>3} "
-              f"{wall_of(one):>6.0f}s {_total(rows, 'calls'):>6.0f} "
+              f"{wall_of(one):>6.0f}s "
+              f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
+              f"{_total(rows, 'calls'):>6.0f} "
               f"{_total(rows, 'processed_tokens'):>8.0f} "
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
@@ -853,8 +944,10 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
         server = one.get("server") or {}
         found = str(server.get("finder") or "-")
         together = at_once(server)
+        load = server.get("load_s")
         print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
-              + (f", {together} at once" if together else "") + ")")
+              + (f", {together} at once" if together else "")
+              + (f", load {float(load):.0f}s" if load is not None else "") + ")")
         if not shortfall:
             print("  every question answered in full")
             continue
@@ -1108,11 +1201,12 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
              "`ml-stack-bench`. A conclusion, not evidence: the runs behind it are not in this",
              "repository. Re-measure after any model release -- none of this survives one.",
              "",
-             "| model | F1 | recall | precision | questions | seconds | resident | sampling "
-             "| find | made |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+             "| model | F1 | recall | precision | questions | seconds | load | resident "
+             "| sampling | find | made |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for row in order:
         gb = row.get("resident_bytes")
+        load = row.get("load_s")
         temp = (row.get("sampling") or {}).get("temperature")
         lines.append(
             f"| `{row.get('model')}` "
@@ -1121,6 +1215,7 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
             f"| {(row.get('precision') or 0) * 100:.0f}% "
             f"| {row.get('questions') or '-'} "
             f"| {row.get('seconds') or 0:.0f} "
+            f"| {f'{float(load):.0f}s' if load is not None else '-'} "
             f"| {f'{gb / 2**30:.1f}G' if gb else '-'} "
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
             f"| {row.get('finder') or '-'} "
@@ -1177,7 +1272,10 @@ def _exportable(kept: Sequence[Mapping[str, Any]], *,
             "draft_offered": int(_total(rows, "draft_tokens")),
             "draft_kept": int(_total(rows, "draft_taken")),
             "context": server.get("context"), "slots": server.get("slots"),
+            "cache_type": str(server.get("cache_type") or ""),
             "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
+            # None for a run kept before the lease recorded it: not recorded is not instant
+            "load_s": server.get("load_s"),
             "resident_bytes": server.get("resident_bytes"),
             "kv_and_run_bytes": server.get("kv_and_run_bytes"),
             "mmapped": bool(server.get("mmapped")),
@@ -1380,6 +1478,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            terse: bool = False, ways: Sequence[Mapping[str, Any]] = (),
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
+           spec_draft_max: int | None = None, cache_type: str = "",
            **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
@@ -1391,29 +1490,49 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     produce timings that belong to neither.
 
     ``ways`` asks the *same* server several times, which is most of the saving available
-    here. Whether the tools are described briefly, and what sampling is used, are questions
-    about the asking and not about the serving -- so measuring four of them costs one load
-    and not four. Only a change the server itself must be told about, a draft head or a
-    context, needs putting it up again. Each way is ``{"label": ..., "terse": ..., }`` plus
-    anything a client takes.
+    here. Whether the tools are described briefly, what sampling is used, and whether a
+    shortlist is handed over first are questions about the asking and not about the
+    serving -- so measuring four of them costs one load and not four. Only a change the
+    server itself must be told about, a draft head or a context, needs putting it up
+    again. Each way is ``{"label": ..., "terse": ..., "shortlist": ...}`` plus anything a
+    client takes; a way without ``shortlist`` takes the ``shortlist`` given here.
 
     ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
     passes it -- and a way that has one is skipped before the model is loaded, so a sweep
     killed on its third model costs the third model to re-run and not the first two.
+
+    ``spec_draft_max`` is how many tokens the draft head guesses ahead, when one is served;
+    ``cache_type`` quantises the KV cache (``q8_0``), and every label gets ``-kv-q8_0`` on
+    its end, because a run with a quantised cache is another configuration and the label is
+    what the table shows.
+
+    **The load is preflighted first** -- shards present, architecture read by this build,
+    weights plus an estimated KV cache under what this machine may use, every flag one the
+    build accepts -- and the report is printed under the `up in` line, the KV estimate
+    beside what `kv+run` then measures. A refused preflight is printed and the model is
+    skipped, nothing loaded: a sweep of five must not end on the one that does not fit.
     """
+    from ml_stack import hub
     from ml_stack.client import Client
+    from ml_stack.serve import preflight as checks
     from ml_stack.serve import serve
+    from ml_stack.serve.backend import ServerSpec
+    from ml_stack.serve.binary import find_binary
 
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
+    suffix = f"-kv-{cache_type}" if cache_type else ""
+
+    def labelled(way: Mapping[str, Any]) -> str:
+        tag = str(way.get("label", "") or "")
+        return (f"{name}-{tag}" if tag else name) + suffix
+
     every = list(ways) or [{}]
     if already is not None:
         todo = []
         for way in every:
-            tag = str(way.get("label", "") or "")
-            here = f"{name}-{tag}" if tag else name
-            kept_as = already(here)
+            kept_as = already(labelled(way))
             if kept_as:
-                print(f"skipping {here}: kept at {kept_as.get('at', '?')}")
+                print(f"skipping {labelled(way)}: kept at {kept_as.get('at', '?')}")
             else:
                 todo.append(way)
         if not todo:
@@ -1427,47 +1546,87 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
         kind = spec_for(draft)
         if kind:
             extra["spec_type"] = kind
+        if spec_draft_max is not None:
+            extra["spec_draft_max"] = int(spec_draft_max)
+    if cache_type:
+        extra["cache_type_k"] = extra["cache_type_v"] = cache_type
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
     extra.setdefault("cache_reuse", 256)
     extra.setdefault("warmup", False)
+
+    # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
+    # none named, the one `find_binary` would; a name no build answers to gives the flag and
+    # architecture checks no opinion rather than a wrong one. `room()` is what this machine
+    # may wire for a model, not what happens to be free.
+    spec = ServerSpec(model=model, port=port, context=context, **extra)
+    report = checks.Preflight(spec, binary=binary or find_binary() or "llama-server",
+                              limit_bytes=hub.room())
+    if not report.ok:
+        print(f"    preflight refused {name}{suffix}; not loaded:\n"
+              + "\n".join(f"      {line}" for line in report.said().splitlines()))
+        return []
+    checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
+               "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)}
+
     if binary:
         from ml_stack.serve.backend import LlamaServerBackend
         from ml_stack.serve.manager import ServerManager
 
         extra["manager"] = ServerManager(LlamaServerBackend(binary=binary))
 
+    rows: list[Row] = []
     began = time.time()
-    with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
-        loaded = time.time() - began
-        print(f"    up in {loaded:.0f}s, look_up by {finding(store, embed_url)}")
-        rows = []
-        for way in every:
-            asked = dict(way)
-            tag = str(asked.pop("label", "") or "")
-            how = bool(asked.pop("terse", terse))
-            here = f"{name}-{tag}" if tag else name
-            if len(every) > 1:
-                print(f"\n  --- {here}")
-            wants_card = bool(asked.pop("_card", False))
-            client = Client(server.base_url, **{**making, **asked})
-            if wants_card:
-                # what the model itself recommends, read from the GGUF it is serving
-                client = Client(server.base_url, **{**making, **client.card})
-            ask = asking(graph, shortlist=shortlist, store=store, embed_url=embed_url,
-                         embed_model=embed_model, terse=how,
-                         rich=bool(asked.pop("rich", False)))
-            got = measure(ask, questions, label=here, client=client, log=print, graph=graph)
-            for row in got:
-                row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-            held = {**footprint(server.base_url), "graph": _which(graph),
-                    "finder": getattr(ask, "finder", "")}
-            if draft:
-                held["draft_model"] = str(draft).rsplit("/", 1)[-1]
-            if kept:
-                save(kept, got, held={**held, "sampling": dict(client.sampling)})
-            rows += got
+    try:
+        with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
+            # `load_s` is the lease's own clock, process start to health; the stopwatch
+            # here also holds an adopted server's nothing and a warm-up's something.
+            loaded = time.time() - began
+            load_s = getattr(server, "load_s", None)
+            warmup_s = getattr(server, "warmup_s", None)
+            print(f"    up in {loaded:.0f}s"
+                  + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
+                                                       if warmup_s is not None else "") + ")"
+                     if load_s is not None else "")
+                  + f", look_up by {finding(store, embed_url)}")
+            print("\n".join(f"      {line}" for line in report.said().splitlines()))
+            for way in every:
+                asked = dict(way)
+                here = labelled(asked)
+                asked.pop("label", None)
+                how = bool(asked.pop("terse", terse))
+                first = int(asked.pop("shortlist", shortlist) or 0)
+                if len(every) > 1:
+                    print(f"\n  --- {here}")
+                wants_card = bool(asked.pop("_card", False))
+                client = Client(server.base_url, **{**making, **asked})
+                if wants_card:
+                    # what the model itself recommends, read from the GGUF it is serving
+                    client = Client(server.base_url, **{**making, **client.card})
+                ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
+                             embed_model=embed_model, terse=how,
+                             rich=bool(asked.pop("rich", False)))
+                got = measure(ask, questions, label=here, client=client, log=print, graph=graph)
+                for row in got:
+                    row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
+                held = {**footprint(server.base_url), "graph": _which(graph),
+                        "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
+                        "load_s": load_s, "warmup_s": warmup_s}
+                if draft:
+                    held["draft_model"] = str(draft).rsplit("/", 1)[-1]
+                    if spec_draft_max is not None:
+                        held["spec_draft_max"] = int(spec_draft_max)
+                if cache_type:
+                    held["cache_type"] = cache_type
+                if kept:
+                    save(kept, got, held={**held, "sampling": dict(client.sampling)})
+                rows += got
+    except checks.PreflightFailed as why:
+        # The backend's own preflight, which can refuse what this one passed -- a draft
+        # head resolved to a file this could not size, say. Same answer: say it, move on.
+        print(f"    preflight refused {name}{suffix}; not loaded:\n"
+              + "\n".join(f"      {line}" for line in str(why).splitlines()))
     return rows
 
 
@@ -1475,7 +1634,8 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
            graph: Mapping[str, Any], *, port: int = 8099, context: int = 32768,
            parallel: int = 1, binary: str = "", kept: str | Path = "",
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           serve_timeout: float = 900.0, **making: Any) -> list[Row]:
+           serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
+           cache_type: str = "", **making: Any) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
     A draft head only *proposes*; the large model verifies every token, so a quantised head
@@ -1486,19 +1646,29 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
 
     Pass "" as a head to measure the model with no draft at all, which is the baseline
     every other row has to beat.
+
+    ``n_max`` is how many tokens a head guesses ahead per pass, one served configuration
+    per value -- `--spec-draft-n-max` is bound when the server starts, like the head -- and
+    the run is labelled ``draft:<head>@n8`` so the table shows acceptance and wall clock
+    per (head, n-max). ``None`` is the build's own default and adds nothing to the label.
+    The baseline with no head is measured once: there is nothing to guess ahead with.
     """
     # The base model is loaded again for every head, because `-md` is bound when the server
     # starts and llama.cpp has no runtime swap: N configurations is N servers. It costs much
     # less than the first load -- the weights are mmapped and the pages are still cached --
     # but it is not free, so `served` times it and prints it rather than waving it away.
     out: list[Row] = []
+    lengths = list(n_max) or [None]
     for head in heads:
         name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
-        print(f"\n--- draft: {name}")
-        out += served(model, questions, graph, label=f"draft:{name}", draft=head, port=port,
-                      context=context, parallel=parallel, binary=binary, kept=kept,
-                      store=store, embed_url=embed_url, embed_model=embed_model,
-                      serve_timeout=serve_timeout, **making)
+        for length in (lengths if head else [None]):
+            tagged = f"{name}@n{length}" if length is not None else name
+            print(f"\n--- draft: {tagged}")
+            out += served(model, questions, graph, label=f"draft:{tagged}", draft=head,
+                          port=port, context=context, parallel=parallel, binary=binary,
+                          kept=kept, store=store, embed_url=embed_url,
+                          embed_model=embed_model, serve_timeout=serve_timeout,
+                          spec_draft_max=length, cache_type=cache_type, **making)
     return out
 
 
@@ -1648,6 +1818,14 @@ def _parser() -> argparse.ArgumentParser:
     heads.add_argument("--draft", action="append", default=[], metavar="PATH",
                        help="a draft head to measure; repeat for each. Pass '' for the "
                             "baseline with no draft, which every other row must beat")
+    heads.add_argument("--n-max", action="append", type=int, default=[], metavar="N",
+                       help="how many tokens a head guesses ahead per pass "
+                            "(--spec-draft-n-max); repeat to serve each head once per "
+                            "value, labelled draft:<head>@nN. Without it, once at the "
+                            "build's own default")
+    heads.add_argument("--serve-kv", default="", metavar="TYPE",
+                       help="quantise the KV cache of the served model (q8_0, q4_0); the "
+                            "label ends -kv-TYPE and the table's ctx column shows it")
     heads.add_argument("--port", type=int, default=8099)
     heads.add_argument("--context", type=int, default=32768)
     heads.add_argument("--parallel", type=int, default=1)
@@ -1737,8 +1915,17 @@ def _parser() -> argparse.ArgumentParser:
                             "finds the one shipped with it, '' serves without")
     sweep.add_argument("--binary", default="", metavar="PATH",
                        help="a llama-server that reads these models")
+    sweep.add_argument("--serve-kv", default="", metavar="TYPE",
+                       help="quantise the KV cache of each --serve'd model (q8_0, q4_0): "
+                            "every label ends -kv-TYPE and the table's ctx column shows "
+                            "it, since a run with a quantised cache is another "
+                            "configuration and not another model")
     sweep.add_argument("--plain-only", action="store_true",
                        help="skip the shortlist half, just measure each model as it is")
+    sweep.add_argument("--shortlist-for", default="", metavar="A,B",
+                       help="substrings of the models that get the shortlist half as well "
+                            "(e2b,e4b); the rest are measured plain only. Both halves of "
+                            "a model are asked of one load")
     sweep.add_argument("--resume", action="store_true",
                        help="skip any model and way already kept since --since with this "
                             "many questions at this context and these slots, so a sweep "
@@ -1803,6 +1990,11 @@ def _parser() -> argparse.ArgumentParser:
                               "returns at once. `status` says what is measuring, `tail -f` "
                               "follows the log, `stop` ends it and takes its server down. "
                               "Read before the rest of the line is parsed, like --no-queue")
+        one.add_argument("--no-prefetch", action="store_true",
+                         help="do not download the hf: models and heads named here before "
+                              "the measuring lock is taken. Without this every reference "
+                              "is fetched first, one line each with its size, because a "
+                              "download inside the timed window is a timing of the network")
 
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
@@ -1914,7 +2106,6 @@ def _main(argv: list[str] | None = None) -> int:
                            _how_many(args))
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
-        ways = [("plain", 0)] if args.plain_only else [("plain", 0), ("shortlist", args.shortlist)]
         saved: list[str] = []
         total_context = args.context or 32768 * max(1, args.parallel)
         already = (resumable(args.kept, questions=len(questions), context=total_context,
@@ -1932,33 +2123,37 @@ def _main(argv: list[str] | None = None) -> int:
                 from ml_stack.serve.cli import drafted
 
                 head = drafted(model, "auto")
-            for suffix, shortlist in ways:
-                stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
-                print(f"\n{stem}-{suffix}")
-                # A port nothing answers on is exactly what --serve expects, so the
-                # "would not say whether it is busy" note is noise here. Only a port
-                # somebody is actually using should stop us.
-                if busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
-                        f"http://127.0.0.1:{args.serve_port}", args):
-                    return 3
-                # `--context` is the total across slots, which is what `-c` takes and what
-                # ServerSpec means by it. Dividing by the slot count served a model at a
-                # quarter of the context every other run had, and the only thing that said
-                # so was the `ctx` column reading 8k where the rest read 32k.
-                before = {r["key"] for r in runs(args.kept)} if Path(args.kept).expanduser().exists() else set()
-                served(model, questions, graph, label=f"{stem}-{suffix}", draft=head,
-                       ways=_ways(args),
-                       port=args.serve_port,
-                       context=total_context,
-                       parallel=getattr(args, "parallel", 1), binary=args.binary,
-                       kept=args.kept, shortlist=shortlist,
-                       store=args.store or None, embed_url=args.embed_url,
-                       embed_model=args.embed_model, terse=getattr(args, "terse", False),
-                       already=already, **sampling_from(args))
-                saved += [r["key"] for r in runs(args.kept) if r["key"] not in before]
+            stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+            # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
+            # and every `--also` of each, asked of one load. Loading twice per model was
+            # how this began, and the second load measured nothing about the asking.
+            parts = halves(args, f"{wanted} {model}")
+            print(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
+            # A port nothing answers on is exactly what --serve expects, so the
+            # "would not say whether it is busy" note is noise here. Only a port
+            # somebody is actually using should stop us.
+            if busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
+                    f"http://127.0.0.1:{args.serve_port}", args):
+                return 3
+            # `--context` is the total across slots, which is what `-c` takes and what
+            # ServerSpec means by it. Dividing by the slot count served a model at a
+            # quarter of the context every other run had, and the only thing that said
+            # so was the `ctx` column reading 8k where the rest read 32k.
+            before = {r["key"] for r in _kept(args.kept)}
+            served(model, questions, graph, label=stem, draft=head,
+                   ways=_asked(args, parts),
+                   port=args.serve_port,
+                   context=total_context,
+                   parallel=getattr(args, "parallel", 1), binary=args.binary,
+                   kept=args.kept,
+                   store=args.store or None, embed_url=args.embed_url,
+                   embed_model=args.embed_model, terse=getattr(args, "terse", False),
+                   already=already, cache_type=getattr(args, "serve_kv", "") or "",
+                   **sampling_from(args))
+            saved += [r["key"] for r in _kept(args.kept) if r["key"] not in before]
 
         for name, url in named:
-            for suffix, shortlist in ways:
+            for suffix, shortlist in halves(args, name):
                 label = f"{name}-{suffix}"
                 if already is not None and already(label):
                     print(f"skipping {label}: kept at {already(label).get('at', '?')}")
@@ -1980,7 +2175,7 @@ def _main(argv: list[str] | None = None) -> int:
                                   held={**footprint(url), "sampling": used,
                                         "graph": _which(graph), "finder": ask.finder}))
         print()
-        table(read_back(args.kept, saved) if args.smoke else runs(args.kept))
+        table(read_back(args.kept, saved) if args.smoke else _kept(args.kept))
         return 0
     if args.cmd == "prepare":
         from ml_stack.graph.community import graph as invented
@@ -2008,17 +2203,19 @@ def _main(argv: list[str] | None = None) -> int:
 
         asked = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                        SMOKE if getattr(args, "smoke", False) else args.sample)
-        before = {r["key"] for r in runs(args.kept)} if Path(args.kept).expanduser().exists() else set()
+        before = {r["key"] for r in _kept(args.kept)}
         rows = drafts(find_model(args.model), args.draft or [""], asked, invented(),
                       port=args.port,
                       context=args.context, parallel=args.parallel, binary=args.binary,
-                      kept=args.kept, store=prepared() or None)
+                      kept=args.kept, store=prepared() or None,
+                      n_max=list(getattr(args, "n_max", []) or []) or [None],
+                      cache_type=getattr(args, "serve_kv", "") or "")
         print()
         if getattr(args, "smoke", False):
-            saved = [r["key"] for r in runs(args.kept) if r["key"] not in before]
+            saved = [r["key"] for r in _kept(args.kept) if r["key"] not in before]
             table(read_back(args.kept, saved))
         else:
-            table(runs(args.kept))
+            table(_kept(args.kept))
         return 0 if rows else 1
 
     if args.cmd == "concurrent":
@@ -2130,6 +2327,12 @@ def _main(argv: list[str] | None = None) -> int:
     if args.smoke:
         table(read_back(args.kept, [key]))
     return 0
+
+
+def _kept(store: str | Path) -> list[dict[str, Any]]:
+    """Every run in ``store``, or none when there is no store yet -- a sweep whose every
+    model was refused at preflight has kept nothing and must still print its table."""
+    return runs(store) if Path(store).expanduser().exists() else []
 
 
 def read_back(store: str | Path, keys: Sequence[str]) -> list[dict[str, Any]]:
@@ -2372,6 +2575,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     refuse = "--no-queue" in rest
     rest = [a for a in rest if a != "--no-queue"]
+    if "--no-prefetch" not in rest:
+        # Before the lock, on purpose: a download is minutes of network and no GPU, and
+        # holding the measuring lock through it makes the next run wait for the Hub.
+        prefetch(references_in(_parser().parse_args(rest)))
     previous = None
     try:
         previous = signal.signal(signal.SIGTERM, _stop_on_sigterm)
