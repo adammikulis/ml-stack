@@ -5,10 +5,12 @@ the tools themselves — which are the part with judgement in them — run for r
 graph. What is asserted is what the tools returned and what came back as touched.
 """
 
-from dataclasses import dataclass
+from dataclasses import replace
 
+from ml_stack.client import Reply
 from ml_stack.graph.ask import (LISTED, Answer, converse, converse_stream, list_kind, look_at,
                                 look_up, path_between, tools_for)
+from ml_stack.testing import ScriptedModel
 
 GRAPH = {
     "nodes": [
@@ -31,35 +33,6 @@ GRAPH = {
         "m2": {"text": "compilers are what I do too, mostly."},
     },
 }
-
-
-@dataclass
-class Reply:
-    content: str = ""
-    tool_calls: list | None = None
-    thinking: str | None = None
-    finish_reason: str | None = None
-
-
-class ScriptedModel:
-    """Answers with the tool calls it was told to, then with words."""
-
-    def __init__(self, script):
-        self.script = list(script)
-        self.seen: list[list[dict]] = []
-
-    def chat(self, messages, tools=None, **_):
-        self.seen.append(list(messages))
-        # A model can only call what it was offered. The last turn offers the tools that act
-        # but not the ones that search, so a script that wants to search then has nothing to
-        # call and answers in words — which is the whole point of taking them away.
-        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-        if self.script and self.script[0][0] in offered:
-            name, args = self.script.pop(0)
-            import json
-            return Reply(tool_calls=[{"id": "c1", "function": {
-                "name": name, "arguments": json.dumps(args)}}])
-        return Reply(content="Ada and Bea both work on compilers.")
 
 
 def call(name, **args):
@@ -223,7 +196,7 @@ def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
             if self.script and tools:
                 import json
                 name, args = self.script.pop(0)
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
             if self.quiet:
                 self.quiet = False
@@ -252,7 +225,7 @@ def test_an_answer_left_in_the_thinking_channel_is_asked_for_again():
             if tools and self.script:
                 import json
                 name, args = self.script.pop(0)
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
             if not self.reasoned:
                 self.reasoned = True
@@ -277,7 +250,7 @@ def test_the_working_out_is_never_shown_as_the_answer():
             if tools and self.script:
                 import json
                 name, args = self.script.pop(0)
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
             return Reply(content="", thinking=SCRATCH)
 
@@ -296,7 +269,7 @@ def test_a_model_that_only_searched_gets_the_top_finds_read_to_it():
             if tools and self.script:
                 import json
                 name, args = self.script.pop(0)
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
             if any("What the graph holds" in str(m.get("content") or "")
                    for m in messages if m.get("role") == "user"):
@@ -472,7 +445,7 @@ def test_a_reply_that_is_only_notes_is_asked_again():
             self.asked += 1
             if tools and self.asked == 1:
                 import json
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": "look_at", "arguments": json.dumps({"ids": ["person:ada"]})}}])
             if self.asked <= 2:
                 return Reply(content="We need to answer: who works on compilers. Need to check.")
@@ -542,7 +515,7 @@ def test_the_written_out_call_is_what_gets_lit():
         def chat(self, messages, tools=None, **_):
             self.asked += 1
             if tools and self.asked == 1:
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": "look_at", "arguments": json.dumps({"ids": ["topic:compilers"]})}}])
             return Reply(content='Ada and Bea both work on compilers. '
                                  'show({"ids":["person:ada","person:bea"]})')
@@ -583,7 +556,7 @@ def test_a_turn_that_stops_searching_can_still_act():
         def chat(self, messages, tools=None, **_):
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             if "look_up" in offered:
-                return Reply(tool_calls=[{"id": "c", "function": {
+                return Reply(content="", tool_calls=[{"id": "c", "function": {
                     "name": "look_up", "arguments": _json.dumps({"text": "Denver"})}}])
             assert "request_change" in offered, f"nothing left to act with: {offered}"
             return Reply(content="Recorded.", tool_calls=[{"id": "c", "function": {
@@ -614,7 +587,7 @@ def test_an_answer_built_on_nothing_is_sent_back_to_search():
             if self.turns == 1:
                 return Reply(content="Probably somebody in engineering.")
             if "look_up" in offered:
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": "look_up", "arguments": '{"text": "compilers"}'}}])
             return Reply(content="Ada works on compilers.")
 
@@ -712,10 +685,10 @@ def test_a_turn_stops_as_soon_as_it_has_said_what_to_light():
             self.calls += 1
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             if self.calls == 1 and "look_at" in offered:
-                return Reply(tool_calls=[{"id": "a", "function": {
+                return Reply(content="", tool_calls=[{"id": "a", "function": {
                     "name": "look_at", "arguments": '{"ids": ["person:ada"]}'}}])
             if self.calls == 2 and "show" in offered:
-                return Reply(tool_calls=[{"id": "b", "function": {
+                return Reply(content="", tool_calls=[{"id": "b", "function": {
                     "name": "show", "arguments": '{"ids": ["person:ada"]}'}}])
             return Reply(content="Ada works on compilers.")
 
@@ -736,7 +709,7 @@ def test_a_turn_that_shows_and_keeps_looking_is_not_finished():
             self.calls += 1
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             if self.calls == 1 and "look_up" in offered:
-                return Reply(tool_calls=[
+                return Reply(content="", tool_calls=[
                     {"id": "a", "function": {"name": "show",
                                              "arguments": '{"ids": ["person:ada"]}'}},
                     {"id": "b", "function": {"name": "look_up",
@@ -762,7 +735,7 @@ def test_going_in_circles_costs_a_handful_of_calls_and_stops():
             self.calls += 1
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             if "look_up" in offered:
-                return Reply(tool_calls=[{"id": "x", "function": {
+                return Reply(content="", tool_calls=[{"id": "x", "function": {
                     "name": "look_up", "arguments": '{"text": "compilers"}'}}])
             return Reply(content="Nothing more to find.")
 
@@ -829,7 +802,7 @@ def test_listing_a_kind_is_a_search_and_is_taken_away_on_the_final_turn():
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             offered_by_call.append(offered)
             if "list_kind" in offered:
-                return Reply(tool_calls=[{"id": "x", "function": {
+                return Reply(content="", tool_calls=[{"id": "x", "function": {
                     "name": "list_kind", "arguments": '{"kind": "org"}'}}])
             return Reply(content="Pellard Foundry is the only company here.")
 
@@ -858,10 +831,10 @@ def test_show_is_found_by_name_after_the_tools_were_reordered():
             offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             offered_last.append(offered)
             if len(offered_last) == 1:
-                return Reply(tool_calls=[{"id": "a", "function": {
+                return Reply(content="", tool_calls=[{"id": "a", "function": {
                     "name": "look_at", "arguments": '{"ids": ["person:ada"]}'}}])
             if offered == {"show"}:
-                return Reply(tool_calls=[{"id": "b", "function": {
+                return Reply(content="", tool_calls=[{"id": "b", "function": {
                     "name": "show", "arguments": '{"ids": ["person:ada"]}'}}])
             return Reply(content="Ada works on compilers.")
 
@@ -904,7 +877,7 @@ def test_an_empty_answer_says_why_from_the_last_reply():
             if tools and self.script:
                 import json
                 name, args = self.script.pop(0)
-                return Reply(tool_calls=[{"id": "c1", "function": {
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": name, "arguments": json.dumps(args)}}])
             return Reply(content="", thinking=SCRATCH, finish_reason="stop")
 
@@ -1192,7 +1165,7 @@ class SayingModel(ScriptedModel):
         self.offered.append(list(tools or []))
         reply = super().chat(messages, tools=tools, **kw)
         if not reply.tool_calls:
-            reply.content = self.answer
+            reply = replace(reply, content=self.answer)
         return reply
 
 
