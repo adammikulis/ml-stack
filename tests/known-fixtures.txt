@@ -142,3 +142,8 @@ All Hands
 Hack Week
 Winter Party
 git add -A
+M3 Max
+M5 Max
+M5 Pro
+M4 Max
+Apple Silicon
