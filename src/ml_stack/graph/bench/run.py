@@ -351,6 +351,10 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--label-suffix", default="", metavar="TEXT",
+                       help="appended to every label this sweep keeps, so a run that varies a "
+                            "serving knob (--serve-arg, --serve-mlock, --serve-mmproj) is "
+                            "told apart from the plain one in the table, e.g. -ub2048")
     sweep.add_argument("--serve-arg", action="append", default=[], metavar="ARG",
                        help="a raw llama-server argument for each --serve'd model, repeatable "
                             "(e.g. --serve-arg=--spec-draft-p-min --serve-arg=0.5): the knob "
@@ -707,7 +711,8 @@ def _run(args: Any) -> int:
                 head = chosen.path
                 print(f"    draft head: {head or 'none'} -- {chosen.why}"
                       + (f"\n      {chosen.note}" if chosen.note else ""))
-            stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+            stem = (str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+                    + str(getattr(args, "label_suffix", "") or ""))
             # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
             # and every `--also` of each, asked of one load. Loading twice per model was
             # how this began, and the second load measured nothing about the asking.
