@@ -497,6 +497,374 @@ class TestTheCommand:
         assert "needs a model" in capsys.readouterr().err
 
 
+class TestDrawingIt:
+    """Two panels over the records, written to a real file in ``tmp_path``.
+
+    matplotlib is driven through the Agg backend `fit._pyplot` selects, so nothing here
+    opens a window or needs a display. The assertions are about what was drawn -- the
+    legend's entries, the axis labels, the file on disk -- rather than about pixels: a
+    chart test that compares images fails on a font and passes on a wrong axis.
+    """
+
+    def rows(self) -> list[Fit]:
+        """Two invented models with opposite shapes -- the crossing the picture is for.
+
+        thornfield is small and its cache is fat; marrowgate is three times the weights and
+        its cache costs a quarter as much per token, because most of its layers keep a state
+        rather than a history.
+        """
+        return [
+            Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, room=110 * GIB,
+                compute=GIB, per_token=32768, per_seq=0, cache_type="f16",
+                kv_layers=32, build="a1b2c3d", measured_at="2026-09-02T00:00:00Z"),
+            Fit(model="marrowgate-A3B-UD-Q4_K_XL.gguf", weights=15 * GIB, room=110 * GIB,
+                compute=GIB // 2, per_token=8192, per_seq=12 * MIB, cache_type="q8_0",
+                spec="draft-simple", kv_layers=12, recurrent_layers=36, build="a1b2c3d",
+                measured_at="2026-09-02T00:10:00Z"),
+        ]
+
+    @pytest.mark.parametrize("suffix", [".png", ".svg"])
+    def test_the_file_is_written_in_the_format_its_name_asks_for(self, tmp_path, suffix):
+        """Mutation: hard-code png, and `--plot fit.svg` writes a png with an svg name."""
+        where = tmp_path / f"fit{suffix}"
+        assert fit_mod.plot(self.rows(), where) == str(where)
+        assert where.stat().st_size > 0
+        start = where.read_bytes()[:2048]
+        assert start.startswith(b"\x89PNG") if suffix == ".png" else b"<svg" in start
+
+    def test_a_format_nobody_can_draw_is_refused_by_name(self, tmp_path):
+        """Before the figure is built, not inside savefig, so the message names the flag's
+        own value rather than a matplotlib backend."""
+        with pytest.raises(ValueError, match="csv"):
+            fit_mod.plot(self.rows(), tmp_path / "fit.csv")
+
+    def test_nothing_measured_is_refused_rather_than_drawn_empty(self, tmp_path):
+        with pytest.raises(ValueError, match="no model has been measured"):
+            fit_mod.plot([], tmp_path / "fit.png")
+
+    def test_the_legend_names_every_record_by_model_cache_and_draft(self, tmp_path):
+        """Two records of the same weights differ by their cache type and whether a draft
+        was served, so the label carries both. Mutation: label by model alone, and two
+        measurements of one model become two indistinguishable lines.
+        """
+        import matplotlib.pyplot as plt
+
+        fit_mod.plot(self.rows(), tmp_path / "fit.png")
+        assert fit_mod.label_of(self.rows()[0]) == "thornfield-8B-Q4_K_M"
+        assert fit_mod.label_of(self.rows()[1]) == "marrowgate-A3B-UD-Q4_K_XL q8_0 +draft"
+        plt.close("all")
+
+    def test_every_record_appears_in_the_legend_of_both_panels(self, tmp_path,
+                                                              monkeypatch):
+        """Read off the figure itself rather than off the file: a record silently dropped
+        from a panel is invisible in a png and obvious here."""
+        import matplotlib.pyplot as plt
+
+        drawn: list = []
+        real = plt.subplots
+
+        def spy(*a, **kw):
+            made = real(*a, **kw)
+            drawn.append(made)
+            return made
+
+        monkeypatch.setattr(plt, "subplots", spy)
+        fit_mod.plot(self.rows(), tmp_path / "fit.png")
+        _, (left, right) = drawn[0]
+        for panel in (left, right):
+            named = [t.get_text() for t in panel.get_legend().get_texts()]
+            for record in self.rows():
+                assert any(fit_mod.label_of(record) in entry for entry in named), \
+                    f"{fit_mod.label_of(record)} is in no legend entry of a panel"
+        plt.close("all")
+
+    def test_a_model_that_does_not_fit_says_so_in_the_legend_and_draws_nothing(
+            self, tmp_path, monkeypatch):
+        """An empty space in a chart is read as 'not measured'. A named line with no points
+        is read as what it is. Mutation: skip the record, and the reader cannot tell a model
+        that was never measured from one this machine cannot hold.
+        """
+        import matplotlib.pyplot as plt
+
+        drawn: list = []
+        real = plt.subplots
+        monkeypatch.setattr(plt, "subplots",
+                            lambda *a, **kw: drawn.append(real(*a, **kw)) or drawn[-1])
+
+        huge = Fit(model="cragmoor-400B-Q4_K_M.gguf", weights=200 * GIB, room=24 * GIB,
+                   compute=GIB, per_token=16384, cache_type="f16")
+        fit_mod.plot([*self.rows(), huge], tmp_path / "fit.png", rooms=[24 * GIB])
+        _, (left, _right) = drawn[0]
+        named = [t.get_text() for t in left.get_legend().get_texts()]
+        assert any("cragmoor-400B-Q4_K_M" in entry and "does not fit" in entry
+                   for entry in named), named
+        empty = [line for line in left.get_lines() if len(line.get_xdata()) == 0]
+        assert empty, "the model that does not fit should draw a line with no points"
+        plt.close("all")
+
+    def test_a_second_room_is_drawn_dashed_beside_the_first(self, tmp_path, monkeypatch):
+        """110G solid, 24G dashed: the same models, two machines, one picture. Mutation:
+        draw only the first room, and --room's repeatability means nothing.
+        """
+        import matplotlib.pyplot as plt
+
+        drawn: list = []
+        real = plt.subplots
+        monkeypatch.setattr(plt, "subplots",
+                            lambda *a, **kw: drawn.append(real(*a, **kw)) or drawn[-1])
+
+        fit_mod.plot(self.rows(), tmp_path / "fit.png", rooms=[110 * GIB, 24 * GIB])
+        _, (left, right) = drawn[0]
+        styles = {line.get_linestyle() for line in left.get_lines()
+                  if len(line.get_xdata())}
+        assert "-" in styles and "--" in styles
+        # and one horizontal line per room on the second panel
+        flat = [line for line in right.get_lines()
+                if len(set(line.get_ydata())) == 1 and len(line.get_ydata()) > 1]
+        assert len(flat) >= 2
+        plt.close("all")
+
+    def test_the_title_names_the_machine_the_room_and_the_build(self, tmp_path,
+                                                                monkeypatch):
+        """A chart with no machine on it is a chart nobody can check a year later."""
+        import matplotlib.pyplot as plt
+
+        drawn: list = []
+        real = plt.subplots
+        monkeypatch.setattr(plt, "subplots",
+                            lambda *a, **kw: drawn.append(real(*a, **kw)) or drawn[-1])
+
+        fit_mod.plot(self.rows(), tmp_path / "fit.png", machine="hollowmere")
+        title = drawn[0][0].get_suptitle()
+        assert "hollowmere" in title and "110.0G" in title and "a1b2c3d" in title
+        plt.close("all")
+
+    def test_the_second_panel_charges_at_the_context_it_was_given(self, tmp_path,
+                                                                  monkeypatch):
+        """`--at` is the whole reason the second panel is comparable: at 4k the small model
+        holds more, at 128k the one with the cheap cache does. Mutation: hard-code 32768.
+        """
+        import matplotlib.pyplot as plt
+
+        seen: list = []
+        real = plt.subplots
+        monkeypatch.setattr(plt, "subplots",
+                            lambda *a, **kw: seen.append(real(*a, **kw)) or seen[-1])
+
+        fit_mod.plot(self.rows()[:1], tmp_path / "fit.png", at=4096)
+        _, (_left, right) = seen[0]
+        assert "4,096 tokens" in right.get_xlabel()
+        # the line starts at zero users, where the height is the model with an empty cache,
+        # and climbs by one user's worth of cache a step
+        line = right.get_lines()[0]
+        assert line.get_xdata()[0] == 0
+        assert line.get_ydata()[0] == pytest.approx(6 * GIB / GIB, rel=1e-6)
+        assert line.get_ydata()[1] == pytest.approx(
+            (6 * GIB + 4096 * 32768) / GIB, rel=1e-6)
+        plt.close("all")
+
+
+class TestTheLineAModelDraws:
+    """The second panel is a straight line, and `Fit.line` is the two numbers it is drawn
+    from -- so the chart is testable as arithmetic rather than as a picture."""
+
+    def one(self, **over) -> Fit:
+        base = dict(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, draft=GIB // 2,
+                    room=24 * GIB, per_token=32768, per_seq=8 * MIB, compute=GIB)
+        return Fit(**{**base, **over})
+
+    def test_loaded_is_the_model_sitting_there_with_an_empty_cache(self):
+        """Weights, a draft head and the compute buffers: everything that does not grow
+        with the users. Mutation: leave the compute buffers out, and every intercept is
+        low by the one part of the figure a GGUF header cannot tell you."""
+        assert self.one().loaded() == 5 * GIB + GIB // 2 + GIB
+        assert self.one().free() == 24 * GIB - self.one().loaded()
+
+    def test_the_intercept_and_the_slope_are_what_the_chart_plots(self):
+        """`loaded() + users * cost(at)`, and nothing else. Mutation: put the per-sequence
+        cost in the intercept, and a model is charged for a user who never arrived."""
+        intercept, each = self.one().line(32768)
+        assert intercept == self.one().loaded()
+        assert each == 32768 * 32768 + 8 * MIB == self.one().cost(32768)
+
+    def test_a_longer_context_tilts_the_line_and_leaves_the_intercept_alone(self):
+        """The whole shape of the answer: the context changes what a user costs, never what
+        the model costs before anybody arrives."""
+        short, steep = self.one().line(4096), self.one().line(131072)
+        assert short[0] == steep[0]
+        assert steep[1] > short[1]
+
+    def test_the_line_meets_the_room_at_the_last_user_that_fits(self):
+        """The two ends of the same fact: where the line crosses a room is `users()`.
+
+        Mutation: any disagreement between the chart's arithmetic and the table's, which is
+        exactly the bug a chart drawn from its own formula would hide.
+        """
+        fit = self.one()
+        intercept, each = fit.line(32768)
+        held = fit.users(32768)
+        assert intercept + held * each <= fit.room
+        assert intercept + (held + 1) * each > fit.room
+
+
+class TestTheCardsBehindIt:
+    def rows(self) -> list[Fit]:
+        return [Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, room=110 * GIB,
+                    compute=GIB, per_token=32768, cache_type="f16")]
+
+    def panels(self, tmp_path, monkeypatch, **kw):
+        import matplotlib.pyplot as plt
+
+        drawn: list = []
+        real = plt.subplots
+        monkeypatch.setattr(plt, "subplots",
+                            lambda *a, **k: drawn.append(real(*a, **k)) or drawn[-1])
+        fit_mod.plot(self.rows(), tmp_path / "fit.png", **kw)
+        return drawn[0]
+
+    def test_the_familiar_card_sizes_are_drawn_behind_the_lines(self, tmp_path,
+                                                                monkeypatch):
+        """A chart that only knows about this machine answers "will it fit here"; the grey
+        lines are what turn it into "and what would I need". Mutation: drop them, and a
+        reader with a 24 GB card has to do the arithmetic themselves.
+        """
+        import matplotlib.pyplot as plt
+
+        _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[24 * GIB])
+        flat = {round(line.get_ydata()[0]) for line in right.get_lines()
+                if len(set(line.get_ydata())) == 1 and len(line.get_ydata()) > 1}
+        assert {6, 8, 12, 16, 24}.issubset(flat)
+        assert "128G" not in {a.get_text() for a in right.texts}, \
+            "a card far above everything drawn only squashes the chart"
+        plt.close("all")
+
+    def test_the_top_of_the_chart_clears_the_room_being_asked_about(self, tmp_path,
+                                                                    monkeypatch):
+        """Mutation: fit the axis to the lines alone, and the room line -- the thing the
+        reader is looking for -- falls off the top."""
+        import matplotlib.pyplot as plt
+
+        _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[96 * GIB])
+        assert right.get_ylim()[1] > 96
+        assert right.get_xlim()[0] == 0
+        plt.close("all")
+
+    def test_the_legend_says_the_intercept_and_the_slope_in_words(self, tmp_path,
+                                                                  monkeypatch):
+        """"6.0G + 1.00G/user at 32k" -- the whole model in one line, which is what makes
+        two models comparable at a glance. Mutation: label by model name alone."""
+        import matplotlib.pyplot as plt
+
+        _figure, (left, right) = self.panels(tmp_path, monkeypatch, at=32768)
+        [entry] = [t.get_text() for t in right.get_legend().get_texts()]
+        assert entry == "thornfield-8B-Q4_K_M: 6.0G + 1.00G/user at 32k"
+        [first] = [t.get_text() for t in left.get_legend().get_texts()]
+        assert first == "thornfield-8B-Q4_K_M (6.0G loaded)"
+        plt.close("all")
+
+
+class TestTheCommandDraws:
+    def run(self, argv: list[str]) -> int:
+        from ml_stack.serve.cli import main
+
+        return main(["fit", *argv])
+
+    def some_records(self, path: Path) -> None:
+        path.write_text(json.dumps([
+            Fit(model="thornfield-8B-Q4_K_M.gguf", weights=5 * GIB, compute=GIB,
+                per_token=32768, room=110 * GIB, build="a1b2c3d").as_dict(),
+            Fit(model="marrowgate-A3B-UD-Q4_K_XL.gguf", weights=15 * GIB, compute=GIB // 2,
+                per_token=8192, per_seq=12 * MIB, room=110 * GIB,
+                build="a1b2c3d").as_dict()]), encoding="utf-8")
+
+    def test_plot_writes_the_picture_and_says_where(self, tmp_path, monkeypatch, capsys,
+                                                    _fit_files_in_tmp):
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        where = tmp_path / "fit.png"
+
+        assert self.run(["--plot", str(where)]) == 0
+        assert where.exists()
+        assert str(where) in capsys.readouterr().err
+
+    def test_two_rooms_on_the_command_line_reach_the_chart(self, tmp_path, monkeypatch,
+                                                           capsys, _fit_files_in_tmp):
+        """`--room` is repeatable and both reach `plot`; the listing still answers for the
+        first. Mutation: keep --room a single value, and the second is silently dropped."""
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        seen: list = []
+        monkeypatch.setattr(fit_mod, "plot",
+                            lambda rows, where, **kw: seen.append(kw) or str(where))
+
+        assert self.run(["--room", "110G", "--room", "24G", "--plot",
+                         str(tmp_path / "fit.png")]) == 0
+        assert seen[0]["rooms"] == [110 * GIB, 24 * GIB]
+        out = capsys.readouterr().out
+        assert "110.0G room" in out
+
+    def test_a_bad_room_is_refused_before_anything_is_drawn(self, tmp_path, monkeypatch,
+                                                            capsys, _fit_files_in_tmp):
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        where = tmp_path / "fit.png"
+        assert self.run(["--room", "24G", "--room", "heaps", "--plot", str(where)]) == 2
+        assert not where.exists()
+        capsys.readouterr()
+
+    def test_at_reaches_the_second_panel(self, tmp_path, monkeypatch, capsys,
+                                         _fit_files_in_tmp):
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        seen: list = []
+        monkeypatch.setattr(fit_mod, "plot",
+                            lambda rows, where, **kw: seen.append(kw) or str(where))
+
+        assert self.run(["--at", "8192", "--plot", str(tmp_path / "fit.svg")]) == 0
+        assert seen[0]["at"] == 8192
+        capsys.readouterr()
+
+    def test_a_chart_drawn_beside_a_written_page_is_embedded_in_it(
+            self, tmp_path, monkeypatch, capsys, _fit_files_in_tmp):
+        """The pair travel together: the Markdown names the picture by its basename, so
+        moving both to a docs directory keeps the link. Mutation: write an absolute path,
+        and the image is broken everywhere but this machine.
+        """
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        page, picture = tmp_path / "fit.md", tmp_path / "fit.png"
+
+        assert self.run(["--plot", str(picture), "--write", str(page)]) == 0
+        written = page.read_text(encoding="utf-8")
+        assert "](fit.png)" in written
+        assert str(tmp_path) not in written
+        capsys.readouterr()
+
+    def test_a_page_written_without_a_chart_embeds_nothing(self, tmp_path, monkeypatch,
+                                                           capsys, _fit_files_in_tmp):
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        page = tmp_path / "fit.md"
+        assert self.run(["--write", str(page)]) == 0
+        assert "![" not in page.read_text(encoding="utf-8")
+        capsys.readouterr()
+
+    def test_without_matplotlib_the_refusal_says_how_to_get_it(self, tmp_path, monkeypatch,
+                                                               capsys, _fit_files_in_tmp):
+        """Optional the way every other heavy dependency here is optional. Mutation: let
+        the ImportError out, and a person gets a traceback instead of an install line."""
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+
+        def missing():
+            raise RuntimeError(
+                "drawing the fit chart needs matplotlib: pip install 'ml-stack[plot]'")
+
+        monkeypatch.setattr(fit_mod, "_pyplot", missing)
+        assert self.run(["--plot", str(tmp_path / "fit.png")]) == 2
+        assert "pip install 'ml-stack[plot]'" in capsys.readouterr().err
+
+
 # -- the estimate, for when nothing has been measured -------------------------------------
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))

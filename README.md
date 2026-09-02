@@ -469,7 +469,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | | |
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
-| `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--write FILE` writes the Markdown |
+| `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown |
 | `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
@@ -608,7 +608,7 @@ exactly what it allocated at load, and that is what is recorded:
 ```
 ml-stack-serve fit model.gguf --measure --context 32768
 ml-stack-serve fit --room 24G --per-user 8192 --per-user 65536
-ml-stack-serve fit --md --write docs/fit.md
+ml-stack-serve fit --room 110G --room 24G --plot docs/fit.png --write docs/fit.md
 ```
 
 `--measure` serves the model once with `-lv 4` (the library's own load lines are
@@ -617,6 +617,23 @@ LOG_LEVEL_TRACE, so the server's default verbosity of 3 prints none of them), re
 backend already writes, stops the server, and keeps two numbers: **bytes per token of
 context** and **bytes fixed per sequence**. Those compose in both directions -- how many
 users fit at a context, and the longest context a given number of users can each have.
+
+`--plot FILE.png` (or `.svg`, `.pdf`) draws two panels over the same records. The first is
+how many users fit against the context each one gets. The second is the one worth having:
+memory against users at one context, each line starting at zero users -- where its height is the
+model sitting there with an empty cache -- and climbing by exactly one user's worth of cache
+per step. That is what makes a heavy model with a cheap cache comparable to a light one with
+an expensive cache: Qwen3.8-Flash-Next is large and its KV is tiny, so it starts high and
+barely rises, and the picture shows where it overtakes a small model whose cache costs eight
+times as much a token. Familiar card sizes (6, 8, 12, 16, 24, 32, 48, 64, 96, 128 GB) are
+drawn faintly behind, and each `--room` in force is drawn across it, so the chart answers
+"what would I need" as well as "does it fit here". `--room` is repeatable -- the first is
+solid, the second dashed. `--at N` sets the context the second panel charges at (default
+32768). The legend carries each model's arithmetic in full: `87.2G + 0.14G/user at 32k`,
+which is `Fit.line(context)`, the pair of numbers every line is drawn from. Drawing needs
+matplotlib (`pip install 'ml-stack[plot]'`); nothing else here does, and `ml-stack-bench
+show --plot` deliberately still writes hand-built SVG with no library so it opens on a
+machine with no packages. With `--write` alongside, the page embeds the picture beside it.
 
 The records are the single source of truth, in `src/ml_stack/data/fit.json`, keyed by the
 model file's basename, the cache type and the guessing-ahead kind; `~/.ml-stack/fit.json`

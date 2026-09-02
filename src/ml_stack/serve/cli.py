@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import platform
 import subprocess
 import pathlib
 import json
@@ -411,14 +412,16 @@ def cmd_fit(args: argparse.Namespace) -> int:
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
 
-    asked_room = 0
-    if getattr(args, "room", ""):
+    asked_rooms: list[int] = []
+    for said in (getattr(args, "room", None) or []):
         try:
-            asked_room = fit_mod.parse_room(args.room)
+            asked_rooms.append(fit_mod.parse_room(said))
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
-    room = asked_room or machine_room()
+    # The listing answers for one machine -- the first room named, or this one. The chart
+    # draws every room asked for, which is the whole point of naming more than one.
+    room = asked_rooms[0] if asked_rooms else machine_room()
 
     per_user = [int(n) for n in (getattr(args, "per_user", None) or [])]
     wanted = [Path(str(m)).name.lower() for m in (getattr(args, "model", None) or [])]
@@ -451,16 +454,34 @@ def cmd_fit(args: argparse.Namespace) -> int:
             print(f"{row.model}: {parallel} users fit at "
                   f"{row.longest(parallel):,} tokens each")
 
+    drawn = ""
+    picture = str(getattr(args, "plot", "") or "")
+    if picture:
+        try:
+            drawn = fit_mod.plot(rows, picture,
+                                 rooms=asked_rooms or [machine_room()],
+                                 at=int(getattr(args, "at", 32768) or 32768),
+                                 machine=platform.node() or "this machine")
+        except (RuntimeError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+        print(f"\ndrew {drawn}", file=sys.stderr)
+
     where = str(getattr(args, "write", "") or "")
     if where:
         every = fit_mod.records()
-        parts = [f"# What fits\n\nMeasured at load, not estimated -- see "
-                 f"`src/ml_stack/data/fit.json`.\n\n## This machine "
-                 f"({fit_mod._human(machine_room())})\n\n"
+        head = ("# What fits\n\nMeasured at load, not estimated -- see "
+                "`src/ml_stack/data/fit.json`.\n")
+        if drawn:
+            # The chart sits beside the file it is named in, so the Markdown refers to it
+            # by name alone and the pair can be moved together.
+            head += f"\n![How many fit, and what it costs]({Path(drawn).name})\n"
+        parts = [head + f"\n## This machine ({fit_mod._human(machine_room())})\n\n"
                  + fit_mod.render(every, contexts, machine_room(), True)]
-        if asked_room and asked_room != machine_room():
-            parts.append(f"## A machine with {fit_mod._human(asked_room)}\n\n"
-                         + fit_mod.render(every, contexts, asked_room, True))
+        for asked in asked_rooms:
+            if asked != machine_room():
+                parts.append(f"## A machine with {fit_mod._human(asked)}\n\n"
+                             + fit_mod.render(every, contexts, asked, True))
         Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
         print(f"\nwrote {where}", file=sys.stderr)
     return 0
@@ -741,10 +762,13 @@ def main(argv: list[str] | None = None) -> int:
                        help="measure with the main model's KV cache stored as this: f16 "
                             "(the server's own default), q8_0, q4_0. A record is kept per "
                             "cache type, because that is what changes the per-token cost")
-    fit_p.add_argument("--room", default="", metavar="SIZE",
+    fit_p.add_argument("--room", action="append", default=[], metavar="SIZE",
                        help="ask about a machine with this much memory instead of this one "
                             "-- 24G, 24576M, or a plain number of bytes. Default: what "
-                            "`ml-stack-serve memory` says a model may use here")
+                            "`ml-stack-serve memory` says a model may use here. Repeatable: "
+                            "the listing answers for the first, and --plot draws every one "
+                            "of them, solid then dashed, so a laptop and a card can be "
+                            "compared in the same picture")
     fit_p.add_argument("--per-user", type=int, action="append", dest="per_user",
                        default=[], metavar="N",
                        help="a per-user context to put in the table. Repeatable; default "
@@ -754,6 +778,16 @@ def main(argv: list[str] | None = None) -> int:
                             "(default: 1, which is the line every block prints anyway). "
                             "Measuring always serves two slots, so a per-sequence cost can "
                             "be told apart from a constant")
+    fit_p.add_argument("--plot", default="", metavar="FILE.png",
+                       help="draw it: two panels, one figure -- how many users fit against "
+                            "the context each gets, and what the memory costs as they "
+                            "arrive. The second is the one worth having: a large model with "
+                            "a small cache starts higher and climbs more slowly than a small "
+                            "model with a fat one, and the picture is where they cross. "
+                            ".png, .svg or .pdf; needs matplotlib")
+    fit_p.add_argument("--at", type=int, default=32768, metavar="N",
+                       help="the per-user context the second panel charges at "
+                            "(default: 32768)")
     fit_p.add_argument("--md", action="store_true",
                        help="print Markdown rather than the plain listing")
     fit_p.add_argument("--write", default="", metavar="FILE",

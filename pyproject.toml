@@ -51,12 +51,15 @@ web = ["ddgs>=9", "trafilatura>=2"]
 # ml-stack-models fetch and hub.located read and fill the Hub cache through this
 hub = ["huggingface_hub>=0.20"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
+# `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
+# own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
+plot = ["matplotlib>=3.7"]
 testing = ["numpy>=1.24", "pytest>=7"]
 telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
 mcp = ["mcp>=1.0"]
 all = [
-    "ml-stack[app,train,serve,gguf,graph,store,scrape,vision,testing,telemetry]",
+    "ml-stack[app,train,serve,gguf,graph,store,scrape,vision,testing,telemetry,plot]",
 ]
 
 [project.urls]
