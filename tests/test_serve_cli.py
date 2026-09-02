@@ -819,3 +819,36 @@ def test_machine_memory_splits_the_servers_from_everything_else(monkeypatch):
     assert got["total"] == 128 * G and got["used"] == 111 * G and got["wired"] == 67 * G
     assert got["servers"] == 73 * G and got["others"] == 3 * G
     assert got["largest"] == ["Browser 2.0G", "editor 1.0G"]
+
+
+def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
+    """`--kv q8_0` reaches both cache types of the spec; nothing asked leaves the server's
+    own default."""
+    import ml_stack.hub as hub_module
+
+    seen = {}
+
+    class Manager:
+        def __init__(self, *a, **k):
+            self.backend = types.SimpleNamespace(binary=None)
+
+        def lease(self, spec, **kw):
+            seen["spec"] = spec
+            raise SystemExit(0)
+
+    import types
+
+    monkeypatch.setattr(cli, "ServerManager", Manager)
+    monkeypatch.setattr(hub_module, "HUB_CACHE", tmp_path)
+    model = tmp_path / "tiny.gguf"
+    model.write_bytes(b"x")
+    try:
+        cli.main(["up", str(model), "--kv", "q8_0", "--port", "1"])
+    except SystemExit:
+        pass
+    assert seen["spec"].cache_type_k == "q8_0" and seen["spec"].cache_type_v == "q8_0"
+    try:
+        cli.main(["up", str(model), "--port", "1"])
+    except SystemExit:
+        pass
+    assert seen["spec"].cache_type_k == "" and seen["spec"].cache_type_v == ""
