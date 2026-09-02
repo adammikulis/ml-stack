@@ -3391,3 +3391,21 @@ def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
     quick = _measured("draft:eagle3@n1", hits=12, seconds=100.0, draft="eagle3.gguf",
                       guessed=100, taken=80)
     assert drafted([base, slower, quick]).splitlines()[-1].startswith("serve draft:eagle3@n1")
+
+
+def test_drafts_measures_every_arm_under_the_same_reasoning_budget(tmp_path, monkeypatch):
+    """A head and no thinking is the serving shape worth measuring together; the budget
+    binds at start on every arm, baseline included, and every label says so."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    assert bench._main(["drafts", "tiny.gguf", "--draft", "", "--draft", "mtp-tiny.gguf",
+                        "--n-max", "2", "--reasoning-budget", "0", "--smoke",
+                        "--kept", str(kept), "--questions", str(asked), "--port", "1"]) == 0
+    assert [kw.get("reasoning_budget") for kw in seen["kwargs"]] == [0, 0]
+    assert sorted(r["label"] for r in runs(kept)) == ["draft:mtp-tiny@n2-rb0", "draft:none-rb0"]
+    assert all(r["server"].get("reasoning_budget") == 0 for r in runs(kept))

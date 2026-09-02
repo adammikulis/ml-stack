@@ -233,6 +233,12 @@ def _parser() -> argparse.ArgumentParser:
     heads.add_argument("--draft", action="append", default=[], metavar="PATH",
                        help="a draft head to measure; repeat for each. Pass '' for the "
                             "baseline with no draft, which every other row must beat")
+    heads.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
+                       help="tokens the model may spend thinking on each turn, on every arm "
+                            "(llama-server --reasoning-budget; 0 turns thinking off, -1 is "
+                            "unlimited). A head and no thinking is the serving shape worth "
+                            "measuring together, since drafting pays most where the tokens "
+                            "are. Every label ends -rbN")
     heads.add_argument("--n-max", action="append", type=int, default=[], metavar="N",
                        help="how many tokens a head guesses ahead per pass "
                             "(--spec-draft-n-max); repeat to serve each head once per "
@@ -741,6 +747,7 @@ def _run(args: Any) -> int:
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
                       cache_type=getattr(args, "serve_kv", "") or "",
                       per_question=args.per_question,
+                      reasoning_budget=getattr(args, "reasoning_budget", None),
                       smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
         print()
         if getattr(args, "smoke", False):
