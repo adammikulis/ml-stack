@@ -305,6 +305,12 @@ def _parser() -> argparse.ArgumentParser:
     ready.add_argument("--embed-url", default="",
                        help="a server that embeds; without one only the word index is built")
     ready.add_argument("--embed-model", default="", help="what to file the vectors under")
+    ready.add_argument("--mix", action="store_true",
+                       help="print how many questions ask for each kind of answer, and "
+                            "build nothing: what a full run measures, and what a short one "
+                            "draws from")
+    ready.add_argument("--questions", default="",
+                       help="the set --mix reports on (default: the invented community's)")
 
     sweep = sub.add_parser("sweep", allow_abbrev=False,
                            help="run every model, with and without a shortlist")
@@ -778,6 +784,17 @@ def _run(args: Any) -> int:
         from ml_stack.graph.vectors import remember
 
         graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
+        if getattr(args, "mix", False):
+            from ml_stack.graph.bench.measure import mix
+            from ml_stack.graph.community import QUESTIONS
+
+            everything = read_questions(args.questions) if args.questions else QUESTIONS
+            counts = mix(everything, graph)
+            scored = sum(1 for q in everything if q.get("expect"))
+            print(f"{len(everything)} asked, {scored} scored")
+            for kind, how_many in counts.items():
+                print(f"  {kind:12} {how_many:4}  {how_many / len(everything):6.1%}")
+            return 0
         counted = replace(args.store, graph)          # writing builds the word index
         print(f"{args.store}: {counted['nodes']} nodes, {counted['edges']} edges, word index built")
         if not args.embed_url:

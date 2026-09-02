@@ -13,6 +13,7 @@ from collections import Counter
 
 import pytest
 
+from ml_stack.graph.bench.measure import mix, sample
 from ml_stack.graph.community import QUESTIONS, _MORE_SAID, graph
 from ml_stack.graph.store import GraphStore
 
@@ -136,29 +137,52 @@ def test_no_question_is_asked_twice():
     assert [q for q, n in said.items() if n > 1] == []
 
 
-def test_the_full_set_is_sixty_scored_questions_and_no_one_kind_of_them(g):
-    """Sixty is the `n` a full run records -- the scored questions; the ones whose right
+def test_the_full_set_is_a_hundred_scored_questions_and_no_one_kind_of_them(g):
+    """A hundred is the `n` a full run records -- the scored questions; the ones whose right
     answer is nobody are asked, not counted -- and the ranking takes a model's largest run,
-    so a fifty-question row stays valid until a sixty of the same model exists.
+    so a sixty-question row stays valid until a hundred of the same model exists.
 
-    Each question is filed under the rarest kind it asks for, exactly as `bench.sample`
-    files it when drawing a short run. Every bucket has to be there for a short run to
-    have anything to draw, and none may be more than half the set: the set is about half
-    person-shaped on purpose, because the page is, and half is the line past which it is
-    person-shaped by accident again. Ids and duplicates are held by
+    Each question is filed under the rarest kind it asks for, by `bench.mix`, which is the
+    same filing `bench.sample` uses when drawing a short run. Every bucket has to be there
+    for a short run to have anything to draw, and none may be more than half the set: the
+    set is about half person-shaped on purpose, because the page is, and half is the line
+    past which it is person-shaped by accident again. Ids and duplicates are held by
     `test_every_expected_answer_exists` and `test_no_question_is_asked_twice`."""
-    kind = {n["id"]: n["kind"] for n in g["nodes"]}
     scored = [q for q in QUESTIONS if q["expect"]]
-    assert len(scored) == 60
+    assert len(scored) == 100
     assert len(QUESTIONS) - len(scored) >= 4, "and some whose right answer is nobody"
 
-    wanted = Counter(k for q in QUESTIONS
-                     for k in ({kind[e] for e in q["expect"]} or {"nobody"}))
-    filed = Counter(min({kind[e] for e in q["expect"]} or {"nobody"}, key=wanted.__getitem__)
-                    for q in QUESTIONS)
+    filed = mix(QUESTIONS, g)
     assert set(filed) == {"person", "org", "place", "topic", "opportunity", "event", "nobody"}
-    assert all(n >= 2 for n in filed.values()), f"a kind with one question: {dict(filed)}"
-    assert max(filed.values()) <= len(QUESTIONS) / 2, f"one kind is most of the set: {dict(filed)}"
+    assert all(n >= 2 for n in filed.values()), f"a kind with one question: {filed}"
+    assert max(filed.values()) <= len(QUESTIONS) / 2, f"one kind is most of the set: {filed}"
+
+
+# What the set is meant to look like, to within a question or two either way. Written down
+# because the mix is what a hundred questions can quietly lose: forty additions each of which
+# looked like a fair one, and the set is about people again. `ml-stack-bench prepare --mix`
+# prints the same counts.
+_MIX = {"person": 51, "org": 15, "place": 13, "topic": 12, "nobody": 10, "event": 5,
+        "opportunity": 4}
+
+
+def test_the_mix_is_the_one_that_was_agreed(g):
+    """Growing the set from sixty to a hundred kept every kind's share of it, near enough:
+    a set that gains forty questions and changes shape is a different benchmark wearing the
+    old one's name, and the scores either side of it do not compare."""
+    filed = mix(QUESTIONS, g)
+    assert filed == _MIX, f"the mix moved: {filed}"
+    for kind, how_many in filed.items():
+        assert abs(how_many / len(QUESTIONS) - _MIX[kind] / sum(_MIX.values())) < 0.02, kind
+
+
+def test_the_mix_is_filed_the_way_a_short_run_is_drawn(g):
+    """`mix` counting one thing and `sample` drawing another would let the reported shape
+    drift from the shape actually measured. They are one function."""
+    filed = mix(QUESTIONS, g)
+    assert sum(filed.values()) == len(QUESTIONS)
+    drawn = sample(QUESTIONS, len(filed), g)
+    assert set(mix(drawn, g)) == set(filed), "a short run drops a kind the mix reports"
 
 
 # --- the four kinds the set was short of ------------------------------------------------------
@@ -166,17 +190,37 @@ def test_the_full_set_is_sixty_scored_questions_and_no_one_kind_of_them(g):
 # Counting, two hops, traps and quotes. Each is held here by deriving its answer from the graph
 # again, so the expectation is a fact about the graph rather than something remembered.
 
+# A question and the words in somebody's message that answer it. Nothing on an edge and no
+# label carries these, so a model that only ever reads the graph's shape cannot score them --
+# which is the point: the messages are most of what a community is, and a set that never asks
+# about them measures a filing cabinet.
+_QUOTED: dict[str, str] = {
+    "Who said they had just joined?": "just joined",
+    "What did Vera Lund say she works on?": "data engineering for hospitals",
+    "Who here has been doing their job the longest?": "twenty-five years",
+    "Who here can weld, even a little?": "learning to weld",
+    "Who said they teach in the evenings?": "two evenings a week",
+    "Who mentioned working on medical imaging?": "medical imaging",
+    "Who said they would rather be outdoors than at a desk?": "prefer being outdoors",
+    "Who said they read a lot of CVs?": "read a lot of cvs",
+    "Who said the planning is not the same job as the fixing?": "not the same job as fixing",
+    "Who said they do the unglamorous half of the work?": "unglamorous half",
+    "Who here works with soil and boreholes?": "boreholes and soil",
+    "Who did Tam Quillon say tells him where to dig?": "where to dig",
+}
+
 _GAPS: dict[str, tuple[str, ...]] = {
     "aggregate": ("How many people here do robotics?",
                   "Which company sent the most people to the Northern Trade Fair?",
                   "Who here has been doing their job the longest?"),
     "two-hop": ("Who works alongside the person who does geotechnics?",
-                "Which places do the people who do repair live in?"),
+                "Which places do the people who do repair live in?",
+                "Who at Quenlow Robotics also went to Makers Night?",
+                "Which company had somebody at both events?"),
     "trap": ("Who here is called Vance?",
              "Since Ada Lovelace moved to Selby, who is left in Calderwick?",
              "Who here can weld, even a little?"),
-    "quote": ("Who said they had just joined?",
-              "What did Vera Lund say she works on?"),
+    "quote": tuple(_QUOTED),
 }
 
 
@@ -281,3 +325,27 @@ def test_a_quote_question_is_answered_by_the_words_and_by_nothing_else(g):
     assert "data engineering" in vera and "hospital" in vera
     assert set(_asked("What did Vera Lund say she works on?")["expect"]) \
         == _of(g, "person:vera", "experienced_in")
+
+
+def test_a_dozen_questions_are_answered_from_a_message_and_not_from_a_label(g):
+    """Six is the floor -- most of a community is what people said, and a set that asks
+    only about edges rewards a model that never opens a message.
+
+    For each, the phrase it turns on is in somebody's message and in no label, and the
+    person who said it is either the answer or the one person who said it about somebody
+    else (Tam, on where Iris tells him to dig)."""
+    assert len(_QUOTED) >= 6, "the set is short of questions only a message can answer"
+    said = {n["id"]: " ".join(g["messages"][m]["text"] for m in n.get("messages") or ()).lower()
+            for n in g["nodes"] if n["kind"] == "person"}
+    labels = " ".join(n["label"] for n in g["nodes"]).lower()
+    for text, phrase in _QUOTED.items():
+        q = _asked(text)
+        assert q["expect"], text
+        assert phrase not in labels, f"{text}: a label carries {phrase!r}"
+        speakers = {i for i, s in said.items() if phrase in s}
+        assert len(speakers) == 1, f"{text}: {len(speakers)} people said {phrase!r}"
+        assert speakers <= set(q["expect"]) or not (speakers & set(q["expect"])), text
+        # and the question never simply names what it is asking for
+        for e in q["expect"]:
+            label = next(n["label"] for n in g["nodes"] if n["id"] == e)
+            assert label.lower() not in text.lower(), f"{text} names {label}"

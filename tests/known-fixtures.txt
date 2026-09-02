@@ -186,3 +186,6 @@ x1 - x0
 
 # allowed with `hook allow` on 2026-09-02: not people
 Defender Firewall
+
+# allowed with `hook allow` on 2026-09-02: not people
+assert label.lower

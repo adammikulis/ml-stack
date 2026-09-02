@@ -1051,11 +1051,14 @@ impressionistic. Runs are kept in a graph store under `~/.ml-stack/bench`, so on
 compared with another a week later.
 
 There are two question sets, and a ranking should be read on both. The curated set,
-`ml_stack.graph.community.QUESTIONS` -- sixty scored, six whose right answer is nobody --
-is written by hand for nuance: two people who share a surname, a false premise about a
-real person, a role nobody has but one person nearly does, a count scored as the people
-counted, an answer two hops away from the person the question describes, and things only
-somebody's own words say. The generated set, `ml-stack-world questions --world DIR --n 200`,
+`ml_stack.graph.community.QUESTIONS` -- a hundred scored, ten whose right answer is nobody
+-- is written for nuance: two people who share a surname, a false premise about a real
+person, a role nobody has but one person nearly does, a count scored as the people counted,
+an answer two hops away from the person the question describes, and things only somebody's
+own words say. Rather than write all hundred by hand, half of the second fifty were drawn by
+handing this graph to the generator below and reading what it produced; `ml-stack-bench
+prepare --mix` prints how many questions ask for each kind of answer, which is what says
+whether it still measures the whole page or has drifted into being about people. The generated set, `ml-stack-world questions --world DIR --n 200`,
 is derived from an invented world's truth for breadth -- hundreds of questions over
 thousands of people, tagged by `kind`, with `--kinds aggregate,twohop,trap,quote` to draw
 only those -- and reaches sizes the hand-written set never will. Both are fed to
@@ -1092,7 +1095,7 @@ library and no network, so it opens on any machine.
 a draft head cannot change an answer -- the target verifies every token -- only the wall
 clock and the memory. Accuracy comes from the model's largest run (the full sweep, undrafted,
 on mainline; the newest on a tie), and cost, printed per question so a twenty-question
-`drafts` run compares with a sixty, from its fastest run of at least `SHORT` questions
+`drafts` run compares with a hundred, from its fastest run of at least `SHORT` questions
 whose F1 held within five points of that -- a head, a draft length and a fork included -- with
 the last column naming which run and which build it was (`--noise` widens or tightens the
 five). A run that fell outside the noise is listed under the table as `rejected`, so a head

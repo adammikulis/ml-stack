@@ -10,6 +10,19 @@ nothing to confuse -- so a model can score well without discriminating at all. T
 carries several people per subject, subjects that sound alike, and places that repeat, so
 that a wrong answer is always available and finding the right one is work. It is still
 small enough to read in one sitting and to check an expected answer by eye.
+
+`QUESTIONS` is a hundred scored questions and ten more whose right answer is nobody. Each
+is ``{"q": ..., "expect": [exact node ids]}``; an empty ``expect`` means naming anybody is
+wrong. Every answer is derivable from this graph alone -- what `look_up`, `look_at`,
+`path_between` and `list_kind` can reach -- so a wrong answer is the model's and never the
+question's. A question about finding somebody does not contain the label it is looking for;
+a listing question expects every member; a path question expects the chain, and the chain
+must be *a* shortest path (`tests/test_graph_community.py` derives it from the graph rather
+than trusting the list). About a dozen turn on words only a message carries, because most
+of a community is what people said. `ml-stack-bench prepare --mix` prints how many ask for
+each kind of answer, which is the number to watch when adding more: the second fifty were
+half drawn by `ml_stack.world.questions` over this same graph and half written by hand,
+and both halves were kept to the shares the first fifty already had.
 """
 
 from __future__ import annotations
@@ -326,10 +339,23 @@ QUESTIONS: list[dict[str, Any]] = [
      "expect": ["person:dorian"]},
     {"q": "Who works at Pellard Foundry?",
      "expect": ["person:charles", "person:oskar", "person:otto"]},
+    # Sela's subject is "brand"; the question asks for the job rather than the word, which
+    # is what a person actually types.
+    {"q": "We need somebody to write the words on a manufacturer's website. Who?",
+     "expect": ["person:sela"]},
+    # "geotechnics" appears nowhere in the question; only Tam's own line says what it is.
+    {"q": "Who here works with soil and boreholes?", "expect": ["person:tam"]},
 
     # --- putting people together ------------------------------------------------------
     {"q": "Who could work together on a robotics marketing project?",
      "expect": ["person:ada", "person:hedy", "person:grace"]},
+    # An employer and an event, intersected: Quenlow is Ada and Hedy, and both were there.
+    {"q": "Who at Quenlow Robotics also went to Makers Night?",
+     "expect": ["person:ada", "person:hedy"]},
+    # The same shape one hop further out -- the fair's crowd, narrowed to the logistics
+    # firm, which is Corvane. Grace and Sela were there and work for nobody.
+    {"q": "Who at the Northern Trade Fair works for a logistics company?",
+     "expect": ["person:dorian", "person:milo"]},
     # --- place -----------------------------------------------------------------------
     {"q": "Who is based in Dunmore?",
      "expect": ["person:grace", "person:katherine", "person:sela"]},
@@ -353,9 +379,23 @@ QUESTIONS: list[dict[str, Any]] = [
      "expect": ["place:calderwick"]},
     {"q": "What does Pellard Foundry do?", "expect": ["topic:repair", "topic:maintenance"]},
     {"q": "where's quenlow robotics?", "expect": ["place:turin"]},
+    {"q": "What does Littlemoor Legal do?", "expect": ["topic:contracts"]},
     # Two hops out and back: the people who were there, then where each of them works.
     {"q": "Which firms had someone at Makers Night?",
      "expect": ["org:brayfield", "org:pellard", "org:quenlow"]},
+    # Both events, intersected: Pellard sent Otto to one and Charles to the other, and it
+    # is the only firm that appears in both lists.
+    {"q": "Which company had somebody at both events?", "expect": ["org:pellard"]},
+    # Nell's subject is "contracts"; only her own line says the word the question uses.
+    {"q": "Which company employs the lawyer?", "expect": ["org:littlemoor"]},
+    # A quote and then an edge: the imaging is only in what Alan said, and the firm is
+    # only on the edge out of him.
+    {"q": "Which company does the person who works on medical imaging work for?",
+     "expect": ["org:harnley"]},
+    # The other direction from "Which firms had someone at Makers Night?": the same five
+    # people, followed on to where they live.
+    {"q": "Where do the people who went to Makers Night live?",
+     "expect": ["place:calderwick", "place:turin"]},
 
     # --- work going spare, which is what a community graph is for ----------------------
     {"q": "What openings are there?",
@@ -371,6 +411,11 @@ QUESTIONS: list[dict[str, Any]] = [
     # that offer something themselves.
     {"q": "Which companies are offering work?",
      "expect": ["org:brayfield", "org:harnley", "org:quenlow"]},
+    # Those three firms, then back down to their people: Charles offers work but is not a
+    # company, so his colleagues at Pellard are not an answer.
+    {"q": "Who works for a company that is offering work?",
+     "expect": ["person:ada", "person:alan", "person:hedy", "person:iris", "person:tam",
+                "person:vera"]},
 
     # --- where people meet ------------------------------------------------------------
     {"q": "What events come up?", "expect": ["event:makersnight", "event:tradefair"]},
@@ -394,6 +439,15 @@ QUESTIONS: list[dict[str, Any]] = [
     {"q": "How is Iris Bellweather connected to Alan Turing?", "expect": []},
     {"q": "How is Milo Fenwick connected to Alan Turing?",
      "expect": ["person:milo", "place:selby", "person:alan"]},
+    # Three more of the two-hop shape, one through each of the joins a person has: an
+    # employer, a subject and a town. Two hops is the commonest real answer and the set had
+    # one of them, so a model that only ever finds the long way round scored the same.
+    {"q": "How are Vera Lund and Alan Turing connected?",
+     "expect": ["person:vera", "org:harnley", "person:alan"]},
+    {"q": "What links Katherine Johnson and Milo Fenwick?",
+     "expect": ["person:katherine", "topic:automation", "person:milo"]},
+    {"q": "How is Delia Vance connected to Oskar Trent?",
+     "expect": ["person:delia", "place:harrowgate", "person:oskar"]},
     {"q": "Who could introduce Iris Bellweather to a lawyer?", "expect": ["person:nell"]},
     {"q": "Who could introduce Ada Lovelace to someone who does marketing?",
      "expect": ["person:charles", "person:grace"]},
@@ -462,11 +516,72 @@ QUESTIONS: list[dict[str, Any]] = [
     # Her own words name data engineering and hospitals; the answer is those two subjects,
     # not Alan, whom she also mentions.
     {"q": "What did Vera Lund say she works on?", "expect": ["topic:data", "topic:healthcare"]},
+    # Each of these names something only a message carries -- an evening class, a scanner,
+    # a preference, a stack of CVs, a distinction, a half of a job -- and none of them
+    # names the subject, employer or town the person is joined to, so the edges cannot
+    # answer them. Delia's subject is bookbinding and Alan's is healthcare; neither word
+    # appears above.
+    {"q": "Who said they teach in the evenings?", "expect": ["person:delia"]},
+    {"q": "Who mentioned working on medical imaging?", "expect": ["person:alan"]},
+    {"q": "Who said they would rather be outdoors than at a desk?", "expect": ["person:iris"]},
+    {"q": "Who said they read a lot of CVs?", "expect": ["person:bram"]},
+    {"q": "Who said the planning is not the same job as the fixing?",
+     "expect": ["person:oskar"]},
+    {"q": "Who said they do the unglamorous half of the work?", "expect": ["person:otto"]},
+    # The one whose evidence is in somebody else's message: Tam says it about Iris, and
+    # Iris's own line never mentions digging.
+    {"q": "Who did Tam Quillon say tells him where to dig?", "expect": ["person:iris"]},
+
+    # --- drawn by the generator, then read before being kept ---------------------------
+    #
+    # `ml_stack.world.questions` writes questions out of a world's own truth. Handed this
+    # graph -- a `World` around it and nothing else -- it asks its templates about these
+    # people, so half the set costs a seed rather than an afternoon and is not bounded by
+    # whatever the person writing it happened to think of. Its `kind` tags are the kinds
+    # this set already files under, so what it draws lands where the hand-written ones
+    # land. What it cannot draw here is what the community has no relation for -- units,
+    # products, works_with, reports_to -- and its `quote` questions, whose patterns are
+    # the simulator's sentences rather than these.
+    #
+    # Every one below was read before it was kept. The ones naming somebody in the crowd,
+    # and the ones that only reworded a question already asked, were dropped.
+    {"q": "Who knows about recruiting?", "expect": ["person:bram"]},
+    {"q": "Who knows about healthcare?", "expect": ["person:alan", "person:vera"]},
+    {"q": "Who knows about geotechnics?", "expect": ["person:tam"]},
+    {"q": "Who is based in Turin?", "expect": ["person:ada", "person:hedy"]},
+    {"q": "Who is based in Harrowgate?",
+     "expect": ["person:charles", "person:delia", "person:mary", "person:oskar"]},
+    {"q": "Who was at Northern Trade Fair?",
+     "expect": ["person:charles", "person:dorian", "person:grace", "person:milo",
+                "person:sela"]},
+    {"q": "Who could take on selling a machine nobody has heard of?",
+     "expect": ["person:grace"]},
+    {"q": "Who could take on keeping a production line running?",
+     "expect": ["person:ada", "person:charles"]},
+    {"q": "Where does Iris Bellweather work?", "expect": ["org:brayfield"]},
+    {"q": "Where does Hedy Marchetti work?", "expect": ["org:quenlow"]},
+    {"q": "Where is Nell Ashgrove based?", "expect": ["place:calderwick"]},
+    {"q": "Where is Grace Hopper based?", "expect": ["place:dunmore"]},
+    {"q": "Which places do the people who know about automation live in?",
+     "expect": ["place:dunmore", "place:selby"]},
+    {"q": "What is Mary Somerville good at?",
+     "expect": ["person:mary", "topic:onboarding"]},
+    {"q": "What is Tam Quillon good at?", "expect": ["person:tam", "topic:geotechnics"]},
+    {"q": "What does keeping a production line running need?", "expect": ["topic:repair"]},
+    {"q": "Which projects or openings want marketing?", "expect": ["opportunity:sellmachine"]},
+    {"q": "What is Harnley Health running or offering?",
+     "expect": ["opportunity:clinicaldata"]},
+    {"q": "Which events did Grace Hopper go to?", "expect": ["event:tradefair"]},
+    {"q": "Which events did Ada Lovelace go to?", "expect": ["event:makersnight"]},
 
     # --- the right answer is nobody ----------------------------------------------------
     {"q": "Nobody here does underwater welding. Who could?", "expect": []},
     {"q": "Who is the chief financial officer?", "expect": []},
     {"q": "Is anyone here a dentist?", "expect": []},
+    {"q": "Which of these people has a pilot's licence?", "expect": []},
+    {"q": "Who here has worked in film or television?", "expect": []},
+    {"q": "Which company here makes shoes?", "expect": []},
     {"q": "hi", "expect": []},
+    {"q": "good morning, anyone about?", "expect": []},
     {"q": "thanks, thats all i needed", "expect": []},
 ]
