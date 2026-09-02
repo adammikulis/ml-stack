@@ -949,6 +949,60 @@ column; the flags a build has for holding conversations -- `--kv-unified`, `--ca
 It takes the same lock as `run` and `sweep`, and `--smoke` runs two conversations of one
 turn to prove the path.
 
+### Measuring the reading, not the asking
+
+```
+ml-stack-world make --kind community --size small --seed 3 --out ./world
+ml-stack-bench extract flash-next --world ./world --serve Qwen3.8-Flash-Next --smoke
+ml-stack-bench extract flash-next --world ./world --serve Qwen3.8-Flash-Next --twice
+ml-stack-bench show --extract
+```
+
+Everything above measures a graph that already exists. Before it exists it has to be read
+out of what people said, one message at a time, and which model reads best was never
+measured, because nobody knows the truth behind a real message. An invented world does:
+the simulation writes each message *from* the graph, and since 2026-09-02 it writes down
+what each message asserts as it goes -- ``attrs["asserts"]``, the ids of the people,
+organisations, topics, places and other entries the writer put into that sentence and the
+relations it stated -- so the gold is a record, not an inference. The template writer's
+record is exact; the model writer's is the opening it was grounded in plus what its answer
+drew on, a lower bound, and is scored separately with its coverage read as "against a
+lower bound". The asserts ride through ``messages.jsonl`` and the scraper-shaped rows
+``emit`` writes as an extra key the readers ignore.
+
+`extract` samples N messages (forty by default, three under `--smoke`), stratified so an
+arc's thread and every kind of routine chatter both appear -- an arc is a handful of
+threads in a fortnight and a plain draw would miss it -- has the model read each into
+`contracts/extraction.schema.json` (people with an optional role, organisation and place;
+organisations; topics; places; relations as ``from / rel / to``) under a grammar with the
+sender named as context and thinking off, folds the extractions into one graph by name
+(case aside, near-spellings joined by `entities.spelling.close`, a first name joined to
+its full name), and scores that against the union of what those messages assert. A world
+without messages is simulated for a few days with the template writer first, and the
+command says so. The estimate is printed before the clock starts: forty messages at the
+guessed fifteen seconds each is ten minutes, or whatever an earlier run of the same model
+measured.
+
+The table keeps coverage and precision as separate columns per kind, because an F1 alone
+cannot say whether a model missed things or made them up and those are fixed by opposite
+changes to the asking; `invented` is the count and rate of extracted people and
+organisations that match nothing in the gold, the reading-side twin of `made`; relations
+match loosely on the name (case, underscores and spaces aside, then near-spellings) and
+strictly on the ends. Under each row: the folded graph's connected components and the
+share of nodes in the largest against the gold's own, so a model that scores well on
+triples and builds a fragmented graph is seen; conformance, how many relations used the
+world's own vocabulary; fact survival, the share of each message's assertions still
+present after the fold, which catches a fold that merged two people into one; and
+resolution, extracted nodes per gold node (`splits`) and gold nodes per extracted node
+(`merges`), 1.00 each when perfect. `--twice` reads the sample again with the model's own
+card and reports the Jaccard similarity of the two graphs: a model that gives a different graph each
+run is a finding. An entry naming something the messages asserted under `others` -- a
+project, a department, which the generic schema has no word for -- is neither found nor
+invented. The runs sit in the same store as the answering runs, marked `kind: "extract"`;
+`show` prints them in their own table under the answering one, `show --extract` alone.
+`extract` takes the measuring lock like `run`, and `--detach`, `status`, `tail` and `stop`
+work as they do there.
+
 ## An invented company
 
 A demo of a graph read out of a community needs a community, and a real one cannot be shown.

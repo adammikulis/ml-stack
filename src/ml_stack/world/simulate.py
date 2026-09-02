@@ -19,6 +19,15 @@ because an arc is where consistency is noticed.
 An arc's end writes a fact back into the graph -- a decision, a move, a new collaboration,
 a joining -- as a typed edge carrying the message it was said in, so later conversations and
 the truth agree. Nothing here is a real person or organisation.
+
+Every message also says what it asserts, in ``attrs["asserts"]``: the ids of the people,
+organisations, topics, places and other entries the writer put into that sentence, and the
+relations it stated, as ``[source, rel, target]``. The template writer knows exactly which
+slots it filled, so its record is exact (``attrs["asserts_exact"]`` is True); the model
+writer's is the opening it was grounded in plus what its answer drew on, a lower bound on
+what the persona may have named, and is flagged False. That record is the gold an
+extraction is scored against (`ml_stack.graph.bench_extract`): nothing infers it back out
+of the text.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import random
+import string
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,11 +43,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ml_stack.world import Message, World
-from ml_stack.world.story import (DOWNWARD, OUTCOMES, PEER, UPWARD, calendar, facts_for,
-                                  groups, people_of, place_of, slug)
+from ml_stack.world.story import (DOWNWARD, ORG_KINDS, OUTCOMES, PEER, PLACE_KINDS,
+                                  TOPIC_KINDS, UPWARD, calendar, facts_for, groups, people_of,
+                                  place_of, slug)
 
-__all__ = ["CHATTER", "ModelWriter", "Writer", "model_writer", "run", "simulate",
-           "template_writer"]
+__all__ = ["CHATTER", "ModelWriter", "Writer", "asserts_of", "model_writer", "run",
+           "simulate", "template_writer"]
 
 Writer = Callable[[Mapping[str, Any], str, Mapping[str, Any]], str]
 
@@ -242,12 +253,39 @@ def _arc_threads(world: World, rel: _Relations, day: int, rng: random.Random,
         source, channel = venues[(day - start) % len(venues)]
         if channel == "dm":
             channel = "dm:" + ",".join(sorted(who[:2]))
-        facts = dict(arc.get("facts") or facts_for(world.graph, who, rng,
-                                                    group=str(arc.get("group") or "")))
+        facts = _with_ids(dict(arc.get("facts") or facts_for(
+            world.graph, who, rng, group=str(arc.get("group") or ""))), arc, rel)
         plans.append({"kind": str(arc.get("kind") or "arc"), "who": who,
                       "about": str(arc.get("about") or ""), "where": (str(source), str(channel)),
                       "facts": facts, "arc": arc, "last": day == until})
     return plans
+
+
+def _with_ids(facts: dict[str, str], arc: Mapping[str, Any], rel: _Relations) -> dict[str, str]:
+    """The arc's facts with the ``_id`` behind each name put back.
+
+    A calendar is written to JSON with the names and not the ids, so an arc read from disk
+    knows it is about "Lantern" and not that Lantern is ``project:lantern``. The arc's own
+    ``subject``, ``group`` and ``to`` say most of it; the rest is the entry whose label is
+    the name, which is exact because the name was read off that label.
+    """
+    from ml_stack.world.story import PROJECT_KINDS
+
+    group, to, subject = (str(arc.get(k) or "") for k in ("group", "to", "subject"))
+    known = {"group": group, "group2": to if to and to != group else "",
+             "project": subject if rel.by_id.get(subject, {}).get("kind") in PROJECT_KINDS else ""}
+    kinds = {"project": PROJECT_KINDS, "org": ORG_KINDS, "topic": TOPIC_KINDS,
+             "place": PLACE_KINDS, "group": None, "group2": None}
+    for slot, wanted in kinds.items():
+        if facts.get(slot + "_id"):
+            continue
+        held = known.get(slot, "")
+        name = str(facts.get(slot) or "")
+        if not held and name:
+            held = next((i for i, n in rel.by_id.items() if str(n.get("label") or "") == name
+                         and (wanted is None or str(n.get("kind") or "") in wanted)), "")
+        facts[slot + "_id"] = held if held and str(rel.label.get(held, "")) == name else ""
+    return facts
 
 
 # -- outcomes ------------------------------------------------------------------------------------
@@ -509,10 +547,16 @@ def template_writer(rng: random.Random) -> Writer:
     sentence twice: candidates already used in the thread are skipped, and when every one
     has been, a varying tail is added, then a count, so the guarantee holds however long a
     thread runs.
+
+    After each call ``write.last`` is ``{"ids": [...]}``: the graph ids of exactly the
+    slots the chosen sentence was filled with -- the project, the place, the person
+    addressed -- which is what the message asserts and what an extraction of it is
+    scored against. A slot filled with a fallback ("the project") names nothing.
     """
     used: dict[str, set[str]] = {}
 
     def write(persona: Mapping[str, Any], prompt: str, context: Mapping[str, Any]) -> str:
+        write.last = {"ids": []}  # type: ignore[attr-defined]
         thread = str(context.get("thread") or "")
         if thread not in used:
             if len(used) > 64:
@@ -530,29 +574,89 @@ def template_writer(rng: random.Random) -> Writer:
         else:
             pool = _MIDDLES.get(org_kind, ()) + _GENERIC
         slots = _slots(persona, context)
-        candidates = [t.format(**slots) for t in pool]
+        ids = _slot_ids(persona, context)
+        candidates = [(t, t.format(**slots)) for t in pool]
         rng.shuffle(candidates)
         voice = str(persona.get("voice") or "").casefold()
         flavours = [f for word, fs in _VOICES.items() if word in voice for f in fs]
-        for sentence in candidates:
+
+        def said(template: str, sentence: str) -> str:
+            seen.add(sentence)
+            write.last = {"ids": _filled(template, ids)}  # type: ignore[attr-defined]
+            return sentence
+
+        for template, sentence in candidates:
             if flavours and rng.random() < 0.35:
                 head, tail = rng.choice(flavours)
                 sentence = (head + sentence[0].lower() + sentence[1:] if head else sentence) + tail
             if sentence not in seen:
-                seen.add(sentence)
-                return sentence
-        base = candidates[0]
+                return said(template, sentence)
+        template, base = candidates[0]
         for tail in _TAILS:
             if base + tail not in seen:
-                seen.add(base + tail)
-                return base + tail
+                return said(template, base + tail)
         n = 2
         while f"{base} ({n})" in seen:
             n += 1
-        seen.add(f"{base} ({n})")
-        return f"{base} ({n})"
+        return said(template, f"{base} ({n})")
 
+    write.last = {"ids": []}  # type: ignore[attr-defined]
     return write
+
+
+def _slot_ids(persona: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, str]:
+    """The graph id behind each slot a template can name, "" where the slot would be
+    filled with a fallback or with somebody the thread cannot tell apart."""
+    facts = dict(context.get("facts") or {})
+    labels = context.get("labels") or {}
+    me = str(context.get("speaker") or persona.get("id") or "")
+    others = [str(p) for p in (context.get("others") or ()) if str(p) != me]
+    who = [p for p in (me, *others) if p]
+
+    def by_first(name: str) -> str:
+        hits = [p for p in who if str(labels.get(p, "")).split()[:1] == [name]] if name else []
+        return hits[0] if len(hits) == 1 else ""
+
+    out = {"me": me, "other": others[0] if others else ""}
+    for slot in ("project", "org", "topic", "place", "group", "group2"):
+        out[slot] = str(facts.get(slot + "_id") or "")
+    other_first = str(labels.get(others[0], "")).split()[:1] if others else []
+    out["first"] = by_first(str(facts.get("first") or (other_first[0] if other_first else "")))
+    out["second"] = by_first(str(facts.get("second") or ""))
+    return out
+
+
+def _filled(template: str, ids: Mapping[str, str]) -> list[str]:
+    """The ids of the slots ``template`` names, in the order it names them, each once."""
+    out: list[str] = []
+    for _, name, _, _ in string.Formatter().parse(template):
+        held = ids.get(str(name or ""), "")
+        if held and held not in out:
+            out.append(held)
+    return out
+
+
+def asserts_of(ids: Sequence[str], relations: Sequence[Sequence[str]], sender: str,
+               nodes: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """What a message asserts, bucketed by what each id is in the graph.
+
+    ``people``, ``orgs``, ``topics`` and ``places`` by the kinds `story` recognises for
+    each, everything else -- a project, a department, an event -- under ``others``, as what
+    it is rather than forced into a bucket it does not belong in. The sender is always a
+    person asserted. ``relations`` are ``[source, rel, target]`` as stated.
+    """
+    out: dict[str, Any] = {"people": [], "orgs": [], "topics": [], "places": [], "others": [],
+                           "relations": [list(map(str, r)) for r in relations]}
+    for one in dict.fromkeys(str(i) for i in (sender, *ids) if i):
+        node = nodes.get(one)
+        if node is None:
+            continue
+        kind = str(node.get("kind") or "")
+        key = ("people" if kind == "person" else "orgs" if kind in ORG_KINDS
+               else "topics" if kind in TOPIC_KINDS else "places" if kind in PLACE_KINDS
+               else "others")
+        out[key].append(one)
+    return out
 
 
 def _slots(persona: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, str]:
@@ -631,6 +735,10 @@ class ModelWriter:
         self.memory = memory
         self.messages = 0
         self.last: Any = None
+        # what the last message asserts, as far as is known: the opening it was grounded
+        # in and every id its answer drew on -- a lower bound, since the persona may have
+        # named more than it looked up
+        self.last_ids: list[str] = []
         self._subgraphs: dict[tuple[str, int, int], dict[str, Any]] = {}
 
     @property
@@ -690,6 +798,10 @@ class ModelWriter:
                           system=str(persona.get("system") or SYSTEM),
                           tools=tools_for(graph), rounds=self.rounds, opening=opening)
         self.last = answer
+        from ml_stack.graph.thread import drew_on
+
+        drawn = [i for ids in drew_on(answer).values() for i in ids]
+        self.last_ids = list(dict.fromkeys(i for i in (*opening, *drawn) if i in known))
         text, _ids = spoken_show(without_notes(answer.content))
         text = " ".join(text.split())
         if text:
@@ -773,7 +885,6 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
             said: list[tuple[str, str]] = []
             speaker = who[0]
             when = _work_start(day, zones.get(speaker, timezone.utc), rng, 8.0)
-            last: Message | None = None
             for seq in range(length):
                 if seq:
                     others = [p for p in who if p != speaker] or who
@@ -799,6 +910,18 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
                 if not text or any(text == t for _, t in said):
                     text, wrote = templated(persona, prompt, context), "template"
                 message_id = root_id if seq == 0 else f"msg:{counter:06d}"
+                if wrote == "model":
+                    asserted = list(getattr(writer, "last_ids", ()) or ())
+                else:
+                    asserted = list((getattr(templated, "last", None) or {}).get("ids") or ())
+                stated: list[list[str]] = []
+                if arc and plan.get("last") and seq == length - 1:
+                    # the outcome is written either way; the message asserts it only
+                    # when its sentence named both ends, since a closer that says "that
+                    # is the call" states nothing an extractor could read
+                    edge = _outcome(world, arc, message_id, day)
+                    if edge and edge["source"] in asserted and edge["target"] in asserted:
+                        stated.append([edge["source"], edge["rel"], edge["target"]])
                 recipients: tuple[str, ...] = ()
                 if source != "slack" or channel.startswith("dm:"):
                     recipients = tuple(p for p in who if p != speaker)
@@ -809,16 +932,15 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
                     kind="message" if seq == 0 else "reply",
                     attrs={"kind": plan["kind"], "about": plan["about"], "arc": arc_key,
                            "day": day, "writer": "model" if by_model else "template",
-                           "wrote": wrote})
+                           "wrote": wrote,
+                           "asserts": asserts_of(asserted, stated, speaker, rel.by_id),
+                           "asserts_exact": wrote != "model"})
                 counter += 1
                 said.append((speaker, text))
                 if store is not None:
                     _remember(store, name, message, plan, rel,
                               getattr(writer, "last", None) if wrote == "model" else None)
-                last = message
                 yield message
-            if arc and plan.get("last") and last is not None:
-                _outcome(world, arc, last.id, day)
 
 
 def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,

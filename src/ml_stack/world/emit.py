@@ -510,5 +510,10 @@ def rows(messages: Iterable[Message], people: Mapping[str, Mapping[str, Any]], *
             row["replies"] = reply_count.get(m.id, 0)
         row["scrapedAt"] = stamp
         row["permalink"] = f"{export}/{folder}/{_day(m.ts)}.json#p{m.ts.replace('.', '')}"
+        if "asserts" in m.attrs:
+            # what the simulation knows the message states, as an extra key the row
+            # reader ignores, so a scraped-shaped corpus still carries its gold
+            row["asserts"] = m.attrs["asserts"]
+            row["asserts_exact"] = bool(m.attrs.get("asserts_exact", True))
         out.append(row)
     return out

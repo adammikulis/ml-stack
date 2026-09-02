@@ -2419,11 +2419,18 @@ def _parser() -> argparse.ArgumentParser:
                               "is fetched first, one line each with its size, because a "
                               "download inside the timed window is a timing of the network")
 
+    from ml_stack.graph.bench_extract import add_arguments as extracting
+
+    extracting(sub)
+
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
     show.add_argument("--kept", default=str(HOME / "runs.ladybug"),
                       help="the store the runs are in (default: %(default)s)")
     show.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), default=None)
+    show.add_argument("--extract", action="store_true",
+                      help="only the extraction runs (ml-stack-bench extract), in their own "
+                           "table; without it they print under the answering table")
     show.add_argument("--detail", nargs="?", const="", default=None, metavar="LABEL",
                       help="the questions themselves, not the totals: what each one wanted, "
                            "what it showed, and what it missed. A label narrows it to one run")
@@ -2705,16 +2712,31 @@ def _main(argv: list[str] | None = None) -> int:
             table(read_back(args.kept, [key]))
         return 0
 
+    if args.cmd == "extract":
+        from ml_stack.graph.bench_extract import main as extracting
+
+        return extracting(args)
+
     if args.cmd == "show":
+        from ml_stack.graph import bench_extract
+
+        # an extraction run is kept in the same store and is not an answering run: it has
+        # no questions to score, and its table is its own
+        everything = runs(args.kept) if Path(args.kept).expanduser().exists() else []
+        extracted = bench_extract.only(everything)
+        answering = [r for r in everything if r.get("kind") != bench_extract.KIND]
+        if getattr(args, "extract", False):
+            bench_extract.table(extracted)
+            return 0
         if args.compare:
             print(compare(args.kept, *args.compare))
             return 0
         if args.rank:
-            ranking(runs(args.kept), args.rank, noise=args.noise / 100)
+            ranking(answering, args.rank, noise=args.noise / 100)
             print(args.rank)
             return 0
         if args.export:
-            print(export(runs(args.kept), args.export,
+            print(export(answering, args.export,
                          anyway=getattr(args, "export_anyway", False)))
             return 0
         if args.shape:
@@ -2725,17 +2747,19 @@ def _main(argv: list[str] | None = None) -> int:
             shape(questions, invented())
             return 0
         if args.plot:
-            print(plot(runs(args.kept), args.plot, cost=args.cost, noise=args.noise / 100))
+            print(plot(answering, args.plot, cost=args.cost, noise=args.noise / 100))
             return 0
         if args.rates:
-            rates(runs(args.kept), cost=args.cost, noise=args.noise / 100)
+            rates(answering, cost=args.cost, noise=args.noise / 100)
             return 0
         if args.detail is not None:
-            everything = runs(args.kept)
-            missed([r for r in everything if not args.detail or r.get("label") == args.detail],
-                   everything=args.all, among=everything)
+            missed([r for r in answering if not args.detail or r.get("label") == args.detail],
+                   everything=args.all, among=answering)
             return 0
-        table(runs(args.kept))
+        table(answering)
+        if extracted:
+            print()
+            bench_extract.table(extracted)
         hollow = empties(args.kept)
         if hollow:
             print(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
@@ -2827,7 +2851,7 @@ def resumable(store: str | Path, *, questions: int, context: int, parallel: int,
 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
-MEASURING = ("run", "sweep", "drafts", "concurrent")
+MEASURING = ("run", "sweep", "drafts", "concurrent", "extract")
 
 # Windows has no sessions; a child that survives its parent's console is asked for by flag.
 _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS

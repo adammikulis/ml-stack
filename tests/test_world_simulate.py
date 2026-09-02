@@ -441,3 +441,125 @@ def test_run_with_a_model_takes_the_lock_keeps_memory_beside_the_output_and_pric
     assert (tmp_path / "out" / "simulate.lock").read_text() == ""
     rows = [json.loads(line) for line in (tmp_path / "out" / "messages.jsonl").read_text().splitlines()]
     assert all(r["attrs"]["wrote"] == "model" for r in rows)
+
+
+# -- what a message asserts -------------------------------------------------------------------
+
+def _norm(text: str) -> str:
+    import re
+
+    return re.sub(r"[^\w]+|_+", " ", text.casefold()).strip()
+
+
+def _named_in(text: str, node: dict) -> bool:
+    """Whether ``text`` writes the node's label as whole words -- a person also by first name."""
+    held = " " + _norm(text) + " "
+    label = _norm(node["label"])
+    return f" {label} " in held or (node["kind"] == "person"
+                                    and f" {label.split()[0]} " in held)
+
+
+def test_a_template_written_message_asserts_exactly_the_ids_its_sentence_names():
+    world = tiny_world()
+    nodes = {n["id"]: n for n in world.graph["nodes"]}
+    messages = all_of(world, days=10, writer=None, per_day=3.0)
+    assert messages
+    for m in messages:
+        held = m.attrs["asserts"]
+        assert m.attrs["asserts_exact"] is True
+        assert set(held) == {"people", "orgs", "topics", "places", "others", "relations"}
+        ids = [i for k in ("people", "orgs", "topics", "places", "others") for i in held[k]]
+        assert len(ids) == len(set(ids))
+        assert m.sender in held["people"], "the sender counts as a person"
+        for i in ids:
+            assert i in nodes
+            if i != m.sender:
+                assert _named_in(m.text, nodes[i]), (i, m.text)
+        # and every entry the sentence names is asserted -- nothing the writer filled is lost
+        for i, node in nodes.items():
+            if _named_in(m.text, node):
+                assert i in ids, (i, m.text)
+        # each bucket holds what its name says
+        assert all(nodes[i]["kind"] == "person" for i in held["people"])
+        assert all(nodes[i]["kind"] == "org" for i in held["orgs"])
+        assert all(nodes[i]["kind"] == "topic" for i in held["topics"])
+        assert all(nodes[i]["kind"] == "place" for i in held["places"])
+        assert all(nodes[i]["kind"] in ("project", "department") for i in held["others"])
+        for source, rel, target in held["relations"]:
+            assert source in ids and target in ids and rel in OUTCOMES
+
+
+def test_the_union_of_asserts_over_a_run_is_the_set_of_entries_its_messages_mention():
+    world = tiny_world()
+    nodes = {n["id"]: n for n in world.graph["nodes"]}
+    messages = all_of(world, days=10, writer=None, per_day=3.0)
+    asserted = {i for m in messages for k in ("people", "orgs", "topics", "places", "others")
+                for i in m.attrs["asserts"][k]}
+    mentioned = {m.sender for m in messages} | {
+        i for m in messages for i, node in nodes.items() if _named_in(m.text, node)}
+    assert asserted == mentioned
+    assert "project:lantern" in asserted and len(asserted & set(PEOPLE)) > 1
+
+
+def test_an_outcome_is_asserted_by_the_closing_message_only_when_it_names_both_ends():
+    world = tiny_world()
+    world.calendar = [
+        {"day": 0, "until": 0, "kind": "reorg", "who": ["person:milo", "person:ada"],
+         "about": "Milo moving", "where": [("email", "Changes")], "outcome": "moved_to",
+         "group": "dept:eng", "to": "dept:support", "subject": "project:lantern",
+         "facts": {"first": "Milo", "group": "Engineering", "group2": "Customer Support",
+                   "project": "Lantern"}},
+    ]
+    found = False
+    for seed in range(6):
+        world.graph["edges"] = [e for e in world.graph["edges"] if e.get("rel") != "moved_to"]
+        messages = all_of(world, days=1, writer=None, per_day=0.0, seed=seed)
+        last = messages[-1]
+        edge = next(e for e in world.graph["edges"] if e.get("rel") == "moved_to")
+        assert edge["attrs"]["said_in"] == last.id
+        stated = last.attrs["asserts"]["relations"]
+        said = last.text.casefold()             # a voice flavour may lower-case the opener
+        if "customer support" in said and "milo" in said:
+            assert stated == [["person:milo", "moved_to", "dept:support"]]
+            assert "dept:support" in last.attrs["asserts"]["others"]
+            found = True
+        else:
+            assert stated == []
+    assert found, "every moved_to closer names the person and the group they moved to"
+
+
+def test_a_model_written_message_asserts_its_grounding_as_a_lower_bound():
+    world = tiny_world()
+    world.calendar = [{"day": 0, "until": 0, "kind": "incident",
+                       "who": ["person:ada", "person:bea"], "about": "the outage in Lantern",
+                       "where": [("slack", "incidents")], "outcome": "decision",
+                       "group": "dept:eng", "subject": "project:lantern"}]
+    messages = all_of(world, days=1, writer=model_writer(SpeakingModel(), world), mix=1.0,
+                      per_day=0.0)
+    spoken = [m for m in messages if m.attrs["wrote"] == "model"]
+    assert spoken
+    for m in spoken:
+        assert m.attrs["asserts_exact"] is False
+        held = m.attrs["asserts"]
+        assert m.sender in held["people"]
+        assert "project:lantern" in held["others"]        # the opening, and what show drew on
+
+
+def test_asserts_round_trip_through_messages_jsonl_and_the_scraper_rows(tmp_path):
+    from ml_stack.sources import rows as scraper
+    from ml_stack.world.emit import rows
+
+    world = tiny_world()
+    messages = all_of(world, days=2, writer=None, per_day=2.0)
+    line = json.dumps(dataclasses.asdict(messages[0]))
+    back = Message(**json.loads(line))
+    assert back.attrs["asserts"] == messages[0].attrs["asserts"]
+    assert back.attrs["asserts_exact"] is True
+    people = {pid: {"label": row[0]} for pid, row in PEOPLE.items()}
+    written = rows(messages, people)
+    assert written and all("asserts" in r and "asserts_exact" in r for r in written)
+    by_ts = {m.ts: m for m in messages if m.source == "slack"}
+    assert all(r["asserts"] == by_ts[r["ts"]].attrs["asserts"] for r in written)
+    # the scraper-row reader ignores the key, as it ignores anything it does not know
+    read = scraper.read(written, people)
+    assert read and all("asserts" not in m.attrs for m in read)

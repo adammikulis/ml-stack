@@ -1,0 +1,55 @@
+{
+  "$comment": "What one message from an organised group states, read out by a model: the generic shape ml-stack-bench extract scores against a world's truth. A field the message does not give is an empty string, never a guess.",
+  "type": "object",
+  "properties": {
+    "people": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "org": {"type": "string"},
+          "place": {"type": "string"}
+        },
+        "required": ["name", "role", "org", "place"],
+        "additionalProperties": false
+      }
+    },
+    "orgs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"type": "string"}
+        },
+        "required": ["name", "kind"],
+        "additionalProperties": false
+      }
+    },
+    "topics": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "places": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "relations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "from": {"type": "string"},
+          "rel": {"type": "string"},
+          "to": {"type": "string"}
+        },
+        "required": ["from", "rel", "to"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["people", "orgs", "topics", "places", "relations"],
+  "additionalProperties": false
+}
