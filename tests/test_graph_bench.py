@@ -2333,9 +2333,9 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
 
     monkeypatch.setattr(bench, "served", fake_served)
     monkeypatch.setattr(bench, "_kept", lambda kept: [])
+    monkeypatch.setattr(bench, "runs", lambda *a, **k: [])
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "prepared", lambda: "")
-    monkeypatch.setattr(bench.hub, "fetch", lambda ref: tmp_path / "x", raising=False) if hasattr(bench, "hub") else None
     graph = tmp_path / "g.json"
     graph.write_text('{"nodes": [], "edges": []}')
     code = bench._main(["sweep", "--serve", "bad.gguf", "--serve", "good.gguf", "--plain-only",
