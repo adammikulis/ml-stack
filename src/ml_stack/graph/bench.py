@@ -1286,7 +1286,8 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
     within ``noise``. Taking both from one run ranked a drafted model at its undrafted
     speed, or not at all when the drafted run was short.
 
-    Accuracy: the run with the most questions, the newest on a tie. Cost: the fastest per
+    Accuracy: the run with the most questions, the best F1 among those, the newest on a
+    full tie. Cost: the fastest per
     question of the model's runs of at least `SHORT` questions whose F1 fell no more than
     ``noise`` below the accuracy run's; the accuracy run itself when nothing faster held.
     ``rejected`` holds the rest, so a head that hurt accuracy is seen rather than skipped.
@@ -1309,7 +1310,11 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
         by_model.setdefault(str((one.get("server") or {}).get("model") or "?"), []).append(one)
     out = []
     for model, mine in by_model.items():
-        accuracy = max(mine, key=lambda o: (derived(o)["questions"], str(o.get("at") or "")))
+        # the most questions; among those, the best F1 -- the askings (plain, terse, card)
+        # are configurations a person chooses between, and the newest was the card run,
+        # which ranked E4B at 48% when plain had 49% (measured 2026-09-01); newest last
+        accuracy = max(mine, key=lambda o: (derived(o)["questions"], derived(o)["right"],
+                                            str(o.get("at") or "")))
         top = derived(accuracy)["right"]
         held = [o for o in mine if top - derived(o)["right"] <= noise + 1e-9]
         cost = min(held, key=lambda o: (per_question(o), o is not accuracy))

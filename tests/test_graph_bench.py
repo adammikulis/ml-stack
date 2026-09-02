@@ -2112,7 +2112,7 @@ def test_a_smoke_run_never_supplies_cost_and_the_footnote_counts_it(tmp_path):
     assert "supplies neither accuracy nor cost" in said
 
 
-def test_accuracy_is_the_largest_run_and_the_newest_on_a_tie():
+def test_accuracy_is_the_largest_run_then_the_best_then_the_newest():
     from ml_stack.graph.bench import choices, invented_digest
 
     def run(label, at, hits, seconds):
@@ -2128,6 +2128,12 @@ def test_accuracy_is_the_largest_run_and_the_newest_on_a_tie():
     assert chosen[0].accuracy is newer, "the same size: the newest"
     assert chosen[0].cost is older, "and the older one, at the same F1, was faster"
     assert not chosen[0].own and chosen[0].rejected == []
+
+    # the askings are configurations a person chooses between: the best F1 among the
+    # largest runs wins, however old -- the newest was a card run once (2026-09-01)
+    better = run("plain", "2026-07-01T00:00:00", 15, 120.0)
+    chosen, _ = choices([older, newer, better])
+    assert chosen[0].accuracy is better, "the best F1 among the same size, not the newest"
 
 
 def test_the_composed_frontier_holds_the_composed_point(tmp_path, capsys):
