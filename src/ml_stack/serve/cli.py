@@ -347,6 +347,11 @@ def cmd_up(args: argparse.Namespace) -> int:
         except (BinaryNotFound, OSError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 2
+        # a draft named by hf: file is fetched and served by path, exactly as start() does;
+        # a preflight of the unresolved reference refused it instead (measured 2026-09-01)
+        from ml_stack.serve.backend import LlamaServerBackend
+
+        spec = LlamaServerBackend.resolved_draft(spec)
         report = Preflight(spec, binary=binary_path, limit_bytes=room())
         print(report.said())
         return 0 if report.ok else 1

@@ -665,3 +665,39 @@ class TestModelsFetch:
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
         assert hub.main(["fetch", "hf:maker/thing-GGUF/thing-Q4_K_M.gguf"]) == 0
         assert "thing-Q4_K_M.gguf" in capsys.readouterr().out
+
+
+def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, capsys):
+    """`up --preflight-only` with `--draft hf:owner/repo/MTP/head.gguf` refused the reference
+    where a real start would have fetched it and served by path. Mutation: drop the
+    resolved_draft call before Preflight."""
+    from ml_stack.serve import cli
+
+    head = tmp_path / "mtp-head-Q8_0.gguf"
+    head.write_bytes(b"GGUF")
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF")
+    monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: head)
+    seen = {}
+
+    class Report:
+        ok = True
+        kv_estimate_bytes = 0
+        weights_bytes = 0
+
+        def said(self):
+            return "ok"
+
+    def fake_preflight(spec, *, binary, limit_bytes):
+        seen["draft"] = spec.draft
+        return Report()
+
+    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", fake_preflight)
+    monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+    code = cli.main(["up", str(model), "--preflight-only", "--binary", str(binary),
+                     "--draft", "hf:owner/repo-GGUF/MTP/mtp-head-Q8_0.gguf"])
+    assert code == 0, capsys.readouterr()
+    assert seen["draft"] == str(head)
