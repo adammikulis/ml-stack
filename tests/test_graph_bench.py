@@ -3372,3 +3372,22 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
                  {"nodes": [], "edges": []}, n_max=[2, 8], kept="")
     assert seen == [("draft:none", ""), ("draft:embedded-mtp@n2", "embedded"),
                     ("draft:embedded-mtp@n8", "embedded")]
+
+
+def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
+    """gpt-oss's eagle3 head: 65% accepted, F1 unchanged, 0.82x -- the summary recommended
+    it (2026-09-02). Serving a head is only worth it when it is faster than no head."""
+    from ml_stack.graph.bench import drafted
+
+    base = _measured("draft:none", hits=12, seconds=120.0, at="2026-09-01T11:00:00")
+    slower = _measured("draft:eagle3@n2", hits=12, seconds=146.0, draft="eagle3.gguf",
+                       guessed=100, taken=65)
+    slowest = _measured("draft:eagle3@n4", hits=12, seconds=160.0, draft="eagle3.gguf",
+                        guessed=100, taken=46)
+    last = drafted([base, slower, slowest]).splitlines()[-1]
+    assert last.startswith("serve no head: the best that held its F1, draft:eagle3@n2, "
+                           "is slower than none at 0.82x"), last
+    # one that is faster is still recommended over the slower ones
+    quick = _measured("draft:eagle3@n1", hits=12, seconds=100.0, draft="eagle3.gguf",
+                      guessed=100, taken=80)
+    assert drafted([base, slower, quick]).splitlines()[-1].startswith("serve draft:eagle3@n1")

@@ -382,11 +382,18 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
     held = [(one, faster) for one, base, faster, mine, theirs in rows
             if faster is not None and theirs.get("right") is not None
             and theirs["right"] - mine.get("right", 0.0) <= noise + 1e-9]
+    # a head that held its F1 but is slower than no head is worth nothing: gpt-oss's eagle3
+    # head accepted 65% and still ran at 0.82x, and was recommended (2026-09-02)
+    won = [pair for pair in held if pair[1] > 1.0]
     pts = noise * 100
-    if held:
-        best, faster = max(held, key=lambda pair: pair[1])
+    if won:
+        best, faster = max(won, key=lambda pair: pair[1])
         lines.append(f"serve {best.get('label', '')}: fastest whose F1 held within "
                      f"{pts:g} points of its baseline, {_times(faster)}")
+    elif held:
+        best, faster = max(held, key=lambda pair: pair[1])
+        lines.append(f"serve no head: the best that held its F1, {best.get('label', '')}, "
+                     f"is slower than none at {_times(faster)}")
     elif any(faster is not None for _, _, faster, _, _ in rows):
         lines.append(f"serve no head: none held its baseline's F1 within {pts:g} points")
     else:
