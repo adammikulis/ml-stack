@@ -2315,3 +2315,32 @@ def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path
     capsys.readouterr()
     assert "reasoning_budget" not in seen["kwargs"][0]
     assert runs(seen["kept"], "other-plain")[0]["server"].get("reasoning_budget") is None
+
+
+def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatch, tmp_path, capsys):
+    """Measured 2026-09-01: Flash-Next's head failed to load on mainline and the crash took
+    gpt-oss-120b's measurement down with it, twice. Mutation: drop the except."""
+    from ml_stack.graph import bench
+    from ml_stack.serve.backend import ServerFailed
+
+    calls = []
+
+    def fake_served(model, *a, **k):
+        calls.append(model)
+        if "bad" in model:
+            raise ServerFailed("llama-server did not become healthy (exited 1)")
+        return []
+
+    monkeypatch.setattr(bench, "served", fake_served)
+    monkeypatch.setattr(bench, "_kept", lambda kept: [])
+    monkeypatch.setattr(bench, "busy", lambda url: 0)
+    monkeypatch.setattr(bench, "prepared", lambda: "")
+    monkeypatch.setattr(bench.hub, "fetch", lambda ref: tmp_path / "x", raising=False) if hasattr(bench, "hub") else None
+    graph = tmp_path / "g.json"
+    graph.write_text('{"nodes": [], "edges": []}')
+    code = bench._main(["sweep", "--serve", "bad.gguf", "--serve", "good.gguf", "--plain-only",
+                        "--graph", str(graph), "--kept", str(tmp_path / "runs.ladybug"),
+                        "--no-prefetch", "--smoke"])
+    said = capsys.readouterr().out
+    assert calls == ["bad.gguf", "good.gguf"], said
+    assert "did not load; moving on" in said

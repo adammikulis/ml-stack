@@ -1753,7 +1753,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     from ml_stack.client import Client
     from ml_stack.serve import preflight as checks
     from ml_stack.serve import serve
-    from ml_stack.serve.backend import ServerSpec
+    from ml_stack.serve.backend import ServerFailed, ServerSpec
     from ml_stack.serve.binary import find_binary
 
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
@@ -2411,18 +2411,28 @@ def _main(argv: list[str] | None = None) -> int:
             # quarter of the context every other run had, and the only thing that said
             # so was the `ctx` column reading 8k where the rest read 32k.
             before = {r["key"] for r in _kept(args.kept)}
-            served(model, questions, graph, label=stem, draft=head,
-                   ways=_asked(args, parts),
-                   port=args.serve_port,
-                   context=total_context,
-                   parallel=getattr(args, "parallel", 1), binary=args.binary,
-                   kept=args.kept,
-                   store=args.store or None, embed_url=args.embed_url,
-                   embed_model=args.embed_model, terse=getattr(args, "terse", False),
-                   already=already, cache_type=getattr(args, "serve_kv", "") or "",
-                   per_question=args.per_question,
-                   reasoning_budget=getattr(args, "reasoning_budget", None),
-                   **sampling_from(args))
+            from ml_stack.serve.backend import ServerFailed
+
+            try:
+                served(model, questions, graph, label=stem, draft=head,
+                       ways=_asked(args, parts),
+                       port=args.serve_port,
+                       context=total_context,
+                       parallel=getattr(args, "parallel", 1), binary=args.binary,
+                       kept=args.kept,
+                       store=args.store or None, embed_url=args.embed_url,
+                       embed_model=args.embed_model, terse=getattr(args, "terse", False),
+                       already=already, cache_type=getattr(args, "serve_kv", "") or "",
+                       per_question=args.per_question,
+                       reasoning_budget=getattr(args, "reasoning_budget", None),
+                       **sampling_from(args))
+            except ServerFailed as why:
+                # A model that will not load -- a head the build cannot read, a tensor it
+                # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
+                # such load took gpt-oss-120b's measurement down with it, twice.
+                print(f"    {stem} did not load; moving on:\n"
+                      + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
+                continue
             saved += [r["key"] for r in _kept(args.kept) if r["key"] not in before]
 
         for name, url in named:
