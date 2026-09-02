@@ -335,3 +335,15 @@ def test_the_shapes_that_died_in_the_preflight_pass_and_read_nothing(monkeypatch
     assert selfcheck(["sweep", "--serve", "/nowhere/at/all/absent.gguf"]).startswith("sweep: ")
     assert selfcheck(["sweep", "--serve", "hf:someone/absent-GGUF/absent-Q4_K_M.gguf"]) \
         .startswith("sweep: ")
+
+
+def test_a_raw_serve_arg_passes_the_self_check_for_the_real_preflight_to_judge(tmp_path, monkeypatch):
+    """`--serve-arg=-ub --serve-arg=2048`: the stand-in build cannot know a raw flag, so the
+    self-check takes the person's word for it and the real preflight checks it against the
+    real binary. Every knob sweep failed here before (2026-09-02)."""
+    from ml_stack.graph.bench.selfcheck import selfcheck
+
+    said = selfcheck(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
+                      "--serve-arg=-ub", "--serve-arg=2048", "--serve-mlock",
+                      "--label-suffix=-ub2048"])
+    assert "ub2048" in said or said

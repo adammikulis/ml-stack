@@ -288,7 +288,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
         spec = ServerSpec(model=model, port=port or 1, context=context, **spec_kwargs)
         backend = getattr(manager, "backend", None) or LlamaServerBackend(binary=stand_in)
         argv = backend.command(backend.resolved_draft(spec))
-        lacking = unknown_flags(argv, _mainline_flags(stand_in))
+        lacking = unknown_flags(argv, _mainline_flags(stand_in) | _raw_flags(spec))
         if lacking:
             raise UnknownFlag("\n".join(f"selfcheck: command() emits {flag}, which no build "
                                         f"accepts" + (f"; nearest {near}" if near else "")
@@ -309,7 +309,8 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
         try:
             report = _RealPreflight(spec, binary=binary, limit_bytes=limit_bytes,
                                     shards_of=present, read_header=lambda path: dict(_HEADER),
-                                    arches=lambda build: {"llama"}, flags=_mainline_flags,
+                                    arches=lambda build: {"llama"},
+                                    flags=lambda build: _mainline_flags(build) | _raw_flags(spec),
                                     ref_bytes=lambda ref: _COMPANION_BYTES if ref else 0)
         except Exception as exc:  # noqa: BLE001 - the point is to say so before the GPU
             raise SelfCheckFailed(
@@ -362,6 +363,15 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
         patch(mock.patch.object(importlib.import_module("ml_stack.client.embed"), "embed",
                                 no_embedder))
         yield
+
+
+def _raw_flags(spec: Any) -> frozenset[str]:
+    """The flags a run named raw (`--serve-arg`): the person's explicit choice, which the
+    stand-in build cannot know and the real preflight, against the real binary, still
+    checks. Without this every `--serve-arg` sweep failed its self-check on the flag it
+    was written to measure (2026-09-02, `-ub 2048`)."""
+    return frozenset(a.split("=", 1)[0] for a in (getattr(spec, "extra_args", ()) or ())
+                     if str(a).startswith("-"))
 
 
 def selfcheck(argv: Sequence[str]) -> str:
