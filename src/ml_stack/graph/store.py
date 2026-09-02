@@ -55,6 +55,16 @@ class WouldLoseTooMuch(RuntimeError):
     """A write would have removed most of the store, which is a fault rather than a rebuild."""
 
 
+class StoreMismatch(RuntimeError):
+    """What was read back after a write is not what was written.
+
+    Raised by the round-trip check every write makes, naming the key. Measured 2026-09-01:
+    twelve bench runs read back empty through a scan of ``Doc.value`` while a keyed lookup
+    returned them whole, and nothing said so until half an hour of GPU had been lost. A
+    write the store cannot read back is refused rather than believed.
+    """
+
+
 # How much of a store one write may remove before it stops being a rebuild. A pipeline that
 # read nothing produces an empty graph, and an empty graph looks exactly like "delete
 # everything" to anything that trusts it.
@@ -118,6 +128,28 @@ def _unjson(raw: Any) -> dict[str, Any]:
     return out if isinstance(out, dict) else {}
 
 
+_MISSING = object()
+"""What get_doc hands back when there is no row, told apart from a document holding None."""
+
+NODE_BY_ID = ("MATCH (n:Node {id:$id}) RETURN n.id AS id, n.kind AS kind, n.label AS label, "
+              "n.mentions AS mentions, n.attrs AS attrs, n.data AS data")
+
+
+def _shown(value: Any) -> str:
+    """A value short enough for one line: long strings by their length."""
+    if isinstance(value, str) and len(value) > 40:
+        return f"{len(value)} chars"
+    return repr(value)
+
+
+def _differences(a: Mapping[str, Any], b: Mapping[str, Any], a_name: str = "written",
+                 b_name: str = "read") -> str:
+    """The columns two rows disagree on, as ``col (written X, read Y)``, on one line."""
+    parts = [f"{col} ({a_name} {_shown(a.get(col))}, {b_name} {_shown(b.get(col))})"
+             for col in sorted(set(a) | set(b)) if a.get(col) != b.get(col)]
+    return ", ".join(parts) or "nothing, yet the rows differ"
+
+
 def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
             keep_copy: bool = True) -> dict[str, int]:
     """Make the store hold this graph and nothing else, safely.
@@ -148,6 +180,11 @@ def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
         with store.transaction():
             store.drop(gone, force=True)  # already judged, above, against the whole store
             written = store.write(graph)
+            # counted before the commit, so a store that did not take the write keeps none of it
+            held = store.counts()["nodes"]
+            if held != len(live):
+                raise StoreMismatch(
+                    f"{path}: wrote {len(live)} nodes and counts {held} afterwards")
         store.index()                     # outside the transaction: see GraphStore.index
         return written
 
@@ -294,24 +331,37 @@ class GraphStore:
         Whatever the caller carries beyond the columns — the messages a node was read from, a
         flag of its own — rides along in ``data`` and comes back untouched.
         """
+        sent = {"id": str(node["id"]), "kind": str(node.get("kind") or ""),
+                "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
+                "attrs": _json(node.get("attrs")),
+                "data": _json({k: v for k, v in node.items() if k not in NODE_COLUMNS})}
         self._conn.execute(
             "MERGE (n:Node {id: $id}) SET n.kind=$kind, n.label=$label, "
-            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data",
-            {"id": str(node["id"]), "kind": str(node.get("kind") or ""),
-             "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
-             "attrs": _json(node.get("attrs")),
-             "data": _json({k: v for k, v in node.items() if k not in NODE_COLUMNS})})
+            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data", sent)
+        back = self.query(NODE_BY_ID, {"id": sent["id"]})
+        if not back or back[0] != sent:
+            raise StoreMismatch(
+                f"node {sent['id']}: written, then read back by id as "
+                f"{_differences(sent, back[0]) if back else 'nothing'}")
 
     def upsert_edge(self, edge: Mapping[str, Any]) -> bool:
         """Put one edge in. False when either end is not in the store."""
+        sent = {"s": str(edge["source"]), "t": str(edge["target"]),
+                "rel": str(edge.get("rel") or ""), "weight": int(edge.get("weight") or 1),
+                "data": _json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})}
         rows = self.query(
             "MATCH (a:Node {id:$s}), (b:Node {id:$t}) "
             "MERGE (a)-[e:Edge {rel:$rel}]->(b) SET e.weight=$weight, e.data=$data "
-            "RETURN e.rel AS rel",
-            {"s": str(edge["source"]), "t": str(edge["target"]), "rel": str(edge.get("rel") or ""),
-             "weight": int(edge.get("weight") or 1),
-             "data": _json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})})
-        return bool(rows)
+            "RETURN e.rel AS rel, e.weight AS weight, e.data AS data", sent)
+        if not rows:
+            return False
+        # the RETURN reads the edge after the SET, which is a read-back for free
+        expected = {"rel": sent["rel"], "weight": sent["weight"], "data": sent["data"]}
+        if rows[0] != expected:
+            raise StoreMismatch(
+                f"edge {sent['s']} -{sent['rel']}-> {sent['t']}: written, then read back as "
+                f"{_differences(expected, rows[0])}")
+        return True
 
     def write(self, graph: Mapping[str, Any]) -> dict[str, int]:
         """A whole graph as built. Nodes first, so no edge arrives before its ends.
@@ -400,9 +450,20 @@ class GraphStore:
         return [{**{k: v for k, v in r.items() if k != "data"}, **_unjson(r["data"])} for r in rows]
 
     def put_doc(self, key: str, value: Any) -> None:
-        """Something about the graph as a whole: where it came from, what it counts."""
+        """Something about the graph as a whole: where it came from, what it counts.
+
+        Read back by key straight after writing, and refused with :class:`StoreMismatch`
+        when what comes back is not what went in. One lookup per write is what a store of
+        documents can afford, and a store of measurements cannot afford to be without.
+        """
+        raw = _json(value)
         self._conn.execute("MERGE (d:Doc {key: $key}) SET d.value = $value",
-                           {"key": str(key), "value": _json(value)})
+                           {"key": str(key), "value": raw})
+        back = self.get_doc(str(key), _MISSING)
+        if back is _MISSING or back != _unjson(raw):
+            raise StoreMismatch(
+                f"doc {key}: written ({len(raw)} chars), then read back by key as "
+                + ("nothing" if back is _MISSING else f"{len(_json(back))} chars"))
 
     def get_doc(self, key: str, default: Any = None) -> Any:
         rows = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value", {"key": str(key)})
@@ -439,6 +500,98 @@ class GraphStore:
     def read(self) -> dict[str, Any]:
         """The graph in the shape it went in as, whole."""
         return {**self.docs(), "nodes": self.nodes(), "edges": self.edges()}
+
+    # -- checking itself
+
+    def check(self) -> list[str]:
+        """Every record read two ways, and one line for each disagreement. Empty is clean.
+
+        Each document is read by a scan of ``Doc`` and again by key; each node by a scan
+        and again by id; each edge by a scan and again by its ends and relation; and each
+        table's ``count`` is held against the number of rows its scan returned, edges both
+        ways along the arrow. A scan that disagrees with a lookup is the fault measured on
+        2026-09-01 -- twelve runs blank through a scan, whole by key -- and a node or edge
+        scan that disagrees is the same class of fault, so all three are asked.
+        """
+        found: list[str] = []
+        docs = self.query("MATCH (d:Doc) RETURN d.key AS key, d.value AS value ORDER BY d.key")
+        for row in docs:
+            keyed = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value",
+                               {"key": row["key"]})
+            if not keyed:
+                found.append(f"doc {row['key']}: found by scan, not by key")
+                continue
+            by_scan, by_key = row["value"] or "", keyed[0]["value"] or ""
+            if by_scan != by_key:
+                found.append(f"doc {row['key']}: scan read {len(by_scan)} chars, "
+                             f"key read {len(by_key)} chars")
+            elif not by_key:
+                found.append(f"doc {row['key']}: empty by key and by scan; "
+                             "nothing left to restore it from")
+        found.extend(self._counted("docs", "MATCH (d:Doc) RETURN count(d) AS c", len(docs)))
+
+        nodes = self.query("MATCH (n:Node) RETURN n.id AS id, n.kind AS kind, n.label AS label, "
+                           "n.mentions AS mentions, n.attrs AS attrs, n.data AS data ORDER BY n.id")
+        for row in nodes:
+            by_id = self.query(NODE_BY_ID, {"id": row["id"]})
+            if not by_id:
+                found.append(f"node {row['id']}: found by scan, not by id")
+            elif by_id[0] != row:
+                found.append(f"node {row['id']}: scan and id disagree on "
+                             f"{_differences(by_id[0], row, 'id', 'scan')}")
+        found.extend(self._counted("nodes", "MATCH (n:Node) RETURN count(n) AS c", len(nodes)))
+
+        edges = self.query("MATCH (a:Node)-[e:Edge]->(b:Node) RETURN a.id AS source, e.rel AS rel, "
+                           "b.id AS target, e.weight AS weight, e.data AS data "
+                           "ORDER BY a.id, e.rel, b.id")
+        for row in edges:
+            name = f"edge {row['source']} -{row['rel']}-> {row['target']}"
+            keyed = self.query(
+                "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) "
+                "RETURN e.weight AS weight, e.data AS data",
+                {"s": row["source"], "t": row["target"], "rel": row["rel"]})
+            if not keyed:
+                found.append(f"{name}: found by scan, not by its ends")
+                continue
+            expected = {"weight": row["weight"], "data": row["data"]}
+            if keyed[0] != expected:
+                found.append(f"{name}: scan and lookup disagree on "
+                             f"{_differences(keyed[0], expected, 'lookup', 'scan')}")
+        found.extend(self._counted("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c",
+                                   len(edges)))
+        found.extend(self._counted("edges, walked backwards",
+                                   "MATCH (:Node)<-[e:Edge]-(:Node) RETURN count(e) AS c",
+                                   len(edges)))
+        return found
+
+    def _counted(self, what: str, cypher: str, scanned: int) -> list[str]:
+        rows = self.query(cypher)
+        counted = int(rows[0]["c"]) if rows else -1
+        if counted != scanned:
+            return [f"{what}: count says {counted}, scan returned {scanned}"]
+        return []
+
+    def repair(self) -> list[str]:
+        """Rewrite every document a scan reads empty while a lookup by key reads it whole.
+
+        The rewrite is a plain :meth:`put_doc` of the keyed value, which round-trips by key
+        like any write; whether the scan then agrees is for :meth:`check` to say afterwards,
+        because the trigger for the scan's blank is not known and a rewrite is a guess at
+        it. A document empty both ways has nothing to be rewritten from, and is left for
+        :meth:`check` to keep reporting.
+        """
+        rewrote: list[str] = []
+        for row in self.query("MATCH (d:Doc) RETURN d.key AS key, d.value AS value ORDER BY d.key"):
+            if row["value"]:
+                continue
+            keyed = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value",
+                               {"key": row["key"]})
+            raw = keyed[0]["value"] if keyed else ""
+            if not raw:
+                continue
+            self.put_doc(row["key"], json.loads(raw))
+            rewrote.append(f"rewrote doc {row['key']} ({len(raw)} chars)")
+        return rewrote
 
     def neighbours(self, node_id: str) -> list[dict[str, Any]]:
         """Everything joined to this node, whichever way the edge points."""

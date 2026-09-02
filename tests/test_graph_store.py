@@ -531,3 +531,133 @@ def test_a_document_can_be_deleted_and_says_whether_it_was_there(tmp_path):
     with GraphStore(tmp_path / "g", read_only=True) as reader:
         assert reader.doc_keys() == ["bench:kept"]
         assert reader.counts()["docs"] == 1
+
+
+# -- the store checks itself ---------------------------------------------------------------
+
+def test_a_document_that_does_not_read_back_is_refused_at_the_write(tmp_path, monkeypatch):
+    """Every put_doc reads its own document back by key, and a write the store cannot read
+    back is refused rather than believed."""
+    from ml_stack.graph.store import StoreMismatch
+
+    with GraphStore(tmp_path / "g") as store:
+        monkeypatch.setattr(store, "get_doc", lambda key, default=None: {"label": "other"})
+        with pytest.raises(StoreMismatch, match="doc bench:tried"):
+            store.put_doc("bench:tried", {"label": "tried", "rows": [1, 2]})
+        monkeypatch.setattr(store, "get_doc", lambda key, default=None: default)
+        with pytest.raises(StoreMismatch, match="bench:again.*nothing"):
+            store.put_doc("bench:again", {"label": "again"})
+
+
+def test_a_node_or_edge_that_does_not_read_back_is_refused_at_the_write(tmp_path):
+    from ml_stack.graph.store import StoreMismatch
+
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        honest = store.query
+
+        def a_store_that_keeps_less(cypher, params=None):
+            rows = honest(cypher, params)
+            if "{id:$id}) RETURN n.id" in cypher:          # the lookup by id
+                return [{**r, "label": ""} for r in rows]
+            if "MERGE (a)-[e:Edge" in cypher:              # the edge's own RETURN
+                return [{**r, "weight": 0} for r in rows]
+            return rows
+
+        store.query = a_store_that_keeps_less
+        with pytest.raises(StoreMismatch, match="node person:ada: .*label \\(written 'Ada Lovelace', read ''\\)"):
+            store.upsert_node(GRAPH["nodes"][0])
+        with pytest.raises(StoreMismatch, match="edge person:ada -interested_in-> topic:compilers: .*weight \\(written 3, read 0\\)"):
+            store.upsert_edge(GRAPH["edges"][0])
+
+
+def test_a_rebuild_whose_count_does_not_match_is_rolled_back(tmp_path, monkeypatch):
+    from ml_stack.graph.store import StoreMismatch, count_store, replace
+
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write(GRAPH)
+    monkeypatch.setattr(GraphStore, "counts", lambda self: {"nodes": 1, "edges": 0, "docs": 0})
+    with pytest.raises(StoreMismatch, match="wrote 6 nodes and counts 1"):
+        replace(path, {**GRAPH, "nodes": [*GRAPH["nodes"], {"id": "person:cyd", "kind": "person",
+                                                             "label": "Cyd Marek", "mentions": 1,
+                                                             "attrs": {}}]})
+    monkeypatch.undo()
+    assert count_store(path)["nodes"] == 5, "the refused write was kept"
+
+
+def test_a_consistent_store_checks_clean(tmp_path):
+    graph = {**GRAPH, "stats": {"nodes": 5, "edges": 3},
+             "messages": {"C1-1.1": {"text": "Hello"}}}
+    with GraphStore(tmp_path / "g") as store:
+        store.write(graph)
+        assert store.check() == []
+    with GraphStore(tmp_path / "g", read_only=True) as reader:
+        assert reader.check() == []
+
+
+def test_a_document_a_scan_reads_empty_is_one_line_of_check_and_repair_rewrites_it(tmp_path):
+    """The fault as measured: '' through a scan of Doc, whole by key. The scan lies here the
+    way that store did, and stops lying about a document once it is rewritten -- which is
+    what a rewrite hopes for, and the part no fresh file has reproduced; `check` says
+    afterwards whether it took."""
+    doc = {"label": "tried", "rows": [{"question": "who welds?"}] * 3}
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.put_doc("bench:tried", doc)
+        store.put_doc("bench:kept", doc)
+        honest, lost = store.query, {"bench:tried"}
+
+        def as_that_store_did(cypher, params=None):
+            rows = honest(cypher, params)
+            if "d.value" in cypher and "{key" not in cypher:      # a scan, not a lookup
+                return [{**r, "value": "" if r.get("key") in lost else r["value"]} for r in rows]
+            return rows
+
+        store.query = as_that_store_did
+        size = len(honest("MATCH (d:Doc {key:'bench:tried'}) RETURN d.value AS value")[0]["value"])
+        assert store.check() == [f"doc bench:tried: scan read 0 chars, key read {size} chars"]
+
+        real_put = store.put_doc
+
+        def put_and_heal(key, value):
+            real_put(key, value)
+            lost.discard(key)
+
+        store.put_doc = put_and_heal
+        assert store.repair() == [f"rewrote doc bench:tried ({size} chars)"]
+        assert store.check() == []
+        assert store.get_doc("bench:tried") == doc
+
+
+def test_a_document_emptied_on_disk_is_reported_and_cannot_be_rewritten(tmp_path):
+    """`SET d.value = ''` by hand empties a document by key and by scan alike (measured:
+    both read ''). The store never writes '' itself, so it is a finding; and with nothing
+    whole to rewrite it from, repair leaves it for check to keep reporting."""
+    with GraphStore(tmp_path / "g") as store:
+        store.put_doc("bench:tried", {"label": "tried"})
+        store.query("MATCH (d:Doc {key:'bench:tried'}) SET d.value = '' RETURN d.key AS key")
+    with GraphStore(tmp_path / "g") as store:
+        line = "doc bench:tried: empty by key and by scan; nothing left to restore it from"
+        assert store.check() == [line]
+        assert store.repair() == []
+        assert store.check() == [line]
+
+
+def test_a_node_or_edge_a_scan_reads_wrong_is_the_same_fault(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        honest = store.query
+
+        def a_scan_that_loses_data(cypher, params=None):
+            rows = honest(cypher, params)
+            if "{id" not in cypher and ".data" in cypher:         # a scan of Node or Edge
+                return [{**r, "data": ""} for r in rows]
+            return rows
+
+        store.query = a_scan_that_loses_data
+        found = store.check()
+    assert "node person:ada: scan and id disagree on data (id '{}', scan '')" in found
+    assert ("edge person:ada -interested_in-> topic:compilers: scan and lookup disagree on "
+            "data (lookup '{\"messages\": [\"C1-1.1\"]}', scan '')") in found
+    assert len(found) == 5 + 3, found        # every node and every edge, nothing else
