@@ -51,6 +51,14 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
   any compress ratio / indexer -- as one paragraph. Read by hand with a throwaway script
   today to understand Flash-Next; `fit --measure` gives the real bytes, this says why.
   `preflight._recurrent_layers` / `_sliding_layers` already compute most of it.
+- [ ] **`ml-stack-bench queue FILE`** (2026-09-02): an evening's measurements were a zsh
+  script in a scratchpad -- fairness samples, a knob matrix (smoke, then sample, per knob),
+  four hundred-question runs, two extraction runs, then rank/export/report and the page
+  back -- run under a persistent monitor. That is a queue file: one bench invocation per
+  line, `smoke:` / `then:` pairs, a `--yes` policy, a summary line per step to the log, and
+  `status` showing which step is running and what is left. The fleet daemon's bench jobs
+  are the same thing across machines; the local queue should be the daemon's job runner
+  pointed at localhost, not a second scheduler.
 - [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
   join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
   cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of
