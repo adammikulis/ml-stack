@@ -34,12 +34,6 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
 
 ## Measuring across the fleet (asked 2026-09-02)
 
-- [ ] **`tests/test_fleet_discovery.py::test_a_booted_daemon_is_found_and_driven_with_no_address_configured`
-  fails on this machine** (`PeerError: job ... still queued after timeout`), alone and in
-  the suite, since 2026-09-02 afternoon; it passed in the morning's full runs. Nothing under
-  `fleet/` changed in between except the bench-job handling in `daemon.py` (a bench job
-  gates training jobs: a stale `measuring.lock` or a leftover adopted job would keep a
-  training job queued). Find which, and make the test independent of `~/.ml-stack`.
 - [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
   join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
   cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of
