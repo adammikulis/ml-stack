@@ -1189,3 +1189,21 @@ def test_the_card_comes_from_the_served_model_before_the_family(monkeypatch, tmp
     quiet = Client("http://nowhere.invalid", family=GEMMA)
     monkeypatch.setattr(quiet, "_from_gguf", lambda: {})
     assert quiet.card == {"temperature": 1.0, "top_p": 0.95, "top_k": 64}
+
+
+def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
+    """`chat(think=False)` must reach the server as the chat template's own switch;
+    as a body key it was ignored and the model thought anyway (Flash-Next, 2026-09-02)."""
+    from ml_stack.client import families
+    from ml_stack.client.chat import Client
+
+    client = Client("http://127.0.0.1:1", family="qwen")
+    body = client.build_body([{"role": "user", "content": "hi"}], think=False)
+    assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "think" not in body
+    body = client.build_body([{"role": "user", "content": "hi"}], think=True,
+                             chat_template_kwargs={"other": 1})
+    assert body["chat_template_kwargs"] == {"other": 1, "enable_thinking": True}
+    plain = Client("http://127.0.0.1:1", family=families.GENERIC.name)
+    body = plain.build_body([{"role": "user", "content": "hi"}], think=False)
+    assert "think" not in body      # whatever the family's switch is, the word itself never goes

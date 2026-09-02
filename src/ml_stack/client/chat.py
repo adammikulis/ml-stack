@@ -227,6 +227,16 @@ class Client:
             else:
                 body["response_format"] = response_format
 
+        # `think` is the caller's word; the server's is the family's chat-template flag
+        # (`enable_thinking` for a qwen template, `reasoning_effort` for harmony). Merged
+        # into the body it was an unknown key the server ignored, and Flash-Next thought
+        # through every call that asked it not to (2026-09-02, ~400 characters a call).
+        think = extra.pop("think", None)
+        if think is not None:
+            asked = self.family.think_kwargs(bool(think)) if self.family.think_kwargs else {}
+            if asked:
+                body["chat_template_kwargs"] = {**(extra.pop("chat_template_kwargs", None) or {}),
+                                                **asked}
         body.update(extra)
 
         if self._is_hosted_openai:
