@@ -1328,3 +1328,80 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
     listed = set(out.listed)
     rest = [i for i in out.show if i not in listed]
     assert rest == [] and len(out.show) == 9, "a listing is never cut"
+
+
+# ------------------------------------------------------------ of any length
+
+from types import SimpleNamespace  # noqa: E402
+
+from ml_stack.graph.ask import EARLIER, RECALLED, SYSTEM  # noqa: E402
+
+WINDOW_TURNS = [{"role": "user", "content": "who is Ada Lovelace?"},
+                {"role": "assistant", "content": "Ada Lovelace is an analyst at Pellard Foundry."},
+                {"role": "user", "content": "and Bea?"},
+                {"role": "assistant", "content": "Bea Marlow works on compilers too."}]
+
+
+def test_without_a_summary_or_recall_the_messages_are_byte_for_byte_what_they_were():
+    """The ranking runs and the answer cache depend on this: with the new kwargs absent,
+    the messages are the system prompt, the window in order, the shortlist, the question."""
+    before = ScriptedModel([])
+    converse("who else?", GRAPH, before, turns=WINDOW_TURNS)
+    assert before.seen[0] == [{"role": "system", "content": SYSTEM}, *WINDOW_TURNS,
+                              {"role": "user", "content": "who else?"}]
+
+    explicit = ScriptedModel([])
+    converse("who else?", GRAPH, explicit, turns=WINDOW_TURNS, summary=None, recalled=())
+    assert explicit.seen == before.seen
+
+    empty = ScriptedModel([])
+    converse("who else?", GRAPH, empty, turns=WINDOW_TURNS, summary="   ",
+             recalled=[{"role": "user", "content": ""}, None])
+    assert empty.seen == before.seen
+
+    listed = ScriptedModel([])
+    converse("who else?", GRAPH, listed, turns=WINDOW_TURNS, opening=["person:ada"])
+    seen = listed.seen[0]
+    assert seen[:1 + len(WINDOW_TURNS)] == before.seen[0][:1 + len(WINDOW_TURNS)]
+    assert seen[-2]["content"].startswith("A search turned up these entries")
+    assert seen[-1] == {"role": "user", "content": "who else?"}
+
+
+def test_the_summary_goes_first_then_the_recalled_then_the_window_then_the_shortlist():
+    """Order, and the shapes each may arrive in: a string, a mapping, a Turn-like object."""
+    model = ScriptedModel([])
+    recalled = [{"role": "user", "content": "did Ada ever move?"},
+                SimpleNamespace(role="assistant", text="Ada moved to Turin in the spring."),
+                {"role": "user", "text": "a mapping with text rather than content"}]
+    converse("where is she now?", GRAPH, model, turns=WINDOW_TURNS,
+             summary=SimpleNamespace(role="summary", text="Ada is the subject.\n  Rests on person:ada."),
+             recalled=recalled, opening=["person:ada"])
+    seen = model.seen[0]
+    assert seen[0] == {"role": "system", "content": SYSTEM}
+    assert seen[1] == {"role": "user", "content": EARLIER + "Ada is the subject. Rests on person:ada."}
+    assert seen[2:5] == [
+        {"role": "user", "content": RECALLED + "did Ada ever move?"},
+        {"role": "assistant", "content": RECALLED + "Ada moved to Turin in the spring."},
+        {"role": "user", "content": RECALLED + "a mapping with text rather than content"}]
+    assert seen[5:9] == WINDOW_TURNS
+    assert seen[9]["content"].startswith("A search turned up these entries")
+    assert seen[10] == {"role": "user", "content": "where is she now?"} and len(seen) == 11
+
+    # a bare string is a summary too, and the streaming path assembles the same messages
+    streamed = ScriptedModel([])
+    converse_stream("where is she now?", GRAPH, streamed, on_event=lambda e: None,
+                    turns=WINDOW_TURNS, summary="Ada is the subject.", recalled=recalled[:1])
+    assert streamed.seen[0][1] == {"role": "user", "content": EARLIER + "Ada is the subject."}
+    assert streamed.seen[0][2]["content"] == RECALLED + "did Ada ever move?"
+    assert streamed.seen[0][3:7] == WINDOW_TURNS
+
+
+def test_a_follow_up_resolves_from_the_window_alone():
+    """"And where is she based?" has its "she" in the window and nowhere else: no summary,
+    nothing recalled, and the model reads Ada off the turn before and opens her entry."""
+    model = ScriptedModel([call("look_at", ids=["person:ada"])], answer="Ada is based in Turin.")
+    out = converse("and where is she based?", GRAPH, model, turns=WINDOW_TURNS[:2])
+    assert model.seen[0][1:3] == WINDOW_TURNS[:2]
+    assert model.seen[0][3] == {"role": "user", "content": "and where is she based?"}
+    assert out.read == ["person:ada"] and "Turin" in model.told()
+    assert out.content == "Ada is based in Turin."

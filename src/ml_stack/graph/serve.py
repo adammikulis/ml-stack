@@ -12,6 +12,12 @@ comes from or which model answers: a subclass says how a question is answered (`
 and where conversations are kept (``threads``), and hangs whatever it wants -- a journal, a
 review queue, a seat number -- off ``answered`` and ``failed``.
 
+What goes back with a question is ``history``'s ``History``: the last ``WINDOW`` turns as
+messages, always, and on it the latest ``summary`` and the earlier turns ``recalled`` for
+this question, for ``converse(..., summary=, recalled=)``. A subclass that returns an
+``embedder`` gets turns recalled by meaning as well as by their words; one that returns a
+``summariser`` gets the summary rolled forward every ``summary_every`` turns.
+
 ::
 
     class Handler(AskRoutes, BaseHTTPRequestHandler):
@@ -40,11 +46,13 @@ from __future__ import annotations
 import json
 import sys
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
-__all__ = ["Ask", "AskRoutes", "answer_payload", "sse", "thread_request"]
+from ml_stack.graph.thread import EVERY, WINDOW
+
+__all__ = ["Ask", "AskRoutes", "History", "answer_payload", "sse", "thread_request"]
 
 # what an answer carries to the page, in the order the page reads them: `content` is the
 # words, `ids` everything the tools touched, then the four ways they touched it, then the
@@ -111,6 +119,28 @@ def thread_request(path: str) -> tuple[str, bool] | None:
     return name[:64], "working=1" in query
 
 
+class History(list):
+    """What goes back with a question: the window as messages, and what goes ahead of it.
+
+    A list of ``{"role", "content"}`` -- the last ``WINDOW`` turns, chosen by recency alone,
+    exactly what ``history`` always returned -- so every asker that passes ``turns`` on
+    keeps working. On it, for ``converse(..., summary=, recalled=)``: ``summary`` is the
+    latest summary ``Turn`` or None, ``recalled`` the earlier turns found for this
+    question, oldest first. ``as_dict`` is the same three things by name.
+    """
+
+    __slots__ = ("summary", "recalled")
+
+    def __init__(self, turns: Sequence[Mapping[str, str]] = (), *, summary: Any = None,
+                 recalled: Sequence[Any] = ()) -> None:
+        super().__init__(turns)
+        self.summary = summary
+        self.recalled = list(recalled)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {"summary": self.summary, "recalled": list(self.recalled), "turns": list(self)}
+
+
 class Ask:
     """One question as the page sent it, after the body was checked and history resolved."""
 
@@ -129,6 +159,16 @@ class Ask:
     @property
     def took_s(self) -> float:
         return round(time.time() - self.began, 1)
+
+    @property
+    def summary(self) -> Any:
+        """The latest summary of the thread, when ``history`` found one."""
+        return getattr(self.turns, "summary", None)
+
+    @property
+    def recalled(self) -> list:
+        """The earlier turns recalled for this question, oldest first."""
+        return list(getattr(self.turns, "recalled", ()) or ())
 
 
 class AskRoutes:
@@ -159,10 +199,24 @@ class AskRoutes:
     ``failed(ask, exc)``
         Called when answering raised, before the error is sent.
     ``remembered_turns``
-        How many turns of history go back to the model with the question.
+        How many turns of history go back to the model with the question: the window,
+        chosen by recency alone and never trimmed for what else is sent. ``WINDOW``.
+    ``recalled_turns``
+        How many earlier turns ``recall`` may add ahead of the window; 0 turns it off.
+    ``embedder()``
+        ``texts -> vectors``, or None. Given, every turn is embedded as it is remembered
+        and recalled by meaning as well as by its words -- one embedding call per turn
+        written and one per question asked.
+    ``summariser()``
+        ``turns -> str``, or None. Given, the summary is rolled forward every
+        ``summary_every`` turns, after the answer has gone out: one more short model
+        call, over that many turns and the previous paragraph, once per ``summary_every``
+        turns. ``partial(thread.write_summary, client)`` is that writer for a chat client.
     """
 
-    remembered_turns: int = 6
+    remembered_turns: int = WINDOW
+    recalled_turns: int = 3
+    summary_every: int = EVERY
     asking: Ask | None = None
 
     # ------------------------------------------------------------- what a subclass says
@@ -175,6 +229,12 @@ class AskRoutes:
         return None
 
     def ready(self) -> str | None:
+        return None
+
+    def embedder(self) -> Callable[[Sequence[str]], Sequence[Sequence[float]]] | None:
+        return None
+
+    def summariser(self) -> Callable[[Sequence[Any]], str] | None:
         return None
 
     def answered(self, ask: Ask, out: Any, payload: dict[str, Any]) -> dict[str, Any]:
@@ -262,25 +322,37 @@ class AskRoutes:
 
     # ----------------------------------------------------------- conversations
 
-    def history(self, thread: str, sent: list) -> list:
+    def history(self, thread: str, sent: list, *, question: str = "",
+                window: int | None = None) -> History:
         """The turns before this one: the store's, when it has any, else the page's.
+
+        A ``History``: the last ``window`` turns as messages (``remembered_turns`` by
+        default) -- chosen by recency alone, so a follow-up resolves from them with nothing
+        else -- carrying the thread's latest ``summary`` and, given the ``question``, the
+        earlier turns ``recalled`` for it. Neither is ever taken out of the window.
 
         The page's own list stays as a fallback, so a reader whose store is unavailable
         still gets a conversation rather than an error -- and a reopened page, which sends
         nothing, gets the conversation the graph is holding.
         """
         if not thread:
-            return sent
+            return History(sent)
+        keep = int(self.remembered_turns if window is None else window)
         try:
-            from ml_stack.graph.thread import recent
+            from ml_stack.graph.thread import latest_summary, recall, recent
 
             with self._opened() as held:
                 if held is None:
-                    return sent
-                kept = recent(held, thread, turns=int(self.remembered_turns))
-            return kept or sent
+                    return History(sent)
+                kept = recent(held, thread, turns=keep)
+                summary = latest_summary(held, thread)
+                recalled = []
+                if question and int(self.recalled_turns) > 0:
+                    recalled = recall(held, thread, question, embedder=self.embedder(),
+                                      limit=int(self.recalled_turns), window=keep)
+            return History(kept or sent, summary=summary, recalled=recalled)
         except Exception:  # noqa: BLE001 - a conversation is not worth failing an answer for
-            return sent
+            return History(sent)
 
     def remember(self, ask: Ask, out: Any) -> None:
         """Write the pair of turns, joined to what the answer drew on. Best effort.
@@ -289,20 +361,31 @@ class AskRoutes:
         back; ``why`` is the same steps joined, kept beside them for older readers. A store
         that will not open -- another process holds the writer -- loses the record, not
         the answer, which the reader already has.
+
+        With an ``embedder`` both turns are embedded as they are written; with a
+        ``summariser`` the summary is rolled forward when ``summary_every`` turns have
+        been said since the last -- one more model call, made here, after the answer has
+        gone out.
         """
         if not ask.thread:
             return
         try:
-            from ml_stack.graph.thread import drew_on, remember_turn
+            from ml_stack.graph.thread import drew_on, remember_turn, summarise
 
             payload = answer_payload(out)
+            embed = self.embedder()
             with self._opened(write=True) as held:
                 if held is None:
                     return
-                remember_turn(held, thread=ask.thread, role="user", text=ask.question)
+                remember_turn(held, thread=ask.thread, role="user", text=ask.question,
+                              embedder=embed)
                 remember_turn(held, thread=ask.thread, role="assistant",
                               text=str(payload.get("content") or ""), drew=drew_on(payload),
-                              meta={"why": payload.get("why", ""), "steps": payload.get("steps", [])})
+                              meta={"why": payload.get("why", ""), "steps": payload.get("steps", [])},
+                              embedder=embed)
+                writer = self.summariser()
+                if writer is not None:
+                    summarise(held, ask.thread, writer, every=int(self.summary_every))
         except Exception as exc:  # noqa: BLE001
             print(f"{time.strftime('%FT%T')} turn not remembered: {exc}", file=sys.stderr)
 
@@ -336,7 +419,7 @@ class AskRoutes:
         ask = Ask(body)
         if not ask.question:
             return None
-        ask.turns = self.history(ask.thread, ask.sent)
+        ask.turns = self.history(ask.thread, ask.sent, question=ask.question)
         return ask
 
     def _answer(self, ask: Ask, *, stream: bool, emit: Any) -> Any:

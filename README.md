@@ -710,6 +710,55 @@ A rebuilt graph misses on its own, but does not sweep on its own: pass
 ever gave. Entries live under keys beginning `_`, which `GraphStore.docs` skips, so a cache
 in the same store as a graph never leaks into `read()`.
 
+## A conversation of any length
+
+```python
+from functools import partial
+from ml_stack.graph.thread import WINDOW, latest_summary, recall, recent, summarise, write_summary
+
+turns = recent(store, thread, turns=WINDOW)                       # the last ten, always
+summary = latest_summary(store, thread)                           # one paragraph, rarely changed
+recalled = recall(store, thread, question, embedder=embed)        # two or three older turns
+out = converse(question, graph, client, turns=turns, summary=summary, recalled=recalled)
+...
+summarise(store, thread, partial(write_summary, client))          # every EVERY turns
+```
+
+What goes back with a question, in this order: the system prompt; the latest **summary**, as
+one message reading "Earlier in this conversation: …"; the turns **recalled** for this
+question, oldest first, each marked as recalled; the last `WINDOW` (ten) turns, whole and in
+order; the shortlist, if any; the question. The window is chosen by recency and nothing
+else — a follow-up ("and where is she based?") resolves from it alone — and neither the
+summary nor the recall ever takes a turn out of it. With no summary and nothing recalled the
+messages are byte for byte what they were, which the ranking runs and the answer cache rest
+on; pinned in `tests/test_graph_ask.py`.
+
+`recall` is the word index over what was said, fused with the turn vectors when the same
+`embedder` the turns were remembered with is given (`remember_turn(..., embedder=)`, kept
+under the thread's own name), the way `search.hybrid` fuses. It never returns a turn inside
+the window or a summary. `summarise` rolls the summary forward when `every` (eight) ordinary
+turns have been said since the last, handing the writer the previous paragraph and those
+turns with what they drew on; the paragraph is a `Turn` of role `"summary"`, joined to every
+id it names that those turns rested on, out of `follow`'s ordinary window and read by
+`latest_summary`. `AskRoutes` does all of this for a page: `history` returns a `History` —
+the window as messages, with `.summary` and `.recalled` on it — and `remember` embeds each
+turn and calls `summarise` when the subclass returns a `summariser()`.
+
+What it costs, per question, with everything on: one embedding call for the question and
+one per turn written (two), one word-index and one vector query, and every eight turns one
+more short model call — over eight turns of text plus the previous paragraph, made after the
+answer has gone out. Prompt tokens per question are the summary (a paragraph), up to three
+recalled turns, the ten-turn window and the question; because the summary sits ahead of
+everything that changes per question, it is inside the cached prefix and re-read for free
+until it changes. Measured on the fake model: a fact stated at turn one is in front of the
+model at turn two hundred twice, once in the summary and once recalled, and the prefix is
+identical across turns 193–200. Measure the `cached` share per turn with `ml-stack-bench
+concurrent` after changing `EVERY`; a summary that changes too often shows up there.
+
+A fact stated in conversation reaches the *graph* through the change-request path, not
+through any of this. The summary and the recall keep it in the model's view for this
+thread; only an entry makes the tools find it next time, in any thread.
+
 ## What this measured, and what it changed
 
 Answering a graph is the case this was built for, so the numbers are here rather than in
@@ -810,6 +859,18 @@ may carry the ids a good answer names, which is what makes accuracy measurable r
 impressionistic. Runs are kept in a graph store under `~/.ml-stack/bench`, so one can be
 compared with another a week later.
 
+There are two question sets, and a ranking should be read on both. The curated set,
+`ml_stack.graph.community.QUESTIONS` -- sixty scored, six whose right answer is nobody --
+is written by hand for nuance: two people who share a surname, a false premise about a
+real person, a role nobody has but one person nearly does, a count scored as the people
+counted, an answer two hops away from the person the question describes, and things only
+somebody's own words say. The generated set, `ml-stack-world questions --world DIR --n 200`,
+is derived from an invented world's truth for breadth -- hundreds of questions over
+thousands of people, tagged by `kind`, with `--kinds aggregate,twohop,trap,quote` to draw
+only those -- and reaches sizes the hand-written set never will. Both are fed to
+`--questions`; a model that is good on one and not the other is telling you which of the two
+it was tuned on.
+
 `show` reports wall clock, model calls, prompt tokens **and how many of them were cached** —
 a conversation re-sends itself every turn, so the tokens shown and the tokens actually read
 are different numbers and only the second is a cost.
@@ -832,7 +893,7 @@ library and no network, so it opens on any machine.
 a draft head cannot change an answer -- the target verifies every token -- only the wall
 clock and the memory. Accuracy comes from the model's largest run (the full sweep, undrafted,
 on mainline; the newest on a tie), and cost, printed per question so a twenty-question
-`drafts` run compares with a fifty, from its fastest run of at least `SHORT` questions
+`drafts` run compares with a sixty, from its fastest run of at least `SHORT` questions
 whose F1 held within five points of that -- a head, a draft length and a fork included -- with
 the last column naming which run and which build it was (`--noise` widens or tightens the
 five). A run that fell outside the noise is listed under the table as `rejected`, so a head
@@ -1051,6 +1112,15 @@ invented. The runs sit in the same store as the answering runs, marked `kind: "e
 `extract` takes the measuring lock like `run`, and `--detach`, `status`, `tail` and `stop`
 work as they do there.
 
+Every run records which machine measured it (`server["host"]`) and which code
+(`server["commit"]`, the short sha, `(dirty)` when the tree had changes). `show` adds a
+`host` column only when a store holds more than one; the ranking never composes one host's
+accuracy with another's cost -- a cost run from another machine is listed as
+`rejected: other host` -- and `--rates` and `--plot` name points by host. `sweep --fleet
+[--peers NAME,...]` spreads the `--serve` models over the fleet: one job per model with
+the same line otherwise, planned, dispatched, waited for and gathered into `--kept`, then
+shown; a peer on another commit is refused before anything is dispatched.
+
 ## An invented company
 
 A demo of a graph read out of a community needs a community, and a real one cannot be shown.
@@ -1116,7 +1186,14 @@ The questions are generated from the truth that made the world -- who reports to
 works on what, who is where -- spread over the same kinds of answer the bench's own set
 covers: people mostly, then organisations, places, subjects, units, paths between two
 people, events, work going spare, and a few whose right answer is nobody. A kind that lacks
-a relation (a community has no `reports_to`) simply asks no such question.
+a relation (a community has no `reports_to`) simply asks no such question. Four more are kinds
+of *question* rather than of answer, because the bench's own set was short of them:
+`aggregate` (a count, scored as the people counted; the unit or employer with the most
+people, only when that is not a tie), `twohop` (who works with whoever knows a subject, or
+which units or places those people are in -- the far end, never the middle), `trap` (a
+false premise about a real person, whose right answer is the place exactly as the graph
+has it) and `quote` (answerable from what a person said and from nothing else). Every
+question carries its `kind`, which the bench ignores, and `--kinds` draws only some.
 
 ## Searching the web
 

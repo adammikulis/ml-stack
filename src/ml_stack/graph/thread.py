@@ -16,6 +16,26 @@ entries it drew on with *how* it drew on them. What that buys:
 
 Nothing here decides what a reader sees. It records what happened; showing or hiding the
 working is the caller's choice, and both are one query away.
+
+A conversation of any length
+----------------------------
+
+What goes back to the model with a question is three things, in this order, and only the
+last is chosen by recency:
+
+* the latest *summary* -- one paragraph the small model writes every ``EVERY`` turns
+  (``summarise``): what is established, what the asker wants, what is open, the entry ids it
+  rests on. It is a ``Turn`` of role ``"summary"``, joined to those ids, kept out of the
+  ordinary window, and it changes rarely, so it sits inside the model's cached prefix;
+* what ``recall`` finds -- the two or three earlier turns, outside the window, whose words or
+  meaning match the question, each with what it drew on;
+* the last ``WINDOW`` ordinary turns, always, chosen by recency alone. A follow-up ("and
+  where is she based?") resolves from these with nothing else; ``recall`` and the summary
+  are additions ahead of them and never displace one.
+
+A fact stated in conversation reaches the *graph* through the change-request path, not
+through any of this: the summary and the recall keep it in the model's view; only an entry
+makes the tools find it.
 """
 
 from __future__ import annotations
@@ -23,17 +43,30 @@ from __future__ import annotations
 import json
 import time
 import uuid
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
-__all__ = ["DREW", "HOW", "Turn", "drew_on", "follow", "forget_thread", "of_node", "recent",
-           "remember_turn", "threads", "turn_of"]
+__all__ = ["DREW", "EVERY", "HOW", "SUMMARY", "Turn", "WINDOW", "drew_on", "follow",
+           "forget_thread", "latest_summary", "of_node", "recall", "recent", "remember_turn",
+           "summarise", "threads", "turn_of", "write_summary"]
 
 TURN_TABLE = """CREATE NODE TABLE IF NOT EXISTS Turn(
     id STRING, thread STRING, seq INT64, at STRING, role STRING, text STRING,
     meta STRING, PRIMARY KEY (id))"""
 AFTER_TABLE = """CREATE REL TABLE IF NOT EXISTS After(FROM Turn TO Turn)"""
 DREW_TABLE = """CREATE REL TABLE IF NOT EXISTS Drew(FROM Turn TO Node, how STRING)"""
+# The word index over what was said, so an earlier turn is findable by its words the way an
+# entry is findable by its label. Built by whoever writes turns: a reader cannot build one.
+TURN_INDEX = "CALL CREATE_FTS_INDEX('Turn', 'turn_index', ['text'])"
+
+# How many ordinary turns always go back with a question, newest last, chosen by recency and
+# nothing else. Raised from six when the summary took over carrying what is older: the window
+# is for consistency and follow-ups, and is never trimmed to make room for what recall found.
+WINDOW = 10
+# How many ordinary turns pass between one summary and the next.
+EVERY = 8
+# The role a summary turn is kept under. Never in the ordinary window; `latest_summary` reads it.
+SUMMARY = "summary"
 
 # How a turn touched an entry, weakest to strongest. `found` is a search result the model was
 # shown; `read` is one it opened; `path` is one it travelled through; `shown` is one it said
@@ -75,6 +108,28 @@ def _tables(store: Any) -> None:
             store.query(statement)
         except Exception:  # noqa: BLE001 - a read-only store already has them, or has none
             return
+    _words_index(store)
+
+
+def _words_index(store: Any) -> bool:
+    """The word index over turns, built once per writing handle; False when it cannot be.
+
+    Measured: an index built before any turn was said sees every turn said after it, so it
+    is built with the tables and never rebuilt. Rebuilding raises "already exists", which
+    the store's own once-per-handle guard swallows. A store that cannot index -- no
+    extension, a reader -- still keeps the conversation; recall simply has one voter fewer.
+    """
+    try:
+        store._extension("fts")                       # noqa: SLF001 - same package
+        store._index("turn_fts", TURN_INDEX)          # noqa: SLF001
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _tag(thread: str) -> str:
+    """The name a thread's turn vectors are kept under, so `similar` finds only this thread."""
+    return "thread:" + str(thread)
 
 
 def _rows(store: Any, cypher: str, params: Mapping[str, Any] | None = None) -> list[dict]:
@@ -118,7 +173,9 @@ def drew_on(answer: Any) -> dict[str, list[str]]:
 
 def remember_turn(store: Any, *, thread: str, role: str, text: str,
                   drew: Mapping[str, Sequence[str]] | None = None,
-                  meta: Mapping[str, Any] | None = None, after: str = "") -> Turn:
+                  meta: Mapping[str, Any] | None = None, after: str = "",
+                  embedder: Callable[[Sequence[str]], Sequence[Sequence[float]]] | None = None
+                  ) -> Turn:
     """Write one turn, chained after the last in its thread, joined to what it drew on.
 
     ``after`` names the turn this follows; left empty it follows whatever is last in the
@@ -127,8 +184,17 @@ def remember_turn(store: Any, *, thread: str, role: str, text: str,
 
     An id the graph does not hold is not joined. A conversation must not be able to invent
     entries, which is the same rule the tool loop follows.
+
+    ``embedder`` -- ``texts -> vectors`` -- makes the turn findable by meaning as well as by
+    its words: the vector is kept under the thread's own name, so ``recall`` with the same
+    embedder finds it and nothing else's. It is called before anything is written, so an
+    embedder that fails writes nothing rather than half a turn. A summary is not embedded:
+    it is sent every time, and has nothing to be recalled for.
     """
     _tables(store)
+    vector: Sequence[float] | None = None
+    if embedder is not None and role != SUMMARY and text.strip():
+        vector = list(embedder([text])[0])
     rows = _rows(store, "MATCH (t:Turn) WHERE t.thread = $th RETURN max(t.seq) AS n",
                  {"th": str(thread)})
     last = int(rows[0]["n"] or 0) if rows and rows[0].get("n") is not None else 0
@@ -155,6 +221,8 @@ def remember_turn(store: Any, *, thread: str, role: str, text: str,
             if done:
                 kept.setdefault(how, []).append(str(node_id))
     turn.drew = kept
+    if vector is not None:
+        store.set_embedding(turn.id, vector, model=_tag(turn.thread))
     return turn
 
 
@@ -175,18 +243,23 @@ def _read(row: Mapping[str, Any]) -> Turn:
                 role=str(row.get("role") or ""), text=str(row.get("text") or ""), meta=meta)
 
 
-def follow(store: Any, thread: str, *, limit: int = 0, working: bool = True) -> list[Turn]:
+def follow(store: Any, thread: str, *, limit: int = 0, working: bool = True,
+           summaries: bool = False) -> list[Turn]:
     """A thread in the order it was said, oldest first.
 
     ``working`` carries what each turn drew on. Off, the turns come back as plain words --
     which is the same history a reader sees when the working is hidden, and cheaper.
     ``limit`` keeps the last N turns, because a long conversation is usually read from
-    its end.
+    its end. Summaries are not part of the conversation and stay out unless ``summaries``
+    asks for them: the window is the last N things *said*, and ``latest_summary`` is the
+    way to the summary.
     """
+    only = "" if summaries else "AND t.role <> $summary "
     rows = _rows(
-        store, "MATCH (t:Turn) WHERE t.thread = $th "
+        store, "MATCH (t:Turn) WHERE t.thread = $th " + only +
         "RETURN t.id AS id, t.thread AS thread, t.seq AS seq, t.at AS at, t.role AS role, "
-        "t.text AS text, t.meta AS meta ORDER BY t.seq", {"th": str(thread)})
+        "t.text AS text, t.meta AS meta ORDER BY t.seq",
+        {"th": str(thread), "summary": SUMMARY})
     turns = [_read(r) for r in rows]
     if limit > 0:
         turns = turns[-limit:]
@@ -250,11 +323,13 @@ def threads(store: Any) -> list[dict[str, Any]]:
             for r in rows]
 
 
-def recent(store: Any, thread: str, *, turns: int = 6) -> list[dict[str, str]]:
+def recent(store: Any, thread: str, *, turns: int = WINDOW) -> list[dict[str, str]]:
     """The last few turns as chat messages, ready to send back to a model.
 
     Only role and content: the working is for the reader, not for the next prompt, and
-    sending it back would spend the context on a transcript of searching.
+    sending it back would spend the context on a transcript of searching. Chosen by
+    recency alone -- this is the window, and nothing found by ``recall`` displaces a turn
+    in it.
     """
     return [{"role": t.role, "content": t.text}
             for t in follow(store, thread, limit=turns, working=False) if t.text.strip()]
@@ -271,4 +346,155 @@ def forget_thread(store: Any, thread: str) -> int:
         store.query("MATCH (a:Turn)-[d:After]->(b:Turn) WHERE a.thread = $th "
                     "OR b.thread = $th DELETE d", {"th": str(thread)})
         store.query("MATCH (t:Turn) WHERE t.thread = $th DELETE t", {"th": str(thread)})
+        # the turn vectors too, kept under the thread's name; a store that never embedded
+        # a turn has no table to delete from, which is nothing to delete
+        _rows(store, "MATCH (e:Embedding) WHERE e.model = $m DELETE e", {"m": _tag(thread)})
     return n
+
+
+# ---------------------------------------------------------- of any length
+
+
+def _ordinary(store: Any, thread: str) -> list[Turn]:
+    """Every turn actually said in a thread, oldest first, without the working."""
+    return follow(store, thread, working=False)
+
+
+def recall(store: Any, thread: str, question: str, *,
+           embedder: Callable[[Sequence[str]], Sequence[Sequence[float]]] | None = None,
+           limit: int = 3, window: int = WINDOW) -> list[Turn]:
+    """The earlier turns of this thread, outside the window, that best match the question.
+
+    Two voters, fused the way ``search.hybrid`` fuses: the word index over what was said,
+    and -- when ``embedder`` is given, the same one the turns were remembered with -- the
+    vectors kept under the thread's name. Whatever is unavailable does not vote. Never a
+    turn inside the last ``window`` ordinary turns, which the caller is already sending,
+    and never a summary. Each comes with what it drew on, so the ids an old answer rested on
+    come back with its words.
+
+    Chosen by how well they match; returned in the order they were said, oldest first,
+    because that is the order they are read in.
+    """
+    want = " ".join(str(question or "").split())
+    if not want or limit <= 0:
+        return []
+    said = _ordinary(store, thread)
+    earlier = said[:-window] if window > 0 else said
+    if not earlier:
+        return []
+    allowed = {t.id: t for t in earlier}
+    # ask for enough that the window, the other threads and the summaries do not crowd out
+    # what is wanted: the index ranks every turn in the store, not this thread's
+    k = len(said) + 4 * max(limit, window) + 16
+
+    from ml_stack.graph.search import rrf_scored
+
+    rankings: list[list[str]] = []
+    words = _by_words(store, want, k)
+    if words:
+        rankings.append([i for i in words if i in allowed])
+    if embedder is not None:
+        try:
+            vector = list(embedder([want])[0])
+            near = store.similar(vector, model=_tag(thread), limit=k)
+            rankings.append([str(r["id"]) for r in near if str(r["id"]) in allowed])
+        except Exception:  # noqa: BLE001 - nothing embedded yet is one voter fewer, not an error
+            pass
+    chosen = [turn_id for turn_id, _ in rrf_scored(*rankings, limit=limit)] if rankings else []
+    if not chosen:
+        return []
+    picked = sorted((allowed[i] for i in chosen), key=lambda t: t.seq)
+    held = _drew_for(store, [t.id for t in picked])
+    for one in picked:
+        one.drew = held.get(one.id, {})
+    return picked
+
+
+def _by_words(store: Any, text: str, k: int) -> list[str]:
+    """Turn ids whose words match, best first; empty when the store has no word index."""
+    try:
+        store._extension("fts")                       # noqa: SLF001 - same package
+    except Exception:  # noqa: BLE001
+        return []
+    rows = _rows(
+        store, "CALL QUERY_FTS_INDEX('Turn', 'turn_index', $q, TOP := $k) "
+        "RETURN node.id AS id, score AS score", {"q": text, "k": int(k)})
+    rows.sort(key=lambda r: -float(r.get("score") or 0.0))
+    return [str(r["id"]) for r in rows]
+
+
+def latest_summary(store: Any, thread: str) -> Turn | None:
+    """The newest summary of a thread, with the ids it rests on; None before the first."""
+    rows = _rows(
+        store, "MATCH (t:Turn) WHERE t.thread = $th AND t.role = $summary "
+        "RETURN t.id AS id, t.thread AS thread, t.seq AS seq, t.at AS at, t.role AS role, "
+        "t.text AS text, t.meta AS meta ORDER BY t.seq DESC LIMIT 1",
+        {"th": str(thread), "summary": SUMMARY})
+    if not rows:
+        return None
+    one = _read(rows[0])
+    one.drew = _drew_for(store, [one.id]).get(one.id, {})
+    return one
+
+
+def summarise(store: Any, thread: str, writer: Callable[[Sequence[Turn]], str], *,
+              every: int = EVERY) -> Turn | None:
+    """Roll the summary forward when ``every`` ordinary turns have been said since the last.
+
+    ``writer(turns) -> str`` is the small model, or anything scripted to stand in for it:
+    it is handed the previous summary (first, when there is one) and every ordinary turn
+    since, each with what it drew on, and returns one paragraph -- what is established,
+    what the asker wants, what is open, the entry ids it rests on. That paragraph is kept as
+    a ``Turn`` of role ``"summary"``, joined to every id it names that a summarised turn or
+    the previous summary drew on: an id the writer drops is an id the summary no longer
+    rests on, and one it invents is not in that set to begin with.
+
+    Returns the new summary, or None when it is not yet time or the writer said nothing.
+    Costs one model call every ``every`` turns, over roughly ``every`` turns of text plus
+    the previous paragraph; the answer it is written after has already gone out.
+    """
+    last = latest_summary(store, thread)
+    since = int(last.seq) if last is not None else 0
+    fresh = [t for t in follow(store, thread) if t.seq > since]
+    if every <= 0 or len(fresh) < every:
+        return None
+    given: list[Turn] = ([last] if last is not None else []) + fresh
+    text = str(writer(given) or "").strip()
+    if not text:
+        return None
+    candidates: list[str] = []
+    for turn in given:
+        for how in HOW:
+            for node_id in turn.drew.get(how, ()):
+                if node_id not in candidates:
+                    candidates.append(node_id)
+    rests = [i for i in candidates if i in text]
+    return remember_turn(store, thread=thread, role=SUMMARY, text=text,
+                         drew={"shown": rests} if rests else None,
+                         meta={"over": [fresh[0].seq, fresh[-1].seq]})
+
+
+SUMMARY_SYSTEM = (
+    "You keep the running notes of a conversation about a knowledge graph. Write one "
+    "paragraph and nothing else: what has been established, what the asker wants, what is "
+    "still open, and the entry ids (like person:iris) that it rests on -- keep every id you "
+    "are given that still matters, written exactly as given. Fold the previous notes in "
+    "rather than repeating them. No preamble, no headings.")
+
+
+def write_summary(client: Any, turns: Sequence[Turn]) -> str:
+    """A summary writer made from a chat client: ``partial(write_summary, client)``.
+
+    One short call with no tools, ``think=False``; what the model says is the paragraph.
+    The turns are laid out one per line as ``role: text`` with the ids each rests on, so
+    the ids are in front of the model in the form it is asked to keep them in.
+    """
+    lines = []
+    for turn in turns:
+        ids = [i for how in HOW for i in turn.drew.get(how, ())]
+        rests = f"  [rests on: {', '.join(dict.fromkeys(ids))}]" if ids else ""
+        what = "previous notes" if turn.role == SUMMARY else turn.role
+        lines.append(f"{what}: {' '.join(turn.text.split())[:2000]}{rests}")
+    reply = client.chat([{"role": "system", "content": SUMMARY_SYSTEM},
+                         {"role": "user", "content": "\n".join(lines)}], think=False)
+    return str(getattr(reply, "content", "") or "").strip()

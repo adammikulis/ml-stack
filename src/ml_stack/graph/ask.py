@@ -755,7 +755,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
              opening: Sequence[str] = (), rich: bool = False,
-             tight: bool = False) -> Answer:
+             tight: bool = False, summary: Any = None,
+             recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -772,10 +773,20 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     `LIT_TIGHT` -- the ids the prose names kept first -- and an id the prose names but
     look_at never read is dropped from it. Each of those is a line in ``steps``. Off,
     nothing observable changes, byte for byte, for the same reason as ``rich``.
+
+    ``turns`` is the window: the last few turns, chosen by recency, sent whole and in
+    order. ``summary`` -- a thread's rolling summary, as a ``Turn``, a mapping with
+    ``text`` or ``content``, or a string -- goes first after the system prompt, as one
+    message reading "Earlier in this conversation: ...", ahead of anything that changes
+    per question so it stays inside the model's cached prefix. ``recalled`` -- earlier
+    turns outside the window that match this question, oldest first, the same shapes --
+    follow it, each marked as recalled, before the window. With neither, the messages are
+    byte for byte what they were.
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
-                     opening=opening, rich=rich, tight=tight)
+                     opening=opening, rich=rich, tight=tight, summary=summary,
+                     recalled=recalled)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -785,7 +796,8 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
                     opening: Sequence[str] = (), rich: bool = False,
-                    tight: bool = False) -> Answer:
+                    tight: bool = False, summary: Any = None,
+                    recalled: Sequence[Any] = ()) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -797,7 +809,8 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
-                     opening=opening, rich=rich, tight=tight)
+                     opening=opening, rich=rich, tight=tight, summary=summary,
+                     recalled=recalled)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -881,11 +894,35 @@ def _result_count(result: Any) -> int:
     return 1 if result else 0
 
 
+# How the summary and a recalled turn announce themselves. The summary is one user message,
+# placed before everything that changes per question; a recalled turn keeps its role and
+# says it was recalled, so the model does not read an old answer as the one just given.
+EARLIER = "Earlier in this conversation: "
+RECALLED = "Recalled from earlier in this conversation: "
+SAID_CHARS_BACK = 4000
+
+
+def _spoken(turn: Any) -> tuple[str, str]:
+    """``(role, text)`` of a turn given as a ``Turn``, a mapping, or bare text."""
+    if turn is None:
+        return "user", ""
+    if isinstance(turn, str):
+        return "user", turn
+    if isinstance(turn, Mapping):
+        role = turn.get("role")
+        text = turn.get("content") if turn.get("content") is not None else turn.get("text")
+    else:
+        role = getattr(turn, "role", None)
+        text = getattr(turn, "text", None)
+    return ("assistant" if role == "assistant" else "user"), str(text or "")
+
+
 def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              rich: bool = False, tight: bool = False) -> Answer:
+              rich: bool = False, tight: bool = False, summary: Any = None,
+              recalled: Sequence[Any] = ()) -> Answer:
     given = tools is not None
     if tools is None:
         tools = tools_for(graph, finder=finder, rich=rich, tight=tight)
@@ -928,9 +965,20 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 into.append(str(one))
 
     said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
-             "content": str(t.get("content") or "")[:4000]}
+             "content": str(t.get("content") or "")[:SAID_CHARS_BACK]}
             for t in turns if str(t.get("content") or "").strip()]
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *said]
+    # In this order: the summary, then what was recalled, then the window. The summary is
+    # the thing that changes least, so it goes first and the cached prefix covers it; the
+    # window is the thing that must be complete, so nothing here is taken out of it.
+    ahead: list[dict[str, Any]] = []
+    _, told = _spoken(summary)
+    if told.strip():
+        ahead.append({"role": "user", "content": EARLIER + " ".join(told.split())})
+    for one in recalled:
+        role, text = _spoken(one)
+        if text.strip():
+            ahead.append({"role": role, "content": RECALLED + text[:SAID_CHARS_BACK]})
+    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *ahead, *said]
 
     # A search has already been run — cheaply, by a small model that only measures meaning —
     # and what it found is read out before the first turn. Most questions are then answered

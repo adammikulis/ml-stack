@@ -12,14 +12,15 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from ml_stack.graph.ask import Answer
-from ml_stack.graph.serve import Ask, AskRoutes, answer_payload, sse, thread_request
+from ml_stack.graph.serve import Ask, AskRoutes, History, answer_payload, sse, thread_request
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import follow
+from ml_stack.graph.thread import SUMMARY, WINDOW, follow
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
@@ -53,7 +54,8 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
 
     def asker(self, question, *, turns, held, stream, emit):
         type(self).asked.append({"question": question, "turns": list(turns), "held": held,
-                                 "stream": stream})
+                                 "stream": stream, "summary": getattr(turns, "summary", None),
+                                 "recalled": list(getattr(turns, "recalled", ()))})
         if self.raise_with:
             raise self.raise_with
         if stream:
@@ -89,6 +91,17 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
             self.end_headers()
 
 
+@contextmanager
+def running(handler):
+    """A live server on a free port for ``handler``; yields its url."""
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}"
+    finally:
+        srv.shutdown()
+
+
 @pytest.fixture
 def served(tmp_path):
     """A live server with a conversation store beside it; yields (url, handler class)."""
@@ -99,12 +112,8 @@ def served(tmp_path):
         store_path = tmp_path / "graph.ladybug"
         asked = []
 
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{srv.server_address[1]}", Handler
-    finally:
-        srv.shutdown()
+    with running(Handler) as url:
+        yield url, Handler
 
 
 def call(url, method="GET", body=None):
@@ -165,7 +174,8 @@ def test_the_plain_route_returns_the_same_payload_in_one_body(served):
     assert code == 200 and kind == "application/json"
     assert out == answer_payload(ANSWER)
     assert handler.asked[-1] == {"question": "who surveys land?", "turns": [],
-                                 "held": ["topic:surveying"], "stream": False}
+                                 "held": ["topic:surveying"], "stream": False,
+                                 "summary": None, "recalled": []}
 
 
 def test_a_generator_asker_yields_its_events_and_returns_its_answer(served):
@@ -343,3 +353,106 @@ def test_an_ask_checks_the_body_the_way_the_page_sends_it():
     assert ask.question == "who?" and len(ask.thread) == 64
     assert ask.held == [] and ask.sent == [] and ask.took_s >= 0
     assert Ask({"held": ["a"]}).held == ["a"]
+
+
+# ------------------------------------------------------------ of any length
+
+
+def notes(turns):
+    """A scripted summary writer that keeps every id it is given."""
+    ids = dict.fromkeys(i for t in turns for how in t.drew for i in t.drew[how])
+    return f"So far: Iris surveys land. Rests on: {', '.join(ids)}."
+
+
+def test_the_window_is_the_last_ten_turns_in_order_and_nothing_else(served):
+    """With recall off and no summariser, what goes back is exactly the last WINDOW turns,
+    chosen by recency, in the order they were said -- as it always was, only longer."""
+    url, handler = served
+    handler.recalled_turns = 0
+    assert handler.remembered_turns == WINDOW == 10
+    for n in range(6):
+        call(url + "/ask", "POST", {"question": f"question {n}", "thread": "w1"})
+    call(url + "/ask", "POST", {"question": "and who else?", "thread": "w1"})
+    last = handler.asked[-1]
+    want = []
+    for n in range(1, 6):
+        want += [{"role": "user", "content": f"question {n}"},
+                 {"role": "assistant", "content": "Iris surveys land."}]
+    assert last["turns"] == want and len(last["turns"]) == WINDOW
+    assert last["summary"] is None and last["recalled"] == []
+
+
+def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(tmp_path):
+    """The new shape: the window as before, with the summary and what was recalled on it."""
+    with GraphStore(tmp_path / "graph.ladybug") as held:
+        held.write(GRAPH)
+
+    class Handler(Scripted):
+        store_path = tmp_path / "graph.ladybug"
+        asked = []
+        remembered_turns = 2          # a short window, so there is something to recall
+        summary_every = 4
+
+        def summariser(self):
+            return notes
+
+    with running(Handler) as url:
+        call(url + "/ask", "POST", {"question": "who surveys land?", "thread": "c1"})
+        assert Handler.asked[-1]["summary"] is None and Handler.asked[-1]["recalled"] == []
+        call(url + "/ask", "POST", {"question": "what else?", "thread": "c1"})
+        # four turns said: the summary was written after that answer went out
+        call(url + "/ask", "POST", {"question": "so who surveys land again?", "thread": "c1"})
+        last = Handler.asked[-1]
+        assert last["turns"] == [{"role": "user", "content": "what else?"},
+                                 {"role": "assistant", "content": "Iris surveys land."}]
+        assert last["summary"].role == SUMMARY
+        assert last["summary"].text == "So far: Iris surveys land. Rests on: topic:surveying, person:iris."
+        assert last["summary"].drew == {"shown": ["topic:surveying", "person:iris"]}
+        # recalled from outside the window, never from inside it
+        assert [t.text for t in last["recalled"]] == ["who surveys land?", "Iris surveys land."]
+        assert [t.seq for t in last["recalled"]] == [1, 2]
+        assert last["recalled"][1].drew["shown"] == ["person:iris"]
+
+        # the same thing by name, without a request
+        handler = Handler.__new__(Handler)
+        history = handler.history("c1", [], question="who surveys land?")
+        assert isinstance(history, History) and isinstance(history, list)
+        assert set(history.as_dict()) == {"summary", "recalled", "turns"}
+        assert history.as_dict()["turns"] == list(history) and len(history) == 2
+        # six turns now, so turn 4 ("Iris surveys land." again) is outside the window too
+        assert history.summary.role == SUMMARY and [t.seq for t in history.recalled] == [1, 2, 4]
+        # a wider window is asked for by name, and recall keeps out of it
+        wide = handler.history("c1", [], question="who surveys land?", window=WINDOW)
+        assert len(wide) == 6 and wide.recalled == []
+        # no question, nothing recalled; no thread, the page's own list
+        assert handler.history("c1", []).recalled == []
+        assert handler.history("", [{"role": "user", "content": "x"}]).as_dict() == {
+            "summary": None, "recalled": [], "turns": [{"role": "user", "content": "x"}]}
+
+        # the page never sees the summary as a turn
+        _, _, replay = call(url + "/thread/c1")
+        assert [t["role"] for t in replay["turns"]] == ["user", "assistant"] * 3
+        with GraphStore(Handler.store_path, read_only=True) as held:
+            assert [t.role for t in follow(held, "c1", summaries=True)].count(SUMMARY) == 1
+
+
+def test_a_summariser_that_raises_loses_the_summary_not_the_answer(tmp_path, capsys):
+    with GraphStore(tmp_path / "graph.ladybug") as held:
+        held.write(GRAPH)
+
+    class Handler(Scripted):
+        store_path = tmp_path / "graph.ladybug"
+        asked = []
+        summary_every = 2
+
+        def summariser(self):
+            def broken(turns):
+                raise RuntimeError("the writer went away")
+            return broken
+
+    with running(Handler) as url:
+        code, _, out = call(url + "/ask", "POST", {"question": "who?", "thread": "c1"})
+        assert code == 200 and out["content"] == "Iris surveys land."
+        _, _, replay = call(url + "/thread/c1")
+        assert len(replay["turns"]) == 2
+    assert "the writer went away" in capsys.readouterr().err
