@@ -539,11 +539,92 @@ def test_the_flags_check_takes_a_draft_named_by_hf_file(tmp_path, monkeypatch):
     """The check is about flags; a head still named by hf: file is fetched later at start().
     Measured 2026-09-02: the check refused the reference and E4B's heads never ran.
     Mutation: drop the stand-in."""
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
     from ml_stack.serve import preflight
     from ml_stack.serve.backend import ServerSpec
 
     monkeypatch.setattr("ml_stack.serve.backend.flags_of", lambda b, **k: frozenset({"-m", "-md", "--port", "-c", "-np", "--spec-type", "-fa", "--jinja", "--flash-attn", "--ctx-size", "--parallel", "--model", "--model-draft", "--host"}))
     spec = ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-Q4_0.gguf", spec_type="draft-mtp")
-    check = preflight._flags_check(spec, tmp_path / "llama-server")
+    check = preflight._flags_check(spec, binary)
     assert check.name == "flags"
     assert "must be fetched" not in check.detail
+
+
+class TestSeams:
+    """`Preflight`'s keyword seams -- ``shards_of``, ``read_header``, ``arches``, ``flags``,
+    ``ref_bytes`` -- replace the readers and nothing else: every check's own code, the argv
+    `_flags_check` builds included, still runs over what was handed in. The bench's
+    self-check is the caller; this is what lets it run the real preflight on no file."""
+
+    def test_every_fact_handed_in_reaches_no_file_no_hub_and_no_build(self, tmp_path,
+                                                                        monkeypatch):
+        import ml_stack.hub as hub_module
+        import ml_stack.setup as setup_module
+        from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
+
+        def never(*a, **k):
+            raise AssertionError("a real reader was reached")
+
+        monkeypatch.setattr(hub_module, "files", never)
+        monkeypatch.setattr(preflight, "_local_index", never)
+        monkeypatch.setattr(preflight, "read_gguf_header", never)
+        monkeypatch.setattr(setup_module, "_arches", never)
+        monkeypatch.setattr(backend_module, "flags_of", never)
+        # a file, because `command()` resolves its binary and a name that is no file would
+        # send `find_binary` looking round this machine; its --help is never read
+        binary = fake_binary(tmp_path)
+        spec = ServerSpec(model="hf:maker/thing-GGUF/thing-Q4_K_M.gguf", context=4096,
+                          draft="hf:maker/thing-GGUF/MTP/mtp-head-Q8_0.gguf",
+                          spec_type="draft-mtp", spec_draft_max=4, cache_type_k="q8_0",
+                          cache_type_v="q8_0", reasoning_budget=1024)
+        asked: dict[str, object] = {}
+
+        def shards_of(seen):
+            asked["spec"] = seen
+            return (4 * 2**30, tmp_path / "thing-Q4_K_M.gguf",
+                    preflight.Check("shards", True, "taken as present"))
+
+        report = Preflight(
+            spec, binary=binary, limit_bytes=64 * 2**30, shards_of=shards_of,
+            read_header=lambda path: dict(LLAMA_META), arches=lambda build: {"llama"},
+            flags=lambda build: frozenset(emitted_flags(LlamaServerBackend(binary=build))),
+            ref_bytes=lambda ref: 2**30 if ref else 0)
+        assert report.ok, report.said()
+        assert asked["spec"] is spec
+        assert report.weights_bytes == 4 * 2**30
+        # the estimate is made from the header handed in: 32 layers x 8 kv heads x 128 x
+        # context x q8_0 on both sides
+        assert report.kv_estimate_bytes == int(32 * 8 * 128 * 4096 * 2 * (34 / 32))
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["architecture"].detail == "llama"
+        assert "draft 1.0G" in by_name["fit"].detail
+        assert "every flag" in by_name["flags"].detail
+
+    def test_the_facts_handed_in_are_still_judged(self, tmp_path):
+        """The seams replace the readers, not the checks: a header naming an architecture
+        the handed-in build lacks fails, and a flag list short of what the argv needs
+        fails naming the flag. Mutation: have a seam short-circuit its check."""
+        gguf = tmp_path / "model.gguf"   # never written; the shards fact says it is there
+        report = Preflight(
+            ServerSpec(model=gguf, cache_type_k="q8_0"), binary=fake_binary(tmp_path),
+            shards_of=lambda spec: (1, gguf, preflight.Check("shards", True, "")),
+            read_header=lambda path: dict(LLAMA_META), arches=lambda build: {"gemma4"},
+            flags=lambda build: frozenset({"--host", "--port", "-m", "-c", "-ngl", "-fa",
+                                           "--jinja"}))
+        by_name = {c.name: c for c in report.checks}
+        assert not by_name["architecture"].ok and "'llama'" in by_name["architecture"].detail
+        assert not by_name["flags"].ok and "--cache-type-k" in by_name["flags"].detail
+        assert not report.ok
+
+    def test_handing_in_nothing_reads_the_file_as_before(self, tmp_path, monkeypatch):
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        report = Preflight(ServerSpec(model=gguf, context=512), binary=fake_binary(tmp_path))
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["shards"].ok and by_name["architecture"].detail == "llama"
+        assert report.weights_bytes == gguf.stat().st_size
+        assert report.kv_estimate_bytes == 32 * 8 * 128 * 512 * 4

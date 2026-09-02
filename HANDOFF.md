@@ -24,6 +24,14 @@ Landed in ml-stack (`thread.recall`, `summarise`, `WINDOW = 10`, `converse(summa
 recalled=)`); the app has to pass them and add them to the answer cache's context.
 
 
+## The store on ladybug 0.20
+
+- [ ] **ladybug 0.20.2 returns nothing from a fresh store's scans** (CI on Linux, 2026-09-02: ten
+  store tests read a count of zero where one was written; this machine runs 0.18.2 and
+  passes). The store extra is pinned `<0.19` for now. Characterise it with
+  `ml-stack-store check` on a scratch store under 0.20 (scan by key vs by scan, nodes and
+  docs), find the release note, and either adapt the queries or keep the pin with the reason.
+
 ## The self-check's blind spot
 
 - [ ] **The self-check fakes the whole preflight, so a preflight bug reaches the GPU.** Twice on

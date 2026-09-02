@@ -249,8 +249,9 @@ def test_a_file_may_declare_itself_a_catalogue_of_invented_labels(tmp_path):
                  'EVENTS = ["All Hands", "Hack Week", "Winter Party"]\n')
     code, said = check(where, tmp_path, **{"events.py": catalogue})
     assert code == 0, said
-    code, said = check(where, tmp_path, **{"events.py": catalogue + 'X = "Ada Lovelace"\n'})
-    assert code == 1 and "Ada Lovelace" in said
+    # a name from the graph, so the exact list catches it with or without presidio
+    code, said = check(where, tmp_path, **{"events.py": catalogue + 'X = "Wren Halloway"\n'})
+    assert code == 1 and "Wren Halloway" in said
 
 
 def test_the_recogniser_is_built_once_per_process():

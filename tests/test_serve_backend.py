@@ -369,6 +369,9 @@ def test_an_hf_reference_keeps_the_file_under_its_directory():
 def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_path):
     """`-hfd` takes owner/repo[:quant], never a file, so a head named by file is fetched
     into the cache first and passed with -md. Mutation: drop resolved_draft() from start."""
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
     from ml_stack.serve import backend as be
 
     head = tmp_path / "mtp-head-BF16.gguf"
@@ -378,9 +381,9 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
     spec = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf")
     resolved = be.LlamaServerBackend.resolved_draft(spec)
     assert asked == ["hf:owner/repo-GGUF/MTP/mtp-head-BF16.gguf"]
-    argv = be.LlamaServerBackend(binary=tmp_path / "llama-server").command(resolved)
+    argv = be.LlamaServerBackend(binary=binary).command(resolved)
     assert argv[argv.index("-md") + 1] == str(head)
     with pytest.raises(be.ServerFailed, match="fetched before serving"):
-        be.LlamaServerBackend(binary=tmp_path / "llama-server").command(spec)
+        be.LlamaServerBackend(binary=binary).command(spec)
     quant = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF")
-    assert "-hfd" in be.LlamaServerBackend(binary=tmp_path / "llama-server").command(quant)
+    assert "-hfd" in be.LlamaServerBackend(binary=binary).command(quant)

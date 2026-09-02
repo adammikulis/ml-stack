@@ -31,8 +31,12 @@ def test_a_machine_that_will_not_answer_says_so_rather_than_guessing(monkeypatch
         "it must not claim an architecture is missing when it could not read any"
 
 
-def test_an_architecture_is_only_claimed_when_the_names_were_read(monkeypatch):
+def test_an_architecture_is_only_claimed_when_the_names_were_read(monkeypatch, tmp_path):
     import ml_stack.setup as setup
+    fake = tmp_path / "llama-server"
+    fake.write_text("#!/bin/sh\necho usage\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr("ml_stack.serve.binary.find_binary", lambda *a, **k: fake)
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"qwen3moe", "gemma4"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
@@ -150,11 +154,15 @@ def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch)
     assert not [f for f in setup.look() if f.name == "flags this build lacks"]
 
 
-def test_a_missing_architecture_offers_the_build_fix(monkeypatch):
+def test_a_missing_architecture_offers_the_build_fix(monkeypatch, tmp_path):
     """`ml-stack-serve build` is the fix for a release lagging master by an architecture --
     `ml-stack-setup --yes` runs whatever a finding's `fix` names, so this is what makes
     `--yes` actually get a missing architecture rather than just naming the gap."""
     import ml_stack.setup as setup
+    fake = tmp_path / "llama-server"
+    fake.write_text("#!/bin/sh\necho usage\n")
+    fake.chmod(0o755)
+    monkeypatch.setattr("ml_stack.serve.binary.find_binary", lambda *a, **k: fake)
 
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     found = [f for f in setup.look() if f.name == "architecture qwen4exp"]
