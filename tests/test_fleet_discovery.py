@@ -12,6 +12,7 @@ from, a daemon the developer actually has running on this LAN.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -200,9 +201,10 @@ def test_garbage_on_the_port_does_not_kill_the_listener(key, port):
 
 
 # -- end to end: a real daemon process ----------------------------------
-@pytest.fixture
-def traind(tmp_path):
-    """Boot the actual daemon the way a machine would, and find it."""
+@contextlib.contextmanager
+def _booted(tmp_path, *extra: str):
+    """Boot the actual daemon the way a machine would, rooted in ``tmp_path/traind``
+    with ``extra`` flags, and yield ``(keyfile, disco_port, http_port, log)``."""
     keyfile = tmp_path / "cluster.key"
     create_cluster_key(keyfile)
     disco_port = _free_udp_port()
@@ -220,7 +222,7 @@ def traind(tmp_path):
         [sys.executable, "-m", "ml_stack.fleet.daemon",
          "--root", str(tmp_path / "traind"), "--host", "127.0.0.1",
          "--port", str(http_port), "--name", "testbox",
-         "--cluster-key", str(keyfile)],
+         "--cluster-key", str(keyfile), *extra],
         env=env, stdout=fh, stderr=subprocess.STDOUT)
     deadline = time.time() + 20
     while time.time() < deadline:
@@ -243,6 +245,24 @@ def traind(tmp_path):
         except subprocess.TimeoutExpired:
             proc.kill()
         fh.close()
+
+
+@pytest.fixture
+def traind(tmp_path):
+    """The daemon as a machine boots it: nothing but a root and a key."""
+    with _booted(tmp_path) as booted:
+        yield booted
+
+
+def _driver(keyfile: Path, http_port: int) -> Peer:
+    """A `Peer` at the booted daemon by address, with the token discovery would derive --
+    for tests about what the daemon does, not about finding it."""
+    return Peer(f"http://127.0.0.1:{http_port}", derive_token(load_cluster_key(keyfile)))
+
+
+def _probe(rtx: Peer, out: Path) -> dict:
+    return rtx.submit([sys.executable, "-c", f"open({str(out)!r}, 'w').write('ran')"],
+                      name="probe")
 
 
 def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, tmp_path):
@@ -268,6 +288,57 @@ def test_a_booted_daemon_is_found_and_driven_with_no_address_configured(traind, 
     final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
     assert final["state"] == "done", rtx.log(job["id"])
     assert out.read_text() == "ran"
+
+
+# -- the measuring gate reads the daemon's own bench home, not this machine's ----
+def test_a_daemon_in_its_own_root_runs_training_while_some_other_home_is_measuring(tmp_path):
+    """The failure this reproduces: the daemon's bench gate read ``~/.ml-stack/bench``
+    whatever ``--root`` said, so on a developer's box with a real benchmark running, a
+    daemon booted in a test's directory held every training job queued -- the gate told
+    the truth about the wrong machine. Here the "real" home is another tmp dir with its
+    lock held, and the daemon, pointed nowhere near it, must not care."""
+    from ml_stack.lock import only_one
+
+    elsewhere = tmp_path / "somebody-elses-home" / "bench"
+    with only_one(elsewhere / "measuring.lock", announce=lambda *a, **k: None):
+        with _booted(tmp_path) as (keyfile, _disco, http_port, log):
+            rtx = _driver(keyfile, http_port)
+            assert rtx.health()["measuring"] is False, log.read_text(errors="replace")
+            out = tmp_path / "proof.txt"
+            job = _probe(rtx, out)
+            final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
+            assert final["state"] == "done", rtx.log(job["id"])
+            assert out.read_text() == "ran"
+    said = log.read_text(errors="replace")
+    assert f"bench {tmp_path / 'bench'}" in said, said
+    assert "holding" not in said
+
+
+def test_a_daemon_pointed_at_a_held_bench_home_keeps_training_queued_and_says_so(tmp_path):
+    """The gate still works once it reads the right home: a daemon told its bench home
+    is the held one queues training, says why in its log, and runs the job the moment
+    the lock goes."""
+    from ml_stack.lock import only_one
+
+    home = tmp_path / "bench-of-this-box"
+    with _booted(tmp_path, "--bench-home", str(home)) as (keyfile, _disco, http_port, log):
+        rtx = _driver(keyfile, http_port)
+        out = tmp_path / "proof.txt"
+        with only_one(home / "measuring.lock", announce=lambda *a, **k: None):
+            assert rtx.health()["measuring"] is True
+            job = _probe(rtx, out)
+            deadline = time.time() + 4
+            while time.time() < deadline and "holding" not in log.read_text(errors="replace"):
+                time.sleep(0.1)
+            assert rtx.job(job["id"])["state"] == "queued"
+            assert not out.exists()
+            said = log.read_text(errors="replace")
+            assert "holding 1 queued job(s): a benchmark is measuring" in said, said
+        final = rtx.wait(job["id"], poll_s=0.3, timeout_s=60)
+        assert final["state"] == "done", rtx.log(job["id"])
+        assert out.read_text() == "ran"
+        assert rtx.health()["measuring"] is False
+    assert "taking queued work again" in log.read_text(errors="replace")
 
 
 def test_find_one_says_why_when_no_peer_matches(traind):

@@ -554,3 +554,37 @@ def test_a_local_peer_goes_through_the_same_path(tmp_path):
 def test_a_handle_with_no_job_has_nothing_to_gather(tmp_path):
     refused = Handle(peer=None, job=_job("m.gguf"), state="refused", why="room: no")
     assert gather([refused], into=tmp_path / "home.ladybug", log=lambda _l: None) == {}
+
+
+def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_path, monkeypatch):
+    """A daemon rooted away from ``~/.ml-stack`` watches ``<root.parent>/bench``; the bench it
+    launches must record there too, or the daemon holds a lock nobody takes."""
+    from ml_stack.fleet import bench as fb
+
+    seen = {}
+
+    def run(argv, **kw):
+        seen["env"] = kw.get("env") or {}
+        home = Path(seen["env"]["MLSTACK_BENCH_HOME"])
+        home.mkdir(parents=True, exist_ok=True)
+        (home / "measuring.json").write_text(json.dumps({"pid": 4242, "log": str(home / "x.log")}))
+        return subprocess.CompletedProcess(argv, 0, "log: " + str(home / "x.log"), "")
+
+    monkeypatch.setattr(fb.subprocess, "run", run)
+    pid, log = fb.detach_bench(["run", "m.gguf"], tmp_path / "bench")
+    assert pid == 4242 and log == tmp_path / "bench" / "x.log"
+    assert seen["env"]["MLSTACK_BENCH_HOME"] == str(tmp_path / "bench")
+    assert "PATH" in seen["env"]                     # the rest of the environment came along
+
+
+def test_the_bench_home_moves_with_the_environment(tmp_path, monkeypatch):
+    import importlib
+
+    from ml_stack.graph.bench import keep
+
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "elsewhere"))
+    try:
+        assert importlib.reload(keep).HOME == tmp_path / "elsewhere"
+    finally:
+        monkeypatch.delenv("MLSTACK_BENCH_HOME")
+        importlib.reload(keep)

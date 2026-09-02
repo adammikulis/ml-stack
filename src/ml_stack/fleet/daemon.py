@@ -158,6 +158,7 @@ class JobRunner:
         self._wake = threading.Event()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
+        self._held_because = ""
         self._spawn(slots)
 
     def _spawn(self, upto: int) -> None:
@@ -285,7 +286,8 @@ class JobRunner:
             self._wake.wait(timeout=1.0)
             self._wake.clear()
             if self.gate is not None:
-                allowed, _why = self.gate()
+                allowed, why = self.gate()
+                self._holding(why if not allowed else "")
                 if not allowed:
                     continue
             with self._lock:
@@ -294,6 +296,20 @@ class JobRunner:
                 job_id = self._queue.pop(0)
                 job = self.jobs[job_id]
             self._run_one(job)
+
+    def _holding(self, why: str) -> None:
+        """Say, once each time it changes, why queued work is waiting. A job that sits
+        queued with no word from the daemon looks like a hang, and its log -- not the
+        gate's return value, which nobody sees -- is where a person goes to find out."""
+        with self._lock:
+            waiting = len(self._queue)
+            if why and not waiting:
+                return
+            if why == self._held_because:
+                return
+            self._held_because = why
+        print(f"  holding {waiting} queued job(s): {why}" if why
+              else "  taking queued work again", flush=True)
 
     def _run_one(self, job: Job) -> None:
         log = self.log_path(job.id)
@@ -1132,7 +1148,11 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   fetch_slots: int = 2, web: bool = True,
                   setup_from_lan: bool = False,
                   busy_hours: Iterable[str] = (), free_hours: Iterable[str] = (),
-                  on_paused: str = "stop") -> None:
+                  on_paused: str = "stop",
+                  bench_home: Path | str | None = None) -> None:
+    """``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
+    lock; the ``bench`` beside ``root`` unless given (`fleet.bench.bench_home`), so a
+    daemon rooted in a test's directory never consults the real home."""
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     live_token: list[str] = [""]
@@ -1172,7 +1192,10 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     conversations = Conversations(root / "chats")
     downloads = Downloads(models)
     from .bench import BenchHost
+    from .bench import bench_home as bench_home_beside
 
+    measuring_home = (Path(bench_home).expanduser() if bench_home is not None
+                      else bench_home_beside(root))
     bench_host: list[BenchHost] = []
 
     def may_start() -> tuple[bool, str]:
@@ -1184,7 +1207,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     runner = JobRunner(root, files_root, slots=slots, gate=may_start,
                        environment=environment)
-    bench_host.append(BenchHost(runner, name=name))
+    bench_host.append(BenchHost(runner, home=measuring_home, name=name))
     fetcher = Fetcher(files_root, key, slots=fetch_slots)
     interface = None
     setup_token = ""
@@ -1280,6 +1303,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     print(f"ml-stack traind on http://{host}:{port}")
     print(f"  name  {name}")
     print(f"  root  {root}")
+    print(f"  bench {measuring_home}")
     print(f"  slots {slots}")
     state = schedule.public()
     for window in schedule.windows:
@@ -1355,6 +1379,10 @@ def main(argv: list[str] | None = None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="ml-stack-traind")
     ap.add_argument("--root", default="~/.ml-stack/traind")
+    ap.add_argument("--bench-home", default=None, metavar="DIR",
+                    help="where this machine's ml-stack-bench keeps its measuring lock "
+                         "(default: the 'bench' beside --root, so ~/.ml-stack/bench). "
+                         "While that lock is held, queued training waits.")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--name", default="",
@@ -1426,7 +1454,8 @@ def main(argv: list[str] | None = None) -> int:
                   labels=a.label or os.environ.get("ML_STACK_LABELS", "").split(","),
                   fetch_slots=a.fetch_slots, web=not a.no_web,
                   setup_from_lan=a.setup_from_lan,
-                  busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused)
+                  busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused,
+                  bench_home=a.bench_home)
     return 0
 
 

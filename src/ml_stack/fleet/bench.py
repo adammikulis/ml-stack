@@ -179,10 +179,21 @@ TAIL = 5
 """Lines of a peer's log `wait` prints when a job ends."""
 
 
-def bench_home() -> Path:
+def bench_home(traind_root: Path | str | None = None) -> Path:
     """Where ``ml-stack-bench`` keeps everything on this machine: the lock, the store, the
-    logs and ``measuring.json``. The same path `ml_stack.graph.bench.HOME` names, written
-    here rather than imported so a daemon that never measures never loads the bench."""
+    logs and ``measuring.json``.
+
+    Given a daemon's root, the ``bench`` directory beside it -- ``~/.ml-stack/traind``
+    measures in ``~/.ml-stack/bench``, and a daemon rooted in a test's directory looks
+    beside *that*, never in the real home. A daemon that read ``~/.ml-stack/bench``
+    whatever its root was told the truth about the wrong machine: a training job sent to a
+    daemon under test stayed queued for as long as a real benchmark was measuring on the
+    developer's box. Without a root, ``~/.ml-stack/bench``: the same path
+    `ml_stack.graph.bench.HOME` names, written here rather than imported so a daemon that
+    never measures never loads the bench.
+    """
+    if traind_root is not None:
+        return Path(traind_root).expanduser().parent / "bench"
     return Path("~/.ml-stack/bench").expanduser()
 
 
@@ -436,7 +447,8 @@ def detach_bench(line: Sequence[str], home: Path) -> tuple[int, Path]:
     run queued behind another, since the lock was checked before this was called."""
     done = subprocess.run([sys.executable, "-m", "ml_stack.graph.bench", *line,
                            "--no-queue", "--detach"],
-                          capture_output=True, text=True, timeout=120)
+                          capture_output=True, text=True, timeout=120,
+                          env={**os.environ, "MLSTACK_BENCH_HOME": str(home)})
     said = (done.stdout or "") + (done.stderr or "")
     if done.returncode != 0:
         raise RuntimeError(f"ml-stack-bench --detach exited {done.returncode}: {said.strip()}")
@@ -494,17 +506,18 @@ class BenchHost:
     ``runner`` is the daemon's `JobRunner`: an accepted job is adopted into it, so it is
     listed under ``/jobs``, polled at ``/jobs/<id>``, read at ``/jobs/<id>/log`` and
     stopped at ``/jobs/<id>/stop`` exactly as a training job is. ``home`` is where this
-    machine's ``ml-stack-bench`` keeps its lock, store and logs; ``commit`` is what this
-    machine runs (`installed_commit` unless given); ``room`` and ``launch`` are
-    `machine_room` and `detach_bench` unless a test hands in fakes.
+    machine's ``ml-stack-bench`` keeps its lock, store and logs -- always given, never
+    defaulted, because the caller knows its root and this does not (`bench_home`);
+    ``commit`` is what this machine runs (`installed_commit` unless given); ``room`` and
+    ``launch`` are `machine_room` and `detach_bench` unless a test hands in fakes.
     """
 
-    def __init__(self, runner: "JobRunner", *, home: Path | str | None = None,
+    def __init__(self, runner: "JobRunner", *, home: Path | str,
                  commit: str | None = None, room: Callable[[], int] = machine_room,
                  launch: Callable[[Sequence[str], Path], tuple[int, Path]] = detach_bench,
                  name: str = "", poll_s: float = 1.0) -> None:
         self.runner = runner
-        self.home = Path(home).expanduser() if home is not None else bench_home()
+        self.home = Path(home).expanduser()
         self.commit = installed_commit() if commit is None else commit
         self.room = room
         self.launch = launch
