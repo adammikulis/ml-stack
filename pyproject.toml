@@ -32,6 +32,7 @@ dependencies = []
 
 [project.optional-dependencies]
 privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
+test = ["pytest>=8", "pytest-xdist>=3.5"]
 app = ["pywebview>=5.0"]
 arrays = ["numpy>=1.24"]
 torch = ["torch>=2.2"]
@@ -93,7 +94,9 @@ packages = ["src/ml_stack"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers"
+# every core by default: 2054 tests took seven minutes serially (measured 2026-09-01);
+# `-p no:xdist` or `-n 0` runs them in one process when a failure needs a clean order
+addopts = "--strict-markers -n auto"
 markers = ["slow: builds a wheel; skipped with -m 'not slow'"]
 
 [tool.ruff]
