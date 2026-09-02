@@ -69,6 +69,11 @@ _SAID: dict[str, tuple[str, str, str]] = {
     "person:bram": ("Bram Ostley", "person",
                     "Recruiting, mostly engineers. I read a lot of CVs and meet a lot of "
                     "people who are almost right."),
+    # Shares a surname with Otto and nothing else. A question that names only "Vance" has
+    # two right answers, and a model that picks the better-known one is wrong.
+    "person:delia": ("Delia Vance", "person",
+                     "No relation to Otto, before anyone asks. I bind books and teach it "
+                     "two evenings a week."),
     # --- people who work outdoors ----------------------------------------------------
     "person:iris": ("Iris Bellweather", "person",
                     "Land surveying, mostly for civil engineering firms. Twelve years of "
@@ -111,6 +116,7 @@ _SAID: dict[str, tuple[str, str, str]] = {
     "topic:recruiting": ("recruiting", "topic", ""),
     "topic:surveying": ("surveying", "topic", ""),
     "topic:geotechnics": ("geotechnics", "topic", ""),
+    "topic:bookbinding": ("bookbinding", "topic", ""),
 
     # Work going spare, which is the kind a community graph exists to match people to --
     # and the kind the page has a shape for and this bench had never tested.
@@ -172,6 +178,8 @@ _JOINED: list[tuple[str, str, str]] = [
     ("person:nell", "based_in", "place:calderwick"),
     ("person:bram", "experienced_in", "topic:recruiting"),
     ("person:bram", "based_in", "place:selby"),
+    ("person:delia", "experienced_in", "topic:bookbinding"),
+    ("person:delia", "based_in", "place:harrowgate"),
 
     ("person:iris", "experienced_in", "topic:surveying"),
     ("person:iris", "works_at", "org:brayfield"),
@@ -409,6 +417,51 @@ QUESTIONS: list[dict[str, Any]] = [
     {"q": "And where is she based?", "expect": ["place:calderwick"]},
     {"q": "Who does data engineering for hospitals?", "expect": ["person:vera"]},
     {"q": "And which company is she at?", "expect": ["org:harnley"]},
+
+    # --- counting and comparing --------------------------------------------------------
+    # A count is scored as the people counted, so "two" is checked rather than trusted.
+    # The crowd is spread evenly over its own employers and towns, so "the company with
+    # the most members" is one of theirs, four ways tied -- every aggregate here is scoped
+    # to something the crowd never touches: a subject, an event, or what people said.
+    {"q": "How many people here do robotics?", "expect": ["person:ada", "person:hedy"]},
+    # Corvane sent Dorian and Milo; Pellard sent Charles; Grace and Sela work for nobody.
+    {"q": "Which company sent the most people to the Northern Trade Fair?",
+     "expect": ["org:corvane"]},
+    # Only three people put a number on it: Katherine twenty-five years, Grace twenty,
+    # Iris twelve. Answerable from what was said and from nothing else.
+    {"q": "Who here has been doing their job the longest?", "expect": ["person:katherine"]},
+
+    # --- two hops through the graph ----------------------------------------------------
+    # The answer is not the person the question describes but who they are joined to:
+    # the geotechnics person is Tam, Tam is at Brayfield, and Brayfield's other person is
+    # Iris. Tam himself is not an answer.
+    {"q": "Who works alongside the person who does geotechnics?", "expect": ["person:iris"]},
+    # Repair is Ada and Charles; Ada is in Turin and Charles in Harrowgate. Neither person
+    # is an answer, and neither Oskar (maintenance, not repair) nor his Harrowgate matters.
+    {"q": "Which places do the people who do repair live in?",
+     "expect": ["place:turin", "place:harrowgate"]},
+
+    # --- ambiguity and traps -------------------------------------------------------------
+    # Two Vances, no relation; a question naming only the surname wants both, and a model
+    # that settles on the one it knows more about has answered a different question.
+    {"q": "Who here is called Vance?", "expect": ["person:otto", "person:delia"]},
+    # A false premise about a real person: Ada is in Turin and has not moved. The graph's
+    # Calderwick is unchanged, and an answer that subtracts anyone believed the question.
+    {"q": "Since Ada Lovelace moved to Selby, who is left in Calderwick?",
+     "expect": ["person:iris", "person:nell", "person:otto", "person:tam"]},
+    # Nobody here is a welder; Hedy says she is "slowly learning to weld badly". The
+    # question allows the near miss ("even a little"), so she is the answer -- where
+    # "Nobody here does underwater welding" below allows nothing and expects nobody.
+    {"q": "Who here can weld, even a little?", "expect": ["person:hedy"]},
+
+    # --- what people said, which only their own words carry -------------------------------
+    # Pell has no subject, employer or place -- only a line saying he just joined. The
+    # graph has no joining date, so "who joined most recently" is not askable here; this
+    # is the nearest question that is, and only the quote can answer it.
+    {"q": "Who said they had just joined?", "expect": ["person:pell"]},
+    # Her own words name data engineering and hospitals; the answer is those two subjects,
+    # not Alan, whom she also mentions.
+    {"q": "What did Vera Lund say she works on?", "expect": ["topic:data", "topic:healthcare"]},
 
     # --- the right answer is nobody ----------------------------------------------------
     {"q": "Nobody here does underwater welding. Who could?", "expect": []},

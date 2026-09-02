@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import time
 
 import pytest
@@ -16,7 +17,7 @@ from ml_stack.world import World
 from ml_stack.world.names import company_name, person_name, product_name, slug
 from ml_stack.world.organisation import (KINDS, SIZES, UNIT_KIND, load, make, role_catalogue,
                                          summary)
-from ml_stack.world.questions import questions
+from ml_stack.world.questions import KINDS as KINDS_OF_QUESTION, questions
 
 
 def _edges(world: World, rel: str) -> list[tuple[str, str]]:
@@ -227,7 +228,7 @@ def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
                  "--out", str(tmp_path / "q.jsonl")]) == 0
     graph = json.loads((out / "graph.json").read_text())      # exactly as `run --graph` does
     asked = read_questions(tmp_path / "q.jsonl")
-    assert len(asked) == 40 and all(set(q) == {"q", "expect"} for q in asked)
+    assert len(asked) == 40 and all(set(q) == {"q", "expect", "kind"} for q in asked)
     kinds = {n["id"]: n["kind"] for n in graph["nodes"]}
     assert all(e in kinds for q in asked for e in q["expect"])
 
@@ -269,7 +270,7 @@ def test_questions_expect_ids_that_exist_and_cover_every_kind_of_answer(kind):
     assert len({q["q"] for q in asked}) == 40, "no question twice"
     wanted = set()
     for q in asked:
-        assert set(q) == {"q", "expect"}
+        assert set(q) == {"q", "expect", "kind"}
         for e in q["expect"]:
             assert e in kinds, (q, e)
         wanted.update(kinds[e] for e in q["expect"])
@@ -287,6 +288,161 @@ def test_questions_are_the_same_for_a_seed_and_a_given_rng_changes_them():
     assert questions(world, 20) == questions(world, 20)
     assert questions(world, 20) != questions(world, 20, random.Random(99))
     assert len(questions(world, 5)) == 5
+
+
+# --- the four kinds the bench's own set was short of -------------------------------------------
+#
+# Counting, two hops, a false premise and a quote. Each is held by deriving its answer from
+# the world's graph again, so a generated expectation is a fact about the graph and not
+# about the generator.
+
+_NEW = ("aggregate", "twohop", "trap", "quote")
+
+
+def _by(world: World, rel: str) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for s, t in _edges(world, rel):
+        out.setdefault(s, set()).add(t)
+    return out
+
+
+def _to(world: World, rel: str) -> dict[str, set[str]]:
+    out: dict[str, set[str]] = {}
+    for s, t in _edges(world, rel):
+        out.setdefault(t, set()).add(s)
+    return out
+
+
+@pytest.mark.parametrize("kind", KINDS)
+def test_every_new_kind_is_generated_for_every_world_and_every_expected_id_exists(kind):
+    world = make(kind, "small", 0)
+    kinds = _kinds(world)
+    asked = questions(world, 60)
+    assert set(KINDS_OF_QUESTION) >= {q["kind"] for q in asked}
+    for new in _NEW:
+        some = [q for q in asked if q["kind"] == new]
+        assert len(some) >= 2, f"{kind} asks no {new} question"
+        for q in some:
+            assert q["expect"], q
+            assert all(e in kinds for e in q["expect"]), q
+
+
+def test_a_count_is_scored_as_the_people_counted_and_a_tie_is_never_the_most():
+    world = make("community", "small", 0)
+    kinds = _kinds(world)
+    in_unit = _to(world, "part_of")
+    label = {n["id"]: n["label"] for n in world.graph["nodes"]}
+    for q in questions(world, 200, kinds=["aggregate"]):
+        if q["q"].startswith("How many people are in "):
+            unit = next(u for u in in_unit if label[u] == q["q"][len("How many people are in "):-1])
+            assert set(q["expect"]) == {p for p in in_unit[unit] if kinds[p] == "person"}
+        elif q["q"].startswith("Which group has the most"):
+            sizes = {u: len(in_unit[u]) for u in in_unit if kinds[u] == "group"}
+            top = sorted(sizes.values(), reverse=True)
+            assert top[0] > top[1] and sizes[q["expect"][0]] == top[0]
+        elif q["q"].startswith("Which company employs"):
+            at = _to(world, "works_at")
+            sizes = {o: len(at[o]) for o in at}
+            top = sorted(sizes.values(), reverse=True)
+            assert top[0] > top[1] and sizes[q["expect"][0]] == top[0]
+        else:
+            assert q["q"].startswith("How many people")
+            assert all(kinds[e] == "person" for e in q["expect"])
+
+
+def test_two_hops_answer_with_the_far_end_and_never_the_person_in_the_middle():
+    world = make("company", "small", 1)
+    kinds = _kinds(world)
+    label = {n["id"]: n["label"] for n in world.graph["nodes"]}
+    knows = _to(world, "experienced_in")
+    beside: dict[str, set[str]] = {}
+    for x, y in _edges(world, "works_with"):
+        beside.setdefault(x, set()).add(y)
+        beside.setdefault(y, set()).add(x)
+    seen = set()
+    for q in questions(world, 200, kinds=["twohop"]):
+        topic = next(t for t in knows if q["q"].endswith(f" {label[t]}?") or q["q"].endswith(f" {label[t]} in?")
+                     or q["q"].endswith(f" {label[t]} live in?"))
+        if q["q"].startswith("Who works with someone who knows about "):
+            middle = knows[topic]
+            assert set(q["expect"]) == {c for p in middle for c in beside.get(p, ())} - middle
+            seen.add("with")
+        elif q["q"].startswith("Who works with someone in "):
+            unit_label = q["q"][len("Who works with someone in "):q["q"].index(" who knows about ")]
+            unit = next(i for i, l in label.items() if l == unit_label and kinds[i] == "department")
+            middle = knows[topic] & _to(world, "part_of")[unit]
+            assert 1 <= len(middle) <= 3
+            assert set(q["expect"]) == {c for p in middle for c in beside.get(p, ())} - middle
+            seen.add("with-in")
+        elif "live in?" in q["q"]:
+            lives = _by(world, "based_in")
+            assert set(q["expect"]) == {c for p in knows[topic] for c in lives.get(p, ())}
+            seen.add("places")
+        else:
+            unit_of = _by(world, "part_of")
+            assert set(q["expect"]) == {u for p in knows[topic] for u in unit_of.get(p, ())
+                                        if kinds[u] == "department"}
+            seen.add("units")
+    assert {"places", "units"} <= seen and seen & {"with", "with-in"}
+
+
+def test_a_false_premise_leaves_the_place_exactly_as_the_graph_has_it():
+    world = make("open-source", "small", 0)
+    kinds = _kinds(world)
+    label = {n["id"]: n["label"] for n in world.graph["nodes"]}
+    lives = _by(world, "based_in")
+    settled = _to(world, "based_in")
+    asked = questions(world, 200, kinds=["trap"])
+    assert asked
+    for q in asked:
+        m = re.fullmatch(r"Since (.+) moved to (.+), who (?:in (.+) )?is left in (.+)\?", q["q"])
+        assert m, q["q"]
+        mover = next(i for i, l in label.items() if l == m.group(1) and kinds[i] == "person")
+        to = next(i for i, l in label.items() if l == m.group(2) and kinds[i] == "place")
+        place = next(i for i, l in label.items() if l == m.group(4) and kinds[i] == "place")
+        assert to not in lives[mover] and place not in lives[mover], "the premise is false"
+        here = {p for p in settled[place] if kinds[p] == "person"}
+        if m.group(3):
+            unit = next(i for i, l in label.items() if l == m.group(3))
+            here &= _to(world, "part_of")[unit]
+        assert set(q["expect"]) == here, "nobody subtracted"
+
+
+def test_a_quote_question_is_answered_by_the_words_and_by_nothing_else():
+    world = make("university", "small", 2)
+    g = world.graph
+    label = {n["id"]: n["label"] for n in g["nodes"]}
+    said = {n["id"]: [g["messages"][m]["text"] for m in n["messages"]]
+            for n in g["nodes"] if n["kind"] == "person"}
+    asked = questions(world, 200, kinds=["quote"])
+    assert asked and {q["kind"] for q in asked} == {"quote"}
+    for q in asked:
+        if q["q"].startswith("Who said they "):
+            phrase = q["q"][len("Who said they "):-1]
+            assert set(q["expect"]) == {who for who, lines in said.items()
+                                        if any(f"I {phrase}." in l for l in lines)}
+        else:
+            who = next(i for i, l in label.items() if q["q"] == f"What did {l} say takes most of their time?")
+            assert len(q["expect"]) == 1
+            assert any(f"Lately most of my time goes to {label[q['expect'][0]]}." in l for l in said[who])
+
+
+def test_kinds_draws_only_those_buckets_and_refuses_an_unknown_one(tmp_path, capsys):
+    from ml_stack.world.cli import main
+
+    world = make("company", "small", 0)
+    assert {q["kind"] for q in questions(world, 30, kinds=["trap", "quote"])} == {"trap", "quote"}
+    with pytest.raises(ValueError, match="unknown question kind"):
+        questions(world, 5, kinds=["riddle"])
+
+    out = tmp_path / "world"
+    assert main(["make", "--kind", "company", "--size", "small", "--seed", "0", "--out", str(out)]) == 0
+    capsys.readouterr()
+    assert main(["questions", "--world", str(out), "--n", "8", "--kinds", "aggregate,twohop"]) == 0
+    lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
+    assert len(lines) == 8 and {l["kind"] for l in lines} == {"aggregate", "twohop"}
+    assert main(["questions", "--world", str(out), "--n", "8", "--kinds", "riddle"]) == 2
+    assert "riddle" in capsys.readouterr().err
 
 
 # --- names -------------------------------------------------------------------------------------------
@@ -341,7 +497,7 @@ def test_main_make_writes_the_three_files_and_says_what_it_made(tmp_path, capsys
 
     assert main(["questions", "--world", str(out), "--n", "12"]) == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert len(lines) == 12 and all(set(json.loads(l)) == {"q", "expect"} for l in lines)
+    assert len(lines) == 12 and all(set(json.loads(l)) == {"q", "expect", "kind"} for l in lines)
 
 
 def test_main_make_writes_world_json_and_load_reads_kind_size_and_people_from_it(tmp_path):

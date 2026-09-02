@@ -26,7 +26,7 @@ from typing import Any
 from ml_stack.files import write_json
 from ml_stack.world import Message
 from ml_stack.world.organisation import KINDS, SIZES, load, make, summary
-from ml_stack.world.questions import questions
+from ml_stack.world.questions import KINDS as QUESTION_KINDS, questions
 
 __all__ = ["EXPORTS", "main", "read_messages"]
 
@@ -58,7 +58,12 @@ def _make(args: argparse.Namespace) -> int:
 
 def _questions(args: argparse.Namespace) -> int:
     world = load(args.world)
-    asked = questions(world, args.n)
+    kinds = [k.strip() for k in (args.kinds or "").split(",") if k.strip()]
+    try:
+        asked = questions(world, args.n, kinds=kinds or None)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     lines = "".join(json.dumps(q, ensure_ascii=False) + "\n" for q in asked)
     if args.out:
         Path(args.out).expanduser().write_text(lines, encoding="utf-8")
@@ -145,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
     asked = subs.add_parser("questions", help="questions with known answers, as bench JSONL")
     asked.add_argument("--world", required=True, help="the directory `make --out` wrote")
     asked.add_argument("--n", type=int, default=40, help="how many (default: 40)")
+    asked.add_argument("--kinds", default="",
+                       help="only these kinds, comma-separated (any of: " + ", ".join(QUESTION_KINDS) + ")")
     asked.add_argument("--out", default="", help="write here instead of stdout")
     asked.set_defaults(run=_questions)
 

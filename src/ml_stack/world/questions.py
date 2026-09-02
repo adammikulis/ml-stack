@@ -3,10 +3,17 @@
 `ml_stack.graph.community.QUESTIONS` was written by hand against a graph small enough to
 check by eye. A world of five thousand people cannot be, so its questions are generated from
 the truth that made it: who reports to whom, who works on what, who is where. Each is
-``{"q": ..., "expect": [ids]}``, the shape `ml_stack.graph.bench` reads, and the set is
-spread across the kinds of answer the bench's own set covers -- people mostly, but
-organisations, places, subjects, work, events, paths between two people, and a few whose
-right answer is nobody -- so a model measured on it is measured on the same things.
+``{"q": ..., "expect": [ids], "kind": ...}``, the shape `ml_stack.graph.bench` reads (it
+ignores the tag), and the set is spread across the kinds of answer the bench's own set
+covers -- people mostly, but organisations, places, subjects, work, events, paths between
+two people, and a few whose right answer is nobody -- so a model measured on it is measured
+on the same things. Four kinds are about the *question* rather than the answer, because the
+bench's own set was short of them: ``aggregate`` (a count, scored as the people counted, or
+the unit or employer with the most people), ``twohop`` (the people who work with whoever
+knows a subject, or the units they sit in -- the far end, never the middle), ``trap`` (a
+false premise about a real person; the right answer is the place as the graph has it) and
+``quote`` (answerable from a person's own ``messages`` and nothing else). `KINDS` lists
+every tag, and ``kinds=`` draws only some.
 
 Nothing here assumes a company. Every generator reads a relation, and a kind that lacks
 that relation (a community has no ``reports_to``) simply contributes no such questions.
@@ -15,12 +22,13 @@ that relation (a community has no ``reports_to``) simply contributes no such que
 from __future__ import annotations
 
 import random
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from ml_stack.world import World
 
-__all__ = ["questions"]
+__all__ = ["KINDS", "questions"]
 
 # a relation into a unit or a person, and how to ask who is on the other end of it
 _WHO_BY = {
@@ -65,6 +73,7 @@ class _Truth:
             self.out.setdefault(rel, {}).setdefault(s, []).append(t)
             self.inc.setdefault(rel, {}).setdefault(t, []).append(s)
         self.edges = list(graph.get("edges") or ())
+        self.messages: Mapping[str, Any] = graph.get("messages") or {}
         meta = (graph.get("meta") or {}).get("world") or {}
         self.unit_kind = str(meta.get("unit_kind") or "department")
         self.org = str(meta.get("organisation") or "")
@@ -245,36 +254,152 @@ def _buckets(t: _Truth, rng: random.Random) -> dict[str, list[dict[str, Any]]]:
         for who in rng.sample(leaves, min(2, len(leaves))):
             b["nobody"].append(_q(f"Who reports to {t.label(who)}?", []))
 
+    # --- counting and comparing: the count is scored as the people counted ----------------------
+    for unit in units:
+        crowd = t.people_in(unit)
+        if 2 <= len(crowd) <= 15:
+            b.setdefault("aggregate", []).append(
+                _q(f"How many people are in {t.label(unit)}?", crowd))
+    for topic in t.of_kind("topic"):
+        b.setdefault("aggregate", []).extend(_people_at(
+            t, "experienced_in", topic, units, "How many people know about {}?",
+            "How many people in {} know about {}?", 2, 8))
+    biggest = _unique_most({u: len(t.people_in(u)) for u in units})
+    if biggest:
+        b.setdefault("aggregate", []).append(
+            _q(f"Which {t.unit_kind} has the most people in it?", [biggest]))
+    employers = {o: len([p for p in crowd_at if t.kind(p) == "person"])
+                 for o, crowd_at in t.inc.get("works_at", {}).items() if o != t.org}
+    busiest = _unique_most(employers)
+    if busiest and len(employers) >= 2:
+        b.setdefault("aggregate", []).append(
+            _q("Which company employs the most people here?", [busiest]))
+
+    # --- two hops: the far end of works_with or part_of, never the person in the middle ---------
+    beside: dict[str, set[str]] = {}
+    for x, ys in t.out.get("works_with", {}).items():
+        for y in ys:
+            beside.setdefault(x, set()).add(y)
+            beside.setdefault(y, set()).add(x)
+    for topic in t.of_kind("topic"):
+        knowers = [p for p in t.inc.get("experienced_in", {}).get(topic, ()) if t.kind(p) == "person"]
+        if not knowers:
+            continue
+        # the people in the middle: everyone who knows it when that is few, else those in one unit
+        anchors = [("", knowers)] if len(knowers) <= 3 else []
+        for unit in units if len(knowers) > 3 else ():
+            both = [p for p in knowers if p in set(t.people_in(unit))]
+            if 1 <= len(both) <= 3:
+                anchors.append((unit, both))
+        for unit, middle in anchors:
+            colleagues = sorted({c for p in middle for c in beside.get(p, ())} - set(middle))
+            if 1 <= len(colleagues) <= 8:
+                who = (f"someone in {t.label(unit)} who knows about" if unit
+                       else "someone who knows about")
+                b.setdefault("twohop", []).append(
+                    _q(f"Who works with {who} {t.label(topic)}?", colleagues))
+        homes = sorted({u for p in knowers for u in t.out.get("part_of", {}).get(p, ())
+                        if t.kind(u) == t.unit_kind})
+        if len(knowers) >= 2 and 1 <= len(homes) <= 4:
+            b.setdefault("twohop", []).append(
+                _q(f"Which {t.unit_kind}s are the people who know about {t.label(topic)} in?", homes))
+        towns = sorted({c for p in knowers for c in t.out.get("based_in", {}).get(p, ())})
+        if len(knowers) >= 2 and 1 <= len(towns) <= 6:
+            b.setdefault("twohop", []).append(
+                _q(f"Which places do the people who know about {t.label(topic)} live in?", towns))
+
+    # --- a false premise about a real person: the place is exactly as the graph has it ----------
+    settled = {p: [q for q in t.inc.get("based_in", {}).get(p, ()) if t.kind(q) == "person"]
+               for p in t.of_kind("place")}
+    towns = [p for p, here in settled.items() if here]
+    for place in towns:
+        elsewhere = [q for q in people if q not in settled[place] and t.out.get("based_in", {}).get(q)]
+        others = [p for p in towns if p != place]
+        if not elsewhere or not others:
+            continue
+        mover, to = rng.choice(elsewhere), rng.choice(others)
+        if to in t.out.get("based_in", {}).get(mover, ()):
+            continue
+        premise = f"Since {t.label(mover)} moved to {t.label(to)}, "
+        b.setdefault("trap", []).extend(_people_at(
+            t, "based_in", place, units, premise + "who is left in {}?",
+            premise + "who in {} is left in {}?"))
+
+    # --- what people said, which only their own words carry -------------------------------------
+    said_does: dict[str, list[str]] = {}
+    labelled = {str(n.get("label") or ""): i for i, n in t.nodes.items()
+                if n.get("kind") in ("opportunity", "product", "topic")}
+    for who in people:
+        for mid in t.nodes[who].get("messages") or ():
+            text = str((t.messages.get(mid) or {}).get("text") or "")
+            does = _DOES.search(text)
+            if does:
+                said_does.setdefault(does.group(1), []).append(who)
+            lately = _LATELY.search(text)
+            if lately and lately.group(1) in labelled:
+                b.setdefault("quote", []).append(
+                    _q(f"What did {t.label(who)} say takes most of their time?", [labelled[lately.group(1)]]))
+    for does, whom in said_does.items():
+        if 1 <= len(whom) <= 6:
+            b.setdefault("quote", []).append(_q(f"Who said they {does}?", whom))
+
     for bucket in b.values():
         rng.shuffle(bucket)
     return b
 
 
+_DOES = re.compile(r"(?:Mostly I|What I actually do: I|Day to day that means I) (.+?)\.$")
+_LATELY = re.compile(r"Lately most of my time goes to (.+?)\.$")
+
+
+def _unique_most(counted: Mapping[str, int]) -> str | None:
+    """The key with the largest count, or nothing when two tie for it -- a comparative with
+    a tied answer is not a comparative."""
+    if not counted:
+        return None
+    top = sorted(counted.items(), key=lambda kv: (-kv[1], kv[0]))
+    if len(top) > 1 and top[0][1] == top[1][1]:
+        return None
+    return top[0][0] if top[0][1] > 0 else None
+
+
 # how many of each bucket a cycle takes: people most, as the bench's own set has it
 _ORDER = (("person", 3), ("org", 1), ("place", 1), ("topic", 1), ("unit", 1), ("path", 1),
-          ("event", 1), ("opportunity", 1), ("product", 1), ("about", 1), ("nobody", 1))
+          ("event", 1), ("opportunity", 1), ("product", 1), ("about", 1), ("nobody", 1),
+          ("aggregate", 1), ("twohop", 1), ("trap", 1), ("quote", 1))
+
+KINDS: tuple[str, ...] = tuple(name for name, _share in _ORDER)
+"""Every ``kind`` a question can carry: the bucket it was drawn from."""
 
 
-def questions(world: World, n: int = 40, rng: random.Random | None = None) -> list[dict[str, Any]]:
+def questions(world: World, n: int = 40, rng: random.Random | None = None, *,
+              kinds: Sequence[str] | None = None) -> list[dict[str, Any]]:
     """``n`` questions about the world, each with the ids a good answer names.
 
     Spread over every kind of answer the world supports, rarest kinds first so a small
     ``n`` still asks about each; deterministic from ``world.seed`` unless an ``rng`` is
-    given. Each is ``{"q", "expect"}`` and nothing else, so the bench reads it as it reads
-    its own.
+    given. Each is ``{"q", "expect", "kind"}`` -- the bench reads the first two exactly as
+    it reads its own, and ``kind`` says which bucket in `KINDS` it came from. ``kinds``
+    draws only those buckets; an unknown one is refused by name.
     """
+    wanted = tuple(kinds) if kinds else KINDS
+    unknown = sorted(set(wanted) - set(KINDS))
+    if unknown:
+        raise ValueError(f"unknown question kind(s) {unknown}; known: {', '.join(KINDS)}")
     rng = rng or random.Random(f"questions/{world.seed}/{world.size}")
     buckets = _buckets(_Truth(world.graph), rng)
     taken: list[dict[str, Any]] = []
     seen: set[str] = set()
-    while len(taken) < n and any(buckets.values()):
+    while len(taken) < n and any(buckets.get(name) for name in wanted):
         for name, share in _ORDER:
+            if name not in wanted:
+                continue
             for _ in range(share):
                 while buckets.get(name):
                     one = buckets[name].pop()
                     if one["q"] not in seen:
                         seen.add(one["q"])
-                        taken.append(one)
+                        taken.append({**one, "kind": name})
                         break
                 if len(taken) >= n:
                     return taken

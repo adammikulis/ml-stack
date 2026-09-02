@@ -130,10 +130,10 @@ def test_no_question_is_asked_twice():
     assert [q for q, n in said.items() if n > 1] == []
 
 
-def test_the_full_set_is_fifty_scored_questions_and_no_one_kind_of_them(g):
-    """Fifty is the `n` a full run records -- the scored questions; the ones whose right
+def test_the_full_set_is_sixty_scored_questions_and_no_one_kind_of_them(g):
+    """Sixty is the `n` a full run records -- the scored questions; the ones whose right
     answer is nobody are asked, not counted -- and the ranking takes a model's largest run,
-    so a thirty-four-question row stays valid until a fifty of the same model exists.
+    so a fifty-question row stays valid until a sixty of the same model exists.
 
     Each question is filed under the rarest kind it asks for, exactly as `bench.sample`
     files it when drawing a short run. Every bucket has to be there for a short run to
@@ -143,7 +143,7 @@ def test_the_full_set_is_fifty_scored_questions_and_no_one_kind_of_them(g):
     `test_every_expected_answer_exists` and `test_no_question_is_asked_twice`."""
     kind = {n["id"]: n["kind"] for n in g["nodes"]}
     scored = [q for q in QUESTIONS if q["expect"]]
-    assert len(scored) == 50
+    assert len(scored) == 60
     assert len(QUESTIONS) - len(scored) >= 4, "and some whose right answer is nobody"
 
     wanted = Counter(k for q in QUESTIONS
@@ -153,3 +153,125 @@ def test_the_full_set_is_fifty_scored_questions_and_no_one_kind_of_them(g):
     assert set(filed) == {"person", "org", "place", "topic", "opportunity", "event", "nobody"}
     assert all(n >= 2 for n in filed.values()), f"a kind with one question: {dict(filed)}"
     assert max(filed.values()) <= len(QUESTIONS) / 2, f"one kind is most of the set: {dict(filed)}"
+
+
+# --- the four kinds the set was short of ------------------------------------------------------
+#
+# Counting, two hops, traps and quotes. Each is held here by deriving its answer from the graph
+# again, so the expectation is a fact about the graph rather than something remembered.
+
+_GAPS: dict[str, tuple[str, ...]] = {
+    "aggregate": ("How many people here do robotics?",
+                  "Which company sent the most people to the Northern Trade Fair?",
+                  "Who here has been doing their job the longest?"),
+    "two-hop": ("Who works alongside the person who does geotechnics?",
+                "Which places do the people who do repair live in?"),
+    "trap": ("Who here is called Vance?",
+             "Since Ada Lovelace moved to Selby, who is left in Calderwick?",
+             "Who here can weld, even a little?"),
+    "quote": ("Who said they had just joined?",
+              "What did Vera Lund say she works on?"),
+}
+
+
+def _asked(text: str) -> dict:
+    return next(q for q in QUESTIONS if q["q"] == text)
+
+
+def _who(g, rel: str, target: str) -> set[str]:
+    return {e["source"] for e in g["edges"] if e["rel"] == rel and e["target"] == target}
+
+
+def _of(g, source: str, rel: str) -> set[str]:
+    return {e["target"] for e in g["edges"] if e["rel"] == rel and e["source"] == source}
+
+
+def test_each_gap_has_at_least_two_scored_questions_whose_answers_exist(g):
+    have = {n["id"] for n in g["nodes"]}
+    asked = {q["q"] for q in QUESTIONS}
+    for gap, texts in _GAPS.items():
+        assert len(texts) >= 2, gap
+        for text in texts:
+            assert text in asked, text
+            expect = _asked(text)["expect"]
+            assert expect and set(expect) <= have, text
+
+
+def test_a_count_is_scored_as_the_people_counted(g):
+    assert set(_asked("How many people here do robotics?")["expect"]) == \
+        _who(g, "experienced_in", "topic:robotics")
+
+
+def test_the_company_that_sent_the_most_people_to_the_fair_is_the_unique_most(g):
+    went = _who(g, "attended", "event:tradefair")
+    sent = Counter(o for p in went for o in _of(g, p, "works_at"))
+    top = sent.most_common()
+    assert top[0][1] > top[1][1], f"a tie is not a comparative: {top}"
+    assert _asked("Which company sent the most people to the Northern Trade Fair?")["expect"] \
+        == [top[0][0]]
+
+
+def test_the_longest_serving_person_is_the_only_one_who_said_the_largest_number_of_years(g):
+    import re
+
+    words = {"twelve": 12, "twenty": 20, "twenty-five": 25}
+    years = {}
+    for n in g["nodes"]:
+        for m in n.get("messages") or ():
+            for hit in re.findall(r"\b(twelve|twenty-five|twenty) years\b",
+                                  g["messages"][m]["text"].lower()):
+                years[n["id"]] = words[hit]
+    assert len(years) >= 3, "several people put a number on it, or there is nothing to compare"
+    most = max(years.values())
+    assert [i for i, y in years.items() if y == most] == \
+        _asked("Who here has been doing their job the longest?")["expect"]
+
+
+def test_two_hops_answer_with_the_far_end_and_never_the_middle(g):
+    tam = _who(g, "experienced_in", "topic:geotechnics")
+    assert tam == {"person:tam"}
+    colleagues = {p for org in _of(g, "person:tam", "works_at")
+                  for p in _who(g, "works_at", org)} - tam
+    assert set(_asked("Who works alongside the person who does geotechnics?")["expect"]) \
+        == colleagues
+
+    fixers = _who(g, "experienced_in", "topic:repair")
+    homes = {place for p in fixers for place in _of(g, p, "based_in")}
+    q = _asked("Which places do the people who do repair live in?")
+    assert set(q["expect"]) == homes
+    assert not (set(q["expect"]) & fixers)
+
+
+def test_a_surname_alone_wants_everyone_who_carries_it(g):
+    vances = {n["id"] for n in g["nodes"] if n["kind"] == "person" and n["label"].endswith(" Vance")}
+    assert len(vances) == 2, "two of them, or there is nothing to confuse"
+    assert set(_asked("Who here is called Vance?")["expect"]) == vances
+
+
+def test_a_false_premise_leaves_the_place_exactly_as_the_graph_has_it(g):
+    assert _of(g, "person:ada", "based_in") == {"place:turin"}, "Ada was never in Calderwick"
+    trap = _asked("Since Ada Lovelace moved to Selby, who is left in Calderwick?")
+    assert set(trap["expect"]) == _who(g, "based_in", "place:calderwick")
+    assert trap["expect"] == _asked("Who is in Calderwick?")["expect"]
+
+
+def test_a_near_miss_is_the_answer_only_when_the_question_allows_it(g):
+    said = {n["id"]: " ".join(g["messages"][m]["text"] for m in n.get("messages") or ())
+            for n in g["nodes"] if n["kind"] == "person"}
+    welders = {i for i, s in said.items() if "weld" in s.lower()}
+    assert "topic:welding" not in {n["id"] for n in g["nodes"]}, "nobody has it as a subject"
+    assert _asked("Who here can weld, even a little?")["expect"] == sorted(welders)
+    assert _asked("Nobody here does underwater welding. Who could?")["expect"] == []
+
+
+def test_a_quote_question_is_answered_by_the_words_and_by_nothing_else(g):
+    said = {n["id"]: " ".join(g["messages"][m]["text"] for m in n.get("messages") or ())
+            for n in g["nodes"] if n["kind"] == "person"}
+    joined = {i for i, s in said.items() if "just joined" in s.lower()}
+    assert _asked("Who said they had just joined?")["expect"] == sorted(joined)
+    assert not [e for e in g["edges"] if e["source"] == "person:pell"], "only the quote finds him"
+
+    vera = said["person:vera"].lower()
+    assert "data engineering" in vera and "hospital" in vera
+    assert set(_asked("What did Vera Lund say she works on?")["expect"]) \
+        == _of(g, "person:vera", "experienced_in")
