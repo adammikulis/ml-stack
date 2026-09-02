@@ -7,6 +7,7 @@ import json
 import mimetypes
 import time
 import urllib.parse
+from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +23,7 @@ from .discovery import (
 )
 from .session import Sessions, Throttle, parse_cookie
 
-__all__ = ["ASSETS", "UI", "asset_bytes"]
+__all__ = ["ASSETS", "UI", "asset_bytes", "serve_page"]
 
 ASSETS = Path(__file__).parent / "web"
 
@@ -331,6 +332,70 @@ class UI:
 
         return [asdict(e) for e in history(HOME)][::-1][:limit]
 
+    def fit(self) -> dict[str, Any]:
+        """The measured fit records, this machine's room, and the rooms worth drawing.
+
+        Everything the Fit view needs in one answer: `fit.records()` as it comes off disk
+        -- measured at load, never estimated -- plus `hub.room()`, which is what a model
+        may actually use here rather than the installed RAM. The page does the arithmetic
+        itself, from the same two numbers per record that `Fit.line` composes, so moving
+        the room slider costs no round trip.
+        """
+        try:
+            from ml_stack.hub import room
+            from ml_stack.serve import fit as fit_mod
+        except ImportError as exc:                        # a device-tier install has no serve
+            return {"error": f"this install cannot measure or read fits: {exc}",
+                    "records": [], "room": 0, "name": self.name}
+        return {
+            "records": [f.as_dict() for f in fit_mod.records()],
+            "room": room(),
+            "name": self.name,
+            "vram_gb": list(fit_mod.COMMON_VRAM_GB),
+            "contexts": list(fit_mod.PLOT_CONTEXTS),
+        }
+
+    def rates(self) -> dict[str, Any]:
+        """Every kept bench run as a point: what it scored, what it cost, and where the
+        frontier runs -- ``ml-stack-bench show --rates`` as data rather than as a table.
+
+        Nothing here measures anything. `keep._kept` reads the store the command reads,
+        `score.derived` turns one run into the rates it already prints, `score.composed`
+        adds each model once more as the command does, and `show.pareto` marks the runs
+        nothing beats on both axes. The frontier is worked out for *all three* costs and
+        sent with each point, so switching the axis on the page costs no round trip -- the
+        same reason the fit records carry their two composing numbers rather than answers.
+        """
+        try:
+            from ml_stack.graph.bench import HOME
+            from ml_stack.graph.bench.keep import _kept
+            from ml_stack.graph.bench.score import NOISE, composed, derived, host_of
+            from ml_stack.graph.bench.show import AXES, pareto
+        except ImportError as exc:                       # a device-tier install has no bench
+            return {"error": f"the bench is not installed here: {exc}",
+                    "runs": [], "axes": {}, "store": ""}
+        store = Path(HOME) / "runs.ladybug"
+        kept = _kept(store)
+        points = list(kept) + composed(kept)
+        # by identity, the way `rates` marks them: two runs can agree on every number and
+        # still be two runs
+        front = {cost: {id(one) for one in pareto(points, cost=cost)} for cost in AXES}
+        rows = []
+        for one in points:
+            got = derived(one)
+            if not got:
+                continue
+            rows.append({
+                "label": str(one.get("label") or ""),
+                "host": host_of(one),
+                "composed": bool(one.get("composed")),
+                "from": str(one.get("from") or ""),
+                "front": [cost for cost in AXES if id(one) in front[cost]],
+                **{k: v for k, v in got.items()},
+            })
+        rows.sort(key=lambda r: -r.get("right", 0.0))
+        return {"runs": rows, "axes": dict(AXES), "store": str(store), "noise": NOISE}
+
     def start_sweep(self, argv: list[str]) -> dict[str, Any]:
         """Start ``ml-stack-bench argv`` detached and hand back its log and pid."""
         import shlex
@@ -435,6 +500,15 @@ def routes(ui: UI, handler: Any) -> bool:
     # -- static ----------------------------------------------------------
     if path in ("/ui", "/ui/"):
         asset = asset_bytes("index.html")
+        if asset is None:
+            send(500, {"error": "the UI assets are missing from this install"})
+            return True
+        raw, kind = asset
+        handler._send(200, None, raw=raw, content_type=kind)
+        return True
+
+    if path in ("/ui/fit", "/ui/fit/"):
+        asset = asset_bytes("fit.html")
         if asset is None:
             send(500, {"error": "the UI assets are missing from this install"})
             return True
@@ -566,6 +640,14 @@ def routes(ui: UI, handler: Any) -> bool:
         if why:
             send(403, {"error": why})
             return True
+
+    if path == "/ui/fit.json" and method == "GET":
+        send(200, ui.fit())
+        return True
+
+    if path == "/ui/rates.json" and method == "GET":
+        send(200, ui.rates())
+        return True
 
     if path == "/ui/settings":
         if method == "GET":
@@ -977,3 +1059,64 @@ def routes(ui: UI, handler: Any) -> bool:
 
     send(404, {"error": "no such route"})
     return True
+
+
+# ------------------------------------------------------------------ a page on its own
+
+class _Loopback(BaseHTTPRequestHandler):
+    """The handler `serve_page` mounts: `routes` and nothing else.
+
+    ``_send`` is the same shape the daemon's handler gives `routes`, because `routes` is
+    what is being run -- the page and its JSON come from one implementation, not two that
+    have to be kept saying the same thing.
+    """
+
+    ui: "UI"
+    protocol_version = "HTTP/1.1"
+
+    def _send(self, code: int, payload: Any, *, raw: bytes | None = None,
+              headers: dict[str, str] | None = None, content_type: str = "") -> None:
+        body = raw if raw is not None else json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", content_type or (
+            "application/octet-stream" if raw is not None else "application/json"))
+        self.send_header("Content-Length", str(len(body)))
+        for key, value in (headers or {}).items():
+            self.send_header(key, value)
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def do_GET(self) -> None:      # noqa: N802 - BaseHTTPRequestHandler's spelling
+        if self.path in ("/", ""):
+            self._send(302, None, raw=b"", headers={"Location": "/ui/fit"})
+            return
+        if not routes(self.ui, self):
+            self._send(404, {"error": "no such route"})
+
+    do_POST = do_GET
+
+    def log_message(self, *args: Any) -> None:   # a served page is not a log line
+        return
+
+
+def serve_page(*, port: int = 0, name: str = "", host: str = "127.0.0.1") -> Any:
+    """A loopback-only server over `routes` alone -- what ``ml-stack-serve fit --ui`` puts up.
+
+    The same ``UI`` object and the same route table the daemon mounts, with nothing else
+    on it: no jobs, no models, no peers, and a cluster key path that deliberately does not
+    exist, so a machine that *is* in a cluster is not asked to sign in to look at its own
+    measurements. It binds loopback, which is what makes that safe: `may_setup` lets this
+    machine in and there is no address anyone else could reach.
+
+    Returns the server, not yet serving; the caller decides whether that is a thread or
+    this one. ``port=0`` takes whatever is free, and ``server.server_port`` says which.
+    """
+    import platform as _platform
+    import tempfile
+    from http.server import ThreadingHTTPServer
+
+    ui = UI(name=name or _platform.node() or "this machine",
+            cluster_key_path=Path(tempfile.gettempdir()) / "ml-stack-fit-no-cluster")
+    handler = type("FitHandler", (_Loopback,), {"ui": ui})
+    return ThreadingHTTPServer((host, port), handler)

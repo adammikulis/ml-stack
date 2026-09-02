@@ -67,7 +67,11 @@ const contextPicker = (start, onPick) => {
       + "smaller one costs less."));
 };
 
+// "Fit" is a page of its own rather than a screen here: it draws the measured records and
+// asks for no fleet state at all, and `ml-stack-serve fit --ui` serves that same page from
+// a tiny local server on a machine running no daemon.
 const TABS = [["Chat", () => chat()], ["Cluster", () => fleet()],
+              ["Fit", () => { location.href = "/ui/fit"; }],
               ["Models", () => models()], ["Settings", () => settings()]];
 
 const top = (current, group = "") =>

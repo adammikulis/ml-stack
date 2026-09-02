@@ -1,0 +1,978 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ml-stack · what fits</title>
+<link rel="stylesheet" href="/ui/static/style.css">
+<!--
+  The Fit view. Every number on this page comes out of `src/ml_stack/serve/fit.py` -- the
+  records are measured at load, never estimated -- and the arithmetic below is the same
+  arithmetic `Fit.line`, `Fit.users` and `Fit.longest` do, transliterated once and marked
+  between two comments so a test can lift it out and check the two still agree.
+
+  Nothing is loaded from a network: no d3, no CDN. Both panels are hand-drawn SVG, because
+  this page has to open on a machine that has never been online. The static picture this
+  sits beside (`fit --plot`) could not do the one thing the question needs -- move the room
+  and the context and watch the crossing move -- and its second panel was squashed flat by
+  whichever model happened to fit 250 people.
+-->
+<style>
+  body { font: 14px/1.5 var(--sans); }
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 0 20px 60px; }
+
+  header.fit-top {
+    display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    background: var(--bg-raised); position: sticky; top: 0; z-index: 20;
+  }
+  header.fit-top h1 { font-size: 17px; margin: 0; letter-spacing: -.01em; }
+  header.fit-top .machine { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  header.fit-top .spacer { flex: 1; }
+  nav.views { display: flex; gap: 2px; }
+  nav.views button {
+    background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer;
+    color: var(--muted); font: inherit; font-size: 13px; padding: 3px 10px 5px;
+  }
+  nav.views button.on { color: var(--text); border-bottom-color: var(--accent); }
+  svg .point { stroke: var(--bg-raised); stroke-width: 1.2; }
+  svg .front { fill: none; stroke: var(--good); stroke-width: 1.4; stroke-dasharray: 4 3; }
+  table.fit td.mark { color: var(--good); }
+
+  .controls {
+    display: grid; gap: 18px 26px; padding: 16px 0 18px;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    border-bottom: 1px solid var(--line);
+  }
+  .ctl { min-width: 0; }
+  .ctl > label.cap, .ctl > div.cap {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+    font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted);
+    margin-bottom: 5px;
+  }
+  .ctl .cap b { font-size: 13px; text-transform: none; letter-spacing: 0;
+                color: var(--text); font-family: var(--mono); }
+  .ctl input[type=range] { width: 100%; accent-color: var(--accent); }
+  .ctl .pair { display: flex; gap: 6px; align-items: center; }
+  .ctl select, .ctl input[type=number] {
+    background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
+    border-radius: 7px; padding: 5px 7px; font: inherit; min-width: 0; flex: 1;
+  }
+  .ctl .hint { color: var(--dim); font-size: 11px; margin-top: 4px; }
+  .wide { grid-column: 1 / -1; }
+
+  .models { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+  .models label {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    font-family: var(--mono); font-size: 12px; white-space: nowrap;
+  }
+  .models label.off { opacity: .4; }
+  .models input { accent-color: var(--accent); }
+  i.sw { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex: none; }
+
+  .toggle { display: flex; border: 1px solid var(--line-bright);
+            border-radius: 7px; overflow: hidden; }
+  .toggle button {
+    flex: 1; background: var(--bg-sunken); color: var(--muted); border: 0;
+    padding: 6px 8px; font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  .toggle button.on { background: var(--accent-dim); color: var(--text); }
+
+  .panels { display: grid; gap: 20px; grid-template-columns: 1fr 1fr; margin-top: 20px; }
+  @media (max-width: 1050px) { .panels { grid-template-columns: 1fr; } }
+  .panel {
+    background: var(--bg-raised); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 12px 14px 8px; position: relative; box-shadow: var(--shadow);
+  }
+  .panel h2 { margin: 0 0 2px; font-size: 13px; letter-spacing: -.01em; }
+  .panel .sub { color: var(--dim); font-size: 11px; margin-bottom: 6px; max-width: 60ch; }
+  .panel .zoomhint { position: absolute; right: 14px; top: 12px;
+                     color: var(--dim); font-size: 10px; font-family: var(--mono); }
+  svg { display: block; width: 100%; height: auto; touch-action: none; }
+  svg text { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
+  svg .axis { stroke: var(--line-bright); stroke-width: 1; }
+  svg .grid { stroke: var(--line); stroke-width: 1; }
+  svg .vram { stroke: var(--line-bright); stroke-width: 1; stroke-dasharray: 2 3; }
+  svg .vram-label { fill: var(--dim); font-size: 9px; }
+  svg .room { stroke: var(--bad); stroke-width: 1.6; }
+  svg .room-label { fill: var(--bad); font-size: 10px; }
+  svg .ln { fill: none; stroke-width: 1.8; stroke-linejoin: round; }
+  svg .ln.dim { opacity: .22; }
+  svg .ln.hot { stroke-width: 3.2; }
+  svg .cross { stroke: var(--line-bright); stroke-width: 1; stroke-dasharray: 3 3; }
+  svg .title { fill: var(--muted); font-size: 10px; }
+
+  .tip {
+    position: absolute; pointer-events: none; z-index: 5; opacity: 0;
+    background: var(--bg-sunken); border: 1px solid var(--line-bright);
+    border-radius: 7px; padding: 6px 8px; font-family: var(--mono); font-size: 11px;
+    box-shadow: var(--shadow); white-space: nowrap; transition: opacity .08s;
+  }
+  .tip b { color: var(--text); }
+  .tip span { color: var(--muted); }
+  .tip .hot { background: color-mix(in srgb, var(--accent) 16%, transparent);
+              border-radius: 3px; }
+
+  table.fit { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 13px; }
+  table.fit th, table.fit td { padding: 7px 10px; text-align: right;
+                               border-bottom: 1px solid var(--line); }
+  table.fit th { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                 letter-spacing: .06em; font-weight: 600; }
+  table.fit th:first-child, table.fit td:first-child { text-align: left; }
+  table.fit td { font-family: var(--mono); }
+  table.fit tbody tr.hot { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  table.fit tbody tr.nofit td { color: var(--dim); }
+  table.fit td.name { display: flex; align-items: center; gap: 7px; font-size: 12px; }
+  table.fit .bad { color: var(--bad); }
+  .note { color: var(--dim); font-size: 12px; margin-top: 14px; max-width: 82ch; }
+  .empty { color: var(--muted); padding: 40px 0; }
+</style>
+
+<header class="fit-top">
+  <h1 id="heading">What fits</h1>
+  <nav class="views" id="views"></nav>
+  <span class="machine" id="machine"></span>
+  <span class="spacer"></span>
+  <a href="/ui">&larr; ml-stack</a>
+</header>
+
+<div class="wrap">
+  <div class="controls" id="controls"></div>
+  <div class="controls" id="rate-controls" hidden></div>
+  <div id="body"></div>
+</div>
+
+<script>
+"use strict";
+
+// ---------------------------------------------------------------- fit arithmetic
+// BEGIN FIT ARITHMETIC -- must equal Fit.line / Fit.users / Fit.longest in serve/fit.py.
+// `tests/test_fleet_ui_fit.py` lifts this block out between the markers and runs it over
+// the records the route serves, against fit.py's own answers, so the two cannot drift.
+
+/** Python's `//` on non-negative integers, without a double's rounding at 1e11. */
+function fdiv(a, b) {
+  if (b <= 0) return 0;
+  let q = Math.floor(a / b);
+  while (q * b > a) q -= 1;
+  while ((q + 1) * b <= a) q += 1;
+  return q;
+}
+
+const Fit = {
+  /** weights + draft + compute: what it costs with nobody on it. */
+  loaded: (f) => f.weights + f.draft + f.compute,
+  /** what is left for caches in a machine with `room` bytes; never negative. */
+  free: (f, room) => Math.max(0, room - Fit.loaded(f)),
+  /** what one more user at `ctx` tokens costs. */
+  cost: (f, ctx) => f.per_token * Math.max(0, Math.trunc(ctx)) + f.per_seq,
+  /** [with nobody on it, each user adds] -- the two numbers panel B draws. */
+  line: (f, ctx) => [Fit.loaded(f), Fit.cost(f, ctx)],
+  /** how many users fit at `ctx`; 0 when not even one does. */
+  users: (f, room, ctx) => {
+    const each = Fit.cost(f, ctx);
+    return each > 0 ? fdiv(Fit.free(f, room), each) : 0;
+  },
+  /** the longest context `n` users can each be given; 0 when they do not fit. */
+  longest: (f, room, n) => {
+    n = Math.max(1, Math.trunc(n));
+    if (f.per_token <= 0) return 0;
+    const each = fdiv(Fit.free(f, room), n) - f.per_seq;
+    return each < 0 ? 0 : fdiv(each, f.per_token);
+  },
+};
+// END FIT ARITHMETIC
+
+// ---------------------------------------------------------------- saying numbers
+const GB = 1024 ** 3;
+
+const human = (size) => {
+  let v = Number(size);
+  for (const unit of ["B", "K", "M", "G", "T"]) {
+    if (v < 1024 || unit === "T") return unit === "B" ? `${v.toFixed(0)}B` : `${v.toFixed(1)}${unit}`;
+    v /= 1024;
+  }
+  return `${v.toFixed(1)}T`;
+};
+
+const kTokens = (n) => (n >= 1024 && n % 1024 === 0 ? `${n / 1024}k` : n.toLocaleString());
+const commas = (n) => Math.round(n).toLocaleString();
+
+/** The legend name: the model, its cache type when that is not f16, and whether a draft
+    head was served -- the three things that make two records of the same weights two
+    different measurements. `label_of` in fit.py says exactly this. */
+function labelOf(f) {
+  const parts = [f.model.replace(/\.gguf$/i, "")];
+  if (f.cache_type && f.cache_type !== "f16") parts.push(f.cache_type);
+  if (f.spec) parts.push("+draft");
+  return parts.join(" ");
+}
+
+/** That, without the sharding tail, so a three-file model does not shout its parts. */
+const shortName = (f) => labelOf(f).replace(/-0*\d+-of-0*\d+/, "");
+
+// A colour per record, stable across every redraw, legible on both themes.
+const COLOURS = ["#35d6c3", "#f2b544", "#5b8dd6", "#f2685c", "#4ad07f", "#c58af9",
+                 "#e08b4c", "#7fd8cd", "#9aa7f5", "#d97fb0"];
+
+// ---------------------------------------------------------------- the data
+// The rooms people actually have, in GB -- `COMMON_VRAM_GB` in fit.py, and the route
+// hands them over so the two lists cannot drift. These are gridlines with names on:
+// nothing about them is measured.
+const DEFAULT_ROOMS_GB = [6, 8, 12, 16, 24, 32, 48, 64, 96, 128];
+const CTX_STEPS = [1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144];
+
+const state = {
+  records: [], room: 0, machineRoom: 0, name: "",
+  vram: DEFAULT_ROOMS_GB, ctx: 32768, users: 8,
+  cacheType: "", drafted: "either", on: new Set(), hot: null,
+  zoom: null,             // [x0, x1] on panel B once someone has zoomed
+  view: "fit",            // or "rates"
+  runs: null, axes: {}, cost: "seconds", showing: "both", hotRun: null, ratesError: "",
+};
+
+async function load() {
+  const r = await fetch("/ui/fit.json", { headers: { "X-ML-Stack-UI": "1" } });
+  const got = await r.json();
+  if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
+  state.records = (got.records || []).map((f, i) =>
+    ({ ...f, i, colour: COLOURS[i % COLOURS.length] }));
+  state.machineRoom = Number(got.room) || 0;
+  state.room = state.machineRoom || 24 * GB;
+  state.name = got.name || "this machine";
+  if (Array.isArray(got.vram_gb) && got.vram_gb.length) state.vram = got.vram_gb;
+  for (const f of state.records) state.on.add(f.i);
+}
+
+/** Every record the checkboxes, the cache select and the drafted toggle leave standing. */
+function visible() {
+  return state.records.filter((f) => {
+    if (!state.on.has(f.i)) return false;
+    if (state.cacheType && f.cache_type !== state.cacheType) return false;
+    if (state.drafted === "yes" && !f.spec) return false;
+    if (state.drafted === "no" && f.spec) return false;
+    return true;
+  });
+}
+
+const cacheTypes = () => [...new Set(state.records.map((f) => f.cache_type))].sort();
+
+/** Whether some model was measured both with a head and without, which is the only case
+    where the toggle is worth showing: with one record each way it just hides half. */
+function draftedBothWays() {
+  const bare = new Set(), drafted = new Set();
+  for (const f of state.records) (f.spec ? drafted : bare).add(f.model + "|" + f.cache_type);
+  return [...drafted].some((k) => bare.has(k));
+}
+
+// ---------------------------------------------------------------- small helpers
+const NS = "http://www.w3.org/2000/svg";
+
+function svgEl(tag, attrs = {}, text = null) {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v !== null && v !== undefined) n.setAttribute(k, String(v));
+  }
+  if (text !== null) n.textContent = String(text);
+  return n;
+}
+
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === null || v === undefined) continue;
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else n.setAttribute(k, String(v));
+  }
+  for (const kid of kids.flat()) {
+    if (kid === null || kid === undefined || kid === false) continue;
+    n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return n;
+};
+
+const W = 620, H = 380, PAD = { l: 62, r: 18, t: 14, b: 40 };
+const IX0 = PAD.l, IX1 = W - PAD.r, IY0 = PAD.t, IY1 = H - PAD.b;
+
+// ---------------------------------------------------------------- panel A: who fits
+//
+// Users that fit against the context each is given, both axes logarithmic. Doubling the
+// context halves the heads until the per-sequence cost takes over and the fall flattens,
+// and the flattening is the whole shape of a hybrid model. A record whose weights leave
+// room for nobody draws nothing here and says "does not fit" in the table, rather than
+// leaving an empty space to be interpreted.
+function panelFits(rows, tip) {
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  const xs = CTX_STEPS;
+  const at = (f, c) => Fit.users(f, state.room, c);
+  const topUsers = Math.max(1, ...rows.flatMap((f) => xs.map((c) => at(f, c))));
+  const decades = Math.log10(Math.max(10, topUsers * 1.15));
+
+  const lx = (c) => IX0 + (Math.log2(c) - Math.log2(xs[0])) /
+                    (Math.log2(xs[xs.length - 1]) - Math.log2(xs[0])) * (IX1 - IX0);
+  // log y floored at one user: below one the answer is "nobody", not a smaller number.
+  const ly = (n) => IY1 - Math.log10(Math.max(1, n)) / decades * (IY1 - IY0);
+
+  for (const c of xs) {
+    svg.append(svgEl("line", { class: "grid", x1: lx(c), x2: lx(c), y1: IY0, y2: IY1 }));
+    svg.append(svgEl("text", { x: lx(c), y: IY1 + 14, "text-anchor": "middle" }, kTokens(c)));
+  }
+  for (let p = 0; p <= decades; p += 1) {
+    const n = Math.pow(10, p);
+    svg.append(svgEl("line", { class: "grid", x1: IX0, x2: IX1, y1: ly(n), y2: ly(n) }));
+    svg.append(svgEl("text", { x: IX0 - 8, y: ly(n) + 3, "text-anchor": "end" }, commas(n)));
+  }
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
+  svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
+                             class: "title" }, "context each user gets (tokens)"));
+  svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title", "text-anchor": "middle",
+                             transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
+                   "users that fit"));
+
+  // where the context slider is standing, so the chart and the table agree at a glance
+  svg.append(svgEl("line", { class: "cross", x1: lx(state.ctx), x2: lx(state.ctx),
+                             y1: IY0, y2: IY1 }));
+
+  for (const f of rows) {
+    const pts = xs.map((c) => [c, at(f, c)]).filter(([, n]) => n > 0);
+    if (!pts.length) continue;
+    const d = pts.map(([c, n], i) =>
+      `${i ? "L" : "M"}${lx(c).toFixed(1)},${ly(n).toFixed(1)}`).join("");
+    const path = svgEl("path", { class: "ln", d, stroke: f.colour });
+    path.dataset.i = f.i;
+    svg.append(path);
+    const here = at(f, state.ctx);
+    if (here > 0) {
+      const dot = svgEl("circle", { cx: lx(state.ctx), cy: ly(here), r: 3, fill: f.colour });
+      dot.dataset.i = f.i;
+      dot.setAttribute("class", "dotmark");
+      svg.append(dot);
+    }
+  }
+
+  hovering(svg, tip, (mx) => {
+    // read at the cursor's own context, not at the nearest measured step
+    const t = (mx - IX0) / (IX1 - IX0);
+    const lo = Math.log2(xs[0]), hi = Math.log2(xs[xs.length - 1]);
+    const c = Math.max(xs[0], Math.min(xs[xs.length - 1],
+      Math.round(Math.pow(2, lo + t * (hi - lo)))));
+    return {
+      head: `${kTokens(c)} each · ${human(state.room)}`,
+      rows: rows.map((f) => [f, `${commas(at(f, c))} users`]),
+      at: (f) => [lx(c), ly(at(f, c))],
+    };
+  });
+  return svg;
+}
+
+// ---------------------------------------------------------------- panel B: what it costs
+//
+// `loaded() + users * cost(ctx)` -- a straight line from the axis, where the height is the
+// model with an empty cache and the slope is one user's worth of it. Starting at zero users
+// is the point: the intercept is the part a person already knows (the weights) and the
+// slope is the part nobody does, and a heavy model with a cheap cache crossing a light one
+// with a fat cache is only visible when both are drawn from the axis.
+//
+// The x range follows the visible models rather than the widest of them, and a drag or a
+// wheel narrows it further -- the thing the static picture could not do, and the reason its
+// right-hand panel went flat the moment a 2B model that fits 250 people was in it.
+function panelCost(rows, tip) {
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  const fits = rows.map((f) => Fit.users(f, state.room, state.ctx));
+  const natural = Math.max(8, Math.min(4096, Math.max(1, ...fits) * 1.15));
+  const [x0, x1] = state.zoom || [0, natural];
+  const px = (n) => IX0 + (n - x0) / Math.max(1e-9, x1 - x0) * (IX1 - IX0);
+
+  const highest = Math.max(state.room / GB,
+    ...rows.map((f) => (Fit.loaded(f) + x1 * Fit.cost(f, state.ctx)) / GB));
+  const crossed = state.vram.filter((g) => g <= highest);
+  const top = Math.max(state.room / GB, Math.max(0, ...crossed), 1) * 1.08;
+  const py = (g) => IY1 - Math.min(g, top) / top * (IY1 - IY0);
+
+  for (const g of state.vram) {
+    if (g > top) continue;
+    svg.append(svgEl("line", { class: "vram", x1: IX0, x2: IX1, y1: py(g), y2: py(g) }));
+    svg.append(svgEl("text", { class: "vram-label", x: IX1 - 3, y: py(g) - 3,
+                               "text-anchor": "end" }, `${g}G`));
+  }
+  for (let i = 0; i <= 6; i += 1) {
+    const n = x0 + (x1 - x0) * i / 6;
+    svg.append(svgEl("text", { x: px(n), y: IY1 + 14, "text-anchor": "middle" }, commas(n)));
+  }
+  for (let i = 0; i <= 4; i += 1) {
+    const g = top * i / 4;
+    svg.append(svgEl("text", { x: IX0 - 8, y: py(g) + 3, "text-anchor": "end" }, g.toFixed(0)));
+  }
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
+  svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
+                             class: "title" }, `users, each with ${commas(state.ctx)} tokens`));
+  svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title", "text-anchor": "middle",
+                             transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
+                   "memory needed (GB)"));
+
+  for (const f of rows) {
+    const [intercept, each] = Fit.line(f, state.ctx);
+    // clipped to the box by hand: a 120B model at 128k leaves the top at the second user,
+    // and an unclipped line drags every other one into the floor
+    const seg = clip(x0, (intercept + x0 * each) / GB, x1, (intercept + x1 * each) / GB, top);
+    if (!seg) continue;
+    const path = svgEl("path", { class: "ln", stroke: f.colour,
+      d: `M${px(seg[0]).toFixed(1)},${py(seg[1]).toFixed(1)}`
+         + `L${px(seg[2]).toFixed(1)},${py(seg[3]).toFixed(1)}` });
+    path.dataset.i = f.i;
+    svg.append(path);
+  }
+
+  // the room in force, over the lines it cuts: where a line leaves it is the last user
+  const roomY = py(state.room / GB);
+  svg.append(svgEl("line", { class: "room", x1: IX0, x2: IX1, y1: roomY, y2: roomY }));
+  svg.append(svgEl("text", { class: "room-label", x: IX0 + 4, y: roomY - 4 },
+                   `${human(state.room)} of room`));
+
+  if (state.users >= x0 && state.users <= x1) {
+    svg.append(svgEl("line", { class: "cross", x1: px(state.users), x2: px(state.users),
+                               y1: IY0, y2: IY1 }));
+  }
+
+  hovering(svg, tip, (mx) => {
+    const n = Math.max(0, Math.round(x0 + (mx - IX0) / (IX1 - IX0) * (x1 - x0)));
+    return {
+      head: `${commas(n)} user${n === 1 ? "" : "s"} at ${kTokens(state.ctx)}`,
+      rows: rows.map((f) => [f, human(Fit.loaded(f) + n * Fit.cost(f, state.ctx))]),
+      at: (f) => [px(n), py((Fit.loaded(f) + n * Fit.cost(f, state.ctx)) / GB)],
+    };
+  });
+  zooming(svg, () => [x0, x1], natural);
+  return svg;
+}
+
+/** The part of the segment `(x0,y0)-(x1,y1)` that is inside `[0, top]`, or null. */
+function clip(x0, y0, x1, y1, top) {
+  const slope = (y1 - y0) / Math.max(1e-9, x1 - x0);
+  if (slope <= 0) return y0 > top ? null : [x0, y0, x1, y1];
+  const b = Math.min(x1, x0 + (top - y0) / slope);
+  if (b <= x0) return null;
+  return [x0, y0, b, y0 + (b - x0) * slope];
+}
+
+// ---------------------------------------------------------------- hover and zoom
+
+/** Cursor tracking for one panel: highlight the nearest line, light its row in the table,
+    and say every model's exact number at that x. */
+function hovering(svg, tip, read) {
+  const leave = () => { state.hot = null; tip.style.opacity = 0; paintHot(); };
+  svg.addEventListener("mouseleave", leave);
+  svg.addEventListener("mousemove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const mx = (e.clientX - box.left) / box.width * W;
+    const my = (e.clientY - box.top) / box.height * H;
+    if (mx < IX0 || mx > IX1) { leave(); return; }
+    const got = read(mx);
+    let best = null, gap = Infinity;
+    for (const [f] of got.rows) {
+      const near = Math.abs(got.at(f)[1] - my);
+      if (near < gap) { gap = near; best = f; }
+    }
+    state.hot = best && gap < 40 ? best.i : null;
+    paintHot();
+    tip.replaceChildren(
+      el("div", {}, el("b", {}, got.head)),
+      ...got.rows.map(([f, said]) => el("div", { class: state.hot === f.i ? "hot" : "" },
+        el("i", { class: "sw", style: `background:${f.colour};margin-right:6px` }),
+        el("span", {}, shortName(f) + "  "), el("b", {}, said))));
+    const host = svg.parentElement.getBoundingClientRect();
+    tip.style.left = `${Math.max(4, Math.min(e.clientX - host.left + 14, host.width - 250))}px`;
+    tip.style.top = `${e.clientY - host.top + 14}px`;
+    tip.style.opacity = 1;
+  });
+}
+
+/** Drag across to narrow the users axis, wheel to zoom about the cursor, double-click to
+    put it back. Without this one model's 250 users flattens every other line. */
+function zooming(svg, span, natural) {
+  let from = null;
+  svg.addEventListener("mousedown", (e) => {
+    from = (e.clientX - svg.getBoundingClientRect().left)
+           / svg.getBoundingClientRect().width * W;
+  });
+  svg.addEventListener("mouseup", (e) => {
+    if (from === null) return;
+    const box = svg.getBoundingClientRect();
+    const to = (e.clientX - box.left) / box.width * W;
+    const [x0, x1] = span();
+    const users = (x) => x0 + (Math.max(IX0, Math.min(IX1, x)) - IX0) / (IX1 - IX0) * (x1 - x0);
+    const [a, b] = [users(from), users(to)].sort((p, q) => p - q);
+    from = null;
+    if (b - a < (x1 - x0) * 0.03) return;          // a click is not a drag
+    state.zoom = [Math.max(0, Math.floor(a)), Math.max(1, Math.ceil(b))];
+    draw();
+  });
+  svg.addEventListener("dblclick", () => { state.zoom = null; draw(); });
+  svg.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const box = svg.getBoundingClientRect();
+    const mx = (e.clientX - box.left) / box.width * W;
+    const [x0, x1] = span();
+    const here = x0 + (Math.max(IX0, Math.min(IX1, mx)) - IX0) / (IX1 - IX0) * (x1 - x0);
+    const k = e.deltaY > 0 ? 1.25 : 0.8;
+    const a = Math.max(0, here - (here - x0) * k), b = here + (x1 - here) * k;
+    state.zoom = (b - a) >= natural ? null
+      : [Math.floor(a), Math.max(Math.floor(a) + 1, Math.ceil(b))];
+    draw();
+  }, { passive: false });
+}
+
+/** Re-mark the hot line and its table row without redrawing either panel: a highlight
+    that redrew the SVG would drop the cursor's own hover on the way. */
+function paintHot() {
+  for (const mark of document.querySelectorAll("svg path.ln, svg .dotmark")) {
+    const mine = Number(mark.dataset.i);
+    const hot = state.hot === mine, dim = state.hot !== null && !hot;
+    mark.classList.toggle("hot", hot);
+    mark.classList.toggle("dim", dim);
+    if (mark.classList.contains("dotmark")) {
+      mark.setAttribute("r", hot ? "4.5" : "3");
+      mark.setAttribute("opacity", dim ? "0.25" : "1");
+    }
+  }
+  for (const tr of document.querySelectorAll("table.fit tbody tr")) {
+    tr.classList.toggle("hot", state.hot === Number(tr.dataset.i));
+  }
+}
+
+// ---------------------------------------------------------------- the table
+function table(rows) {
+  const body = el("tbody", {});
+  for (const f of rows) {
+    const fits = Fit.users(f, state.room, state.ctx);
+    const long = Fit.longest(f, state.room, state.users);
+    const tr = el("tr", { class: fits ? "" : "nofit",
+      onmouseenter: () => { state.hot = f.i; paintHot(); },
+      onmouseleave: () => { state.hot = null; paintHot(); } },
+      el("td", { class: "name" }, el("i", { class: "sw", style: `background:${f.colour}` }),
+         shortName(f)),
+      el("td", {}, (Fit.loaded(f) / GB).toFixed(2)),
+      el("td", {}, (Fit.cost(f, state.ctx) / GB).toFixed(3)),
+      el("td", { class: fits ? "" : "bad" }, fits ? commas(fits) : "does not fit"),
+      el("td", { class: long ? "" : "bad" }, long ? commas(long) : "does not fit"),
+      el("td", {}, f.cache_type + (f.spec ? " +draft" : "")));
+    tr.dataset.i = f.i;
+    body.append(tr);
+  }
+  return el("table", { class: "fit" },
+    el("thead", {}, el("tr", {},
+      el("th", {}, "model"),
+      el("th", {}, "loaded (GB)"),
+      el("th", {}, `GB per user @ ${kTokens(state.ctx)}`),
+      el("th", {}, "users that fit"),
+      el("th", {}, `longest for ${commas(state.users)} (tokens)`),
+      el("th", {}, "cache"))),
+    body);
+}
+
+// ---------------------------------------------------------------- the controls
+//
+// Built once and left alone: a control rebuilt on every redraw loses the drag that is
+// moving it, and the whole page is a thing you drag.
+const ref = {};
+
+function buildControls() {
+  const box = document.getElementById("controls");
+
+  ref.roomSaid = el("b", {});
+  ref.roomPick = el("select", { onchange: (e) => {
+    state.room = e.target.value === "machine" ? state.machineRoom : Number(e.target.value) * GB;
+    state.zoom = null;
+    ref.roomFree.value = (state.room / GB).toFixed(0);
+    draw();
+  } });
+  if (state.machineRoom) {
+    ref.roomPick.append(el("option", { value: "machine" },
+                           `${state.name} · ${human(state.machineRoom)}`));
+  }
+  for (const g of state.vram) ref.roomPick.append(el("option", { value: String(g) }, `${g} GB`));
+  ref.roomPick.value = state.machineRoom ? "machine" : String(state.vram[0]);
+  ref.roomFree = el("input", { type: "number", min: "1", max: "4096", step: "1",
+    value: (state.room / GB).toFixed(0), oninput: (e) => {
+      const g = Number(e.target.value);
+      if (g > 0) { state.room = g * GB; state.zoom = null; draw(); }
+    } });
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "room"), ref.roomSaid),
+    el("div", { class: "pair" }, ref.roomPick, ref.roomFree),
+    el("div", { class: "hint" }, "what a model may actually use here — not the installed RAM")));
+
+  ref.ctxSaid = el("b", {});
+  ref.ctxSlider = el("input", { type: "range", min: "0", max: String(CTX_STEPS.length - 1),
+    value: String(Math.max(0, CTX_STEPS.indexOf(state.ctx))),
+    oninput: (e) => { state.ctx = CTX_STEPS[Number(e.target.value)]; state.zoom = null; draw(); } });
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "context each user gets"), ref.ctxSaid),
+    ref.ctxSlider,
+    el("div", { class: "hint" }, "1k to 256k, doubling — a question with its tools, "
+                                 + "up to a whole conversation kept open")));
+
+  ref.usersSaid = el("b", {});
+  ref.usersSlider = el("input", { type: "range", min: "1", max: "64", value: String(state.users),
+    oninput: (e) => { state.users = Number(e.target.value); draw(); } });
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "users"), ref.usersSaid),
+    ref.usersSlider,
+    el("div", { class: "hint" }, "the last column answers the question the other way round: "
+                                 + "the longest context this many could each be given")));
+
+  const kinds = cacheTypes();
+  if (kinds.length > 1) {
+    const sel = el("select", { onchange: (e) => { state.cacheType = e.target.value; draw(); } },
+      el("option", { value: "" }, "every cache type"),
+      ...kinds.map((k) => el("option", { value: k }, k)));
+    box.append(el("div", { class: "ctl" },
+      el("div", { class: "cap" }, el("span", {}, "kv cache stored as")),
+      el("div", { class: "pair" }, sel),
+      el("div", { class: "hint" }, "what changes the per-token cost")));
+  }
+
+  if (draftedBothWays()) {
+    ref.draftButtons = [];
+    const mk = (key, said) => {
+      const b = el("button", { onclick: () => { state.drafted = key; draw(); } }, said);
+      b.dataset.key = key;
+      ref.draftButtons.push(b);
+      return b;
+    };
+    box.append(el("div", { class: "ctl" },
+      el("div", { class: "cap" }, el("span", {}, "guessing ahead")),
+      el("div", { class: "toggle" }, mk("either", "either"), mk("no", "no head"),
+                                     mk("yes", "with a head")),
+      el("div", { class: "hint" }, "a draft model keeps its own cache at the same context, "
+                                   + "which is the real cost of serving one")));
+  }
+
+  ref.modelLabels = [];
+  const boxes = el("div", { class: "models" }, ...state.records.map((f) => {
+    const cb = el("input", { type: "checkbox", onchange: (e) => {
+      if (e.target.checked) state.on.add(f.i); else state.on.delete(f.i);
+      draw();
+    } });
+    cb.checked = true;
+    const label = el("label", {
+      onmouseenter: () => { state.hot = f.i; paintHot(); },
+      onmouseleave: () => { state.hot = null; paintHot(); } },
+      cb, el("i", { class: "sw", style: `background:${f.colour}` }), shortName(f));
+    ref.modelLabels.push([f, label]);
+    return label;
+  }));
+  box.append(el("div", { class: "ctl wide" },
+    el("div", { class: "cap" }, el("span", {}, "models measured")), boxes));
+}
+
+/** What the controls say, after the state moved. Values, never structure. */
+function paintControls() {
+  ref.roomSaid.textContent = human(state.room);
+  ref.ctxSaid.textContent = `${kTokens(state.ctx)} tokens`;
+  ref.usersSaid.textContent = commas(state.users);
+  // the users slider reaches as far as the most generous model actually fits, so dragging
+  // it never runs off into a range where every answer is "does not fit"
+  const most = Math.max(1, ...visible().map((f) => Fit.users(f, state.room, state.ctx)));
+  const ceiling = Math.max(8, Math.min(1024, most));
+  ref.usersSlider.max = String(ceiling);
+  if (state.users > ceiling) { state.users = ceiling; ref.usersSlider.value = String(ceiling); }
+  for (const b of (ref.draftButtons || [])) b.classList.toggle("on", b.dataset.key === state.drafted);
+  for (const [f, label] of (ref.modelLabels || [])) label.classList.toggle("off", !state.on.has(f.i));
+}
+
+// ---------------------------------------------------------------- what it cost to be right
+//
+// `ml-stack-bench show --rates`, as a picture you can move rather than a table you have to
+// hold in your head. Accuracy up, cost along -- and the cost is any of the three scarcities
+// the bench measures, because which model to serve depends on which one is short. The
+// frontier is the runs nothing beats on *both*: choosing among those is choosing a budget,
+// and everything off it there is never a reason to choose.
+//
+// Every number comes off `/ui/rates.json`, which is `score.derived` and `show.pareto` over
+// the kept store. Nothing is recomputed here -- including the frontier, which arrives
+// worked out for all three costs so switching the axis costs no round trip.
+
+async function loadRates() {
+  if (state.runs !== null) return;
+  try {
+    const r = await fetch("/ui/rates.json", { headers: { "X-ML-Stack-UI": "1" } });
+    const got = await r.json();
+    if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
+    state.runs = (got.runs || []).map((p, i) => ({ ...p, i, colour: COLOURS[i % COLOURS.length] }));
+    state.axes = got.axes || {};
+    state.ratesError = got.error || "";
+  } catch (e) {
+    state.runs = [];
+    state.ratesError = e.message;
+  }
+}
+
+const shownRuns = () => (state.runs || []).filter((p) =>
+  state.showing === "both" || (state.showing === "composed" ? p.composed : !p.composed));
+
+/** What a cost reads as on the axis: seconds, tokens, and bytes shown as GB. */
+const saidCost = (p) => (state.cost === "kv_bytes"
+  ? `${(p.kv_bytes / GB).toFixed(1)} GB`
+  : state.cost === "paid_tokens" ? `${commas(p.paid_tokens)} tok` : `${p.seconds.toFixed(1)} s`);
+
+const costOf = (p) => (state.cost === "kv_bytes" ? p.kv_bytes / GB : p[state.cost] || 0);
+
+function panelRates(points, tip) {
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+  const top = Math.max(0.01, ...points.map(costOf)) * 1.08;
+  const px = (c) => IX0 + c / top * (IX1 - IX0);
+  const py = (right) => IY1 - Math.max(0, Math.min(1, right)) * (IY1 - IY0);
+
+  for (let i = 0; i <= 5; i += 1) {
+    const y = i / 5;
+    svg.append(svgEl("line", { class: "grid", x1: IX0, x2: IX1, y1: py(y), y2: py(y) }));
+    svg.append(svgEl("text", { x: IX0 - 8, y: py(y) + 3, "text-anchor": "end" },
+                     `${(y * 100).toFixed(0)}%`));
+  }
+  for (let i = 0; i <= 5; i += 1) {
+    const c = top * i / 5;
+    svg.append(svgEl("line", { class: "grid", x1: px(c), x2: px(c), y1: IY0, y2: IY1 }));
+    svg.append(svgEl("text", { x: px(c), y: IY1 + 14, "text-anchor": "middle" },
+                     state.cost === "paid_tokens" ? commas(c) : c.toFixed(1)));
+  }
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
+  svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
+  svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
+                             class: "title" }, state.axes[state.cost] || state.cost));
+  svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title", "text-anchor": "middle",
+                             transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
+                   "answers right (F1)"));
+
+  // the frontier, joined: nothing on it is both more accurate and cheaper than another
+  const front = points.filter((p) => (p.front || []).includes(state.cost))
+                      .sort((a, b) => costOf(a) - costOf(b));
+  if (front.length > 1) {
+    svg.append(svgEl("path", { class: "front",
+      d: front.map((p, i) => `${i ? "L" : "M"}${px(costOf(p)).toFixed(1)},${py(p.right).toFixed(1)}`).join("") }));
+  }
+  for (const p of points) {
+    const on = (p.front || []).includes(state.cost);
+    // a composed point is a square: it is a model, not a run -- accuracy from its largest
+    // run and cost from its fastest one that held that accuracy
+    const x = px(costOf(p)), y = py(p.right);
+    const mark = p.composed
+      ? svgEl("rect", { x: x - 4, y: y - 4, width: 8, height: 8, class: "point",
+                        fill: on ? "#4ad07f" : p.colour })
+      : svgEl("circle", { cx: x, cy: y, r: on ? 5.5 : 4, class: "point",
+                          fill: on ? "#4ad07f" : p.colour });
+    mark.dataset.run = p.i;
+    svg.append(mark);
+  }
+
+  svg.addEventListener("mouseleave", () => { state.hotRun = null; tip.style.opacity = 0; paintHotRun(); });
+  svg.addEventListener("mousemove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const mx = (e.clientX - box.left) / box.width * W, my = (e.clientY - box.top) / box.height * H;
+    let best = null, gap = Infinity;
+    for (const p of points) {
+      const near = Math.hypot(px(costOf(p)) - mx, py(p.right) - my);
+      if (near < gap) { gap = near; best = p; }
+    }
+    state.hotRun = best && gap < 24 ? best.i : null;
+    paintHotRun();
+    if (state.hotRun === null) { tip.style.opacity = 0; return; }
+    tip.replaceChildren(
+      el("div", {}, el("b", {}, best.label + (best.composed ? " (composed)" : ""))),
+      el("div", {}, el("span", {}, "F1 "), el("b", {}, `${(best.right * 100).toFixed(0)}%`),
+         el("span", {}, "  over "), el("b", {}, `${commas(best.questions)} questions`)),
+      el("div", {}, el("span", {}, (state.axes[state.cost] || state.cost) + " "),
+         el("b", {}, saidCost(best))),
+      (best.front || []).includes(state.cost)
+        ? el("div", {}, el("b", { style: "color:#4ad07f" }, "on the frontier")) : null,
+      best.host ? el("div", {}, el("span", {}, "measured on "), el("b", {}, best.host)) : null);
+    const host = svg.parentElement.getBoundingClientRect();
+    tip.style.left = `${Math.max(4, Math.min(e.clientX - host.left + 14, host.width - 250))}px`;
+    tip.style.top = `${e.clientY - host.top + 14}px`;
+    tip.style.opacity = 1;
+  });
+  return svg;
+}
+
+function paintHotRun() {
+  for (const mark of document.querySelectorAll("svg .point")) {
+    mark.classList.toggle("hot", state.hotRun === Number(mark.dataset.run));
+    mark.setAttribute("opacity",
+      state.hotRun !== null && state.hotRun !== Number(mark.dataset.run) ? "0.3" : "1");
+  }
+  for (const tr of document.querySelectorAll("table.rates tbody tr")) {
+    tr.classList.toggle("hot", state.hotRun === Number(tr.dataset.run));
+  }
+}
+
+function ratesTable(points) {
+  const num = (v, digits = 2) => (v === undefined || v === null ? "—" : v.toFixed(digits));
+  const body = el("tbody", {});
+  for (const p of points) {
+    const tr = el("tr", {
+      onmouseenter: () => { state.hotRun = p.i; paintHotRun(); },
+      onmouseleave: () => { state.hotRun = null; paintHotRun(); } },
+      el("td", { class: "name" }, el("i", { class: "sw", style: `background:${p.colour}` }),
+         p.label + (p.composed ? " =" : "")),
+      el("td", {}, p.host || "—"),
+      el("td", {}, commas(p.questions)),
+      el("td", {}, `${(p.right * 100).toFixed(0)}%`),
+      el("td", {}, `${(p.recall * 100).toFixed(0)}%`),
+      el("td", {}, `${(p.precision * 100).toFixed(0)}%`),
+      el("td", {}, num(p.right_per_minute)),
+      el("td", {}, num(p.right_per_1k, 4)),
+      el("td", {}, num(p.right_per_gb, 3)),
+      el("td", {}, num(p.seconds_per_right, 1)),
+      el("td", { class: "mark" }, (p.front || []).includes(state.cost) ? "★" : ""));
+    tr.dataset.run = p.i;
+    body.append(tr);
+  }
+  return el("table", { class: "fit rates" },
+    el("thead", {}, el("tr", {},
+      el("th", {}, "run"), el("th", {}, "host"), el("th", {}, "n"), el("th", {}, "F1"),
+      el("th", {}, "recall"), el("th", {}, "prec"), el("th", {}, "F1/min"),
+      el("th", {}, "F1/1k tok"), el("th", {}, "F1/GB"), el("th", {}, "s per right"),
+      el("th", {}, "frontier"))),
+    body);
+}
+
+function buildRateControls() {
+  const box = document.getElementById("rate-controls");
+  const sel = el("select", { onchange: (e) => { state.cost = e.target.value; draw(); } },
+    ...Object.entries(state.axes).map(([key, said]) => el("option", { value: key }, said)));
+  sel.value = state.cost;
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "accuracy against")),
+    el("div", { class: "pair" }, sel),
+    el("div", { class: "hint" }, "which scarcity is short here — the frontier is drawn "
+                                 + "against this one")));
+
+  ref.showButtons = [];
+  const mk = (key, said) => {
+    const b = el("button", { onclick: () => { state.showing = key; draw(); } }, said);
+    b.dataset.key = key;
+    ref.showButtons.push(b);
+    return b;
+  };
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "points")),
+    el("div", { class: "toggle" }, mk("both", "both"), mk("runs", "runs"),
+                                   mk("composed", "models")),
+    el("div", { class: "hint" }, "a model composed is one point: accuracy from its largest "
+                                 + "run, cost from its fastest run that held it")));
+}
+
+function drawRates() {
+  const body = document.getElementById("body");
+  for (const b of (ref.showButtons || [])) b.classList.toggle("on", b.dataset.key === state.showing);
+  const points = shownRuns();
+  if (!points.length) {
+    body.replaceChildren(el("p", { class: "empty" }, state.ratesError
+      || "Nothing has been measured into the runs store yet. "
+         + "ml-stack-bench sweep --smoke asks two questions through the whole path."));
+    return;
+  }
+  const tip = el("div", { class: "tip" });
+  const panel = el("div", { class: "panel" },
+    el("h2", {}, "What it cost to be right"),
+    el("div", { class: "sub" },
+       "green is the frontier for this cost: nothing there is both more accurate and "
+       + "cheaper, so choosing among them is choosing a budget. A square is a model "
+       + "composed, a circle is one run."));
+  panel.append(panelRates(points, tip), tip);
+  body.replaceChildren(
+    el("div", { class: "panels", style: "grid-template-columns: 1fr" }, panel),
+    ratesTable(points),
+    el("p", { class: "note" },
+      "The same runs `ml-stack-bench show --rates` prints, from the same store. Raw runs "
+      + "describe one machine and one llama.cpp build and are not committed; what is "
+      + "committed is the ranking they support."));
+  paintHotRun();
+}
+
+// ---------------------------------------------------------------- drawing it all
+
+/** The two views share the header, the styles and the tooltip; nothing else. */
+const VIEWS = [["fit", "What fits"], ["rates", "What it cost to be right"]];
+
+function buildViews() {
+  const nav = document.getElementById("views");
+  ref.viewButtons = VIEWS.map(([key, said]) => {
+    const b = el("button", { onclick: () => go(key) }, said);
+    b.dataset.key = key;
+    return b;
+  });
+  nav.replaceChildren(...ref.viewButtons);
+}
+
+async function go(view) {
+  state.view = view;
+  if (view === "rates") {
+    await loadRates();
+    if (!ref.showButtons) buildRateControls();
+  }
+  draw();
+}
+
+function draw() {
+  for (const b of (ref.viewButtons || [])) b.classList.toggle("on", b.dataset.key === state.view);
+  document.getElementById("heading").textContent =
+    VIEWS.find(([k]) => k === state.view)[1];
+  document.getElementById("controls").hidden = state.view !== "fit";
+  document.getElementById("rate-controls").hidden = state.view !== "rates";
+  state.hot = state.hotRun = null;
+  if (state.view === "rates") { drawRates(); return; }
+  drawFit();
+}
+
+function drawFit() {
+  paintControls();
+  const rows = visible();
+  const body = document.getElementById("body");
+  if (!rows.length) {
+    body.replaceChildren(el("p", { class: "empty" },
+      "Nothing to draw. Tick a model above, or measure one: "
+      + "ml-stack-serve fit MODEL --measure"));
+    return;
+  }
+  const tipA = el("div", { class: "tip" }), tipB = el("div", { class: "tip" });
+
+  const a = el("div", { class: "panel" },
+    el("h2", {}, "How many fit, and at what context"),
+    el("div", { class: "sub" },
+       `at ${human(state.room)} of room · both scales logarithmic · `
+       + "the dashed line is where the context slider stands"));
+  a.append(panelFits(rows, tipA), tipA);
+
+  const b = el("div", { class: "panel" },
+    el("div", { class: "zoomhint" }, "drag or wheel to zoom · double-click to reset"),
+    el("h2", {}, "What it costs as they arrive"),
+    el("div", { class: "sub" },
+       `each user gets ${commas(state.ctx)} tokens · where a line leaves the red room line `
+       + "is the last user that machine holds"));
+  b.append(panelCost(rows, tipB), tipB);
+
+  body.replaceChildren(
+    el("div", { class: "panels" }, a, b),
+    table(rows),
+    el("p", { class: "note" },
+      "Measured at load, never estimated: every record is what llama.cpp said it allocated, "
+      + "read off its own log at -lv 4. A line's intercept is the weights plus the compute "
+      + "buffers — the part that does not grow — and its slope is one user's cache. A heavy "
+      + "model with a cheap cache overtakes a light one with a fat cache somewhere, and that "
+      + "crossing is the whole reason the second panel is drawn from zero users."));
+  paintHot();
+}
+
+load().then(() => {
+  document.getElementById("machine").textContent =
+    `${state.name} · ${human(state.machineRoom)} of room · ${state.records.length} measured`;
+  buildViews();
+  buildControls();
+  draw();
+}).catch((e) => {
+  document.getElementById("body").replaceChildren(
+    el("p", { class: "empty" }, `Could not read the measurements: ${e.message}`));
+});
+</script>

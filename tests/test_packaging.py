@@ -27,7 +27,7 @@ def test_the_web_interface_ships_in_the_fleet_wheel(tmp_path):
     wheel = build(tmp_path)
     names = zipfile.ZipFile(wheel).namelist()
 
-    for asset in ("index.html", "style.css", "app.js"):
+    for asset in ("index.html", "style.css", "app.js", "fit.html"):
         assert f"ml_stack/fleet/web/{asset}" in names, f"{asset} missing from {wheel.name}"
 
 

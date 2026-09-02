@@ -412,6 +412,9 @@ def cmd_fit(args: argparse.Namespace) -> int:
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
 
+    if getattr(args, "ui", False):
+        return _fit_ui()
+
     asked_rooms: list[int] = []
     for said in (getattr(args, "room", None) or []):
         try:
@@ -490,6 +493,29 @@ def cmd_fit(args: argparse.Namespace) -> int:
                              + fit_mod.render(every, contexts, asked, True))
         Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
         print(f"\nwrote {where}", file=sys.stderr)
+    return 0
+
+
+def _fit_ui() -> int:
+    """``fit --ui``: the interactive page, on loopback, until Ctrl-C.
+
+    Not a second implementation of anything -- `fleet.ui.serve_page` mounts the same route
+    table the app mounts, so `/ui/fit` and `/ui/fit.json` are the app's, and a machine with
+    no daemon running still gets the page.
+    """
+    from ml_stack.fleet.ui import serve_page
+    from ml_stack.platform import open_path
+
+    server = serve_page(name=platform.node() or "this machine")
+    where = f"http://127.0.0.1:{server.server_port}/ui/fit"
+    print(f"the fit page is at {where}\n(loopback only; Ctrl-C to stop)", file=sys.stderr)
+    print(f"opened with {open_path(where)}", file=sys.stderr)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\nstopped", file=sys.stderr)
+    finally:
+        server.server_close()
     return 0
 
 
@@ -803,6 +829,12 @@ def main(argv: list[str] | None = None) -> int:
                             ".png, .svg or .pdf; needs matplotlib")
     fit_p.add_argument("--open", action="store_true",
                        help="with --plot: open the picture when it is drawn")
+    fit_p.add_argument("--ui", action="store_true",
+                       help="put the same two panels up as a page you can move: a room "
+                            "slider, a per-user context slider, a users slider and a model "
+                            "per checkbox, redrawn as you drag. Serves on loopback, opens a "
+                            "browser at it, and stays up until Ctrl-C. The fleet app shows "
+                            "the same page under Fit")
     fit_p.add_argument("--at", type=int, default=32768, metavar="N",
                        help="the per-user context the second panel charges at "
                             "(default: 32768)")

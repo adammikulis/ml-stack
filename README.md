@@ -469,7 +469,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | | |
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
-| `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown |
+| `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown; `--ui` puts the same two panels up as an interactive page on loopback (also the app's **Fit** view) |
 | `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
@@ -634,6 +634,30 @@ which is `Fit.line(context)`, the pair of numbers every line is drawn from. Draw
 matplotlib (`pip install 'ml-stack[plot]'`); nothing else here does, and `ml-stack-bench
 show --plot` deliberately still writes hand-built SVG with no library so it opens on a
 machine with no packages. With `--write` alongside, the page embeds the picture beside it.
+
+`--ui` puts the same two panels up as a page you can move, which the picture cannot be:
+a room slider (this machine's, the familiar card sizes, or a number you type), a per-user
+context slider from 1k to 256k, a users slider, a checkbox per measured model, a cache-type
+select and a drafted toggle where both records exist -- and every drag redraws both panels
+and a table saying, per model, what it costs loaded, what a user costs at that context, how
+many fit and the longest context the chosen number could each be given. The second panel's
+x range follows the models on screen and takes a drag or a wheel to zoom, because the static
+picture's did not: one 2B model that fits 250 people flattened every other line in it.
+Hovering either panel lights the model's row and says its exact numbers at the cursor. It
+serves on loopback and opens a browser at it:
+
+```
+ml-stack-serve fit --ui
+```
+
+The fleet app shows the same page under **Fit**, at `/ui/fit`, from the same two routes --
+`/ui/fit.json` hands over the records with this machine's room, and the page does the
+arithmetic itself so a slider costs no round trip. A sibling tab, **What it cost to be
+right**, draws `ml-stack-bench show --rates` the same way: accuracy against wall clock,
+tokens paid for, or KV and runtime, with the Pareto frontier joined -- nothing on it is both
+more accurate and cheaper, so choosing among those points is choosing a budget. Both pages
+are hand-drawn SVG with no library and no CDN, so they open on a machine that has never been
+online.
 
 The records are the single source of truth, in `src/ml_stack/data/fit.json`, keyed by the
 model file's basename, the cache type and the guessing-ahead kind; `~/.ml-stack/fit.json`
