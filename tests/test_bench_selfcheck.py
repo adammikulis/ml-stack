@@ -235,3 +235,103 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
     assert bench._main(["extract", "alone", "--world", str(world), "--serve", "tiny.gguf",
                         "--sample", "5", "--kept", str(kept), "--no-smoke"]) == 0
     assert [len(r["rows"]) for r in bench.runs(kept, "alone")] == [5]
+
+
+# -- the preflight is the real one ----------------------------------------------------------------
+
+HEAD = "hf:someone/tiny-GGUF/MTP/mtp-tiny-Q8_0.gguf"
+
+
+def test_the_real_preflight_runs_over_the_spec_the_run_builds_and_the_argv_is_built(monkeypatch):
+    """Twice on 2026-09-02 the self-check said ok and the run died inside the preflight,
+    because the self-check had replaced `Preflight` whole. Now every check runs over the
+    spec `served` builds -- a head named by hf: file, a draft length, a quantised cache --
+    and `command()` builds the argv for real, twice: in the flags check on the reference's
+    stand-in, and in the served fake on the head as `start()` would have fetched it."""
+    from ml_stack.serve import preflight
+    from ml_stack.serve.backend import LlamaServerBackend
+
+    checked, built = [], []
+    real_flags = preflight._flags_check
+    real_command = LlamaServerBackend.command
+
+    def watching_flags(spec, binary, **seams):
+        checked.append(spec)
+        return real_flags(spec, binary, **seams)
+
+    def watching_command(self, spec):
+        argv = real_command(self, spec)
+        built.append(" ".join(argv))
+        return argv
+
+    monkeypatch.setattr(preflight, "_flags_check", watching_flags)
+    monkeypatch.setattr(LlamaServerBackend, "command", watching_command)
+    said = selfcheck(["drafts", "tiny.gguf", "--draft", HEAD, "--n-max", "2",
+                      "--serve-kv", "q8_0"])
+    assert "draft:mtp-tiny-Q8_0@n2" in said
+    spec = checked[-1]
+    assert spec.draft == HEAD and spec.spec_draft_max == 2 and spec.spec_type == "draft-mtp"
+    assert spec.cache_type_k == spec.cache_type_v == "q8_0"
+    argvs = [a for a in built if "--spec-draft-n-max 2" in a]
+    assert any("-md draft-head.gguf" in a for a in argvs), "the flags check's stand-in"
+    assert any("mtp-tiny-Q8_0.gguf" in a and "--cache-type-k q8_0" in a
+               and "--spec-type draft-mtp" in a and "-md " in a for a in argvs), \
+        "the lease's argv, on the head as fetched"
+    assert not any(a.split()[0] == "llama-server" for a in argvs), "a binary that is a file"
+
+
+def test_yesterdays_bug_put_back_fails_the_self_check_naming_the_reference(monkeypatch):
+    """A flags check that builds the argv on the raw spec, where `command()` refuses a head
+    still named by hf: file. The self-check fails and says which reference, rather than
+    saying ok over a preflight that never ran."""
+    from ml_stack.serve import preflight
+    from ml_stack.serve.backend import LlamaServerBackend
+    from ml_stack.serve.preflight import Check
+
+    def raw(spec, binary, **_):
+        LlamaServerBackend(binary=binary).command(spec)
+        return Check("flags", True, "built on the raw spec")
+
+    monkeypatch.setattr(preflight, "_flags_check", raw)
+    with pytest.raises(SelfCheckFailed, match="MTP/mtp-tiny-Q8_0.gguf") as why:
+        selfcheck(["drafts", "tiny.gguf", "--draft", HEAD, "--n-max", "2"])
+    assert "the preflight raised" in str(why.value) and "ServerFailed" in str(why.value)
+    assert "must be fetched" in str(why.value)
+
+
+def test_a_check_that_refuses_fails_the_self_check_with_the_report(monkeypatch):
+    from ml_stack.serve import preflight
+    from ml_stack.serve.preflight import Check
+
+    monkeypatch.setattr(preflight, "_fit_check",
+                        lambda *a, **k: Check("fit", False, "selfcheck test: does not fit"))
+    with pytest.raises(SelfCheckFailed, match="FAIL  fit: selfcheck test: does not fit"):
+        selfcheck(["sweep", "--serve", "tiny.gguf"])
+
+
+def test_the_shapes_that_died_in_the_preflight_pass_and_read_nothing(monkeypatch):
+    """The two command lines of 2026-09-02, and a model whose file is nowhere: the facts
+    say the shards are present, the header is a dense model the build reads, every flag
+    is accepted -- and nothing asks the disk, the Hub or a build's --help for any of it."""
+    import ml_stack.hub
+    import ml_stack.setup
+    from ml_stack.serve import backend, preflight
+
+    def never(*a, **k):
+        raise AssertionError("the self-check reached a real reader")
+
+    monkeypatch.setattr(ml_stack.hub, "files", never)
+    monkeypatch.setattr(preflight, "_local_index", never)
+    monkeypatch.setattr(preflight, "read_gguf_header", never)
+    monkeypatch.setattr(ml_stack.setup, "_arches", never)
+    monkeypatch.setattr(backend, "flags_of", never)
+
+    said = selfcheck(["drafts", "tiny.gguf", "--draft", "hf:someone/tiny-GGUF/MTP/head.gguf",
+                      "--n-max", "2", "--n-max", "8"])
+    assert "draft:head@n2" in said and "draft:head@n8" in said
+    said = selfcheck(["sweep", "--serve", "tiny.gguf", "--serve-draft", "auto",
+                      "--serve-kv", "q8_0", "--reasoning-budget", "4096"])
+    assert "tiny-plain-kv-q8_0-rb4096" in said and "tiny-shortlist-kv-q8_0-rb4096" in said
+    assert selfcheck(["sweep", "--serve", "/nowhere/at/all/absent.gguf"]).startswith("sweep: ")
+    assert selfcheck(["sweep", "--serve", "hf:someone/absent-GGUF/absent-Q4_K_M.gguf"]) \
+        .startswith("sweep: ")

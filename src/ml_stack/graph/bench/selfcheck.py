@@ -8,9 +8,20 @@ accepts anything. Neither the plan nor the test is where that belongs. `selfchec
 the exact subcommand and flags a person asked for -- every ``--also`` way, the store and
 the shortlist, the KV cache, the draft lengths, the per-question cap -- through the whole
 path with a scripted model that takes exactly what `Client` takes, a served model that
-never starts, a preflight that reads nothing, the invented community and two of its
-questions, into a scratch store it reads back. Ten seconds, and `main` runs it before it
-takes the measuring lock, so the check no longer depends on a person remembering it.
+never starts, the real preflight over facts that read nothing, the invented community and
+two of its questions, into a scratch store it reads back. Ten seconds, and `main` runs it
+before it takes the measuring lock, so the check no longer depends on a person remembering
+it.
+
+The preflight is the real one on purpose. Twice on 2026-09-02 the self-check said ok and
+the run then died inside the preflight -- `command()` refusing a draft head still named by
+`hf:` file -- because the self-check had replaced `Preflight` whole, so no preflight code
+ran. Now only its readers are replaced, through `Preflight`'s own seams (``shards_of``,
+``read_header``, ``arches``, ``flags``, ``ref_bytes``): the shards are present, the header
+is a dense model the build reads, the build accepts every flag `command` can emit. Every
+check's code runs over the exact spec the run builds, the argv included; and `fake_serve`
+walks what `start()` does before `Popen` -- the draft resolved, the argv built, its flags
+checked -- so the lease's refusal is met here too.
 
 `ScriptedModel` and `ScriptedReader` are the fakes the tests use too. One fake shared
 between the tests and the runner is the point: a fake with ``**kwargs`` in its signature
@@ -34,9 +45,12 @@ from typing import Any
 from unittest import mock
 
 # the real client's signature, read before anything is patched over it, is what the fakes
-# are strict against -- so they stay strict as `Client` changes, with nothing to maintain
+# are strict against -- so they stay strict as `Client` changes, with nothing to maintain;
+# the real preflight, bound the same way, is what the self-check runs whatever a test has
+# put over `preflight.Preflight` for the run it then makes
 from ml_stack.client.chat import Client as _RealClient
 from ml_stack.client.families import GENERIC
+from ml_stack.serve.preflight import Preflight as _RealPreflight
 
 __all__ = ["ScriptedModel", "ScriptedReader", "SelfCheckFailed", "selfcheck"]
 
@@ -189,11 +203,41 @@ def _rewritten(args: argparse.Namespace, scratch: Path) -> argparse.Namespace:
     return out
 
 
+# What the faked facts say about any model: a dense header with the keys the KV estimate
+# reads, so the estimate is a number and not a 0 that skips the arithmetic.
+_HEADER: dict[str, object] = {"general.architecture": "llama", "llama.block_count": 32,
+                              "llama.attention.head_count_kv": 8,
+                              "llama.attention.key_length": 128}
+_WEIGHTS_BYTES = 4 << 30
+_COMPANION_BYTES = 1 << 30
+
+
+def _stand_in_binary(home: Path) -> Path:
+    """A file named llama-server that exists and does nothing: `command()` resolves its
+    binary through `require_binary`, which needs a file, and a bare name would fall
+    through to whatever this machine has -- or nothing, on a machine with none."""
+    where = home / "bin" / "llama-server"
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    where.chmod(0o755)
+    return where
+
+
+def _mainline_flags(binary: str | Path) -> frozenset[str]:
+    """Every flag `command` can emit, as the build's --help: the flags check then judges
+    the argv it builds for real, rather than giving an unread build no opinion and
+    never building one."""
+    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
+
+    return frozenset(emitted_flags(LlamaServerBackend(binary=binary)))
+
+
 @contextlib.contextmanager
 def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     """Everything a measuring command reaches for that is a server, a file or a machine,
-    replaced for the block: the served model never starts, the preflight passes without
-    reading, the client is scripted (and strict), nothing is asked of a port."""
+    replaced for the block: the served model never starts, the preflight runs for real
+    over facts that touch nothing, the client is scripted (and strict), nothing is asked
+    of a port."""
     import ml_stack.client
     import ml_stack.hub
     import ml_stack.serve
@@ -202,30 +246,81 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     from ml_stack.graph import bench
     from ml_stack.graph.bench import extract as bench_extract
     from ml_stack.serve import ServerInfo
-    from ml_stack.serve.backend import ServerSpec
+    from ml_stack.serve.backend import (
+        LlamaServerBackend,
+        ServerSpec,
+        UnknownFlag,
+        unknown_flags,
+    )
     from ml_stack.serve.preflight import Check, Report
 
     fake_client = ScriptedReader if args.cmd == "extract" else ScriptedModel
+    stand_in = _stand_in_binary(home)
 
     class Built(fake_client):  # type: ignore[misc,valid-type]
         def __init__(self, *a: Any, **k: Any) -> None:
             super().__init__(*a, **k)
             built.append(self)
 
+    def find_stand_in(name: str = "llama-server", *, explicit: Any = None,
+                      **_: Any) -> Path:
+        # `command()` resolves its binary through here; a --binary that exists is kept,
+        # anything else is the stand-in, so the argv is built whatever this machine has
+        given = Path(str(explicit)).expanduser() if explicit else None
+        return given.resolve() if given is not None and given.is_file() else stand_in
+
+    def fetched(reference: str) -> Path:
+        # a head named by hf: file is fetched into the cache and served by path; here
+        # it lands under the scratch home, as a file that is never read
+        head = home / "cache" / str(reference).removeprefix("hf:").rsplit("/", 1)[-1]
+        head.parent.mkdir(parents=True, exist_ok=True)
+        head.touch()
+        return head
+
     @contextlib.contextmanager
     def fake_serve(model: Any, *, port: int | None = None, context: int = 4096,
                    timeout: float | None = None, manager: Any = None, **spec_kwargs: Any):
-        # the spec is built for real: a keyword the server does not take fails here
-        ServerSpec(model=model, port=port or 1, context=context, **spec_kwargs)
+        # the spec is built for real: a keyword the server does not take fails here --
+        # and then everything `start()` does before Popen: the draft resolved to a file,
+        # the argv built, every flag in it checked. A spec the backend refuses is refused
+        # here, naming what it refused (measured 2026-09-02: a head still named by hf:
+        # file, refused in the lease after a self-check that built no argv)
+        spec = ServerSpec(model=model, port=port or 1, context=context, **spec_kwargs)
+        backend = getattr(manager, "backend", None) or LlamaServerBackend(binary=stand_in)
+        argv = backend.command(backend.resolved_draft(spec))
+        lacking = unknown_flags(argv, _mainline_flags(stand_in))
+        if lacking:
+            raise UnknownFlag("\n".join(f"selfcheck: command() emits {flag}, which no build "
+                                        f"accepts" + (f"; nearest {near}" if near else "")
+                                        for flag, near in lacking))
         yield ServerInfo(base_url="http://127.0.0.1:1", port=1, pid=None, backend="selfcheck",
                          load_s=0.0, warmup_s=0.0)
 
-    def fake_preflight(spec: Any, *, binary: str, limit_bytes: int = 0) -> Report:
-        return Report(checks=[Check("shards", True, "selfcheck: not read"),
-                              Check("architecture", True, "selfcheck: not read"),
-                              Check("fit", True, "selfcheck: not estimated"),
-                              Check("flags", True, "selfcheck: not asked")],
-                      weights_bytes=1, kv_estimate_bytes=1)
+    def present(spec: Any) -> tuple[int, Path | None, Check]:
+        name = str(spec.model).rsplit("/", 1)[-1] or "model.gguf"
+        return (_WEIGHTS_BYTES, home / "cache" / name,
+                Check("shards", True, "selfcheck: taken as complete on this machine"))
+
+    def checked_preflight(spec: Any, *, binary: str, limit_bytes: int = 0) -> Report:
+        # the real thing, over the spec the run built, with only the readers replaced:
+        # the shards are present at a plausible size, the header is a dense model this
+        # build reads, the build accepts every flag `command` can emit, a companion
+        # costs a gigabyte. Every check's own code runs, and the argv is built for real.
+        try:
+            report = _RealPreflight(spec, binary=binary, limit_bytes=limit_bytes,
+                                    shards_of=present, read_header=lambda path: dict(_HEADER),
+                                    arches=lambda build: {"llama"}, flags=_mainline_flags,
+                                    ref_bytes=lambda ref: _COMPANION_BYTES if ref else 0)
+        except Exception as exc:  # noqa: BLE001 - the point is to say so before the GPU
+            raise SelfCheckFailed(
+                f"the preflight raised over the spec the run builds for {spec.model}"
+                + (f" with draft {spec.draft}" if spec.draft else "")
+                + f": {type(exc).__name__}: {exc}\n\n{traceback.format_exc()}") from exc
+        if not report.ok:
+            raise SelfCheckFailed(
+                f"the preflight refused the spec the run builds for {spec.model}:\n"
+                + report.said())
+        return report
 
     def fake_footprint(url: str) -> dict[str, Any]:
         return {"base_url": url, "context": int(getattr(args, "context", 0) or 32768),
@@ -252,14 +347,15 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
         patch(mock.patch.object(bench_extract, "footprint", fake_footprint))
         patch(mock.patch.object(bench, "ask_from", fake_ask_from))
         patch(mock.patch.object(ml_stack.serve, "serve", fake_serve))
-        patch(mock.patch.object(ml_stack.serve.binary, "find_binary", lambda: "llama-server"))
+        patch(mock.patch.object(ml_stack.serve.binary, "find_binary", find_stand_in))
+        patch(mock.patch.object(ml_stack.hub, "fetch", fetched))
         # `--serve-draft auto` asks the one resolver; here it answers with a head that
         # never loads, and says so the way the real one does
         patch(mock.patch.object(ml_stack.hub, "choose_head",
                                 lambda model, **k: ml_stack.hub.Chosen(
                                     f"mtp-{Path(str(model)).name}", "",
                                     "selfcheck: a head that never loads", False)))
-        patch(mock.patch.object(preflight, "Preflight", fake_preflight))
+        patch(mock.patch.object(preflight, "Preflight", checked_preflight))
         patch(mock.patch.object(ml_stack.hub, "room", lambda: 1 << 40))
         patch(mock.patch.object(ml_stack.client, "Client", Built))
         # the module, not the function the package re-exports under the same name
@@ -271,9 +367,11 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
 def selfcheck(argv: Sequence[str]) -> str:
     """Drive ``ml-stack-bench argv`` through the whole path with no server and no GPU.
 
-    The exact subcommand and flags given, with the model, the server, the preflight and
-    the machine faked and everything else real: the ways are built, the spec is built,
-    every client is constructed as the run would construct it, two questions are asked of
+    The exact subcommand and flags given, with the model, the server and the machine
+    faked and everything else real: the ways are built, the spec is built, the real
+    preflight runs over it (its readers faked, its checks and its argv not), what
+    `start()` does before `Popen` is done to it, every client is constructed as the run
+    would construct it, two questions are asked of
     the invented community and scored, the run is saved to a scratch store and read back
     the way `show` reads it. `extract` reads a tiny invented world the same way. A run
     that was not asked for as ``--smoke`` runs its own smoke first here too.

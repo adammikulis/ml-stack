@@ -15,8 +15,10 @@ from __future__ import annotations
 
 import re
 import struct
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 __all__ = ["Check", "Preflight", "PreflightFailed", "Report", "read_gguf_header",
            "shard_names"]
@@ -198,6 +200,17 @@ def _hf_shards(repo: str, name: str) -> tuple[int, Path | None, Check]:
     return total, first_path, Check("shards", ok, detail)
 
 
+def _shards_of(spec) -> tuple[int, Path | None, Check]:
+    """The weights' size, the first shard's path when it is on this machine, and the
+    shards check -- off the disk for a path, through the Hub cache for an `hf:` reference.
+    The default ``shards_of`` reader; the one fact a preflight cannot ask without touching
+    a file or the Hub."""
+    if spec.is_hf_ref:
+        repo, name = spec.hf_parts(spec.model)
+        return _hf_shards(repo, name)
+    return _local_shards(Path(spec.model))
+
+
 def _ref_bytes(ref: str | Path | None) -> int:
     """Roughly what a companion reference (a draft, an mmproj) will cost, local or on the
     Hub. Best-effort: a companion that cannot be sized costs nothing to the estimate rather
@@ -225,17 +238,21 @@ def _ref_bytes(ref: str | Path | None) -> int:
 
 # ---------------------------------------------------------------- architecture
 
-def _architecture_check(first_file: Path | None, binary: str | Path) -> Check:
+def _architecture_check(first_file: Path | None, binary: str | Path, *,
+                        read_header: Callable[[Path | str], dict[str, object]] | None = None,
+                        arches: Callable[[str | Path], set[str]] | None = None) -> Check:
     """Same philosophy as ``flags_of``/``unknown_flags``: a fact that cannot be read is
     unknown, and an unknown build (or an unreadable file) is given no opinion rather than
     told it is wrong. Only a fact that *was* read, and contradicts what the build reads,
-    fails -- a missing shard is still a fact; a file this cannot even open is not."""
+    fails -- a missing shard is still a fact; a file this cannot even open is not.
+
+    ``read_header`` and ``arches`` are `Preflight`'s seams of the same names."""
     if first_file is None:
         return Check("architecture", True,
                      "no local copy to read yet; nothing to check until the shards check "
                      "above has something on disk")
     try:
-        meta = read_gguf_header(first_file)
+        meta = (read_header or read_gguf_header)(first_file)
     except Exception as exc:  # noqa: BLE001
         return Check("architecture", True,
                      f"could not read {first_file} ({exc}); no opinion")
@@ -245,7 +262,7 @@ def _architecture_check(first_file: Path | None, binary: str | Path) -> Check:
         return Check("architecture", True,
                      f"{first_file} names no general.architecture; no opinion")
 
-    known = known_architectures(binary)
+    known = (arches or known_architectures)(binary)
     if not known:
         return Check("architecture", True,
                      f"{arch!r} (this build's own architectures could not be read; no opinion)")
@@ -383,10 +400,14 @@ def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes
 
 # ---------------------------------------------------------------- flags (reuses backend.py)
 
-def _flags_check(spec, binary: str | Path) -> Check:
+def _flags_check(spec, binary: str | Path, *,
+                 flags: Callable[[str | Path], frozenset[str]] | None = None) -> Check:
+    """Every flag ``command(spec)`` emits is one the build's ``--help`` lists. ``flags``
+    stands in for `flags_of` when handed in (`Preflight`'s seam); the argv is always built
+    for real, because building it is where a spec the backend refuses is found out."""
     from ml_stack.serve.backend import LlamaServerBackend, flags_of, unknown_flags
 
-    known = flags_of(binary)
+    known = (flags or flags_of)(binary)
     if not known:
         return Check("flags", True, "could not read this build's --help; no opinion")
     # A draft named by hf: file is fetched and served by path at start(); this check is
@@ -408,38 +429,52 @@ def _flags_check(spec, binary: str | Path) -> Check:
 
 # ---------------------------------------------------------------- the whole thing
 
-def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0) -> Report:
+def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
+              shards_of: Callable[[Any], tuple[int, Path | None, Check]] | None = None,
+              read_header: Callable[[Path | str], dict[str, object]] | None = None,
+              arches: Callable[[str | Path], set[str]] | None = None,
+              flags: Callable[[str | Path], frozenset[str]] | None = None,
+              ref_bytes: Callable[[str | Path | None], int] | None = None) -> Report:
     """Everything worth knowing about ``spec`` before a process is started for it.
 
     Every check runs and is recorded even after one fails -- a report that stopped at the
     first failure would hide a second, unrelated one behind it, and the whole point of
     asking before the load is asking everything at once rather than one slow round at a time.
+
+    The five keyword seams are where the facts come from, and each defaults to the real
+    reader: ``shards_of(spec)`` is `_shards_of` (the disk, or the Hub cache),
+    ``read_header(path)`` is `read_gguf_header`, ``arches(binary)`` is
+    `known_architectures`, ``flags(binary)`` is `flags_of`, ``ref_bytes(ref)`` is
+    `_ref_bytes` (a companion's size, local or on the Hub). They exist for one caller: the
+    bench's self-check, which hands in facts that touch nothing so that every check's own
+    code -- the shard arithmetic, the KV estimate, the fit, and above all the argv
+    `_flags_check` builds -- runs over the exact spec a run is about to serve. Twice on
+    2026-09-02 a self-check that replaced this whole function said ok, and the run then
+    died in here. A fake that skips the checks is not a check of the checks.
     """
     report = Report()
 
-    if spec.is_hf_ref:
-        repo, name = spec.hf_parts(spec.model)
-        weights_bytes, first_file, shards = _hf_shards(repo, name)
-    else:
-        weights_bytes, first_file, shards = _local_shards(Path(spec.model))
+    weights_bytes, first_file, shards = (shards_of or _shards_of)(spec)
     report.checks.append(shards)
     report.weights_bytes = weights_bytes
 
-    report.checks.append(_architecture_check(first_file, binary))
+    report.checks.append(_architecture_check(first_file, binary, read_header=read_header,
+                                             arches=arches))
 
     meta: dict[str, object] = {}
     if first_file is not None:
         try:
-            meta = read_gguf_header(first_file)
+            meta = (read_header or read_gguf_header)(first_file)
         except Exception:  # noqa: BLE001 - already reported by the architecture check
             meta = {}
 
     kv_bytes = _kv_estimate_bytes(meta, spec.context, spec.cache_type_k, spec.cache_type_v)
     report.kv_estimate_bytes = kv_bytes
-    draft_bytes = _ref_bytes(spec.draft)
-    mmproj_bytes = _ref_bytes(spec.mmproj)
+    sized = ref_bytes or _ref_bytes
+    draft_bytes = sized(spec.draft)
+    mmproj_bytes = sized(spec.mmproj)
     report.checks.append(
         _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes))
 
-    report.checks.append(_flags_check(spec, binary))
+    report.checks.append(_flags_check(spec, binary, flags=flags))
     return report
