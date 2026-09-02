@@ -36,6 +36,7 @@ from pathlib import Path
 from ml_stack.serve.binary import (
     CACHE_ROOT,
     MANAGED_CURRENT,
+    MANAGED_NAMED,
     MANAGED_ROOT,
     child_env,
     find_binary,
@@ -43,8 +44,8 @@ from ml_stack.serve.binary import (
 )
 
 __all__ = [
-    "BuildFailed", "ROOT", "SRC_DIR", "BUILDS_DIR", "CURRENT_LINK",
-    "PERSIST_PLIST", "PERSIST_TASK", "WEEK_SECONDS", "cmd_build",
+    "BuildFailed", "ROOT", "SRC_DIR", "BUILDS_DIR", "CURRENT_LINK", "NAMED_DIR",
+    "NAMED_SRC_DIR", "PERSIST_PLIST", "PERSIST_TASK", "WEEK_SECONDS", "cmd_build",
 ]
 
 REPO_URL = "https://github.com/ggml-org/llama.cpp"
@@ -57,6 +58,8 @@ ROOT = MANAGED_ROOT
 SRC_DIR = ROOT / "src"
 BUILDS_DIR = ROOT / "builds"
 CURRENT_LINK = MANAGED_CURRENT
+NAMED_DIR = MANAGED_NAMED
+NAMED_SRC_DIR = ROOT / "named-src"
 
 LIB_GLOBS = ("lib*.dylib", "lib*.so", "*.dll")
 
@@ -187,6 +190,31 @@ def _short_commit(source: Path) -> str:
     return _git("rev-parse", "--short", "HEAD", cwd=source).stdout.strip()
 
 
+# -- a fork, kept beside `current` rather than replacing it ---------------------------
+def _named_source_dir(name: str) -> Path:
+    return NAMED_SRC_DIR / name
+
+
+def _named_dest(name: str, commit: str) -> Path:
+    return BUILDS_DIR / f"{name}-{commit}"
+
+
+def _sync_named_source(source: Path, repo: str, ref: str) -> None:
+    """Clone or fetch ``repo`` into ``source``, then land on ``ref`` -- a tag, branch or
+    SHA -- the same way ``_checkout_commit`` lands master's checkout on a specific commit.
+    Left at the default branch's tip when ``ref`` is empty."""
+    url = f"https://github.com/{repo}"
+    if (source / ".git").is_dir():
+        print(f"  fetching {url} into {source}")
+        _git("fetch", "--depth", "1", "origin", cwd=source)
+    else:
+        print(f"  cloning {url} into {source} (--depth 1)")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        _git("clone", "--depth", "1", url, str(source))
+    if ref:
+        _checkout_commit(source, ref)
+
+
 def _arches_from_source(source: Path) -> set[str]:
     """Every architecture name master's own source reads, for ``--check`` to compare against."""
     arch_file = source / "src" / "llama-arch.cpp"
@@ -252,7 +280,8 @@ def _version_of(binary: Path) -> str:
     return text.splitlines()[0] if text else ""
 
 
-def _install_source_build(build_dir: Path, dest: Path, commit: str) -> Path:
+def _install_source_build(build_dir: Path, dest: Path, commit: str, *,
+                          extra: dict | None = None) -> Path:
     bin_dir = build_dir / "bin"
     binary_name = _server_name()
     if not (bin_dir / binary_name).is_file() and not (bin_dir / binary_name).is_symlink():
@@ -266,9 +295,10 @@ def _install_source_build(build_dir: Path, dest: Path, commit: str) -> Path:
     if not is_windows():
         binary.chmod(binary.stat().st_mode | 0o111)
     version = _version_of(binary)
-    (dest / "BUILD.json").write_text(json.dumps(
-        {"commit": commit, "built_at": _now_iso(), "version": version, "source": "source"},
-        indent=2))
+    info = {"commit": commit, "built_at": _now_iso(), "version": version, "source": "source"}
+    if extra:
+        info.update(extra)
+    (dest / "BUILD.json").write_text(json.dumps(info, indent=2))
     return binary
 
 
@@ -295,19 +325,77 @@ def _build_from_source(args) -> tuple[Path, str]:
     return dest, commit
 
 
+def _build_from_source_named(args) -> tuple[Path, str]:
+    """Build a fork's own ref, kept at ``builds/<name>-<commit>/`` beside master's builds
+    and linked from ``named/<name>`` rather than replacing ``current``."""
+    source = _named_source_dir(args.name)
+    _sync_named_source(source, args.repo, args.ref)
+
+    commit = _short_commit(source)
+    dest = _named_dest(args.name, commit)
+    if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
+        print(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
+        return dest, commit
+
+    jobs = args.jobs or (os.cpu_count() or 4)
+    print(f"configuring {args.name}-{commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
+    _configure(source)
+    print(f"building ({jobs} jobs) -- this takes several minutes")
+    _compile(source, jobs)
+    print("installing")
+    _install_source_build(source / "build", dest, commit,
+                          extra={"repo": args.repo, "ref": args.ref or commit,
+                                 "name": args.name})
+    return dest, commit
+
+
 # -- downloading a release, for a machine with no compiler ----------------
-def _llama_releases(per_page: int = 5, timeout: float = 30.0) -> list[dict]:
+def _releases_for(repo: str, per_page: int = 5, timeout: float = 30.0) -> list[dict]:
     import urllib.error
     import urllib.request
 
     req = urllib.request.Request(
-        f"{LLAMA_RELEASES_API}?per_page={per_page}",
+        f"https://api.github.com/repos/{repo}/releases?per_page={per_page}",
         headers={"Accept": "application/vnd.github+json", "User-Agent": "ml-stack"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read())
     except (urllib.error.URLError, OSError, ValueError) as exc:
-        raise BuildFailed(f"could not reach GitHub releases: {exc}") from None
+        raise BuildFailed(f"could not reach {repo}'s GitHub releases: {exc}") from None
+
+
+def _llama_releases(per_page: int = 5, timeout: float = 30.0) -> list[dict]:
+    return _releases_for("ggml-org/llama.cpp", per_page=per_page, timeout=timeout)
+
+
+def _named_release_asset_globs() -> list[str]:
+    """Release asset name patterns for this machine, matching an ``unslothai/llama.cpp``
+    -shaped fork -- a *different* naming convention from ``ggml-org/llama.cpp`` itself, so
+    reusing ``_platform_asset_globs`` silently matched nothing there the first time this was
+    tried.
+
+    Read off unslothai/llama.cpp's actual release assets on 2026-09-01 (``curl -s
+    https://api.github.com/repos/unslothai/llama.cpp/releases?per_page=3``): macOS ships the
+    same shape mainline does, ``llama-<tag>-bin-macos-<arch>.tar.gz`` (both ``arm64`` and
+    ``x64``) -- so the mainline glob works unchanged there. Windows and Linux ship no plain
+    ``llama-server`` build at all, only an ``app-<tag>-<os>-<arch>-<backend>.zip`` bundle
+    (``cpu``, ``vulkan``, a ``cuda12``/``cuda13`` variant, or ROCm) -- a different shape
+    entirely, encoded here rather than assumed to match.
+    """
+    machine = platform.machine().lower()
+    arch = "arm64" if machine in ("arm64", "aarch64") else "x64"
+    system = platform.system()
+    if system == "Windows":
+        globs = []
+        if arch == "x64" and shutil.which("nvcc"):
+            globs.append("app-*-windows-x64-cuda12-newer.zip")
+        if _vulkan_available():
+            globs.append(f"app-*-windows-{arch}-vulkan.zip")
+        globs.append(f"app-*-windows-{arch}-cpu.zip")
+        return globs
+    if system == "Darwin":
+        return [f"llama-*-bin-macos-{arch}.tar.gz"]
+    return [f"app-*-linux-{arch}-cpu.tar.gz"]
 
 
 def _extract(archive: Path, into: Path) -> None:
@@ -403,6 +491,54 @@ def _build_from_release(args) -> tuple[Path, str]:
         f"matching {globs} for this machine")
 
 
+def _build_from_release_named(args) -> tuple[Path, str]:
+    """Download a fork's own release, kept at ``builds/<name>-<tag>/`` and linked from
+    ``named/<name>`` rather than replacing ``current`` -- the release-download twin of
+    ``_build_from_source_named``, for a fork that ships binaries and a machine with no
+    compiler, or simply to skip a compile when a matching asset already exists."""
+    from ml_stack.fleet import updates as gh_updates
+
+    print(f"checking {args.repo}'s releases")
+    releases = _releases_for(args.repo)
+    globs = _named_release_asset_globs()
+    wanted_tag = args.tag
+
+    for release in releases:
+        tag = str(release.get("tag_name", ""))
+        if wanted_tag and tag != wanted_tag:
+            continue
+        assets = {str(a.get("name")): a for a in (release.get("assets") or [])}
+        for pattern in globs:
+            match = next((n for n in assets if fnmatch.fnmatch(n, pattern)), None)
+            if match is None:
+                continue
+            dest = _named_dest(args.name, _slug(tag))
+            if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
+                print(f"{tag} is already installed at {dest} -- pass --force to redo it")
+                return dest, tag
+
+            print(f"downloading {match} from {tag}")
+            with tempfile.TemporaryDirectory(prefix="ml-stack-llama-release-") as tmp:
+                tmp_path = Path(tmp)
+                archive = gh_updates.download(assets[match], tmp_path)
+                print("installing")
+                binary = _release_install(dest, archive)
+
+            version = _version_of(binary)
+            (dest / "BUILD.json").write_text(json.dumps(
+                {"commit": tag, "built_at": _now_iso(), "version": version,
+                 "source": "release", "asset": match, "repo": args.repo,
+                 "ref": wanted_tag or tag, "name": args.name}, indent=2))
+            return dest, tag
+        if wanted_tag:
+            break
+
+    raise BuildFailed(
+        (f"{args.repo}'s release {wanted_tag!r}" if wanted_tag else
+         f"none of the last {len(releases)} {args.repo} releases") +
+        f" had an asset matching {globs} for this machine")
+
+
 # -- adopting a build that already exists ----------------------------------
 def _commit_from_version(version: str) -> str:
     """The short commit ``--version`` names, when it names one -- llama-server prints
@@ -493,7 +629,15 @@ def _point_current(dest: Path) -> None:
     _relink(CURRENT_LINK, dest)
 
 
-def _verify_and_switch(dest: Path, commit: str) -> None:
+def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> None:
+    """Trust ``dest`` only once it answers ``--help``, then switch to it.
+
+    ``named`` is the one thing that differs for a named build: it links ``named/<named>``
+    instead of repointing ``current``, and a missing architecture is *reported*, never a
+    reason to refuse -- a fork may read fewer architectures than master on purpose (or by
+    being younger), and that is a fact about the fork, not a regression the way it would be
+    for the default build. ``current`` is never touched when ``named`` is given.
+    """
     from ml_stack.serve.backend import flags_of
 
     binary = dest / _server_name()
@@ -515,6 +659,17 @@ def _verify_and_switch(dest: Path, commit: str) -> None:
     baseline = find_binary("llama-server")
     old_arches = setup_module._arches(str(baseline), known=known) if baseline else set()
     missing = old_arches - new_arches
+
+    if named:
+        print(f"  {binary} answers --help ({len(help_flags)} flags) and reads "
+              f"{len(new_arches)} architectures"
+              + (f"; missing {', '.join(sorted(missing))} that the current build reads"
+                 if missing else ""))
+        NAMED_DIR.mkdir(parents=True, exist_ok=True)
+        _relink(NAMED_DIR / named, dest)
+        print(f"  named build {named!r} -> {dest} ({commit})")
+        return
+
     if missing:
         raise BuildFailed(
             "the new build is missing " + ", ".join(sorted(missing)) +
@@ -593,6 +748,53 @@ def _report(args) -> int:
     return 0
 
 
+# -- --list: current, and every named build alongside it -------------------
+def _named_builds() -> list[tuple[str, Path]]:
+    """Every named build's link, sorted by name. Not every entry is trustworthy on its own
+    -- a link is only ever written once ``_verify_and_switch`` has already run for it -- but
+    a link that no longer resolves (its build directory was removed by hand) is skipped
+    rather than reported as a build that is not there."""
+    if not NAMED_DIR.is_dir():
+        return []
+    out = []
+    for link in sorted(NAMED_DIR.iterdir()):
+        if (link.is_symlink() or link.is_dir()) and (link / _server_name()).exists():
+            out.append((link.name, link))
+    return out
+
+
+def _manifest_of(build_dir: Path) -> dict:
+    manifest = build_dir / "BUILD.json"
+    if not manifest.is_file():
+        return {}
+    try:
+        return json.loads(manifest.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _cmd_list() -> int:
+    from ml_stack.setup import _age
+
+    def _line(label: str, build_dir: Path) -> str:
+        info = _manifest_of(build_dir)
+        age = _age(str(info.get("built_at", ""))) or "?"
+        repo = info.get("repo", "ggml-org/llama.cpp")
+        return f"{label:14} {info.get('commit', '?'):12} {age:>4} old  {repo}"
+
+    if CURRENT_LINK.is_symlink() or CURRENT_LINK.exists():
+        print(_line("current", CURRENT_LINK))
+    else:
+        print("current        not built yet -- ml-stack-serve build")
+
+    named = _named_builds()
+    for name, link in named:
+        print(_line(name, link))
+    if not named:
+        print("no named builds -- ml-stack-serve build --repo OWNER/REPO --ref REF --name NAME")
+    return 0
+
+
 # -- keeping it fresh on its own -------------------------------------------
 def _persist_argv() -> list[str]:
     found = shutil.which("ml-stack-serve")
@@ -666,6 +868,8 @@ def _cmd_persist() -> int:
 def cmd_build(args) -> int:
     if args.check:
         return _report(args)
+    if getattr(args, "list", False):
+        return _cmd_list()
     if args.rollback:
         return _do_rollback()
     if args.persist:
@@ -673,14 +877,27 @@ def cmd_build(args) -> int:
     if getattr(args, "adopt", ""):
         return _cmd_adopt(args)
 
+    name = getattr(args, "name", "") or ""
+    if name and not getattr(args, "repo", ""):
+        print("error: --name requires --repo OWNER/REPO", file=sys.stderr)
+        return 2
+
     kind = args.source_kind or ("source" if _can_build_from_source() else "release")
     try:
-        if kind == "release":
-            dest, commit = _build_from_release(args)
+        if name:
+            if kind == "release":
+                dest, commit = _build_from_release_named(args)
+            else:
+                dest, commit = _build_from_source_named(args)
+            print("verifying")
+            _verify_and_switch(dest, commit, named=name)
         else:
-            dest, commit = _build_from_source(args)
-        print("verifying")
-        _verify_and_switch(dest, commit)
+            if kind == "release":
+                dest, commit = _build_from_release(args)
+            else:
+                dest, commit = _build_from_source(args)
+            print("verifying")
+            _verify_and_switch(dest, commit)
     except BuildFailed as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

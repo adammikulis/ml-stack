@@ -4,6 +4,23 @@ import pytest
 from ml_stack.hub import advice
 
 
+@pytest.fixture(autouse=True)
+def _no_network_for_draft_note(monkeypatch):
+    """``draft_for``'s default ``borrows=False`` path asks ``draft_note`` whether a found
+    head's own README warns about needing a fork, which would otherwise reach the real Hub
+    in every test that finds one. A test that cares about ``draft_note`` itself overrides
+    this locally with its own fake."""
+    import huggingface_hub
+    import ml_stack.hub as hub
+
+    def refuse(*a, **k):
+        raise OSError("no network in tests")
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", refuse)
+    hub._DRAFT_NOTES.clear()   # the cache is process-wide; each test starts with none
+    yield
+
+
 def test_advice_reads_the_settings_a_card_names():
     said = """
     ## Best Practices
@@ -289,6 +306,62 @@ def test_a_head_says_which_kind_of_speculation_it_needs():
     assert spec_for("") == ""
 
 
+class TestDraftForBorrows:
+    """`--draft auto` must not offer a head that needs a fork unless the binary about to
+    serve it can borrow -- measured for real: every `mtp-` head under
+    unsloth/Qwen3.8-Flash-Next-GGUF/MTP/ fails on mainline llama.cpp master with
+    `check_tensor_dims: tensor 'output_hc_norm.weight' not found`."""
+
+    SHELVES = {
+        "maker/thing-GGUF": [
+            ("thing-Q4.gguf", 4_000_000_000),
+            ("MTP/mtp-thing-shared-BF16.gguf", 5_000_000_000),
+            ("MTP/mtp-thing-shared-Q8_0.gguf", 2_600_000_000),
+            ("MTP/mtp-thing-Q8_0.gguf", 3_900_000_000),
+        ],
+    }
+
+    def _repo(self, monkeypatch, tmp_path, *, note: str = ""):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+        monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
+
+        readme = tmp_path / "MTP-README.md"
+        readme.write_text(note)
+
+        def fake_download(repo, filename, **kw):
+            if note and filename == "MTP/README.md":
+                return str(readme)
+            raise OSError("no readme")
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        return hub
+
+    def test_a_head_whose_readme_warns_is_withheld_by_default(self, monkeypatch, tmp_path):
+        hub = self._repo(monkeypatch, tmp_path,
+                         note="These do not work on mainline ggml-org/llama.cpp yet.")
+
+        assert hub.draft_for("maker/thing-GGUF") == ""
+        assert hub.draft_for("maker/thing-GGUF", borrows=False) == ""
+
+    def test_the_same_head_is_offered_when_the_binary_can_borrow(self, monkeypatch, tmp_path):
+        hub = self._repo(monkeypatch, tmp_path,
+                         note="These do not work on mainline ggml-org/llama.cpp yet.")
+
+        found = hub.draft_for("maker/thing-GGUF", borrows=True)
+        # the recommended shared-Q8_0 head is preferred over its shared-BF16 sibling
+        assert found == "hf:maker/thing-GGUF/MTP/mtp-thing-shared-Q8_0.gguf"
+
+    def test_a_head_with_no_warning_is_offered_either_way(self, monkeypatch, tmp_path):
+        hub = self._repo(monkeypatch, tmp_path, note="")   # no MTP/README.md at all
+
+        assert hub.draft_for("maker/thing-GGUF", borrows=False) != ""
+        assert hub.draft_for("maker/thing-GGUF", borrows=False) == \
+            hub.draft_for("maker/thing-GGUF", borrows=True)
+
+
 class TestFetch:
     """Downloading an `hf:` reference into the cache without serving it -- what a preflight
     calls so a download never happens inside a benchmark's timed window."""
@@ -343,3 +416,111 @@ class TestFetch:
 
         with pytest.raises(ValueError, match="hf:owner/repo/file.gguf"):
             hub.fetch("hf:maker/thing-GGUF")
+
+
+class TestLocated:
+    """A bare model name resolved against the Hub cache -- what fixed 'up' reading a name
+    copied out of `ml-stack-models files` as a relative path and reporting shards missing
+    for a model that was on the machine the whole time."""
+
+    def test_an_exact_filename_is_found_and_resolved_through_the_symlink(self, tmp_path):
+        import ml_stack.hub as hub
+
+        cache = tmp_path / "hub"
+        blob = cache / "models--maker--thing-GGUF" / "blobs" / "deadbeef"
+        blob.parent.mkdir(parents=True)
+        blob.write_bytes(b"x" * 4_000_000)
+        snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        (snapshot / "thing-Q4_K_M.gguf").symlink_to(blob)
+
+        found = hub.located("thing-Q4_K_M.gguf", cache=cache)
+        assert found == blob.resolve()
+
+    def test_a_shard_less_stem_finds_the_first_shard(self, tmp_path):
+        import ml_stack.hub as hub
+
+        cache = tmp_path / "hub"
+        snapshot = (cache / "models--maker--big-GGUF" / "snapshots" / "abc123"
+                   / "UD-Q4_K_XL")
+        snapshot.mkdir(parents=True)
+        for shard in ("thing-00001-of-00002.gguf", "thing-00002-of-00002.gguf"):
+            (snapshot / shard).write_bytes(b"x")
+
+        found = hub.located("thing.gguf", cache=cache)
+        assert found is not None and found.name == "thing-00001-of-00002.gguf"
+
+    def test_a_name_that_matches_nothing_is_none_not_an_error(self, tmp_path):
+        import ml_stack.hub as hub
+
+        assert hub.located("nowhere.gguf", cache=tmp_path) is None
+        assert hub.located("nowhere.gguf", cache=tmp_path / "does-not-exist") is None
+
+
+class TestDraftNote:
+    """The sentence a draft head's own README says about needing a fork -- unsloth's MTP
+    heads for Qwen3.8-Flash-Next fail to load on mainline with a tensor error, and their
+    README says why in one line."""
+
+    def test_reads_the_sentence_naming_mainline(self, monkeypatch, tmp_path):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+        readme = tmp_path / "MTP-README.md"
+        readme.write_text(
+            "# MTP heads\n\nThese heads are trained alongside the model. "
+            "These do not work on mainline ggml-org/llama.cpp yet. "
+            "Use unslothai/llama.cpp instead.\n")
+
+        seen: list[tuple[str, str]] = []
+
+        def fake_download(repo, filename, **kw):
+            seen.append((repo, filename))
+            if filename == "MTP/README.md":
+                return str(readme)
+            raise OSError("no such file in this repo")
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        note = hub.draft_note("maker/thing-GGUF")
+        assert "mainline" in note.lower()
+        assert seen == [("maker/thing-GGUF", "MTP/README.md")]
+
+        # cached -- a second call does not fetch again
+        assert hub.draft_note("maker/thing-GGUF") == note
+        assert seen == [("maker/thing-GGUF", "MTP/README.md")]
+
+    def test_falls_back_to_the_plain_readme_when_there_is_no_mtp_one(
+            self, monkeypatch, tmp_path):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+        readme = tmp_path / "README.md"
+        readme.write_text("This repository requires the unsloth fork of llama.cpp.\n")
+
+        def fake_download(repo, filename, **kw):
+            if filename == "README.md":
+                return str(readme)
+            raise OSError("no MTP readme here")
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        note = hub.draft_note("maker/plain-GGUF")
+        assert "requires" in note.lower()
+
+    def test_a_card_with_nothing_to_say_about_either_returns_empty(
+            self, monkeypatch, tmp_path):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+        readme = tmp_path / "README.md"
+        readme.write_text("Just an ordinary model card, nothing special here.\n")
+
+        def fake_download(repo, filename, **kw):
+            if filename == "README.md":
+                return str(readme)
+            raise OSError("no MTP readme here")
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        assert hub.draft_note("maker/quiet-GGUF") == ""

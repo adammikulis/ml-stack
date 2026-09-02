@@ -161,6 +161,21 @@ def look() -> list[Finding]:
                      "build gets one from llama.cpp's own master, or serve with --binary "
                      "/path/to/a/master/build -- without either the server exits saying "
                      "only 'unknown model architecture'"))
+        try:
+            from ml_stack.serve import build as build_module
+
+            named = build_module._named_builds()
+        except Exception:  # noqa: BLE001
+            named = []
+        if named:
+            described = ", ".join(
+                f"{name} ({build_module._manifest_of(link).get('commit', '?')})"
+                for name, link in named)
+            out.append(Finding(
+                name="named builds", good=True, said=described,
+                note="beside 'current', not replacing it -- 'ml-stack-serve up --build "
+                     "NAME' or $MLSTACK_LLAMA_BUILD=NAME selects one"))
+
         lacking = _lacking_flags(binary)
         if lacking:
             # Silent when the build answers every flag; an unknown build (no help text)

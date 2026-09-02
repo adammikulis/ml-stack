@@ -294,7 +294,7 @@ def test_a_draft_is_passed_through_and_auto_finds_the_head_shipped_with_the_mode
 
     seen = []
 
-    def fake_draft_for(repo):
+    def fake_draft_for(repo, *, borrows=False):
         seen.append(repo)
         return f"hf:{repo}/mtp-model.gguf"
 
@@ -525,6 +525,129 @@ class TestPreflightOnly:
         out = capsys.readouterr().out
         assert code == 1
         assert "FAIL  architecture" in out
+
+
+class TestResolveModel:
+    """A bare model name -- no `/`, no `hf:` -- used to be read as a relative path and fail
+    preflight saying 'shards missing' for a model already in the Hub cache."""
+
+    def test_a_path_or_hf_reference_is_used_exactly_as_given(self):
+        assert cli.resolve_model("hf:maker/thing-GGUF/thing.gguf") == \
+            "hf:maker/thing-GGUF/thing.gguf"
+        assert cli.resolve_model("some/dir/thing.gguf") == "some/dir/thing.gguf"
+
+    def test_a_bare_name_found_in_the_hub_cache_resolves_to_its_real_path(
+            self, tmp_path, monkeypatch):
+        import ml_stack.hub as hub_module
+
+        cache = tmp_path / "hub"
+        snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        gguf = snapshot / MODEL
+        gguf.write_bytes(b"x")
+        monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+
+        assert cli.resolve_model(MODEL) == str(gguf.resolve())
+
+    def test_a_bare_name_found_nowhere_is_returned_unchanged(self, tmp_path, monkeypatch):
+        import ml_stack.hub as hub_module
+
+        monkeypatch.setattr(hub_module, "HUB_CACHE", tmp_path / "empty")
+        assert cli.resolve_model(MODEL) == MODEL
+
+    def test_up_preflight_only_resolves_a_bare_name_and_reports_it(
+            self, tmp_path, monkeypatch, capsys):
+        import ml_stack.hub as hub_module
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        cache = tmp_path / "hub"
+        snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
+        snapshot.mkdir(parents=True)
+        gguf = _write_gguf(snapshot / MODEL, {
+            "general.architecture": "llama", "llama.block_count": 32,
+            "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
+        })
+        monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+
+        binary = tmp_path / "llama-server"
+        binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                          + _FULL_HELP + "HELP\nfi\nexit 0\n")
+        binary.chmod(0o755)
+
+        def lease(self, spec, *, timeout=None, roam=True):
+            raise AssertionError("--preflight-only must never lease a server")
+
+        monkeypatch.setattr(cli.ServerManager, "lease", lease)
+
+        code = cli.main(["up", MODEL, "--binary", str(binary), "--preflight-only",
+                         "--port", str(free_port())])
+        out = capsys.readouterr()
+        assert code == 0
+        assert "ok    shards" in out.out
+        assert f"resolved {MODEL} -> {gguf.resolve()}" in out.err
+
+
+class TestBuildFlag:
+    """``up --build NAME`` picks the binary through the named build rather than 'current'."""
+
+    def test_the_named_build_is_threaded_into_the_backend(self, tmp_path, monkeypatch):
+        """`Preflight` itself builds a second `LlamaServerBackend` (with the already
+        -resolved path) to check flags, so every construction is recorded rather than one
+        captured value overwritten -- only the *first* is `cmd_up`'s own."""
+        from ml_stack.serve import backend as backend_module
+
+        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        calls: list[dict] = []
+
+        class Spy(backend_module.LlamaServerBackend):
+            def __init__(self, **kw):
+                calls.append(dict(kw))
+                super().__init__(**kw)
+
+        monkeypatch.setattr(backend_module, "LlamaServerBackend", Spy)
+
+        def lease(self, spec, *, timeout=None, roam=True):
+            raise AssertionError("this test only checks how the backend was built")
+
+        monkeypatch.setattr(cli.ServerManager, "lease", lease)
+
+        gguf = tmp_path / MODEL
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        cli.main(["up", str(gguf), "--build", "unsloth", "--preflight-only",
+                 "--port", str(free_port())])
+
+        assert calls, "cmd_up must construct its own backend when --build is given"
+        assert calls[0].get("build") == "unsloth"
+        assert not calls[0].get("binary")
+
+    def test_an_explicit_binary_is_passed_alongside_and_wins_at_resolution(
+            self, tmp_path, monkeypatch):
+        from ml_stack.serve import backend as backend_module
+
+        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        calls: list[dict] = []
+
+        class Spy(backend_module.LlamaServerBackend):
+            def __init__(self, **kw):
+                calls.append(dict(kw))
+                super().__init__(**kw)
+
+        monkeypatch.setattr(backend_module, "LlamaServerBackend", Spy)
+
+        def lease(self, spec, *, timeout=None, roam=True):
+            raise AssertionError("this test only checks how the backend was built")
+
+        monkeypatch.setattr(cli.ServerManager, "lease", lease)
+
+        gguf = tmp_path / MODEL
+        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
+        cli.main(["up", str(gguf), "--binary", "/some/llama-server", "--build", "unsloth",
+                 "--preflight-only", "--port", str(free_port())])
+
+        assert calls[0].get("binary") == "/some/llama-server"
+        assert calls[0].get("build") == "unsloth"
 
 
 class TestModelsFetch:

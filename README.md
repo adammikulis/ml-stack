@@ -537,7 +537,52 @@ wherever the publisher put it: at the root, under `MTP/`, or in a sibling `-MTP-
 repository. Beware that a `-MTP-GGUF` repository is not always heads: for
 Qwen3.6-35B-A3B it is the whole model rebuilt with the prediction layers in it, 36G of
 weights for `--spec draft-mtp`, and `auto` correctly reports no draft rather than
-offering it as one.
+offering it as one. `hub.draft_note(repo)` reads the head's own `MTP/README.md` (or
+`README.md`) for the sentence that says why a head needs something more than the model
+itself — `ml-stack-models files` prints it under the draft line it already reports, so a
+publisher's warning is read before a load, not guessed at after one fails.
+
+**Some heads need a fork, and `--draft auto` will not hand mainline one it cannot load.**
+Measured for real: every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
+mainline llama.cpp master with `check_tensor_dims: tensor 'output_hc_norm.weight' not
+found` — mainline has no MTP graph for `qwen4exp` at all — and the repository's own
+`MTP/README.md` says so: "these do not work on mainline ggml-org/llama.cpp yet". So
+`hub.draft_for(repo, borrows=...)` takes whether the binary about to serve it can actually
+load a head that needs a fork; `up`'s own `--draft auto` passes `borrows=True` only when
+`--build NAME` names one, and otherwise prints the repository's own warning in place of a
+head that would fail at the far end of a multi-gigabyte load. `ml-stack-models files`
+always passes `borrows=True` — it never serves anything, so it tells you a head exists and
+what it needs, which is the point of asking before spending a load.
+
+**A named build keeps a fork beside `current` instead of replacing it.**
+`ml-stack-serve build --repo OWNER/REPO [--ref TAG|BRANCH|SHA] --name NAME` builds a fork
+from source the same way `--from source` builds master; `--from release --tag TAG`
+downloads a matching release asset instead — and does not need a compiler, or a compile
+that would perturb whatever else is on the GPU or the CPU right now. Either way the result
+lands at `~/.ml-stack/llama.cpp/builds/<name>-<commit>/`, verified the same way `current`
+is (answers `--help`) — except a named build is not required to be a superset of `current`'s
+architectures; a fork may read fewer on purpose, or be younger, and that is reported rather
+than refused. `~/.ml-stack/llama.cpp/named/<name>` points at it once verified; `current`
+is never touched. Select it with `ml-stack-serve up --build NAME` (which resolves the
+binary through the named link), `find_binary(build=NAME)` for a direct library caller, or
+`$MLSTACK_LLAMA_BUILD=NAME` for one with no `build=` to pass — all three outrank `current`
+but never an explicit path or `$LLAMA_CPP_SERVER`. `ml-stack-serve build --list` shows
+`current` and every named build with commit, age and repo; `ml-stack-setup` lists named
+builds under the `llama-server` line.
+
+Measured on this machine 2026-09-01, from the newest unsloth release
+(`b10715-mix-86bd2d3`, a macOS arm64 asset, `--from release` — no compile):
+`ml-stack-serve build --repo unslothai/llama.cpp --from release --tag b10715-mix-86bd2d3
+--name unsloth`. `--build unsloth` then preflights Qwen3.8-Flash-Next
+(`UD-IQ4_XS`) with `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`, `--spec draft-mtp
+--spec-draft-n-max 2` cleanly — architecture, shards and every flag check pass — without
+ever serving it. For the later measurement itself (not yet run): unsloth's own recommended
+`--spec-draft-n-max` is 2, other reports found 3 or 6 better depending on platform and
+`--spec-draft-p-min` (0.7 is the value used alongside them); `--ctx-checkpoints 0` is
+needed for a byte-identical comparison at all, because **greedy output with a head on is
+not byte-identical on Metal at n-max ≥ 3** (also seen on HIP) — so a bench comparing heads
+on this machine must watch its own F1 for a real quality change, not assume decoding stayed
+identical just because sampling is greedy.
 
 ## A hierarchy read out of prose or a picture
 

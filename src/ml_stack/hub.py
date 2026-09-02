@@ -15,8 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 __all__ = ["Found", "PREFER", "advice", "aside", "beside", "builds", "card",
-           "draft_for", "fetch", "files", "find", "main", "mmproj_for",
-           "DRAFT_KINDS", "held", "in_gguf", "ref", "room", "spec_for"]
+           "draft_for", "draft_note", "fetch", "files", "find", "located", "main",
+           "mmproj_for", "DRAFT_KINDS", "held", "in_gguf", "ref", "room", "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -101,7 +101,7 @@ def aside(name: str) -> int:
 DRAFT_KINDS = {"mtp-": "draft-mtp", "eagle3-": "draft-eagle3"}
 
 
-def draft_for(repo: str) -> str:
+def draft_for(repo: str, *, borrows: bool = False) -> str:
     """The draft head shipped beside the weights, as a reference, or ''.
 
     A repository that ships one carries an `mtp-` file — a multi-token-prediction head
@@ -112,27 +112,51 @@ def draft_for(repo: str) -> str:
     root *and* under `MTP/`; Qwen3.8-27B puts it only under `MTP/`, and a rule that ignored
     subdirectories found nothing for it. Prefer the root copy when there is one, since a
     reference without a directory is the plainer thing to serve, but take a nested one
-    rather than reporting no draft at all.
+    rather than reporting no draft at all. Among several at the same level, one named
+    `*shared*` is preferred -- unsloth's own recommendation for Qwen3.8-Flash-Next's head,
+    which borrows the target's embeddings and output layer rather than carrying its own.
+
+    ``borrows`` says whether the binary about to serve this head can actually load one that
+    needs a fork. Measured for real: every `mtp-` head under
+    `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on mainline llama.cpp master with
+    `check_tensor_dims: tensor 'output_hc_norm.weight' not found` -- mainline has no MTP
+    graph for `qwen4exp` at all -- and the repository's own `MTP/README.md` says so: "these
+    do not work on mainline ggml-org/llama.cpp yet". So a head whose repository says as much
+    (``draft_note``) is offered only when ``borrows`` is true, which is only when serving
+    through a named fork build (`ml-stack-serve up --build NAME`, a fork the README names).
+    Offering it to mainline is offering something that fails at the far end of a
+    multi-gigabyte load; ``borrows=False`` is the safe default. A repository whose README
+    says nothing about a fork is unaffected either way.
     """
+    where = repo
+    found = ""
     for prefix in DRAFT_KINDS:
-        found = beside(repo, prefix)
+        found = beside(where, prefix, prefer=("shared-q8_0", "shared"))
         if found:
-            return found
-    # Some publishers ship the head as its own repository beside the weights. Asking costs
-    # one request and is the difference between speculating and not.
-    #
-    # Beware what a `-MTP-GGUF` repository actually is: for Qwen3.6-35B-A3B it is not a
-    # draft head at all but the *whole model* rebuilt with the multi-token-prediction layers
-    # in it, 36G of weights, to be served with `--spec-type draft-mtp` rather than as a
-    # second model. Only a file actually named `mtp-` is taken here, so that repository
-    # correctly yields nothing rather than a 36G "draft".
-    stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
-    for sibling in (f"{stem}-MTP-GGUF", f"{stem}-MTP"):
-        for prefix in DRAFT_KINDS:
-            found = beside(sibling, prefix)
+            break
+    if not found:
+        # Some publishers ship the head as its own repository beside the weights. Asking
+        # costs one request and is the difference between speculating and not.
+        #
+        # Beware what a `-MTP-GGUF` repository actually is: for Qwen3.6-35B-A3B it is not a
+        # draft head at all but the *whole model* rebuilt with the multi-token-prediction
+        # layers in it, 36G of weights, to be served with `--spec-type draft-mtp` rather
+        # than as a second model. Only a file actually named `mtp-` is taken here, so that
+        # repository correctly yields nothing rather than a 36G "draft".
+        stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
+        for sibling in (f"{stem}-MTP-GGUF", f"{stem}-MTP"):
+            for prefix in DRAFT_KINDS:
+                found = beside(sibling, prefix, prefer=("shared-q8_0", "shared"))
+                if found:
+                    where = sibling
+                    break
             if found:
-                return found
-    return ""
+                break
+    if not found:
+        return ""
+    if not borrows and draft_note(where):
+        return ""
+    return found
 
 
 def spec_for(draft: str) -> str:
@@ -163,7 +187,8 @@ def _precision(name: str) -> int:
     return len(_QUANTS)
 
 
-def beside(repo: str, prefix: str, *, best: bool = False) -> str:
+def beside(repo: str, prefix: str, *, best: bool = False,
+          prefer: str | tuple[str, ...] = ()) -> str:
     """A file whose name starts with ``prefix`` in one repository, root copy preferred.
 
     The things that travel with a model are named by convention and filed wherever the
@@ -174,8 +199,16 @@ def beside(repo: str, prefix: str, *, best: bool = False) -> str:
     projector wants: it is a fraction of the model's size -- DeepSeek-OCR-2's is 886M against
     5.5G of weights -- and quantising it costs sight out of all proportion to what it saves,
     so a Q4 model is still served with an F32 or BF16 projector. A draft head is the other
-    way about and takes whatever is there.
+    way about and *precision is not what picks one*: unsloth's own recommendation for
+    Qwen3.8-Flash-Next is `mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf` over its BF16 sibling
+    ("the LM head is cheaper at 8 bits"), which `best`'s most-precise-wins rule would get
+    backwards. ``prefer`` is for exactly this: one or more substrings, most specific first,
+    each tried in turn against the candidates found so far -- the first that matches
+    anything narrows to those matches; nothing narrows when none does. `draft_for` asks for
+    ``("shared-q8_0", "shared")``.
     """
+    words = (prefer,) if isinstance(prefer, str) else tuple(prefer)
+    words = tuple(w for w in words if w)
     nested: list[str] = []
     root: list[str] = []
     try:
@@ -190,6 +223,11 @@ def beside(repo: str, prefix: str, *, best: bool = False) -> str:
     for found in (root, nested):
         if not found:
             continue
+        for word in words:
+            matched = [f for f in found if word.lower() in f.lower()]
+            if matched:
+                found = matched
+                break
         return ref(repo, min(found, key=_precision) if best else found[0])
     return ""
 
@@ -395,6 +433,86 @@ def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, 
                                     or name.rsplit("/", 1)[-1] == build)]
 
 
+HUB_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
+
+
+def located(name: str, *, cache: Path | None = None) -> Path | None:
+    """A model already in the Hub cache, found by its exact filename, or ``None``.
+
+    A name copied out of `ml-stack-models files` -- no directory, no `hf:` -- names a file
+    already downloaded, but `ml-stack-serve up` used to read anything without a `/` or an
+    `hf:` prefix as a relative path and report "shards missing" for a model that was on the
+    machine the whole time. `graph.bench.find_model` already solved this for the bench by
+    asking `fleet.models` where the file is; this is the same idea narrowed to the Hub cache
+    itself and to an *exact* filename match, which is what a preflight is actually handed.
+
+    Resolved through the symlink: a Hub cache entry is a name in `snapshots/<rev>/` pointing
+    into `blobs/`, and reading the symlink's own size reports a few bytes rather than the
+    weights it stands for.
+
+    A sharded build's first shard is found when ``name`` is the shard-less stem -- what the
+    quantisation itself is called, e.g. `thing-UD-Q4_K_XL.gguf`, rather than any one file
+    inside it.
+    """
+    root = Path(cache) if cache is not None else HUB_CACHE
+    if not root.is_dir():
+        return None
+    wanted = Path(name).name
+
+    def _search(pattern: str) -> Path | None:
+        for snapshot in sorted(root.glob("*/snapshots/*")):
+            if not snapshot.is_dir():
+                continue
+            for candidate in sorted(snapshot.rglob(pattern)):
+                if candidate.is_file():
+                    return candidate.resolve()
+        return None
+
+    found = _search(wanted)
+    if found is not None:
+        return found
+    base = wanted[: -len(".gguf")] if wanted.lower().endswith(".gguf") else wanted
+    return _search(f"{base}-00001-of-*.gguf")
+
+
+_DRAFT_NOTES: dict[str, str] = {}
+
+
+def draft_note(repo: str) -> str:
+    """The sentence a draft head's own README says about needing a fork, or ''.
+
+    Measured for real: unsloth's `mtp-` heads for Qwen3.8-Flash-Next fail to load on
+    mainline llama.cpp master with `check_tensor_dims: tensor 'output_hc_norm.weight' not
+    found`, and `MTP/README.md` says why in one sentence -- "These do not work on mainline
+    ggml-org/llama.cpp yet". `ml-stack-models files` prints this under the draft line it
+    already reports, so a person is told a head needs a fork *before* spending a load on it,
+    not after it fails at the far end of one.
+
+    Read once per repository and cached for the life of the process -- `files` calls this on
+    every listing, and a repository's README does not change between two calls of it.
+    """
+    if repo in _DRAFT_NOTES:
+        return _DRAFT_NOTES[repo]
+    from huggingface_hub import hf_hub_download
+
+    text = ""
+    for name in ("MTP/README.md", "README.md"):
+        try:
+            text = Path(hf_hub_download(repo, name)).read_text(errors="replace")
+            break
+        except Exception:  # noqa: BLE001 - no README there, or the repo is not there at all
+            continue
+
+    note = ""
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        low = sentence.lower()
+        if "mainline" in low or "fork" in low or "requires" in low:
+            note = " ".join(sentence.split())
+            break
+    _DRAFT_NOTES[repo] = note
+    return note
+
+
 def fetch(reference: str) -> Path:
     """Download an `hf:` reference into the Hub cache, without serving it.
 
@@ -554,16 +672,25 @@ def main(argv: list[str] | None = None) -> int:
                 if aside(name):
                     print(f"{_human(size):>8}  {ref(args.repo, name)}  (alongside)")
             print(f"\nml-stack-models files {args.repo} --every  for individual files")
-            drafted = draft_for(args.repo)
+            # This listing never serves anything, so it is told about a head even when it
+            # needs a fork -- borrows=True -- and the note underneath it says so, which is
+            # the whole point: know before spending a load, not after one fails at the end.
+            drafted = draft_for(args.repo, borrows=True)
             if drafted:
                 print(f"draft head shipped with it: {drafted}")
+                warned = draft_note(args.repo)
+                if warned:
+                    print(f"  {warned}")
             return 0
         for name, size in listing:
             note = "  (alongside)" if aside(name) else ""
             print(f"{_human(size):>8}  {ref(args.repo, name)}{note}")
-        drafted = draft_for(args.repo)
+        drafted = draft_for(args.repo, borrows=True)
         if drafted:
             print(f"\ndraft head shipped with it: {drafted}")
+            warned = draft_note(args.repo)
+            if warned:
+                print(f"  {warned}")
         return 0
     except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)

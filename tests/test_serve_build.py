@@ -99,6 +99,8 @@ def _isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(build, "SRC_DIR", root / "src")
     monkeypatch.setattr(build, "BUILDS_DIR", root / "builds")
     monkeypatch.setattr(build, "CURRENT_LINK", root / "current")
+    monkeypatch.setattr(build, "NAMED_DIR", root / "named")
+    monkeypatch.setattr(build, "NAMED_SRC_DIR", root / "named-src")
     monkeypatch.setattr(build, "PERSIST_PLIST",
                         tmp_path / "Library" / "LaunchAgents" / f"{build.PERSIST_LABEL}.plist")
     # No earlier build to compare against, unless a test says otherwise.
@@ -108,7 +110,8 @@ def _isolated(tmp_path, monkeypatch):
 
 def _args(**over):
     base = dict(commit="", jobs=0, source="", force=False, check=False, rollback=False,
-               persist=False, source_kind="source", adopt="")
+               persist=False, source_kind="source", adopt="", repo="", ref="", tag="",
+               name="", list=False)
     base.update(over)
     return SimpleNamespace(**base)
 
@@ -332,6 +335,59 @@ class TestFindBinaryPrefersTheManagedBuild:
         monkeypatch.setenv("LLAMA_CPP_SERVER", str(env_pick))
         assert binary_module.find_binary("llama-server") == env_pick
 
+    def test_a_named_build_wins_over_current_but_not_over_explicit_or_the_env_var(
+            self, tmp_path, monkeypatch):
+        import ml_stack.serve.binary as binary_module
+
+        current = tmp_path / "current"
+        current.mkdir()
+        (current / "llama-server").write_text("#!/bin/sh\nexit 0\n")
+        (current / "llama-server").chmod(0o755)
+        monkeypatch.setattr(binary_module, "MANAGED_CURRENT", current)
+
+        named_root = tmp_path / "named"
+        unsloth = named_root / "unsloth"
+        unsloth.mkdir(parents=True)
+        (unsloth / "llama-server").write_text("#!/bin/sh\nexit 0\n")
+        (unsloth / "llama-server").chmod(0o755)
+        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
+
+        monkeypatch.delenv("LLAMA_CPP_SERVER", raising=False)
+        monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
+        monkeypatch.delenv("MLSTACK_LLAMA_BUILD", raising=False)
+        monkeypatch.setenv("PATH", "")
+
+        # No build named: current, as always.
+        assert binary_module.find_binary("llama-server") == current / "llama-server"
+
+        # build= outranks current.
+        assert (binary_module.find_binary("llama-server", build="unsloth")
+                == unsloth / "llama-server")
+
+        # $MLSTACK_LLAMA_BUILD does the same for a caller with no build= to pass.
+        monkeypatch.setenv("MLSTACK_LLAMA_BUILD", "unsloth")
+        assert binary_module.find_binary("llama-server") == unsloth / "llama-server"
+
+        # An explicit path, or $LLAMA_CPP_SERVER, still wins over a named build.
+        explicit = tmp_path / "explicit" / "llama-server"
+        explicit.parent.mkdir()
+        explicit.write_text("#!/bin/sh\nexit 0\n")
+        explicit.chmod(0o755)
+        assert binary_module.find_binary("llama-server", explicit=explicit,
+                                         build="unsloth") == explicit
+
+        env_pick = tmp_path / "env" / "llama-server"
+        env_pick.parent.mkdir()
+        env_pick.write_text("#!/bin/sh\nexit 0\n")
+        env_pick.chmod(0o755)
+        monkeypatch.setenv("LLAMA_CPP_SERVER", str(env_pick))
+        assert binary_module.find_binary("llama-server", build="unsloth") == env_pick
+
+        # A named build that does not exist falls through to current, not to nothing.
+        monkeypatch.delenv("LLAMA_CPP_SERVER", raising=False)
+        assert (binary_module.find_binary("llama-server", build="missing")
+                == current / "llama-server")
+
 
 class TestCheck:
     def test_nothing_built_and_nothing_on_path_says_so(self, monkeypatch):
@@ -540,6 +596,138 @@ class TestPlatformSelection:
         found = build._cudart_companion("llama-b1-bin-win-cuda-12.4-x64.zip", assets)
         assert found is not None and found["name"] == "cudart-llama-bin-win-cuda-12.4-x64.zip"
         assert build._cudart_companion("llama-b1-bin-win-vulkan-x64.zip", assets) is None
+
+
+class TestNamedBuild:
+    """``--repo OWNER/REPO --name NAME`` builds a fork and keeps it beside ``current``
+    instead of replacing it -- e.g. unslothai/llama.cpp, whose MTP heads mainline cannot
+    load yet."""
+
+    def test_a_named_source_build_is_linked_and_current_is_untouched(self, monkeypatch):
+        chain = FakeToolchain(commit="86bd2d3", arches={"gemma4", "qwen4exp"})
+        monkeypatch.setattr(subprocess, "run", chain.run)
+
+        code = build.cmd_build(
+            _args(repo="unslothai/llama.cpp", ref="b10715-mix-86bd2d3", name="unsloth"))
+        assert code == 0
+
+        dest = build.BUILDS_DIR / "unsloth-86bd2d3"
+        assert (dest / build._server_name()).is_file()
+        manifest = json.loads((dest / "BUILD.json").read_text())
+        assert manifest["repo"] == "unslothai/llama.cpp"
+        assert manifest["ref"] == "b10715-mix-86bd2d3"
+        assert manifest["name"] == "unsloth"
+
+        assert (build.NAMED_DIR / "unsloth").resolve() == dest.resolve()
+        assert not build.CURRENT_LINK.exists() and not build.CURRENT_LINK.is_symlink(), \
+            "a named build must never become 'current'"
+
+    def test_a_named_build_missing_an_architecture_the_baseline_has_is_linked_anyway(
+            self, monkeypatch, capsys):
+        """The whole point of --name: a fork is not required to be a superset of master's
+        own build, unlike the default build a bare 'ml-stack-serve build' would replace."""
+        baseline_dir = build.ROOT.parent / "baseline"
+        baseline_dir.mkdir(parents=True)
+        _fake_server_script(baseline_dir / build._server_name())
+        _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp"})
+        monkeypatch.setattr(build, "find_binary",
+                            lambda *a, **k: baseline_dir / build._server_name())
+
+        chain = FakeToolchain(arches={"gemma4"})   # missing qwen4exp -- fine for --name
+        monkeypatch.setattr(subprocess, "run", chain.run)
+
+        code = build.cmd_build(_args(repo="unslothai/llama.cpp", name="unsloth"))
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "missing qwen4exp" in out
+        assert (build.NAMED_DIR / "unsloth").is_symlink()
+        assert not build.CURRENT_LINK.exists()
+
+    def test_name_without_repo_is_refused(self, capsys):
+        code = build.cmd_build(_args(name="unsloth"))
+        assert code == 2
+        assert "--repo" in capsys.readouterr().err
+
+    def test_a_named_release_build_downloads_the_forks_own_asset_naming(
+            self, monkeypatch, tmp_path):
+        monkeypatch.setattr(platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+
+        releases = [{"tag_name": "b10715-mix-86bd2d3", "assets": [
+            {"name": "app-b10715-mix-86bd2d3-windows-x64-cpu.zip"},   # not this machine
+            {"name": "llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz", "size": 0},
+        ]}]
+        monkeypatch.setattr(build, "_releases_for", lambda repo, **kw: releases)
+
+        archive_dir = tmp_path / "archive"
+        archive_dir.mkdir()
+        payload = archive_dir / "payload"
+        payload.mkdir()
+        _fake_server_script(payload / build._server_name())
+        _fake_libllama(payload / "libllama.dylib", {"gemma4"})
+        archive = archive_dir / "llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz"
+        with tarfile.open(archive, "w:gz") as tf:
+            tf.add(payload, arcname=payload.name)
+
+        downloaded = []
+
+        def fake_download(asset, into, **kw):
+            downloaded.append(asset["name"])
+            return archive
+
+        import ml_stack.fleet.updates as gh_updates
+        monkeypatch.setattr(gh_updates, "download", fake_download)
+        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+
+        code = build.cmd_build(_args(repo="unslothai/llama.cpp", name="unsloth",
+                                     source_kind="release"))
+        assert code == 0
+        assert downloaded == ["llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz"]
+        manifest = json.loads(
+            (build.NAMED_DIR / "unsloth" / "BUILD.json").read_text())
+        assert manifest["commit"] == "b10715-mix-86bd2d3"
+        assert manifest["source"] == "release"
+        assert manifest["repo"] == "unslothai/llama.cpp"
+
+    def test_list_shows_current_and_every_named_build(self, monkeypatch, capsys):
+        chain = FakeToolchain(commit="abc1234")
+        monkeypatch.setattr(subprocess, "run", chain.run)
+        assert build.cmd_build(_args()) == 0
+
+        chain2 = FakeToolchain(commit="86bd2d3")
+        monkeypatch.setattr(subprocess, "run", chain2.run)
+        assert build.cmd_build(
+            _args(repo="unslothai/llama.cpp", ref="b10715-mix-86bd2d3", name="unsloth")) == 0
+
+        code = build.cmd_build(_args(list=True))
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "current" in out and "abc1234" in out
+        assert "unsloth" in out and "86bd2d3" in out and "unslothai/llama.cpp" in out
+
+    def test_list_with_nothing_built_says_so(self, capsys):
+        code = build.cmd_build(_args(list=True))
+        assert code == 0
+        out = capsys.readouterr().out
+        assert "not built yet" in out
+        assert "no named builds" in out
+
+
+class TestNamedReleaseAssetGlobs:
+    """Encoding unslothai/llama.cpp's own release asset naming, read for real on
+    2026-09-01 -- a different shape from ggml-org/llama.cpp's own releases."""
+
+    def test_macos_matches_the_same_shape_mainline_uses(self, monkeypatch):
+        monkeypatch.setattr(platform, "system", lambda: "Darwin")
+        monkeypatch.setattr(platform, "machine", lambda: "arm64")
+        assert build._named_release_asset_globs() == ["llama-*-bin-macos-arm64.tar.gz"]
+
+    def test_windows_uses_the_forks_app_bundle_naming_not_llama_bin(self, monkeypatch):
+        monkeypatch.setattr(platform, "system", lambda: "Windows")
+        monkeypatch.setattr(platform, "machine", lambda: "AMD64")
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        monkeypatch.delenv("VULKAN_SDK", raising=False)
+        assert build._named_release_asset_globs() == ["app-*-windows-x64-cpu.zip"]
 
 
 class TestReleaseInstall:

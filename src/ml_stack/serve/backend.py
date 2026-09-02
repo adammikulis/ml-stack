@@ -298,15 +298,18 @@ class LlamaServerBackend(ServerBackend):
         *,
         binary: str | Path | None = None,
         vendor_dir: Path | None = None,
+        build: str | None = None,
         quiet: bool = True,
     ) -> None:
         self._explicit = binary
         self._vendor_dir = vendor_dir
+        self._build = build
         self.quiet = quiet
 
     @property
     def binary(self) -> Path:
-        return require_binary("llama-server", explicit=self._explicit, vendor_dir=self._vendor_dir)
+        return require_binary("llama-server", explicit=self._explicit,
+                              vendor_dir=self._vendor_dir, build=self._build)
 
     def command(self, spec: ServerSpec) -> list[str]:
         """Build the argv."""

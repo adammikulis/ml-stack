@@ -240,7 +240,7 @@ def alongside(model: str, asked: str, prefix: str, *, best: bool = False) -> str
     return ""
 
 
-def drafted(model: str, asked: str) -> str:
+def drafted(model: str, asked: str, *, borrows: bool = False) -> str:
     """The draft head to serve with ``model``, resolving 'auto'.
 
     A head is named by the method it implements -- `mtp-` for multi-token prediction,
@@ -252,11 +252,15 @@ def drafted(model: str, asked: str) -> str:
     directory to every revision of the same repository -- because a Hub cache keeps one
     folder per revision, and weights fetched in August sit beside nothing that was fetched
     today.
+
+    ``borrows`` is passed straight to `hub.draft_for`: true only when serving through a
+    named fork build (`--build NAME`), the only case a head whose own README says it needs
+    one can actually load.
     """
     if asked.lower() == "auto" and str(model).startswith("hf:"):
         from ml_stack.hub import draft_for
 
-        return draft_for("/".join(str(model)[3:].split("/")[:2]))
+        return draft_for("/".join(str(model)[3:].split("/")[:2]), borrows=borrows)
     for prefix in ("mtp-", "eagle3-"):
         found = alongside(model, asked, prefix)
         if found:
@@ -264,17 +268,56 @@ def drafted(model: str, asked: str) -> str:
     return ""
 
 
+def resolve_model(named: str) -> str:
+    """A bare model name, found in the Hub cache -- a path or an ``hf:`` reference is used
+    exactly as given.
+
+    A name copied straight out of `ml-stack-models files` -- no directory, no `hf:` prefix
+    -- used to be read as a relative path and fail preflight with "shards missing" for a
+    model that was on the machine the whole time: `up gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+    --preflight-only` did exactly that. `graph.bench.find_model` already solved the same
+    problem for the bench by asking `fleet.models` where a bare name lives; `hub.located`
+    is the same idea, narrowed to the Hub cache and an exact filename -- what `up` is
+    actually handed.
+    """
+    if not named or named.startswith("hf:") or "/" in named:
+        return named
+    from ml_stack.hub import located
+
+    found = located(named)
+    return str(found) if found is not None else named
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import LlamaServerBackend, UnknownFlag
 
+    model = resolve_model(str(args.model))
+    if model != str(args.model):
+        print(f"resolved {args.model} -> {model}", file=sys.stderr)
+
     chosen = str(getattr(args, "binary", "") or "")
-    manager = ServerManager(LlamaServerBackend(binary=chosen) if chosen else None,
-                            state_file=STATE_FILE)
-    draft = drafted(args.model, str(getattr(args, "draft", "") or ""))
+    build_name = str(getattr(args, "build", "") or "")
+    manager = ServerManager(
+        LlamaServerBackend(binary=chosen or None, build=build_name or None)
+        if (chosen or build_name) else None,
+        state_file=STATE_FILE)
+    # A named build is the only case a fork-only MTP head can actually load -- offering one
+    # to 'current' is offering something that fails at the far end of a multi-gigabyte load.
+    borrows = bool(build_name)
+    draft = drafted(model, str(getattr(args, "draft", "") or ""), borrows=borrows)
     if str(getattr(args, "draft", "")).lower() == "auto" and not draft:
-        print("no draft head is shipped beside that model; serving without one",
-              file=sys.stderr)
-    seeing = alongside(args.model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
+        note = ""
+        if str(model).startswith("hf:"):
+            from ml_stack.hub import draft_note
+
+            note = draft_note("/".join(str(model)[3:].split("/")[:2]))
+        if note:
+            print(f"no draft head served -- {note} Serve with --build NAME to use one.",
+                  file=sys.stderr)
+        else:
+            print("no draft head is shipped beside that model; serving without one",
+                  file=sys.stderr)
+    seeing = alongside(model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
                        best=True)
     # A head implements one method and says which in its name. Serving an EAGLE3 head
     # without --spec-type draft-eagle3 is asking it to do something it does not do.
@@ -286,7 +329,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     if str(getattr(args, "mmproj", "")).lower() == "auto" and not seeing:
         print("no vision projector is shipped beside that model; it will not read pictures",
               file=sys.stderr)
-    spec = ServerSpec(model=args.model, port=args.port, context=args.context,
+    spec = ServerSpec(model=model, port=args.port, context=args.context,
                       parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
                       spec_type=kind,
                       spec_draft_max=getattr(args, "spec_n_max", None),
@@ -506,6 +549,11 @@ def main(argv: list[str] | None = None) -> int:
                          "and qwen3moe are in the current release, qwen4exp is not, so "
                          "Qwen3.8-Flash-Next needs a build from master and says "
                          "'unknown model architecture' without one")
+    up.add_argument("--build", default="", metavar="NAME",
+                    help="serve with a named build 'ml-stack-serve build --name NAME' made "
+                         "-- a fork kept beside 'current' rather than replacing it, e.g. a "
+                         "fork whose fixes have not reached mainline yet. Ignored if "
+                         "--binary is also given")
     up.add_argument("--mmproj", default="", metavar="PATH_OR_AUTO",
                     help="the vision projector, so the model can read a picture -- a path, "
                          "an hf: reference, or 'auto' to take the most precise one shipped "
@@ -589,6 +637,23 @@ def main(argv: list[str] | None = None) -> int:
                               "hand-built binary, or a release zip unpacked by hand -- as "
                               "a managed build, verify it, and switch to it now, without "
                               "compiling or downloading anything")
+    build_p.add_argument("--repo", default="", metavar="OWNER/REPO",
+                         help="build a fork instead of ggml-org/llama.cpp's own master -- "
+                              "combine with --name to keep it beside 'current' instead of "
+                              "replacing it, e.g. --repo unslothai/llama.cpp --name unsloth")
+    build_p.add_argument("--ref", default="", metavar="TAG_OR_BRANCH_OR_SHA",
+                         help="the fork's ref to build (--from source, with --repo; "
+                              "default: its default branch's tip)")
+    build_p.add_argument("--tag", default="", metavar="TAG",
+                         help="the fork's release tag to download (--from release, with "
+                              "--repo; default: the newest release with a matching asset)")
+    build_p.add_argument("--name", default="", metavar="NAME",
+                         help="keep this build at ~/.ml-stack/llama.cpp/named/NAME instead "
+                              "of replacing 'current' -- requires --repo. Select it with "
+                              "'ml-stack-serve up --build NAME' or $MLSTACK_LLAMA_BUILD=NAME")
+    build_p.add_argument("--list", action="store_true",
+                         help="show 'current' and every named build, with commit, age and "
+                              "repo -- builds nothing")
 
     args = ap.parse_args(argv)
     return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "memory": cmd_memory,
