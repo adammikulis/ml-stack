@@ -384,6 +384,17 @@ def ref(repo: str, name: str = "") -> str:
     return f"hf:{repo}/{name}" if name else f"hf:{repo}"
 
 
+def shards_beside(path: Path) -> list[Path]:
+    """``path`` and every other shard of its build in the same directory, in order -- just
+    ``[path]`` for a model that is one file."""
+    path = Path(path)
+    if not _SHARD.search(path.name):
+        return [path]
+    stem = _SHARD.sub("", path.name)
+    found = sorted(p for p in path.parent.iterdir()
+                   if _SHARD.search(p.name) and _SHARD.sub("", p.name) == stem)
+    return found or [path]
+
 _SHARD = re.compile(r"-\d{5}-of-\d{5}(?=\.gguf$)", re.IGNORECASE)
 
 
@@ -797,8 +808,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "fetch":
             for one in args.refs:
                 path = fetch(one)
-                size = path.stat().st_size if path.exists() else 0
-                print(f"{_human(size):>8}  {path}")
+                # every shard of the build, not only the one named: what came down, with
+                # the total, so nobody lists the cache directory to check
+                total = 0
+                for shard in shards_beside(path):
+                    size = shard.stat().st_size if shard.exists() else 0
+                    total += size
+                    print(f"{_human(size):>8}  {shard}")
+                if _SHARD.search(path.name):
+                    print(f"{_human(total):>8}  in all")
             return 0
 
         listing = files(args.repo, ending=args.ending)

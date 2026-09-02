@@ -782,3 +782,16 @@ class TestPrettyName:
         script = text[start:end] + "\nconsole.log(JSON.stringify(" + json.dumps(names) + ".map(prettyName)))"
         said = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True).stdout
         assert json.loads(said) == [pretty_name(n) for n in names]
+
+
+class TestShardsBeside:
+    def test_every_shard_of_the_build_and_nothing_else(self, tmp_path):
+        from ml_stack.hub import shards_beside
+
+        for n in (1, 2, 3):
+            (tmp_path / f"thing-Q4_K_M-0000{n}-of-00003.gguf").write_bytes(b"x" * n)
+        (tmp_path / "other-Q4_K_M-00001-of-00002.gguf").write_bytes(b"y")
+        (tmp_path / "thing-Q4_K_M.gguf").write_bytes(b"z")
+        got = shards_beside(tmp_path / "thing-Q4_K_M-00001-of-00003.gguf")
+        assert [p.name for p in got] == [f"thing-Q4_K_M-0000{n}-of-00003.gguf" for n in (1, 2, 3)]
+        assert shards_beside(tmp_path / "thing-Q4_K_M.gguf") == [tmp_path / "thing-Q4_K_M.gguf"]

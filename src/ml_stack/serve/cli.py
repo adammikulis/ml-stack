@@ -126,8 +126,60 @@ def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
     return f"{ask} would start its own server"
 
 
+def every_server() -> list[dict]:
+    """Every llama-server process on this machine, leased or not: pid, port, model, memory.
+    A server nobody recorded -- a Homebrew one from before the managed build, a hand start
+    -- holds memory `status` cannot otherwise see, and `pgrep` by hand is what the guard
+    refuses."""
+    try:
+        import psutil
+    except ImportError:
+        return []
+    out = []
+    for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
+        try:
+            argv = list(proc.info.get("cmdline") or [])
+            name = str(proc.info.get("name") or "")
+        except (psutil.Error, OSError):
+            continue
+        head = Path(argv[0]).name if argv else name
+        if "llama-server" not in head and "llama-server" not in name:
+            continue
+
+        def after(flag: str, short: str = "") -> str:
+            for i, a in enumerate(argv[:-1]):
+                if a == flag or (short and a == short):
+                    return argv[i + 1]
+                if a.startswith(flag + "="):
+                    return a.split("=", 1)[1]
+            return ""
+
+        mem = proc.info.get("memory_info")
+        out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
+                    "model": after("--model", "-m") or after("-hf") or "",
+                    "binary": argv[0] if argv else name,
+                    "rss": int(getattr(mem, "rss", 0) or 0)})
+    return sorted(out, key=lambda r: r["port"])
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     records = recorded_servers(STATE_FILE)
+    if getattr(args, "every", False):
+        from ml_stack.hub import pretty_name
+
+        found = every_server()
+        if not found:
+            print("no llama-server is running on this machine.")
+            return 1
+        for one in found:
+            leased = "leased" if one["port"] in records else "NOT leased -- nobody records it"
+            rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
+            print(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
+                  f"{rss} resident  {leased}  ({one['binary']})")
+        strays = [o for o in found if o["port"] not in records]
+        if strays:
+            print(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
+        return 0
     ports = sorted({*records, args.port})
     manager = ServerManager(state_file=STATE_FILE)
 
@@ -708,6 +760,9 @@ def main(argv: list[str] | None = None) -> int:
     status.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
                         help=f"the slots that lease would ask for (default: "
                              f"{DEFAULT_PARALLEL})")
+    status.add_argument("--every", action="store_true",
+                        help="every llama-server process on this machine, leased or not -- "
+                             "a stray one holds memory a lease cannot see")
     status.add_argument("--json", action="store_true",
                         help="print one JSON object instead of the human listing")
 

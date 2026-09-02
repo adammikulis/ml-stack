@@ -763,3 +763,32 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     found = cli.resolve_model("big-Q4_K_M-00001-of-00002.gguf")
     assert found == str(snapshot / "big-Q4_K_M-00001-of-00002.gguf")
     assert Path(found).is_symlink() and Path(found).stat().st_size == 100
+
+
+def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monkeypatch, capsys):
+    """A stray server -- a Homebrew one from before the managed build -- holds memory a lease
+    cannot see; `status --every` names it, and `pgrep` by hand is what the guard refuses."""
+    import types
+    from pathlib import Path
+
+    import psutil
+
+    def proc(pid, argv, rss):
+        return types.SimpleNamespace(info={"pid": pid, "name": Path(argv[0]).name, "cmdline": argv,
+                                           "memory_info": types.SimpleNamespace(rss=rss)})
+
+    fakes = [proc(11, ["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
+                       "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30),
+             proc(12, ["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
+                       "--port", "8082"], 60 * 2**30),
+             proc(13, ["/usr/bin/python3", "-m", "something"], 5)]
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: fakes)
+    monkeypatch.setattr(cli, "recorded_servers", lambda path: {8082: {"pid": 12}})
+    assert cli.main(["status", "--every"]) == 0
+    out = capsys.readouterr().out
+    assert ":8081  pid 11  embeddinggemma-300M (Q8_0)  1.0G resident  NOT leased" in out
+    assert ":8082  pid 12  thing (Q4_K_XL)  60.0G resident  leased" in out
+    assert "1 not leased" in out and "python3" not in out
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])
+    assert cli.main(["status", "--every"]) == 1
+    assert "no llama-server is running" in capsys.readouterr().out

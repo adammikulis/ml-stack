@@ -25,6 +25,8 @@ import os
 import re
 import subprocess
 import sys
+import time
+from pathlib import Path
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, TextIO
@@ -315,6 +317,14 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
     refused, else 0."""
     env = os.environ if env is None else env
     out = sys.stderr if stdout is None else stdout
+    if argv and argv[0] == "allow":
+        # `python -m ml_stack.redact.hook allow "Windows Defender Firewall"`: the phrase
+        # is a product, a code fragment, an invented name -- never a person -- and goes on
+        # the allow-list rather than being appended to the file by hand (three times on
+        # 2026-09-02). A phrase already there is not added twice.
+        where = os.fspath(root) if root is not None else _git(None, "rev-parse", "--show-toplevel").strip()
+        fixtures = os.path.join(where, env.get("NAMES_FIXTURES", DEFAULT_FIXTURES))
+        return allow(fixtures, argv[1:], out)
     if env.get("SKIP_NAME_CHECK"):
         return 0
     where = os.fspath(root) if root is not None else _git(None, "rev-parse", "--show-toplevel").strip()
@@ -356,6 +366,30 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         print(f"           ...and {len(unique) - SHOWN} more", file=out)
     print(f"           invent the data. If the name is made up, add it to {fixtures}.", file=out)
     return 1
+
+
+def allow(fixtures: str, phrases: list[str], out: TextIO) -> int:
+    """Add ``phrases`` to the allow-list at ``fixtures``, once each, under a dated heading.
+    Refuses an empty list and says so."""
+    phrases = [p.strip() for p in phrases if p and p.strip()]
+    if not phrases:
+        print("allow what? e.g.: allow \"Windows Defender Firewall\" \"x1 - x0\"", file=out)
+        return 2
+    path = Path(fixtures)
+    have = {ln.strip().casefold() for ln in path.read_text(encoding="utf-8").splitlines()} \
+        if path.exists() else set()
+    new = [p for p in phrases if p.casefold() not in have]
+    if not new:
+        print(f"already allowed in {fixtures}: {', '.join(phrases)}", file=out)
+        return 0
+    stamp = time.strftime("%Y-%m-%d")
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    if text and not text.endswith("\n"):
+        text += "\n"
+    text += f"\n# allowed with `hook allow` on {stamp}: not people\n" + "".join(f"{p}\n" for p in new)
+    path.write_text(text, encoding="utf-8")
+    print(f"allowed in {fixtures}: {', '.join(new)}", file=out)
+    return 0
 
 
 if __name__ == "__main__":

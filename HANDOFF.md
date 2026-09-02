@@ -45,6 +45,12 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
   through each daemon). Then a router in front of the fleet that sends a new session to the
   peer with a free slot on the best model. Tests on fakes: three peers of different room, one
   demand, the plan; a demand no fleet fits says so and by how much.
+- [ ] **`ml-stack-models layout MODEL`** (2026-09-02): the attention layout read off the GGUF
+  header -- which layers hold a cache, which are recurrent (`full_attention_interval`),
+  sliding (`sliding_window`, pattern, `key_length_swa`), shared (`shared_kv_layers`), and
+  any compress ratio / indexer -- as one paragraph. Read by hand with a throwaway script
+  today to understand Flash-Next; `fit --measure` gives the real bytes, this says why.
+  `preflight._recurrent_layers` / `_sliding_layers` already compute most of it.
 - [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
   join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
   cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of

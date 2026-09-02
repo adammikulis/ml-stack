@@ -87,3 +87,30 @@ def test_what_the_names_are_read_from_can_be_chosen(tmp_path):
 
     graph, _ = _graph_and_log(tmp_path)
     assert names_in(graph, kind="topic", field="nobody") == {"looms"}
+
+
+def test_allow_puts_a_phrase_on_the_list_once(tmp_path):
+    """`hook allow PHRASE`: the allow-list grows by the command, not by hand; a phrase
+    already there is not added twice, and nothing to allow is a refusal that says how."""
+    import io
+
+    from ml_stack.redact import hook
+
+    fixtures = tmp_path / "tests" / "known-fixtures.txt"
+    fixtures.parent.mkdir()
+    fixtures.write_text("# invented\nAda Lovelace\n")
+    out = io.StringIO()
+    env = {"NAMES_FIXTURES": "tests/known-fixtures.txt"}
+    assert hook.main(["allow", "Windows Defender Firewall", "x1 - x0"], env=env, root=tmp_path,
+                     stdout=out) == 0
+    text = fixtures.read_text()
+    assert "Windows Defender Firewall\n" in text and "x1 - x0\n" in text
+    assert "allowed with `hook allow` on" in text and text.startswith("# invented\nAda Lovelace\n")
+    assert "allowed in" in out.getvalue()
+    out = io.StringIO()
+    assert hook.main(["allow", "windows defender firewall"], env=env, root=tmp_path, stdout=out) == 0
+    assert "already allowed" in out.getvalue()
+    assert fixtures.read_text().count("Windows Defender Firewall") == 1
+    out = io.StringIO()
+    assert hook.main(["allow"], env=env, root=tmp_path, stdout=out) == 2
+    assert "allow what?" in out.getvalue()
