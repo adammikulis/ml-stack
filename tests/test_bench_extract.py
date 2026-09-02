@@ -14,7 +14,7 @@ import random
 import pytest
 
 from ml_stack.client.families import GENERIC
-from ml_stack.graph import bench_extract as bx
+from ml_stack.graph.bench import extract as bx
 from ml_stack.graph.bench import MEASURING, RunNotKept, _parser, runs
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import simulate

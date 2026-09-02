@@ -78,7 +78,7 @@ ml-stack-setup = "ml_stack.setup:main"
 ml-stack-doctor = "ml_stack.doctor:main"
 ml-stack-serve = "ml_stack.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
-ml-stack-bench = "ml_stack.graph.bench:main"
+ml-stack-bench = "ml_stack.graph.bench.run:main"
 # find a model newer than anything the assistant remembers, and print how to serve it
 ml-stack-models = "ml_stack.hub:main"
 ml-stack-store = "ml_stack.graph.store_cli:main"

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-import ml_stack.graph.bench_history as bh
+import ml_stack.graph.bench.history as bh
 
 # A day in the invented company's life: four measurements, in the order they were started.
 DAY = "2026-09-01"
@@ -198,7 +198,7 @@ def test_the_default_home_is_the_benchs_and_is_faked_here(tmp_path: Path, monkey
 
 
 def test_runs_as_a_module(day: Path):
-    done = subprocess.run([sys.executable, "-m", "ml_stack.graph.bench_history",
+    done = subprocess.run([sys.executable, "-m", "ml_stack.graph.bench.history",
                            "--home", str(day), "--json"],
                           capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
@@ -212,3 +212,16 @@ def test_runs_as_a_module(day: Path):
 ])
 def test_an_estimate_line_is_read_in_any_of_the_shapes_it_is_printed_in(text, seconds):
     assert bh.parse_duration(text) == seconds
+
+
+def test_ml_stack_bench_history_is_the_same_command(day: Path, monkeypatch, capsys):
+    """Registered on the bench's parser: `ml-stack-bench history` dispatches to `run`, and
+    its flags are this module's own (`add_arguments`), so the two cannot drift."""
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bh, "_now", lambda: _epoch(NOW))
+    assert bench.main(["history", "--home", str(day), "--json", "--since", "24h"]) == 0
+    got = json.loads(capsys.readouterr().out)
+    assert [e["exit"][:7] for e in got] == ["done", "killed", "crashed", "running"]
+    assert got[0]["commit"] == "0f1e2d3 (dirty)"
+    assert bench.main(["history", "--since", "yesterday-ish", "--home", str(day)]) == 2

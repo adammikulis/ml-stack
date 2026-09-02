@@ -11,7 +11,7 @@ import pathlib
 import pytest
 
 from ml_stack.graph.bench import Row, _hit, missed, runs, save, table
-from ml_stack.graph.bench_selfcheck import ScriptedModel
+from ml_stack.graph.bench.selfcheck import ScriptedModel
 
 
 def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
@@ -440,7 +440,7 @@ def test_a_short_run_is_the_same_short_run_twice():
     from ml_stack.graph.community import QUESTIONS
 
     assert sample(QUESTIONS, 9) == sample(QUESTIONS, 9)
-    assert [q["q"] for q in sample(QUESTIONS, 40)] == [q["q"] for q in QUESTIONS]
+    assert [q["q"] for q in sample(QUESTIONS, len(QUESTIONS) + 1)] == [q["q"] for q in QUESTIONS]
     assert sample(QUESTIONS, 0) == [dict(q) for q in QUESTIONS]
 
 
@@ -667,7 +667,7 @@ TINY = {
 class _Scripted(ScriptedModel):
     """The runner's own scripted model -- calls look_up for one text, then answers, keeps
     every message it was shown -- given the text to look up. One fake, shared with
-    `bench_selfcheck`, so that what the tests let through the runner lets through."""
+    `bench.selfcheck`, so that what the tests let through the runner lets through."""
 
     def __init__(self, text: str = "compilers") -> None:
         super().__init__()
@@ -2709,3 +2709,144 @@ def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tm
     with pytest.raises(bench.SmokeFailed, match="run smoke: every question failed"):
         bench._main(["run", "again", *common])
     assert [len(r["rows"]) for r in runs(kept, "again")] == [2], "the smoke, and no more"
+
+
+# -- the split: one package, one namespace, the old names still resolve ---------------------------
+
+def test_the_old_module_names_still_import_and_are_the_same_objects():
+    """`bench_extract`, `bench_selfcheck` and `bench_history` moved into the package; the
+    shims at the old paths re-export, so an import written before the move still works."""
+    from ml_stack.graph import bench_extract, bench_history, bench_selfcheck
+    from ml_stack.graph.bench import extract, history, selfcheck
+
+    assert bench_extract.main is extract.main
+    assert bench_selfcheck.ScriptedModel is selfcheck.ScriptedModel
+    assert bench_history.history is history.history
+
+
+def test_patching_the_package_reaches_every_module(monkeypatch):
+    """The package is the one namespace: `bench.runs` patched here is what `read_back` in
+    `keep` and `compare` in `show` see, or a test's fake store would be read by nobody."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import keep, show
+
+    monkeypatch.setattr(bench, "runs",
+                        lambda store, label="": [{"key": "k", "label": label, "rows": []}])
+    assert keep.read_back("nowhere", ["k"]) == [{"key": "k", "label": "", "rows": []}]
+    assert "wall clock" in show.compare("nowhere", "a", "b")
+
+
+def test_serve_draft_auto_asks_the_one_resolver_and_says_why(tmp_path, monkeypatch, capsys):
+    """`hub.choose_head` is the resolver every caller shares -- told which binary will
+    serve, so a head that borrows is withheld from mainline. The bench had its own, which
+    chose a BF16 MTP head for mainline twice (2026-09-01), 87G each time."""
+    import ml_stack.hub
+    import ml_stack.graph.bench as bench
+
+    asked = []
+
+    def fake_choose(model, *, binary=None, **k):
+        asked.append((model, binary))
+        return ml_stack.hub.Chosen("hf:someone/tiny-GGUF/mtp-tiny.gguf", "",
+                                   "shipped beside the weights", False,
+                                   "the README says it needs a fork")
+
+    monkeypatch.setattr(ml_stack.hub, "choose_head", fake_choose)
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--serve-draft", "auto",
+                        "--plain-only", *seen["common"]]) == 0
+    said = capsys.readouterr().out
+    assert asked == [("tiny.gguf", None)], "no --binary means the build find_binary picks"
+    assert seen["kwargs"][0]["draft"] == "hf:someone/tiny-GGUF/mtp-tiny.gguf"
+    assert "draft head: hf:someone/tiny-GGUF/mtp-tiny.gguf -- shipped beside the weights" in said
+    assert "the README says it needs a fork" in said
+
+    # a head withheld: nothing served as the draft, and the reason printed
+    asked.clear()
+    seen["kwargs"].clear()
+    monkeypatch.setattr(ml_stack.hub, "choose_head",
+                        lambda model, **k: ml_stack.hub.Chosen("", "", "withheld: mainline", False))
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--serve-draft", "auto",
+                        "--plain-only", *seen["common"]]) == 0
+    assert "draft head: none -- withheld: mainline" in capsys.readouterr().out
+    assert "draft" not in seen["kwargs"][0]
+
+
+def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, monkeypatch,
+                                                                     capsys):
+    """The log's first lines are its record: `history` reads them back once
+    `measuring.json` has moved on to the next run, and `measuring.json` carries the commit
+    while the run is going."""
+    import pathlib
+    import subprocess
+
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import history
+    from ml_stack.graph.bench import run as running
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kw: type("C", (), {"pid": 4242})())
+    argv = ["sweep", "--serve", "models/tiny.gguf", "--detach", "--also", "terse", "--smoke"]
+    assert bench.main(argv) == 0
+    capsys.readouterr()
+    held = json.loads((tmp_path / "home" / "measuring.json").read_text())
+    assert held["commit"] == "0f1e2d3 (dirty)"
+    lines = pathlib.Path(held["log"]).read_text().splitlines()
+    assert lines[0] == "argv: sweep --serve models/tiny.gguf --also terse --smoke"
+    assert lines[1] == f"started: {held['started']}"
+    assert lines[2] == "commit: 0f1e2d3 (dirty)"
+
+    (tmp_path / "home" / "measuring.json").unlink()
+    entry = history.history(tmp_path / "home", alive=lambda pid: False)[0]
+    assert entry.commit == "0f1e2d3 (dirty)"
+    assert entry.argv == [a for a in argv if a != "--detach"]
+    assert entry.started == held["started"]
+
+    # no repository to ask: the header has no commit line and the record an empty one
+    monkeypatch.setattr(running, "_commit", lambda root=None: "")
+    assert bench.main(["run", "tried", "--detach"]) == 0
+    capsys.readouterr()
+    held = json.loads((tmp_path / "home" / "measuring.json").read_text())
+    assert held["commit"] == ""
+    assert pathlib.Path(held["log"]).read_text().splitlines() == \
+        ["argv: run tried", f"started: {held['started']}"]
+
+
+def test_commit_reads_the_short_sha_and_marks_a_dirty_tree(tmp_path):
+    """Best effort against a repository made here: the sha, `(dirty)` once a file is left
+    uncommitted, and "" where there is no repository at all."""
+    import subprocess
+
+    from ml_stack.graph.bench.run import _commit
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*words):
+        return subprocess.run(["git", "-C", str(repo), "-c", "user.name=quill",
+                               "-c", "user.email=quill@invented.example", *words],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    git("init", "-q")
+    git("commit", "-q", "--allow-empty", "-m", "first")
+    sha = git("rev-parse", "--short", "HEAD")
+    assert _commit(repo) == sha
+    (repo / "note.txt").write_text("left over", encoding="utf-8")
+    assert _commit(repo) == f"{sha} (dirty)"
+    assert _commit(tmp_path / "nowhere") == ""
+
+
+def test_a_sigterm_says_killed_before_it_raises(capsys):
+    """`history` tells a stopped run from a crashed one by that word in its log."""
+    import signal
+
+    from ml_stack.graph.bench import history
+    from ml_stack.graph.bench.run import _stop_on_sigterm
+
+    with pytest.raises(SystemExit) as left:
+        _stop_on_sigterm(signal.SIGTERM, None)
+    assert left.value.code == 128 + signal.SIGTERM
+    assert capsys.readouterr().out.startswith(history._KILLED)

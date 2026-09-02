@@ -933,7 +933,7 @@ it comes up and pays for it once -- and a smoke where every question fails ends 
 exit 1 and the reason before anything else starts. The day this was written a new `--also
 tight` way reached `Client.__init__` as a keyword and took an 87G load down with it, because
 the smoke was a step in a plan and the test's fake client accepted anything; now the fake is
-the runner's own -- `bench_selfcheck.ScriptedModel`, bound against the real signature, and
+the runner's own -- `bench.selfcheck.ScriptedModel`, bound against the real signature, and
 the tests use it too -- and the check is not a step anyone has to remember.
 
 **A load is fetched, checked and timed before it is measured.** Every `hf:` reference a

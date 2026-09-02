@@ -13,7 +13,7 @@ import json
 import pytest
 
 from ml_stack.graph import bench
-from ml_stack.graph.bench_selfcheck import (
+from ml_stack.graph.bench.selfcheck import (
     ScriptedModel,
     ScriptedReader,
     SelfCheckFailed,
@@ -152,7 +152,7 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
     """The lock is faked to record its call and refuse, so `main` stops right after the
     check either way: with the flag no check ran, without it the ok line came first."""
     import ml_stack.lock
-    from ml_stack.graph import bench_selfcheck
+    from ml_stack.graph.bench import selfcheck as bench_selfcheck
 
     checked = []
     real = bench_selfcheck.selfcheck
@@ -188,7 +188,7 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
 
     import ml_stack.client
     import ml_stack.serve
-    from ml_stack.graph import bench_extract as bx
+    from ml_stack.graph.bench import extract as bx
     from ml_stack.serve import ServerInfo
 
     loads, readers = [], []
