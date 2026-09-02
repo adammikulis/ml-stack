@@ -171,6 +171,14 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
             key, n = f"{stem}-{n}", n + 1
         writer.put_doc(key, record)
     back = next((r for r in bench.runs(store) if r.get("key") == key), None)
+    tries = 1
+    while back is None and tries < 4:
+        # CI (Linux, ladybug 0.18.x, 2026-09-02): a run written to a fresh store came back on
+        # a later read and not the first. A run that needs a second read is still a run that
+        # came back; one that never does is the error below. HANDOFF has the investigation.
+        time.sleep(0.2 * tries)
+        tries += 1
+        back = next((r for r in bench.runs(store) if r.get("key") == key), None)
     if back is None:
         raise RunNotKept(f"{key} was written to {store} and did not come back")
     back = {k: v for k, v in back.items() if k != "key"}

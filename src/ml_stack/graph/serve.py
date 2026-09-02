@@ -88,6 +88,13 @@ def answer_payload(out: Any, **extra: Any) -> dict[str, Any]:
         payload = dict(out)
     else:
         payload = {k: getattr(out, k) for k in PAYLOAD if hasattr(out, k)}
+        spent = getattr(out, "spent", None)
+        if spent is not None and hasattr(spent, "public") and getattr(spent, "calls", 0):
+            # which model answered and what it cost: calls, seconds, tokens read, written,
+            # cached and drafted -- for the page's footer and for anyone testing an answer.
+            # An answer no model was asked for (a greeting, a cached one) carries neither.
+            payload["model"] = spent.model
+            payload["spent"] = spent.public()
     payload.setdefault("content", "")
     steps = payload.get("steps")
     if steps is not None:
@@ -230,6 +237,18 @@ class AskRoutes:
 
     def ready(self) -> str | None:
         return None
+
+    def model_name(self) -> str:
+        """What is answering, for a reader who has not asked anything yet -- the served
+        model's name, as the subclass knows it (a lease, a config, a probe of the server).
+        Empty when it cannot say; every answer still carries the name the server reported."""
+        return ""
+
+    def handle_model(self) -> dict[str, Any]:
+        """``GET /ask/model``: ``{"model": name}`` -- the page shows it in the ask pane."""
+        payload = {"model": self.model_name() or "", "ready": self.ready()}
+        self.send_json(200, payload)
+        return payload
 
     def embedder(self) -> Callable[[Sequence[str]], Sequence[Sequence[float]]] | None:
         return None

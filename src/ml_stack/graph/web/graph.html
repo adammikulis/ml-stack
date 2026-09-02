@@ -524,7 +524,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
       <div class="two">
         <div class="askpane" id="askpane">
           <div class="pane-head">
-            <h3 class="pane-title">Ask the model</h3>
+            <h3 class="pane-title" id="askpane-title">Ask the model</h3>
             <button type="button" id="qclear">clear</button>
           </div>
           <div class="turns" id="qturns"></div>
@@ -604,6 +604,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   // the same file is served from this machine and published as a flat page; only the served
   // one has a model behind it, and it is served over the tunnel as much as over loopback
   const served = !!window.GRAPH_LIVE;
+  // the served model's name, before anything is asked: the pane says what will answer
+  if (served) {
+    fetch('/ask/model').then(r => r.ok ? r.json() : null).then(d => {
+      const title = document.getElementById('askpane-title');
+      if (d && d.model && title) { title.textContent = 'Ask ' + modelShort(d.model); title.title = d.model; }
+    }).catch(() => {});
+  }
   let answer = null;
   let query = '';
   let selected = null;
@@ -999,6 +1006,26 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     }
   }
   // the same events in the past tense, once the answer has landed: zero counts left out
+  // which model answered, and what it spent -- from the answer's `spent`; the whole record
+  // goes on the label's title, so a tester can read every number without opening the console
+  function modelShort(name) {
+    return String(name || '').split(/[\\/]/).pop().replace(/\.gguf$/, '').replace(/-\d{5}-of-\d{5}$/, '');
+  }
+  function spentLine(ev) {
+    const sp = ev.spent || {};
+    const model = modelShort(ev.model || sp.model);
+    if (!model && !sp.calls) return '';
+    const bits = [];
+    if (model) bits.push('answered by ' + model);
+    if (sp.seconds) bits.push(sp.seconds.toFixed(1) + 's');
+    if (sp.calls) bits.push(sp.calls + ' call' + (sp.calls === 1 ? '' : 's'));
+    if (sp.read_tokens || sp.cached_tokens) bits.push('read ' + (sp.read_tokens || 0) + ', cached ' + (sp.cached_tokens || 0));
+    if (sp.completion_tokens) bits.push('wrote ' + sp.completion_tokens);
+    if (sp.tokens_per_second) bits.push(sp.tokens_per_second + ' tok/s');
+    if (sp.drafted && sp.acceptance != null) bits.push('draft ' + Math.round(sp.acceptance * 100) + '%');
+    if (sp.truncated) bits.push('cut by the ceiling');
+    return ' · ' + bits.join(' · ');
+  }
   function tally(counts) {
     const parts = [];
     if (counts.look_up) parts.push(`looked up ${counts.look_up}`);
@@ -1113,7 +1140,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
         if (!answering) { answering = true; label.textContent = 'answering'; }
       } else if (ev.event === 'done' || ev.event === 'error') {
         out = ev;
-        if (ev.event === 'done') label.textContent = tally(counts);
+        if (ev.event === 'done') { label.textContent = tally(counts) + spentLine(ev); if (ev.spent) label.title = JSON.stringify(ev.spent, null, 1); }
       }
       qTurns.scrollTop = qTurns.scrollHeight;
     };

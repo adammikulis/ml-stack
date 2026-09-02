@@ -8,6 +8,8 @@ graph. What is asserted is what the tools returned and what came back as touched
 from dataclasses import replace
 
 from ml_stack.client import Reply
+import json
+
 from ml_stack.graph.ask import (LISTED, Answer, converse, converse_stream, list_kind, look_at,
                                 look_up, path_between, tools_for)
 from ml_stack.testing import ScriptedModel
@@ -1405,3 +1407,35 @@ def test_a_follow_up_resolves_from_the_window_alone():
     assert model.seen[0][3] == {"role": "user", "content": "and where is she based?"}
     assert out.read == ["person:ada"] and "Turin" in model.told()
     assert out.content == "Ada is based in Turin."
+
+
+def test_an_answer_says_which_model_answered_and_what_every_call_spent():
+    """`Answer.spent` is noted from every reply of the loop: the model the server named, the
+    calls, the tokens read, kept and written, and the draft head's acceptance -- so a person
+    testing an answer sees the cost without running the bench."""
+    from ml_stack.client.chat import Reply
+
+    raw = {"model": "tiny-Q4.gguf", "usage": {"prompt_tokens": 500, "completion_tokens": 30},
+           "timings": {"prompt_n": 200, "cache_n": 300, "prompt_ms": 50.0, "predicted_ms": 150.0,
+                       "draft_n": 10, "draft_n_accepted": 7}}
+
+    class Model:
+        def __init__(self):
+            self.turn = 0
+
+        def chat(self, messages, tools=None, **kw):
+            self.turn += 1
+            if self.turn == 1:
+                return Reply(content=None, raw=raw, finish_reason="tool_calls", tool_calls=[
+                    {"id": "c1", "type": "function",
+                     "function": {"name": "look_up", "arguments": json.dumps({"text": "Ada"})}}])
+            return Reply(content="Ada works on compilers.", raw=raw, finish_reason="stop")
+
+    out = converse("what does Ada do?", GRAPH, Model())
+    assert out.model == "tiny-Q4.gguf"
+    assert out.spent.calls >= 2 and out.spent.tool_calls >= 1
+    assert out.spent.read_tokens == 200 * out.spent.calls
+    assert out.spent.cached_tokens == 300 * out.spent.calls
+    assert out.spent.acceptance == 0.7 and out.spent.drafted
+    assert out.spent.finish == "stop" and not out.spent.truncated
+    assert out.spent.seconds >= 0

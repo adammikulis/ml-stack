@@ -20,10 +20,12 @@ from __future__ import annotations
 import copy
 import json
 import re
+import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ml_stack.client.spent import Spent
 from ml_stack.graph.search import MATCHED_BY_RANK
 
 SYSTEM = (
@@ -491,6 +493,12 @@ class Answer:
     path: list[str] = field(default_factory=list)
     show: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
+    # which model answered and what it spent -- see `Spent`; `model` is the short form
+    spent: Spent = field(default_factory=Spent)
+
+    @property
+    def model(self) -> str:
+        return self.spent.model
 
     @property
     def why(self) -> str:
@@ -1017,8 +1025,11 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     def step(with_tools: bool) -> Any:
         offer = schemas if with_tools else quiet
         kw: dict[str, Any] = {"tools": offer} if offer else {}
+        sent = time.monotonic()
         if emit is None:
-            return client.chat(messages, think=False, **kw)
+            reply = client.chat(messages, think=False, **kw)
+            out.spent.note(reply, time.monotonic() - sent)
+            return reply
         streamed = {"thinking": False, "answer": False}
 
         def on_delta(kind: str, text: str) -> None:
@@ -1029,6 +1040,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             emit({"event": name, "text": text})
 
         reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
+        out.spent.note(reply, time.monotonic() - sent)
         if not streamed["thinking"]:
             trace = (getattr(reply, "thinking", "") or "").strip()
             if trace:

@@ -9,6 +9,7 @@ without the answer on it, a 409 sent after the stream headers.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import threading
 import urllib.error
 import urllib.request
@@ -72,7 +73,15 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
     def ready(self):
         return self.reason
 
+    model = ""
+
+    def model_name(self):
+        return self.model
+
     def do_GET(self):
+        if self.path == "/ask/model":
+            self.handle_model()
+            return
         want = thread_request(self.path)
         if want:
             self.handle_thread(*want)
@@ -456,3 +465,47 @@ def test_a_summariser_that_raises_loses_the_summary_not_the_answer(tmp_path, cap
         _, _, replay = call(url + "/thread/c1")
         assert len(replay["turns"]) == 2
     assert "the writer went away" in capsys.readouterr().err
+
+
+def test_the_done_frame_and_the_plain_answer_say_which_model_answered_and_what_it_spent():
+    """An `Answer` carries `spent`; the payload carries the model's name and the record --
+    calls, seconds, tokens read, cached, written, drafted -- for the page's footer."""
+    from ml_stack.client.chat import Reply
+
+    out = Answer(content="Iris surveys land.")
+    out.spent.note(Reply(content="ok", raw={"model": "tiny-Q4.gguf",
+                                            "usage": {"prompt_tokens": 900, "completion_tokens": 40},
+                                            "timings": {"prompt_n": 300, "cache_n": 600,
+                                                        "prompt_ms": 100.0, "predicted_ms": 400.0,
+                                                        "draft_n": 20, "draft_n_accepted": 15}}),
+                   took=0.8)
+    payload = answer_payload(out)
+    assert payload["model"] == "tiny-Q4.gguf"
+    spent = payload["spent"]
+    assert spent["calls"] == 1 and spent["read_tokens"] == 300 and spent["cached_tokens"] == 600
+    assert spent["completion_tokens"] == 40 and spent["drafted"] is True
+    assert spent["acceptance"] == 0.75 and spent["tokens_per_second"] == 80.0
+    assert spent["first_token"] == 0.4
+    assert json.dumps(payload)                      # JSON-ready, derived fields included
+
+
+def test_the_model_route_names_what_is_serving_before_anything_is_asked(served):
+    from urllib.request import urlopen
+
+    def get(where):
+        with urlopen(where, timeout=5) as r:
+            return json.loads(r.read().decode("utf-8"))
+
+    url, handler = served
+    handler.model = ""
+    assert get(url + "/ask/model") == {"model": "", "ready": None}
+    handler.model = "hf:someone/tiny-GGUF/tiny-Q4.gguf"
+    assert get(url + "/ask/model")["model"] == "hf:someone/tiny-GGUF/tiny-Q4.gguf"
+
+
+def test_the_page_shows_the_served_model_and_what_each_answer_spent():
+    import ml_stack.graph as graph_package
+
+    html = (Path(graph_package.__file__).parent / "web" / "graph.html").read_text(encoding="utf-8")
+    assert "fetch('/ask/model')" in html and "answered by" in html
+    assert "askpane-title" in html and "ev.spent" in html
