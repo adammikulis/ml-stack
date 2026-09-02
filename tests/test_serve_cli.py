@@ -852,3 +852,9 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
     except SystemExit:
         pass
     assert seen["spec"].cache_type_k == "" and seen["spec"].cache_type_v == ""
+    assert seen["spec"].embedding is False
+    try:
+        cli.main(["up", str(model), "--port", "1", "--embedding"])
+    except SystemExit:
+        pass
+    assert seen["spec"].embedding is True

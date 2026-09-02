@@ -400,6 +400,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     spec = ServerSpec(model=model, port=args.port, context=args.context,
                       parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
                       spec_type=kind, cache_type_k=kv, cache_type_v=kv,
+                      embedding=bool(getattr(args, "embedding", False)),
                       spec_draft_max=getattr(args, "spec_n_max", None),
                       spec_draft_ngl=getattr(args, "draft_ngl", None),
                       lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
@@ -900,6 +901,9 @@ def main(argv: list[str] | None = None) -> int:
                     help="layers of the draft model to put on the GPU. Without it the draft "
                          "runs where the server puts it by default, which can be the CPU -- "
                          "and a draft slower than the model it is guessing for is a loss")
+    up.add_argument("--embedding", action="store_true",
+                    help="serve an embedding model (llama-server --embedding), the way the "
+                         "graph's vectors and the thread's recall want one")
     up.add_argument("--kv", default="", metavar="TYPE",
                     help="what the KV cache is stored as: q8_0 halves it (measured 2026-09-02 "
                          "on Flash-Next: F1 unchanged, faster; the recurrent state is not "
