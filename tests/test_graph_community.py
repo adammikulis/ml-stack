@@ -128,3 +128,28 @@ def test_no_question_is_asked_twice():
 
     said = Counter(q["q"].strip().casefold() for q in QUESTIONS)
     assert [q for q, n in said.items() if n > 1] == []
+
+
+def test_the_full_set_is_fifty_scored_questions_and_no_one_kind_of_them(g):
+    """Fifty is the `n` a full run records -- the scored questions; the ones whose right
+    answer is nobody are asked, not counted -- and the ranking takes a model's largest run,
+    so a thirty-four-question row stays valid until a fifty of the same model exists.
+
+    Each question is filed under the rarest kind it asks for, exactly as `bench.sample`
+    files it when drawing a short run. Every bucket has to be there for a short run to
+    have anything to draw, and none may be more than half the set: the set is about half
+    person-shaped on purpose, because the page is, and half is the line past which it is
+    person-shaped by accident again. Ids and duplicates are held by
+    `test_every_expected_answer_exists` and `test_no_question_is_asked_twice`."""
+    kind = {n["id"]: n["kind"] for n in g["nodes"]}
+    scored = [q for q in QUESTIONS if q["expect"]]
+    assert len(scored) == 50
+    assert len(QUESTIONS) - len(scored) >= 4, "and some whose right answer is nobody"
+
+    wanted = Counter(k for q in QUESTIONS
+                     for k in ({kind[e] for e in q["expect"]} or {"nobody"}))
+    filed = Counter(min({kind[e] for e in q["expect"]} or {"nobody"}, key=wanted.__getitem__)
+                    for q in QUESTIONS)
+    assert set(filed) == {"person", "org", "place", "topic", "opportunity", "event", "nobody"}
+    assert all(n >= 2 for n in filed.values()), f"a kind with one question: {dict(filed)}"
+    assert max(filed.values()) <= len(QUESTIONS) / 2, f"one kind is most of the set: {dict(filed)}"

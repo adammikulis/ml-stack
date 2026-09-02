@@ -310,6 +310,14 @@ QUESTIONS: list[dict[str, Any]] = [
     # keeps the inputs honest. A question that says "build" wants the modeller.
     {"q": "I need two people to build a healthcare AI prototype. Who?",
      "expect": ["person:alan", "person:vera"]},
+    # Ada fixes the arms and Hedy programs them; Oskar plans the servicing and says himself
+    # it is not the same job as fixing. A question that names the job wants the one person.
+    {"q": "Who programs robot arms?", "expect": ["person:hedy"]},
+    {"q": "who decides what gets serviced and when?", "expect": ["person:oskar"]},
+    {"q": "Who could get us a first meeting with a company worth talking to?",
+     "expect": ["person:dorian"]},
+    {"q": "Who works at Pellard Foundry?",
+     "expect": ["person:charles", "person:oskar", "person:otto"]},
 
     # --- putting people together ------------------------------------------------------
     {"q": "Who could work together on a robotics marketing project?",
@@ -319,6 +327,8 @@ QUESTIONS: list[dict[str, Any]] = [
      "expect": ["person:grace", "person:katherine", "person:sela"]},
     {"q": "Who is in Calderwick?",
      "expect": ["person:iris", "person:nell", "person:otto", "person:tam"]},
+    {"q": "whos based in selby",
+     "expect": ["person:alan", "person:bram", "person:dorian", "person:milo"]},
 
     # --- answers that are not people --------------------------------------------------
     # The set was nine-tenths person-shaped, which flatters anything that prefers people.
@@ -333,6 +343,11 @@ QUESTIONS: list[dict[str, Any]] = [
      "expect": ["topic:surveying", "topic:geotechnics"]},
     {"q": "Which places do the people at Brayfield live in?",
      "expect": ["place:calderwick"]},
+    {"q": "What does Pellard Foundry do?", "expect": ["topic:repair", "topic:maintenance"]},
+    {"q": "where's quenlow robotics?", "expect": ["place:turin"]},
+    # Two hops out and back: the people who were there, then where each of them works.
+    {"q": "Which firms had someone at Makers Night?",
+     "expect": ["org:brayfield", "org:pellard", "org:quenlow"]},
 
     # --- work going spare, which is what a community graph is for ----------------------
     {"q": "What openings are there?",
@@ -343,12 +358,19 @@ QUESTIONS: list[dict[str, Any]] = [
     {"q": "Somebody is selling a machine and needs help. What do they need?",
      "expect": ["topic:marketing"]},
     {"q": "Who could take the clinical data work?", "expect": ["person:vera"]},
+    {"q": "Any work going for a surveyor?", "expect": ["opportunity:sitesurvey"]},
+    # Charles is offering work too, but he is a person; "companies" asks for the three
+    # that offer something themselves.
+    {"q": "Which companies are offering work?",
+     "expect": ["org:brayfield", "org:harnley", "org:quenlow"]},
 
     # --- where people meet ------------------------------------------------------------
     {"q": "What events come up?", "expect": ["event:makersnight", "event:tradefair"]},
     {"q": "Who was at Makers Night?",
      "expect": ["person:ada", "person:hedy", "person:iris", "person:otto", "person:tam"]},
     {"q": "Which event did the sellers go to?", "expect": ["event:tradefair"]},
+    {"q": "Where would a surveyor have run into the robotics people?",
+     "expect": ["event:makersnight"]},
 
     # --- how two things connect, at several distances ----------------------------------
     # Two hops through a shared employer; four through a place and an employer; six across
@@ -362,6 +384,8 @@ QUESTIONS: list[dict[str, Any]] = [
      "expect": ["person:ada", "topic:repair", "person:charles", "topic:marketing",
                 "person:grace"]},
     {"q": "How is Iris Bellweather connected to Alan Turing?", "expect": []},
+    {"q": "How is Milo Fenwick connected to Alan Turing?",
+     "expect": ["person:milo", "place:selby", "person:alan"]},
     {"q": "Who could introduce Iris Bellweather to a lawyer?", "expect": ["person:nell"]},
     {"q": "Who could introduce Ada Lovelace to someone who does marketing?",
      "expect": ["person:charles", "person:grace"]},
@@ -373,15 +397,23 @@ QUESTIONS: list[dict[str, Any]] = [
     {"q": "Tell me about Otto Vance.",
      "expect": ["person:otto", "org:pellard", "place:calderwick"]},
     {"q": "Is Ada Lovelace the right person for a robotics job?", "expect": ["person:ada"]},
+    {"q": "what's milo fenwick into?",
+     "expect": ["person:milo", "topic:automation", "topic:logistics"]},
+    {"q": "Tell me about Nell Ashgrove.",
+     "expect": ["person:nell", "org:littlemoor", "place:calderwick"]},
 
     # --- somebody the graph knows of and nothing about ---------------------------------
     {"q": "What does Rufus Kell do?", "expect": ["person:rufus"]},
 
     # --- a follow-up, which only means anything with the turn before it ----------------
     {"q": "And where is she based?", "expect": ["place:calderwick"]},
+    {"q": "Who does data engineering for hospitals?", "expect": ["person:vera"]},
+    {"q": "And which company is she at?", "expect": ["org:harnley"]},
 
     # --- the right answer is nobody ----------------------------------------------------
     {"q": "Nobody here does underwater welding. Who could?", "expect": []},
     {"q": "Who is the chief financial officer?", "expect": []},
+    {"q": "Is anyone here a dentist?", "expect": []},
     {"q": "hi", "expect": []},
+    {"q": "thanks, thats all i needed", "expect": []},
 ]

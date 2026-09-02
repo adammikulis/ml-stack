@@ -832,7 +832,7 @@ library and no network, so it opens on any machine.
 a draft head cannot change an answer -- the target verifies every token -- only the wall
 clock and the memory. Accuracy comes from the model's largest run (the full sweep, undrafted,
 on mainline; the newest on a tie), and cost, printed per question so a twenty-question
-`drafts` run compares with a thirty-four, from its fastest run of at least `SHORT` questions
+`drafts` run compares with a fifty, from its fastest run of at least `SHORT` questions
 whose F1 held within five points of that -- a head, a draft length and a fork included -- with
 the last column naming which run and which build it was (`--noise` widens or tightens the
 five). A run that fell outside the noise is listed under the table as `rejected`, so a head
