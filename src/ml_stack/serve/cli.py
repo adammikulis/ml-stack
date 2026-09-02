@@ -27,6 +27,9 @@ DEFAULT_CONTEXT = _SPEC.context
 DEFAULT_PARALLEL = _SPEC.parallel
 DEFAULT_TIMEOUT = DEFAULT_TIMEOUT_S
 PROBE_TIMEOUT = 2.0
+# The per-user contexts `fit` tabulates unless told otherwise; named here so --help can
+# say them without importing the module that measures.
+FIT_PER_USER = (4096, 8192, 16384, 32768, 65536, 131072)
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,6 +400,122 @@ def cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fit(args: argparse.Namespace) -> int:
+    """``ml-stack-serve fit`` -- how many people fit on this machine, at what context.
+
+    Reads the measured records rather than a formula: `preflight`'s estimate counts every
+    layer as full attention, and gemma4, gpt-oss and qwen4exp each disagree with that in a
+    different way. `--measure` serves a model once at `-lv 4`, reads what llama.cpp says it
+    allocated, and writes that into the source of truth.
+    """
+    from ml_stack.hub import room as machine_room
+    from ml_stack.serve import fit as fit_mod
+
+    asked_room = 0
+    if getattr(args, "room", ""):
+        try:
+            asked_room = fit_mod.parse_room(args.room)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    room = asked_room or machine_room()
+
+    per_user = [int(n) for n in (getattr(args, "per_user", None) or [])]
+    wanted = [Path(str(m)).name.lower() for m in (getattr(args, "model", None) or [])]
+
+    if getattr(args, "measure", False):
+        if not wanted:
+            print("error: --measure needs a model to measure", file=sys.stderr)
+            return 2
+        code = _measure_each(args, room=room)
+        if code:
+            return code
+
+    rows = fit_mod.records(room=room)
+    if wanted:
+        rows = [r for r in rows if r.model.lower() in wanted
+                or any(w in r.model.lower() for w in wanted)]
+        if not rows:
+            print("nothing measured for " + ", ".join(wanted)
+                  + " -- `ml-stack-serve fit MODEL --measure` serves it once and records "
+                    "what it allocated.", file=sys.stderr)
+            return 1
+
+    contexts = per_user or list(fit_mod.DEFAULT_PER_USER)
+    print(fit_mod.render(rows, contexts, room, bool(getattr(args, "md", False))))
+
+    parallel = int(getattr(args, "parallel", 1) or 1)
+    if parallel > 1:
+        print()
+        for row in rows:
+            print(f"{row.model}: {parallel} users fit at "
+                  f"{row.longest(parallel):,} tokens each")
+
+    where = str(getattr(args, "write", "") or "")
+    if where:
+        every = fit_mod.records()
+        parts = [f"# What fits\n\nMeasured at load, not estimated -- see "
+                 f"`src/ml_stack/data/fit.json`.\n\n## This machine "
+                 f"({fit_mod._human(machine_room())})\n\n"
+                 + fit_mod.render(every, contexts, machine_room(), True)]
+        if asked_room and asked_room != machine_room():
+            parts.append(f"## A machine with {fit_mod._human(asked_room)}\n\n"
+                         + fit_mod.render(every, contexts, asked_room, True))
+        Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+        print(f"\nwrote {where}", file=sys.stderr)
+    return 0
+
+
+def _measure_each(args: argparse.Namespace, *, room: int) -> int:
+    """Serve each named model once and record what it allocated. Returns an exit code."""
+    from ml_stack.serve import fit as fit_mod
+    from ml_stack.serve.backend import LlamaServerBackend
+    from ml_stack.serve.manager import weight_of
+    from ml_stack.serve.preflight import _ref_bytes
+
+    binary = str(getattr(args, "binary", "") or "")
+    build_name = str(getattr(args, "build", "") or "")
+    backend = (LlamaServerBackend(binary=binary or None, build=build_name or None)
+               if (binary or build_name) else LlamaServerBackend())
+
+    # Two slots, not one: the sliding-window and recurrent caches are sized for however many
+    # sequences were asked for, and a measurement taken over one cannot tell a per-sequence
+    # cost from a constant. `--parallel` is about who fits, not about how it was measured.
+    slots = max(2, int(getattr(args, "parallel", 1) or 1))
+    kv = str(getattr(args, "kv", "") or "")
+
+    for named in args.model:
+        model = resolve_model(str(named))
+        draft = drafted(model, str(getattr(args, "draft", "") or ""))
+        kind = ""
+        if draft:
+            from ml_stack.hub import spec_for
+
+            kind = spec_for(draft)
+        spec = ServerSpec(model=model, port=args.port, context=args.context,
+                          parallel=slots, draft=draft or None, spec_type=kind,
+                          cache_type_k=kv, cache_type_v=kv, warmup=False)
+        try:
+            measured = fit_mod.measure(spec, backend=backend, timeout=args.timeout)
+        except Exception as exc:  # noqa: BLE001 - whatever the load said, say it here
+            print(f"error: could not measure {Path(model).name}: {exc}", file=sys.stderr)
+            return 2
+        if not measured.measured:
+            print(f"error: {Path(model).name} loaded but its log said nothing about a "
+                  "cache. That is what a build too old for `-lv 4` looks like; nothing "
+                  "was recorded.", file=sys.stderr)
+            return 2
+        record = fit_mod.Fit.of(
+            measured, model=Path(model).name, weights=weight_of(model),
+            draft=_ref_bytes(draft or None), room=room,
+            cache_type=kv or measured.cache_type, spec=kind, context=args.context,
+            parallel=slots)
+        where = fit_mod.add(record)
+        print(f"measured {record.model}: {measured.said()}", file=sys.stderr)
+        print(f"  recorded in {where}", file=sys.stderr)
+    return 0
+
+
 PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -600,6 +719,61 @@ def main(argv: list[str] | None = None) -> int:
                          "pass -- a path, an hf: reference, or 'auto' to use the draft head "
                          "shipped beside the weights (the mtp- file in a QAT repository)")
 
+    fit_p = sub.add_parser(
+        "fit", help="how many people fit at a given context, from measured KV numbers")
+    fit_p.add_argument("model", nargs="*",
+                       help="which measured models to report (a bare name, a path, or an "
+                            "hf: reference). Default: every model that has been measured")
+    fit_p.add_argument("--measure", action="store_true",
+                       help="serve each named model once at -lv 4, read what llama.cpp says "
+                            "it allocated -- the base cache per token, the sliding-window "
+                            "and recurrent caches per sequence, the compute buffers -- and "
+                            "record it. This is the only way the numbers get in: a formula "
+                            "over the GGUF header counts every layer as full attention, and "
+                            "gemma4 (18 layers share a cache, the rest slide), gpt-oss "
+                            "(every other layer slides) and qwen4exp (three layers in four "
+                            "are recurrent) each disagree with that differently")
+    fit_p.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
+                       help="measure it with a draft head as well -- a path, an hf: "
+                            "reference, or 'auto'. A draft *model* keeps its own cache at "
+                            "the same context, which is the real cost of drafting with one")
+    fit_p.add_argument("--kv", default="", metavar="TYPE",
+                       help="measure with the main model's KV cache stored as this: f16 "
+                            "(the server's own default), q8_0, q4_0. A record is kept per "
+                            "cache type, because that is what changes the per-token cost")
+    fit_p.add_argument("--room", default="", metavar="SIZE",
+                       help="ask about a machine with this much memory instead of this one "
+                            "-- 24G, 24576M, or a plain number of bytes. Default: what "
+                            "`ml-stack-serve memory` says a model may use here")
+    fit_p.add_argument("--per-user", type=int, action="append", dest="per_user",
+                       default=[], metavar="N",
+                       help="a per-user context to put in the table. Repeatable; default "
+                            f"{', '.join(str(n) for n in FIT_PER_USER)}")
+    fit_p.add_argument("--parallel", type=int, default=1, metavar="N",
+                       help="also say the longest context N users could each be given "
+                            "(default: 1, which is the line every block prints anyway). "
+                            "Measuring always serves two slots, so a per-sequence cost can "
+                            "be told apart from a constant")
+    fit_p.add_argument("--md", action="store_true",
+                       help="print Markdown rather than the plain listing")
+    fit_p.add_argument("--write", default="", metavar="FILE",
+                       help="write the Markdown for every record to a file -- at this "
+                            "machine's room, and at --room's as a second section")
+    fit_p.add_argument("--context", type=int, default=32768, metavar="N",
+                       help="the context to measure at (default: 32768). The per-token cost "
+                            "does not depend on it; a long one just measures it precisely")
+    fit_p.add_argument("--port", type=int, default=DEFAULT_PORT,
+                       help=f"the port to measure on (default: {DEFAULT_PORT})")
+    fit_p.add_argument("--timeout", type=float, default=None,
+                       help="seconds to wait for the measured load (default: scales with "
+                            "the weights on disk)")
+    fit_p.add_argument("--binary", default="", metavar="PATH",
+                       help="the llama-server to measure with, when the one on PATH cannot "
+                            "read this model")
+    fit_p.add_argument("--build", default="", metavar="NAME",
+                       help="measure with a named build, the way `up --build NAME` serves "
+                            "with one")
+
     memory = sub.add_parser("memory", help="how much a model may use here, and whether that "
                                            "survives a reboot")
     memory.add_argument("--persist", nargs="?", const="", default=None, metavar="MB",
@@ -664,7 +838,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "memory": cmd_memory,
-            "build": build.cmd_build}[args.cmd](args)
+            "fit": cmd_fit, "build": build.cmd_build}[args.cmd](args)
 
 
 if __name__ == "__main__":

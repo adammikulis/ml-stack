@@ -338,12 +338,76 @@ def _per_layer(value: object, n_layer: int) -> list[float]:
     return [float(value)] * n_layer
 
 
+def _recurrent_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
+    """Which layers keep a *state* rather than a history, and so cost nothing per token.
+
+    Two ways a GGUF says so, both read the way llama.cpp's own loader reads them
+    (`models/qwen4exp.cpp`): an explicit `attention.recurrent_layers` array wins, and
+    otherwise `full_attention_interval = N` means every Nth layer holds a cache and the
+    other N-1 do not -- `(il + 1) % N != 0` is recurrent. Qwen3.8-Flash-Next is 4, so three
+    layers in four cost nothing at all as the context grows.
+    """
+    explicit = key("attention.recurrent_layers")
+    if isinstance(explicit, (list, tuple)) and explicit:
+        rows = [bool(v) for v in explicit]
+        return (rows + [rows[-1]] * n_layer)[:n_layer]
+    interval = key("full_attention_interval")
+    try:
+        every = int(interval) if interval is not None else 0
+    except (TypeError, ValueError):
+        every = 0
+    if every <= 0:
+        return [False] * n_layer
+    return [(il + 1) % every != 0 for il in range(n_layer)]
+
+
+def _sliding_layers(key: Callable[[str], object], n_layer: int) -> list[bool]:
+    """Which layers see only a window, read the way `llama_hparams::set_swa_pattern` writes it.
+
+    `attention.sliding_window_pattern` is a bool per layer in gemma4 and a *period* in
+    gemma3 and cohere2, and llama.cpp reads either through the same `get_key_or_arr`. A
+    model that names a window and no pattern gets llama.cpp's own default period of 2 --
+    which is gpt-oss, where the even layers slide and the odd ones do not.
+    """
+    pattern = key("attention.sliding_window_pattern")
+    if isinstance(pattern, (list, tuple)) and pattern:
+        rows = [bool(v) for v in pattern]
+        return (rows + [rows[-1]] * n_layer)[:n_layer]
+    period = 0
+    if isinstance(pattern, bool):
+        period = 0
+    elif isinstance(pattern, (int, float)):
+        period = int(pattern)
+    elif key("attention.sliding_window"):
+        period = 2
+    if period <= 0:
+        return [False] * n_layer
+    return [il % period < (period - 1) for il in range(n_layer)]
+
+
 def _kv_estimate_bytes(meta: dict[str, object], context: int,
                        cache_type_k: str, cache_type_v: str) -> int:
-    """``sum over layers of n_kv_heads * head_dim * context * (bytes_k + bytes_v)`` -- 0 when
-    the GGUF does not carry the keys this needs, which is a real answer, not a failure to
-    read. Never raises: an estimate that cannot be made is unknown, and a preflight that
-    crashes a load has defeated itself."""
+    """``sum over the layers that hold one of n_kv_heads * head_dim * span * bytes`` -- 0
+    when the GGUF does not carry the keys this needs, which is a real answer, not a failure
+    to read. Never raises: an estimate that cannot be made is unknown, and a preflight that
+    crashes a load has defeated itself.
+
+    Not every layer holds a cache and not every cache spans the context, which is the whole
+    difference between this and the flat multiplication it used to be:
+
+    * a **recurrent** layer keeps a fixed state per sequence, so it costs nothing per token
+      -- three layers in four of Qwen3.8-Flash-Next (`full_attention_interval = 4`);
+    * a **sliding-window** layer holds its window and no more, in its own `key_length_swa`
+      -- gemma4 (a bool per layer, a 512-token window) and gpt-oss (128, every other layer);
+    * a **shared-KV** layer holds nothing of its own -- gemma4's `shared_kv_layers = 18`
+      says the last eighteen read the cache the layers before them wrote.
+
+    It is still an estimate, and still only the fallback: the compute buffers are not in the
+    header at all, a recurrent layer's per-sequence state is not either, and
+    `attention.compress_ratios` (Qwen3.8-Flash-Next again) shrinks even the layers counted
+    here. `ml-stack-serve fit` is the measured answer; this is what there is before anybody
+    has measured one.
+    """
     try:
         arch = str(meta.get("general.architecture") or "")
         if not arch:
@@ -356,18 +420,44 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
         if not (n_layer and context):
             return 0
         kv_heads = _per_layer(key("attention.head_count_kv") or 0, n_layer)
-        head_dim = key("attention.key_length")
-        if not head_dim:
+
+        fallback = key("attention.key_length")
+        if not fallback:
             embed, n_head = key("embedding_length"), key("attention.head_count")
             if embed and n_head:
                 heads = _per_layer(n_head, n_layer)
-                head_dim = [float(embed) / h if h else 0.0 for h in heads]
-        dims = _per_layer(head_dim or 0, n_layer)
-        if not any(kv_heads) or not any(dims):
+                fallback = [float(embed) / h if h else 0.0 for h in heads]
+        key_dim = _per_layer(fallback or 0, n_layer)
+        value_dim = _per_layer(key("attention.value_length") or fallback or 0, n_layer)
+        key_swa = _per_layer(key("attention.key_length_swa") or fallback or 0, n_layer)
+        # A model that names a narrower key for its windowed layers has a narrower value
+        # there too (gemma4 refuses to load if they differ), so the SWA key is a better
+        # fallback for the SWA value than the full-attention one is.
+        value_swa = _per_layer(
+            key("attention.value_length_swa") or key("attention.key_length_swa")
+            or key("attention.value_length") or fallback or 0, n_layer)
+        if not any(kv_heads) or not any(key_dim):
             return 0
+
+        recurrent = _recurrent_layers(key, n_layer)
+        sliding = _sliding_layers(key, n_layer)
+        window = int(key("attention.sliding_window") or 0)
+        shared = int(key("attention.shared_kv_layers") or 0)
+        holds_kv = n_layer - shared if shared > 0 else n_layer
+
         bytes_k = _CACHE_BYTES.get(cache_type_k.lower(), 2.0) if cache_type_k else 2.0
         bytes_v = _CACHE_BYTES.get(cache_type_v.lower(), 2.0) if cache_type_v else 2.0
-        return int(sum(kh * d for kh, d in zip(kv_heads, dims)) * context * (bytes_k + bytes_v))
+
+        total = 0.0
+        for il in range(n_layer):
+            if recurrent[il] or il >= holds_kv:
+                continue
+            swa = sliding[il] and window > 0
+            span = min(context, window) if swa else context
+            k_dim = key_swa[il] if swa else key_dim[il]
+            v_dim = value_swa[il] if swa else value_dim[il]
+            total += kv_heads[il] * (k_dim * bytes_k + v_dim * bytes_v) * span
+        return int(total)
     except Exception:  # noqa: BLE001 - an estimate that cannot be made is 0, never a crash
         return 0
 

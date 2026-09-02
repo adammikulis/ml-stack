@@ -469,6 +469,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | | |
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
+| `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--write FILE` writes the Markdown |
 | `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
@@ -595,6 +596,33 @@ completion sent right after the health check, so the first *measured* question i
 one paying for shader compilation) — both show up in `ml-stack-serve status --json`, and the
 load timeout itself scales with the weights on disk (`60s + 1.5s/GB`, floor 300s) rather than
 racing a fixed clock against whichever model is biggest.
+
+**How many people fit** is a measured number, not an estimated one. The preflight's KV
+estimate reads the GGUF header, and the header does not say enough: gemma4 slides a
+512-token window on some layers and shares one cache across its last eighteen, gpt-oss
+slides a 128-token window on every other layer, and Qwen3.8-Flash-Next keeps a token cache
+on one layer in four and a fixed state per *sequence* on the other three. Counting every
+layer as full attention is wrong by a different multiple for each of them. llama.cpp prints
+exactly what it allocated at load, and that is what is recorded:
+
+```
+ml-stack-serve fit model.gguf --measure --context 32768
+ml-stack-serve fit --room 24G --per-user 8192 --per-user 65536
+ml-stack-serve fit --md --write docs/fit.md
+```
+
+`--measure` serves the model once with `-lv 4` (the library's own load lines are
+LOG_LEVEL_TRACE, so the server's default verbosity of 3 prints none of them), reads the
+`llama_kv_cache`, `llama_memory_recurrent` and compute-buffer lines out of the log the
+backend already writes, stops the server, and keeps two numbers: **bytes per token of
+context** and **bytes fixed per sequence**. Those compose in both directions -- how many
+users fit at a context, and the longest context a given number of users can each have.
+
+The records are the single source of truth, in `src/ml_stack/data/fit.json`, keyed by the
+model file's basename, the cache type and the guessing-ahead kind; `~/.ml-stack/fit.json`
+layers a machine's own measurements over the shipped ones, and `--measure` says which of the
+two it wrote to. Without `--measure`, `fit` only reads -- nothing is served and no GPU is
+touched.
 
 **Guessing ahead** comes in two shapes and `--spec TYPE` chooses. A *draft* kind runs a
 second small model — `--draft auto` finds the `mtp-` head a repository ships, wherever the

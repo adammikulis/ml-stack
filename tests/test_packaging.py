@@ -42,6 +42,16 @@ def test_the_contract_data_ships_in_the_contracts_wheel(tmp_path):
     assert any("recipes/" in n and n.endswith(".json") for n in names)
 
 
+@pytest.mark.slow
+def test_the_measured_fit_records_ship_in_the_wheel(tmp_path):
+    """`ml-stack-serve fit` reads `ml_stack/data/fit.json` at runtime, and a wheel without
+    it is a command that says nothing has ever been measured."""
+    wheel = build(tmp_path)
+    names = zipfile.ZipFile(wheel).namelist()
+
+    assert "ml_stack/data/fit.json" in names, f"fit.json missing from {wheel.name}"
+
+
 def console_scripts() -> dict:
     import tomllib
 

@@ -177,3 +177,7 @@ onclick: back
 Pellard P40
 checksum mismatch
 Windows Defender Firewall
+
+# vendors and products named in the README (a GPU maker, a mail API); not people
+NVIDIA
+Microsoft

@@ -1,0 +1,572 @@
+"""How many people fit on one machine at a given context -- from what llama.cpp allocated.
+
+A formula over a GGUF's header cannot answer this. `preflight._kv_estimate_bytes` counts
+every layer as full attention, and no interesting model is built that way any more:
+
+* `qwen4exp` (Qwen3.8-Flash-Next) carries `full_attention_interval = 4` -- one layer in four
+  holds a token cache and the other three are recurrent, with a fixed state per *sequence*
+  rather than per token -- and those attention layers then compress their keys again.
+* `gemma4` has a sliding-window pattern (a bool per layer, a 512-token window, its own
+  `key_length_swa`) and `shared_kv_layers = 18`: eighteen layers own no cache at all.
+* `gpt-oss` has a 128-token window with no pattern, and llama.cpp alternates -- even layers
+  slide, odd ones do not.
+
+Each of those is a different multiplier on the same header, and the header does not say
+which. llama.cpp does: at load it prints exactly what it allocated, per cache, in MiB. This
+module reads those lines, turns them into two numbers that compose -- **bytes per token of
+context** and **bytes fixed per sequence** -- and keeps them, per model, in one file:
+`ml_stack/data/fit.json`, with `~/.ml-stack/fit.json` layered over it for a machine's own
+additions. `ml-stack-serve fit` is the command over this.
+
+The two numbers are what make the question answerable in either direction::
+
+    cost(context)  = per_token * context + per_seq
+    users(context) = (room - weights - draft - compute) // cost(context)
+    longest(n)     = ((room - weights - draft - compute) // n - per_seq) // per_token
+
+Measured, never assumed: `measure()` serves the model once at `-lv 4` (the llama.cpp
+library's own INFO lines are LOG_LEVEL_TRACE, so verbosity 3 -- the server's default --
+prints the server's lines and none of these), reads the log the backend already writes, and
+stops the server again.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, replace
+from datetime import datetime, timezone
+from pathlib import Path
+
+__all__ = [
+    "DEFAULT_PER_USER", "Fit", "Measured", "add", "local_file", "measure",
+    "package_file", "parse_load_log", "parse_room", "records", "render", "writable_file",
+]
+
+_MIB = 1024 * 1024
+
+# The per-user contexts the table asks about, unless told otherwise. 4k is a question with
+# its tools; 128k is a whole conversation kept open.
+DEFAULT_PER_USER: tuple[int, ...] = (4096, 8192, 16384, 32768, 65536, 131072)
+
+
+# ------------------------------------------------------------------ reading a load log
+
+# `llama_kv_cache: size = 1234.00 MiB ( 65536 cells,  12 layers,  2/1 seqs), K (f16): ...`
+# (llama-kv-cache.cpp, the constructor's own summary). A model with sliding-window layers
+# is an `llama_kv_cache_iswa`, which builds two of these and so prints the line twice: the
+# base cache first, at the full context, then the SWA one at a few hundred cells.
+_KV_SIZE = re.compile(
+    r"llama_kv_cache:\s*size\s*=\s*([\d.]+)\s*MiB\s*\(\s*(\d+)\s*cells,\s*(\d+)\s*layers,"
+    r"\s*(\d+)\s*/\s*(\d+)\s*seqs\).*?K\s*\(([^)]*)\):\s*([\d.]+)\s*MiB,"
+    r"\s*V\s*\(([^)]*)\):\s*([\d.]+)\s*MiB")
+
+# `llama_memory_recurrent: size = 12.00 MiB ( 2 cells, 36 layers, 2 seqs 2 rs_seq), R ...`
+# One cell per sequence: a recurrent layer keeps a state, not a history, so its cost does
+# not grow with the context at all -- which is the whole reason a hybrid model is worth
+# serving at a long one.
+_RS_SIZE = re.compile(
+    r"llama_memory_recurrent:\s*size\s*=\s*([\d.]+)\s*MiB\s*\(\s*(\d+)\s*cells,"
+    r"\s*(\d+)\s*layers,\s*(\d+)\s*seqs")
+
+# `sched_reserve:      Metal compute buffer size =   304.00 MiB` -- one line per backend,
+# printed once after every graph has been reserved. The function name in front of it has
+# moved between releases (it was `llama_context:`), so nothing here depends on it.
+_COMPUTE = re.compile(r"(\S+)\s+compute buffer size\s*=\s*([\d.]+)\s*MiB")
+
+# `llama_model_loader: loaded meta data with 40 key-value pairs and 300 tensors from PATH`
+# -- printed once per model, and the only reliable boundary between the target's numbers
+# and a draft head's, which are otherwise the same lines again a few hundred lines later.
+_LOADED = re.compile(
+    r"llama_model_loader:\s*loaded meta data with\s*\d+\s*key-value pairs and\s*\d+\s*"
+    r"tensors from\s*(\S+)")
+
+# `cmn  common_param: build N (<commit>) with Apple clang ...` -- LOG_TRC, so it is in the
+# log at `-lv 4` for the same reason everything else here is.
+_BUILD = re.compile(r"\bbuild\s+\d+\s+\(([0-9A-Za-z._-]+)\)")
+
+
+def _mib(text: str) -> int:
+    return int(round(float(text) * _MIB))
+
+
+@dataclass(frozen=True, slots=True)
+class Measured:
+    """What one load actually allocated, read off llama.cpp's own log.
+
+    ``per_token`` and ``per_seq`` are the two numbers that compose; everything else is what
+    was seen while working them out, kept so a surprising answer can be argued with.
+    """
+
+    per_token: int = 0
+    """Bytes of KV cache per token of context. The base cache's size divided by its cells;
+    the cells are the context, whether or not the slots share them."""
+    per_seq: int = 0
+    """Bytes every sequence costs no matter how long its context is: the recurrent state,
+    and the sliding-window cache, each divided by the sequences it was sized for."""
+    compute: int = 0
+    """The compute buffers, summed over the backends. Paid once, not per user."""
+    cache_type: str = ""
+    """What the base cache stores, as llama.cpp names it: `f16`, `q8_0`. K and V are joined
+    with a `/` when they differ."""
+    kv_layers: int = 0
+    recurrent_layers: int = 0
+    cells: int = 0
+    seqs: int = 0
+    swa_cells: int = 0
+    kv_bytes: int = 0
+    swa_bytes: int = 0
+    recurrent_bytes: int = 0
+    model_file: str = ""
+    build: str = ""
+
+    @property
+    def measured(self) -> bool:
+        """Whether the log said anything at all. False for a log written at the server's
+        default verbosity, where none of these lines exist."""
+        return bool(self.per_token or self.per_seq or self.compute)
+
+    def said(self) -> str:
+        """One line per fact, for a person reading a `--measure` that surprised them."""
+        parts = [
+            f"per token {_human(self.per_token)}",
+            f"per sequence {_human(self.per_seq)}",
+            f"compute {_human(self.compute)}",
+            f"{self.kv_layers} layers with a cache",
+        ]
+        if self.recurrent_layers:
+            parts.append(f"{self.recurrent_layers} recurrent")
+        if self.swa_cells:
+            parts.append(f"a {self.swa_cells}-cell sliding window")
+        if self.cache_type:
+            parts.append(f"cache {self.cache_type}")
+        return ", ".join(parts)
+
+
+def _segments(text: str) -> list[str]:
+    """The log split at each model load, so a draft head's cache is not read as the
+    target's. The text before the first load is dropped: nothing is allocated yet there."""
+    bounds = [m.start() for m in _LOADED.finditer(text)]
+    if not bounds:
+        return [text]
+    bounds.append(len(text))
+    return [text[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+
+
+def parse_load_log(text: str) -> Measured:
+    """What llama.cpp allocated, from the log it wrote at `-lv 4`.
+
+    Robust to every line being absent: a model with no recurrent layers prints no
+    `llama_memory_recurrent` line, one with no sliding window prints one `llama_kv_cache`
+    line rather than two, and a log written at the default verbosity prints none of them --
+    which comes back as an all-zero ``Measured`` whose ``measured`` is False, never as a
+    raise. Only the *first* model in the log is read: a draft head loads after the target
+    and prints the same lines again.
+    """
+    build = ""
+    found = _BUILD.search(text)
+    if found:
+        build = found.group(1)
+
+    for segment in _segments(text):
+        kv = list(_KV_SIZE.finditer(segment))
+        rs = list(_RS_SIZE.finditer(segment))
+        if not kv and not rs:
+            continue
+
+        source = _LOADED.search(segment)
+        model_file = Path(source.group(1)).name if source else ""
+
+        per_token = kv_bytes = cells = seqs = kv_layers = 0
+        swa_bytes = swa_cells = 0
+        cache_type = ""
+        if kv:
+            # llama_kv_cache_iswa builds the base cache first and the SWA one second; the
+            # base is the one whose cells are the context.
+            base, *sliding = kv
+            kv_bytes, cells = _mib(base.group(1)), int(base.group(2))
+            kv_layers, seqs = int(base.group(3)), int(base.group(4))
+            type_k, type_v = base.group(6), base.group(8)
+            cache_type = type_k if type_k == type_v else f"{type_k}/{type_v}"
+            per_token = kv_bytes // cells if cells else 0
+            for other in sliding:
+                swa_bytes += _mib(other.group(1))
+                swa_cells = max(swa_cells, int(other.group(2)))
+                kv_layers += int(other.group(3))
+
+        recurrent_bytes = recurrent_layers = 0
+        rs_seqs = 0
+        if rs:
+            for one in rs:
+                recurrent_bytes += _mib(one.group(1))
+                recurrent_layers += int(one.group(3))
+                rs_seqs = max(rs_seqs, int(one.group(4)))
+
+        # Both fixed costs were sized for however many sequences were served; one
+        # sequence's share is what a user costs.
+        share = max(seqs, rs_seqs, 1)
+        per_seq = (recurrent_bytes + swa_bytes) // share
+
+        # The compute buffers are one per backend and the reserve can run more than once,
+        # so the last figure for each backend is the one that stands.
+        by_backend: dict[str, int] = {}
+        for one in _COMPUTE.finditer(segment):
+            by_backend[one.group(1)] = _mib(one.group(2))
+
+        return Measured(
+            per_token=per_token, per_seq=per_seq, compute=sum(by_backend.values()),
+            cache_type=cache_type, kv_layers=kv_layers, recurrent_layers=recurrent_layers,
+            cells=cells, seqs=share, swa_cells=swa_cells, kv_bytes=kv_bytes,
+            swa_bytes=swa_bytes, recurrent_bytes=recurrent_bytes, model_file=model_file,
+            build=build)
+
+    return Measured(build=build)
+
+
+# ------------------------------------------------------------------ one measured model
+
+@dataclass(frozen=True, slots=True)
+class Fit:
+    """One model, measured once, and what it means for a machine with this much room.
+
+    ``room`` is what a model may actually use here -- `hub.room()`, not the installed RAM.
+    Everything else was read off a load. ``spec`` is the guessing-ahead kind it was measured
+    with (``""`` for none): a draft *model* keeps its own cache, so the same weights at the
+    same cache type are a different measurement with one and without.
+    """
+
+    model: str
+    weights: int = 0
+    draft: int = 0
+    room: int = 0
+    per_token: int = 0
+    per_seq: int = 0
+    compute: int = 0
+    cache_type: str = "f16"
+    spec: str = ""
+    build: str = ""
+    measured_at: str = ""
+    context: int = 0
+    parallel: int = 0
+    kv_layers: int = 0
+    recurrent_layers: int = 0
+    swa_cells: int = 0
+
+    @property
+    def key(self) -> tuple[str, str, str]:
+        """What a record is keyed by in the file: the model file's basename, the cache type
+        it was measured with, and the speculation kind."""
+        return (self.model, self.cache_type, self.spec)
+
+    def free(self) -> int:
+        """Bytes left for caches once the weights, a draft and the compute buffers are in.
+        Never negative: a model that does not fit at all has no room for anyone."""
+        return max(0, self.room - self.weights - self.draft - self.compute)
+
+    def cost(self, per_user_context: int) -> int:
+        """What one more user at ``per_user_context`` tokens costs, in bytes."""
+        return self.per_token * max(0, int(per_user_context)) + self.per_seq
+
+    def users(self, per_user_context: int) -> int:
+        """How many users fit at that context. 0 when even one does not."""
+        each = self.cost(per_user_context)
+        return self.free() // each if each > 0 else 0
+
+    def longest(self, parallel: int = 1) -> int:
+        """The longest context ``parallel`` users can each be given. 0 when they do not fit.
+
+        The whole answer read the other way round -- the same two numbers, solved for the
+        context rather than the head count.
+        """
+        parallel = max(1, int(parallel))
+        if self.per_token <= 0:
+            return 0
+        each = self.free() // parallel - self.per_seq
+        return max(0, each // self.per_token)
+
+    def at_room(self, room: int) -> Fit:
+        """The same measurement, asked about a machine with this much room instead."""
+        return replace(self, room=int(room))
+
+    def as_dict(self) -> dict:
+        return {
+            "model": self.model, "weights": self.weights, "draft": self.draft,
+            "room": self.room, "per_token": self.per_token, "per_seq": self.per_seq,
+            "compute": self.compute, "cache_type": self.cache_type, "spec": self.spec,
+            "build": self.build, "measured_at": self.measured_at, "context": self.context,
+            "parallel": self.parallel, "kv_layers": self.kv_layers,
+            "recurrent_layers": self.recurrent_layers, "swa_cells": self.swa_cells,
+        }
+
+    @classmethod
+    def from_dict(cls, row: dict) -> Fit:
+        """One record read back. Unknown keys are ignored so an older file still loads,
+        and a missing one takes the default rather than raising."""
+        fields = {f for f in cls.__slots__}
+        return cls(**{k: v for k, v in row.items() if k in fields and k != "model"},
+                   model=str(row.get("model") or ""))
+
+    @classmethod
+    def of(cls, measured: Measured, *, model: str, weights: int = 0, draft: int = 0,
+           room: int = 0, cache_type: str = "", spec: str = "", context: int = 0,
+           parallel: int = 0, build: str = "", when: str = "") -> Fit:
+        """A record from one measurement and the sizes around it."""
+        return cls(
+            model=model or measured.model_file,
+            weights=weights, draft=draft, room=room,
+            per_token=measured.per_token, per_seq=measured.per_seq,
+            compute=measured.compute,
+            cache_type=cache_type or measured.cache_type or "f16",
+            spec=spec, build=build or measured.build,
+            measured_at=when or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            context=context, parallel=parallel, kv_layers=measured.kv_layers,
+            recurrent_layers=measured.recurrent_layers, swa_cells=measured.swa_cells)
+
+
+# ------------------------------------------------------------------ the file it lives in
+
+def package_file() -> Path:
+    """The measurements that ship with ml-stack -- the single source of truth. A function
+    rather than a constant so a test can point it somewhere with nothing in it."""
+    return Path(__file__).resolve().parent.parent / "data" / "fit.json"
+
+
+def local_file() -> Path:
+    """This machine's own additions, layered over the shipped ones. `$MLSTACK_FIT_FILE`
+    moves it, which is how the tests keep out of a real `~/.ml-stack`."""
+    named = os.environ.get("MLSTACK_FIT_FILE")
+    if named:
+        return Path(named).expanduser()
+    return Path.home() / ".ml-stack" / "fit.json"
+
+
+def _read(path: Path) -> list[Fit]:
+    """Every record in one file. A file that is absent, unreadable or not a list of objects
+    contributes nothing -- there is no such thing as a half-measured model."""
+    try:
+        parsed = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    out: list[Fit] = []
+    for row in parsed:
+        if not isinstance(row, dict) or not row.get("model"):
+            continue
+        try:
+            out.append(Fit.from_dict(row))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def records(*, package: Path | None = None, local: Path | None = None,
+            room: int | None = None) -> list[Fit]:
+    """Every measured model: the shipped file, with this machine's own layered over it.
+
+    A local record with the same (model, cache type, speculation) key replaces the shipped
+    one rather than appearing beside it -- a machine that measured a model again means the
+    newer number, and a listing that showed both would make a person choose between two
+    facts that are not in disagreement about anything but the date.
+
+    ``room`` overrides the room every record was recorded with, which is how a 24 GB card
+    is asked about from a machine that is not one.
+    """
+    merged: dict[tuple[str, str, str], Fit] = {}
+    for fit in _read(package or package_file()) + _read(local or local_file()):
+        merged[fit.key] = fit
+    out = list(merged.values())
+    if room is not None:
+        out = [fit.at_room(room) for fit in out]
+    return sorted(out, key=lambda f: (f.model.lower(), f.cache_type, f.spec))
+
+
+def writable_file() -> Path:
+    """Where a new measurement goes: the shipped file when this is a checkout somebody can
+    write to, and this machine's own file otherwise. An installed wheel is not a place to
+    keep a measurement -- the next upgrade would take it away."""
+    shipped = package_file()
+    if "site-packages" in shipped.parts or "dist-packages" in shipped.parts:
+        return local_file()
+    parent = shipped.parent
+    try:
+        parent.mkdir(parents=True, exist_ok=True)
+        if os.access(parent, os.W_OK):
+            return shipped
+    except OSError:
+        pass
+    return local_file()
+
+
+def add(fit: Fit, *, path: Path | None = None) -> Path:
+    """Write one measurement into the source of truth, replacing any it supersedes.
+
+    Returns where it was written, which is what `--measure` prints: a person who measured a
+    model on a laptop and expected it in the repository should be told it went elsewhere.
+    """
+    where = path or writable_file()
+    kept = [row for row in _read(where) if row.key != fit.key]
+    kept.append(fit)
+    kept.sort(key=lambda f: (f.model.lower(), f.cache_type, f.spec))
+    where.parent.mkdir(parents=True, exist_ok=True)
+    where.write_text(json.dumps([row.as_dict() for row in kept], indent=2) + "\n",
+                     encoding="utf-8")
+    return where
+
+
+# ------------------------------------------------------------------ measuring one
+
+def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
+    """Serve it once, read the log the backend already writes, stop it again.
+
+    The seam `measure` replaces in a test. Nothing is faked here: the same `ServerManager`
+    every other caller leases through, so a spec that a load would refuse is refused the
+    same way, by the same preflight, before anything is spawned.
+    """
+    from ml_stack.serve.backend import LOG_DIR, LlamaServerBackend, ServerFailed
+    from ml_stack.serve.manager import ServerManager
+
+    manager = ServerManager(backend or LlamaServerBackend())
+    info = manager.lease(spec, timeout=timeout)
+    try:
+        if info.adopted:
+            raise ServerFailed(
+                f"{info.base_url} was already serving that model, and an adopted server's "
+                "log is from a load that may not have been asked for -lv 4. Stop it "
+                "(`ml-stack-serve down --port %d`) and measure again." % info.port)
+        where = info.log_path or LOG_DIR / f"llama-server-{info.port}.log"
+        return Path(where).read_text(encoding="utf-8", errors="replace")
+    finally:
+        manager.release(info)
+
+
+def measure(spec, *, backend=None, timeout: float | None = None,
+            serve: Callable[..., str] | None = None) -> Measured:
+    """Serve ``spec`` once at `-lv 4`, read what it allocated, and stop it.
+
+    The verbosity is not decoration: every line this reads is an `LLAMA_LOG_INFO` from the
+    library, which `common_log_get_verbosity` maps to LOG_LEVEL_TRACE -- so the server's own
+    default of 3 prints the server's lines and none of the model's. A measurement taken
+    without it comes back empty and truthfully says so.
+    """
+    if "-lv" not in spec.extra_args:
+        spec = replace(spec, extra_args=tuple(spec.extra_args) + ("-lv", "4"))
+    text = (serve or _load_log)(spec, backend=backend, timeout=timeout)
+    return parse_load_log(text)
+
+
+# ------------------------------------------------------------------ saying it
+
+def _human(size: float) -> str:
+    value = float(size)
+    for unit in ("B", "K", "M", "G", "T"):
+        if value < 1024 or unit == "T":
+            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
+        value /= 1024.0
+    return f"{value:.1f}T"
+
+
+_ROOM = re.compile(r"^\s*([\d.]+)\s*([KMGT]?)(?:i?B?)?\s*$", re.IGNORECASE)
+_SCALE = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
+
+
+def parse_room(text: str) -> int:
+    """``24G``, ``24GiB``, ``24576M``, ``25769803776`` -- all the same number of bytes.
+
+    A bare number is bytes, because that is what every other number in this module is.
+    Raises ``ValueError`` on anything else rather than guessing: a room misread by a factor
+    of 1024 answers the question confidently and wrongly.
+    """
+    match = _ROOM.match(str(text))
+    if not match:
+        raise ValueError(f"cannot read {text!r} as an amount of memory; try 24G")
+    return int(float(match.group(1)) * _SCALE[match.group(2).upper()])
+
+
+def _tokens(count: int) -> str:
+    return f"{count:,}"
+
+
+def render(fits: Iterable[Fit], per_user: Sequence[int] = DEFAULT_PER_USER,
+           room: int | None = None, md: bool = False) -> str:
+    """One block per model: what it costs, and who fits.
+
+    ``room`` re-asks every record against a different machine. ``md`` writes the same thing
+    as Markdown, for `--write docs/fit.md`.
+    """
+    rows = [fit.at_room(room) for fit in fits] if room is not None else list(fits)
+    if not rows:
+        return ("No model has been measured yet. `ml-stack-serve fit MODEL --measure` "
+                "serves it once and records what it allocated.")
+    contexts = [int(c) for c in per_user if int(c) > 0] or list(DEFAULT_PER_USER)
+    return ("\n\n".join(_block_md(f, contexts) for f in rows) if md
+            else "\n\n".join(_block(f, contexts) for f in rows))
+
+
+def _headline(fit: Fit) -> str:
+    bits = [f"{fit.cache_type} cache"]
+    if fit.spec:
+        bits.append(f"guessing ahead by {fit.spec}")
+    if fit.context:
+        bits.append(f"measured at {_tokens(fit.context)} tokens"
+                    + (f" over {fit.parallel} slots" if fit.parallel else ""))
+    if fit.build:
+        bits.append(f"build {fit.build}")
+    if fit.measured_at:
+        bits.append(fit.measured_at)
+    return ", ".join(bits)
+
+
+def _shape(fit: Fit) -> str:
+    bits = [f"{fit.kv_layers} layers with a cache"]
+    if fit.recurrent_layers:
+        bits.append(f"{fit.recurrent_layers} recurrent (a fixed state per sequence, not "
+                    f"per token)")
+    if fit.swa_cells:
+        bits.append(f"a {_tokens(fit.swa_cells)}-cell sliding window per sequence")
+    return "; ".join(bits)
+
+
+def _block(fit: Fit, contexts: list[int]) -> str:
+    lines = [f"{fit.model}", f"  {_headline(fit)}"]
+    lines.append(
+        f"  weights {_human(fit.weights)}"
+        + (f", draft {_human(fit.draft)}" if fit.draft else "")
+        + f", compute {_human(fit.compute)}"
+        + f" -- of {_human(fit.room)} room, {_human(fit.free())} is left for caches")
+    lines.append(f"  {_human(fit.per_token)} per token of context, "
+                 f"{_human(fit.per_seq)} fixed per sequence")
+    shape = _shape(fit)
+    if shape:
+        lines.append(f"  {shape}")
+    lines.append("")
+    lines.append("  per user context   users that fit   each costs")
+    for context in contexts:
+        lines.append(f"  {_tokens(context):>16}   {fit.users(context):>14}   "
+                     f"{_human(fit.cost(context)):>10}")
+    lines.append(f"  one user, longest context: {_tokens(fit.longest(1))} tokens")
+    return "\n".join(lines)
+
+
+def _block_md(fit: Fit, contexts: list[int]) -> str:
+    lines = [f"### {fit.model}", "", f"{_headline(fit)}.", ""]
+    lines.append(
+        f"- weights {_human(fit.weights)}"
+        + (f", draft {_human(fit.draft)}" if fit.draft else "")
+        + f", compute {_human(fit.compute)}")
+    lines.append(f"- room {_human(fit.room)}, of which {_human(fit.free())} is left for "
+                 f"caches")
+    lines.append(f"- **{_human(fit.per_token)} per token of context**, "
+                 f"**{_human(fit.per_seq)} fixed per sequence**")
+    shape = _shape(fit)
+    if shape:
+        lines.append(f"- {shape}")
+    lines += ["", "| per user context | users that fit | each costs |",
+              "| --- | --- | --- |"]
+    for context in contexts:
+        lines.append(f"| {_tokens(context)} | {fit.users(context)} | "
+                     f"{_human(fit.cost(context))} |")
+    lines += ["", f"One user, longest context: **{_tokens(fit.longest(1))} tokens**."]
+    return "\n".join(lines)
