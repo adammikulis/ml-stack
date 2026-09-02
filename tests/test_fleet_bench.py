@@ -577,14 +577,13 @@ def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_pat
     assert "PATH" in seen["env"]                     # the rest of the environment came along
 
 
-def test_the_bench_home_moves_with_the_environment(tmp_path, monkeypatch):
-    import importlib
+def test_the_bench_home_moves_with_the_environment(tmp_path):
+    """Read in a fresh interpreter: reloading the module in this one would mint a second
+    `RunNotKept` class and break every later `pytest.raises` on the first (CI, 2026-09-02)."""
+    import os
 
-    from ml_stack.graph.bench import keep
-
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "elsewhere"))
-    try:
-        assert importlib.reload(keep).HOME == tmp_path / "elsewhere"
-    finally:
-        monkeypatch.delenv("MLSTACK_BENCH_HOME")
-        importlib.reload(keep)
+    env = {**os.environ, "MLSTACK_BENCH_HOME": str(tmp_path / "elsewhere")}
+    said = subprocess.run([sys.executable, "-c",
+                           "from ml_stack.graph.bench import keep; print(keep.HOME)"],
+                          capture_output=True, text=True, env=env, check=True).stdout.strip()
+    assert Path(said) == tmp_path / "elsewhere"
