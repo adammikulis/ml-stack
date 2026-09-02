@@ -38,6 +38,7 @@ from ml_stack.graph.bench.keep import (
     resumable,
     save,
 )
+from ml_stack.graph.bench.estimate import ceiling_default, estimate
 from ml_stack.graph.bench.measure import (
     PER_QUESTION,
     _how_many,
@@ -152,8 +153,18 @@ def with_card(client: Any, args: Any) -> Any:
 
 
 def checking(one: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """The two flags every measuring subcommand has for the two checks it makes before it
-    measures: the self-check on no GPU, and the smoke on the real one."""
+    """The flags every measuring subcommand has for the checks it makes before it
+    measures: the self-check on no GPU, the estimate against the ceiling, and the smoke on
+    the real one."""
+    one.add_argument("--ceiling", type=float, default=ceiling_default(), metavar="MINUTES",
+                     help="refuse to start when the estimate -- seconds per question from "
+                          "the runs kept of each model, else a guess from its weights, "
+                          "times the questions, the ways and the models, plus a load each "
+                          "-- is over this many minutes, unless --yes (default: "
+                          "%(default)s, or MLSTACK_BENCH_CEILING). A --smoke run is never "
+                          "refused. No more eight-hour tests")
+    one.add_argument("--yes", action="store_true",
+                     help="run it even when the estimate is over --ceiling")
     one.add_argument("--no-selfcheck", action="store_true",
                      help="skip the dry run made first, before the lock is taken: this exact "
                           "command through the whole path with a scripted model, no server "
@@ -1164,6 +1175,20 @@ def stop(*, wait: float = 60.0) -> str:
     return f"stopped pid {pid} after {time.monotonic() - began:.1f}s; its log: {held.get('log', '?')}"
 
 
+def _estimated(rest: Sequence[str]) -> int:
+    """Print what ``ml-stack-bench rest`` should take -- one ``estimate:`` line per model
+    and the total, read from the runs kept in its store -- and return 5 when that is over
+    the ceiling and ``--yes`` was not given, with the refusal on stderr; 0 otherwise."""
+    args = _parser().parse_args([a for a in rest if a not in ("--detach", "--no-queue")])
+    guess = estimate(args, bench._kept(args.kept))
+    for line in guess.lines():
+        print(line, flush=True)
+    if guess.over and not getattr(args, "yes", False):
+        print(guess.refusal(), file=sys.stderr)
+        return 5
+    return 0
+
+
 def _stop_on_sigterm(signum: int, frame: Any) -> None:
     """Turn SIGTERM into an exception, so every `with` on the way out runs its exit.
 
@@ -1193,6 +1218,12 @@ def main(argv: list[str] | None = None) -> int:
 
     rest = list(argv if argv is not None else sys.argv[1:])
     if "--detach" in rest:
+        # estimated and, over the ceiling, refused here in the terminal: a refusal at the
+        # top of a log nobody is watching is not a refusal. The child says it again into
+        # the log, which is where `history` reads it beside the actual.
+        refused = _estimated(rest)
+        if refused:
+            return refused
         log = detach(rest)
         print(f"measuring in the background; log: {log}\n"
               f"  ml-stack-bench status   -- what is measuring, and its last line\n"
@@ -1219,6 +1250,11 @@ def main(argv: list[str] | None = None) -> int:
                   "repeat a run whose path the last one proved", file=sys.stderr)
             return 4
         print(f"selfcheck: ok ({time.monotonic() - began:.1f} s) -- {proved}", flush=True)
+    # After the self-check and before the prefetch and the lock: what this will cost, from
+    # what is kept, and a refusal over the ceiling before a download or a load is paid
+    refused = _estimated(rest)
+    if refused:
+        return refused
     if "--no-prefetch" not in rest:
         # Before the lock, on purpose: a download is minutes of network and no GPU, and
         # holding the measuring lock through it makes the next run wait for the Hub.

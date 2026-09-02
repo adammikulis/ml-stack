@@ -17,7 +17,8 @@ One package, one command (``ml-stack-bench``), six modules so that each agent is
 - `serve`: a model put up, asked every way on one load, and taken down;
 - `run`: the parser, every subcommand, the lock, `--detach`, `status`/`tail`/`stop`;
 - and beside them `extract` (reading a graph out of messages), `selfcheck` (the dry run
-  `main` makes before the lock) and `history` (the day, read out of the logs).
+  `main` makes before the lock), `estimate` (what a run will cost, and the ceiling it is
+  refused over) and `history` (the day, read out of the logs).
 
 This module is the namespace: everything is imported here, and every call between the
 modules to something a test or `selfcheck` patches -- `served`, `measure`, `footprint`,
@@ -73,10 +74,20 @@ from ml_stack.graph.bench.score import (  # noqa: F401
     hosts_of,
     invented_digest,
     per_question,
+    prefix_hits,
+    prefix_kept,
     ranking,
     speedup,
     unread_named,
     wall_of,
+)
+from ml_stack.graph.bench.estimate import (  # noqa: F401
+    CEILING_MIN,
+    Estimate,
+    ModelEstimate,
+    ceiling_default,
+    estimate,
+    span,
 )
 from ml_stack.graph.bench.measure import (  # noqa: F401
     PER_QUESTION,
@@ -102,6 +113,7 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     AXES,
     _shown,
     at_once,
+    cache_turns,
     compare,
     drafted,
     drafting,
@@ -110,6 +122,7 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     missed,
     pareto,
     plot,
+    prefixed,
     rates,
     sampled,
     shape,
@@ -128,6 +141,7 @@ from ml_stack.graph.bench.serve import (  # noqa: F401
 from ml_stack.graph.bench.run import (  # noqa: F401
     MEASURING,
     _asked,
+    _estimated,
     _fleet_sweep,
     _last_line,
     _latest_log,
@@ -155,10 +169,10 @@ from ml_stack.graph.bench.run import (  # noqa: F401
 from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401
 
-__all__ = ["Counting", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut", "Row", "SHORT",
-           "SMOKE", "SmokeFailed", "baseline", "beyond_weights", "choices", "composed",
-           "drafted", "export", "ranking", "ask_from", "asking", "compare", "concurrent",
-           "detach", "empties", "finding", "footprint", "forget", "halves", "kv_short", "main",
-           "measure", "measuring", "prefetch", "prepared", "read_questions", "references_in",
-           "runs", "save", "slot_count", "speedup", "status", "stop", "table", "tail",
-           "unread_named"]
+__all__ = ["Counting", "Estimate", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut",
+           "Row", "SHORT", "SMOKE", "SmokeFailed", "baseline", "beyond_weights", "choices",
+           "composed", "drafted", "estimate", "export", "ranking", "ask_from", "asking",
+           "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
+           "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
+           "prefix_kept", "prepared", "read_questions", "references_in", "runs", "save",
+           "slot_count", "speedup", "status", "stop", "table", "tail", "unread_named"]

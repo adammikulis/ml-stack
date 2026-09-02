@@ -23,7 +23,7 @@ from typing import Any
 # at import.
 from ml_stack.graph import bench
 from ml_stack.graph.bench.keep import SHORT, SMOKE
-from ml_stack.graph.bench.score import Row, unread_named
+from ml_stack.graph.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 
@@ -62,6 +62,10 @@ class Counting:
         self.completion_tokens = 0
         self.draft_tokens = 0
         self.draft_taken = 0
+        # Per call, ``(cached, processed)`` as the server reported them: the totals above
+        # cannot say whether the prefix survived from one call to the next, and that --
+        # see `prefix_kept` -- is the cheapest speed lever there is.
+        self.per_call: list[tuple[int, int]] = []
         # What the server itself spent reading and generating, so that the difference
         # between it and the wall clock -- time spent waiting for a slot -- is a number.
         self.generating_ms = 0.0
@@ -107,10 +111,13 @@ class Counting:
         # A conversation re-sends everything every turn, so the prompt total counts the same
         # words over and over. What the machine actually pays for is what it had to read:
         # `timings.prompt_n`, with `cache_n` the part it kept from the turn before.
-        self.cached_tokens += int(timings.get("cache_n")
-                                  or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                                  or 0)
-        self.processed_tokens += int(timings.get("prompt_n") or 0)
+        cached = int(timings.get("cache_n")
+                     or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                     or 0)
+        processed = int(timings.get("prompt_n") or 0)
+        self.cached_tokens += cached
+        self.processed_tokens += processed
+        self.per_call.append((cached, processed))
         # A draft model guesses ahead and the large one checks the guesses in one pass, so
         # what decides whether it was worth serving is not that it ran but how often it was
         # right. Both are zero on a server without one, which is how the table tells them
@@ -262,6 +269,9 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     row.completion_tokens = counting.completion_tokens
     row.draft_tokens = counting.draft_tokens
     row.draft_taken = counting.draft_taken
+    row.cache_calls = [[c, p] for c, p in counting.per_call]
+    row.prefix_kept, row.prefix_turns = prefix_kept(counting.per_call)
+    row.prefix_hits = row.prefix_kept / row.prefix_turns if row.prefix_turns else None
     return row, said
 
 

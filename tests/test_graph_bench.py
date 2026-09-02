@@ -1110,8 +1110,10 @@ def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
     head = said.splitlines()[0]
     assert head.split().index("conc") == head.split().index("find") + 1, "beside find"
     lines = {ln.split()[0]: ln for ln in said.splitlines() if ln[:1].isalpha() and ln[:3] != "run"}
-    assert lines["together"].split()[11] == "2x3"
-    assert lines["tried"].split()[11] != "2x3" and "x" not in lines["tried"].split()[11]
+    # `together`'s client reports its cache, so its line has a pfx word and `tried`'s has
+    # none: the marker is found by what it says, not by where it falls
+    assert "2x3" in lines["together"].split()
+    assert not any("x" in w and w[0].isdigit() for w in lines["tried"].split())
 
     missed(runs(store, "together"), everything=True)
     said = capsys.readouterr().out
@@ -1135,7 +1137,8 @@ def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path
                        "--questions", str(asked), "--client", "fake:client",
                        "--store", "", "--no-selfcheck"]) == 0
     said = capsys.readouterr().out
-    assert said.splitlines()[0].startswith("two-at-once: 2 conversations of 1 turn(s) at once")
+    first = next(ln for ln in said.splitlines() if not ln.startswith("estimate:"))
+    assert first.startswith("two-at-once: 2 conversations of 1 turn(s) at once")
     assert "kept as bench:two-at-once:" in said
 
     back = runs(kept)[0]
@@ -1762,7 +1765,9 @@ def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(
     said = capsys.readouterr().out
     assert fetched == ["hf:someone/tiny-GGUF/tiny.gguf", "hf:someone/tiny-GGUF/mtp-tiny.gguf"], \
         "each hf: reference once, a local path never"
-    first_lines = said.splitlines()[:2]
+    # the estimate is said before the fetch -- a refusal after a download is a download
+    # for nothing -- and the fetch lines are the first thing after it
+    first_lines = [ln for ln in said.splitlines() if not ln.startswith("estimate:")][:2]
     assert first_lines[0].startswith("fetched hf:someone/tiny-GGUF/tiny.gguf: 0.00G at ")
     assert first_lines[1].startswith("fetched hf:someone/tiny-GGUF/mtp-tiny.gguf: 0.00G at ")
 
@@ -3038,3 +3043,302 @@ def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_pat
     assert bench._main(["sweep", "--fleet", "--on", "x=http://127.0.0.1:1",
                         "--kept", str(kept)]) == 2
     assert "pass --serve MODEL" in capsys.readouterr().err
+
+
+# -- the prompt cache, per turn --------------------------------------------------------------
+
+class _Reporting:
+    """A client whose every reply carries the ``(cache_n, prompt_n)`` the script says the
+    server reported for that call, and nothing else a bench needs."""
+
+    def __init__(self, script):
+        self.script = list(script)
+        self.sampling: dict = {}
+
+    def chat(self, messages, tools=None, **_):
+        cached, processed = self.script.pop(0)
+        raw = {"usage": {"prompt_tokens": cached + processed, "completion_tokens": 5},
+               "timings": {"cache_n": cached, "prompt_n": processed}}
+        return type("R", (), {"content": "a compiler person", "thinking": None, "raw": raw,
+                              "tool_calls": None})()
+
+
+def _asking_calls(n):
+    """An `ask` of ``n`` round trips that then lights the compiler."""
+    def ask(question, client, **_):
+        for _ in range(n):
+            client.chat([{"role": "user", "content": question}])
+        return {"content": "a compiler person", "show": ["topic:compiler"]}
+    return ask
+
+
+def _cache_row(script, label="cached"):
+    from ml_stack.graph.bench import _ask_once
+
+    row, _ = _ask_once(_asking_calls(len(script)), {"q": "who?", "expect": ["topic:compiler"]},
+                       label=label, client=_Reporting(script))
+    return row
+
+
+def test_a_prefix_that_survives_and_one_that_breaks_are_told_apart_per_turn():
+    """The second call of a question should pay for the tool result and the reply and
+    nothing before them. Cached tokens that grow past the previous call's whole prompt
+    say the prefix was kept; cached tokens that fall back say the system prompt and the
+    tool schemas were read again -- which the run's totals cannot see."""
+    from ml_stack.graph.bench import prefix_kept
+
+    grew = _cache_row([(0, 900), (900, 120), (1025, 80), (1100, 60)])
+    assert grew.cache_calls == [[0, 900], [900, 120], [1025, 80], [1100, 60]]
+    assert (grew.prefix_kept, grew.prefix_turns, grew.prefix_hits) == (3, 3, 1.0)
+    assert grew.cached_tokens == 3025 and grew.processed_tokens == 1160, "the totals as before"
+
+    reset = _cache_row([(0, 900), (0, 1020), (700, 400), (0, 1500)])
+    assert (reset.prefix_kept, reset.prefix_turns, reset.prefix_hits) == (0, 3, 0.0)
+
+    mixed = _cache_row([(0, 900), (900, 120), (0, 1100), (1100, 50)])
+    assert (mixed.prefix_kept, mixed.prefix_turns) == (2, 3)
+    assert mixed.prefix_hits == pytest.approx(2 / 3)
+
+    # a template re-rendering the turn boundary re-reads a few tokens: still kept
+    assert prefix_kept([(0, 900), (895, 130)]) == (1, 1)
+    assert prefix_kept([(0, 900), (880, 130)]) == (0, 1), "more than a few is a break"
+    # a server that reports nothing says nothing about its cache; one call has no turn
+    silent = _cache_row([(0, 0), (0, 0), (0, 0)])
+    assert (silent.prefix_turns, silent.prefix_hits) == (0, None)
+    assert _cache_row([(0, 900)]).prefix_hits is None
+
+
+def test_the_run_the_table_the_detail_and_the_export_carry_the_cache_per_turn(tmp_path, capsys):
+    from ml_stack.graph.bench import _flat, cache_turns, missed, prefixed
+
+    store = tmp_path / "runs.ladybug"
+    grew = _cache_row([(0, 900), (900, 120), (1025, 80), (1100, 60)])
+    mixed = _cache_row([(0, 900), (900, 120), (0, 1100), (1100, 50)])
+    save(store, [grew, mixed], held={"context": 32768, "slots": 1})
+    save(store, [a_row("q?", expected=["topic:compiler"], shown=["topic:compiler"])],
+         held={"context": 32768, "slots": 1})               # as a run kept before this
+    back = {r["label"]: r for r in runs(store)}
+    assert back["cached"]["server"]["prefix_hits"] == pytest.approx(5 / 6)
+    assert "prefix_hits" not in back["tried"]["server"], "no turn judged: no key, not 0"
+    assert back["cached"]["rows"][1]["cache_calls"] == [[0, 900], [900, 120], [0, 1100],
+                                                        [1100, 50]]
+
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0].split()
+    assert head.index("pfx") == head.index("cached") + 1
+    new = next(ln for ln in said.splitlines() if ln.startswith("cached"))
+    old = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert "83%" in new.split() and "83%" not in old.split()
+    assert prefixed(back["cached"]["server"]) == "83%" and prefixed(back["tried"]["server"]) == ""
+    assert old.split()[3] == "1" and new.split()[3] == "2", "n is still the fourth word"
+
+    missed(runs(store, "cached"), everything=True)
+    said = capsys.readouterr().out
+    assert "cache 3/3 turns" in said and "cache 2/3 turns" in said
+    assert cache_turns(back["tried"]["rows"][0]) == ""
+    missed(runs(store, "tried"), everything=True)
+    assert "cache " not in capsys.readouterr().out
+
+    assert _flat(back["cached"])["prefix_hits"] == pytest.approx(5 / 6, abs=1e-4)
+    assert _flat(back["tried"])["prefix_hits"] is None
+
+
+# -- the estimate, before anything is paid for -----------------------------------------------
+
+def _stamped_run(label, *, model, per_question, questions=20, context=32768, at, load_s=None):
+    """A kept run as `runs` hands it back, ``questions`` rows of ``per_question`` seconds."""
+    from dataclasses import asdict
+
+    rows = []
+    for n in range(questions):
+        r = a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
+        r.label, r.seconds = label, per_question
+        rows.append(asdict(r))
+    server = {"model": model, "context": context, "slots": 1}
+    if load_s is not None:
+        server["load_s"] = load_s
+    return {"key": f"bench:{label}:{at}", "at": at, "label": label, "server": server,
+            "rows": rows}
+
+
+def _twelve(tmp_path):
+    asked = tmp_path / "twelve.jsonl"
+    asked.write_text("\n".join(json.dumps({"q": f"q{n}?", "expect": ["person:ada"]})
+                               for n in range(12)) + "\n")
+    return str(asked)
+
+
+def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_context(tmp_path,
+                                                                                    monkeypatch):
+    """The newest run of that model at this context, over a newer one at another: a model
+    at 8k answers faster than the same model at 32k, and the `ctx` column exists because
+    the two are not the same measurement. Times the questions, the ways and a load."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import estimate, history
+
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    kept = [_stamped_run("quill-plain", model="quill.gguf", per_question=65.0, load_s=41.6,
+                         at="2026-09-01T12:00:00"),
+            _stamped_run("quill-plain", model="quill.gguf", per_question=2.0, context=8192,
+                         at="2026-09-01T15:00:00"),
+            _stamped_run("lantern-plain", model="lantern.gguf", per_question=9.0,
+                         at="2026-09-01T16:00:00")]
+    args = bench._parser().parse_args(["sweep", "--serve", "models/quill.gguf", "--also",
+                                       "terse", "--questions", _twelve(tmp_path),
+                                       "--no-smoke", "--kept", str(tmp_path / "none")])
+    got = estimate(args, kept)
+    assert len(got.models) == 1
+    one = got.models[0]
+    assert (one.questions, one.ways, one.per_question, one.load_s) == (12, 4, 65.0, 41.6)
+    assert not one.guessed
+    assert one.line() == ("estimate: 53 min (quill 12 q × 4 ways × 65 s/q + load 42 s; "
+                          "from quill-plain kept 2026-09-01T12:00:00 at 32k)")
+    assert got.seconds == pytest.approx(12 * 4 * 65 + 41.6)
+    assert got.over and got.ceiling_min == 30
+    assert got.lines()[-1] == "estimate: 53 min in all for 1 model (over the ceiling)"
+    assert history.parse_duration(got.lines()[-1].split(":", 1)[1]) == 53 * 60, \
+        "what history reads back is the total and nothing added to it"
+    assert "over the 30 min ceiling" in got.refusal() and "--yes" in got.refusal()
+    assert "--sample N" in got.refusal() and "MLSTACK_BENCH_CEILING" in got.refusal()
+
+    # a real run smokes first: two more questions of every way; a server already up
+    # (--on) has no load to pay and is matched by the name its labels start with
+    args = bench._parser().parse_args(["sweep", "--serve", "models/quill.gguf", "--on",
+                                       "lantern=http://127.0.0.1:1", "--plain-only",
+                                       "--questions", _twelve(tmp_path)])
+    got = estimate(args, kept)
+    assert [(m.name, m.questions, m.ways, m.load_s) for m in got.models] == [
+        ("quill", 14, 1, 41.6), ("lantern", 14, 1, 0.0)]
+    assert got.models[1].per_question == 9.0 and not got.models[1].guessed
+    assert got.lines()[-1] == "estimate: 18 min in all for 2 models"
+
+
+def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_so(tmp_path,
+                                                                                   monkeypatch):
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import estimate
+
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    sized = tmp_path / "sized.gguf"
+    with sized.open("wb") as fh:
+        fh.truncate(3_000_000_000)                       # sparse: 3G on paper, no disk
+    args = bench._parser().parse_args(["sweep", "--serve", str(sized), "--serve",
+                                       "models/absent.gguf", "--plain-only", "--no-smoke",
+                                       "--questions", _twelve(tmp_path), "--sample", "4"])
+    got = estimate(args, [])
+    by_size, unknown = got.models
+    assert by_size.guessed and by_size.per_question == pytest.approx(2.1)
+    assert by_size.load_s == 30.0 and "a guess from 2.8G of weights" in by_size.line()
+    assert unknown.guessed and unknown.per_question == 15.0
+    assert unknown.line() == ("estimate: 2 min (absent 4 q × 1 way × 15 s/q + load 30 s; a "
+                              "guess, no run of it kept and no weights on disk to size it by)")
+    assert unknown.seconds == 90.0, "and 90 s reads as 2 min, the shape history reads"
+    assert got.lines()[-1] == "estimate: 2 min in all for 2 models, 2 guessed with no run kept"
+    assert not got.over
+
+
+def test_every_measuring_subcommand_estimates_its_own_shape(tmp_path, monkeypatch):
+    """`drafts` is a load per (head, n-max) and one for the baseline; `concurrent` asks
+    conversations times turns; `extract` reads messages, twice with --twice; `run` is one
+    way of one server. A --smoke is two questions and is never over the ceiling."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import estimate
+
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    parse = bench._parser().parse_args
+    heads = estimate(parse(["drafts", "tiny.gguf", "--draft", "mtp-a.gguf", "--draft", "",
+                            "--n-max", "4", "--n-max", "8", "--sample", "5"]), [])
+    assert [(m.name, m.questions, m.load_s) for m in heads.models] == [
+        ("tiny draft:mtp-a@n4", 7, 30.0), ("tiny draft:mtp-a@n8", 7, 30.0),
+        ("tiny draft:none", 7, 30.0)]
+    talk = estimate(parse(["concurrent", "four-by-three", "--conversations", "4", "--turns",
+                           "3", "--no-smoke", "--ceiling", "1"]), [])
+    assert [(m.name, m.questions, m.ways, m.load_s) for m in talk.models] == [
+        ("four-by-three", 12, 1, 0.0)]
+    assert talk.over and talk.ceiling_min == 1.0
+    reading = estimate(parse(["extract", "read", "--world", str(tmp_path), "--serve",
+                              "tiny.gguf", "--sample", "10", "--twice"]), [])
+    assert [(m.name, m.questions, m.ways, m.load_s) for m in reading.models] == [
+        ("tiny", 10, 2, 30.0)]
+    alone = estimate(parse(["run", "plain", "--client", "fake:client", "--no-smoke",
+                            "--questions", _twelve(tmp_path)]), [])
+    assert [(m.name, m.questions, m.ways, m.load_s) for m in alone.models] == [
+        ("plain", 12, 1, 0.0)]
+    smoke = estimate(parse(["sweep", "--serve", "huge.gguf", "--also", "terse", "--also",
+                            "rich", "--smoke", "--ceiling", "0.01"]), [])
+    assert smoke.models[0].questions == 2 and not smoke.over
+    assert smoke.lines()[-1].endswith("(a smoke run, never refused)")
+    monkeypatch.setenv("MLSTACK_BENCH_CEILING", "0.5")
+    assert bench._parser().parse_args(["run", "x"]).ceiling == 0.5
+
+
+def test_main_refuses_over_the_ceiling_with_exit_5_and_serves_nothing_unless_yes(tmp_path,
+                                                                                monkeypatch,
+                                                                                capsys):
+    """Adam, 2026-09-02: no more eight-hour tests. The rule is in the tool: over the
+    ceiling, said and refused before a download, a lock or a load; --yes runs it; a
+    --smoke is never refused."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    argv = ["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"],
+            "--no-selfcheck", "--ceiling", "0.5"]
+    assert bench.main(argv) == 5
+    said = capsys.readouterr()
+    assert said.out.splitlines()[0].startswith("estimate: 45 s (tiny 1 q × 1 way × 15 s/q "
+                                               "+ load 30 s; a guess")
+    assert said.out.splitlines()[1] == ("estimate: 45 s in all for 1 model, 1 guessed with "
+                                        "no run kept (over the ceiling)")
+    assert said.err.strip() == ("error: estimated 45 s, over the 0.5 min ceiling -- no more "
+                                "eight-hour tests. Ask fewer questions (--sample N, --short), "
+                                "raise the ceiling (--ceiling MINUTES, or "
+                                "MLSTACK_BENCH_CEILING), or pass --yes to run it anyway.")
+    assert seen["models"] == [], "nothing was loaded"
+    assert not (tmp_path / "home" / "measuring.lock").exists(), "the lock was never taken"
+
+    # the environment sets the ceiling when the flag does not
+    monkeypatch.setenv("MLSTACK_BENCH_CEILING", "0.25")
+    assert bench.main([a for a in argv if a not in ("--ceiling", "0.5")]) == 5
+    assert "over the 0.25 min ceiling" in capsys.readouterr().err
+    assert seen["models"] == []
+    monkeypatch.delenv("MLSTACK_BENCH_CEILING")
+    assert bench.main([a for a in argv if a != "--no-smoke"] + ["--smoke", "--ceiling",
+                       "0.01"]) == 0, "a smoke run is never refused"
+    assert seen["models"] == ["tiny.gguf"]
+    assert "(a smoke run, never refused)" in capsys.readouterr().out
+
+    assert bench.main([*argv, "--yes"]) == 0
+    assert seen["models"] == ["tiny.gguf", "tiny.gguf"]
+    said = capsys.readouterr().out
+    # the smoke kept a run of this model, so this estimate was measured, not guessed
+    assert "s/q + load 12 s; from tiny-plain kept " in said.splitlines()[0]
+    assert "guessed" not in said.splitlines()[1]
+
+
+def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detaches(tmp_path,
+                                                                                  monkeypatch,
+                                                                                  capsys):
+    """A refusal at the top of a log nobody is watching is not a refusal."""
+    import subprocess
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
+    started = []
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kw: started.append(command) or type(
+                            "C", (), {"pid": 4242})())
+    argv = ["sweep", "--serve", "models/tiny.gguf", "--plain-only", "--detach", "--no-smoke",
+            "--questions", _twelve(tmp_path), "--ceiling", "1"]
+    assert bench.main(argv) == 5
+    said = capsys.readouterr()
+    assert started == [] and not (tmp_path / "home" / "measuring.json").exists()
+    assert said.out.startswith("estimate: 4 min (tiny 12 q × 1 way × 15 s/q + load 30 s;")
+    assert "over the 1 min ceiling" in said.err
+
+    assert bench.main([*argv, "--yes"]) == 0
+    said = capsys.readouterr().out
+    assert len(started) == 1 and started[0][-1] == "--yes"
+    assert said.startswith("estimate: 4 min (tiny") and "measuring in the background" in said

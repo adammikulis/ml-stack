@@ -39,6 +39,14 @@ class Row:
     answer_chars: int = 0
     draft_tokens: int = 0          # guessed ahead by a draft model, when one is served
     draft_taken: int = 0           # of those, how many the large model kept
+    # Per call, ``[cached, processed]`` as the server reported them, and from those
+    # whether the prompt cache's prefix survived from each call to the next -- see
+    # `prefix_kept`. `prefix_hits` is kept over turns, None for a question of one call
+    # or a server that reports nothing; the run's is under ``server["prefix_hits"]``.
+    cache_calls: list[list[int]] = field(default_factory=list)
+    prefix_kept: int = 0
+    prefix_turns: int = 0
+    prefix_hits: float | None = None
     shown: list[str] = field(default_factory=list)
     expected: list[str] = field(default_factory=list)
     # Entries the answer's prose names that no tool call found, read, traversed or showed
@@ -123,6 +131,44 @@ def unread_named(text: str, graph: Mapping[str, Any],
 
 def _total(rows: Sequence[dict[str, Any]], key: str) -> float:
     return sum(float(r.get(key) or 0) for r in rows)
+
+
+# How many tokens short of the previous call's whole prompt a cache may fall and still
+# count as the prefix kept: a chat template re-rendering the turn boundary re-reads a few.
+# A broken prefix is not a few tokens, it is the system prompt and every tool schema.
+PREFIX_SLACK = 8
+
+
+def prefix_kept(per_call: Sequence[Sequence[int]], *, slack: int = PREFIX_SLACK) -> tuple[int, int]:
+    """``(kept, turns)``: of the calls after the first, how many found the previous call's
+    whole prompt still in the cache -- its cached tokens at least the previous call's
+    cached plus processed, less ``slack`` -- and how many were judged.
+
+    A conversation re-sends everything every turn, so the second call of a question
+    should pay for the tool result and the model's reply and nothing before them; when it
+    pays for the system prompt and the tool schemas again, a change to the asking has
+    broken the prefix, and the totals alone cannot see it. A transition is judged only
+    when the previous call reported reading something -- a server that reports no
+    timings says nothing about its cache, and nothing is not a hit.
+    """
+    kept = turns = 0
+    for before, after in zip(per_call, per_call[1:]):
+        cached_before, processed_before = int(before[0]), int(before[1])
+        if cached_before + processed_before <= 0:
+            continue
+        turns += 1
+        if int(after[0]) >= cached_before + processed_before - slack:
+            kept += 1
+    return kept, turns
+
+
+def prefix_hits(rows: Sequence[Mapping[str, Any]]) -> float | None:
+    """A run's share of judged turns whose prefix survived, over every row that carries
+    the count; None for a run kept before it was counted, or one with no turn to judge."""
+    if not any("prefix_turns" in r for r in rows):
+        return None
+    turns = _total(rows, "prefix_turns")
+    return _total(rows, "prefix_kept") / turns if turns else None
 
 
 def wall_of(one: Mapping[str, Any]) -> float:
@@ -558,6 +604,9 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         # None for an undrafted run, or one whose baseline is not among the runs
         "speedup": round(faster, 3) if faster is not None else None,
         "timed_out": sum(1 for r in rows if r.get("timed_out")),
+        # None for a run kept before the cache was counted per turn, or with no turn to judge
+        "prefix_hits": (round(float(server["prefix_hits"]), 4)
+                        if server.get("prefix_hits") is not None else None),
         "context": server.get("context"), "slots": server.get("slots"),
         "cache_type": str(server.get("cache_type") or ""),
         "reasoning_budget": server.get("reasoning_budget"),

@@ -143,9 +143,17 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
     the sweep printed its summary from memory, so nobody knew until the next morning. The
     read-back is the only proof that a run exists, and it is cheap next to the run.
     """
+    from ml_stack.graph.bench.score import prefix_hits
     from ml_stack.graph.store import GraphStore
 
     server = stamped(held)
+    # the run's prompt-cache figure beside the per-question ones, so the table can carry
+    # it without adding up every row. Only when there is one: a run with no turn to judge
+    # carries no key, like a run kept before it was counted -- not counted is not zero
+    if "prefix_hits" not in server:
+        hits = prefix_hits([asdict(r) for r in rows])
+        if hits is not None:
+            server["prefix_hits"] = hits
     stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
     record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
                      "server": server, "rows": [asdict(r) for r in rows],

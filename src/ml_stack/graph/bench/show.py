@@ -122,11 +122,15 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # `1.42x`. Acceptance says why a head is earning its place; this says whether it is.
     # Blank for an undrafted run, or one whose baseline is not among the runs shown.
     # `host` only when more than one machine measured: a fleet's store holds runs from
-    # several, and a column nobody needs is noise on a single one
+    # several, and a column nobody needs is noise on a single one.
+    # `pfx` is the prompt cache per turn: of the calls after a question's first, the share
+    # that found the previous call's whole prompt still cached. `cached` is a total and
+    # cannot see a change to the asking that breaks the prefix; blank for a run kept
+    # before it was counted.
     several = len(hosts_of(kept)) > 1
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
             + f"{'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
+            f"{'written':>8} {'cached':>8} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling'}")
     print(head)
@@ -158,6 +162,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'processed_tokens'):>8.0f} "
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
+              f"{prefixed(server):>4} "
               f"{drafting(rows):>6} "
               f"{_times(speedup(one, kept)):>6} "
               f"{str(server.get('finder') or '-'):>7} "
@@ -174,6 +179,21 @@ def timeouts(one: Mapping[str, Any]) -> str:
     goes to the runs that did. Each is scored wrong and wall-clocked at the cap."""
     n = sum(1 for r in (one.get("rows") or []) if r.get("timed_out"))
     return str(n) if n else ""
+
+
+def prefixed(server: Mapping[str, Any]) -> str:
+    """The run's prompt-cache share as ``75%``; "" for a run kept before it was counted,
+    or with no turn to judge -- not counted is not 0%."""
+    got = server.get("prefix_hits")
+    return f"{100 * float(got):.0f}%" if got is not None else ""
+
+
+def cache_turns(row: Mapping[str, Any]) -> str:
+    """``cache 3/4 turns``: of a question's calls after the first, how many found the
+    previous call's prompt still cached; "" for a row from before it was counted or a
+    question of one call."""
+    turns = int(row.get("prefix_turns") or 0)
+    return f"cache {int(row.get('prefix_kept') or 0)}/{turns} turns" if turns else ""
 
 
 def at_once(server: Mapping[str, Any]) -> str:
@@ -239,7 +259,9 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
             if r.get("unread"):
                 # what F1 cannot see: a name in the prose that no tool call produced
                 print(f"        made    {', '.join(r['unread'])}  (named, never found or read)")
+            turns = cache_turns(r)
             note = (f"{r.get('calls', 0)} calls, {r.get('answer_chars', 0)} chars"
+                    + (f", {turns}" if turns else "")
                     + (f", ERROR {r['error']}" if r.get("error") else ""))
             if together:
                 note += (f"; conversation {r.get('conversation', 0)} turn {r.get('turn', 0)}, "
