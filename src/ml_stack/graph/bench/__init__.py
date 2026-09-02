@@ -34,6 +34,7 @@ from ml_stack.graph.bench.keep import (  # noqa: F401
     SHORT,
     SMOKE,
     RunNotKept,
+    _commit,
     _kept,
     _plain,
     empties,
@@ -43,6 +44,7 @@ from ml_stack.graph.bench.keep import (  # noqa: F401
     resumable,
     runs,
     save,
+    stamped,
 )
 from ml_stack.graph.bench.score import (  # noqa: F401
     NOISE,
@@ -67,6 +69,8 @@ from ml_stack.graph.bench.score import (  # noqa: F401
     composed,
     derived,
     export,
+    host_of,
+    hosts_of,
     invented_digest,
     per_question,
     ranking,
@@ -124,7 +128,7 @@ from ml_stack.graph.bench.serve import (  # noqa: F401
 from ml_stack.graph.bench.run import (  # noqa: F401
     MEASURING,
     _asked,
-    _commit,
+    _fleet_sweep,
     _last_line,
     _latest_log,
     _main,
@@ -135,6 +139,7 @@ from ml_stack.graph.bench.run import (  # noqa: F401
     _ways,
     checking,
     detach,
+    fleet_jobs,
     halves,
     main,
     measuring,

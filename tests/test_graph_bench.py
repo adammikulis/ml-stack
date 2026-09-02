@@ -2852,3 +2852,189 @@ def test_a_sigterm_says_killed_before_it_raises(capsys):
         _stop_on_sigterm(signal.SIGTERM, None)
     assert left.value.code == 128 + signal.SIGTERM
     assert capsys.readouterr().out.startswith(history._KILLED)
+
+
+# -- every run says which machine and which code measured it -------------------------------------
+
+def test_every_run_carries_the_host_and_the_commit(tmp_path, monkeypatch):
+    """Stamped by `save`, kept as given when a record arrives with them -- a run gathered
+    from a peer names the peer, not the machine that gathered it."""
+    import socket
+
+    from ml_stack.graph.bench import keep
+
+    store = tmp_path / "runs.ladybug"
+    monkeypatch.setattr(keep, "_commit", lambda root=None: "0f1e2d3 (dirty)")
+    save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768})
+    save(store, [a_row("who?", expected=["person:iris"], shown=[])],
+         held={"host": "lantern", "commit": "abc1234"})
+    mine, theirs = runs(store)
+    assert mine["server"]["host"] == socket.gethostname()
+    assert mine["server"]["commit"] == "0f1e2d3 (dirty)" and mine["server"]["context"] == 32768
+    assert theirs["server"] == {"host": "lantern", "commit": "abc1234"}
+
+
+def test_the_table_names_the_host_only_when_more_than_one_measured(tmp_path, capsys):
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=20, hits=10, seconds=100.0,
+              host="quill-box")
+    _kept_run(store, "flash-terse", model="flash.gguf", questions=20, hits=10, seconds=90.0,
+              host="quill-box")
+    table(runs(store))
+    said = capsys.readouterr().out
+    assert "host" not in said.splitlines()[0], "one machine: no column"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=20, hits=10, seconds=80.0,
+              host="lantern")
+    table(runs(store))
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split()[:2] == ["run", "host"]
+    # `runs` is by key, so the second flash-plain sits between the two quill-box runs
+    assert [ln.split()[1] for ln in lines[2:]] == ["quill-box", "lantern", "quill-box"]
+
+
+def test_a_cost_run_from_another_host_is_never_taken_and_is_named(tmp_path, capsys):
+    """A different machine is a different clock: however well its F1 held, a run from
+    another host supplies no cost, and the ranking says so rather than skipping it."""
+    from ml_stack.graph.bench import choices, composed, plot, ranking, rates
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
+              host="quill-box")
+    _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, host="lantern")
+    kept = runs(store)
+    chosen, _ = choices(kept)
+    assert chosen[0].own and chosen[0].rejected == []
+    assert [r["label"] for r in chosen[0].elsewhere] == ["draft:mtp-tiny@n4"]
+    said = ranking(kept)
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert "| 14.7 |" in row and "| quill-box |" in row and row.endswith("| its own run |")
+    assert "| host |" in said
+    assert ("- `flash.gguf` rejected: other host -- `draft:mtp-tiny@n4` on lantern "
+            "(20 q, 10.0 s/question)") in said
+    assert composed(kept)[0]["server"] == {"host": "quill-box"}
+
+    rates(kept)
+    out = capsys.readouterr().out
+    # `_shown` keeps the end of a label, which is where the host now is
+    assert any(ln.startswith("…h-plain@quill-box") for ln in out.splitlines()), out
+    assert any(ln.startswith("…p-tiny@n4@lantern") for ln in out.splitlines())
+    assert any(ln.startswith("…sh.gguf@quill-box =") for ln in out.splitlines()), \
+        "the composed point carries its accuracy run's host"
+    drawn = pathlib.Path(plot(kept, tmp_path / "f.html")).read_text()
+    assert "host: lantern" in drawn and "@quill-box" in drawn
+
+    # the same run on the same host is taken as before
+    _kept_run(store, "draft:mtp-tiny@n8", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, host="quill-box")
+    again = ranking(runs(store))
+    row = next(ln for ln in again.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert "| 10.0 |" in row and "`draft:mtp-tiny@n8`" in row
+
+    # one host: no host column at all
+    alone = ranking([kept[0]])
+    assert "| host |" not in alone
+
+
+# -- sweep --fleet ----------------------------------------------------------------------------------
+
+def test_fleet_jobs_are_the_same_line_with_one_serve_each():
+    from ml_stack.graph.bench.run import fleet_jobs
+
+    argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
+            "b.gguf", "--serve-draft", "ha.gguf", "--also", "terse", "--kept", "/k",
+            "--no-queue", "--sample", "5"]
+    jobs = fleet_jobs(argv, ["a.gguf", "b.gguf"], commit="0f1e2d3 (dirty)")
+    assert [j["argv"] for j in jobs] == [
+        ["sweep", "--also", "terse", "--kept", "/k", "--sample", "5", "--serve", "a.gguf",
+         "--serve-draft", "ha.gguf"],
+        ["sweep", "--also", "terse", "--kept", "/k", "--sample", "5", "--serve", "b.gguf"]]
+    assert [(j["model"], j["commit"], j["dirty"]) for j in jobs] == \
+        [("a.gguf", "0f1e2d3", True), ("b.gguf", "0f1e2d3", True)]
+    assert fleet_jobs(["sweep", "--peers=quill", "--serve=x.gguf"], ["x.gguf"],
+                      commit="abc1234")[0] == {"model": "x.gguf", "argv": ["sweep", "--serve",
+                                                                            "x.gguf"],
+                                               "commit": "abc1234", "dirty": False}
+
+
+def _fake_fleet(monkeypatch, *, plan):
+    """`ml_stack.fleet.bench` with the four functions faked, recording every call; `gather`
+    keeps one invented run in the store it is told to."""
+    import sys
+    import types
+
+    calls = {}
+    fake = types.ModuleType("ml_stack.fleet.bench")
+
+    def planning(models, peers):
+        calls["plan"] = (list(models), peers)
+        return plan
+
+    def dispatching(jobs):
+        calls["dispatch"] = [dict(j) for j in jobs]
+        return [f"handle:{j['model']}" for j in jobs]
+
+    def waiting(handles):
+        calls["wait"] = list(handles)
+
+    def gathering(handles, *, into):
+        calls["gather"] = (list(handles), into)
+        _kept_run(into, "a-plain", model="a.gguf", questions=20, hits=10, seconds=100.0,
+                  host="quill")
+
+    fake.plan, fake.dispatch, fake.wait, fake.gather = planning, dispatching, waiting, gathering
+    monkeypatch.setitem(sys.modules, "ml_stack.fleet.bench", fake)
+    return calls
+
+
+def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeypatch, capsys):
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import run as running
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3")
+    calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill", "commit": "0f1e2d3"},
+                                           {"model": "b.gguf", "peer": "lantern"}])
+    kept = tmp_path / "runs.ladybug"
+    argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
+            "b.gguf", "--plain-only", "--kept", str(kept), "--store", ""]
+    assert bench._main(argv) == 0
+    said = capsys.readouterr().out
+    assert calls["plan"] == (["a.gguf", "b.gguf"], ["quill", "lantern"])
+    assert [j["argv"] for j in calls["dispatch"]] == [
+        ["sweep", "--plain-only", "--kept", str(kept), "--store", "", "--serve", "a.gguf"],
+        ["sweep", "--plain-only", "--kept", str(kept), "--store", "", "--serve", "b.gguf"]]
+    assert [(j["peer"], j["commit"]) for j in calls["dispatch"]] == \
+        [("quill", "0f1e2d3"), ("lantern", "0f1e2d3")]
+    assert calls["wait"] == ["handle:a.gguf", "handle:b.gguf"]
+    assert calls["gather"] == (["handle:a.gguf", "handle:b.gguf"], str(kept))
+    assert "plan: 2 job(s) on commit 0f1e2d3 over quill, lantern" in said
+    assert "  a.gguf -> quill (0f1e2d3)" in said and "  b.gguf -> lantern" in said
+    assert said.index("plan:") < said.index("a-plain"), "the plan first, then the table"
+    assert [r["label"] for r in runs(kept)] == ["a-plain"], "gathered into --kept"
+
+
+def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_path, monkeypatch,
+                                                                         capsys):
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import run as running
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
+    calls = _fake_fleet(monkeypatch, plan={"a.gguf": "quill", "b.gguf": "lantern"})
+    kept = tmp_path / "runs.ladybug"
+    assert bench._main(["sweep", "--fleet", "--serve", "a.gguf", "--serve", "b.gguf",
+                        "--kept", str(kept)]) == 0, "a plan that names no commit is trusted"
+    assert [j["peer"] for j in calls["dispatch"]] == ["quill", "lantern"]
+    capsys.readouterr()
+
+    calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill",
+                                            "commit": "deadbee"}])
+    assert bench._main(["sweep", "--fleet", "--serve", "a.gguf", "--kept", str(kept)]) == 2
+    said = capsys.readouterr()
+    assert "quill is on commit deadbee, this checkout is on 0f1e2d3 (dirty)" in said.err
+    assert "dispatch" not in calls and "gather" not in calls
+    assert bench._main(["sweep", "--fleet", "--on", "x=http://127.0.0.1:1",
+                        "--kept", str(kept)]) == 2
+    assert "pass --serve MODEL" in capsys.readouterr().err

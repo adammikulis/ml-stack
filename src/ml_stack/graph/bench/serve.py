@@ -111,8 +111,13 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            spec_draft_max: int | None = None, cache_type: str = "",
            per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
-           smoke: Sequence[Mapping[str, Any]] = (), **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
+           **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
+
+    ``host`` is what the kept runs say measured them, when this machine's name is not the
+    answer -- a peer running a fleet's job records the name the plan gave it. Empty, the
+    hostname is written.
 
     ``smoke`` is the questions to ask first, of every way, on the same load -- two of them
     -- kept, read back, and refused with `SmokeFailed` when every one of them failed. A
@@ -286,6 +291,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                         held["cache_type"] = cache_type
                     if reasoning_budget is not None:
                         held["reasoning_budget"] = int(reasoning_budget)
+                    if host:
+                        held["host"] = host
                     if kept:
                         keys.append(save(kept, got,
                                          held={**held, "sampling": dict(client.sampling)}))
@@ -315,10 +322,12 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
            cache_type: str = "", per_question: float = PER_QUESTION,
-           smoke: Sequence[Mapping[str, Any]] = (), **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
+           **making: Any) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
-    ``smoke`` goes to `served` as it is: the two questions each load is asked first.
+    ``smoke`` and ``host`` go to `served` as they are: the two questions each load is asked
+    first, and the name the kept runs carry.
 
     A draft head only *proposes*; the large model verifies every token, so a quantised head
     cannot make an answer wrong -- it can only be right less often, and each wrong guess
@@ -356,7 +365,7 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
                           kept=kept, store=store, embed_url=embed_url,
                           embed_model=embed_model, serve_timeout=serve_timeout,
                           spec_draft_max=length, cache_type=cache_type,
-                          per_question=per_question, smoke=smoke, **making)
+                          per_question=per_question, smoke=smoke, host=host, **making)
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given
         # only heads, the newest undrafted run of this model and size already kept. The

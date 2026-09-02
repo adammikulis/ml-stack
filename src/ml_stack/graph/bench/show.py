@@ -26,6 +26,8 @@ from ml_stack.graph.bench.score import (
     baseline,
     composed,
     derived,
+    host_of,
+    hosts_of,
     per_question,
     speedup,
     wall_of,
@@ -119,7 +121,11 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # the same size on the same build, per question, over this run's -- `speedup` -- as
     # `1.42x`. Acceptance says why a head is earning its place; this says whether it is.
     # Blank for an undrafted run, or one whose baseline is not among the runs shown.
-    head = (f"{'run':28} {'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
+    # `host` only when more than one machine measured: a fleet's store holds runs from
+    # several, and a column nobody needs is noise on a single one
+    several = len(hosts_of(kept)) > 1
+    head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
+            + f"{'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling'}")
@@ -143,7 +149,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         rss = server.get("resident_bytes")
         load = server.get("load_s")
         print(f"{_shown(one.get('label', '')):28} "
-              f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
+              + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
+              + f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
               f"{len(scored):>3} "
               f"{wall_of(one):>6.0f}s "
               f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
@@ -376,6 +383,7 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
         return
     points = list(kept) + composed(kept, noise=noise)
     on_front = {id(one) for one in pareto(points, cost=cost)}
+    several = len(hosts_of(points)) > 1
     head = (f"{'run':28} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
             f"{'F1/min':>8} {'F1/1k tok':>10} {'F1/GB':>7} {'s per':>7} {'tok per':>8}")
     print(head)
@@ -387,7 +395,11 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
         def num(key: str, fmt: str) -> str:
             return format(d[key], fmt) if key in d else "-"
         mark = ("*" if id(one) in on_front else " ") + ("=" if one.get("composed") else " ")
-        print(f"{str(one.get('label',''))[:18]:18}{mark} {d['questions']:>3.0f} "
+        # by host when several measured: the frontier is one clock, and a point from
+        # another machine is on it only by name
+        named = (_shown(f"{one.get('label', '')}@{host_of(one) or '?'}", 18) if several
+                 else str(one.get("label", ""))[:18])
+        print(f"{named:18}{mark} {d['questions']:>3.0f} "
               f"{100 * d['right']:>4.0f}% {100 * d['recall']:>4.0f}% "
               f"{100 * d['precision']:>4.0f}% {d['shown_per_question']:>6.1f} "
               f"{num('right_per_minute', '8.2f')} {num('right_per_1k', '10.4f')} "
@@ -418,6 +430,7 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     if not points:
         raise ValueError("nothing to plot")
     front = {id(one) for one in pareto([one for one, _ in points], cost=cost)}
+    several = len(hosts_of([one for one, _ in points])) > 1
 
     wide, tall, pad = 900, 520, 70
     costs = [d[cost] for _, d in points]
@@ -435,10 +448,13 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     for one, d in sorted(points, key=lambda kv: kv[1][cost]):
         cx, cy = x(d[cost]), y(d["right"])
         on = id(one) in front
-        label = _shown(one.get("label", ""), 28)
+        label = _shown(f"{one.get('label', '')}@{host_of(one) or '?'}" if several
+                       else one.get("label", ""), 28)
         kind = "composed" if one.get("composed") else ("front" if on else "dot")
         note = (f'\ncomposed: cost from {one.get("from") or "its own run"}'
                 if one.get("composed") else "")
+        if several:
+            note += f'\nhost: {host_of(one) or "?"}'
         dots.append(
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6 if on else 4.5}" '
             f'class="{kind}{" front" if on and kind == "composed" else ""}"><title>{label}\n'

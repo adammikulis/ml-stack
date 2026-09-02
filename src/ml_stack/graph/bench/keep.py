@@ -9,6 +9,8 @@ too, because the scorer, the parser and the runner all need the same two numbers
 from __future__ import annotations
 
 import json
+import socket
+import subprocess
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, is_dataclass
@@ -47,6 +49,56 @@ def _plain(value: Any) -> Any:
     if value is None or isinstance(value, (str, bool, int, float)):
         return value
     return str(value)
+
+
+_commit_here: str | None = None
+
+
+def _commit(root: Path | None = None) -> str:
+    """The short sha this package runs from, ``(dirty)`` appended when the tree has changes;
+    "" when there is no repository or no git. Best effort, never a reason not to run.
+
+    On every run record (`stamped`), at the top of every detached log and in
+    `measuring_file`, because a day of logs with no commit on them was a day nobody could
+    tell which code had measured what -- and a fleet must not compose one commit's
+    accuracy with another's cost. ``root`` is the working tree to ask; unset, the one this
+    file sits in, read once per process -- a pinned worktree keeps a ``.git`` file, and
+    `repo_root` reads that too.
+    """
+    global _commit_here
+    if root is None and _commit_here is not None:
+        return _commit_here
+    from ml_stack.paths import repo_root
+
+    where = root if root is not None else repo_root(Path(__file__).parent)
+    out = ""
+    if where is not None:
+        try:
+            def git(*words: str) -> str:
+                return subprocess.run(["git", "-C", str(where), *words], capture_output=True,
+                                      text=True, timeout=15, check=True).stdout.strip()
+
+            sha = git("rev-parse", "--short", "HEAD")
+            out = f"{sha} (dirty)" if sha and git("status", "--porcelain") else sha
+        except Exception:  # noqa: BLE001 - a commit line is never worth a run not starting
+            out = ""
+    if root is None:
+        _commit_here = out
+    return out
+
+
+def stamped(held: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A run's ``server`` record with ``host`` and ``commit`` on it, unless it names them.
+
+    Every run says which machine measured it and which code: a fleet gathers runs from
+    several hosts into one store, and the table, the ranking and the frontier must tell
+    them apart. A record that arrives with a host -- gathered from a peer, or measured
+    under ``--host`` -- keeps it; an empty one is filled in.
+    """
+    out = dict(held or {})
+    out.setdefault("host", socket.gethostname())
+    out.setdefault("commit", _commit())
+    return out
 
 
 def prepared() -> str:
@@ -93,10 +145,10 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
     """
     from ml_stack.graph.store import GraphStore
 
-    server = held
+    server = stamped(held)
     stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
     record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
-                     "server": server or {}, "rows": [asdict(r) for r in rows],
+                     "server": server, "rows": [asdict(r) for r in rows],
                      "unread_named": sum(r.unread_named for r in rows)})
     record = json.loads(json.dumps(record))      # no default=: anything left raises here
     with GraphStore(store) as writer:

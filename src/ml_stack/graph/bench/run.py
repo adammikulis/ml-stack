@@ -11,6 +11,7 @@ off the command line (`sampling_from`, `with_card`) are here because they read a
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import platform
@@ -19,7 +20,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -27,7 +28,16 @@ from typing import Any
 # `bench.find_model`, `bench.HOME` -- so anything patchable is looked up there at call
 # time, never bound here at import.
 from ml_stack.graph import bench
-from ml_stack.graph.bench.keep import SHORT, SMOKE, empties, forget, read_back, resumable, save
+from ml_stack.graph.bench.keep import (
+    SHORT,
+    SMOKE,
+    _commit,
+    empties,
+    forget,
+    read_back,
+    resumable,
+    save,
+)
 from ml_stack.graph.bench.measure import (
     PER_QUESTION,
     _how_many,
@@ -334,6 +344,16 @@ def _parser() -> argparse.ArgumentParser:
     sweep.add_argument("--since", default="", metavar="WHEN",
                        help="with --resume, how old a kept run may be and still count: an "
                             "ISO date or date-time (default: the start of today)")
+    sweep.add_argument("--fleet", action="store_true",
+                       help="spread the --serve models over the fleet instead of this "
+                            "machine: one job per model, this same line with that one "
+                            "--serve, planned over the peers, dispatched, waited for and "
+                            "gathered into --kept, then shown. Every peer must be on this "
+                            "checkout's commit; a peer that is not is refused, here and by "
+                            "its daemon")
+    sweep.add_argument("--peers", default="", metavar="NAME,...",
+                       help="with --fleet, only these peers (default: whichever the fleet "
+                            "plans over)")
 
     for one in (run, sweep, conc):
         one.add_argument("--sample", type=int, default=0, metavar="N",
@@ -493,7 +513,10 @@ def _parser() -> argparse.ArgumentParser:
 
 def _main(argv: list[str] | None = None) -> int:
     """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
-    return _run(_parser().parse_args(argv))
+    args = _parser().parse_args(argv)
+    # the line as given, for `sweep --fleet` to hand each peer the same line with one model
+    args._argv = list(argv if argv is not None else sys.argv[1:])
+    return _run(args)
 
 
 def wants_smoke(args: Any) -> bool:
@@ -567,6 +590,8 @@ def _run(args: Any) -> int:
             print("error: nothing to measure; pass --on NAME=URL for a server that is "
                   "already up, or --serve MODEL to put one up", file=sys.stderr)
             return 2
+        if getattr(args, "fleet", False):
+            return _fleet_sweep(args)
         everything = read_questions(args.questions) if args.questions else QUESTIONS
         questions = sample(everything, _how_many(args))
         graph = (json.loads(Path(args.graph).expanduser().read_text())
@@ -852,6 +877,121 @@ def _run(args: Any) -> int:
     return 0
 
 
+# The flags `sweep --fleet` takes off the line before handing it to a peer: what is about
+# this machine's session, not about the measuring.
+_NOT_FOR_A_PEER = ("--fleet", "--detach", "--no-queue")
+_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft")
+
+
+def fleet_jobs(argv: Sequence[str], models: Sequence[str], *, commit: str) -> list[dict[str, Any]]:
+    """One job per model: this same command line with that one ``--serve`` (and its
+    positional ``--serve-draft``, when one was given), on ``commit``.
+
+    Every other flag rides along unchanged -- the questions, the store, the sample, every
+    ``--also`` -- so a peer measures exactly what this machine would have. ``commit`` is
+    the short sha, and ``dirty`` says whether the tree had changes: a peer on another
+    commit is measuring other code, and both ends refuse it.
+    """
+    rest: list[str] = []
+    heads: list[str] = []
+    skip = False
+    for word in argv:
+        if skip:
+            skip = False
+            continue
+        if word in _NOT_FOR_A_PEER:
+            continue
+        flag, sep, value = word.partition("=")
+        if flag in _NOT_FOR_A_PEER_VALUED:
+            if not sep:
+                skip = True
+            continue
+        rest.append(word)
+    heads = list(_values_of(argv, "--serve-draft"))
+    sha, _, dirtiness = commit.partition(" ")
+    out = []
+    for n, model in enumerate(models):
+        line = [*rest, "--serve", model]
+        if n < len(heads):
+            line += ["--serve-draft", heads[n]]
+        out.append({"model": model, "argv": line, "commit": sha, "dirty": bool(dirtiness)})
+    return out
+
+
+def _values_of(argv: Sequence[str], flag: str) -> list[str]:
+    """Every value ``flag`` was given on ``argv``, ``--flag V`` and ``--flag=V`` alike."""
+    out: list[str] = []
+    words = list(argv)
+    for n, word in enumerate(words):
+        if word == flag and n + 1 < len(words):
+            out.append(words[n + 1])
+        elif word.startswith(flag + "="):
+            out.append(word.partition("=")[2])
+    return out
+
+
+def _planned(plan: Any) -> list[dict[str, Any]]:
+    """The fleet's plan as one record per job, whatever shape `plan` gave it: a list of
+    mappings as they are, a mapping of model to peer as ``{"model", "peer"}`` records."""
+    if isinstance(plan, Mapping):
+        return [{"model": str(k), "peer": v} for k, v in plan.items()]
+    return [dict(one) if isinstance(one, Mapping) else {"model": str(one)}
+            for one in (plan or ())]
+
+
+def _fleet_sweep(args: Any) -> int:
+    """`sweep --fleet`: the jobs, the plan, dispatch, wait, gather, show.
+
+    The fleet side is `ml_stack.fleet.bench` -- `plan(models, peers)`, `dispatch(jobs)`,
+    `wait(handles)`, `gather(handles, into=store)` -- imported by name here so this
+    machine's sweep needs none of it. The plan is printed before anything is dispatched,
+    and a peer the plan says is on another commit ends the sweep before it starts: the
+    daemon refuses too, but finding out from four peers' logs is later than from one line.
+    """
+    models = [str(m) for m in (getattr(args, "serve", []) or [])]
+    if not models:
+        print("error: --fleet spreads --serve models over the fleet; pass --serve MODEL for "
+              "each", file=sys.stderr)
+        return 2
+    mine = _commit()
+    if not mine:
+        print("error: --fleet needs to know this checkout's commit, and git would not say",
+              file=sys.stderr)
+        return 2
+    fleet = importlib.import_module("ml_stack.fleet.bench")
+    missing = [name for name in ("plan", "dispatch", "wait", "gather") if not hasattr(fleet, name)]
+    if missing:
+        print(f"error: ml_stack.fleet.bench has no {', '.join(missing)}; the fleet side of "
+              f"the bench is not in this build", file=sys.stderr)
+        return 2
+    jobs = fleet_jobs(list(getattr(args, "_argv", None) or []), models, commit=mine)
+    peers = [p.strip() for p in str(getattr(args, "peers", "") or "").split(",") if p.strip()]
+    planned = _planned(fleet.plan(models, peers or None))
+    sha = mine.partition(" ")[0]
+    print(f"plan: {len(jobs)} job(s) on commit {mine}" + (f" over {', '.join(peers)}" if peers
+                                                          else ""))
+    for one in planned:
+        theirs = str(one.get("commit") or "")
+        print(f"  {one.get('model', '?')} -> {one.get('peer') or one.get('host') or '?'}"
+              + (f" ({theirs})" if theirs else ""))
+        if theirs and theirs.partition(" ")[0] != sha:
+            print(f"error: {one.get('peer') or one.get('host') or 'a peer'} is on commit "
+                  f"{theirs}, this checkout is on {mine}; a peer measuring other code is "
+                  f"refused, and its daemon would refuse too", file=sys.stderr)
+            return 2
+    where = {str(one.get("model")): one for one in planned if one.get("model")}
+    for job in jobs:
+        peer = (where.get(job["model"]) or {}).get("peer")
+        if peer is not None:
+            job["peer"] = peer
+    handles = fleet.dispatch(jobs)
+    fleet.wait(handles)
+    fleet.gather(handles, into=args.kept)
+    print()
+    table(bench._kept(args.kept))
+    return 0
+
+
 # Which subcommands put load on the GPU, and so must never overlap with each other.
 MEASURING = ("run", "sweep", "drafts", "concurrent", "extract")
 
@@ -889,32 +1029,6 @@ def _named_in(argv: Sequence[str]) -> str:
              or next(iter(getattr(args, "on", []) or []), "").partition("=")[0]
              or getattr(args, "model", "") or "bench")
     return re.sub(r"[^\w.-]+", "-", str(named).rsplit("/", 1)[-1].removesuffix(".gguf"))[:40]
-
-
-def _commit(root: Path | None = None) -> str:
-    """The short sha this package runs from, ``(dirty)`` appended when the tree has changes;
-    "" when there is no repository or no git. Best effort, never a reason not to run.
-
-    Written at the top of every detached log and into `measuring_file`, because a day of
-    logs with no commit on them was a day nobody could tell which code had measured what.
-    ``root`` is the working tree to ask; unset, the one this file sits in -- a pinned
-    worktree keeps a ``.git`` file, and `repo_root` reads that too.
-    """
-    from ml_stack.paths import repo_root
-
-    where = root if root is not None else repo_root(Path(__file__).parent)
-    if where is None:
-        return ""
-    try:
-        def git(*words: str) -> str:
-            return subprocess.run(["git", "-C", str(where), *words], capture_output=True,
-                                  text=True, timeout=15, check=True).stdout.strip()
-
-        sha = git("rev-parse", "--short", "HEAD")
-        dirty = git("status", "--porcelain")
-    except Exception:  # noqa: BLE001 - a commit line is never worth a run not starting
-        return ""
-    return f"{sha} (dirty)" if sha and dirty else sha
 
 
 def detach(argv: Sequence[str]) -> Path:

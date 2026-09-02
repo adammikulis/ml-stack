@@ -62,6 +62,7 @@ from ml_stack.graph.bench import (
     sampling_from,
     smoke_first,
     smoked,
+    stamped,
     wants_smoke,
 )
 
@@ -717,7 +718,7 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
 
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"
     record = _plain({"at": time.strftime("%FT%T"), "label": label, "kind": KIND, "model": model,
-                     "world": dict(world), "sample": dict(sample), "server": dict(held or {}),
+                     "world": dict(world), "sample": dict(sample), "server": stamped(held),
                      "scores": dict(scores), "rows": [asdict(r) for r in rows]})
     record = json.loads(json.dumps(record))
     with GraphStore(store) as writer:

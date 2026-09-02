@@ -237,11 +237,23 @@ class Choice:
     accuracy: Mapping[str, Any]
     cost: Mapping[str, Any]
     rejected: list[tuple[Mapping[str, Any], float]]     # (run, how far F1 fell, a fraction)
+    # runs measured on another host than the accuracy run: never a cost, whatever their F1
+    elsewhere: list[Mapping[str, Any]] = field(default_factory=list)
 
     @property
     def own(self) -> bool:
         """The cost is the accuracy run's own: nothing faster held its score."""
         return self.cost is self.accuracy
+
+
+def host_of(one: Mapping[str, Any]) -> str:
+    """The machine a run was measured on, "" for a run from before that was recorded."""
+    return str((one.get("server") or {}).get("host") or "")
+
+
+def hosts_of(kept: Sequence[Mapping[str, Any]]) -> set[str]:
+    """Every host named among ``kept``; more than one means every table says which."""
+    return {host_of(one) for one in kept if host_of(one)}
 
 
 def per_question(one: Mapping[str, Any]) -> float:
@@ -322,6 +334,10 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
     ``noise`` below the accuracy run's; the accuracy run itself when nothing faster held.
     ``rejected`` holds the rest, so a head that hurt accuracy is seen rather than skipped.
 
+    Never across hosts: a cost run from another machine than the accuracy run's is a
+    different GPU, and goes under ``elsewhere`` -- listed by the ranking as "other host"
+    -- however well its F1 held.
+
     Returns the choices, most accurate first, and how many runs were too short to count.
     """
     by_model: dict[str, list[Mapping[str, Any]]] = {}
@@ -346,13 +362,15 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
         accuracy = max(mine, key=lambda o: (derived(o)["questions"], derived(o)["right"],
                                             str(o.get("at") or "")))
         top = derived(accuracy)["right"]
-        held = [o for o in mine if top - derived(o)["right"] <= noise + 1e-9]
+        here = [o for o in mine if host_of(o) == host_of(accuracy)]
+        elsewhere = [o for o in mine if o not in here]
+        held = [o for o in here if top - derived(o)["right"] <= noise + 1e-9]
         cost = min(held, key=lambda o: (per_question(o), o is not accuracy))
         if per_question(cost) >= per_question(accuracy):
             cost = accuracy
-        rejected = sorted(((o, top - derived(o)["right"]) for o in mine if o not in held),
+        rejected = sorted(((o, top - derived(o)["right"]) for o in here if o not in held),
                           key=lambda pair: -pair[1])
-        out.append(Choice(model, accuracy, cost, rejected))
+        out.append(Choice(model, accuracy, cost, rejected, elsewhere))
     return sorted(out, key=lambda c: -derived(c.accuracy)["right"]), too_few
 
 
@@ -374,6 +392,7 @@ def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list
                  "calls": c["calls"] * scale, "kv_bytes": c["kv_bytes"]}
         out.append({"label": choice.model, "composed": True, "model": choice.model,
                     "from": str(choice.cost.get("label") or ""), "own": choice.own,
+                    "server": {"host": host_of(choice.accuracy)},
                     "derived": _with_rates(point)})
     return out
 
@@ -405,6 +424,8 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
     over, skipped = _over_invented(kept)
     chosen, too_few = choices(over, noise=noise)
     pts = noise * 100
+    # which machine, only when more than one measured: a column nobody needs is noise
+    several = len(hosts_of(over)) > 1
     lines = ["# Which model answers best",
              "",
              "Measured over the invented community that ships with this package, by",
@@ -418,8 +439,10 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
              "column says which run that was.",
              "",
              "| model | F1 | recall | precision | questions | s/question | load | resident "
-             "| kv+run | sampling | find | made | cost from |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+             "| kv+run | sampling | find | made |" + (" host |" if several else "")
+             + " cost from |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+             + (" --- |" if several else "") + " --- |"]
     for choice in chosen:
         a, c = _flat(choice.accuracy, over), _flat(choice.cost, over)
         gb, kv, load = c.get("resident_bytes"), c.get("kv_and_run_bytes"), c.get("load_s")
@@ -445,7 +468,8 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
             f"| {a.get('finder') or '-'} "
             f"| {'-' if a.get('unread_named') is None else a['unread_named']} "
-            f"| {source} |")
+            + (f"| {a.get('host') or '-'} " if several else "")
+            + f"| {source} |")
     refused = [(choice, run, fell) for choice in chosen for run, fell in choice.rejected]
     if refused:
         lines += ["", f"Runs whose F1 fell more than {pts:g} points under their model's, so "
@@ -454,6 +478,16 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
         for choice, run, fell in refused:
             lines.append(f"- `{choice.model}` rejected: `{run.get('label')}` F1 "
                          f"-{fell * 100:.0f} pts ({derived(run)['questions']:.0f} q, "
+                         f"{per_question(run):.1f} s/question)")
+    away = [(choice, run) for choice in chosen for run in choice.elsewhere]
+    if away:
+        lines += ["", "Runs measured on another host than their model's accuracy run, so "
+                      "their cost was not taken -- a different machine is a different clock:",
+                  ""]
+        for choice, run in away:
+            lines.append(f"- `{choice.model}` rejected: other host -- "
+                         f"`{run.get('label')}` on {host_of(run) or '?'} "
+                         f"({derived(run)['questions']:.0f} q, "
                          f"{per_question(run):.1f} s/question)")
     notes = []
     if too_few:
@@ -530,6 +564,9 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
         # the llama-server that served it, so a fork's run is told from mainline's
         "binary": str(server.get("binary") or ""),
+        # which machine and which code measured it; "" for a run from before either was
+        "host": str(server.get("host") or ""),
+        "commit": str(server.get("commit") or ""),
         # None for a run kept before the lease recorded it: not recorded is not instant
         "load_s": server.get("load_s"),
         "resident_bytes": server.get("resident_bytes"),
