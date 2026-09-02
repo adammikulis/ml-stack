@@ -82,6 +82,10 @@ class UI:
         self.root: Any = None
         self.servers: Any = None
         self._leases: dict[int, Any] = {}
+        self.detach: Any = None
+        """How a sweep is started: the bench's own `detach` unless a test hands in a fake."""
+        self.discovery_port: int | None = None
+        self.persist_with: Any = None
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -153,7 +157,7 @@ class UI:
         # same daemon answers on each with a beacon of its own.
         by_address: dict[str, dict[str, Any]] = {}
         for member in joined:
-            for beacon in discover(member.key, timeout_s=1.5):
+            for beacon in discover(member.key, timeout_s=1.5, port=self.discovery_port):
                 row = by_address.get(beacon.base_url)
                 if row is None:
                     row = beacon.public()
@@ -268,6 +272,87 @@ class UI:
             return
         stop_model(Started(port=port, lease=held, manager=self.servers),
                    serving=self.serving)
+
+    # -- the fleet, and a sweep over it ----------------------------------
+    def fleet(self) -> dict[str, Any]:
+        """The peers as `join.describe` rows -- serving, room, busy, commit -- and the
+        models they hold between them, which is what a sweep can be built from."""
+        from .discovery import Beacon
+        from .join import describe
+
+        rows = []
+        for row in self.peers():
+            beacon = Beacon(name=str(row.get("name") or ""), port=int(row.get("port") or 8770),
+                            device=dict(row.get("device") or {}), busy=bool(row.get("busy")),
+                            queued=int(row.get("queued") or 0), slots=int(row.get("slots") or 1),
+                            free=int(row.get("free", 1)), host=str(row.get("host") or ""),
+                            hostname=str(row.get("hostname") or ""))
+            rows.append(describe(beacon, clusters=row.get("clusters") or [],
+                                 self_name=self.name))
+        models = sorted({m for r in rows for m in r["models"]})
+        return {"peers": rows, "models": models, "self": self.name,
+                "group": cluster_group(self.cluster_key_path), "bench": self.bench_state()}
+
+    def join_fleet(self, *, passphrase: str = "", group: str = "", persist: bool = False,
+                   name: str = "") -> dict[str, Any]:
+        """The Join button: `join.join_machine`, with this daemon as the one already up."""
+        from .discovery import join as join_cluster
+        from .join import DEFAULT_ROOT, join_machine
+
+        def enrol(words: str, named: str) -> None:
+            join_cluster(words, group=named, path=self.cluster_key_path)
+            self.rejoined()
+
+        said: list[str] = []
+        joined = join_machine(name=name or self.name, passphrase=passphrase, group=group,
+                              persist=persist, port=self.peer_port,
+                              root=self.root or DEFAULT_ROOT,
+                              cluster_key_path=self.cluster_key_path, enrol=enrol,
+                              persist_with=self.persist_with, say=said.append,
+                              discovery_port=self.discovery_port)
+        self._peers = (0.0, [])
+        return {**joined.public(), "said": said}
+
+    def bench_state(self) -> dict[str, Any]:
+        """What ``ml-stack-bench status`` says, for the page. The bench's home is
+        `ml_stack.graph.bench.HOME`, the one the command reads."""
+        try:
+            from ml_stack.graph.bench.run import measuring, status
+        except ImportError as exc:
+            return {"available": False, "text": f"the bench is not installed here: {exc}",
+                    "measuring": None}
+        return {"available": True, "text": status(), "measuring": measuring()}
+
+    def bench_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        from dataclasses import asdict
+
+        from ml_stack.graph.bench import HOME
+        from ml_stack.graph.bench.history import history
+
+        return [asdict(e) for e in history(HOME)][::-1][:limit]
+
+    def start_sweep(self, argv: list[str]) -> dict[str, Any]:
+        """Start ``ml-stack-bench argv`` detached and hand back its log and pid."""
+        import shlex
+
+        from ml_stack.graph.bench.run import detach, measuring_file
+
+        log = (self.detach or detach)(argv)
+        try:
+            held = json.loads(measuring_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            held = {}
+        return {"log": str(log), "pid": held.get("pid"), "argv": list(argv),
+                "command": "ml-stack-bench " + shlex.join(argv)}
+
+    def stop_sweep(self, pid: int) -> str:
+        """Stop the detached measurement, but only the one the page was shown."""
+        from ml_stack.graph.bench.run import measuring, stop
+
+        held = measuring()
+        if held is None or int(held.get("pid") or 0) != int(pid):
+            return "nothing is measuring under that pid"
+        return stop()
 
     def install_update(self) -> dict[str, Any]:
         """Put the newest release in place and start it. Returns what happened."""
@@ -822,6 +907,72 @@ def routes(ui: UI, handler: Any) -> bool:
     if path == "/ui/peers" and method == "GET":
         send(200, {"peers": ui.peers(), "self": ui.name,
                    "group": cluster_group(ui.cluster_key_path)})
+        return True
+
+    # -- the fleet: peers with what they serve, a join, and a sweep across them ------
+    if path == "/ui/fleet" and method == "GET":
+        send(200, ui.fleet())
+        return True
+
+    if path == "/ui/fleet/join" and method == "POST":
+        from .join import JoinError
+        req = body()
+        words = str(req.get("passphrase") or "")
+        if not words and not req.get("persist"):
+            send(400, {"error": "nothing to do: type the passphrase every machine shares, "
+                                "or tick 'start at logon'"})
+            return True
+        try:
+            send(200, ui.join_fleet(passphrase=words, group=str(req.get("group") or ""),
+                                    persist=bool(req.get("persist")),
+                                    name=str(req.get("name") or "")))
+        except (JoinError, DiscoveryError) as exc:
+            send(400, {"error": str(exc)})
+        return True
+
+    if path == "/ui/bench/sweep" and method == "POST":
+        import shlex
+
+        from .join import sweep_argv
+        req = body()
+        models = [str(m) for m in (req.get("models") or []) if str(m).strip()]
+        if not models:
+            send(400, {"error": "pick at least one model to measure"})
+            return True
+        try:
+            argv = sweep_argv(models, peers=[str(p) for p in (req.get("peers") or [])],
+                              sample=int(req.get("sample") or 0),
+                              label=str(req.get("label") or ""),
+                              extra=[str(a) for a in (req.get("extra") or [])])
+        except ValueError as exc:
+            send(400, {"error": str(exc)})
+            return True
+        if req.get("dry_run"):
+            send(200, {"argv": argv, "command": "ml-stack-bench " + shlex.join(argv)})
+            return True
+        try:
+            send(202, ui.start_sweep(argv))
+        except ImportError as exc:
+            send(501, {"error": f"the bench is not installed here: {exc}"})
+        return True
+
+    if path == "/ui/bench/status" and method == "GET":
+        send(200, ui.bench_state())
+        return True
+
+    if path == "/ui/bench/history" and method == "GET":
+        try:
+            send(200, {"history": ui.bench_history()})
+        except ImportError as exc:
+            send(501, {"error": f"the bench is not installed here: {exc}"})
+        return True
+
+    if path == "/ui/bench/stop" and method == "POST":
+        pid = body().get("pid")
+        if not pid:
+            send(400, {"error": "say which pid to stop -- the one the page was shown"})
+            return True
+        send(200, {"stopped": ui.stop_sweep(int(pid))})
         return True
 
     send(404, {"error": "no such route"})

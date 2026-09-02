@@ -495,7 +495,7 @@ the discovery port, and prints the peers that answered. `status` is that listing
 
 ```
 NAME             URL                          ROOM             STATE        COMMIT     SERVING
-studio           http://192.168.2.44:8770     96.0/128.0 GB    idle         0ce5bc5    quince-2b.gguf:8099
+studio           http://192.168.2.44:8770     96.0G            idle         0ce5bc5    quince-2b.gguf:8099
 larch            http://192.168.2.27:8770     20.5/24.0 GB     measuring    0ce5bc5    -
 ```
 
@@ -933,6 +933,14 @@ were two runs sharing a machine, and nothing in the numbers said so. A server th
 answer `/slots` is reported as unknown rather than assumed idle. `--anyway` proceeds on
 purpose.
 
+Every measuring command **estimates itself before it starts** -- after the self-check, before
+a download or the lock -- from what is kept: seconds per question from the newest run of
+each model (at the same context when one is kept there), else a guess from its weights on
+disk, times the questions, the ways one load is asked and the models, plus a load each,
+printed as `estimate:` lines that `history` reads back beside the actual. Over `--ceiling`
+minutes (30, or `MLSTACK_BENCH_CEILING`) it refuses with exit 5 and says what to shorten;
+`--yes` runs it anyway, and a `--smoke` is never refused. No more eight-hour tests.
+
 Serve every model being compared with the **same context and the same number of slots**, or
 the comparison is of two configurations rather than two models: a model at 8k per slot is
 faster and holds a smaller cache than the same model at 32k. The table prints `ctx` on every
@@ -968,6 +976,14 @@ it was tuned on.
 `show` reports wall clock, model calls, prompt tokens **and how many of them were cached** —
 a conversation re-sends itself every turn, so the tokens shown and the tokens actually read
 are different numbers and only the second is a cost.
+
+`pfx` is that cache per turn. A question is several calls, and the second should pay for
+the tool result and the model's reply and nothing before them; when its cached tokens fall
+short of the previous call's whole prompt, the system prompt and every tool schema were
+read again. The table prints the share of turns that kept the prefix, `--detail` says
+`cache 3/4 turns` per question, and a change to the asking that breaks the prefix -- the
+cheapest speed lever there is -- shows here where the totals hide it. Blank on a run from
+before it was counted, because not counted is not none.
 
 It also reports what the server costs to keep up beyond its weights (`kv+run`: the KV cache
 and the runtime around it, measured as resident memory minus the weights on disk) and that

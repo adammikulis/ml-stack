@@ -196,15 +196,26 @@ function peerCard(p) {
     (d.labels || []).length
       ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
       : null,
+    (p.serving || []).length
+      ? el("div", { class: "labels" },
+          el("span", { class: "why" }, "serving"),
+          p.serving.map((s) => el("span", { class: "label" }, s)))
+      : null,
     ...meters,
     el("div", { class: "state" },
-      el("span", { class: `pulse ${state.cls}` }), state.text));
+      el("span", { class: `pulse ${state.cls}` }),
+      p.lock ? `measuring · ${p.lock}` : state.text,
+      p.commit && p.commit !== "?" ? el("span", { class: "why" }, ` · ${p.commit}`) : null));
 }
 
 // ---------------------------------------------------------------- fleet view
 let timer = null;
+// What the sweep form holds, kept across the 4s redraw so a tick is not lost to it.
+const sweep = { models: new Set(), peers: new Set(), sample: "", label: "", started: null,
+  note: "" };
+
 async function fleet() {
-  const r = await api("/ui/peers");
+  const r = await api("/ui/fleet");
   if (r.status === 401) return signIn();
 
   const peers = r.peers || [];
@@ -227,25 +238,34 @@ async function fleet() {
     const named = el("input", { type: "text", id: "cname",
       placeholder: "name (optional)" });
     const note = el("div");
+    const persist = el("input", { type: "checkbox", id: "persist" });
     const add = el("button", { class: "ghost small" }, "Join");
+    // The same `join` as `ml-stack-fleet join`: the checks, the cluster, the daemon (this
+    // one), at logon if ticked, and then what the fleet sees.
     add.onclick = async () => {
       const said = words.value.trim();
-      if (said.length < MIN_PASS) {
+      if (said && said.length < MIN_PASS) {
         note.replaceChildren(el("div", { class: "err" },
           `A passphrase needs at least ${MIN_PASS} characters.`));
         return;
       }
       add.disabled = true;
-      const got = await api("/ui/clusters", { method: "POST",
-        body: JSON.stringify({ passphrase: said, group: named.value.trim() }) });
+      note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
+        " Joining…"));
+      const got = await api("/ui/fleet/join", { method: "POST",
+        body: JSON.stringify({ passphrase: said, group: named.value.trim(),
+                               persist: persist.checked }) });
       add.disabled = false;
       if (got.error) {
         note.replaceChildren(el("div", { class: "err" }, got.error));
         return;
       }
       words.value = ""; named.value = "";
-      note.replaceChildren(el("div", { class: "ok" }, `Joined ${got.joined}.`));
-      drawJoined(got.clusters || []);
+      note.replaceChildren(
+        el("div", { class: "ok" }, `Joined ${got.group}`
+          + (got.persisted ? ", and it starts at logon." : ".")),
+        el("pre", { class: "cmd" }, (got.said || []).join("\n")));
+      api("/ui/clusters").then((c) => drawJoined(c.clusters || []));
       fleet();
     };
 
@@ -269,9 +289,101 @@ async function fleet() {
                 } }, "Leave")))
         : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
       el("div", { class: "searchrow" }, words, named, add),
+      el("label", { class: "opt", for: "persist" }, persist,
+        el("span", {}, el("b", {}, "Start at logon"),
+          el("span", { class: "why" }, "so this machine is back in the fleet after a restart"))),
       note);
   };
   api("/ui/clusters").then((c) => drawJoined(c.clusters || []));
+
+  // A sweep across the fleet: the models the peers hold, one job each, detached.
+  const bench = r.bench || {};
+  const held = r.models || [];
+  const names = peers.map((p) => p.name);
+  const command = () => {
+    const parts = ["ml-stack-bench sweep --fleet"];
+    for (const m of held) if (sweep.models.has(m)) parts.push(`--serve ${m}`);
+    const chosen = names.filter((n) => sweep.peers.has(n));
+    if (chosen.length && chosen.length < names.length) parts.push(`--peers ${chosen.join(",")}`);
+    if (sweep.sample) parts.push(`--sample ${sweep.sample}`);
+    if (sweep.label) parts.push(`--label ${sweep.label}`);
+    return parts.join(" ");
+  };
+  const shown = el("pre", { class: "cmd" }, command());
+  const tick = (set, key, on) => { if (on) set.add(key); else set.delete(key); shown.textContent = command(); };
+  const box = (set, key, label, why) => {
+    const input = el("input", { type: "checkbox", id: `tick-${key}` });
+    input.checked = set.has(key);
+    input.onchange = () => tick(set, key, input.checked);
+    return el("label", { class: "opt", for: `tick-${key}` }, input,
+      el("span", {}, el("b", {}, label), why ? el("span", { class: "why" }, why) : null));
+  };
+  const heldBy = (m) => peers.filter((p) => (p.models || []).includes(m)).map((p) => p.name);
+  const sampleBox = el("input", { type: "text", id: "sample", placeholder: "questions (all)",
+    value: sweep.sample });
+  sampleBox.oninput = () => { sweep.sample = sampleBox.value.replace(/\D/g, ""); shown.textContent = command(); };
+  const labelBox = el("input", { type: "text", id: "label", placeholder: "label (optional)",
+    value: sweep.label });
+  labelBox.oninput = () => { sweep.label = labelBox.value.trim(); shown.textContent = command(); };
+  const sweepNote = el("div", {}, sweep.note ? el("div", { class: "hint" }, sweep.note) : null);
+  const start = el("button", { class: "ghost small" }, "Run across fleet");
+  start.disabled = !held.some((m) => sweep.models.has(m)) || !!(bench.measuring);
+  start.onclick = async () => {
+    start.disabled = true;
+    const got = await api("/ui/bench/sweep", { method: "POST",
+      body: JSON.stringify({ models: held.filter((m) => sweep.models.has(m)),
+                             peers: names.filter((n) => sweep.peers.has(n)),
+                             sample: Number(sweep.sample || 0), label: sweep.label }) });
+    if (got.error) {
+      sweep.note = "";
+      sweepNote.replaceChildren(el("div", { class: "err" }, got.error));
+      start.disabled = false;
+      return;
+    }
+    sweep.started = got;
+    sweep.note = `Started (pid ${got.pid}); log ${got.log}`;
+    fleet();
+  };
+  const stop = bench.measuring
+    ? el("button", { class: "ghost small", onclick: async () => {
+        const got = await api("/ui/bench/stop", { method: "POST",
+          body: JSON.stringify({ pid: bench.measuring.pid }) });
+        sweep.note = got.error || got.stopped || "";
+        fleet();
+      } }, "Stop")
+    : null;
+  const history = el("div", { class: "hint" }, "Loading…");
+  api("/ui/bench/history").then((h) => {
+    const rows = (h.history || []).slice(0, 8);
+    history.replaceChildren(...(rows.length
+      ? rows.map((e) => el("div", { class: "row" },
+          el("span", {}, el("b", {}, `${e.subcommand} ${e.name}`),
+            el("span", { class: "why" },
+              `${e.started} · ${e.exit}${e.seconds ? ` · ${Math.round(e.seconds)}s` : ""}`
+              + `${e.questions ? ` · ${e.questions} questions` : ""}`))))
+      : [el("div", { class: "hint" }, h.error || "Nothing has been measured yet.")]));
+  });
+  const measuring = el("div", { class: "group" },
+    el("h2", {}, "Run across the fleet"),
+    el("div", { class: "hint" },
+      bench.available === false ? bench.text
+      : "Each model is measured on a machine that holds it, one job per model, and the "
+        + "runs are gathered here. Every machine must be on this checkout's commit."),
+    held.length
+      ? el("div", { class: "two" },
+          el("div", {}, el("h2", {}, "models"),
+            held.map((m) => box(sweep.models, m, m, `on ${heldBy(m).join(", ")}`))),
+          el("div", {}, el("h2", {}, "machines"),
+            peers.map((p) => box(sweep.peers, p.name, p.name,
+              p.commit && p.commit !== "?" ? p.commit : "")),
+            el("div", { class: "hint" }, "None ticked means whichever the fleet plans over.")))
+      : el("div", { class: "hint" }, "No machine has a model yet. Get one under Models."),
+    el("div", { class: "searchrow" }, sampleBox, labelBox, start, stop),
+    shown,
+    el("pre", { class: "cmd" }, bench.text || ""),
+    sweepNote,
+    el("h2", {}, "History"),
+    history);
 
   show(el("div", { class: "app" },
     top("Cluster", r.group),
@@ -286,7 +398,8 @@ async function fleet() {
           peers.filter((p) => vendorOf(p.device || {}).key !== "cpu").length),
           el("div", { class: "k" }, "with a GPU"))),
       cards,
-      joined)));
+      joined,
+      measuring)));
 
   clearTimeout(timer);
   timer = setTimeout(fleet, 4000);

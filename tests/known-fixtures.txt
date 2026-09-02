@@ -171,3 +171,7 @@ Calder Ridge.
 Start Menu
 On Windows
 claude mcp
+From Hugging Face
+← Newer
+onclick: back
+Pellard P40
