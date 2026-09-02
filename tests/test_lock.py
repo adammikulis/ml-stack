@@ -74,3 +74,26 @@ def test_only_the_measuring_subcommands_take_it():
 
     assert set(MEASURING) == {"run", "sweep", "drafts", "concurrent", "extract"}
     assert "show" not in MEASURING and "prepare" not in MEASURING
+
+
+def test_a_refused_attempt_leaves_the_holder_named(tmp_path):
+    """The finally ran on the refused attempt too and truncated the holder's pid, so the
+    next asker saw "held by somebody". Mutation: drop the `taken` guard."""
+    import os
+
+    from ml_stack.lock import Busy, only_one
+
+    path = tmp_path / "measuring.lock"
+    with only_one(path, wait=False):
+        try:
+            with only_one(path, wait=False):
+                raise AssertionError("a second holder was allowed")
+        except Busy as why:
+            assert str(os.getpid()) in str(why)
+        # the refusal must not have blanked the record
+        assert path.read_text().strip().startswith("pid"), path.read_text()
+        try:
+            with only_one(path, wait=False):
+                pass
+        except Busy as why:
+            assert "somebody" not in str(why), str(why)

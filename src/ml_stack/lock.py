@@ -111,7 +111,7 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
     path = Path(what).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
     handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    began, told = time.monotonic(), False
+    began, told, taken = time.monotonic(), False, False
     try:
         while not _try_take(handle):
             held = _holder(handle)
@@ -123,11 +123,15 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
             if timeout and time.monotonic() - began > timeout:
                 raise Busy(f"{path} still held by {held} after {timeout:.0f}s")
             time.sleep(0.5)
+        taken = True
         _write_holder(handle)
         yield path
     finally:
+        # Only the holder cleans up: a refused attempt used to truncate the holder's pid on
+        # its way out, so the next asker saw "held by somebody" (found 2026-09-02).
         try:
-            os.ftruncate(handle, 0)
-            _drop(handle)
+            if taken:
+                os.ftruncate(handle, 0)
+                _drop(handle)
         finally:
             os.close(handle)
