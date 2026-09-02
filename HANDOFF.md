@@ -44,6 +44,20 @@ binary=args.binary)`.
   model; measure the `cached` share per turn with `ml-stack-bench concurrent` so a summary
   that changes too often is caught.
 
+## Measuring across the fleet (asked 2026-09-02)
+
+- [ ] **`ml-stack-bench sweep --fleet`.** Ready today: `--on name=http://peer:port` measures a
+  server anywhere, `ml-stack-serve up --root` announces one and `ml-stack-peers` finds it,
+  and the community, the question sets and worlds are in the package or made from a seed.
+  Missing: (1) dispatch — assign each model to the peer whose reported memory fits it, start
+  the run there detached (the training daemon already runs jobs over the fleet; a bench
+  job is the same shape), know when it ended; (2) gather — `show --export` exists, an
+  `import` does not; runs come home into the one store with `server.host` recorded;
+  (3) comparability — a `host` column in the table, and `ranking` never composes one host's
+  accuracy with another's cost; (4) the pin — refuse a peer whose commit differs from the
+  dispatcher's (`history` records commits now); (5) a peer's lock is consulted before work
+  is sent. The Windows and Linux build paths are unit-tested against fakes only.
+
 ## Verifying
 
 ```bash
