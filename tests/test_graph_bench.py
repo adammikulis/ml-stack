@@ -810,7 +810,8 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
     said = capsys.readouterr().out
     head, lines = said.splitlines()[0], [ln for ln in said.splitlines() if ln.startswith("tried")]
     assert "find" in head
-    assert head.split().index("find") == head.split().index("draft") + 1, "beside draft"
+    assert head.split().index("speed") == head.split().index("draft") + 1, "beside draft"
+    assert head.split().index("find") == head.split().index("speed") + 1, "then find"
     # "tried  32k x2  1 ..." -- the context field carries a space, so find is the eleventh word
     assert lines[0].split()[10] == "meaning"
     assert lines[1].split()[10] == "-"
@@ -1929,7 +1930,14 @@ def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, 
     assert by_label["draft:mtp-tiny@n8"]["spec_draft_max"] == 8
     assert "spec_draft_max" not in by_label["draft:none"]
     assert "--- draft: mtp-tiny@n4" in said and "--- draft: mtp-tiny@n8" in said
-    summary = [ln for ln in said.split("\n---", 1)[1].splitlines() if ln.startswith("draft:")]
+    # the drafts summary comes first -- one row per (head, n-max), the baseline named --
+    # and then the table of every run kept
+    worth, then = said.split("\n" + "draft" + " " * 24, 1)[1].split("\nrun ", 1)
+    heads = [ln for ln in worth.splitlines() if ln.startswith("draft:")]
+    assert [ln.split()[0] for ln in heads] == ["draft:mtp-tiny@n4", "draft:mtp-tiny@n8"] \
+        or [ln.split()[0] for ln in heads] == ["draft:mtp-tiny@n8", "draft:mtp-tiny@n4"]
+    assert all(ln.rstrip().endswith("draft:none") for ln in heads), "against the baseline"
+    summary = [ln for ln in then.splitlines() if ln.startswith("draft:")]
     assert len(summary) == 3, "one row per (head, n-max), and the baseline"
 
     # without --n-max: once, at the build's own default, and the label says nothing of it
@@ -2350,3 +2358,153 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
     said = capsys.readouterr().out
     assert calls == ["bad.gguf", "good.gguf"], said
     assert "did not load; moving on" in said
+
+
+# -- what a draft head was worth, as a number ----------------------------------------------
+
+def _measured(label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0,
+              binary="/builds/current/llama-server", draft="", at="2026-09-01T12:00:00",
+              guessed=0, taken=0):
+    """A kept run as `runs` hands it back, built by hand so ``at`` is chosen and not the
+    clock's: ``hits`` of ``questions`` answered in full over ``seconds`` altogether."""
+    from dataclasses import asdict
+
+    rows = []
+    for n in range(questions):
+        r = a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"] if n < hits else [])
+        r.label, r.seconds = label, seconds / questions
+        r.draft_tokens, r.draft_taken = guessed, taken
+        rows.append(asdict(r))
+    server = {"model": model, "binary": binary, "context": 32768, "slots": 1}
+    if draft:
+        server["draft_model"] = draft
+    return {"key": f"bench:{label}:{at}", "at": at, "label": label, "server": server,
+            "rows": rows}
+
+
+def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_over_this_one():
+    """A drafted run at 7.04 s/question against its baseline's 10.0 is 1.42x -- against
+    the *newest* undrafted run of the same model, build and size, and none other."""
+    from ml_stack.graph.bench import baseline, speedup
+
+    older = _measured("draft:none", seconds=300.0, at="2026-09-01T10:00:00")
+    newest = _measured("draft:none", seconds=200.0, at="2026-09-01T11:00:00")
+    fork = _measured("draft:none", seconds=100.0, binary="/builds/brayfork/llama-server")
+    larger = _measured("flash-plain", questions=34, hits=20, seconds=170.0)
+    other = _measured("draft:none", model="tiny.gguf", seconds=50.0)
+    drafted = _measured("draft:mtp-flash@n4", seconds=140.8, draft="mtp-flash.gguf",
+                        guessed=100, taken=76)
+    kept = [older, fork, larger, other, drafted, newest]
+    assert baseline(drafted, kept) is newest
+    assert speedup(drafted, kept) == pytest.approx(200.0 / 140.8)
+    assert f"{speedup(drafted, kept):.2f}x" == "1.42x"
+    # an undrafted run is its own baseline, which is no baseline at all
+    assert speedup(newest, kept) is None and baseline(newest, kept) is None
+    # a fork's baseline says nothing about mainline's head, nor a larger run about a smaller
+    assert speedup(drafted, [fork, larger, other, drafted]) is None
+    # the same model on no named build pairs with a baseline on no named build
+    bare = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf", binary="")
+    assert speedup(bare, [newest, bare]) is None
+    assert speedup(bare, [_measured("draft:none", binary=""), bare]) == pytest.approx(2.0)
+    # a run that took no time has nothing to divide by
+    still = _measured("draft:mtp-flash@n4", seconds=0.0, draft="mtp-flash.gguf")
+    assert speedup(still, [newest, still]) is None
+
+
+def test_the_table_prints_speed_after_draft_and_leaves_it_blank_without_a_baseline(tmp_path,
+                                                                                    capsys):
+    from ml_stack.graph.bench import invented_digest
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=200.0,
+              binary="/builds/current/llama-server")
+    _kept_run(store, "draft:mtp-flash@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=140.8, binary="/builds/current/llama-server",
+              draft_model="mtp-flash.gguf")
+    _kept_run(store, "draft:mtp-flash@n8", model="flash.gguf", questions=20, hits=12,
+              seconds=100.0, binary="/builds/brayfork/llama-server",
+              draft_model="mtp-flash.gguf")
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0].split()
+    assert head.index("speed") == head.index("draft") + 1
+    lines = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith("draft:")}
+    assert "1.42x" in lines["draft:mtp-flash@n4"]
+    assert not any(w.endswith("x") for w in lines["draft:none"].split()), "no head, no speed"
+    assert not any(w.endswith("x") for w in lines["draft:mtp-flash@n8"].split()), \
+        "the fork's run has no baseline on the fork"
+    assert invented_digest()  # the runs above are over the invented community
+
+
+def test_the_detail_says_the_speedup_on_the_run_line(tmp_path, capsys):
+    import ml_stack.graph.bench as bench
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=200.0)
+    _kept_run(store, "draft:mtp-flash@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=140.8, draft_model="mtp-flash.gguf")
+    assert bench._main(["show", "--detail", "draft:mtp-flash@n4", "--kept", str(store)]) == 0
+    said = capsys.readouterr().out
+    line = next(ln for ln in said.splitlines() if ln.startswith("draft:mtp-flash@n4"))
+    assert line.endswith("speedup 1.42x over draft:none (draft:none)")
+    assert "draft:none  (" not in said, "only the label asked for is detailed"
+    # and --detail with no label details every run, the baseline saying nothing of speed
+    assert bench._main(["show", "--detail", "--kept", str(store)]) == 0
+    said = capsys.readouterr().out
+    base = next(ln for ln in said.splitlines() if ln.startswith("draft:none"))
+    assert "speedup" not in base and "speedup 1.42x" in said
+
+
+def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that_held():
+    """Three heads: the fastest lost twenty points of F1, so it is on the table and not in
+    the recommendation; the next fastest held within the noise and is what to serve."""
+    from ml_stack.graph.bench import NOISE, drafted
+
+    base = _measured("draft:none", hits=12, seconds=200.0, at="2026-09-01T11:00:00")
+    slow = _measured("draft:mtp-a@n4", hits=12, seconds=140.0, draft="mtp-a.gguf",
+                     guessed=100, taken=70)
+    fell = _measured("draft:mtp-a@n8", hits=8, seconds=100.0, draft="mtp-a.gguf",
+                     guessed=100, taken=90)
+    held = _measured("draft:mtp-b@n4", hits=11, seconds=125.0, draft="mtp-b.gguf",
+                     guessed=100, taken=80)
+    said = drafted([base, slow, fell, held])
+    lines = said.splitlines()
+    assert lines[0].split() == ["draft", "accept", "s/q", "speed", "F1", "dF1", "against"]
+    rows = [ln for ln in lines if ln.startswith("draft:")]
+    assert [ln.split()[0] for ln in rows] == ["draft:mtp-a@n8", "draft:mtp-b@n4",
+                                              "draft:mtp-a@n4"], "fastest first"
+    assert rows[0].split()[1:] == ["90%", "5.0", "2.00x", "40%", "-20", "draft:none"]
+    assert rows[1].split()[1:] == ["80%", "6.2", "1.60x", "55%", "-5", "draft:none"]
+    assert rows[2].split()[1:] == ["70%", "7.0", "1.43x", "60%", "+0", "draft:none"]
+    assert lines[-1] == (f"serve draft:mtp-b@n4: fastest whose F1 held within "
+                         f"{NOISE * 100:g} points of its baseline, 1.60x")
+    # the baseline may be an older run already kept, found among everything
+    assert drafted([held], among=[base, held]).splitlines()[-1].startswith("serve draft:mtp-b@n4")
+    # no baseline: every row says so, and there is nothing to recommend against
+    alone = drafted([slow, held])
+    assert all(ln.endswith("no baseline") for ln in alone.splitlines() if ln.startswith("draft:"))
+    assert alone.splitlines()[-1].startswith("no baseline to recommend against")
+    # every head fell: serve none
+    assert drafted([base, fell]).splitlines()[-1].startswith("serve no head")
+    assert drafted([base]) == "no drafted run to summarise"
+
+
+def test_the_ranking_and_the_export_carry_the_speedup(tmp_path):
+    """The cost row names the drafted run, its size, and what the head was worth."""
+    from ml_stack.graph.bench import export, ranking
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
+              binary="/builds/current/llama-server")
+    _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=300.0,
+              binary="/builds/unsloth/llama-server")
+    _kept_run(store, "draft:mtp-flash@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, binary="/builds/unsloth/llama-server",
+              draft_model="mtp-flash.gguf")
+    said = ranking(runs(store))
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert row.endswith("| `draft:mtp-flash@n4` on unsloth/llama-server (20 q, 1.50x) |")
+    got = {r["label"]: r for r in
+           json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())}
+    assert got["draft:mtp-flash@n4"]["speedup"] == 1.5
+    assert got["draft:none"]["speedup"] is None and got["flash-plain"]["speedup"] is None

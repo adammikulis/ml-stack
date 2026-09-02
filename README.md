@@ -908,7 +908,12 @@ f16 is a comparison of configurations, and the column is what stops it being rea
 comparison of models. `drafts --n-max N`, repeated, serves each head once per value --
 `--spec-draft-n-max` is bound when the server starts, like the head itself -- labelled
 `draft:<head>@n8`, so the table shows acceptance and wall clock per (head, n-max). Without
-it, once at the build's own default. The baseline with no head is measured once.
+it, once at the build's own default. The baseline with no head is measured once. What a
+head was worth is then a number rather than a division done by hand: `show` prints
+`speed` beside `draft` -- the newest undrafted run of the same model, build and size,
+per question, over this one, as `1.42x` -- `--rank` carries it into `cost from`, and
+`drafts` ends with its own table, one row per (head, n-max) with acceptance, speedup
+and how far F1 moved, and names the fastest configuration whose F1 held within the noise.
 
 ```
 ml-stack-bench concurrent e2b-4x3 --conversations 4 --turns 3 --base-url http://127.0.0.1:8080

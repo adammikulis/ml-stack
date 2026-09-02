@@ -27,11 +27,11 @@ from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 __all__ = ["Counting", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut", "Row", "SHORT",
-           "SMOKE", "beyond_weights", "choices", "composed", "export", "ranking",
-           "ask_from", "asking", "compare", "concurrent", "detach", "empties", "finding",
-           "footprint", "forget", "halves", "kv_short", "main", "measure", "measuring",
-           "prefetch", "prepared", "read_questions", "references_in", "runs", "save",
-           "slot_count", "status", "stop", "table", "tail", "unread_named"]
+           "SMOKE", "baseline", "beyond_weights", "choices", "composed", "drafted", "export",
+           "ranking", "ask_from", "asking", "compare", "concurrent", "detach", "empties",
+           "finding", "footprint", "forget", "halves", "kv_short", "main", "measure",
+           "measuring", "prefetch", "prepared", "read_questions", "references_in", "runs",
+           "save", "slot_count", "speedup", "status", "stop", "table", "tail", "unread_named"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
@@ -919,8 +919,13 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # a run with a quantised cache against one at f16 is two configurations, not two
     # models. `load` is what the server took to come up, from the lease itself and not a
     # stopwatch around it; blank for a run kept before the lease recorded one.
+    #
+    # `speed` is what the draft head was worth: the same model's newest undrafted run of
+    # the same size on the same build, per question, over this run's -- `speedup` -- as
+    # `1.42x`. Acceptance says why a head is earning its place; this says whether it is.
+    # Blank for an undrafted run, or one whose baseline is not among the runs shown.
     head = (f"{'run':28} {'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'conc':>5} "
+            f"{'written':>8} {'cached':>8} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling'}")
     print(head)
@@ -952,6 +957,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
               f"{drafting(rows):>6} "
+              f"{_times(speedup(one, kept)):>6} "
               f"{str(server.get('finder') or '-'):>7} "
               f"{at_once(server):>5} "
               f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
@@ -993,18 +999,24 @@ def made(one: Mapping[str, Any]) -> str:
     return str(int(_total(rows, "unread_named")))
 
 
-def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> None:
+def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
+           among: Sequence[Mapping[str, Any]] = ()) -> None:
     """Question by question: what was wanted, what the answer showed, and what it cost.
 
     A score is a number to act on only when you can see which questions made it. A run that
     scores 17% has failed in some particular way — no tool calls, an empty answer, the right
     people found and the wrong ones shown — and the aggregate cannot tell you which, so this
     prints the rows themselves. Only the misses by default; ``everything`` for all of them.
+
+    ``among`` is every run kept, so a drafted run's line can say what its head was worth
+    against the undrafted baseline `baseline` finds there; ``kept`` alone is one label's.
     """
     if not kept:
         print("nothing kept yet")
         return
     for one in kept:
+        base = baseline(one, among or kept)
+        faster = speedup(one, among or kept)
         rows = [r for r in (one.get("rows") or []) if r.get("expected")]
         shortfall = [r for r in rows if not everything and _hit(r) < 1.0] if not everything else rows
         server = one.get("server") or {}
@@ -1015,7 +1027,9 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
         print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
               + (f", {together} at once" if together else "")
               + (f", load {float(load):.0f}s" if load is not None else "")
-              + (f", {late} timed out" if late else "") + ")")
+              + (f", {late} timed out" if late else "") + ")"
+              + (f"  speedup {_times(faster)} over draft:none ({base.get('label', '')})"
+                 if faster is not None and base is not None else ""))
         if not shortfall:
             print("  every question answered in full")
             continue
@@ -1275,6 +1289,115 @@ def per_question(one: Mapping[str, Any]) -> float:
     return got["seconds"] / got["questions"] if got.get("questions") else 0.0
 
 
+def _head_of(one: Mapping[str, Any]) -> str:
+    """The draft head a run was served with, "" for none."""
+    server = one.get("server") or {}
+    return str(server.get("draft_model") or server.get("draft") or "")
+
+
+def baseline(one: Mapping[str, Any],
+             kept: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The undrafted run a drafted one is measured against, or None.
+
+    The newest run among ``kept`` of the same model, on the same llama-server (or neither
+    naming one), over the same number of scored questions, served with no draft head. The
+    same size because a twenty-question run and a thirty-four are two measurements; the
+    same build because a fork's speed against mainline's is the fork's, not the head's.
+    None for a run with no head: it is its own baseline, and a speedup of 1.00x would say
+    nothing.
+    """
+    if not _head_of(one):
+        return None
+    server = one.get("server") or {}
+    mine = derived(one)
+    if not mine.get("questions"):
+        return None
+    wanted = (str(server.get("model") or ""), str(server.get("binary") or ""),
+              mine["questions"])
+    found = [(n, o) for n, o in enumerate(kept)
+             if o is not one and not _head_of(o)
+             and (str((o.get("server") or {}).get("model") or ""),
+                  str((o.get("server") or {}).get("binary") or ""),
+                  derived(o).get("questions")) == wanted]
+    if not found:
+        return None
+    return max(found, key=lambda pair: (str(pair[1].get("at") or ""), pair[0]))[1]
+
+
+def speedup(one: Mapping[str, Any], kept: Sequence[Mapping[str, Any]]) -> float | None:
+    """What a draft head was worth: the baseline's seconds per question over this run's.
+
+    The wall clock already has the benefit in it and `drafting` says how often the head was
+    right; this is the number a reader was dividing out by hand -- `1.42x` -- and it only
+    exists against the run `baseline` finds, so it is None for an undrafted run, for one
+    with no baseline among ``kept``, and for one that took no time at all.
+    """
+    base = baseline(one, kept)
+    if base is None:
+        return None
+    mine = per_question(one)
+    return per_question(base) / mine if mine > 0 else None
+
+
+def _times(ratio: float | None) -> str:
+    """``1.42x``, or "" for no ratio."""
+    return f"{ratio:.2f}x" if ratio is not None else ""
+
+
+def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, Any]] = (),
+            noise: float = NOISE) -> str:
+    """The `drafts` summary: what each (head, n-max) was worth, and which to serve.
+
+    One row per drafted run in ``kept`` -- acceptance, seconds per question, speedup over
+    the baseline `baseline` finds in ``among`` (``kept`` itself when not given), F1 and how
+    far it moved from the baseline's -- fastest first, the rows with no baseline last. Then
+    the recommendation: the fastest whose F1 held within ``noise`` of its baseline, since a
+    head cannot change an answer and one that did has changed something else. A head that
+    fell outside the noise is on the table, not in the recommendation.
+    """
+    pool = list(among) or list(kept)
+    rows = []
+    for one in kept:
+        if not _head_of(one):
+            continue
+        base = baseline(one, pool)
+        mine = derived(one)
+        rows.append((one, base, speedup(one, pool), mine,
+                     derived(base) if base is not None else {}))
+    if not rows:
+        return "no drafted run to summarise"
+    rows.sort(key=lambda r: -(r[2] if r[2] is not None else -1.0))
+    head = (f"{'draft':28} {'accept':>6} {'s/q':>6} {'speed':>6} {'F1':>5} {'dF1':>5}  "
+            f"against")
+    lines = [head, "-" * len(head)]
+    for one, base, faster, mine, theirs in rows:
+        got = mine.get("right")
+        delta = ((got - theirs["right"]) * 100
+                 if got is not None and theirs.get("right") is not None else None)
+        lines.append(
+            f"{_shown(one.get('label', '')):28} "
+            f"{drafting(one.get('rows') or []):>6} "
+            f"{per_question(one):>6.1f} "
+            f"{_times(faster):>6} "
+            f"{(f'{got * 100:.0f}%' if got is not None else '-'):>5} "
+            f"{(f'{delta:+.0f}' if delta is not None else '-'):>5}  "
+            f"{base.get('label', '') if base is not None else 'no baseline'}")
+    held = [(one, faster) for one, base, faster, mine, theirs in rows
+            if faster is not None and theirs.get("right") is not None
+            and theirs["right"] - mine.get("right", 0.0) <= noise + 1e-9]
+    pts = noise * 100
+    if held:
+        best, faster = max(held, key=lambda pair: pair[1])
+        lines.append(f"serve {best.get('label', '')}: fastest whose F1 held within "
+                     f"{pts:g} points of its baseline, {_times(faster)}")
+    elif any(faster is not None for _, _, faster, _, _ in rows):
+        lines.append(f"serve no head: none held its baseline's F1 within {pts:g} points")
+    else:
+        lines.append("no baseline to recommend against: measure draft:none too "
+                     "(pass \"\" as a head)")
+    return "\n".join(lines)
+
+
 def choices(kept: Sequence[Mapping[str, Any]], *,
             noise: float = NOISE) -> tuple[list[Choice], int]:
     """Per model, where its accuracy comes from and where its cost comes from.
@@ -1391,14 +1514,17 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
              "| kv+run | sampling | find | made | cost from |",
              "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for choice in chosen:
-        a, c = _flat(choice.accuracy), _flat(choice.cost)
+        a, c = _flat(choice.accuracy, over), _flat(choice.cost, over)
         gb, kv, load = c.get("resident_bytes"), c.get("kv_and_run_bytes"), c.get("load_s")
         temp = (a.get("sampling") or {}).get("temperature")
         build = _build(c.get("binary"))
         source = ("its own run" if choice.own
                   else f"`{c.get('label')}`") + (f" on {build}" if build else "")
         if not choice.own:
-            source += f" ({c.get('questions')} q)"
+            # and what the head was worth, when its baseline was measured: `1.42x`
+            faster = c.get("speedup")
+            source += (f" ({c.get('questions')} q"
+                       + (f", {_times(faster)}" if faster is not None else "") + ")")
         lines.append(
             f"| `{choice.model}` "
             f"| {(a.get('f1') or 0) * 100:.0f}% "
@@ -1468,12 +1594,13 @@ def _over_invented(kept: Sequence[Mapping[str, Any]], *,
     return out, skipped
 
 
-def _flat(one: Mapping[str, Any]) -> dict[str, Any]:
+def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """One run as the totals and the server, and no question or entry: what `export` writes
-    and `ranking` reads."""
+    and `ranking` reads. ``among`` is where `speedup` looks for the run's baseline."""
     rows = [r for r in (one.get("rows") or []) if r.get("expected")]
     got = derived(one)
     server = one.get("server") or {}
+    faster = speedup(one, among)
     return {
         "at": one.get("at", ""), "label": one.get("label", ""),
         "questions": len(rows),
@@ -1487,6 +1614,8 @@ def _flat(one: Mapping[str, Any]) -> dict[str, Any]:
         "written_tokens": int(_total(rows, "completion_tokens")),
         "draft_offered": int(_total(rows, "draft_tokens")),
         "draft_kept": int(_total(rows, "draft_taken")),
+        # None for an undrafted run, or one whose baseline is not among the runs
+        "speedup": round(faster, 3) if faster is not None else None,
         "timed_out": sum(1 for r in rows if r.get("timed_out")),
         "context": server.get("context"), "slots": server.get("slots"),
         "cache_type": str(server.get("cache_type") or ""),
@@ -1512,7 +1641,7 @@ def _exportable(kept: Sequence[Mapping[str, Any]], *,
                 anyway: bool = False) -> tuple[list[dict[str, Any]], int]:
     """`_over_invented`, flattened by `_flat`: what `export` writes."""
     out, skipped = _over_invented(kept, anyway=anyway)
-    return [_flat(one) for one in out], skipped
+    return [_flat(one, out) for one in out], skipped
 
 
 def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
@@ -1906,6 +2035,9 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
     the run is labelled ``draft:<head>@n8`` so the table shows acceptance and wall clock
     per (head, n-max). ``None`` is the build's own default and adds nothing to the label.
     The baseline with no head is measured once: there is nothing to guess ahead with.
+
+    When the runs are ``kept``, it ends by printing `drafted`: one row per (head, n-max)
+    with its speedup over the baseline as a number, and which configuration to serve.
     """
     # The base model is loaded again for every head, because `-md` is bound when the server
     # starts and llama.cpp has no runtime swap: N configurations is N servers. It costs much
@@ -1913,6 +2045,7 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
     # but it is not free, so `served` times it and prints it rather than waving it away.
     out: list[Row] = []
     lengths = list(n_max) or [None]
+    before = {r.get("key") for r in _kept(kept)} if kept else set()
     for head in heads:
         name = "none" if not head else str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
         for length in (lengths if head else [None]):
@@ -1924,6 +2057,12 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
                           embed_model=embed_model, serve_timeout=serve_timeout,
                           spec_draft_max=length, cache_type=cache_type,
                           per_question=per_question, **making)
+    if kept and out:
+        # the speedup as a number, against the baseline this call measured -- or, given
+        # only heads, the newest undrafted run of this model and size already kept
+        everything = _kept(kept)
+        mine = [r for r in everything if r.get("key") not in before]
+        print("\n" + drafted(mine, among=everything))
     return out
 
 
@@ -2578,7 +2717,9 @@ def _main(argv: list[str] | None = None) -> int:
             rates(runs(args.kept), cost=args.cost, noise=args.noise / 100)
             return 0
         if args.detail is not None:
-            missed(runs(args.kept, args.detail), everything=args.all)
+            everything = runs(args.kept)
+            missed([r for r in everything if not args.detail or r.get("label") == args.detail],
+                   everything=args.all, among=everything)
             return 0
         table(runs(args.kept))
         hollow = empties(args.kept)
