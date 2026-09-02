@@ -306,6 +306,15 @@ graph, and an empty graph looks exactly like "remove everything". `replace` refu
 that would take most of a store, and leaves a verified snapshot when it would take a tenth.
 `snapshot` and `roll_back` are there directly, and a restore saves what is there first.
 
+**A store checks itself.** Every `put_doc` reads its document back by key and raises
+`StoreMismatch` when what comes back is not what went in; a node is read back by id the same
+way, an edge from its own `RETURN`, and `replace` counts what it wrote before committing.
+Measured 2026-09-01: twelve bench runs read back empty through a scan of `Doc.value` while a
+lookup by key returned them whole, so `ml-stack-store check PATH` reads every document, node
+and edge by key *and* by scan and prints one line per disagreement (exit 1 on any);
+`--fix` rewrites a document the scan lost and checks again rather than announcing a repair,
+and `ml-stack-store docs PATH` lists the documents with their sizes.
+
 **Two processes cannot corrupt one.** The database's own lock stops the second writer with an
 IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
 and letting go of a read handle when a writer wants in.
@@ -557,17 +566,26 @@ offering it as one. `hub.draft_note(repo)` reads the head's own `MTP/README.md` 
 itself — `ml-stack-models files` prints it under the draft line it already reports, so a
 publisher's warning is read before a load, not guessed at after one fails.
 
-**Some heads need a fork, and `--draft auto` will not hand mainline one it cannot load.**
+**Some heads need a fork, and one chooser — told which binary will serve — decides.**
 Measured for real: every `mtp-` head under `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on
 mainline llama.cpp master with `check_tensor_dims: tensor 'output_hc_norm.weight' not
-found` — mainline has no MTP graph for `qwen4exp` at all — and the repository's own
-`MTP/README.md` says so: "these do not work on mainline ggml-org/llama.cpp yet". So
-`hub.draft_for(repo, borrows=...)` takes whether the binary about to serve it can actually
-load a head that needs a fork; `up`'s own `--draft auto` passes `borrows=True` only when
-`--build NAME` names one, and otherwise prints the repository's own warning in place of a
-head that would fail at the far end of a multi-gigabyte load. `ml-stack-models files`
-always passes `borrows=True` — it never serves anything, so it tells you a head exists and
-what it needs, which is the point of asking before spending a load.
+found` — mainline loads a draft as a whole model, and those heads carry only the head,
+borrowing the trunk's embeddings from the target — and the repository's own `MTP/README.md`
+says so: "these do not work on mainline ggml-org/llama.cpp yet". There used to be three
+resolvers for `--draft auto`, and the one the bench used chose that head for mainline twice,
+paying an 87G load each time to reach the error. Now there is one:
+`hub.choose_head(model, binary=...)` returns what to serve, the `--spec-type` it needs, and
+one sentence saying why — "shipped beside the weights", "withheld: the repository's README
+says it needs a fork and this build is mainline", "no head shipped beside the weights" —
+with the build read off the binary itself (`serve.binary.borrows`: a build under
+`named/` or whose `BUILD.json` names a fork can borrow; `current`, brew and anything on PATH
+cannot). A fork build is given unsloth's recommended `shared-Q8_0` head; mainline avoids a
+`shared` head altogether. The model may be an `hf:` reference, a path (the repository is
+read off the Hub cache's directory name), or a bare filename; offline, the head already
+beside the weights on disk is the answer. `ml-stack-serve up --draft auto` prints the
+reason and the README's sentence under it, and `ml-stack-models files` prints the head,
+the warning, and what `this build` and each `--build NAME` on this machine would serve —
+which build a head needs, before a load rather than after one fails.
 
 **A named build keeps a fork beside `current` instead of replacing it.**
 `ml-stack-serve build --repo OWNER/REPO [--ref TAG|BRANCH|SHA] --name NAME` builds a fork

@@ -285,3 +285,87 @@ def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_pa
     assert code == 1, said
     assert "Wren Halloway" in said
     assert "presidio is not installed" in said
+
+
+def test_the_shape_rules_are_data_and_every_section_the_code_reads_exists():
+    """`contracts/name-shapes.json` is well-formed, carries every section `hook.SECTIONS`
+    names, both patterns, and a `why` for each section saying what it is for -- so the next
+    exception is a data change with a known section, not a code change."""
+    from ml_stack.contracts import contracts_dir
+    data = json.loads((contracts_dir() / hook.CONTRACT).read_text(encoding="utf-8"))
+    for section in hook.SECTIONS:
+        assert section in data, f"{hook.CONTRACT} lacks {section}"
+        assert data["why"].get(section), f"{hook.CONTRACT} has no why for {section}"
+    assert set(data["patterns"]) >= {"uuid", "nameish"}
+    rules = hook.shapes()
+    assert rules.stood_down("North Carolina") == "place_first: north"
+    assert rules.stood_down("Colorado River") == "place_last: river"
+    assert rules.stood_down("Software Engineer") == "role_last: engineer"
+    assert rules.stood_down("Bea Marlow") is None
+    assert rules.reserved("pellard.example") == "reserved_domains: example"
+    assert rules.reserved("sub.example.com") is None, "a whole-domain entry matches the whole domain only"
+
+
+def test_a_rules_file_missing_a_section_is_refused_not_guessed_at(tmp_path):
+    from ml_stack.contracts import ContractError
+    partial = tmp_path / "partial.json"
+    partial.write_text(json.dumps({"place_first": []}))
+    with pytest.raises(ContractError, match="place_last"):
+        hook.shapes(str(partial))
+
+
+def test_a_word_added_to_the_data_changes_the_verdict_without_a_code_change(tmp_path):
+    """A name-shaped pair no rule stands down -- a hero's title, assembled here so this file
+    does not trip the hook itself. Copy the contract, add `knight` to `role_last`, point
+    `NAMES_SHAPES` at the copy: the same file commits. The shipped rules are untouched, so
+    the same file is still refused without the variable."""
+    from ml_stack.contracts import contracts_dir
+    data = json.loads((contracts_dir() / hook.CONTRACT).read_text(encoding="utf-8"))
+    data["role_last"].append("knight")
+    copy = tmp_path / "shapes.json"
+    copy.write_text(json.dumps(data))
+    hero = "Hollow " + "Knight"
+    where = repo(tmp_path, graph={"nodes": []})
+    stage(where, {"t.py": f'HERO = "{hero}"\n'})
+
+    said = io.StringIO()
+    assert hook.main(env=wiring(tmp_path), root=where, stdout=said) == 1
+    assert hero in said.getvalue() and "nothing stood it down" in said.getvalue()
+
+    said = io.StringIO()
+    env = {**wiring(tmp_path), "NAMES_SHAPES": str(copy)}
+    assert hook.main(env=env, root=where, stdout=said) == 0, said.getvalue()
+
+
+def test_why_names_the_rule_that_cleared_each_pair(tmp_path):
+    """`--why` (or `NAMES_WHY=1`) prints, for every name-shaped pair and contact-shaped run
+    a rule stood down, which section and which word did it -- the line to edit next time."""
+    where = repo(tmp_path, graph={"nodes": []}, fixtures="Jane O\n")
+    body = ('SHORTHAND = {"nc": "North Carolina", "sf": "Colorado River"}\n'
+            'TITLE = "Payroll Specialist"\n'
+            'WHO = "Jane O"\n'
+            'MAIL = "one@example.com"\n'
+            'NS = "6f1b2a3c-4d5e-4f60-8172-839405a6b7c8"\n')
+    stage(where, {"t.py": body})
+    quiet = io.StringIO()
+    assert hook.main(env=wiring(tmp_path), root=where, stdout=quiet) == 0
+    assert "cleared by" not in quiet.getvalue()
+
+    said = io.StringIO()
+    assert hook.main(["--why"], env=wiring(tmp_path), root=where, stdout=said) == 0
+    told = said.getvalue()
+    assert "t.py:1  'North Carolina' cleared by place_first: north" in told
+    assert "t.py:1  'Colorado River' cleared by place_last: river" in told
+    assert "t.py:2  'Payroll Specialist' cleared by role_last: specialist" in told
+    assert "t.py:3  'Jane O' cleared by fixtures" in told
+    assert "'one@example.com' cleared by reserved_domains: example.com" in told
+    assert "cleared by patterns: uuid" in told
+
+    said = io.StringIO()
+    hook.main(env={**wiring(tmp_path), "NAMES_WHY": "1"}, root=where, stdout=said)
+    assert "cleared by place_first: north" in said.getvalue()
+
+    stage(where, {"events.py": '"""no-real-names: shapes off"""\nX = ["Hack Week"]\n'})
+    said = io.StringIO()
+    hook.main(["--why"], env=wiring(tmp_path), root=where, stdout=said)
+    assert "events.py  shape rule off: shapes_off: marker" in said.getvalue()

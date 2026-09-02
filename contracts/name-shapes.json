@@ -1,0 +1,70 @@
+{
+  "$comment": [
+    "The shape rules the no-real-names hook checks a staged file against: what a name looks",
+    "like, and what stands a name-shaped pair down (a place, a job title, a reserved domain,",
+    "the inside of a uuid). Each rule was learned by an exception, and each exception used to",
+    "be a code change. Now it is a line here, and the hook says which section cleared a pair",
+    "(`NAMES_WHY=1`, or `--why`), so the next one is a data change with a known section.",
+    "This file is DATA. No code lives here, so a non-Python host can read it directly.",
+    "Every name in this file is a word, never a person."
+  ],
+
+  "version": 1,
+
+  "why": {
+    "place_first": "A gazetteer and a geocoder's tests quote pairs like a direction and a state, or a saint's-name city: name-shaped, and places. A first word here stands the pair down. Learned 2026-09-01 from a gazetteer.",
+    "place_last": "The same gazetteer, the other way round: a river, a county, a bay area, a kingdom. A last word here (trailing punctuation stripped) stands the pair down. Learned 2026-09-01 from a gazetteer.",
+    "role_last": "A role catalogue is a page of two- and three-word job titles, every one name-shaped. A last word here stands the pair down. Learned 2026-09-01 from a role catalogue.",
+    "shapes_off": "A catalogue of event names (an all-hands, a hack week, a party) is name-shaped and no list will ever know every shape, so a file carrying the marker in its first lines turns the shape rule off for itself -- and only the shape rule: a name from the graph is still refused there. Data files with these suffixes are off by the same token: a gazetteer's towns are quoted proper nouns and none are people. Learned 2026-09-01 via the file marker.",
+    "reserved_domains": "RFC 2606 / 6761 reserve these so that nobody can be reached at them, which is exactly why tests use them. An entry without a dot is a top-level label and matches any domain ending in it; an entry with a dot matches the whole domain only. Learned 2026-09-01 from RFC 2606.",
+    "not_a_contact": "A mailbox nobody reads is not a person's contact. An address containing one of these is not reported.",
+    "patterns": "uuid: the middle of one holds digits and dashes at a phone number's length, so a phone-shaped run inside a uuid stands down (learned 2026-09-01 from a Teams id). nameish: a Name-shaped run of one to four words inside a quoted string; a surname may be one letter, because a person with one passed straight through when two were demanded.",
+    "skip_suffixes": "Files the hook never reads: images, weights, lockfiles and minified bundles, where a match is noise and the read is slow."
+  },
+
+  "place_first": [
+    "north", "south", "east", "west", "new", "old", "upper", "lower", "san", "santa",
+    "los", "las", "saint", "st.", "fort", "port", "mount", "lake", "cape", "united",
+    "the", "greater", "central"
+  ],
+
+  "place_last": [
+    "county", "river", "city", "island", "islands", "bay", "area", "kingdom", "states",
+    "emirates", "beach", "lake", "valley", "park", "street", "road", "avenue",
+    "mountain", "mountains", "hills", "falls", "springs", "harbor", "harbour",
+    "coast", "province", "republic", "region", "district", "township", "heights"
+  ],
+
+  "role_last": [
+    "engineer", "manager", "designer", "analyst", "specialist", "writer", "marketer",
+    "executive", "representative", "partner", "director", "lead", "officer",
+    "scientist", "researcher", "developer", "administrator", "coordinator", "recruiter",
+    "accountant", "counsel", "architect", "consultant", "technician", "assistant",
+    "associate", "intern", "head", "chief", "professor", "fellow", "student", "lecturer",
+    "maintainer", "contributor", "volunteer", "moderator", "founder", "president",
+    "responder", "worker", "agent", "buyer", "clerk", "auditor", "nurse", "guide",
+    "treasurer", "secretary", "controller", "strategist", "planner", "operator",
+    "generalist", "advocate", "evangelist", "trainer", "educator", "librarian",
+    "support", "success", "operations", "sales", "marketing", "finance", "legal",
+    "security", "reliability", "quality", "product", "platform", "data", "people"
+  ],
+
+  "shapes_off": {
+    "marker": "no-real-names: shapes off",
+    "suffixes": [".json", ".csv", ".geojson"]
+  },
+
+  "reserved_domains": [
+    "example", "test", "invalid", "localhost",
+    "example.com", "example.net", "example.org"
+  ],
+
+  "not_a_contact": ["noreply"],
+
+  "patterns": {
+    "uuid": "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+    "nameish": "[\"'`]([A-Z][a-z]{1,20}(?:\\s+[A-Z][\\w'’.-]{0,20}){1,3})[\"'`]"
+  },
+
+  "skip_suffixes": [".png", ".jpg", ".gguf", ".lock", ".min.js", ".map"]
+}
