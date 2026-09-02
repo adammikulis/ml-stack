@@ -36,6 +36,28 @@ try {
         [Environment]::SetEnvironmentVariable("Path", "$path;$dest", "User")
         Write-Host "Added $dest to your PATH (open a new terminal to pick it up)."
     }
+    # Windows Defender Firewall blocks the daemon (TCP 8770) and its beacons (UDP 8771)
+    # inbound by default, so without these two rules the machine is invisible to the rest
+    # of the fleet. Names and ports match ml_stack.fleet.discovery. One approval prompt.
+    $rules = @(
+        @{ Name = "ml-stack traind";    Protocol = "TCP"; Port = 8770 },
+        @{ Name = "ml-stack discovery"; Protocol = "UDP"; Port = 8771 }
+    )
+    $missing = @($rules | Where-Object {
+        -not (Get-NetFirewallRule -DisplayName $_.Name -ErrorAction SilentlyContinue) })
+    if ($missing.Count -gt 0) {
+        $lines = ($missing | ForEach-Object {
+            "netsh advfirewall firewall add rule name=`"$($_.Name)`" dir=in action=allow " +
+            "protocol=$($_.Protocol) localport=$($_.Port)" }) -join " ; "
+        Write-Host "Letting the fleet reach this machine (Windows asks for approval once)..."
+        try {
+            Start-Process powershell -Verb RunAs -Wait -ArgumentList "-NoProfile", "-Command", $lines
+        }
+        catch {
+            Write-Host "Not approved. Other machines will not see this one until, as administrator:"
+            Write-Host "  $lines"
+        }
+    }
     Write-Host ""
     Write-Host "Installed to $dest"
     Write-Host "Open ml-stack.exe, and type the same passphrase you used on your other machines."

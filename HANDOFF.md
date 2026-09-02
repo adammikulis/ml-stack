@@ -34,6 +34,17 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
 
 ## Measuring across the fleet (asked 2026-09-02)
 
+- [ ] **Place users across the fleet by what fits** (asked 2026-09-02). Adam: "it lets us
+  load balance, where if we have more users we can sacrifice quality and use a smaller model
+  with more simultaneous kv caches ... some users will get the bigger model and some smaller".
+  Input: `ml-stack-serve fit` (measured per-token and per-sequence cache bytes per model, in
+  `src/ml_stack/data/fit.json`) and each peer's room from discovery. Build `ml-stack-fleet
+  plan --users N --context C [--prefer MODEL]`: for every peer, the largest ranked model
+  (docs/model-ranking.md) whose weights plus N_i users' caches fit, N_i summed to N, best
+  models to the most users; print the plan and, with `--apply`, serve it (`ml-stack-serve up`
+  through each daemon). Then a router in front of the fleet that sends a new session to the
+  peer with a free slot on the best model. Tests on fakes: three peers of different room, one
+  demand, the plan; a demand no fleet fits says so and by how much.
 - [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
   join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
   cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of
