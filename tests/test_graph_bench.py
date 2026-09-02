@@ -3665,5 +3665,8 @@ def test_sweep_serve_flags_reach_the_spec_by_field_name(tmp_path, monkeypatch):
                         "--label-suffix=-pmin", "--kept", str(kept), "--questions", str(asked),
                         "--serve-port", "1"]) == 0
     assert any(r["label"].endswith("-pmin-plain") or "-pmin" in r["label"] for r in runs(kept))
-    assert kw.get("mlock") is True and kw.get("flash_attn") is False and kw.get("mmproj") == "auto"
+    assert kw.get("mlock") is True and kw.get("flash_attn") is False
+    # 'auto' is resolved to a file beside the weights, or dropped when there is none --
+    # the word itself never reaches the server
+    assert kw.get("mmproj") != "auto"
     assert serving_fields(type("A", (), {})()) == {}

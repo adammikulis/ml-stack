@@ -216,6 +216,18 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     # what a run wants to vary about the server that no flag of its own names
     for field_name, value in (serving or {}).items():
         extra[field_name] = value
+    if str(extra.get("mmproj") or "").lower() == "auto":
+        # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
+        # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
+        # file to load -- it picked the MTP head and died (2026-09-02)
+        from ml_stack.serve.cli import alongside
+
+        found = alongside(str(model), "auto", "mmproj-", best=True)
+        if found:
+            extra["mmproj"] = found
+        else:
+            extra.pop("mmproj", None)
+            print("no vision projector is shipped beside that model; serving without one")
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
