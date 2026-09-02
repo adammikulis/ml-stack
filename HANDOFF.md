@@ -24,6 +24,15 @@ Landed in ml-stack (`thread.recall`, `summarise`, `WINDOW = 10`, `converse(summa
 recalled=)`); the app has to pass them and add them to the answer cache's context.
 
 
+## The self-check's blind spot
+
+- [ ] **The self-check fakes the whole preflight, so a preflight bug reaches the GPU.** Twice on
+  2026-09-02 a head named by `hf:` file was refused inside the preflight (`command()` in
+  the flags check) after `selfcheck: ok`. Run the *real* `Preflight` under the self-check
+  with only the file-touching facts faked (shards present, a fake `flags_of`, a fake
+  `_arches`), so the argv builder and every check's code path execute against the exact
+  spec the run will build.
+
 ## Measuring across the fleet (asked 2026-09-02)
 
 - [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
