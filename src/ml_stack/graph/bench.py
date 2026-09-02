@@ -1981,6 +1981,11 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                 wants_card = bool(asked.pop("_card", False))
                 # the cap is the client's timeout too, so a call past it is cut off there
                 # and the connection closed, rather than waited on
+                # what is about the asking, not the client -- popped before the client is
+                # built: `tight` reached Client.__init__ and took an 87G load down with it
+                # (measured 2026-09-02); `rich` would have too, on the first real run
+                richly = bool(asked.pop("rich", False))
+                tightly = bool(asked.pop("tight", False))
                 client = Client(server.base_url, **{"timeout": per_question, **making, **asked})
                 if wants_card:
                     # what the model itself recommends, read from the GGUF it is serving
@@ -1988,8 +1993,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                     **{"timeout": per_question, **making, **client.card})
                 ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
                              embed_model=embed_model, terse=how,
-                             rich=bool(asked.pop("rich", False)),
-                             tight=bool(asked.pop("tight", False)))
+                             rich=richly,
+                             tight=tightly)
                 got = measure(ask, questions, label=here, client=client, log=print, graph=graph,
                               per_question=per_question)
                 for row in got:

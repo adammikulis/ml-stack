@@ -2548,3 +2548,43 @@ def test_tight_reaches_converse_as_a_keyword(monkeypatch):
     reached.clear()
     asking(TINY)("who?", _Scripted())
     assert "tight" not in reached, "not asked for, not sent -- the default is converse's own"
+
+
+def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
+    """`--also rich` and `--also tight` are questions about the asking; the client does not
+    take them. `tight` reached Client.__init__ and took an 87G load down with it on
+    2026-09-02, after a fake client with **kwargs had let it pass. Mutation: pop after
+    Client is built."""
+    import ml_stack.client
+    import ml_stack.serve
+    from ml_stack.graph import bench
+
+    built = []
+
+    class Strict:
+        sampling = {}
+        card = {}
+
+        def __init__(self, base_url, *, timeout=None, slot=None, n_predict=None,
+                     temperature=None, top_p=None, top_k=None, min_p=None):
+            built.append(base_url)
+
+    class Server:
+        base_url = "http://127.0.0.1:1"
+
+    class FakeServe:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return Server()
+        def __exit__(self, *a): return False
+
+    monkeypatch.setattr(ml_stack.serve, "serve", FakeServe)
+    monkeypatch.setattr(ml_stack.client, "Client", Strict)
+    monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
+    monkeypatch.setattr(bench, "asking", lambda *a, **k: (lambda *x, **y: None))
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    _preflight_ok(monkeypatch)
+    ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True}]
+    bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
+                 ways=ways, kept="")
+    assert len(built) == 3, "one strict client per way, none refused"
