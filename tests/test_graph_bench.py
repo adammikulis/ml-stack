@@ -3546,3 +3546,16 @@ def test_show_prints_the_peak_column(tmp_path, capsys):
     assert bench._main(["show", "--kept", str(tmp_path / "runs.ladybug")]) == 0
     out = capsys.readouterr().out
     assert " peak " in out.splitlines()[0] and "12k" in out
+
+
+def test_sweep_n_max_reaches_the_served_head(tmp_path, monkeypatch):
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]}) + "\n")
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--serve-draft", "mtp-tiny.gguf",
+                        "--n-max", "4", "--plain-only", "--smoke", "--kept", str(kept),
+                        "--questions", str(asked)]) == 0
+    assert [kw.get("spec_draft_max") for kw in seen["kwargs"]] == [4]

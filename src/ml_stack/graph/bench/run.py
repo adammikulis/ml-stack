@@ -345,6 +345,9 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--n-max", type=int, default=None, metavar="N",
+                       help="how far the served head guesses ahead (--spec-draft-n-max), the "
+                            "length `drafts` found best -- 4 for Flash-Next")
     sweep.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
                        help="tokens each --serve'd model may spend thinking before it must "
                             "answer (llama-server --reasoning-budget; -1 is unlimited). A "
@@ -718,6 +721,7 @@ def _run(args: Any) -> int:
                        already=already, cache_type=getattr(args, "serve_kv", "") or "",
                        per_question=args.per_question,
                        reasoning_budget=getattr(args, "reasoning_budget", None),
+                       spec_draft_max=getattr(args, "n_max", None),
                        smoke=sample(everything, SMOKE) if smoking else (),
                        **sampling_from(args))
             except ServerFailed as why:
