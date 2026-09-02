@@ -1163,3 +1163,172 @@ def test_converse_rich_reaches_the_tool():
     converse_stream("who does compilers?", GRAPH, streamed, on_event=events.append, rich=True)
     handed = [m for m in streamed.seen[-1] if m.get("role") == "tool"]
     assert "joined" in json.loads(handed[0]["content"])[0]
+
+
+# -- tight: light only what answers the question ----------------------------------------------
+
+MANY = {
+    "nodes": [
+        {"id": f"person:p{i}", "kind": "person", "label": name, "mentions": 1, "attrs": {}}
+        for i, name in enumerate(("Wren Tallis", "Hollis Marne", "Ida Pellow", "Bram Oakes",
+                                  "Nell Farrow", "Tobin Ashe", "Marek Voss", "Cass Lindley"),
+                                 start=1)
+    ],
+    "edges": [],
+    "messages": {},
+}
+EIGHT = [n["id"] for n in MANY["nodes"]]
+
+
+class SayingModel(ScriptedModel):
+    """A scripted model whose answer is chosen, and that keeps what tools it was offered."""
+
+    def __init__(self, script, answer):
+        super().__init__(script)
+        self.answer = answer
+        self.offered: list[list[dict]] = []
+
+    def chat(self, messages, tools=None, **kw):
+        self.offered.append(list(tools or []))
+        reply = super().chat(messages, tools=tools, **kw)
+        if not reply.tool_calls:
+            reply.content = self.answer
+        return reply
+
+
+def test_with_tight_off_nothing_observable_changes():
+    """The ranking runs and the answer cache both fingerprint these words, so the flag off
+    is the same schemas (not copies), the same nudge and the same system prompt."""
+    from ml_stack.graph.ask import SYSTEM, TERSE, TIGHT_SENTENCE, TOOLS, tools_for
+
+    for got, base in zip(tools_for(GRAPH, tight=False), TOOLS, strict=True):
+        assert got[0] is base
+    for got, base in zip(tools_for(GRAPH, terse=True, tight=False), TERSE, strict=True):
+        assert got[0] is base
+    assert TIGHT_SENTENCE not in TOOLS[-1]["function"]["description"]
+    assert TIGHT_SENTENCE not in TERSE[-1]["function"]["description"]
+
+    model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
+    out = converse("who?", GRAPH, model)
+    assert out.read == ["person:ada"] and not out.show
+    assert model.seen[0][0]["content"] == SYSTEM
+    assert model.seen[-1][-1]["content"] == (
+        "Now call show once with the ids of the entries your answer is about — everyone and "
+        "everything you named in it, including any you named from a quote. Nothing you "
+        "opened and did not write about.")
+    assert model.offered[-1][0]["function"]["description"] \
+        == TOOLS[-1]["function"]["description"]
+
+
+def test_tight_changes_what_show_says_on_a_copy_of_every_set():
+    from ml_stack.graph.ask import (RICH_SENTENCE, TERSE, TIGHT_SENTENCE, TIGHT_SHOW,
+                                    TIGHT_SHOW_TERSE, TOOLS, tools_for)
+
+    for terse, base, want in ((False, TOOLS, TIGHT_SHOW), (True, TERSE, TIGHT_SHOW_TERSE)):
+        got = tools_for(GRAPH, terse=terse, tight=True)
+        show = got[-1][0]
+        assert show is not base[-1]
+        assert show["function"]["name"] == "show"
+        assert show["function"]["description"] == want
+        assert TIGHT_SENTENCE in want
+        assert show["function"]["parameters"] == base[-1]["function"]["parameters"]
+        # the other four are the same words
+        for g, b in zip(got[:-1], base[:-1], strict=True):
+            assert g[0] == b
+    # rich and tight compose: look_up says what its hits carry, show says what to light
+    both = tools_for(GRAPH, rich=True, tight=True)
+    assert both[0][0]["function"]["description"].endswith(RICH_SENTENCE)
+    assert both[-1][0]["function"]["description"] == TIGHT_SHOW
+    # the full description still shows a call, like every other, and names the tool
+    assert "{" in TIGHT_SHOW and "example" in TIGHT_SHOW.casefold() and "show" in TIGHT_SHOW
+
+
+def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
+    from ml_stack.graph.ask import (SYSTEM, TIGHT_NUDGE, TIGHT_SHOW, TIGHT_SHOW_TERSE,
+                                    TIGHT_SYSTEM_SENTENCE, tools_for)
+    from ml_stack.graph.ask import SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH
+
+    model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
+    converse("who?", GRAPH, model, tight=True)
+    assert model.seen[0][0]["content"] == SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
+    assert TIGHT_NUDGE == ("Now call show once with only the entries that answer the "
+                           "question — the ones the asker would act on. Not what you read "
+                           "on the way, not every name you mentioned. Usually one to three.")
+    assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
+    assert model.offered[-1] == [next(s for s, _ in tools_for(GRAPH, tight=True)
+                                      if s["function"]["name"] == "show")]
+    assert model.offered[-1][0]["function"]["description"] == TIGHT_SHOW
+    # a caller's own tools are told too: the terse set handed in gets the terse tight show
+    handed = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
+    converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True), tight=True)
+    first = handed.offered[0]
+    assert next(s for s in first if s["function"]["name"] == "show")["function"]["description"] \
+        == TIGHT_SHOW_TERSE
+    assert TIGHT_SYSTEM_SENTENCE not in SYSTEM
+
+
+def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
+    from ml_stack.graph.ask import LIT_TIGHT
+
+    assert LIT_TIGHT == 6
+    said = "Marek Voss leads it, with Ida Pellow beside him; ask Marek Voss first."
+    model = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
+    out = converse("who leads?", MANY, model, tight=True)
+    assert out.show == ["person:p7", "person:p3", "person:p1", "person:p2", "person:p4",
+                        "person:p5"]
+    assert "cut 2 of 8 lit" in out.steps
+    assert "lit 8 entries" in out.steps, "what the model asked for is still on record"
+    # the same script, flag off: all eight, capped only by LIT
+    plain = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
+    out = converse("who leads?", MANY, plain)
+    assert out.show == EIGHT
+    assert not [s for s in out.steps if s.startswith("cut ")]
+
+
+def test_tight_drops_a_named_entry_that_was_never_read_and_says_so():
+    """The `made` case: the prose names someone look_at never read. The model found Bea
+    by one word in one quote, read Ada only, wrote about both and lit both."""
+    said = "Ada Lovelace works on compilers, and so does Bea Marlow."
+    script = [call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
+              call("show", ids=["person:ada", "person:bea"])]
+    out = converse("who does compilers?", GRAPH, SayingModel(list(script), said), tight=True)
+    assert "person:bea" in out.found and "person:bea" not in out.read
+    assert out.show == ["person:ada"]
+    assert "dropped 1 unread from show" in out.steps
+    # flag off, both stay lit
+    out = converse("who does compilers?", GRAPH, SayingModel(list(script), said))
+    assert out.show == ["person:ada", "person:bea"]
+    assert not [s for s in out.steps if s.startswith("dropped ")]
+    # an entry lit but not named in the prose is not the made case, and is left alone
+    quiet = SayingModel([call("look_at", ids=["person:ada"]),
+                         call("show", ids=["person:ada", "person:bea"])],
+                        "Ada Lovelace works on compilers.")
+    out = converse("who?", GRAPH, quiet, tight=True)
+    assert out.show == ["person:ada", "person:bea"]
+    # what was handed over at the start was read to the model, so it counts as read
+    given = SayingModel([call("look_at", ids=["person:ada"]),
+                         call("show", ids=["person:ada", "person:bea"])], said)
+    out = converse("who?", GRAPH, given, opening=["person:bea"], tight=True)
+    assert out.show == ["person:ada", "person:bea"]
+    assert not [s for s in out.steps if s.startswith("dropped ")]
+
+
+def test_the_streamed_path_takes_tight_too():
+    events = []
+    said = "Ada Lovelace works on compilers, and so does Bea Marlow."
+    model = SayingModel([call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
+                         call("show", ids=["person:ada", "person:bea"])], said)
+    out = converse_stream("who?", GRAPH, model, on_event=events.append, tight=True)
+    assert out.show == ["person:ada"]
+    assert "dropped 1 unread from show" in out.steps
+    assert events[-1] == {"event": "done"}
+
+
+def test_the_tight_system_prompt_no_longer_says_every_name_belongs_in_show():
+    """The base prompt says every name written belongs in show; tight's copy says only the
+    entries that answer belong, and the base is unchanged. Mutation: drop the replace."""
+    from ml_stack.graph.ask import SHOW_PARAGRAPH, SYSTEM, TIGHT_SHOW_PARAGRAPH
+
+    assert SHOW_PARAGRAPH in SYSTEM
+    tight = SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH)
+    assert "Every one you named belongs" not in tight and "usually one to three" in tight

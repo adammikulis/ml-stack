@@ -279,6 +279,20 @@ so, on a copy. With the flag off nothing observable changes, byte for byte, beca
 answer cache fingerprints those descriptions and a sweep of the current behaviour has to stay
 comparable with the one that measures this.
 
+**Lighting only what answers the question is behind a flag too, for the same reason.** A
+model that finds nearly everything can then light nearly everything: measured over the
+invented community, 34 questions at 32k, Qwen3.8-Flash-Next reached 92% recall at 44%
+precision, and named 70 entries its tools never found, read or showed, where a good answer
+lights about two. `converse(..., tight=True)` (and `tools_for(graph, tight=True)`) changes
+the words about `show`, on a copy — light only the entries that answer the question, the
+ones the asker would act on, never what was looked at on the way, usually one to three —
+says the same in the closing nudge, adds one sentence to the system prompt (name only what
+`look_at` read; say when something was not found rather than guess a name), caps `show` at
+`LIT_TIGHT` (six, the ids the prose names kept first, `cut N of M lit` in `steps`), and drops
+from `show` an entry the prose names that was never read (`dropped N unread from show`). Off,
+nothing observable changes, byte for byte. `ml-stack-bench --also tight` measures it against
+plain on the same load.
+
 **The page's routes come with the page.** `graph.html` streams its answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
 `ml_stack.graph.serve.AskRoutes` is that server side for any `http.server` handler. A

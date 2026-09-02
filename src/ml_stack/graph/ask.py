@@ -316,6 +316,68 @@ RICH = _rich(TOOLS)
 RICH_TERSE = _rich(TERSE)
 
 
+# The tight asking: what `show` says, and what the model is told, when a model that finds
+# nearly everything then lights far more than the answer. Measured over the invented
+# community, 34 questions at 32k: Qwen3.8-Flash-Next reached 92% recall and 44% precision,
+# lighting and naming entries it had looked at on the way, and named 70 entries its tools
+# never found, read or showed. A good answer lights about two. E4B, at 60% recall, was at
+# 47% precision -- so the words about `show` are what this variant changes, and nothing
+# about the searching.
+#
+# Behind `tight=True`, on copies, for the same reason as RICH: the base descriptions, the
+# nudge and SYSTEM are what the answer cache fingerprints and what the ranking measured,
+# so with the flag off they stay byte for byte as they were.
+TIGHT_SENTENCE = ("Light only the entries that answer the question — the people or things "
+                  "the asker would act on — never the ones you looked at on the way, and "
+                  "never every name in a quote. Most questions have one to three.")
+TIGHT_SHOW = ("Say which entries your answer is about, so they light up on the graph. Every "
+              "answer ends with this call. " + TIGHT_SENTENCE + " A question that asks *who* "
+              "is answered by people: show the people, not the subject they have in common. "
+              "Example: having written \"Wren Halloway fires the kiln and Hollis Fen runs "
+              "the studio\", call show with {\"ids\": [\"person:wren\", \"person:hollis\"]}.")
+TIGHT_SHOW_TERSE = ("The entries your answer is about, to light up on the graph. Call it "
+                    "once, last. " + TIGHT_SENTENCE)
+# What the model is asked when it answered without saying what to light. The first is the
+# text the ranking runs were measured with, and stays as it is; the second is the tight one.
+SHOW_NUDGE = ("Now call show once with the ids of the entries your answer is about — everyone "
+              "and everything you named in it, including any you named from a quote. Nothing "
+              "you opened and did not write about.")
+TIGHT_NUDGE = ("Now call show once with only the entries that answer the question — the ones "
+               "the asker would act on. Not what you read on the way, not every name you "
+               "mentioned. Usually one to three.")
+# Added to SYSTEM in the tight variant only: the `made` case is a name in the prose that no
+# tool ever returned, and the remedy is to say so rather than guess.
+# The base system prompt tells the model every name it wrote belongs in show; tight says the
+# opposite, so its copy of the prompt swaps that paragraph rather than arguing with it.
+SHOW_PARAGRAPH = ("Every one you named belongs in it — including any you named from a "
+                  "quote rather than by reading it. What you opened on the way and did not "
+                  "write about does not.")
+TIGHT_SHOW_PARAGRAPH = ("Only the entries that answer the question belong in it — the ones the "
+                        "asker would act on, usually one to three. Not what you read on the "
+                        "way, not every name you mentioned, not a name from a quote.")
+
+TIGHT_SYSTEM_SENTENCE = ("Name in your answer only entries you read with look_at; say plainly "
+                         "when you did not find something, rather than guessing a name.")
+# How many entries a tight answer may light. Six is three times what a good answer wants
+# and a third of LIT; past it, the ids the prose names are kept and the rest are cut.
+LIT_TIGHT = 6
+
+
+def _tight(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Those schemas, copied, with show told to light only what answers the question.
+
+    The terse set gets the terse wording, told by show's description being TERSE's; any
+    other show -- TOOLS', RICH's, a caller's -- gets the full one, example and all.
+    """
+    brief = _schema("show", TERSE)["function"]["description"]
+    out = copy.deepcopy(list(schemas))
+    for schema in out:
+        if schema["function"]["name"] == "show":
+            was = schema["function"]["description"]
+            schema["function"]["description"] = TIGHT_SHOW_TERSE if was == brief else TIGHT_SHOW
+    return out
+
+
 # What a *question* looks like when it wants each tool -- for an embedder to match against,
 # and never sent to the chat model.
 #
@@ -619,7 +681,8 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 
 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
-              terse: bool = False, rich: bool = False) -> list[tuple[dict[str, Any], Any]]:
+              terse: bool = False, rich: bool = False,
+              tight: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
@@ -630,6 +693,10 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     person, who is joined to it (``joined``), and the look_up description says so. Off,
     nothing observable changes -- the same descriptions byte for byte, the same result
     shape -- so a sweep of the current behaviour stays comparable with one before it.
+
+    ``tight`` is the same kind of flag about ``show``: its description, on a copy, says to
+    light only what answers the question -- see `TIGHT_SHOW`. The rest of what tight does
+    (the nudge, the system sentence, the cap on what is lit) is `converse`'s.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -668,6 +735,8 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
         schemas = RICH_TERSE if terse else RICH
     else:
         schemas = TERSE if terse else TOOLS
+    if tight:
+        schemas = _tight(schemas)
     # in the order the schemas are written, which is the order a model reads them in
     return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
 
@@ -677,7 +746,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              rounds: int = ROUNDS, limit: int = LIT,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
-             opening: Sequence[str] = (), rich: bool = False) -> Answer:
+             opening: Sequence[str] = (), rich: bool = False,
+             tight: bool = False) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -687,10 +757,17 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``held`` names entries already highlighted for the reader: they are told to the model
     by label and id, and enter ``ids`` only if a tool call touches them. ``rich`` is
     ``tools_for``'s: look_up hits that say why they matched and who is joined to them.
+
+    ``tight`` is for a model that finds nearly everything and then lights far more than
+    the answer. `show`'s description and the closing nudge say to light only what answers
+    the question, the system prompt says to name only what was read, ``show`` is capped at
+    `LIT_TIGHT` -- the ids the prose names kept first -- and an id the prose names but
+    look_at never read is dropped from it. Each of those is a line in ``steps``. Off,
+    nothing observable changes, byte for byte, for the same reason as ``rich``.
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
-                     opening=opening, rich=rich)
+                     opening=opening, rich=rich, tight=tight)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -699,7 +776,8 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     rounds: int = ROUNDS, limit: int = LIT,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
-                    opening: Sequence[str] = (), rich: bool = False) -> Answer:
+                    opening: Sequence[str] = (), rich: bool = False,
+                    tight: bool = False) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -711,7 +789,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
-                     opening=opening, rich=rich)
+                     opening=opening, rich=rich, tight=tight)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -740,6 +818,35 @@ def _plain(value: Any) -> str:
     return repr(value)[:80]
 
 
+_NOT_A_WORD = re.compile(r"[^\w]+")
+
+
+def _words(text: Any) -> str:
+    return " " + " ".join(_NOT_A_WORD.sub(" ", str(text or "").casefold()).split()) + " "
+
+
+def _named_counts(graph: Mapping[str, Any], text: str, ids: Sequence[str]) -> dict[str, int]:
+    """How many times the prose names each of those entries, by label, as whole words.
+
+    Case does not matter; a label shorter than three characters is never matched, as on
+    the page, because "Al" is in "already". An entry the prose never names is absent.
+    """
+    said = _words(text)
+    if not said.strip():
+        return {}
+    label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
+    out: dict[str, int] = {}
+    for one in ids:
+        name = label.get(one, "")
+        key = _words(name).strip()
+        if len(name) < 3 or not key:
+            continue
+        hits = len(re.findall(r"(?<= )" + re.escape(key) + r"(?= )", said))
+        if hits:
+            out[one] = hits
+    return out
+
+
 def _result_count(result: Any) -> int:
     if isinstance(result, (list, tuple)):
         return len(result)
@@ -756,9 +863,10 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              rich: bool = False) -> Answer:
+              rich: bool = False, tight: bool = False) -> Answer:
+    given = tools is not None
     if tools is None:
-        tools = tools_for(graph, finder=finder, rich=rich)
+        tools = tools_for(graph, finder=finder, rich=rich, tight=tight)
     elif finder is not None:
         def _found(args: Mapping[str, Any]) -> Any:
             wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
@@ -775,10 +883,16 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
                  else (schema, _found)
                  for schema, fn in tools]
+    if tight and given:
+        # a caller's own tools carry a show of their own; tight is about what it says
+        told = _tight([schema for schema, _ in tools])
+        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
     schemas = [schema for schema, _ in tools]
     run = {str((schema.get("function") or {}).get("name") or ""): fn for schema, fn in tools}
 
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
+    if tight:
+        system = system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
     lit = [str(h) for h in held if str(h) in known]
     if lit:
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
@@ -1093,11 +1207,9 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     # just wrote in front of it and nothing else to call.
     if out.content and not out.show and (out.read or out.found or out.path):
         messages.append({"role": "assistant", "content": out.content})
-        messages.append({"role": "user", "content":
-                         "Now call show once with the ids of the entries your answer is "
-                         "about — everyone and everything you named in it, including any you "
-                         "named from a quote. Nothing you opened and did not write about."})
-        last = client.chat(messages, think=False, tools=[_schema("show")])
+        messages.append({"role": "user", "content": TIGHT_NUDGE if tight else SHOW_NUDGE})
+        offer = _schema("show", _tight(TOOLS)) if tight else _schema("show")
+        last = client.chat(messages, think=False, tools=[offer])
         for call in (getattr(last, "tool_calls", None) or []):
             fn = call.get("function") or {}
             if (fn.get("name") or "") != "show":
@@ -1110,6 +1222,21 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             note(out.show, ids)
         if out.show:
             out.steps.append(f"lit {len(out.show)} entr" + ("y" if len(out.show) == 1 else "ies"))
+    if tight and out.show:
+        # The `made` case: a name in the prose that look_at never read is a guess, and
+        # lighting it endorses the guess. What was handed over at the start was read to the
+        # model too, so it counts as read. Then the cap: what the prose names is kept, most
+        # named first, and what it merely lit goes.
+        named = _named_counts(graph, out.content, out.show)
+        seen = set(out.read) | set(start)
+        guessed = [i for i in out.show if named.get(i) and i not in seen]
+        if guessed:
+            out.show = [i for i in out.show if i not in guessed]
+            out.steps.append(f"dropped {len(guessed)} unread from show")
+        if len(out.show) > LIT_TIGHT:
+            whole = len(out.show)
+            out.show = sorted(out.show, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
+            out.steps.append(f"cut {whole - LIT_TIGHT} of {whole} lit")
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
             out.ids.append(one)

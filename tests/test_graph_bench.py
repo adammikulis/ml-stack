@@ -2508,3 +2508,43 @@ def test_the_ranking_and_the_export_carry_the_speedup(tmp_path):
            json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())}
     assert got["draft:mtp-flash@n4"]["speedup"] == 1.5
     assert got["draft:none"]["speedup"] is None and got["flash-plain"]["speedup"] is None
+
+
+# -- --also tight -------------------------------------------------------------------------
+
+def test_tight_is_asked_for_the_way_rich_is():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _parser, _ways
+
+    ways = _ways(Namespace(also=["tight"], terse=False, temperature=0.0))
+    assert ways[1]["label"] == "tight" and ways[1]["tight"] is True
+    assert ways[1]["temperature"] == 0.0, "the run's sampling, as rich carries it"
+    assert "tight" not in ways[0], "the first way is what was asked for, unchanged"
+    assert _parser().parse_args(["run", "x", "--also", "tight"]).also == ["tight"]
+
+
+def test_tight_reaches_converse_as_a_keyword(monkeypatch):
+    """`converse(..., tight=True)` is ask's; this only has to hand it on, and hand the
+    terse set in already told, since that set is built here rather than chosen inside."""
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.ask import TIGHT_SHOW_TERSE
+    from ml_stack.graph.bench import asking
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    asking(TINY, tight=True)("who?", _Scripted())
+    assert reached.get("tight") is True and "tools" not in reached
+    reached.clear()
+    asking(TINY, terse=True, tight=True)("who?", _Scripted())
+    assert reached.get("tight") is True
+    show = next(s for s, _ in reached["tools"] if s["function"]["name"] == "show")
+    assert show["function"]["description"] == TIGHT_SHOW_TERSE
+    reached.clear()
+    asking(TINY)("who?", _Scripted())
+    assert "tight" not in reached, "not asked for, not sent -- the default is converse's own"

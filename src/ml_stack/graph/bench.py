@@ -292,6 +292,11 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # the people joined to it -- a question about the asking, so one load
             out.append({"label": "rich", "terse": first["terse"], "rich": True,
                         **sampling_from(args)})
+        elif also == "tight":
+            # show is told to light only what answers the question, and what is lit is
+            # capped -- for the model that finds everything and then lights it all
+            out.append({"label": "tight", "terse": first["terse"], "tight": True,
+                        **sampling_from(args)})
     return out
 
 
@@ -1983,7 +1988,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                     **{"timeout": per_question, **making, **client.card})
                 ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
                              embed_model=embed_model, terse=how,
-                             rich=bool(asked.pop("rich", False)))
+                             rich=bool(asked.pop("rich", False)),
+                             tight=bool(asked.pop("tight", False)))
                 got = measure(ask, questions, label=here, client=client, log=print, graph=graph,
                               per_question=per_question)
                 for row in got:
@@ -2089,7 +2095,8 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
            embed_url: str = "", embed_model: str = "", terse: bool = False,
-           margin: float = MARGIN, rich: bool = False) -> Callable[..., Any]:
+           margin: float = MARGIN, rich: bool = False,
+           tight: bool = False) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -2101,7 +2108,9 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     had no store on this path and every ranking it wrote measured a look_up nobody ran.
 
     ``rich`` asks with `converse(..., rich=True)`: look_up results carry a score and why
-    they matched, and a topic hit brings the people joined to it.
+    they matched, and a topic hit brings the people joined to it. ``tight`` asks with
+    `converse(..., tight=True)`: show is told to light only what answers the question,
+    and what is lit is capped.
 
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
     which one it measured, and takes ``turns=`` -- the earlier turns of a conversation, as
@@ -2136,9 +2145,12 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
                       turns: Sequence[Mapping[str, str]]) -> Any:
         # `finder` goes to both, because `converse` swaps look_up's callable in whichever
         # tools it is handed, and the terse set is handed in rather than chosen inside
-        extra: dict[str, Any] = {"tools": tools_for(graph, terse=True, finder=finder)} if terse else {}
+        extra: dict[str, Any] = (
+            {"tools": tools_for(graph, terse=True, finder=finder, tight=tight)} if terse else {})
         if rich:
             extra["rich"] = True
+        if tight:
+            extra["tight"] = True
         return converse(question, graph, client, opening=opening, finder=finder,
                         turns=list(turns), **extra)
 
@@ -2371,12 +2383,14 @@ def _parser() -> argparse.ArgumentParser:
                               "it suits this task -- it is not what a client sends otherwise")
     for one in (run, sweep):
         one.add_argument("--also", action="append", default=[],
-                         choices=("terse", "card", "greedy", "rich"),
+                         choices=("terse", "card", "greedy", "rich", "tight"),
                          help="ask the same served model another way as well. Whether the "
-                              "tools are described briefly, what sampling is used, and "
-                              "whether look_up says why it matched (rich) are questions "
-                              "about the asking, not the serving, so measuring four of them "
-                              "costs one model load rather than four. Repeatable")
+                              "tools are described briefly, what sampling is used, "
+                              "whether look_up says why it matched (rich), and whether "
+                              "show is told to light only what answers the question and "
+                              "capped at six (tight) are questions about the asking, not "
+                              "the serving, so measuring five of them costs one model load "
+                              "rather than five. Repeatable")
 
     for one in (run, sweep, heads, conc):
         one.add_argument("--per-question", type=float, default=PER_QUESTION,
