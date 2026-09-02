@@ -46,6 +46,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 
 One user, longest context: **3,463,598 tokens**.
 
+### gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:55:08Z.
+
+- weights 3.9G, draft 56.9M, compute 277.3M
+- room 110.0G, of which 105.7G is left for caches
+- **17.0K per token of context**, **21.2M fixed per sequence**
+- 24 layers with a cache; a 1,024-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 1213 | 89.2M |
+| 8,192 | 688 | 157.2M |
+| 16,384 | 369 | 293.2M |
+| 32,768 | 191 | 565.2M |
+| 65,536 | 97 | 1.1G |
+| 131,072 | 49 | 2.1G |
+
+One user, longest context: **6,521,322 tokens**.
+
 ### gpt-oss-120b-mxfp4-00001-of-00003.gguf
 
 f16 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:27:36Z.
@@ -66,6 +86,26 @@ f16 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:
 
 One user, longest context: **739,285 tokens**.
 
+### gpt-oss-120b-mxfp4-00001-of-00003.gguf
+
+q8_0 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:54:59Z.
+
+- weights 59.0G, compute 165.9M
+- room 110.0G, of which 50.8G is left for caches
+- **38.2K per token of context**, **14.3M fixed per sequence**
+- 36 layers with a cache; a 768-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 310 | 167.3M |
+| 8,192 | 162 | 320.3M |
+| 16,384 | 83 | 626.3M |
+| 32,768 | 42 | 1.2G |
+| 65,536 | 21 | 2.4G |
+| 131,072 | 10 | 4.8G |
+
+One user, longest context: **1,392,343 tokens**.
+
 ### Qwen3.8-27B-UD-Q4_K_XL.gguf
 
 f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:26:25Z.
@@ -85,6 +125,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 | 131,072 | 5 | 16.6G |
 
 One user, longest context: **746,718 tokens**.
+
+### Qwen3.8-27B-UD-Q4_K_XL.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:54:22Z.
+
+- weights 16.7G, draft 1.3G, compute 313.5M
+- room 110.0G, of which 91.7G is left for caches
+- **68.0K per token of context**, **598.5M fixed per sequence**
+- 16 layers with a cache; 64 recurrent (a fixed state per sequence, not per token)
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 107 | 870.5M |
+| 8,192 | 82 | 1.1G |
+| 16,384 | 55 | 1.6G |
+| 32,768 | 33 | 2.7G |
+| 65,536 | 18 | 4.8G |
+| 131,072 | 10 | 9.1G |
+
+One user, longest context: **1,405,421 tokens**.
 
 ### Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
 
@@ -125,6 +185,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 | 131,072 | 3 | 6.6G |
 
 One user, longest context: **419,897 tokens**.
+
+### Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 92cedc867, 2026-09-02T18:54:08Z.
+
+- weights 87.2G, draft 2.6G, compute 359.1M
+- room 110.0G, of which 19.8G is left for caches
+- **25.5K per token of context**, **526.8M fixed per sequence**
+- 24 layers with a cache; 48 recurrent (a fixed state per sequence, not per token); a 16,384-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 32 | 628.8M |
+| 8,192 | 27 | 730.8M |
+| 16,384 | 21 | 934.8M |
+| 32,768 | 15 | 1.3G |
+| 65,536 | 9 | 2.1G |
+| 131,072 | 5 | 3.7G |
+
+One user, longest context: **793,256 tokens**.
 
 ### Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
 
@@ -188,6 +268,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 
 One user, longest context: **645,550 tokens**.
 
+### gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:55:08Z.
+
+- weights 3.9G, draft 56.9M, compute 277.3M
+- room 24.0G, of which 19.7G is left for caches
+- **17.0K per token of context**, **21.2M fixed per sequence**
+- 24 layers with a cache; a 1,024-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 226 | 89.2M |
+| 8,192 | 128 | 157.2M |
+| 16,384 | 68 | 293.2M |
+| 32,768 | 35 | 565.2M |
+| 65,536 | 18 | 1.1G |
+| 131,072 | 9 | 2.1G |
+
+One user, longest context: **1,216,761 tokens**.
+
 ### gpt-oss-120b-mxfp4-00001-of-00003.gguf
 
 f16 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:27:36Z.
@@ -205,6 +305,26 @@ f16 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:
 | 32,768 | 0 | 2.3G |
 | 65,536 | 0 | 4.5G |
 | 131,072 | 0 | 9.0G |
+
+One user, longest context: **0 tokens**.
+
+### gpt-oss-120b-mxfp4-00001-of-00003.gguf
+
+q8_0 cache, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:54:59Z.
+
+- weights 59.0G, compute 165.9M
+- room 24.0G, of which 0B is left for caches
+- **38.2K per token of context**, **14.3M fixed per sequence**
+- 36 layers with a cache; a 768-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 0 | 167.3M |
+| 8,192 | 0 | 320.3M |
+| 16,384 | 0 | 626.3M |
+| 32,768 | 0 | 1.2G |
+| 65,536 | 0 | 2.4G |
+| 131,072 | 0 | 4.8G |
 
 One user, longest context: **0 tokens**.
 
@@ -227,6 +347,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 | 131,072 | 0 | 16.6G |
 
 One user, longest context: **42,206 tokens**.
+
+### Qwen3.8-27B-UD-Q4_K_XL.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 3466812, 2026-09-02T18:54:22Z.
+
+- weights 16.7G, draft 1.3G, compute 313.5M
+- room 24.0G, of which 5.7G is left for caches
+- **68.0K per token of context**, **598.5M fixed per sequence**
+- 16 layers with a cache; 64 recurrent (a fixed state per sequence, not per token)
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 6 | 870.5M |
+| 8,192 | 5 | 1.1G |
+| 16,384 | 3 | 1.6G |
+| 32,768 | 2 | 2.7G |
+| 65,536 | 1 | 4.8G |
+| 131,072 | 0 | 9.1G |
+
+One user, longest context: **79,281 tokens**.
 
 ### Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
 
@@ -265,6 +405,26 @@ f16 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, 
 | 32,768 | 0 | 2.1G |
 | 65,536 | 0 | 3.6G |
 | 131,072 | 0 | 6.6G |
+
+One user, longest context: **0 tokens**.
+
+### Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf
+
+q8_0 cache, guessing ahead by draft-mtp, measured at 32,768 tokens over 2 slots, build 92cedc867, 2026-09-02T18:54:08Z.
+
+- weights 87.2G, draft 2.6G, compute 359.1M
+- room 24.0G, of which 0B is left for caches
+- **25.5K per token of context**, **526.8M fixed per sequence**
+- 24 layers with a cache; 48 recurrent (a fixed state per sequence, not per token); a 16,384-cell sliding window per sequence
+
+| per user context | users that fit | each costs |
+| --- | --- | --- |
+| 4,096 | 0 | 628.8M |
+| 8,192 | 0 | 730.8M |
+| 16,384 | 0 | 934.8M |
+| 32,768 | 0 | 1.3G |
+| 65,536 | 0 | 2.1G |
+| 131,072 | 0 | 3.7G |
 
 One user, longest context: **0 tokens**.
 
