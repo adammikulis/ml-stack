@@ -451,6 +451,10 @@ def _parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
+    show.add_argument("--last", type=int, default=0, metavar="N",
+                      help="only the newest N runs kept")
+    show.add_argument("--since", default="", metavar="ISO",
+                      help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
     show.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
                       help="the store the runs are in (default: %(default)s)")
     show.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), default=None)
@@ -816,6 +820,8 @@ def _run(args: Any) -> int:
         everything = bench.runs(args.kept) if Path(args.kept).expanduser().exists() else []
         extracted = bench_extract.only(everything)
         answering = [r for r in everything if r.get("kind") != bench_extract.KIND]
+        answering = newest(answering, last=int(getattr(args, "last", 0) or 0),
+                           since=str(getattr(args, "since", "") or ""))
         if getattr(args, "extract", False):
             bench_extract.table(extracted)
             return 0
@@ -1092,8 +1098,80 @@ def _last_line(log: Path) -> str:
     return next((ln for ln in reversed(lines) if ln.strip()), "")
 
 
-def status() -> str:
-    """What is measuring, or that nothing is. Exit 0 either way: a question, not a check."""
+def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> list[dict[str, Any]]:
+    """``kept`` narrowed to what was kept at or after ``since`` and then to the newest
+    ``last`` -- the two ways `show` is asked for what just happened."""
+    rows = [r for r in kept if not since or str(r.get("at", "")) >= since]
+    if last:
+        rows = sorted(rows, key=lambda r: str(r.get("at", "")))[-last:]
+    return rows
+
+
+def serving_lines() -> list[str]:
+    """One line per port a server is answering on -- what `ml-stack-serve status` knows,
+    for `status` here, so what is measuring and what it is measuring against are read
+    together and nobody polls ports by hand."""
+    try:
+        from ml_stack.serve.cli import STATE_FILE, look, recorded_servers
+    except Exception:  # noqa: BLE001 - no serving side installed is no servers
+        return []
+    try:
+        records = recorded_servers(STATE_FILE)
+    except Exception:  # noqa: BLE001
+        records = {}
+    out = []
+    for port in sorted(records):
+        got = look(port, records)
+        if got is None:
+            continue
+        shape = (f"{got.context // 1024}k" if got.context else "?") + \
+                (f" x{got.slots}" if got.slots else "")
+        out.append(f"  :{port}  {got.model or '?'}  {shape}")
+    return out
+
+
+def results_since(started: str, kept: str | Path | None = None) -> str:
+    """The table of every run kept since ``started`` -- what a job produced, without
+    reading its log. Empty when nothing was kept."""
+    import contextlib
+    import io
+
+    where = Path(kept) if kept else bench.HOME / "runs.ladybug"
+    if not started or not where.exists():
+        return ""
+    try:
+        rows = newest(bench.runs(where), since=str(started)[:19])
+    except Exception:  # noqa: BLE001 - a store that will not open has nothing to show
+        return ""
+    if not rows:
+        return ""
+    from ml_stack.graph.bench.show import table
+
+    said = io.StringIO()
+    with contextlib.redirect_stdout(said):
+        table(rows)
+    return said.getvalue().rstrip()
+
+
+def status(*, results: bool = True) -> str:
+    """What is measuring, or that nothing is; what is serving; and the rows the current or
+    last job has kept so far. Exit 0 either way: a question, not a check."""
+    text = _status_line()
+    serving = serving_lines()
+    text += "\nserving:\n" + "\n".join(serving) if serving else "\nserving: nothing"
+    if results:
+        held = measuring()
+        try:
+            last = held or json.loads(measuring_file().read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            last = {}
+        rows = results_since(str(last.get("started") or ""))
+        if rows:
+            text += "\nkept by it so far:\n" + rows if held else "\nkept by it:\n" + rows
+    return text
+
+
+def _status_line() -> str:
     held = measuring()
     if held is None:
         try:

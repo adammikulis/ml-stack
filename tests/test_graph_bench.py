@@ -14,6 +14,16 @@ from ml_stack.graph.bench import Row, _hit, missed, runs, save, table
 from ml_stack.graph.bench.selfcheck import ScriptedModel
 
 
+
+@pytest.fixture(autouse=True)
+def _no_real_serving_state(monkeypatch):
+    """`status` now reads what is serving and what the last job kept; a test must never see
+    this machine's servers or its runs store, so both seams are empty unless a test says."""
+    from ml_stack.graph.bench import run as running
+
+    monkeypatch.setattr(running, "serving_lines", lambda: [])
+    monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
+
 def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
           chars: int = 200, error: str = "") -> Row:
     return Row(label="tried", question=question, expected=expected, shown=shown,
@@ -1494,7 +1504,7 @@ def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch,
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.main(["status"]) == 0
-    assert capsys.readouterr().out.strip() == "nothing is measuring"
+    assert capsys.readouterr().out.strip() == "nothing is measuring\nserving: nothing"
 
     _measuring(tmp_path, os.getpid())                     # alive: this very process
     assert bench.main(["status"]) == 0
@@ -3409,3 +3419,58 @@ def test_drafts_measures_every_arm_under_the_same_reasoning_budget(tmp_path, mon
     assert [kw.get("reasoning_budget") for kw in seen["kwargs"]] == [0, 0]
     assert sorted(r["label"] for r in runs(kept)) == ["draft:mtp-tiny@n2-rb0", "draft:none-rb0"]
     assert all(r["server"].get("reasoning_budget") == 0 for r in runs(kept))
+
+
+def test_newest_narrows_to_since_and_then_to_the_last_n():
+    from ml_stack.graph.bench.run import newest
+
+    kept = [{"at": "2026-09-02T10:00:00", "label": "a"}, {"at": "2026-09-02T12:00:00", "label": "b"},
+            {"at": "2026-09-02T14:00:00", "label": "c"}]
+    assert [r["label"] for r in newest(kept, since="2026-09-02T11")] == ["b", "c"]
+    assert [r["label"] for r in newest(kept, last=1)] == ["c"]
+    assert [r["label"] for r in newest(kept, since="2026-09-02T11", last=1)] == ["c"]
+    assert newest(kept) == kept
+
+
+def test_status_says_what_is_serving_and_what_the_job_kept(tmp_path, monkeypatch, capsys):
+    """One command answers 'is anything benching, what is serving, what did it produce'
+    -- Adam: 'you shouldn't have to write so much code to check bench status'."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench import run as running
+
+    store = tmp_path / "runs.ladybug"
+    row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
+    bench.save(store, [row])
+    # kept since a start before the save: the row is in the table; after it: nothing
+    monkeypatch.undo()
+    monkeypatch.setattr(running, "serving_lines", lambda: [])
+    assert "tried" in running.results_since("2026-01-01T00:00:00", kept=store)
+    assert running.results_since("2999-01-01T00:00:00", kept=store) == ""
+    assert running.results_since("", kept=store) == ""
+
+    monkeypatch.setattr(running, "measuring", lambda: None)
+    monkeypatch.setattr(running, "measuring_file", lambda: tmp_path / "none.json")
+    monkeypatch.setattr(running, "results_since",
+                        lambda started, kept=None: "run  ctx  n\nwho-welds-row" if started else "")
+    monkeypatch.setattr(running, "serving_lines",
+                        lambda: ["  :8080  tiny.gguf  32k x2", "  :8082  small.gguf  128k x4"])
+    said = running.status()
+    assert said.startswith("nothing is measuring")
+    assert ":8080  tiny.gguf  32k x2" in said and ":8082  small.gguf" in said
+    assert "kept by it:" not in said, "no last job on record, so nothing was kept by one"
+    (tmp_path / "none.json").write_text(json.dumps({"started": "2026-01-01T00:00:00", "log": "x"}))
+    assert "kept by it:\nrun  ctx  n\nwho-welds-row" in running.status()
+    monkeypatch.setattr(running, "serving_lines", lambda: [])
+    assert "serving: nothing" in running.status()
+
+
+def test_show_last_lists_only_the_newest_runs(tmp_path, capsys):
+    import ml_stack.graph.bench as bench
+
+    store = tmp_path / "runs.ladybug"
+    for label in ("first", "second", "third"):
+        bench.save(store, [Row(label=label, question="who welds?", expected=["person:iris"],
+                               shown=["person:iris"], calls=3, answer_chars=200)])
+    assert bench._main(["show", "--kept", str(store), "--last", "1"]) == 0
+    said = capsys.readouterr().out
+    assert "third" in said and "first" not in said and "second" not in said
