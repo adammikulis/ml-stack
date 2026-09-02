@@ -137,6 +137,20 @@ class RunNotKept(RuntimeError):
     """A run was written and did not come back the way `runs` reads it."""
 
 
+def _told(row: dict[str, Any]) -> dict[str, Any]:
+    """One row as it is kept: its transcript when it has one, and no key when it has not.
+
+    A traced row carries what was said call by call (`bench.measure.Counting.trace`), which
+    is the field a fine-tune is built from and the only one measured in kilobytes. An
+    untraced row carries an empty list, and an empty list in every row of every run is a
+    key that says nothing -- so it is dropped, and a run kept before tracing existed and a
+    run kept without it read back identically.
+    """
+    if not row.get("trace"):
+        row.pop("trace", None)
+    return row
+
+
 def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None) -> str:
     """Keep a run where it can be compared with another one, later, by anybody.
 
@@ -158,8 +172,13 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
         if hits is not None:
             server["prefix_hits"] = hits
     stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
+    kept_rows = [_told(asdict(r)) for r in rows]
     record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
-                     "server": server, "rows": [asdict(r) for r in rows],
+                     "server": server, "rows": kept_rows,
+                     # how many of the rows carry their transcript, so `show` and
+                     # `train-tools from-bench` can say "this run kept none" rather than
+                     # "this run found none"
+                     "traced": sum(1 for r in kept_rows if r.get("trace")),
                      "unread_named": sum(r.unread_named for r in rows)})
     record = json.loads(json.dumps(record))      # no default=: anything left raises here
     with GraphStore(store) as writer:

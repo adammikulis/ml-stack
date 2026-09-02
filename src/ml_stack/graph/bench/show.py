@@ -8,6 +8,7 @@ line because a comparison across any of them is two measurements read as one.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -288,6 +289,90 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
                          f"first token {r.get('first_token', 0):.1f}s, "
                          f"queued {r.get('queued', 0):.1f}s")
             print(f"        {note}")
+
+
+def _args_line(args: Mapping[str, Any], width: int = 60) -> str:
+    """A tool call's arguments on one line, cut to ``width``."""
+    text = json.dumps(args or {}, ensure_ascii=False, sort_keys=True, default=str)
+    return text if len(text) <= width else text[:width - 1] + "…"
+
+
+def transcript(kept: Sequence[Mapping[str, Any]], label: str = "",
+               question: str = "") -> None:
+    """A traced question read back as a conversation: one line per call, in order.
+
+    The table says a question took three calls; this says which three. Per call: the round,
+    the tool and the arguments it was called with, how much came back and how many entries
+    were in it, what the server spent reading and writing, and how much of the draft head's
+    guessing was accepted -- the numbers `Spent` totals per answer, before they are totalled.
+
+    It is where a wrong answer is diagnosed and where a training example is read before
+    thousands of them are written: `ml-stack-train-tools from-bench` turns exactly these
+    turns into a dataset, and a turn that reads wrong here trains wrong there.
+
+    ``label`` narrows to the runs whose label contains it, ``question`` to the questions
+    whose text contains it. Only rows that were traced -- see `wants_trace`.
+    """
+    from ml_stack.graph.bench.measure import TRACE_ENV
+
+    wanted = [one for one in kept if not label or label in str(one.get("label") or "")]
+    shown = 0
+    for one in wanted:
+        rows = [r for r in (one.get("rows") or []) if r.get("trace")
+                and (not question or question.casefold() in str(r.get("question") or "").casefold())]
+        for r in rows:
+            shown += 1
+            print(f"\n{one.get('label', '')}  {r.get('question', '')}"
+                  f"   ({_hit(r) * 100:.0f}%, {r.get('calls', 0)} calls, "
+                  f"{float(r.get('seconds') or 0):.1f}s"
+                  + (", TIMED OUT" if r.get("timed_out") else "")
+                  + (f", ERROR {r['error']}" if r.get("error") else "") + ")")
+            for entry in r.get("trace") or []:
+                for line in _trace_lines(entry):
+                    print(f"  {line}")
+    if not shown:
+        print(f"no traced question found"
+              + (f" for {label!r}" if label else "")
+              + (f" matching {question!r}" if question else "")
+              + f". A run of {bench.SHORT} questions or fewer traces by default; "
+                f"{TRACE_ENV}=1 traces one of any size.")
+
+
+def _trace_lines(entry: Mapping[str, Any]) -> list[str]:
+    """One trace entry as the lines `transcript` prints for it."""
+    role = str(entry.get("role") or "")
+    if role == "tools":
+        names = [str((t.get("function") or {}).get("name") or t.get("name") or "")
+                 for t in (entry.get("tools") or ())]
+        return [f"     tools  {', '.join(n for n in names if n)}"]
+    if role == "tool":
+        return [f"     <-  {entry.get('name', '?')}  {int(entry.get('chars') or 0)} chars, "
+                f"{int(entry.get('ids') or 0)} ids"
+                + ("  (cut)" if entry.get("cut") else "")]
+    if role != "assistant":
+        return [f"     {role:6} {_shown(str(entry.get('content') or '').replace(chr(10), ' '), 88)}"]
+    timings = entry.get("timings") or {}
+    read = (f"read {int(timings.get('prompt_n') or 0)}"
+            f"+{int(timings.get('cache_n') or 0)} cached in "
+            f"{float(timings.get('prompt_ms') or 0):.0f}ms")
+    wrote = (f"wrote {int(timings.get('predicted_n') or 0)} in "
+             f"{float(timings.get('predicted_ms') or 0):.0f}ms")
+    drafted = ""
+    if int(timings.get("draft_n") or 0):
+        taken, guessed = int(timings.get("draft_n_accepted") or 0), int(timings["draft_n"])
+        drafted = f", accepted {taken}/{guessed}"
+    head = f"{int(entry.get('call') or 0):3}"
+    lines = []
+    for call in entry.get("tool_calls") or []:
+        lines.append(f"{head}  -> {call.get('name', '?')}({_args_line(call.get('args') or {})})")
+        head = "   "
+    if not lines:
+        lines.append(f"{head}  -- answered {int(entry.get('chars') or 0)} chars")
+    thought = int(entry.get("thinking_chars") or 0)
+    lines.append(f"        {read}, {wrote}{drafted}"
+                 + (f", thought {thought} chars" if thought else "")
+                 + (f", {entry['finish']}" if entry.get("finish") else ""))
+    return lines
 
 
 def shape(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any]) -> None:

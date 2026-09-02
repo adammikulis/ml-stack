@@ -14,6 +14,12 @@ One command does three things, each skipped when its output is already in ``--ou
 The examples are the seed because they are what was measured to matter: a worked call in a
 description took gemma-4-E4B from 17% to 70% recall on the same weights. A schema that
 already teaches a model at inference time is the right thing to teach a smaller one from.
+
+And one subcommand, ``from-bench``, whose seed is not the descriptions but what a model
+actually did: every traced question a benchmark kept, above a score, turned into one
+training example per model turn — the conversation up to that turn as the input, the call
+the model made as the target (`from_bench`, `examples_from`). Synthetic data teaches the
+shape of a call; a bench trace teaches the calls that scored, on this graph, with these ids.
 """
 
 from __future__ import annotations
@@ -29,8 +35,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-__all__ = ["CHAT", "Example", "SYSTEM", "examples_in", "load_tools", "main", "schemas_of",
-           "split", "synthesise", "write_dataset"]
+__all__ = ["CHAT", "Example", "SYSTEM", "examples_from", "examples_in", "from_bench",
+           "load_tools", "main", "schemas_of", "split", "synthesise", "traced_rows",
+           "would_yield", "write_dataset"]
 
 CHAT = "chat"
 """The prompts key for messages that want no tool — the same key ``graph.ask.TOOL_PROMPTS``
@@ -485,6 +492,163 @@ def write_dataset(out: Path, rows: Sequence[Mapping[str, Any]], *, base: str,
     return summary
 
 
+# -- from what a model actually did -------------------------------------------------------
+
+def _scored(row: Mapping[str, Any]) -> float:
+    """F1 for one kept bench row, as the bench scores it."""
+    from ml_stack.graph.bench.score import _hit
+
+    return float(_hit(row))
+
+
+def traced_rows(kept: Sequence[Mapping[str, Any]], *, model: str = "",
+                min_f1: float = 0.8) -> list[dict[str, Any]]:
+    """Every scored question in these runs that kept its transcript and scored well enough.
+
+    ``model`` is a substring of the run's label or of the model file the server was
+    holding, because a run is named for how it was asked (``e4b-shortlist``) and the file
+    is what was actually loaded; either identifies it. A question with nothing expected is
+    left out -- it was never scored, so "above the threshold" means nothing about it.
+    """
+    out = []
+    for one in kept:
+        server = one.get("server") or {}
+        named = f"{one.get('label', '')} {server.get('model', '')}"
+        if model and model.lower() not in named.lower():
+            continue
+        for row in one.get("rows") or ():
+            if not row.get("trace") or not row.get("expected") or row.get("timed_out"):
+                continue
+            if _scored(row) + 1e-9 < min_f1:
+                continue
+            out.append({**row, "run": one.get("key", ""), "run_label": one.get("label", "")})
+    return out
+
+
+def would_yield(kept: Sequence[Mapping[str, Any]], *, model: str = "",
+                min_f1: float = 0.8) -> dict[str, int]:
+    """What these runs *would* have yielded had they been traced: questions, and turns.
+
+    One training example per model turn, and a question's turns are its calls -- so the
+    count a run of untraced rows would have given is the sum of their ``calls``. Written
+    down because the first answer this command gives on a store filled before tracing
+    existed is zero, and zero is worth nothing without the number beside it: today's
+    thousands of scored tool calls are recoverable only by spending the GPU again.
+    """
+    questions = turns = traced = 0
+    for one in kept:
+        server = one.get("server") or {}
+        named = f"{one.get('label', '')} {server.get('model', '')}"
+        if model and model.lower() not in named.lower():
+            continue
+        for row in one.get("rows") or ():
+            if not row.get("expected") or row.get("timed_out"):
+                continue
+            if _scored(row) + 1e-9 < min_f1:
+                continue
+            questions += 1
+            turns += int(row.get("calls") or 0)
+            traced += 1 if row.get("trace") else 0
+    return {"questions": questions, "turns": turns, "traced": traced}
+
+
+def _as_message(entry: Mapping[str, Any]) -> dict[str, Any] | None:
+    """One trace entry as the chat message a recipe renders, or None for what is not one."""
+    role = str(entry.get("role") or "")
+    if role in ("system", "user"):
+        return {"role": role, "content": str(entry.get("content") or "")}
+    if role == "tool":
+        return {"role": "tool", "name": str(entry.get("name") or ""),
+                "content": str(entry.get("content") or "")}
+    return None
+
+
+def _target(entry: Mapping[str, Any]) -> tuple[dict[str, Any], str] | None:
+    """The assistant turn a trace entry teaches, and the tool it calls; None for no lesson.
+
+    A turn that called nothing and wrote nothing teaches nothing, and a turn the ceiling
+    cut off (``finish`` of ``length``) teaches a truncated call -- the one thing a tool
+    caller must never learn. Both are dropped rather than trained on.
+    """
+    calls = list(entry.get("tool_calls") or ())
+    text = str(entry.get("content") or "")
+    if str(entry.get("finish") or "") == "length" or entry.get("cut"):
+        return None
+    if calls:
+        return ({"role": "assistant", "content": None, "tool_calls": [
+            {"id": f"call_{i}", "type": "function",
+             "function": {"name": str(c.get("name") or ""),
+                          "arguments": dict(c.get("args") or {})}}
+            for i, c in enumerate(calls)]}, str(calls[0].get("name") or ""))
+    if text.strip():
+        return {"role": "assistant", "content": text}, CHAT
+    return None
+
+
+def examples_from(row: Mapping[str, Any], *, system: str = "") -> list[dict[str, Any]]:
+    """One traced question as one training example per model turn.
+
+    The conversation up to a turn is the input -- the system prompt, the question, and
+    every tool result the model had already been given -- and the turn itself is the
+    target. A question of four calls is four examples, each one a decision made with
+    strictly more evidence than the last, which is the thing being taught: not *a* call
+    but the next one, given what came back.
+
+    The tools each example carries are the ones that were actually offered on that call:
+    `graph.ask` takes tools away as a question goes on, and an example that offers a tool
+    the model was not offered teaches it to reach for something that will not be there.
+    """
+    schemas: list[dict[str, Any]] = []
+    conversation: list[dict[str, Any]] = []
+    out: list[dict[str, Any]] = []
+    question = str(row.get("question") or "")
+    for entry in row.get("trace") or ():
+        if str(entry.get("role") or "") == "tools":
+            schemas = schemas_of(entry.get("tools") or [])
+            continue
+        message = _as_message(entry)
+        if message is not None:
+            conversation.append(message)
+            continue
+        if str(entry.get("role") or "") != "assistant":
+            continue
+        offered = [str(n) for n in (entry.get("offered") or ())]
+        taught = _target(entry)
+        if taught is not None:
+            assistant, tool = taught
+            usable = [s for s in schemas if not offered or _fn(s)["name"] in offered]
+            out.append({"messages": [*conversation, assistant], "tools": usable,
+                        "tool": tool, "from": question, "call": int(entry.get("call") or 0),
+                        "run": str(row.get("run") or ""),
+                        "model": str(entry.get("model") or ""),
+                        "split": "holdout" if _hash(question) % HOLDOUT_EVERY == 0 else "train"})
+        # whether or not it was taught, the model said it, and the next turn saw it
+        calls = list(entry.get("tool_calls") or ())
+        conversation.append({"role": "assistant", "content": str(entry.get("content") or "") or None,
+                             **({"tool_calls": [
+                                 {"id": f"call_{i}", "type": "function",
+                                  "function": {"name": str(c.get("name") or ""),
+                                               "arguments": dict(c.get("args") or {})}}
+                                 for i, c in enumerate(calls)]} if calls else {})})
+    if system:
+        for one in out:
+            if not one["messages"] or one["messages"][0].get("role") != "system":
+                one["messages"] = [{"role": "system", "content": system}, *one["messages"]]
+    return out
+
+
+def from_bench(kept: Sequence[Mapping[str, Any]], *, model: str = "", min_f1: float = 0.8,
+               system: str = "") -> list[dict[str, Any]]:
+    """Training rows from kept bench runs: every good traced question, turn by turn.
+
+    The rows are the shape `synthesise` writes and the ``tool-calls`` recipe reads, so the
+    two sources mix in one directory: synthetic conversations teach the shape of a call,
+    and these teach the calls that actually scored, on a real graph, with real ids.
+    """
+    return [example for row in traced_rows(kept, model=model, min_f1=min_f1)
+            for example in examples_from(row, system=system)]
+
+
 def _counts(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     out: dict[str, int] = {}
     for r in rows:
@@ -539,13 +703,117 @@ def _settings(pairs: Sequence[str]) -> dict[str, Any]:
     return out
 
 
+FROM_BENCH = ("Training data from what a model actually did: every traced question a bench "
+              "run kept that scored well enough, as one example per model turn -- the "
+              "conversation up to that turn as the input, the call the model made as the "
+              "target. Runs are traced by default at 20 questions or fewer "
+              "(ml-stack-bench); an untraced run yields nothing, and this says what it "
+              "would have yielded.")
+
+
+def _from_bench_arguments(ap: Any) -> Any:
+    """``from-bench``'s flags, onto either parser that has to carry them.
+
+    There are two: the one this subcommand is parsed by, and the one registered under the
+    top-level parser so that ``--help`` names it and the documentation check can find its
+    flags. Written once so the two cannot drift.
+    """
+    ap.add_argument("--kept", default="", metavar="STORE",
+                    help="the bench store the runs are in (default: ~/.ml-stack/bench/"
+                         "runs.ladybug, or MLSTACK_BENCH_HOME's)")
+    ap.add_argument("--model", default="", metavar="SUBSTRING",
+                    help="only runs whose label or served model file contains this, e.g. "
+                         "e4b. Mixing two models' turns into one dataset teaches the "
+                         "average of two callers")
+    ap.add_argument("--min-f1", type=float, default=0.8, metavar="F1",
+                    help="only questions that scored at least this, 0-1 (default: "
+                         "%(default)s). A wrong answer's tool calls are exactly what must "
+                         "not be learned")
+    ap.add_argument("--label", default="", metavar="SUBSTRING",
+                    help="only runs whose label contains this (narrower than --model)")
+    ap.add_argument("--system", default="", metavar="TEXT",
+                    help="a system prompt to put in front of any conversation that has "
+                         "none; by default the trace's own is used, which is the one the "
+                         "model was actually served")
+    ap.add_argument("--base", default="google/functiongemma-270m-it",
+                    help="what the manifest names as the model this data is rendered for")
+    ap.add_argument("--out", required=True, metavar="FILE.jsonl",
+                    help="one JSONL file of rows, or a directory -- which gets train.jsonl, "
+                         "holdout.jsonl and manifest.json, ready for ml-stack-train-run "
+                         "--recipe tool-calls --data")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="count what would be written and write nothing")
+    return ap
+
+
+def _from_bench_parser() -> Any:
+    import argparse
+
+    return _from_bench_arguments(argparse.ArgumentParser(
+        prog="ml-stack-train-tools from-bench", allow_abbrev=False, description=FROM_BENCH))
+
+
+def _from_bench(argv: list[str]) -> int:
+    """``ml-stack-train-tools from-bench``: kept bench traces into a training file."""
+    from ml_stack.graph import bench
+
+    a = _from_bench_parser().parse_args(argv)
+    store = Path(a.kept).expanduser() if a.kept else bench.HOME / "runs.ladybug"
+    if not store.exists():
+        raise FileNotFoundError(f"no bench store at {store}; run ml-stack-bench first")
+    kept = [r for r in bench.runs(store) if not a.label or a.label in str(r.get("label") or "")]
+    rows = from_bench(kept, model=a.model, min_f1=a.min_f1, system=a.system)
+    could = would_yield(kept, model=a.model, min_f1=a.min_f1)
+    print(f"from-bench: {len(kept)} run(s) in {store}, "
+          f"{could['questions']} question(s) at or above F1 {a.min_f1:g}"
+          + (f" for {a.model!r}" if a.model else "")
+          + f", {could['traced']} of them traced")
+    if not rows:
+        print(f"from-bench: 0 examples. Those questions made {could['turns']} model turns "
+              f"between them, which is what a traced run of the same questions would have "
+              f"yielded (one example per turn). Trace the next run: a run of "
+              f"{bench.SHORT} questions or fewer traces by default, and "
+              f"{bench.TRACE_ENV}=1 traces one of any size.")
+        return 0
+    train, holdout = split(rows)
+    counts = _counts(rows)
+    print(f"from-bench: {len(rows)} examples from {could['traced']} traced question(s) "
+          f"({len(train)} train, {len(holdout)} held out): "
+          + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    out = Path(a.out).expanduser()
+    if a.dry_run:
+        print(f"from-bench: would write {out}")
+        return 0
+    if out.suffix == ".jsonl":
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+                       encoding="utf-8")
+        print(f"from-bench: wrote {out}")
+    else:
+        summary = write_dataset(out, rows, base=a.base, source=str(store), model=a.model,
+                                min_f1=a.min_f1, traced_questions=could["traced"])
+        print(f"from-bench: wrote {out}/train.jsonl, holdout.jsonl, manifest.json "
+              f"({summary['train']} + {summary['holdout']})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
+
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "from-bench":
+        try:
+            return _from_bench(argv[1:])
+        except (ValueError, FileNotFoundError, KeyError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
 
     ap = argparse.ArgumentParser(
         prog="ml-stack-train-tools", allow_abbrev=False,
         description="Plug in a project's tools, make training data from them, fine-tune a "
-                    "base model, end with a GGUF. Each stage is skipped when --out has it.")
+                    "base model, end with a GGUF. Each stage is skipped when --out has it. "
+                    "`ml-stack-train-tools from-bench --help` builds the same data out of "
+                    "what a model actually did, from the traces a bench run kept.")
     ap.add_argument("--tools", required=True,
                     help="JSON list of tool schemas, or python:module:attr "
                          "(e.g. python:ml_stack.graph.ask:TOOLS)")
@@ -568,6 +836,14 @@ def main(argv: list[str] | None = None) -> int:
                     help="run one stage")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan with counts; load no model, write nothing")
+    # Registered so that --help names it and a reader finds its flags where they look for
+    # them. It is not parsed through here: the three stages' --tools and --out are required
+    # at this level, and from-bench takes neither. Both carry the same arguments from
+    # `_from_bench_arguments`, so the two cannot describe different commands.
+    _from_bench_arguments(ap.add_subparsers(dest="cmd", metavar="{from-bench}")
+                          .add_parser("from-bench", allow_abbrev=False,
+                                      description=FROM_BENCH,
+                                      help="training data out of a bench run's traces"))
     a = ap.parse_args(argv)
 
     try:

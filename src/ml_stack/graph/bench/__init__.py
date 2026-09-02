@@ -91,6 +91,9 @@ from ml_stack.graph.bench.estimate import (  # noqa: F401
 )
 from ml_stack.graph.bench.measure import (  # noqa: F401
     PER_QUESTION,
+    TRACE_CAP,
+    TRACE_ENV,
+    TRACE_TEXT_CAP,
     Counting,
     QuestionTimedOut,
     _Peak,
@@ -110,6 +113,7 @@ from ml_stack.graph.bench.measure import (  # noqa: F401
     read_questions,
     sample,
     slot_count,
+    wants_trace,
 )
 from ml_stack.graph.bench.show import (  # noqa: F401
     AXES,
@@ -130,6 +134,7 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     shape,
     table,
     timeouts,
+    transcript,
 )
 from ml_stack.graph.bench.report import (  # noqa: F401
     ASKINGS,
@@ -195,4 +200,5 @@ __all__ = ["Counting", "Estimate", "HOME", "NOISE", "PER_QUESTION", "QuestionTim
            "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
            "report",
            "prefix_kept", "prepared", "read_questions", "references_in", "runs", "save",
-           "slot_count", "speedup", "status", "stop", "table", "tail", "unread_named"]
+           "slot_count", "speedup", "status", "stop", "table", "tail", "transcript",
+           "unread_named", "wants_trace"]

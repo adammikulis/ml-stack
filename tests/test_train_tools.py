@@ -480,3 +480,157 @@ class TestCommandLine:
         assert code == 2
         assert "convert_hf_to_gguf.py" in capsys.readouterr().err
         assert not list(out.glob("*.gguf"))
+
+
+# -- training data out of what a model actually did ----------------------------------------
+
+def _traced_row(question="who works on compilers?", *, shown=("topic:compiler",),
+                expected=("topic:compiler",), calls=3):
+    """One kept bench row with a transcript on it, the shape `Counting` writes.
+
+    Invented throughout: an invented community's ids, an invented model file. Nothing here
+    reads a real store -- that is operation, not a test.
+    """
+    schemas = [{"type": "function", "function": {
+        "name": "look_up", "description": "find entries by words",
+        "parameters": {"type": "object", "properties": {
+            "texts": {"type": "array", "items": {"type": "string"}}}, "required": ["texts"]}}},
+        {"type": "function", "function": {
+            "name": "show", "description": "light entries on the page",
+            "parameters": {"type": "object", "properties": {
+                "ids": {"type": "array", "items": {"type": "string"}}}, "required": ["ids"]}}}]
+    timings = {"prompt_ms": 120.0, "predicted_ms": 300.0, "prompt_n": 900, "cache_n": 0,
+               "predicted_n": 20, "draft_n": 0, "draft_n_accepted": 0}
+
+    def said(call, tool_calls, content="", finish="tool_calls"):
+        return {"role": "assistant", "call": call, "model": "invented-e4b.gguf",
+                "content": content, "chars": len(content), "thinking_chars": 4,
+                "finish": finish, "seconds": 0.4, "tool_calls": tool_calls,
+                "offered": ["look_up", "show"], "tokens": {"prompt": 900, "completion": 20},
+                "timings": dict(timings)}
+
+    return {"question": question, "expected": list(expected), "shown": list(shown),
+            "calls": calls, "trace": [
+                {"role": "tools", "tools": schemas},
+                {"role": "system", "content": "You answer with the tools you are given."},
+                {"role": "user", "content": question},
+                said(1, [{"name": "look_up", "args": {"texts": ["compiler"]}}]),
+                {"role": "tool", "name": "look_up", "chars": 90, "ids": 2,
+                 "content": '[{"id": "topic:compiler"}, {"id": "person:ada"}]'},
+                said(2, [{"name": "show", "args": {"ids": ["topic:compiler"]}}]),
+                {"role": "tool", "name": "show", "chars": 24, "ids": 0,
+                 "content": '"selected 1 on the graph"'},
+                said(3, [], "Ada Quill works on the compiler.", "stop")]}
+
+
+def _kept_run(rows, *, label="e4b-shortlist", model="invented-e4b.gguf"):
+    return [{"key": f"bench:{label}:20260902T190000", "label": label, "at": "2026-09-02T19:00",
+             "server": {"model": model, "context": 32768}, "rows": list(rows)}]
+
+
+class TestFromBench:
+    """`ml-stack-train-tools from-bench`: a bench run's traces into training examples.
+
+    The synthesiser teaches the *shape* of a call from the descriptions; this teaches the
+    calls that actually scored, on a real graph, with real ids -- which is the only source
+    of an argument that a description never showed.
+    """
+
+    def test_one_example_per_model_turn_with_the_conversation_up_to_it(self):
+        from ml_stack.train.tools import from_bench
+
+        rows = from_bench(_kept_run([_traced_row()]), min_f1=0.8)
+        assert [r["tool"] for r in rows] == ["look_up", "show", CHAT]
+        assert [len(r["messages"]) for r in rows] == [3, 5, 7], \
+            "each turn sees strictly more than the one before it"
+
+        first, second, last = rows
+        assert first["messages"][0]["role"] == "system"
+        assert first["messages"][-1]["tool_calls"][0]["function"] == {
+            "name": "look_up", "arguments": {"texts": ["compiler"]}}
+        assert second["messages"][-2] == {"role": "tool", "name": "look_up",
+                                          "content": '[{"id": "topic:compiler"}, '
+                                                     '{"id": "person:ada"}]'}
+        assert second["messages"][-1]["tool_calls"][0]["function"]["arguments"] == {
+            "ids": ["topic:compiler"]}, "the id it showed, which no description could teach"
+        assert last["messages"][-1] == {"role": "assistant",
+                                        "content": "Ada Quill works on the compiler."}
+        assert [t["function"]["name"] for t in first["tools"]] == ["look_up", "show"], \
+            "offered what it was offered, and no tool it never had"
+        assert all(r["from"] == "who works on compilers?" for r in rows)
+        assert all(r["model"] == "invented-e4b.gguf" for r in rows)
+
+    def test_a_wrong_answer_is_not_a_lesson(self):
+        """The whole point of scoring the run first. A question that showed the wrong
+        entries made its tool calls in some particular wrong way, and that is exactly what
+        must not be learned."""
+        from ml_stack.train.tools import from_bench, traced_rows
+
+        kept = _kept_run([_traced_row(),
+                          _traced_row("who welds?", shown=["topic:compiler"],
+                                      expected=["topic:welding"])])
+        assert len(traced_rows(kept, min_f1=0.8)) == 1
+        assert len(traced_rows(kept, min_f1=0.0)) == 2
+        assert {r["from"] for r in from_bench(kept)} == {"who works on compilers?"}
+
+    def test_only_one_model_at_a_time(self):
+        """Two models' turns in one dataset teach the average of two callers. A run is
+        named for how it was asked and the server says which file was loaded; either
+        identifies it."""
+        from ml_stack.train.tools import from_bench
+
+        kept = (_kept_run([_traced_row()], label="e4b-shortlist")
+                + _kept_run([_traced_row()], label="flash-plain", model="flash-next.gguf"))
+        assert len(from_bench(kept, model="e4b")) == 3
+        assert len(from_bench(kept, model="flash-next")) == 3, "by the file, not the label"
+        assert len(from_bench(kept)) == 6
+
+    def test_a_turn_the_ceiling_cut_off_is_dropped(self):
+        """A truncated call is the one thing a tool caller must never learn: a
+        `finish_reason` of length means the arguments stop mid-word."""
+        from ml_stack.train.tools import from_bench
+
+        row = _traced_row()
+        row["trace"][-1]["finish"] = "length"
+        rows = from_bench(_kept_run([row]))
+        assert [r["tool"] for r in rows] == ["look_up", "show"]
+
+    def test_an_untraced_store_yields_nothing_and_says_what_it_would_have(self, capsys,
+                                                                          tmp_path):
+        """What every run kept before today is: hundreds of scored questions and not one
+        transcript. The number beside the zero is the point -- those turns are recoverable
+        only by spending the GPU again."""
+        from ml_stack.train.tools import main, would_yield
+
+        untraced = {k: v for k, v in _traced_row().items() if k != "trace"}
+        kept = _kept_run([untraced, _traced_row("who welds?", shown=["topic:welding"],
+                                                expected=["topic:welding"], calls=5)])
+        assert would_yield(kept) == {"questions": 2, "turns": 8, "traced": 1}
+
+        store = tmp_path / "runs.ladybug"
+        pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+        from ml_stack.graph.store import GraphStore
+
+        with GraphStore(store) as writer:
+            writer.put_doc(kept[0]["key"], {k: v for k, v in kept[0].items() if k != "key"})
+        out = tmp_path / "caller.jsonl"
+        assert main(["from-bench", "--kept", str(store), "--out", str(out)]) == 0
+        said = capsys.readouterr().out
+        assert "2 question(s) at or above F1 0.8, 1 of them traced" in said
+        written = [json.loads(line) for line in out.read_text().splitlines()]
+        assert [r["tool"] for r in written] == ["look_up", "show", CHAT]
+
+    def test_a_directory_out_is_a_dataset_the_recipe_reads(self, tmp_path):
+        """The same rows the synthesiser writes, so the two sources mix in one directory
+        and `ml-stack-train-run --recipe tool-calls --data` reads either."""
+        from ml_stack.train.recipes.tool_calls import read_conversations
+        from ml_stack.train.tools import from_bench, write_dataset
+
+        rows = from_bench(_kept_run([_traced_row(q) for q in
+                                     ("who works on compilers?", "who else?", "and who?")]))
+        summary = write_dataset(tmp_path / "data", rows, base="invented/tiny-it",
+                                source="a bench store")
+        assert summary["rows"] == len(rows) and summary["base"] == "invented/tiny-it"
+        train, holdout, manifest = read_conversations(tmp_path / "data")
+        assert len(train) + len(holdout) == len(rows)
+        assert manifest["base"] == "invented/tiny-it"

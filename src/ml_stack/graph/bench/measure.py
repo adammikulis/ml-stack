@@ -6,11 +6,18 @@ client with the bill kept (`Counting`, `_ask_once`, the `--per-question` cap), a
 them one at a time (`measure`) or N conversations at once (`concurrent`), and what the
 server holding the model costs and whether it is free to be timed (`footprint`, `busy`,
 `slot_count`, `_idle`).
+
+The bill is a total; the *trace* (`Counting.trace`, `wants_trace`, `TRACE_CAP`) is what the
+total is a total of -- every message sent, every tool call made with its arguments, and
+every reply with its timings, kept on the row and in the store. It is what a fine-tune is
+built from (`ml-stack-train-tools from-bench`) and what `ml-stack-bench show --trace` reads
+back, so nothing here decides what a training example looks like: it records what happened.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import time
@@ -41,14 +48,88 @@ def finding(store: str | Path | None, embed_url: str = "") -> str:
     return "meaning" if embed_url else "words"
 
 
+TRACE_ENV = "MLSTACK_BENCH_TRACE"
+"""Set to 1 to trace a run whatever its size, 0 to trace none of it. `wants_trace`."""
+
+TRACE_CAP = 2000
+"""How much of one tool result a trace keeps, in characters.
+
+A tool result is the largest thing in a conversation and the least of what a fine-tune
+learns -- what is being taught is the call, not the answer the graph gave back. The whole
+length is kept beside the cut text (``chars``), so nothing about the cost is lost by not
+keeping the bytes.
+"""
+
+TRACE_TEXT_CAP = 16000
+"""And of anything else -- a system prompt, a question, an answer. High enough that nothing
+a model actually writes is cut; there so that one runaway message cannot fill a store."""
+
+
+def wants_trace(questions: int, told: bool | None = None) -> bool:
+    """Whether a run of this many questions keeps its transcript.
+
+    On for a run of `SHORT` questions or fewer -- a sampled run, a smoke run, the shape most
+    runs actually have -- and off for the hundred, where the traces would be tens of
+    megabytes in a store nothing backs up. ``told`` is a person saying so either way
+    (``--trace`` / ``--no-trace``), and ``MLSTACK_BENCH_TRACE`` says so for a run whose
+    command line cannot.
+
+    The default is that way round because a trace is only useful if it exists before you
+    know you wanted it: today's sweep scored thousands of tool calls and kept none of them,
+    and there is no way to get them back except by spending the GPU again.
+    """
+    if told is not None:
+        return bool(told)
+    asked = os.environ.get(TRACE_ENV, "").strip().lower()
+    if asked:
+        return asked not in ("0", "no", "off", "false")
+    return 0 < int(questions) <= SHORT
+
+
+def _cut(text: Any, cap: int) -> tuple[str, int, bool]:
+    """``(text as kept, its whole length, whether it was cut)``."""
+    whole = str(text or "")
+    return (whole[:cap] if len(whole) > cap else whole), len(whole), len(whole) > cap
+
+
+def _ids_in(text: str) -> int:
+    """How many graph entries a tool result named, counted as the ``id`` keys in it.
+
+    What a tool call was worth in one number: `look_up` that found nothing and `look_up`
+    that found eleven are the same number of calls and the same number of characters
+    apart, and only this tells them apart in a transcript.
+    """
+    try:
+        found = json.loads(text or "")
+    except ValueError:
+        return 0
+
+    def count(value: Any) -> int:
+        if isinstance(value, Mapping):
+            return (1 if isinstance(value.get("id"), str) else 0) + sum(
+                count(v) for k, v in value.items() if k != "id")
+        if isinstance(value, (list, tuple)):
+            return sum(count(v) for v in value)
+        return 0
+
+    return count(found)
+
+
 class Counting:
     """A client that answers exactly as the real one does, and keeps the bill.
 
     Wrapping is the only way to count honestly: the tokens are on the reply the server sent,
     and nothing between here and there is going to add them up for you.
+
+    With ``trace``, it also keeps what was *said*: every message sent that it has not
+    already seen, and every reply -- its tool calls with their arguments, what it wrote,
+    what it thought, why it stopped, which model answered, and the timings `Spent.note`
+    reads, per call, so the transcript and the totals are the same numbers added up two
+    ways. Off for a long run: the totals are numbers and this is kilobytes.
     """
 
-    def __init__(self, client: Any, *, deadline: float | None = None) -> None:
+    def __init__(self, client: Any, *, deadline: float | None = None,
+                 trace: bool = False) -> None:
         self.client = client
         # When this question must be over, as `time.time()` reads it. Each call is given the
         # time left, so a question of three calls gets one cap and not three; a call that
@@ -70,10 +151,87 @@ class Counting:
         # between it and the wall clock -- time spent waiting for a slot -- is a number.
         self.generating_ms = 0.0
         self.first_token: float | None = None
+        # What was said, in order: the tools offered, then every message and every reply.
+        # See `wants_trace` for when it is filled, `_message` and `_reply` for what one
+        # entry holds, and `bench.transcript` for it read back out.
+        self.tracing = bool(trace)
+        self.trace: list[dict[str, Any]] = []
+        self._traced = 0        # how many of `messages` are already in it
+
+    def _message(self, one: Mapping[str, Any]) -> dict[str, Any]:
+        """One message the model was sent, as the trace keeps it."""
+        role = str(one.get("role") or "")
+        cap = TRACE_CAP if role == "tool" else TRACE_TEXT_CAP
+        text, whole, cut = _cut(one.get("content"), cap)
+        entry: dict[str, Any] = {"role": role, "content": text, "chars": whole}
+        if cut:
+            entry["cut"] = True
+        if role == "tool":
+            entry["name"] = str(one.get("name") or "")
+            entry["ids"] = _ids_in(str(one.get("content") or ""))
+        return entry
+
+    def _sent(self, messages: Any, tools: Any) -> None:
+        """Everything sent this call that was not sent last call, into the trace.
+
+        A conversation is one list that grows, so what is new is what is past the end of
+        what was recorded. The assistant turns in it are skipped: the reply itself was
+        recorded when it arrived, with its timings on it, and the copy `ask` appends to
+        the conversation carries none of that.
+        """
+        rows = list(messages or ())
+        if not self.trace and tools:
+            self.trace.append({"role": "tools", "tools": [dict(t) for t in tools]})
+        fresh = rows[self._traced:] if len(rows) >= self._traced else rows
+        self._traced = len(rows)
+        for one in fresh:
+            if isinstance(one, Mapping) and str(one.get("role") or "") != "assistant":
+                self.trace.append(self._message(one))
+
+    def _reply(self, reply: Any, took: float, tools: Any) -> None:
+        """One reply into the trace: what it called, what it wrote, and what it cost.
+
+        Everything `Spent.note` reads, per call, so the per-call record and the per-answer
+        totals are the same numbers added up two ways.
+        """
+        raw = getattr(reply, "raw", None) or {}
+        usage = raw.get("usage") or {}
+        timings = raw.get("timings") or {}
+        calls = []
+        for call in getattr(reply, "tool_calls", None) or ():
+            fn = (call.get("function") or {}) if isinstance(call, Mapping) else {}
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except ValueError:
+                args = {"_unparsed": str(fn.get("arguments") or "")[:TRACE_CAP]}
+            calls.append({"name": str(fn.get("name") or ""),
+                          "args": args if isinstance(args, dict) else {"_value": args}})
+        text, whole, cut = _cut(getattr(reply, "content", "") or "", TRACE_TEXT_CAP)
+        entry: dict[str, Any] = {
+            "role": "assistant", "call": self.calls,
+            "model": str(raw.get("model") or ""),
+            "content": text, "chars": whole,
+            "thinking_chars": len(getattr(reply, "thinking", None) or ""),
+            "finish": str(getattr(reply, "finish_reason", None) or ""),
+            "seconds": round(float(took), 3),
+            "offered": [str((t.get("function") or {}).get("name")) for t in (tools or ())],
+            "tool_calls": calls,
+            "tokens": {"prompt": int(usage.get("prompt_tokens") or 0),
+                       "completion": int(usage.get("completion_tokens") or 0)},
+            "timings": {k: (float(timings[k]) if k.endswith("_ms") else int(timings[k]))
+                        for k in ("prompt_ms", "predicted_ms", "prompt_n", "cache_n",
+                                  "predicted_n", "draft_n", "draft_n_accepted")
+                        if timings.get(k) is not None},
+        }
+        if cut:
+            entry["cut"] = True
+        self.trace.append(entry)
 
     def chat(self, messages: Any, **kw: Any) -> Any:
         self.calls += 1
         sent = time.time()
+        if self.tracing:
+            self._sent(messages, kw.get("tools"))
         if self.deadline is not None:
             left = self.deadline - sent
             if left <= 0:
@@ -95,6 +253,8 @@ class Counting:
                 raise QuestionTimedOut(f"call {self.calls}: {exc}") from exc
             raise
         took = time.time() - sent
+        if self.tracing:
+            self._reply(reply, took, kw.get("tools"))
         raw = getattr(reply, "raw", None) or {}
         usage = raw.get("usage") or {}
         timings = raw.get("timings") or {}
@@ -254,16 +414,21 @@ def read_questions(path: str | Path) -> list[dict[str, Any]]:
 def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, client: Any,
               graph: Mapping[str, Any] | None = None, turns: Sequence[Mapping[str, str]] = (),
               conversation: int = 0, turn: int = 0,
-              per_question: float = PER_QUESTION) -> tuple[Row, str]:
+              per_question: float = PER_QUESTION, trace: bool = False) -> tuple[Row, str]:
     """One question through ``ask(question, client)``, and what it cost; with the answer's
     text, which a conversation carries into its next turn.
 
     ``per_question`` is the most it may take. Past that the row is kept as timed out: no
     answer, the cap as its wall clock, scored wrong -- and the next question is asked. A
     question that hangs is a result, not a reason for the run to.
+
+    ``trace`` keeps the transcript on the row as well as the totals -- see `Counting` and
+    `wants_trace`. A question that failed or timed out keeps the trace it got to: that is
+    the transcript worth having, since it says where it went wrong.
     """
     began = time.time()
-    counting = Counting(client, deadline=began + per_question if per_question else None)
+    counting = Counting(client, deadline=began + per_question if per_question else None,
+                        trace=trace)
     row = Row(label=label, question=str(one.get("q") or ""),
               expected=[str(i) for i in (one.get("expect") or ())],
               conversation=conversation, turn=turn)
@@ -301,6 +466,7 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     row.draft_tokens = counting.draft_tokens
     row.draft_taken = counting.draft_taken
     row.cache_calls = [[c, p] for c, p in counting.per_call]
+    row.trace = counting.trace
     row.prefix_kept, row.prefix_turns = prefix_kept(counting.per_call)
     row.prefix_hits = row.prefix_kept / row.prefix_turns if row.prefix_turns else None
     return row, said
@@ -309,16 +475,23 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
 def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]], *,
             label: str, client: Any, log: Callable[[str], None] | None = None,
             graph: Mapping[str, Any] | None = None,
-            per_question: float = PER_QUESTION) -> list[Row]:
+            per_question: float = PER_QUESTION, trace: bool | None = None) -> list[Row]:
     """Ask each question once through ``ask(question, client)`` and record what it cost.
 
     Given the ``graph``, each row also counts the entries the answer named that no tool
     call produced -- see `unread_named`. ``per_question`` caps each question; see `_ask_once`.
+
+    ``trace`` keeps the whole transcript on each row as well: unset, `wants_trace` decides
+    it from how many questions are being asked -- on for a sampled run, off for the
+    hundred. The default is here rather than on the command line so that every caller gets
+    it: the day a sweep scored thousands of tool calls and kept none of them, the flag it
+    needed did not exist yet either.
     """
+    traced = wants_trace(len(questions), trace)
     rows = []
     for one in questions:
         row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
-                           per_question=per_question)
+                           per_question=per_question, trace=traced)
         rows.append(row)
         if log:
             log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}"
@@ -382,7 +555,8 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
                conversations: int, turns: int, label: str, client: Any,
                graph: Mapping[str, Any] | None = None, base_url: str = "",
                log: Callable[[str], None] | None = None,
-               per_question: float = PER_QUESTION) -> tuple[list[Row], dict[str, Any]]:
+               per_question: float = PER_QUESTION,
+               trace: bool | None = None) -> tuple[list[Row], dict[str, Any]]:
     """N conversations of T turns each, asked of one server at the same time.
 
     Every other measurement here asks one question at a time, which is right for timing a
@@ -409,6 +583,9 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
     # same question at the same moment and share a prompt cache the real thing would not
     chains = [[asked[(c * turns + t) % len(asked)] for t in range(turns)]
               for c in range(conversations)]
+    # every turn of every conversation is a question, and that is what decides whether the
+    # transcripts are worth their kilobytes -- see `wants_trace`
+    traced = wants_trace(conversations * turns, trace)
 
     def one_conversation(c: int) -> list[Row]:
         prior: list[dict[str, str]] = []
@@ -416,7 +593,7 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
         for t, question in enumerate(chains[c]):
             row, said = _ask_once(ask, question, label=label, client=client, graph=graph,
                                   turns=prior, conversation=c, turn=t,
-                                  per_question=per_question)
+                                  per_question=per_question, trace=traced)
             rows.append(row)
             prior += [{"role": "user", "content": row.question},
                       {"role": "assistant", "content": said}]
@@ -566,7 +743,8 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
            embed_url: str = "", embed_model: str = "", terse: bool = False,
            margin: float = MARGIN, rich: bool = False,
-           tight: bool = True, reach: int | None = None) -> Callable[..., Any]:
+           tight: bool = True, reach: int | None = None, batch: bool = False,
+           kinds: bool = False, summary: bool = False) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -587,6 +765,15 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     ``tight=False`` is the loose asking the ranking runs used, kept as a
     control, and it is passed on rather than left out -- left out it would be the default,
     which is now tight, and `--also loose` would have measured tight twice.
+
+    ``batch``, ``kinds`` and ``summary`` are `converse`'s too, and each is a way a sweep
+    measures: a searching tool shown a three-entry call (``batch``), look_up filtered to
+    the kind the question's own words settle on (``kinds``), and the whole graph at a
+    glance offered as a tool for the broad question no search reaches (``summary`` --
+    `converse`'s ``summary_tool``, renamed at this hop only, because `converse`'s
+    ``summary`` is a thread's rolling summary and the two must never be confused). Like
+    ``rich`` and ``reach``, each is sent only when it is asked for, so a run that asked
+    for none reaches `converse` byte for byte as it always did.
 
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
     which one it measured, and takes ``turns=`` -- the earlier turns of a conversation, as
@@ -622,11 +809,21 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         # `finder` goes to both, because `converse` swaps look_up's callable in whichever
         # tools it is handed, and the terse set is handed in rather than chosen inside
         extra: dict[str, Any] = (
-            {"tools": tools_for(graph, terse=True, finder=finder, tight=tight, reach=reach)}
+            {"tools": tools_for(graph, terse=True, finder=finder, tight=tight, reach=reach,
+                                batch=batch, summary=summary)}
             if terse else {})
         if rich:
             extra["rich"] = True
         extra["tight"] = bool(tight)
+        if batch:
+            extra["batch"] = True
+        if kinds:
+            extra["kinds"] = True
+        if summary:
+            # `converse`'s own `summary` is the thread's rolling summary; the tool is
+            # `summary_tool`, and passing this one as that one would hand a bool to
+            # something that reads text
+            extra["summary_tool"] = True
         if reach:
             # sent only when there is one: `None` is the default, and a way that asked for
             # no reach must reach `converse` byte for byte as it always did

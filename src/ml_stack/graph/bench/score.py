@@ -63,6 +63,12 @@ class Row:
     # Measured 2026-09-01: gemma-4-26B-A4B took 252 s and 505 s on two questions, all of it
     # in the thinking channel under a 16k ceiling; a run that waits for that is not a run.
     timed_out: bool = False
+    # What was said, call by call -- see `bench.measure.Counting.trace`. Every other field
+    # here is a total; this is the transcript those totals are of, and the only field a
+    # fine-tune can be built from: the conversation up to each model turn, and the call the
+    # model made from it. Empty unless the run was traced (`wants_trace`), because it is the
+    # one field measured in kilobytes rather than in numbers.
+    trace: list[dict[str, Any]] = field(default_factory=list)
 
     @property
     def hit(self) -> float:
