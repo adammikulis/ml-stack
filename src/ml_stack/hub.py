@@ -531,7 +531,13 @@ def draft_note(repo: str) -> str:
     """
     if repo in _DRAFT_NOTES:
         return _DRAFT_NOTES[repo]
-    from huggingface_hub import hf_hub_download
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError:
+        # the note is a courtesy; a head is still chosen without the hub package, and the
+        # choice must not raise where it used to be swallowed into "no head" (ai_ceo's venv,
+        # 2026-09-02: Flash-Next served undrafted for exactly this)
+        return ""
 
     text = ""
     for name in ("MTP/README.md", "README.md"):
