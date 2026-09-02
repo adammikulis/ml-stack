@@ -95,7 +95,7 @@ packages = ["src/ml_stack"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # every core by default: 2054 tests took seven minutes serially (measured 2026-09-01);
-# `-p no:xdist` or `-n 0` runs them in one process when a failure needs a clean order
+# `-n 0` runs them in one process when a failure needs a clean order
 addopts = "--strict-markers -n auto"
 markers = ["slow: builds a wheel; skipped with -m 'not slow'"]
 

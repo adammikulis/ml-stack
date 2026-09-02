@@ -6,12 +6,16 @@ no tests. Everything named here is invented.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+from ml_stack.redact import hook
 
 HOOK = Path(__file__).resolve().parent.parent / "scripts" / "hooks" / "no-real-names"
 
@@ -31,17 +35,34 @@ def repo(tmp_path: Path, graph: dict | None = None, fixtures: str = "") -> Path:
     return where
 
 
-def check(where: Path, tmp_path: Path, **files: str) -> tuple[int, str]:
-    """Stage those files and run the hook. Returns (exit code, what it said)."""
+def stage(where: Path, files: dict[str, str]) -> None:
     for name, body in files.items():
         (where / name).write_text(body)
         subprocess.run(["git", "add", name], cwd=where, check=True, capture_output=True)
-    done = subprocess.run(["sh", str(HOOK)], cwd=where, capture_output=True, text=True,
-                          env={**os.environ,
-                               "NAMES_GRAPH": str(tmp_path / "graph.json"),
-                               "NAMES_SCRAPE": "",
-                               "NAMES_FIXTURES": "known-fixtures.txt",
-                               "SKIP_NAME_CHECK": ""})
+
+
+def wiring(tmp_path: Path) -> dict[str, str]:
+    return {**os.environ,
+            "NAMES_GRAPH": str(tmp_path / "graph.json"),
+            "NAMES_SCRAPE": "",
+            "NAMES_FIXTURES": "known-fixtures.txt",
+            "SKIP_NAME_CHECK": ""}
+
+
+def check(where: Path, tmp_path: Path, **files: str) -> tuple[int, str]:
+    """Stage those files and run the hook in this process. Returns (exit code, what it said)."""
+    stage(where, files)
+    said = io.StringIO()
+    code = hook.main(env=wiring(tmp_path), root=where, stdout=said)
+    return code, said.getvalue()
+
+
+def check_wrapper(where: Path, tmp_path: Path, script: str = str(HOOK),
+                  python: str = sys.executable, **files: str) -> tuple[int, str]:
+    """Stage those files and run the shell wrapper the way git does."""
+    stage(where, files)
+    done = subprocess.run(["sh", script], cwd=where, capture_output=True, text=True,
+                          env={**wiring(tmp_path), "PYTHON": python})
     return done.returncode, done.stdout + done.stderr
 
 
@@ -230,3 +251,37 @@ def test_a_file_may_declare_itself_a_catalogue_of_invented_labels(tmp_path):
     assert code == 0, said
     code, said = check(where, tmp_path, **{"events.py": catalogue + 'X = "Ada Lovelace"\n'})
     assert code == 1 and "Ada Lovelace" in said
+
+
+def test_the_recogniser_is_built_once_per_process():
+    """One Presidio load serves every check in the process."""
+    assert hook.recogniser() is hook.recogniser()
+
+
+def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
+    """`sh scripts/hooks/no-real-names`, the way git runs it: a clean file commits, a name
+    from the graph is refused with the same exit codes and message as in-process."""
+    where = repo(tmp_path, PEOPLE)
+    code, said = check_wrapper(where, tmp_path, notes="The kiln needs firing.\n")
+    assert code == 0, said
+    code, said = check_wrapper(where, tmp_path, notes="Ask Wren Halloway about the kiln.\n")
+    assert code == 1
+    assert "Wren Halloway" in said and "refusing to commit" in said
+
+
+def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_path):
+    """Run through a `.git/hooks/pre-commit` symlink with a Python that has no site-packages
+    (`-I -S`): the wrapper resolves the symlink to find `../../src`, and the exact list still
+    refuses the name. Presidio is absent from that Python, so the hook says so."""
+    where = repo(tmp_path, PEOPLE)
+    bare = tmp_path / "bare-python"
+    bare.write_text(f'#!/bin/sh\nexec "{sys.executable}" -I -S "$@"\n')
+    bare.chmod(0o755)
+    link = where / ".git" / "hooks" / "pre-commit"
+    link.parent.mkdir(exist_ok=True)
+    link.symlink_to(HOOK)
+    code, said = check_wrapper(where, tmp_path, script=".git/hooks/pre-commit", python=str(bare),
+                               notes="Ask Wren Halloway about the kiln.\n")
+    assert code == 1, said
+    assert "Wren Halloway" in said
+    assert "presidio is not installed" in said
