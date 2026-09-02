@@ -155,7 +155,12 @@ def every_server() -> list[dict]:
             return ""
 
         mem = proc.info.get("memory_info")
+        try:
+            state = str(proc.status())
+        except (psutil.Error, OSError):
+            state = ""
         out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
+                    "defunct": state == psutil.STATUS_ZOMBIE,
                     "model": after("--model", "-m") or after("-hf") or "",
                     "binary": argv[0] if argv else name,
                     "rss": int(getattr(mem, "rss", 0) or 0)})
@@ -172,11 +177,15 @@ def cmd_status(args: argparse.Namespace) -> int:
             print("no llama-server is running on this machine.")
             return 1
         for one in found:
+            if one.get("defunct"):
+                # a zombie holds no memory and answers no port; it is waiting to be reaped
+                print(f"  pid {one['pid']}  defunct -- exited, not yet reaped; holds nothing")
+                continue
             leased = "leased" if one["port"] in records else "NOT leased -- nobody records it"
             rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
             print(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
                   f"{rss} resident  {leased}  ({one['binary']})")
-        strays = [o for o in found if o["port"] not in records]
+        strays = [o for o in found if o["port"] not in records and not o.get("defunct")]
         if strays:
             print(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
         return 0

@@ -773,15 +773,17 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
 
     import psutil
 
-    def proc(pid, argv, rss):
+    def proc(pid, argv, rss, state="running"):
         return types.SimpleNamespace(info={"pid": pid, "name": Path(argv[0]).name, "cmdline": argv,
-                                           "memory_info": types.SimpleNamespace(rss=rss)})
+                                           "memory_info": types.SimpleNamespace(rss=rss)},
+                                     status=lambda: state)
 
     fakes = [proc(11, ["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
                        "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30),
              proc(12, ["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
                        "--port", "8082"], 60 * 2**30),
-             proc(13, ["/usr/bin/python3", "-m", "something"], 5)]
+             proc(13, ["/usr/bin/python3", "-m", "something"], 5),
+             proc(14, ["llama-server"], 0, state=psutil.STATUS_ZOMBIE)]
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: fakes)
     monkeypatch.setattr(cli, "recorded_servers", lambda path: {8082: {"pid": 12}})
     assert cli.main(["status", "--every"]) == 0
@@ -789,6 +791,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert ":8081  pid 11  embeddinggemma-300M (Q8_0)  1.0G resident  NOT leased" in out
     assert ":8082  pid 12  thing (Q4_K_XL)  60.0G resident  leased" in out
     assert "1 not leased" in out and "python3" not in out
+    assert "pid 14  defunct" in out, "a zombie is named as such and not counted as a stray"
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])
     assert cli.main(["status", "--every"]) == 1
     assert "no llama-server is running" in capsys.readouterr().out
