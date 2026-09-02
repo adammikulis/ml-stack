@@ -27,11 +27,12 @@ from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 __all__ = ["Counting", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut", "Row", "SHORT",
-           "SMOKE", "baseline", "beyond_weights", "choices", "composed", "drafted", "export",
-           "ranking", "ask_from", "asking", "compare", "concurrent", "detach", "empties",
-           "finding", "footprint", "forget", "halves", "kv_short", "main", "measure",
-           "measuring", "prefetch", "prepared", "read_questions", "references_in", "runs",
-           "save", "slot_count", "speedup", "status", "stop", "table", "tail", "unread_named"]
+           "SMOKE", "SmokeFailed", "baseline", "beyond_weights", "choices", "composed",
+           "drafted", "export", "ranking", "ask_from", "asking", "compare", "concurrent",
+           "detach", "empties", "finding", "footprint", "forget", "halves", "kv_short", "main",
+           "measure", "measuring", "prefetch", "prepared", "read_questions", "references_in",
+           "runs", "save", "slot_count", "speedup", "status", "stop", "table", "tail",
+           "unread_named"]
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
@@ -768,6 +769,24 @@ def beyond_weights(out: dict[str, Any]) -> dict[str, Any]:
 
 class RunNotKept(RuntimeError):
     """A run was written and did not come back the way `runs` reads it."""
+
+
+class SmokeFailed(RuntimeError):
+    """The two-question pass a real run makes first did not get through, so the run did
+    not start: nothing kept, nothing read back, or every question failed."""
+
+
+def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
+    """Refuse a smoke that proved nothing: no run kept, a run with no rows, or every row
+    an error or a timeout. A model that fails two questions fails twenty, and the point of
+    asking two first is that finding out costs a minute."""
+    if not kept:
+        raise SmokeFailed(f"{what}: no run was kept")
+    rows = [r for one in kept for r in (one.get("rows") or ())]
+    if not rows:
+        raise SmokeFailed(f"{what}: {len(kept)} run(s) kept with no rows")
+    if all(r.get("error") or r.get("timed_out") for r in rows):
+        raise SmokeFailed(f"{what}: every question failed -- {rows[0].get('error') or 'timed out'}")
 
 
 def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None) -> str:
@@ -1853,8 +1872,14 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            spec_draft_max: int | None = None, cache_type: str = "",
            per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
-           **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
+
+    ``smoke`` is the questions to ask first, of every way, on the same load -- two of them
+    -- kept, read back, and refused with `SmokeFailed` when every one of them failed. A
+    real run does this before its questions unless told not to, and it is done here
+    rather than around the call so that the load is paid once: the smoke is the first
+    thing the served model is asked, and its own questions follow on the same server.
 
     The piece that was missing. `sweep` measures servers somebody else started, so anything
     comparing several models meant hand-rolling starts, stops and waits -- which is a shell
@@ -1970,51 +1995,71 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                      if load_s is not None else "")
                   + f", look_up by {finding(store, embed_url)}")
             print("\n".join(f"      {line}" for line in report.said().splitlines()))
-            for way in every:
-                asked = dict(way)
-                here = labelled(asked)
-                asked.pop("label", None)
-                how = bool(asked.pop("terse", terse))
-                first = int(asked.pop("shortlist", shortlist) or 0)
-                if len(every) > 1:
-                    print(f"\n  --- {here}")
-                wants_card = bool(asked.pop("_card", False))
-                # the cap is the client's timeout too, so a call past it is cut off there
-                # and the connection closed, rather than waited on
-                # what is about the asking, not the client -- popped before the client is
-                # built: `tight` reached Client.__init__ and took an 87G load down with it
-                # (measured 2026-09-02); `rich` would have too, on the first real run
-                richly = bool(asked.pop("rich", False))
-                tightly = bool(asked.pop("tight", False))
-                client = Client(server.base_url, **{"timeout": per_question, **making, **asked})
-                if wants_card:
-                    # what the model itself recommends, read from the GGUF it is serving
+
+            def ask_every(asking_these: Sequence[Mapping[str, Any]],
+                          *, smoking: bool) -> tuple[list[Row], list[str]]:
+                """Every way, asked ``asking_these``, each kept: the rows and the keys."""
+                got_all: list[Row] = []
+                keys: list[str] = []
+                for way in every:
+                    asked = dict(way)
+                    here = labelled(asked)
+                    asked.pop("label", None)
+                    how = bool(asked.pop("terse", terse))
+                    first = int(asked.pop("shortlist", shortlist) or 0)
+                    if len(every) > 1 or smoking:
+                        print(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
+                    wants_card = bool(asked.pop("_card", False))
+                    # the cap is the client's timeout too, so a call past it is cut off
+                    # there and the connection closed, rather than waited on
+                    # what is about the asking, not the client -- popped before the client
+                    # is built: `tight` reached Client.__init__ and took an 87G load down
+                    # with it (measured 2026-09-02); `rich` would have too, on the first
+                    # real run
+                    richly = bool(asked.pop("rich", False))
+                    tightly = bool(asked.pop("tight", False))
                     client = Client(server.base_url,
-                                    **{"timeout": per_question, **making, **client.card})
-                ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
-                             embed_model=embed_model, terse=how,
-                             rich=richly,
-                             tight=tightly)
-                got = measure(ask, questions, label=here, client=client, log=print, graph=graph,
-                              per_question=per_question)
-                for row in got:
-                    row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-                # `binary` is the llama-server this ran on, so a run on a fork is told
-                # from one on mainline when the ranking takes its cost
-                held = {**footprint(server.base_url), "graph": _which(graph),
-                        "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
-                        "load_s": load_s, "warmup_s": warmup_s, "binary": build}
-                if draft:
-                    held["draft_model"] = str(draft).rsplit("/", 1)[-1]
-                    if spec_draft_max is not None:
-                        held["spec_draft_max"] = int(spec_draft_max)
-                if cache_type:
-                    held["cache_type"] = cache_type
-                if reasoning_budget is not None:
-                    held["reasoning_budget"] = int(reasoning_budget)
-                if kept:
-                    save(kept, got, held={**held, "sampling": dict(client.sampling)})
-                rows += got
+                                    **{"timeout": per_question, **making, **asked})
+                    if wants_card:
+                        # what the model itself recommends, read from the GGUF it is serving
+                        client = Client(server.base_url,
+                                        **{"timeout": per_question, **making, **client.card})
+                    ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
+                                 embed_model=embed_model, terse=how,
+                                 rich=richly,
+                                 tight=tightly)
+                    got = measure(ask, asking_these, label=here, client=client, log=print,
+                                  graph=graph, per_question=per_question)
+                    for row in got:
+                        row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
+                    # `binary` is the llama-server this ran on, so a run on a fork is told
+                    # from one on mainline when the ranking takes its cost
+                    held = {**footprint(server.base_url), "graph": _which(graph),
+                            "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
+                            "load_s": load_s, "warmup_s": warmup_s, "binary": build}
+                    if draft:
+                        held["draft_model"] = str(draft).rsplit("/", 1)[-1]
+                        if spec_draft_max is not None:
+                            held["spec_draft_max"] = int(spec_draft_max)
+                    if cache_type:
+                        held["cache_type"] = cache_type
+                    if reasoning_budget is not None:
+                        held["reasoning_budget"] = int(reasoning_budget)
+                    if kept:
+                        keys.append(save(kept, got,
+                                         held={**held, "sampling": dict(client.sampling)}))
+                    got_all += got
+                return got_all, keys
+
+            if smoke:
+                # first, on this load: every way through the whole path on two questions,
+                # kept and read back, before the questions that cost the GPU
+                print(f"\n  smoke: {len(smoke)} question(s) through every way first")
+                proved, keys = ask_every(smoke, smoking=True)
+                smoked(read_back(kept, keys) if kept
+                       else [{"rows": [asdict(r) for r in proved]}], f"{name}{suffix} smoke")
+                print("  smoke: ok")
+            rows += ask_every(questions, smoking=False)[0]
     except checks.PreflightFailed as why:
         # The backend's own preflight, which can refuse what this one passed -- a draft
         # head resolved to a file this could not size, say. Same answer: say it, move on.
@@ -2029,8 +2074,10 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
            cache_type: str = "", per_question: float = PER_QUESTION,
-           **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), **making: Any) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
+
+    ``smoke`` goes to `served` as it is: the two questions each load is asked first.
 
     A draft head only *proposes*; the large model verifies every token, so a quantised head
     cannot make an answer wrong -- it can only be right less often, and each wrong guess
@@ -2067,12 +2114,15 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
                           kept=kept, store=store, embed_url=embed_url,
                           embed_model=embed_model, serve_timeout=serve_timeout,
                           spec_draft_max=length, cache_type=cache_type,
-                          per_question=per_question, **making)
+                          per_question=per_question, smoke=smoke, **making)
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given
-        # only heads, the newest undrafted run of this model and size already kept
+        # only heads, the newest undrafted run of this model and size already kept. The
+        # smoke each load made first is kept too and is not one of these rows: two
+        # questions say nothing about a head
         everything = _kept(kept)
-        mine = [r for r in everything if r.get("key") not in before]
+        mine = [r for r in everything if r.get("key") not in before
+                and len(r.get("rows") or ()) == len(questions)]
         print("\n" + drafted(mine, among=everything))
     return out
 
@@ -2175,6 +2225,25 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
 
     ask.finder = finding(store, embed_url)  # type: ignore[attr-defined]
     return ask
+
+
+def checking(one: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """The two flags every measuring subcommand has for the two checks it makes before it
+    measures: the self-check on no GPU, and the smoke on the real one."""
+    one.add_argument("--no-selfcheck", action="store_true",
+                     help="skip the dry run made first, before the lock is taken: this exact "
+                          "command through the whole path with a scripted model, no server "
+                          "and no GPU, into a scratch store read back -- what catches a flag "
+                          "the client does not take before a load is paid for it. For a run "
+                          "you are deliberately repeating, whose path the last one proved. "
+                          "Read before the rest of the line is parsed, like --no-queue")
+    one.add_argument("--no-smoke", action="store_true",
+                     help=f"skip the {SMOKE}-question smoke a real run makes first on the "
+                          f"real server and the real store, read back, before its own "
+                          f"questions. Without this every run that is not itself --smoke "
+                          f"smokes first -- on the same load, where the model is served -- "
+                          f"and a smoke that fails ends the run before anything else starts")
+    return one
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2423,10 +2492,11 @@ def _parser() -> argparse.ArgumentParser:
                               "the measuring lock is taken. Without this every reference "
                               "is fetched first, one line each with its size, because a "
                               "download inside the timed window is a timing of the network")
+        checking(one)
 
     from ml_stack.graph.bench_extract import add_arguments as extracting
 
-    extracting(sub)
+    checking(extracting(sub))
 
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
@@ -2502,7 +2572,35 @@ def _parser() -> argparse.ArgumentParser:
 
 def _main(argv: list[str] | None = None) -> int:
     """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
-    args = _parser().parse_args(argv)
+    return _run(_parser().parse_args(argv))
+
+
+def wants_smoke(args: Any) -> bool:
+    """Whether a run smokes first: it is a real run, not itself ``--smoke``, and not told
+    ``--no-smoke``."""
+    return (getattr(args, "cmd", "") in MEASURING and not getattr(args, "smoke", False)
+            and not getattr(args, "no_smoke", False))
+
+
+def smoke_first(args: Any) -> None:
+    """The same command as a smoke, before the run proper: the real server, the real
+    store, the runs read back, and `SmokeFailed` -- the run never starts -- when it kept
+    nothing or every question failed. For the commands that serve nothing themselves;
+    a served model smokes inside `served`, on the one load."""
+    trial = argparse.Namespace(**vars(args))
+    trial.smoke = True
+    before = {r["key"] for r in _kept(args.kept)}
+    print(f"smoke: the same {args.cmd} on {SMOKE} question(s) first -- ask, score, save, "
+          f"read back -- before the run proper")
+    code = _run(trial)
+    if code != 0:
+        raise SmokeFailed(f"{args.cmd} --smoke returned {code}")
+    smoked([r for r in _kept(args.kept) if r["key"] not in before], f"{args.cmd} smoke")
+    print("smoke: ok\n")
+
+
+def _run(args: Any) -> int:
+    """`_main` after the parse, so a dry run can hand in a namespace it has rewritten."""
     if args.cmd == "status":
         print(status())
         return 0
@@ -2543,10 +2641,18 @@ def _main(argv: list[str] | None = None) -> int:
             print("error: nothing to measure; pass --on NAME=URL for a server that is "
                   "already up, or --serve MODEL to put one up", file=sys.stderr)
             return 2
-        questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                           _how_many(args))
+        everything = read_questions(args.questions) if args.questions else QUESTIONS
+        questions = sample(everything, _how_many(args))
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
+        # the smoke: two questions first, of every model. The servers somebody else
+        # started are smoked as a sweep of their own before anything is served, and each
+        # served model smokes as it comes up, so a load is paid once
+        smoking = wants_smoke(args)
+        if smoking and named:
+            standing = argparse.Namespace(**vars(args))
+            standing.serve = []
+            smoke_first(standing)
         saved: list[str] = []
         total_context = args.context or 32768 * max(1, args.parallel)
         already = (resumable(args.kept, questions=len(questions), context=total_context,
@@ -2595,6 +2701,7 @@ def _main(argv: list[str] | None = None) -> int:
                        already=already, cache_type=getattr(args, "serve_kv", "") or "",
                        per_question=args.per_question,
                        reasoning_budget=getattr(args, "reasoning_budget", None),
+                       smoke=sample(everything, SMOKE) if smoking else (),
                        **sampling_from(args))
             except ServerFailed as why:
                 # A model that will not load -- a head the build cannot read, a tensor it
@@ -2655,8 +2762,8 @@ def _main(argv: list[str] | None = None) -> int:
     if args.cmd == "drafts":
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
-        asked = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                       SMOKE if getattr(args, "smoke", False) else args.sample)
+        everything = read_questions(args.questions) if args.questions else QUESTIONS
+        asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
         before = {r["key"] for r in _kept(args.kept)}
         rows = drafts(find_model(args.model), args.draft or [""], asked, invented(),
                       port=args.port,
@@ -2664,7 +2771,8 @@ def _main(argv: list[str] | None = None) -> int:
                       kept=args.kept, store=prepared() or None,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
                       cache_type=getattr(args, "serve_kv", "") or "",
-                      per_question=args.per_question)
+                      per_question=args.per_question,
+                      smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
         print()
         if getattr(args, "smoke", False):
             saved = [r["key"] for r in _kept(args.kept) if r["key"] not in before]
@@ -2676,6 +2784,8 @@ def _main(argv: list[str] | None = None) -> int:
     if args.cmd == "concurrent":
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
+        if wants_smoke(args):
+            smoke_first(args)
         questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                            _how_many(args))
         if not questions:
@@ -2773,6 +2883,8 @@ def _main(argv: list[str] | None = None) -> int:
 
     from ml_stack.graph.community import QUESTIONS, graph as invented
 
+    if wants_smoke(args):
+        smoke_first(args)
     questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                        _how_many(args))
     if not questions:
@@ -3052,6 +3164,24 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     refuse = "--no-queue" in rest
     rest = [a for a in rest if a != "--no-queue"]
+    if "--no-selfcheck" not in rest:
+        # Before the prefetch and before the lock, on purpose: this is the run itself,
+        # with the model and the machine faked, and what it catches -- a flag the client
+        # does not take, a way that never reaches the store -- cost an 87G load the day
+        # it was left to a person to remember (2026-09-02). It needs no GPU and holds
+        # nobody up.
+        from ml_stack.graph.bench_selfcheck import SelfCheckFailed, selfcheck
+
+        began = time.monotonic()
+        try:
+            proved = selfcheck(rest)
+        except SelfCheckFailed as why:
+            print(f"selfcheck: FAILED -- this command would not get through with a "
+                  f"scripted model, so nothing was loaded:\n{why}", file=sys.stderr)
+            print("error: the self-check failed; fix it, or pass --no-selfcheck to "
+                  "repeat a run whose path the last one proved", file=sys.stderr)
+            return 4
+        print(f"selfcheck: ok ({time.monotonic() - began:.1f} s) -- {proved}", flush=True)
     if "--no-prefetch" not in rest:
         # Before the lock, on purpose: a download is minutes of network and no GPU, and
         # holding the measuring lock through it makes the next run wait for the Hub.
@@ -3069,6 +3199,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {why}. Another measurement is running; wait for it, or pass "
               f"--no-queue to fail fast rather than queue.", file=sys.stderr)
         return 3
+    except SmokeFailed as why:
+        print(f"error: smoke failed, so the run did not start: {why}", file=sys.stderr)
+        return 1
     finally:
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)

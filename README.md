@@ -918,6 +918,24 @@ if what comes back is not what went in; a `--smoke` run's summary is read from t
 for the same reason. `show` counts any run that still reads back empty, and `forget --empty`
 removes them.
 
+**The runner checks itself before it spends the GPU, and smokes before it measures.** Every
+measuring command -- `run`, `sweep`, `drafts`, `concurrent`, `extract` -- first drives the
+exact command line it was given through the whole path with no server and no GPU: a
+scripted model that takes exactly what `Client` takes, a served model that never starts, a
+preflight that reads nothing, the invented community and two of its questions, into a
+scratch store it reads back. It prints `selfcheck: ok (2.1 s)` and goes on, or refuses with
+exit 4 and the traceback -- before the lock is taken and before anything is fetched;
+`--no-selfcheck` skips it, for a run you are deliberately repeating. Then, unless the run
+*is* a `--smoke` run or is told `--no-smoke`, it smokes for real: two questions (three
+messages, for `extract`) through the real server and the real store, read back, before its
+own questions -- on the same load where a model is served, so a sweep smokes each model as
+it comes up and pays for it once -- and a smoke where every question fails ends the run with
+exit 1 and the reason before anything else starts. The day this was written a new `--also
+tight` way reached `Client.__init__` as a keyword and took an 87G load down with it, because
+the smoke was a step in a plan and the test's fake client accepted anything; now the fake is
+the runner's own -- `bench_selfcheck.ScriptedModel`, bound against the real signature, and
+the tests use it too -- and the check is not a step anyone has to remember.
+
 **A load is fetched, checked and timed before it is measured.** Every `hf:` reference a
 measuring command names -- the models `--serve` puts up, the heads `--serve-draft` and
 `--draft` name -- is downloaded through `hub.fetch` *before the measuring lock is taken*,

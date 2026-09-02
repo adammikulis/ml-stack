@@ -60,6 +60,9 @@ from ml_stack.graph.bench import (
     footprint,
     runs,
     sampling_from,
+    smoke_first,
+    smoked,
+    wants_smoke,
 )
 
 __all__ = ["BUCKETS", "GUESS_SECONDS", "INSTRUCTIONS", "KIND", "MessageRow", "SAMPLE",
@@ -986,6 +989,21 @@ def main(args: Any) -> int:
     from ml_stack.client import Client
 
     sampling = sampling_from(args)
+
+    def read_and_keep(client: Any, reading: Sequence[Mapping[str, Any]], *, held: Mapping[str, Any],
+                      twice_over: bool, n: int) -> str:
+        """``reading`` through ``client``, folded, scored, kept and read back: the key."""
+        rows, scores = measure(client, reading, graph, per_message=args.per_message, log=print)
+        held = dict(held)
+        if twice_over:
+            scores["consistency"], held["twice"] = twice(client, reading, graph, scores,
+                                                         per_message=args.per_message)
+        key = save(args.kept, rows, label=args.label, model=model, world=world, scores=scores,
+                   sample={**sample, "n": n}, held=held)
+        print(f"kept as {key}")
+        table(read_back(args.kept, [key]))
+        return key
+
     if args.serve:
         from ml_stack.serve import serve
 
@@ -996,26 +1014,24 @@ def main(args: Any) -> int:
                    warmup=False) as server:
             print(f"    up in {time.time() - began:.0f}s")
             client = Client(server.base_url, timeout=args.per_message, **sampling)
-            rows, scores = measure(client, picked, graph, per_message=args.per_message,
-                                   log=print)
-            if args.twice:
-                scores["consistency"], again = twice(client, picked, graph, scores,
-                                                     per_message=args.per_message)
             held = {**footprint(server.base_url), "sampling": dict(client.sampling),
                     "load_s": getattr(server, "load_s", None)}
+            if wants_smoke(args):
+                # first, on this load: a few messages through the whole path, kept and
+                # read back, before the sample that costs the GPU
+                few = sample_messages(messages, SMOKE_MESSAGES, seed=args.seed)
+                print(f"\n  smoke: {len(few)} message(s) through the whole path first")
+                key = read_and_keep(client, few, held=held, twice_over=False, n=len(few))
+                smoked(read_back(args.kept, [key]), f"{args.label} smoke")
+                print("  smoke: ok\n")
+            read_and_keep(client, picked, held=held, twice_over=args.twice, n=len(picked))
     else:
+        if wants_smoke(args):
+            smoke_first(args)
         if not _idle(args.base_url, args):
             return 3
         client = Client(args.base_url, timeout=args.per_message, **sampling)
-        rows, scores = measure(client, picked, graph, per_message=args.per_message, log=print)
-        if args.twice:
-            scores["consistency"], again = twice(client, picked, graph, scores,
-                                                 per_message=args.per_message)
-        held = {**footprint(args.base_url), "sampling": dict(client.sampling)}
-    if args.twice:
-        held["twice"] = again
-    key = save(args.kept, rows, label=args.label, model=model, world=world, scores=scores,
-               sample=sample, held=held)
-    print(f"kept as {key}")
-    table(read_back(args.kept, [key]))
+        read_and_keep(client, picked, held={**footprint(args.base_url),
+                                            "sampling": dict(client.sampling)},
+                      twice_over=args.twice, n=len(picked))
     return 0

@@ -11,6 +11,7 @@ import pathlib
 import pytest
 
 from ml_stack.graph.bench import Row, _hit, missed, runs, save, table
+from ml_stack.graph.bench_selfcheck import ScriptedModel
 
 
 def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
@@ -663,29 +664,14 @@ TINY = {
 }
 
 
-class _Scripted:
-    """Calls look_up for one text, then answers, and keeps every message it was shown."""
+class _Scripted(ScriptedModel):
+    """The runner's own scripted model -- calls look_up for one text, then answers, keeps
+    every message it was shown -- given the text to look up. One fake, shared with
+    `bench_selfcheck`, so that what the tests let through the runner lets through."""
 
     def __init__(self, text: str = "compilers") -> None:
+        super().__init__()
         self.text = text
-        self.seen: list[list[dict]] = []
-        self.sampling: dict = {}
-
-    def chat(self, messages, tools=None, **_):
-        self.seen.append(list(messages))
-        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-        if "look_up" in offered and len(self.seen) == 1:
-            return type("R", (), {
-                "content": "", "thinking": None, "raw": {},
-                "tool_calls": [{"id": "c1", "function": {
-                    "name": "look_up", "arguments": json.dumps({"texts": [self.text]})}}]})()
-        return type("R", (), {"content": "a compiler person", "thinking": None, "raw": {},
-                              "tool_calls": None})()
-
-    def told(self) -> str:
-        """What look_up answered, as the model saw it."""
-        return " ".join(m["content"] for turn in self.seen for m in turn
-                        if m.get("role") == "tool")
 
 
 def _tiny_store(tmp_path):
@@ -757,7 +743,7 @@ def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsy
     kept = tmp_path / "runs.ladybug"
     store = _tiny_store(tmp_path)
     common = ["--kept", str(kept), "--graph", str(graph), "--questions", str(asked),
-              "--client", "fake:client"]
+              "--client", "fake:client", "--no-smoke"]
 
     assert bench._main(["run", "with-words", "--store", str(store), *common]) == 0
     assert "with-words: 1 questions" in capsys.readouterr().out.splitlines()[0]
@@ -782,7 +768,7 @@ def test_the_first_line_a_run_prints_says_which_finder(tmp_path, monkeypatch, ca
     asked.write_text(json.dumps({"q": "who?", "expect": ["topic:compiler"]}) + "\n")
     bench._main(["run", "tried", "--kept", str(tmp_path / "runs.ladybug"),
                  "--graph", str(graph), "--questions", str(asked), "--client", "fake:client",
-                 "--store", str(_tiny_store(tmp_path))])
+                 "--store", str(_tiny_store(tmp_path)), "--no-smoke"])
     first = capsys.readouterr().out.splitlines()[0]
     assert first.startswith("tried: 1 questions over") and "look_up by words" in first
 
@@ -1145,7 +1131,7 @@ def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path
     assert bench.main(["concurrent", "two-at-once", "--smoke", "--conversations", "9",
                        "--turns", "9", "--kept", str(kept), "--graph", str(graph),
                        "--questions", str(asked), "--client", "fake:client",
-                       "--store", ""]) == 0
+                       "--store", "", "--no-selfcheck"]) == 0
     said = capsys.readouterr().out
     assert said.splitlines()[0].startswith("two-at-once: 2 conversations of 1 turn(s) at once")
     assert "kept as bench:two-at-once:" in said
@@ -1167,15 +1153,11 @@ def test_concurrent_is_a_measuring_subcommand_and_takes_the_lock():
 
 # -- sweep --serve, which had no test through _main -----------------------------------------
 
-class _ServedModel(_Scripted):
-    """The client `served` builds for each way: takes a base_url and the way's sampling,
-    and has the card a `--also card` way reads."""
-
-    def __init__(self, base_url: str = "", **sampling) -> None:
-        super().__init__()
-        self.base_url = base_url
-        self.sampling = dict(sampling)
-        self.card = {"temperature": 1.0, "top_k": 64}
+# The client `served` builds for each way: takes a base_url and the way's sampling -- and
+# only what the real `Client` takes -- and has the card a `--also card` way reads. It is
+# the runner's own fake; a fake of the tests' own with **kwargs let `tight` through to an
+# 87G load on 2026-09-02.
+_ServedModel = ScriptedModel
 
 
 def _preflight_ok(monkeypatch, *, refuse=(), kv_estimate=3 * 2**30, weights=5 * 2**30):
@@ -1234,7 +1216,8 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
 
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
                         "--also", "card", "--kept", str(kept), "--graph", str(graph),
-                        "--questions", str(asked), "--store", "", "--serve-port", "1"]) == 0
+                        "--questions", str(asked), "--store", "", "--serve-port", "1",
+                        "--no-smoke"]) == 0
     said = capsys.readouterr().out
     labels = [r["label"] for r in runs(kept)]
     assert sorted(labels) == sorted(["tiny-plain", "tiny-plain-terse", "tiny-plain-card"])
@@ -1366,7 +1349,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
     with pytest.raises(bench.RunNotKept, match="did not come back"):
         bench.main(["run", "tried", "--smoke", "--kept", str(tmp_path / "runs.ladybug"),
                     "--graph", str(graph), "--questions", str(asked), "--client", "fake:client",
-                    "--store", ""])
+                    "--store", "", "--no-selfcheck"])
 
 
 def test_empty_runs_are_skipped_named_and_forgotten(tmp_path, capsys):
@@ -1610,7 +1593,8 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
     with pytest.raises(SystemExit) as left:
         bench.main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--kept",
                     str(tmp_path / "runs.ladybug"), "--graph", str(graph),
-                    "--questions", str(asked), "--store", "", "--serve-port", "1"])
+                    "--questions", str(asked), "--store", "", "--serve-port", "1",
+                    "--no-selfcheck"])
     assert left.value.code == 128 + signal.SIGTERM
     assert came_down == ["tiny.gguf"], "the server was taken down on the way out"
     assert signal.getsignal(signal.SIGTERM) is before, "and the handler was put back"
@@ -1665,7 +1649,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
 
     argv = ["sweep", "--serve", "tiny.gguf", "--serve", "other.gguf", "--plain-only",
             "--also", "terse", "--also", "card", "--kept", str(kept), "--graph", str(graph),
-            "--questions", str(asked), "--store", "", "--serve-port", "1"]
+            "--questions", str(asked), "--store", "", "--serve-port", "1", "--no-smoke"]
     assert bench._main([*argv, "--resume"]) == 0
     said = capsys.readouterr().out
     assert "skipping tiny-plain: kept at" in said
@@ -1741,7 +1725,8 @@ def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
     asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
                      + "\n")
     seen["common"] = ["--kept", str(tmp_path / "runs.ladybug"), "--graph", str(graph),
-                      "--questions", str(asked), "--store", "", "--serve-port", "1"]
+                      "--questions", str(asked), "--store", "", "--serve-port", "1",
+                      "--no-smoke"]
     seen["kept"] = tmp_path / "runs.ladybug"
     return seen
 
@@ -1770,7 +1755,7 @@ def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(
     monkeypatch.setattr(ml_stack.hub, "fetch", fake_fetch)
     argv = ["sweep", "--serve", "hf:someone/tiny-GGUF/tiny.gguf", "--serve", "local.gguf",
             "--serve-draft", "hf:someone/tiny-GGUF/mtp-tiny.gguf", "--plain-only",
-            *seen["common"]]
+            *seen["common"], "--no-selfcheck"]
     assert bench.main(argv) == 0
     said = capsys.readouterr().out
     assert fetched == ["hf:someone/tiny-GGUF/tiny.gguf", "hf:someone/tiny-GGUF/mtp-tiny.gguf"], \
@@ -2554,20 +2539,23 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     """`--also rich` and `--also tight` are questions about the asking; the client does not
     take them. `tight` reached Client.__init__ and took an 87G load down with it on
     2026-09-02, after a fake client with **kwargs had let it pass. Mutation: pop after
-    Client is built."""
+    Client is built. The strict fake is the runner's own `ScriptedModel`, bound against
+    the real `Client.__init__`, so it stays strict as the client changes."""
     import ml_stack.client
     import ml_stack.serve
     from ml_stack.graph import bench
 
     built = []
 
-    class Strict:
-        sampling = {}
-        card = {}
-
-        def __init__(self, base_url, *, timeout=None, slot=None, n_predict=None,
-                     temperature=None, top_p=None, top_k=None, min_p=None):
+    class Strict(ScriptedModel):
+        def __init__(self, base_url, **settings):
+            super().__init__(base_url, **settings)
             built.append(base_url)
+
+    with pytest.raises(TypeError, match="nonsense"):
+        Strict("http://127.0.0.1:1", nonsense=True)
+    Strict("http://127.0.0.1:1", timeout=1.0, n_predict=4, temperature=0.0)
+    built.clear()
 
     class Server:
         base_url = "http://127.0.0.1:1"
@@ -2588,3 +2576,136 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
                  ways=ways, kept="")
     assert len(built) == 3, "one strict client per way, none refused"
+
+
+# -- the smoke is the first step of a real run ----------------------------------------------
+
+def _watching(monkeypatch):
+    """Every client `served` builds, in the order it built them, so what each was asked
+    can be read off afterwards."""
+    import ml_stack.client
+
+    built = []
+
+    class Watched(_ServedModel):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            built.append(self)
+
+    monkeypatch.setattr(ml_stack.client, "Client", Watched)
+    return built
+
+
+def _asked_of(client) -> int:
+    """How many different questions a scripted client was asked: the first user turn of
+    each conversation it was shown, distinct."""
+    return len({next(m["content"] for m in turn if m.get("role") == "user")
+                for turn in client.seen})
+
+
+def test_a_served_sweep_smokes_every_way_first_on_the_one_load(tmp_path, monkeypatch, capsys):
+    """Unless it is itself --smoke or told --no-smoke, a sweep asks two questions of every
+    way as soon as the model is up -- kept, read back -- and only then its own questions,
+    on the same server, so the load is paid once. The smoke used to be a step in a plan,
+    and the day it was left out of one a bad way cost an 87G load."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    built = _watching(monkeypatch)
+    asked = tmp_path / "q.jsonl"
+    asked.write_text("\n".join(json.dumps({"q": q, "expect": ["topic:compiler"]})
+                               for q in ("who works on compilers?", "who else?", "and?")) + "\n")
+    common = [a for a in seen["common"] if a != "--no-smoke"]
+    common[common.index("--questions") + 1] = str(asked)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                        *common]) == 0
+    said = capsys.readouterr().out
+    assert seen["models"] == ["tiny.gguf"], "one load for the smoke and the sweep"
+    assert [_asked_of(c) for c in built] == [2, 2, 3, 3], \
+        "two questions of every way first, then the three of every way"
+    by_label: dict = {}
+    for r in runs(seen["kept"]):
+        by_label.setdefault(r["label"], []).append(len(r["rows"]))
+    assert by_label == {"tiny-plain": [2, 3], "tiny-plain-terse": [2, 3]}, "the smoke kept too"
+    assert (said.index("smoke: 2 question(s) through every way first")
+            < said.index("--- tiny-plain (smoke)") < said.index("--- tiny-plain-terse (smoke)")
+            < said.index("smoke: ok") < said.index("\n  --- tiny-plain\n"))
+
+    # --no-smoke: the questions alone
+    built.clear()
+    seen["models"].clear()
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                        *common, "--no-smoke"]) == 0
+    capsys.readouterr()
+    assert [_asked_of(c) for c in built] == [3, 3] and seen["models"] == ["tiny.gguf"]
+
+
+def test_a_smoke_that_fails_ends_the_run_with_exit_1_and_nothing_else_starts(tmp_path,
+                                                                            monkeypatch,
+                                                                            capsys):
+    """The self-check passes -- its model is scripted -- and then the real server answers
+    nothing: every smoke question fails, the run stops there with the reason, and the
+    questions that cost the GPU are never asked."""
+    import ml_stack.client
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    built = _watching(monkeypatch)
+    watched = ml_stack.client.Client
+
+    class Silent(watched):
+        def chat(self, messages, tools=None, **_):
+            raise RuntimeError("no answer from the server")
+
+    monkeypatch.setattr(ml_stack.client, "Client", Silent)
+    common = [a for a in seen["common"] if a != "--no-smoke"]
+    assert bench.main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                       *common]) == 1
+    said = capsys.readouterr()
+    assert said.out.splitlines()[0].startswith("selfcheck: ok (")
+    assert ("error: smoke failed, so the run did not start: tiny smoke: every question "
+            "failed -- RuntimeError: no answer from the server") in said.err
+    assert seen["models"] == ["tiny.gguf"] and len(built) == 2, "the smoke's clients, no more"
+    assert sorted((r["label"], len(r["rows"])) for r in runs(seen["kept"])) == [
+        ("tiny-plain", 1), ("tiny-plain-terse", 1)], "the smoke was kept; nothing else ran"
+    assert all(r["error"] for one in runs(seen["kept"]) for r in one["rows"])
+
+
+def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tmp_path,
+                                                                             monkeypatch,
+                                                                             capsys):
+    import ml_stack.graph.bench as bench
+
+    built = []
+
+    class Watched(_Scripted):
+        def __init__(self):
+            super().__init__()
+            built.append(self)
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "ask_from", lambda spec: Watched)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text("\n".join(json.dumps({"q": q, "expect": ["topic:compiler"]})
+                               for q in ("who works on compilers?", "who else?", "and?")) + "\n")
+    kept = tmp_path / "runs.ladybug"
+    common = ["--kept", str(kept), "--graph", str(graph), "--questions", str(asked),
+              "--client", "fake:client", "--store", ""]
+    assert bench._main(["run", "tried", *common]) == 0
+    said = capsys.readouterr().out
+    assert said.splitlines()[0].startswith("smoke: the same run on 2 question(s) first")
+    assert [_asked_of(c) for c in built] == [2, 3]
+    assert [len(r["rows"]) for r in runs(kept, "tried")] == [2, 3]
+    assert said.index("smoke: ok") < said.index("tried: 3 questions over")
+
+    class Silent(Watched):
+        def chat(self, messages, tools=None, **_):
+            raise RuntimeError("nothing")
+
+    monkeypatch.setattr(bench, "ask_from", lambda spec: Silent)
+    with pytest.raises(bench.SmokeFailed, match="run smoke: every question failed"):
+        bench._main(["run", "again", *common])
+    assert [len(r["rows"]) for r in runs(kept, "again")] == [2], "the smoke, and no more"
