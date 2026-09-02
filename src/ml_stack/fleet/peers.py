@@ -113,6 +113,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"    mkdir -p {p.parent} && printf '%s\\n' '{key}' > {p} "
           f"&& chmod 600 {p}")
     print()
+    print("or, on a Windows machine, in PowerShell:")
+    print()
+    print(f'    New-Item -ItemType Directory -Force "{p.parent}" | Out-Null; '
+          f'Set-Content -NoNewline -Path "{p}" -Value "{key}"')
+    print()
     print("Then start the daemon on the box with the card:")
     print()
     print("    ml-stack-traind")
@@ -143,9 +148,12 @@ def cmd_ls(args: argparse.Namespace) -> int:
         print("  - is 'ml-stack-traind' running there?")
         print("  - same LAN, and does that box hold the same cluster key?")
         return 1
-    print(f"{'NAME':<16} {'URL':<28} {'FREE':<7} {'STATE':<10} DEVICE")
+    print(f"{'NAME':<16} {'URL':<28} {'FREE':<7} {'STATE':<10} {'ROOM':<7} DEVICE")
     for p in peers:
-        state = "busy" if p.free == 0 else "idle"
+        # `measuring` before busy: a bench holds the GPU as surely as a job does, and a
+        # sweep dispatched over the fleet must not land a second model on it
+        state = ("measuring" if p.device.get("measuring")
+                 else "busy" if p.free == 0 else "idle")
         if p.queued:
             state += f" +{p.queued}"
         slots = f"{p.free}/{p.slots}"
@@ -155,7 +163,11 @@ def cmd_ls(args: argparse.Namespace) -> int:
         vram = p.device.get("vram_free_gb")
         if vram is not None:
             gpu += f"  {vram}/{p.device.get('vram_total_gb', '?')} GB free"
-        print(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {gpu}")
+        # what a model may use there -- `hub.room()`, not free memory -- which is what
+        # `fleet.bench.plan` fits each model against
+        room = p.device.get("room_bytes")
+        shown = f"{int(room) / 2**30:.0f}G" if room else "?"
+        print(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {shown:<7} {gpu}")
     return 0
 
 

@@ -201,7 +201,47 @@ def look() -> list[Finding]:
                            note="" if mine else "nothing found; ml-stack-models find <words>"))
     except Exception:  # noqa: BLE001
         pass
+
+    from ml_stack.platform import is_windows
+
+    if is_windows():
+        out.append(_firewall_finding())
     return out
+
+
+def _firewall_rule_present(name: str) -> bool:
+    """Whether Windows Defender Firewall has an inbound rule by this name. ``netsh`` exits
+    1 and says 'No rules match' when it does not; anything else is read as absent too,
+    since a rule that cannot be confirmed is not one to rely on."""
+    try:
+        got = subprocess.run(
+            ["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"],
+            capture_output=True, text=True, timeout=20)
+    except Exception:  # noqa: BLE001
+        return False
+    return got.returncode == 0 and "No rules match" not in (got.stdout or "")
+
+
+def _firewall_finding() -> Finding:
+    """Windows only: the daemon is unreachable and its beacons unheard until the firewall
+    lets TCP 8770 and UDP 8771 in. The fix is one line for an administrator's prompt --
+    the one `ml-stack-setup --yes` cannot run for you from an ordinary one."""
+    from ml_stack.fleet.discovery import windows_firewall_line, windows_firewall_rules
+
+    rules = windows_firewall_rules()
+    present = {name: _firewall_rule_present(name) for name, _ in rules}
+    missing = [name for name, ok in present.items() if not ok]
+    return Finding(
+        name="firewall",
+        good=not missing,
+        said=("inbound rules present: " + ", ".join(present)) if not missing
+             else "no inbound rule for " + ", ".join(missing),
+        fix="" if not missing else windows_firewall_line(),
+        root=True,
+        note="" if not missing else
+             "Windows blocks inbound TCP 8770 (the daemon) and UDP 8771 (its beacons) "
+             "by default, so other machines see nothing in 'ml-stack-peers ls'. Run the "
+             "line in a prompt opened as administrator")
 
 
 def _lacking_flags(binary: str) -> list[tuple[str, str]]:

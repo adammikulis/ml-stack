@@ -126,7 +126,10 @@ class TestChangingTheAnswer:
         auto.install("login", log_dir=tmp_path)
 
         assert [c for c in ran if "/Delete" in c], ran
-        assert (tmp_path / "start.cmd").exists()
+        # Logon is a Scheduled Task too now (tests/test_windows.py has the shape of it);
+        # the Startup-folder .cmd is only the fallback when schtasks refuses.
+        assert [c for c in ran if "/Create" in c and "ONLOGON" in c], ran
+        assert not (tmp_path / "start.cmd").exists()
 
     def test_a_scheduled_task_is_visible_as_starting_at_boot(self, windows):
         auto, _ = windows

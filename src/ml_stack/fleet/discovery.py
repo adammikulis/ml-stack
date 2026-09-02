@@ -20,11 +20,17 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import write_json
+from ml_stack.platform import private_file
 
 #: Link-local scope in the administratively-scoped block. TTL 1 keeps it there.
 DEFAULT_GROUP = "239.255.77.70"
-#: One above traind's HTTP port, so a single firewall rule covers both.
+#: One above traind's HTTP port. UDP, where the daemon's own port is TCP -- so a firewall
+#: that filters inbound (Windows Defender does, by default, on every profile) needs two
+#: rules: TCP 8770 for the daemon and UDP 8771 for the beacons. `windows_firewall_rules`.
 DEFAULT_PORT = 8771
+#: traind's own port, repeated here so the firewall rule can name it without importing
+#: the daemon.
+DEFAULT_HTTP_PORT = 8770
 #: What a cluster is called when nobody names one. Two machines that type the same
 #: passphrase derive the same key only if they also agree on this.
 DEFAULT_CLUSTER = "ml-stack"
@@ -199,7 +205,7 @@ def _write_memberships(rows: list[Membership],
     """Record the list this machine belongs to."""
     listed = clusters_path(path)
     write_json(listed, [{"group": m.group, "key": m.key.decode()} for m in rows])
-    listed.chmod(0o600)
+    private_file(listed)
 
 
 def join(passphrase: str, *, group: str = "", path: Path | str | None = None
@@ -328,6 +334,39 @@ def _destinations(group: str, port: int) -> list[tuple[str, int]]:
     return [(group, port), ("255.255.255.255", port), ("127.0.0.1", port)]
 
 
+# -- what a firewall has to let in ---------------------------------------
+FIREWALL_RULE_HTTP = "ml-stack traind"
+FIREWALL_RULE_DISCOVERY = "ml-stack discovery"
+
+
+def windows_firewall_rules(http_port: int = DEFAULT_HTTP_PORT,
+                           port: int | None = None) -> list[tuple[str, str]]:
+    """The two inbound rules Windows Defender Firewall needs, as ``(name, netsh line)``.
+
+    Beacons are UDP to the multicast group, to the broadcast address and to loopback on
+    ``port``; peers then talk to the daemon over TCP on ``http_port``. Windows blocks
+    inbound on both by default -- on the Private profile too, unless the first-run prompt
+    was answered for this exact executable, which a console script's ``python.exe`` never
+    is -- so a daemon there is invisible to ``ml-stack-peers ls`` until these exist. Each
+    line needs an administrator's shell.
+    """
+    port = port if port is not None else default_port()
+    return [
+        (FIREWALL_RULE_HTTP,
+         f'netsh advfirewall firewall add rule name="{FIREWALL_RULE_HTTP}" dir=in '
+         f'action=allow protocol=TCP localport={http_port}'),
+        (FIREWALL_RULE_DISCOVERY,
+         f'netsh advfirewall firewall add rule name="{FIREWALL_RULE_DISCOVERY}" dir=in '
+         f'action=allow protocol=UDP localport={port}'),
+    ]
+
+
+def windows_firewall_line(http_port: int = DEFAULT_HTTP_PORT,
+                          port: int | None = None) -> str:
+    """Both rules as one line a person can paste into an administrator's prompt."""
+    return " && ".join(line for _, line in windows_firewall_rules(http_port, port))
+
+
 def _socket(*, broadcast: bool = False, bind: tuple[str, int] | None = None,
             group: str | None = None) -> socket.socket:
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -388,6 +427,11 @@ class Advertiser:
             raise DiscoveryError("advertiser did not bind in time")
         if self._error is not None:
             raise DiscoveryError(f"advertiser failed to bind: {self._error}")
+        # Say so at once. The loop's first unsolicited beacon is `interval_s` away, and a
+        # daemon that has just come up should appear in the next `ml-stack-peers ls`
+        # rather than ten seconds later.
+        with contextlib.suppress(OSError):
+            self.announce()
         return self
 
     def stop(self) -> None:

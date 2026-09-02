@@ -72,6 +72,34 @@ same daemon, serving the interface to a browser on your network.
 Do the same on every machine you want to train with, typing the same passphrase. They
 find each other on their own.
 
+**On Windows** the same daemon runs, with the handful of things Windows does differently
+decided in one place (`ml_stack/platform.py`): a job gets its own process group and is
+stopped with a `CTRL_BREAK_EVENT` it can catch as `SIGBREAK`, the one-runner lock is
+`msvcrt.locking` where POSIX has `flock`, the cluster key is made private with `icacls`
+where `chmod 600` would only flip the read-only bit, and `ml-stack-traind --persist`
+registers a Scheduled Task at logon (`com.ml-stack.traind.login`) the way `ml-stack-serve
+build --persist` registers its weekly refresh. Two things a Windows machine needs that the
+others do not: llama.cpp comes from `ml-stack-serve build --from release` (a release zip,
+since most Windows installs have no compiler), and **Windows Defender Firewall blocks the
+daemon's TCP 8770 and its UDP 8771 beacons inbound by default**, so `ml-stack-peers ls` on
+another machine sees nothing until, in a prompt opened as administrator:
+
+```
+netsh advfirewall firewall add rule name="ml-stack traind" dir=in action=allow protocol=TCP localport=8770 && netsh advfirewall firewall add rule name="ml-stack discovery" dir=in action=allow protocol=UDP localport=8771
+```
+
+`ml-stack-setup` prints that line as a finding until both rules exist. The first time on a
+new Windows machine, in this order, each of which should say what follows it:
+`pip install -e .` (an editable install, so `ml-stack-traind` is on PATH);
+`ml-stack-setup` (the firewall finding, `!` until the rules are added, then `ok`);
+`ml-stack-doctor` (the checkout and hooks);
+`ml-stack-serve build --from release` ("current -> ...\builds\bNNNN" after "verifying");
+`ml-stack-traind --persist` ("installed to start at login", then a `traind.log` under
+`~\.ml-stack` that begins `ml-stack traind on http://0.0.0.0:8770`);
+`ml-stack-peers ls` from another machine (the Windows box listed with its GPU). Everything
+Windows-specific here was written against a faked `platform.system()` on a Mac -- the
+Windows calls themselves run for the first time when that list does.
+
 **If you write Python**:
 
 ```
@@ -134,6 +162,23 @@ rtx.pull("out/lm/step_000010000/model.safetensors", "local/model.safetensors")
 ```
 
 Uploads and downloads resume and are verified by digest.
+
+A model sweep goes over the fleet the same way. `ml_stack.fleet.bench` is the fleet side
+of `ml-stack-bench sweep --fleet`: `plan(models, peers)` sends each model, largest first,
+to the idle peer with the most room for it -- `room_bytes` is what the daemon announces,
+`hub.room()` rather than free memory -- spreading models over machines rather than
+stacking them, and names every model that fits nowhere and why on each peer. `jobs_from`
+turns the plan into one `Job` per peer (the sweep's line with only that peer's `--serve`s),
+`dispatch` posts them, `wait` polls until each is `done` or `failed` and prints the log's
+tail, and `gather` brings every peer's runs home into one store as `bench:` docs with
+`server["host"]` and `server["commit"]` set, never overwriting and skipping what is already
+there; `import_runs(FILE.json, into, host=...)` does the same by hand from a
+`show --export` file for a peer with no daemon. A daemon refuses a bench job (409, with
+`refused` saying which) when its checkout's commit is not the dispatcher's, when its
+`measuring.lock` is held or a bench of its own is still running, or when a model's
+estimated bytes exceed its room; otherwise it runs `ml-stack-bench ... --detach` on itself
+and adopts the pid into its job list, so `ml-stack-peers ls` shows it `measuring` and no
+training job starts beside it. The dispatcher counts as a peer through `here()`.
 
 ## Training
 
@@ -429,7 +474,56 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions |
+| `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, and its commit; `leave` undoes it |
+| `ml-stack-mcp` | the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
+
+## Joining the fleet
+
+Three lines on a new machine:
+
+```
+pip install ml-stack
+ml-stack-fleet join --persist
+ml-stack-fleet status
+```
+
+`join` runs the checks serving depends on (the memory a model may use, a llama-server --
+downloaded if there is none), asks for the passphrase every machine shares (or takes
+`--passphrase WORDS`), starts the daemon, installs it at logon with `--persist`, announces on
+the discovery port, and prints the peers that answered. `status` is that listing on its own:
+
+```
+NAME             URL                          ROOM             STATE        COMMIT     SERVING
+studio           http://192.168.2.44:8770     96.0/128.0 GB    idle         0ce5bc5    quince-2b.gguf:8099
+larch            http://192.168.2.27:8770     20.5/24.0 GB     measuring    0ce5bc5    -
+```
+
+Discovery is multicast on UDP port **8771** (`239.255.77.70`, TTL 1 -- it never leaves the
+segment), one above the daemon's HTTP port 8770 so one firewall rule covers both;
+`$ML_STACK_DISCOVERY_PORT` moves it. Beacons are signed with the key the passphrase derives,
+so a machine that does not hold it hears nothing and is heard by nobody. There is one
+discovery mechanism: `ml-stack-peers ls`, the app's Cluster view and `ml-stack-fleet status`
+all read the same beacons.
+
+The app's Cluster view has the same Join button, and a "Run across the fleet" form that
+builds `ml-stack-bench sweep --fleet --serve MODEL ...` from the models the peers hold,
+starts it detached, and shows `status` and `history` beside it.
+
+**For an agent**, `ml-stack-mcp` serves the same functions as MCP tools over stdio. In
+Claude Code:
+
+```
+claude mcp add ml-stack -- ml-stack-mcp
+```
+
+or in a project's `.mcp.json`: `{"mcpServers": {"ml-stack": {"command": "ml-stack-mcp"}}}`.
+The tools are `serve_status`, `serve_up`, `serve_down`, `models_find`, `models_files`,
+`models_fetch`, `bench_run`, `bench_status`, `bench_history`, `bench_show`, `fleet_peers`,
+`fleet_join`, `world_make`, `setup_look` and `doctor`; a model load, a download and a
+measurement never block the call -- each returns a log path and a pid, and `bench_status`
+follows it. With `pip install 'ml-stack[mcp]'` the SDK's server is used; without it the
+command speaks the protocol itself.
 
 ## Finding a model
 

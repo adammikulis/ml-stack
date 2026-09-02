@@ -169,10 +169,32 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
 
 
 # -- Windows -------------------------------------------------------------
+# Two Scheduled Tasks, the way `ml-stack-serve build --persist` keeps llama.cpp fresh:
+# LABEL at boot (as SYSTEM, needs an administrator once) and LOGIN_TASK at this user's
+# logon (needs nothing). Both run a .cmd wrapper rather than the daemon directly, because a
+# task's /TR cannot redirect output and a daemon with no log is a daemon nobody can debug.
+# The Startup-folder .cmd is what older installs used for logon; it is still removed, and
+# still the fallback when schtasks refuses.
+LOGIN_TASK = f"{LABEL}.login"
+
+
 def _windows_startup() -> Path:
     return (Path(os.environ.get("APPDATA", Path.home()))
             / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
             / f"{SERVICE}.cmd")
+
+
+def _windows_wrapper(log_dir: Path) -> Path:
+    return log_dir / f"{SERVICE}.cmd"
+
+
+def _windows_wrapper_body(argv: list[str], log_dir: Path) -> str:
+    quoted = _quote(argv)
+    return f'@echo off\r\n{quoted} >> "{log_dir / "traind.log"}" 2>&1\r\n'
+
+
+def _quote(argv: list[str]) -> str:
+    return " ".join(f'"{a}"' if " " in a else a for a in argv)
 
 
 def _windows_task() -> str:
@@ -180,8 +202,17 @@ def _windows_task() -> str:
 
 
 def _windows_task_exists() -> bool:
+    """Whether the boot task is registered."""
+    return _windows_task_named(LABEL)
+
+
+def _windows_login_task_exists() -> bool:
+    return _windows_task_named(LOGIN_TASK)
+
+
+def _windows_task_named(name: str) -> bool:
     try:
-        done = subprocess.run(["schtasks", "/Query", "/TN", LABEL],
+        done = subprocess.run(["schtasks", "/Query", "/TN", name],
                               capture_output=True, text=True, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return False
@@ -189,7 +220,7 @@ def _windows_task_exists() -> bool:
 
 
 def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
-    quoted = " ".join(f'"{a}"' if " " in a else a for a in argv)
+    quoted = _quote(argv)
     if mode == "boot":
         command = (f'schtasks /Create /F /TN "{LABEL}" /TR "{quoted}" '
                    f'/SC ONSTART /RL HIGHEST /RU SYSTEM')
@@ -204,10 +235,34 @@ def _windows_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
             pass
         return Autostart(mode, installed=False, command=command,
                          note="Permission was not given, so it will not start at boot.")
+
+    wrapper = _windows_wrapper(log_dir)
+    wrapper.parent.mkdir(parents=True, exist_ok=True)
+    wrapper.write_text(_windows_wrapper_body(argv, log_dir))
+    create = ["schtasks", "/Create", "/F", "/TN", LOGIN_TASK, "/TR", f'"{wrapper}"',
+              "/SC", "ONLOGON", "/RL", "LIMITED"]
+    try:
+        done = subprocess.run(create, capture_output=True, text=True, timeout=60)
+        refused = "" if done.returncode == 0 else (
+            (done.stderr or done.stdout or "").strip() or "schtasks refused the task")
+    except (OSError, subprocess.SubprocessError) as exc:
+        refused = str(exc)
+    if not refused:
+        # Start it now as well: a logon trigger fires at the next logon, and "starts when
+        # you log in" that does nothing until tomorrow reads as broken.
+        subprocess.run(["schtasks", "/Run", "/TN", LOGIN_TASK],
+                       capture_output=True, check=False)
+        return Autostart(mode, installed=True, path=wrapper,
+                         note=f"scheduled task {LOGIN_TASK!r} runs it at logon; "
+                              f"log at {log_dir / 'traind.log'}")
+    # The Startup folder needs no schtasks and no permission; it starts the daemon in a
+    # visible console window, which is the price.
     path = _windows_startup()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f'@echo off\r\nstart "" {quoted} >> "{log_dir / "traind.log"}" 2>&1\r\n')
-    return Autostart(mode, installed=True, path=path)
+    path.write_text(_windows_wrapper_body(argv, log_dir))
+    return Autostart(mode, installed=True, path=path,
+                     note=f"schtasks refused ({refused}); placed in the Startup folder "
+                          "instead, which starts it in a console window at logon")
 
 
 # -- the interface -------------------------------------------------------
@@ -254,7 +309,12 @@ def uninstall(mode: str = "") -> list[Path]:
     if sys.platform == "darwin":
         candidates = [_mac_path("login"), _mac_path("boot")]
     elif sys.platform == "win32":
-        candidates = [_windows_startup()]
+        candidates = [_windows_startup(), _windows_wrapper(Path.home() / ".ml-stack")]
+        if _windows_login_task_exists():
+            subprocess.run(["schtasks", "/End", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
+            subprocess.run(["schtasks", "/Delete", "/F", "/TN", LOGIN_TASK],
+                           capture_output=True, check=False)
         if _windows_task_exists():
             subprocess.run(["schtasks", "/Delete", "/F", "/TN", LABEL],
                            capture_output=True, check=False)
@@ -302,7 +362,11 @@ def status() -> dict[str, object]:
         if path.exists():
             out["mode"] = mode
             out["paths"].append(str(path))       # type: ignore[union-attr]
-    if sys.platform == "win32" and _windows_task_exists():
-        out["mode"] = "boot"
-        out["paths"].append(LABEL)               # type: ignore[union-attr]
+    if sys.platform == "win32":
+        if _windows_login_task_exists():
+            out["mode"] = "login"
+            out["paths"].append(LOGIN_TASK)      # type: ignore[union-attr]
+        if _windows_task_exists():
+            out["mode"] = "boot"
+            out["paths"].append(LABEL)           # type: ignore[union-attr]
     return out
