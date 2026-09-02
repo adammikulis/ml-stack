@@ -416,9 +416,10 @@ def _parser() -> argparse.ArgumentParser:
                          help="ask the same served model another way as well. Whether the "
                               "tools are described briefly, what sampling is used, "
                               "whether look_up says why it matched (rich), and whether "
-                              "show is told to light only what answers the question and "
-                              "capped at six (tight) are questions about the asking, not "
-                              "the serving, so measuring five of them costs one model load "
+                              "show is told to name what the answer is about with no cap "
+                              "(loose -- the old asking, kept as a control against the "
+                              "tight one every run uses now) are questions about the "
+                              "asking, not the serving, so five of them cost one load "
                               "rather than five. Repeatable")
 
     for one in (run, sweep, heads, conc):

@@ -535,7 +535,7 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
            embed_url: str = "", embed_model: str = "", terse: bool = False,
            margin: float = MARGIN, rich: bool = False,
-           tight: bool = False) -> Callable[..., Any]:
+           tight: bool = True) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -547,9 +547,11 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     had no store on this path and every ranking it wrote measured a look_up nobody ran.
 
     ``rich`` asks with `converse(..., rich=True)`: look_up results carry a score and why
-    they matched, and a topic hit brings the people joined to it. ``tight`` asks with
-    `converse(..., tight=True)`: show is told to light only what answers the question,
-    and what is lit is capped.
+    they matched, and a topic hit brings the people joined to it. ``tight`` is the asking,
+    as it is in `converse`: show is told to light only what answers the question, and what
+    is lit is capped. ``tight=False`` is the loose asking the ranking runs used, kept as a
+    control, and it is passed on rather than left out -- left out it would be the default,
+    which is now tight, and `--also loose` would have measured tight twice.
 
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
     which one it measured, and takes ``turns=`` -- the earlier turns of a conversation, as
@@ -588,8 +590,7 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
             {"tools": tools_for(graph, terse=True, finder=finder, tight=tight)} if terse else {})
         if rich:
             extra["rich"] = True
-        if tight:
-            extra["tight"] = True
+        extra["tight"] = bool(tight)
         return converse(question, graph, client, opening=opening, finder=finder,
                         turns=list(turns), **extra)
 

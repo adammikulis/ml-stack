@@ -57,11 +57,11 @@ def test_the_scripted_model_looks_up_once_then_answers():
 
 def test_a_four_way_sweep_passes_and_every_way_of_both_halves_is_kept():
     said = selfcheck(["sweep", "--serve", "tiny.gguf", "--also", "terse", "--also", "card",
-                      "--also", "rich", "--also", "tight"])
+                      "--also", "rich", "--also", "loose"])
     assert said.startswith("sweep: ") and "read back" in said
     labels = said.split(" -- ")[1].split(", ")
     assert sorted(labels) == sorted(f"tiny-{half}{way}" for half in ("plain", "shortlist")
-                                    for way in ("", "-terse", "-card", "-rich", "-tight"))
+                                    for way in ("", "-terse", "-card", "-rich", "-loose"))
 
 
 def test_drafts_passes_with_a_head_per_n_max_and_the_baseline():
@@ -108,7 +108,7 @@ def test_the_self_check_is_fast_enough_to_run_every_time():
 
     began = time.monotonic()
     selfcheck(["sweep", "--serve", "tiny.gguf", "--also", "terse", "--also", "card",
-               "--also", "rich", "--also", "tight"])
+               "--also", "rich", "--also", "loose"])
     assert time.monotonic() - began < 10.0
 
 

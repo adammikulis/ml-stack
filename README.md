@@ -965,6 +965,14 @@ largest effect here: E4B 58% → 33%, E2B 41% → 29%, precision halving while r
 The same shortlist does nothing for the 120B either way. The idea is sound and the machinery
 is worth keeping; what is missing is teaching a model that a shortlist is somewhere to look.
 
+**The table above was measured with the loose asking, which is no longer how anything
+asks.** Every run in it let `show` name what the answer was about, uncapped — what
+`tight=False` still does, and what `--also loose` now measures as the control. Telling
+`show` instead to light only the entries that answer the question moved Qwen3.8-Flash-Next
+from 43% to 83% precision over the invented community (2026-09-02) with nothing about the
+searching changed, so tight is what `converse` does when it is asked nothing. Re-measure
+before reading a row of that table as current.
+
 **What the tool descriptions changed was real.** E4B answered 17% before they carried a
 worked call and 70% recall after, on the same weights and the same questions. Six of its
 nine failures had been the identical shape: two model calls, a hundred characters of prose,

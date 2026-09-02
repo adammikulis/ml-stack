@@ -14,10 +14,18 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from ml_stack.graph.ask import TIGHT_SYSTEM_SENTENCE
 from ml_stack.world import Message, World
 from ml_stack.world.simulate import (LONGEST, SHORTEST, WORK_END, WORK_START, model_writer, run,
                                      simulate, template_writer)
 from ml_stack.world.story import ARCS, OUTCOMES, calendar, groups
+
+
+def spoken_as(persona: str) -> str:
+    """A persona's own system prompt as `converse` sends it -- tight, which is the asking:
+    the sentence about naming only what a tool returned rides along, so a person in an
+    invented world does not invent a name on top of it."""
+    return persona + " " + TIGHT_SYSTEM_SENTENCE
 
 PEOPLE = {
     "person:ada": ("Ada Lovelace", "eng", "place:turin", "terse and dry"),
@@ -269,12 +277,13 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
     context = {"thread": "msg:000000", "arc_key": "", "kind": "incident", "org_kind": "company",
                "about": "the outage in Lantern", "said": [("person:mary", "It is down.")],
                "labels": {"person:mary": "Mary Somerville"}, "speaker": "person:ada",
-               "others": ["person:mary"], "facts": {}}
+               "others": ["person:mary"], "facts": {"project_id": "project:lantern"}}
     text = writer(persona, "Reply in character.", context)
     # planning is cut off the front; what is left is the message
     assert text == "Lantern is on track from my side, take 1."
     first = model.seen[0]
-    assert first[0] == {"role": "system", "content": world.personas["person:ada"]["system"]}
+    assert first[0] == {"role": "system",
+                        "content": spoken_as(world.personas["person:ada"]["system"])}
     assert {"role": "user", "content": "Mary Somerville: It is down."} in first
     assert first[-1]["content"] == "Reply in character."
     # what the thread is about was read out first, from the subgraph Ada knows
@@ -283,7 +292,9 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
     assert "Bea Marlow" in handed                # engineering is in Ada's subgraph
     assert "Mary Somerville" not in handed       # support is not
     assert "robotics" not in handed              # nor an edge to an entry she does not know
-    # two calls a message: the answer, and what it was about -- kept for the memory
+    # two calls a message: the answer, and what it was about -- kept for the memory. The
+    # asking is tight, and what a message is about survives it because the thread's own
+    # subject was handed over at the start: handed over counts as known, and a guess does not.
     assert writer.calls == 2 and writer.messages == 1
     assert writer.last.show == ["project:lantern"]
     assert [t["function"]["name"] for t in model.seen[1] if False] == []
@@ -321,7 +332,7 @@ def test_what_a_persona_said_last_time_in_an_arc_is_a_turn_when_it_speaks_again(
         assert len(model.seen) == 2 * len(messages)
         first_of_day1 = model.seen[2 * len(day0)]
         speaker = day1[0].sender
-        assert first_of_day1[0]["content"] == world.personas[speaker]["system"]
+        assert first_of_day1[0]["content"] == spoken_as(world.personas[speaker]["system"])
         turns = first_of_day1[1:1 + len(day0)]
         assert [m["content"].split(": ", 1)[1] for m in turns] == [m.text for m in day0]
         assert [m["role"] for m in turns] == [

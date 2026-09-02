@@ -323,12 +323,14 @@ RICH_TERSE = _rich(TERSE)
 # community, 34 questions at 32k: Qwen3.8-Flash-Next reached 92% recall and 44% precision,
 # lighting and naming entries it had looked at on the way, and named 70 entries its tools
 # never found, read or showed. A good answer lights about two. E4B, at 60% recall, was at
-# 47% precision -- so the words about `show` are what this variant changes, and nothing
-# about the searching.
+# 47% precision -- so the words about `show` are all this changes, and nothing about the
+# searching.
 #
-# Behind `tight=True`, on copies, for the same reason as RICH: the base descriptions, the
-# nudge and SYSTEM are what the answer cache fingerprints and what the ranking measured,
-# so with the flag off they stay byte for byte as they were.
+# Said on copies, for the same reason as RICH: the base descriptions, the nudge and SYSTEM
+# are what the answer cache fingerprints and what the ranking measured, so under
+# `tight=False` -- the loose asking, kept as the control -- they stay byte for byte as they
+# were. Tight is what everything asks otherwise (Adam, 2026-09-02: "let's not ever use
+# plain then").
 TIGHT_SENTENCE = ("Select only the entries that answer the question — the people or things "
                   "the asker would act on — never the ones you looked at on the way, and "
                   "never every name in a quote. Most questions have one to three; a question "
@@ -343,7 +345,8 @@ TIGHT_SHOW = ("Select the entries your answer is about — the reader acts on th
 TIGHT_SHOW_TERSE = ("Select the entries your answer is about. Call it once, last. "
                     + TIGHT_SENTENCE)
 # What the model is asked when it answered without saying what to light. The first is the
-# text the ranking runs were measured with, and stays as it is; the second is the tight one.
+# text the ranking runs were measured with and what `tight=False` still sends, so it stays
+# as it is; the second is the one every other run gets.
 SHOW_NUDGE = ("Now call show once with the ids of the entries your answer is about — everyone "
               "and everything you named in it, including any you named from a quote. Nothing "
               "you opened and did not write about.")
@@ -351,8 +354,9 @@ TIGHT_NUDGE = ("Now call show once with only the entries that answer the questio
                "the asker would act on. Not what you read on the way, not every name you "
                "mentioned. Usually one to three; all of them for a which-of-a-kind question, "
                "and the whole chain for a how-are-they-connected question.")
-# Added to SYSTEM in the tight variant only: the `made` case is a name in the prose that no
-# tool ever returned, and the remedy is to say so rather than guess.
+# Added to SYSTEM by the tight asking, and so absent only under `tight=False`: the `made`
+# case is a name in the prose that no tool ever returned, and the remedy is to say so rather
+# than guess.
 # The base system prompt tells the model every name it wrote belongs in show; tight says the
 # opposite, so its copy of the prompt swaps that paragraph rather than arguing with it.
 SHOW_PARAGRAPH = ("Every one you named belongs in it — including any you named from a "
@@ -698,7 +702,7 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False, rich: bool = False,
-              tight: bool = False) -> list[tuple[dict[str, Any], Any]]:
+              tight: bool = True) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
@@ -710,9 +714,10 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     nothing observable changes -- the same descriptions byte for byte, the same result
     shape -- so a sweep of the current behaviour stays comparable with one before it.
 
-    ``tight`` is the same kind of flag about ``show``: its description, on a copy, says to
-    light only what answers the question -- see `TIGHT_SHOW`. The rest of what tight does
-    (the nudge, the system sentence, the cap on what is lit) is `converse`'s.
+    ``tight`` is how these are asked for -- on by default: show's description, on a copy,
+    says to light only what answers the question, see `TIGHT_SHOW`. The rest of what tight
+    does (the nudge, the system sentence, the cap on what is lit) is `converse`'s.
+    ``tight=False`` is the loose asking kept as a control: the sets themselves, unchanged.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -763,7 +768,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
              opening: Sequence[str] = (), rich: bool = False,
-             tight: bool = False, summary: Any = None,
+             tight: bool = True, summary: Any = None,
              recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
@@ -775,12 +780,14 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     by label and id, and enter ``ids`` only if a tool call touches them. ``rich`` is
     ``tools_for``'s: look_up hits that say why they matched and who is joined to them.
 
-    ``tight`` is for a model that finds nearly everything and then lights far more than
-    the answer. `show`'s description and the closing nudge say to light only what answers
-    the question, the system prompt says to name only what was read, ``show`` is capped at
-    `LIT_TIGHT` -- the ids the prose names kept first -- and an id the prose names but
-    look_at never read is dropped from it. Each of those is a line in ``steps``. Off,
-    nothing observable changes, byte for byte, for the same reason as ``rich``.
+    ``tight`` is the asking, and on by default, because a model that finds nearly
+    everything then lights far more than the answer. `show`'s description and the closing
+    nudge say to light only what answers the question, the system prompt says to name only
+    what a tool returned, ``show`` is capped at `LIT_TIGHT` -- the ids the prose names kept
+    first -- and an id the prose names that no tool returned is dropped from it. Each of
+    those is a line in ``steps``. ``tight=False`` is the loose asking the ranking runs and
+    the answer cache were fingerprinted on, kept as a control: with it, nothing observable
+    changes from what this did before, byte for byte.
 
     ``turns`` is the window: the last few turns, chosen by recency, sent whole and in
     order. ``summary`` -- a thread's rolling summary, as a ``Turn``, a mapping with
@@ -804,7 +811,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
                     opening: Sequence[str] = (), rich: bool = False,
-                    tight: bool = False, summary: Any = None,
+                    tight: bool = True, summary: Any = None,
                     recalled: Sequence[Any] = ()) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
@@ -929,7 +936,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              rich: bool = False, tight: bool = False, summary: Any = None,
+              rich: bool = False, tight: bool = True, summary: Any = None,
               recalled: Sequence[Any] = ()) -> Answer:
     given = tools is not None
     if tools is None:

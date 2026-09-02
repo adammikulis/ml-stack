@@ -274,7 +274,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     # with it (measured 2026-09-02); `rich` would have too, on the first
                     # real run
                     richly = bool(asked.pop("rich", False))
-                    tightly = bool(asked.pop("tight", False))
+                    # tight is how everything asks now (Adam, 2026-09-02: "let's not
+                    # ever use plain then"); `loose` is the bench's control
+                    tightly = bool(asked.pop("tight", True))
                     client = Client(server.base_url,
                                     **{"timeout": per_question, **making, **asked})
                     if wants_card:

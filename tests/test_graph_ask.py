@@ -672,8 +672,13 @@ def test_the_tools_can_be_said_briefly_or_at_length():
     graph = {"nodes": [], "edges": [], "messages": {}}
     assert [s["function"]["name"] for s, _fn in tools_for(graph, terse=True)] \
         == [s["function"]["name"] for s, _fn in tools_for(graph)]
-    assert tools_for(graph, terse=True)[0][0] is TERSE[0]
-    assert tools_for(graph)[0][0] is TOOLS[0]
+    # tight is the asking now and hands out copies; loose -- tight=False, the control --
+    # is the sets themselves. Either way look_up is word for word its own: tight changes
+    # what show says and nothing else.
+    assert tools_for(graph, terse=True, tight=False)[0][0] is TERSE[0]
+    assert tools_for(graph, tight=False)[0][0] is TOOLS[0]
+    assert tools_for(graph, terse=True)[0][0] == TERSE[0]
+    assert tools_for(graph)[0][0] == TOOLS[0]
 
 
 def test_a_turn_stops_as_soon_as_it_has_said_what_to_light():
@@ -1034,14 +1039,16 @@ def _staffing_graph(people=10):
 
 
 def test_with_rich_off_look_up_returns_exactly_what_it_always_did():
-    """The comparability guarantee: a sweep of the current behaviour is about to run, and
-    the answer cache fingerprints the tool descriptions, so the flag off is invisible --
-    the same schema object, the same keys in the JSON the model reads."""
+    """The comparability guarantee: the answer cache fingerprints the tool descriptions, so
+    with rich off look_up is invisible -- the same schema object under the loose asking
+    (tight=False, the control), word for word the same under the tight default, which
+    touches show alone, and the same keys in the JSON the model reads."""
     import json
 
     from ml_stack.graph.ask import RICH_SENTENCE, TOOLS
 
-    assert tools_for(GRAPH)[0][0] is TOOLS[0]
+    assert tools_for(GRAPH, tight=False)[0][0] is TOOLS[0]
+    assert tools_for(GRAPH)[0][0] == TOOLS[0]
     assert RICH_SENTENCE not in TOOLS[0]["function"]["description"]
     model = ScriptedModel([call("look_up", text="compilers")])
     converse("?", GRAPH, model)
@@ -1171,10 +1178,13 @@ class SayingModel(ScriptedModel):
         return reply
 
 
-def test_with_tight_off_nothing_observable_changes():
-    """The ranking runs and the answer cache both fingerprint these words, so the flag off
-    is the same schemas (not copies), the same nudge and the same system prompt."""
-    from ml_stack.graph.ask import SYSTEM, TERSE, TIGHT_SENTENCE, TOOLS, tools_for
+def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
+    """Tight is how everything asks now. `tight=False` is the control: the asking the
+    ranking runs and the answer cache fingerprinted, so it is still the same schemas (not
+    copies), the same nudge and the same system prompt, byte for byte."""
+    from ml_stack.graph.ask import (SHOW_PARAGRAPH, SYSTEM, TERSE, TIGHT_NUDGE,
+                                    TIGHT_SENTENCE, TIGHT_SHOW, TIGHT_SHOW_PARAGRAPH,
+                                    TIGHT_SYSTEM_SENTENCE, TOOLS, tools_for)
 
     for got, base in zip(tools_for(GRAPH, tight=False), TOOLS, strict=True):
         assert got[0] is base
@@ -1183,16 +1193,25 @@ def test_with_tight_off_nothing_observable_changes():
     assert TIGHT_SENTENCE not in TOOLS[-1]["function"]["description"]
     assert TIGHT_SENTENCE not in TERSE[-1]["function"]["description"]
 
-    model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
-    out = converse("who?", GRAPH, model)
+    loose = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
+    out = converse("who?", GRAPH, loose, tight=False)
     assert out.read == ["person:ada"] and not out.show
-    assert model.seen[0][0]["content"] == SYSTEM
-    assert model.seen[-1][-1]["content"] == (
+    assert loose.seen[0][0]["content"] == SYSTEM
+    assert loose.seen[-1][-1]["content"] == (
         "Now call show once with the ids of the entries your answer is about — everyone and "
         "everything you named in it, including any you named from a quote. Nothing you "
         "opened and did not write about.")
-    assert model.offered[-1][0]["function"]["description"] \
+    assert loose.offered[-1][0]["function"]["description"] \
         == TOOLS[-1]["function"]["description"]
+
+    # and the default, asked nothing at all, is the tight asking: the tight system prompt,
+    # the tight nudge, the tight show
+    model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
+    converse("who?", GRAPH, model)
+    assert model.seen[0][0]["content"] == (
+        SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE)
+    assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
+    assert model.offered[-1][0]["function"]["description"] == TIGHT_SHOW
 
 
 def test_tight_changes_what_show_says_on_a_copy_of_every_set():
@@ -1232,9 +1251,11 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     assert model.offered[-1] == [next(s for s, _ in tools_for(GRAPH, tight=True)
                                       if s["function"]["name"] == "show")]
     assert model.offered[-1][0]["function"]["description"] == TIGHT_SHOW
-    # a caller's own tools are told too: the terse set handed in gets the terse tight show
+    # a caller's own tools are told too: the terse set handed in -- built loose, as a
+    # caller assembling its own set has it -- gets the terse tight show
     handed = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
-    converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True), tight=True)
+    converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True, tight=False),
+             tight=True)
     first = handed.offered[0]
     assert next(s for s in first if s["function"]["name"] == "show")["function"]["description"] \
         == TIGHT_SHOW_TERSE
@@ -1252,9 +1273,9 @@ def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
                         "person:p5"]
     assert "cut 2 of 8 lit" in out.steps
     assert "selected 8 entries" in out.steps, "what the model asked for is still on record"
-    # the same script, flag off: all eight, capped only by LIT
+    # the same script, asked loose (tight=False, the control): all eight, capped only by LIT
     plain = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
-    out = converse("who leads?", MANY, plain)
+    out = converse("who leads?", MANY, plain, tight=False)
     assert out.show == EIGHT
     assert not [s for s in out.steps if s.startswith("cut ")]
 
@@ -1282,8 +1303,8 @@ def test_tight_keeps_what_a_tool_returned_and_drops_what_none_did():
     assert "person:bea" in out.found and "person:bea" not in out.read
     assert out.show == ["person:ada", "person:bea"], "found counts as known; the guess goes"
     assert "dropped 1 unread from show" in out.steps
-    # flag off: everything the model asked for
-    out = converse("who does compilers?", graph, SayingModel(list(script), said))
+    # asked loose (tight=False, the control): everything the model asked for
+    out = converse("who does compilers?", graph, SayingModel(list(script), said), tight=False)
     assert out.show == ["person:ada", "person:bea", never]
     assert not [s for s in out.steps if s.startswith("dropped ")]
 
@@ -1336,7 +1357,13 @@ def test_tight_spares_a_listing_from_the_cap_and_keeps_what_a_tool_returned(tmp_
 
 from types import SimpleNamespace  # noqa: E402
 
-from ml_stack.graph.ask import EARLIER, RECALLED, SYSTEM  # noqa: E402
+from ml_stack.graph.ask import (EARLIER, RECALLED, SHOW_PARAGRAPH,  # noqa: E402
+                                SYSTEM, TIGHT_SHOW_PARAGRAPH, TIGHT_SYSTEM_SENTENCE)
+
+# The system prompt as the default asking sends it: tight. `SYSTEM` itself is what the
+# control -- tight=False -- still sends, byte for byte.
+TIGHT_SYSTEM = (SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " "
+                + TIGHT_SYSTEM_SENTENCE)
 
 WINDOW_TURNS = [{"role": "user", "content": "who is Ada Lovelace?"},
                 {"role": "assistant", "content": "Ada Lovelace is an analyst at Pellard Foundry."},
@@ -1346,11 +1373,16 @@ WINDOW_TURNS = [{"role": "user", "content": "who is Ada Lovelace?"},
 
 def test_without_a_summary_or_recall_the_messages_are_byte_for_byte_what_they_were():
     """The ranking runs and the answer cache depend on this: with the new kwargs absent,
-    the messages are the system prompt, the window in order, the shortlist, the question."""
+    the messages are the system prompt, the window in order, the shortlist, the question --
+    the prompt being the tight one, which is what the default asking sends."""
     before = ScriptedModel([])
     converse("who else?", GRAPH, before, turns=WINDOW_TURNS)
-    assert before.seen[0] == [{"role": "system", "content": SYSTEM}, *WINDOW_TURNS,
+    assert before.seen[0] == [{"role": "system", "content": TIGHT_SYSTEM}, *WINDOW_TURNS,
                               {"role": "user", "content": "who else?"}]
+    # and the control still sends SYSTEM itself
+    loose = ScriptedModel([])
+    converse("who else?", GRAPH, loose, turns=WINDOW_TURNS, tight=False)
+    assert loose.seen[0][0] == {"role": "system", "content": SYSTEM}
 
     explicit = ScriptedModel([])
     converse("who else?", GRAPH, explicit, turns=WINDOW_TURNS, summary=None, recalled=())
@@ -1379,7 +1411,7 @@ def test_the_summary_goes_first_then_the_recalled_then_the_window_then_the_short
              summary=SimpleNamespace(role="summary", text="Ada is the subject.\n  Rests on person:ada."),
              recalled=recalled, opening=["person:ada"])
     seen = model.seen[0]
-    assert seen[0] == {"role": "system", "content": SYSTEM}
+    assert seen[0] == {"role": "system", "content": TIGHT_SYSTEM}
     assert seen[1] == {"role": "user", "content": EARLIER + "Ada is the subject. Rests on person:ada."}
     assert seen[2:5] == [
         {"role": "user", "content": RECALLED + "did Ada ever move?"},

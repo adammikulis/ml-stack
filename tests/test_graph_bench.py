@@ -2512,25 +2512,67 @@ def test_the_ranking_and_the_export_carry_the_speedup(tmp_path):
     assert got["draft:none"]["speedup"] is None and got["flash-plain"]["speedup"] is None
 
 
-# -- --also tight -------------------------------------------------------------------------
+# -- --also loose: the control, now that tight is the asking ------------------------------
 
-def test_tight_is_asked_for_the_way_rich_is():
+def test_loose_is_asked_for_the_way_rich_is_and_tight_asks_for_nothing_new(capsys):
+    """Tight is the default asking, so `--also loose` is the variant worth a second run:
+    the old asking, as a control. `--also tight` measures what the first way already does,
+    and says so rather than paying for the same run twice."""
     from argparse import Namespace
 
     from ml_stack.graph.bench import _parser, _ways
 
-    ways = _ways(Namespace(also=["tight"], terse=False, temperature=0.0))
-    assert ways[1]["label"] == "tight" and ways[1]["tight"] is True
+    ways = _ways(Namespace(also=["loose"], terse=False, temperature=0.0))
+    assert ways[1]["label"] == "loose" and ways[1]["tight"] is False
     assert ways[1]["temperature"] == 0.0, "the run's sampling, as rich carries it"
     assert "tight" not in ways[0], "the first way is what was asked for, unchanged"
+    assert _parser().parse_args(["run", "x", "--also", "loose"]).also == ["loose"]
+
+    capsys.readouterr()
+    assert _ways(Namespace(also=["tight"], terse=False, temperature=0.0)) == \
+        _ways(Namespace(also=[], terse=False, temperature=0.0)), "no second run to pay for"
+    said = capsys.readouterr().err
+    assert "tight is the default asking now" in said and "--also loose" in said
     assert _parser().parse_args(["run", "x", "--also", "tight"]).also == ["tight"]
 
 
+def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatch, capsys):
+    """What `--also loose` is *for*: a second way through the same load, labelled `loose`,
+    asked with `tight=False` where `served` builds the asking -- while the first way, asked
+    for nothing, is the tight default. Mutation: pop `tight` with a False default."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    asked_tight = []
+    real_asking = bench.asking
+
+    def watched(graph, **kw):
+        asked_tight.append(kw.get("tight"))
+        return real_asking(graph, **kw)
+
+    monkeypatch.setattr(bench, "asking", watched)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "loose",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    assert asked_tight == [True, False], "the default way is tight; the control is not"
+    assert sorted(r["label"] for r in runs(seen["kept"])) == ["tiny-plain", "tiny-plain-loose"]
+
+    # --also tight asks for nothing more: one way, tight, and a note saying why
+    asked_tight.clear()
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "tight",
+                        *seen["common"]]) == 0
+    said = capsys.readouterr()
+    assert asked_tight == [True]
+    assert "tight is the default asking now" in said.err
+
+
 def test_tight_reaches_converse_as_a_keyword(monkeypatch):
-    """`converse(..., tight=True)` is ask's; this only has to hand it on, and hand the
-    terse set in already told, since that set is built here rather than chosen inside."""
+    """`converse(..., tight=...)` is ask's; this only has to hand it on -- both ways, which
+    is the whole of `--also loose` -- and hand the terse set in already told, since that set
+    is built here rather than chosen inside. Mutation: send the keyword only when tight,
+    and the loose control measures the tight default twice."""
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.ask import TIGHT_SHOW_TERSE
+    from ml_stack.graph.ask import TERSE, TIGHT_SHOW_TERSE
     from ml_stack.graph.bench import asking
 
     reached = {}
@@ -2549,7 +2591,13 @@ def test_tight_reaches_converse_as_a_keyword(monkeypatch):
     assert show["function"]["description"] == TIGHT_SHOW_TERSE
     reached.clear()
     asking(TINY)("who?", _Scripted())
-    assert "tight" not in reached, "not asked for, not sent -- the default is converse's own"
+    assert reached.get("tight") is True, "asked nothing, asked tight -- that is the asking"
+    reached.clear()
+    # the control: loose is sent, not left out, or it would arrive as the tight default
+    asking(TINY, terse=True, tight=False)("who?", _Scripted())
+    assert reached.get("tight") is False
+    show = next(s for s, _ in reached["tools"] if s["function"]["name"] == "show")
+    assert show["function"]["description"] == TERSE[-1]["function"]["description"]
 
 
 def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
