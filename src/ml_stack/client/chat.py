@@ -6,6 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from ml_stack.client import families
@@ -330,11 +331,30 @@ class Client:
                 tries: int = 2, prompt: str | None = None,
                 messages: list[dict[str, Any]] | None = None,
                 think: bool = False,
-                schema_name: str = "extraction") -> dict[str, Any]:
+                schema_name: str = "extraction",
+                cache_dir: str | Path | None = None, cache_version: str = "",
+                cache_extra: str = "") -> dict[str, Any]:
         """``text`` as a JSON document matching ``schema``, re-prompted while ``check``
-        objects. Objections left after ``tries`` calls land under ``"_objections"``."""
+        objects. Objections left after ``tries`` calls land under ``"_objections"``.
+
+        With ``cache_dir``, an extraction already done is not done again: the answer is kept
+        as a file per key under it and read back instead of asking the model. The key is
+        ``cache_version`` + the schema + ``text`` + ``cache_extra``, and deliberately *not*
+        the instructions -- :mod:`ml_stack.client.cache` says why, and what belongs in
+        ``cache_extra``. Only a clean answer is kept: one the model never got past ``check``
+        is asked again next run rather than cached as settled.
+        """
         if tries < 1:
             raise ValueError(f"tries must be at least 1, got {tries}")
+
+        key: str | None = None
+        if cache_dir is not None:
+            from ml_stack.client.cache import extraction_key, read_cached
+
+            key = extraction_key(text, schema, version=cache_version, extra=cache_extra)
+            done = read_cached(cache_dir, key)
+            if done is not None:
+                return done
 
         if prompt is not None:
             ask, reject = self._raw_extractor(prompt, schema, n_predict)
@@ -357,6 +377,10 @@ class Client:
                 parsed = answer
                 objections = list(check(answer)) if check else []
                 if not objections:
+                    if key is not None:
+                        from ml_stack.client.cache import write_cached
+
+                        write_cached(cache_dir, key, answer)  # type: ignore[arg-type]
                     return answer
 
             if attempt + 1 < tries:

@@ -298,8 +298,9 @@ converse("how are these two connected?", graph, client)          # the model, wi
 open("page.html", "w").write(render(graph, title="Who knows what"))
 ```
 
-**The model is given five things it can do, not the graph.** `look_up` finds entries by
-name or by the words attached to them, `look_at` reads what is held on them, `path_between`
+**The model is given six things it can do, not the graph.** `look_up` finds entries by
+name or by the words attached to them, `look_at` reads what is held on them, `look_around`
+reads a whole neighbourhood at once, `path_between`
 traces how two connect, `list_kind` reads out everything of one kind, and `show` says what
 the answer is about. `list_kind` exists for the question no search reaches: "which companies
 do people here work for?" is answered by every `org` in the graph, and no word finds those,
@@ -311,6 +312,35 @@ chars, answer 0 chars` — because the assumption is always the token budget and
 it almost never is. A tool of the caller's own that returns pictures (`_images` in its
 result) has them shown to the model as a message of their own, since a tool result cannot
 carry an image; a picture that cannot be prepared is a line in `steps`, not a crash.
+
+**Fewer, fatter calls, for a model that reads far faster than it writes.** Measured
+2026-09-02 over the invented community, Qwen3.8-Flash-Next — hybrid recurrent, 256k of
+context at 48K bytes a token — found nearly everything (89-95% recall, and 76-83% precision
+once the asking was tight), and spent 5-9 tool calls a question at about 2k new tokens each:
+half the wall clock reading results back at ~390 tok/s, the other half writing at ~35. For
+that model a round trip is the expensive part and reading is nearly free, so the way to make
+a question cheaper is to take more per call. `look_around(ids, hops=1)` is the fat call: the
+entries you name, and under each of them everything joined to it with the relation, the
+neighbour's kind, **its id in brackets** and a line of its own words — so "who could help
+with X" is one `look_up` and one `look_around` where it used to be five `look_at`s, and the
+answer may select a neighbour it never looked up. `converse(..., reach=N)` is the budget
+that makes such a result safe to ask for: N tokens per tool result instead of the flat 6000
+characters, with `look_at`, `look_around` and `list_kind` packing **whole entries with their
+quotes**, most-mentioned first, rather than every entry with its words clipped — because the
+quote is the evidence, and `list_kind`'s fixed forty was only ever a guess at what a result
+may cost. Both are off by default (`reach=None`), because the small models have the opposite
+profile — E4B and E2B reach about 60% recall with cheap decoding and an expensive cache, and
+a fatter result is a worse trade for them. `ml-stack-bench --also reach` measures the fat
+asking against the default on one load, and `--reach N` sets the size on every way.
+
+**`look_up`'s first hits are put in the order the vectors mean.** Fusion decides which
+entries come back — a reciprocal rank is a vote count, and three ways agreeing beats one way
+being certain — but it cannot say which of them the asker meant, because a vote is not a
+distance. The vectors can, and they are already in the store, so `hybrid` re-orders its first
+six hits by cosine to the question whenever the question arrived embedded. Membership never
+changes and a hit the vectors have never seen keeps its place rather than sinking, so an
+exact label match cannot be pushed down the page by something the embedder merely likes;
+`rerank=False` is the fused order exactly as it was.
 
 **A hit that says why it matched, and who is joined to it, is behind a flag until it is
 measured.** `look_up` returns `{id, label, kind}` and nothing else, so a model cannot tell an
@@ -375,6 +405,26 @@ picking the answer that is actually *called* what was asked rather than the coun
 ranks first; pass your own `user_agent`, as its usage policy asks. `ml_stack.redact.names_in`
 reads every name a graph and its message log hold, for a `Redactor` to keep out of anything
 printed.
+
+**A vocabulary the model coined drifts, and folds back.** A model asked to read prose into
+(subject, relation, object) invents the relation as it goes, so one relationship arrives as
+`works_at`, `worksat` and `worked_at` and the graph is split three ways.
+`ml_stack.entities.fold.fold_edges` keeps whichever spelling the graph already uses more and
+folds the rest into it -- `entities.close` decides what counts as the same word -- but only
+while one of them is rare: past `ESTABLISHED` weight both are names people keep choosing, and
+neither folds without a written entry saying which is right. Every fold is logged *and*
+returned, so a wrong one is something a test can point at. `dead_keys` is the other half:
+the entries of a hand-written map that nothing produces any more, which fail silently
+otherwise.
+
+**An extraction already done is not done again.** `Client.extract(..., cache_dir=...)` keeps
+each answer as a file there and reads it back instead of asking the model. The key is
+`cache_version` + the schema + the text + `cache_extra` (the rest of the prompt that varies
+per record -- the thread a message replies to, the vocabulary offered) and deliberately *not*
+the instructions: wording those is iterative, and a pipeline that re-reads its whole corpus
+because a sentence was rephrased is one where nobody rephrases anything. `cache_version` is
+the knob for a change nobody should be allowed to skip. Only an answer that passed `check` is
+kept, so a run that gave up is asked again rather than remembered as settled.
 
 ### Message formats
 
@@ -577,6 +627,32 @@ with serve("model.gguf", port=8899) as server:
 
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
+
+**One shape per port, written down once.** llama.cpp serves a model one way at a time, so
+two parts of a program that lease it differently are not two clients of one server:
+whichever leases second finds a mismatch, stops the first and loads the weights again. A
+`Shape` is the whole shape in one object and `Shape.lease()` is the only place it becomes
+`serve`'s arguments, so the two cannot drift apart. `seat` starts the server on the first
+ask, holds it per port for the process, and hands each caller a `Client` pinned to a slot of
+its own -- so several conversations at once do not reprocess each other's context.
+
+```python
+from ml_stack.serve import Shape, seat, draft_for, projector_for
+
+model = "hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
+shape = Shape(model=model, port=8080, seats=4, seat_context=32768, cache_type="q8_0",
+              draft=draft_for(model, "auto"),         # the head shipped beside the weights
+              draft_n_max=4, reasoning_budget=0,      # measured, not remembered
+              mmproj=projector_for(model, "auto"),    # so the model can see
+              build="unsloth")                        # a head mainline will not load
+
+client = seat(shape, index=request_number, n_predict=16384)
+```
+
+`draft_for` and `projector_for` answer 'auto' the way `ml-stack-serve up` does -- a lease
+built by hand has to resolve what the CLI resolves for itself -- and each says out loud why
+it found nothing rather than serving undrafted or blind in silence. `release_all()` lets go
+of every held server; `held()` says which ports are up.
 
 A port already serving something else is refused, with the field that differs named —
 the model, the number of slots, or the context each slot gets. Adopting a server of the

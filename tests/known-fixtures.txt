@@ -189,3 +189,6 @@ Defender Firewall
 
 # allowed with `hook allow` on 2026-09-02: not people
 assert label.lower
+
+# allowed with `hook allow` on 2026-09-02: not people
+Practical AI

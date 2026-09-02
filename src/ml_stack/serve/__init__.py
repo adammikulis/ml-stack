@@ -35,6 +35,7 @@ from ml_stack.serve.ports import (
     server_pids_on_port,
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
+from ml_stack.serve.shape import Shape, draft_for, projector_for, seat
 
 __all__ = [
     "CACHE_ROOT",
@@ -47,7 +48,9 @@ __all__ = [
     "ServerInfo",
     "ServerManager",
     "ServerSpec",
+    "Shape",
     "child_env",
+    "draft_for",
     "find_binary",
     "free_port",
     "kill_pid",
@@ -56,9 +59,11 @@ __all__ = [
     "model_matches",
     "pid_exists",
     "port_is_free",
+    "projector_for",
     "reclaim_port",
     "recorded_servers",
     "require_binary",
+    "seat",
     "serve",
     "server_pids_on_port",
     "shape_mismatch",
