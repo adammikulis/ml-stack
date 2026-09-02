@@ -345,6 +345,17 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--serve-arg", action="append", default=[], metavar="ARG",
+                       help="a raw llama-server argument for each --serve'd model, repeatable "
+                            "(e.g. --serve-arg=--spec-draft-p-min --serve-arg=0.5): the knob "
+                            "the bench has no flag for, measured before it gets one")
+    sweep.add_argument("--serve-mlock", action="store_true",
+                       help="pin the weights in memory rather than page them in on touch")
+    sweep.add_argument("--serve-no-flash-attn", action="store_true",
+                       help="serve without flash attention, to measure what it is worth")
+    sweep.add_argument("--serve-mmproj", default="", metavar="PATH_OR_AUTO",
+                       help="a vision projector to load beside each --serve'd model, as the "
+                            "page does; measures what sight costs a text question")
     sweep.add_argument("--n-max", type=int, default=None, metavar="N",
                        help="how far the served head guesses ahead (--spec-draft-n-max), the "
                             "length `drafts` found best -- 4 for Flash-Next")
@@ -722,6 +733,7 @@ def _run(args: Any) -> int:
                        per_question=args.per_question,
                        reasoning_budget=getattr(args, "reasoning_budget", None),
                        spec_draft_max=getattr(args, "n_max", None),
+                       serving=serving_fields(args),
                        smoke=sample(everything, SMOKE) if smoking else (),
                        **sampling_from(args))
             except ServerFailed as why:
@@ -1144,6 +1156,22 @@ def _last_line(log: Path) -> str:
     except OSError:
         return ""
     return next((ln for ln in reversed(lines) if ln.strip()), "")
+
+
+def serving_fields(args: Any) -> dict[str, Any]:
+    """The ServerSpec fields a sweep's --serve-* flags name, and nothing when none do."""
+    out: dict[str, Any] = {}
+    raw = list(getattr(args, "serve_arg", []) or [])
+    if raw:
+        out["extra_args"] = tuple(raw)
+    if getattr(args, "serve_mlock", False):
+        out["mlock"] = True
+    if getattr(args, "serve_no_flash_attn", False):
+        out["flash_attn"] = False
+    mmproj = str(getattr(args, "serve_mmproj", "") or "")
+    if mmproj:
+        out["mmproj"] = mmproj
+    return out
 
 
 def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> list[dict[str, Any]]:

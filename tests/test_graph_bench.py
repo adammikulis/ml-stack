@@ -3557,5 +3557,25 @@ def test_sweep_n_max_reaches_the_served_head(tmp_path, monkeypatch):
     asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]}) + "\n")
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--serve-draft", "mtp-tiny.gguf",
                         "--n-max", "4", "--plain-only", "--smoke", "--kept", str(kept),
-                        "--questions", str(asked)]) == 0
+                        "--questions", str(asked), "--serve-port", "1"]) == 0
     assert [kw.get("spec_draft_max") for kw in seen["kwargs"]] == [4]
+
+
+def test_sweep_serve_flags_reach_the_spec_by_field_name(tmp_path, monkeypatch):
+    """--serve-arg, --serve-mlock, --serve-no-flash-attn, --serve-mmproj: the serving knobs a
+    run varies to find out what each is worth, reaching the ServerSpec as its own fields."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench.run import serving_fields
+
+    seen = _serving(monkeypatch, tmp_path)
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]}) + "\n")
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
+                        "--serve-arg=--spec-draft-p-min", "--serve-arg=0.5", "--serve-mlock",
+                        "--serve-no-flash-attn", "--serve-mmproj", "auto",
+                        "--kept", str(kept), "--questions", str(asked), "--serve-port", "1"]) == 0
+    kw = seen["kwargs"][0]
+    assert kw.get("extra_args") == ("--spec-draft-p-min", "0.5")
+    assert kw.get("mlock") is True and kw.get("flash_attn") is False and kw.get("mmproj") == "auto"
+    assert serving_fields(type("A", (), {})()) == {}

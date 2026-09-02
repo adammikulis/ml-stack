@@ -115,6 +115,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            spec_draft_max: int | None = None, cache_type: str = "",
+           serving: Mapping[str, Any] | None = None,
            per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
            smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
            spec_type: str = "",
@@ -211,6 +212,10 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
         extra["cache_type_k"] = extra["cache_type_v"] = cache_type
     if reasoning_budget is not None:
         extra["reasoning_budget"] = int(reasoning_budget)
+    # the rest of the serving shape, by field name: mlock, flash_attn, mmproj, extra_args --
+    # what a run wants to vary about the server that no flag of its own names
+    for field_name, value in (serving or {}).items():
+        extra[field_name] = value
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
