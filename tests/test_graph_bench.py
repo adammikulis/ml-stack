@@ -1051,7 +1051,7 @@ def test_a_turn_records_its_first_token_and_what_it_spent_waiting():
                             conversations=1, turns=1, label="t", client=_Overlapping(0.1),
                             graph=TINY)
     row = rows[0]
-    assert row.calls >= 2 and row.seconds >= 0.1 * row.calls
+    assert row.calls >= 2 and row.seconds >= 0.1 * row.calls - 1e-6  # three sleeps of 0.1 are 0.30000000000000004
     # 30ms of generating out of a 100ms pause: the first token waited about 70ms
     # real sleeps: a loaded machine (a benchmark, a parallel suite) stretches them, so the
     # bounds say only that the first token came after the wait and before the answer
