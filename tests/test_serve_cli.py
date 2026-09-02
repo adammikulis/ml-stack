@@ -795,3 +795,27 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])
     assert cli.main(["status", "--every"]) == 1
     assert "no llama-server is running" in capsys.readouterr().out
+
+
+def test_machine_memory_splits_the_servers_from_everything_else(monkeypatch):
+    import types
+    from pathlib import Path
+
+    import psutil
+
+    G = 2**30
+    monkeypatch.setattr(psutil, "virtual_memory",
+                        lambda: types.SimpleNamespace(total=128 * G, available=17 * G, wired=67 * G))
+
+    def proc(argv, rss):
+        return types.SimpleNamespace(info={"name": Path(argv[0]).name, "cmdline": argv,
+                                           "memory_info": types.SimpleNamespace(rss=rss)})
+
+    monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [
+        proc(["/x/llama-server", "--port", "8099"], 73 * G),
+        proc(["/Applications/Browser.app/Contents/MacOS/Browser"], 2 * G),
+        proc(["/usr/bin/editor"], 1 * G)])
+    got = cli.machine_memory()
+    assert got["total"] == 128 * G and got["used"] == 111 * G and got["wired"] == 67 * G
+    assert got["servers"] == 73 * G and got["others"] == 3 * G
+    assert got["largest"] == ["Browser 2.0G", "editor 1.0G"]

@@ -658,6 +658,41 @@ PLIST = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+def machine_memory() -> dict | None:
+    """What the machine holds: total, used, wired, free, the llama-servers' resident total,
+    everything else's, and the five largest non-server processes -- from psutil, or None
+    without it."""
+    from ml_stack.hub import _human
+
+    try:
+        import psutil
+    except ImportError:
+        return None
+    try:
+        vm = psutil.virtual_memory()
+    except Exception:  # noqa: BLE001
+        return None
+    servers = 0
+    rest: list[tuple[int, str]] = []
+    for proc in psutil.process_iter(["name", "cmdline", "memory_info"]):
+        try:
+            mem = proc.info.get("memory_info")
+            rss = int(getattr(mem, "rss", 0) or 0)
+            argv = list(proc.info.get("cmdline") or [])
+            head = Path(argv[0]).name if argv else str(proc.info.get("name") or "")
+        except (psutil.Error, OSError):
+            continue
+        if "llama-server" in head:
+            servers += rss
+        elif rss:
+            rest.append((rss, head))
+    rest.sort(reverse=True)
+    return {"total": int(vm.total), "used": int(vm.total - vm.available),
+            "wired": int(getattr(vm, "wired", 0) or 0), "free": int(vm.available),
+            "servers": servers, "others": sum(r for r, _ in rest),
+            "largest": [f"{name} {_human(r)}" for r, name in rest[:5]]}
+
+
 def cmd_memory(args: argparse.Namespace) -> int:
     """``ml-stack-serve memory`` -- what this machine will let a model use, and for how long.
 
@@ -687,6 +722,29 @@ def cmd_memory(args: argparse.Namespace) -> int:
         else:
             print(f"  this is the default share; {_human(total)} is installed")
 
+    # What the rest of the machine holds right now, so a higher limit is chosen against
+    # what it would take from the desktop rather than guessed (Adam, 2026-09-02: "take a
+    # look at what os and apps are using, can we increase vram from 110 to something
+    # higher or is that our ceiling?")
+    held = machine_memory()
+    if held:
+        print(f"\nright now: {_human(held['used'])} used of {_human(held['total'])} "
+              f"({_human(held['wired'])} wired, {_human(held['free'])} free)")
+        servers = held["servers"]
+        others = held["others"]
+        print(f"  llama-server(s): {_human(servers)}; everything else: {_human(others)}"
+              + (f" -- {', '.join(held['largest'])}" if held["largest"] else ""))
+        headroom = int(total) - int(now) if total else 0
+        if total:
+            print(f"  the limit leaves {_human(headroom)} for everything else; the rest of "
+                  f"the machine holds {_human(others)} now"
+                  + (" -- room to raise it" if others < headroom * 0.6
+                     else " -- close to it; raising it means swapping when a model fills it"))
+        want_mb = int(getattr(args, "limit", 0) or 0)
+        if want_mb and total:
+            left = int(total) - want_mb * 1024 * 1024
+            print(f"  at {want_mb} MB the rest of the machine would have {_human(left)}"
+                  + (" -- less than it holds now" if left < others else ""))
     want = args.persist
     if want is None:
         print("\n  ml-stack-serve memory --persist [MB]   to write a boot-time setting")
@@ -929,6 +987,9 @@ def main(argv: list[str] | None = None) -> int:
                              "default to whatever is set now")
     memory.add_argument("--write", default="", metavar="FILE",
                         help="where to write it (default: ./stack.ml.wired-limit.plist)")
+    memory.add_argument("--limit", type=int, default=0, metavar="MB",
+                        help="preview: what the rest of the machine would have under this "
+                             "wiring limit, against what it holds now")
 
     down = sub.add_parser("down", help="stop a server started on this machine")
     down.add_argument("--port", type=int, default=DEFAULT_PORT,
