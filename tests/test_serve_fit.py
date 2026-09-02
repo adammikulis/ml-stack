@@ -359,13 +359,13 @@ class TestSayingIt:
 
     def test_the_listing_names_the_model_the_two_numbers_and_who_fits(self):
         text = render(self.rows(), [32768])
-        assert "thornfield-8B-Q4_K_M.gguf" in text
+        assert "thornfield-8B (Q4_K_M)" in text
         assert "per token" in text and "per sequence" in text
         assert "32,768" in text and " 18 " in f" {text} "
 
     def test_markdown_is_a_table(self):
         text = render(self.rows(), [32768], None, True)
-        assert text.startswith("### thornfield-8B-Q4_K_M.gguf")
+        assert text.startswith("### thornfield-8B (Q4_K_M)")
         assert "| per user context | users that fit | each costs |" in text
 
     def test_a_different_room_changes_the_answer_and_not_the_measurement(self):
@@ -414,7 +414,7 @@ class TestTheCommand:
 
         assert self.run([str(model), "--measure", "--context", "32768"]) == 0
         out, err = capsys.readouterr()
-        assert "thornfield-8B-Q4_K_M.gguf" in out
+        assert "thornfield-8B (Q4_K_M)" in out
         assert str(_fit_files_in_tmp) in err
 
         [row] = records()
@@ -550,8 +550,8 @@ class TestDrawingIt:
         import matplotlib.pyplot as plt
 
         fit_mod.plot(self.rows(), tmp_path / "fit.png")
-        assert fit_mod.label_of(self.rows()[0]) == "thornfield-8B-Q4_K_M"
-        assert fit_mod.label_of(self.rows()[1]) == "marrowgate-A3B-UD-Q4_K_XL q8_0 +draft"
+        assert fit_mod.label_of(self.rows()[0]) == "thornfield-8B (Q4_K_M)"
+        assert fit_mod.label_of(self.rows()[1]) == "marrowgate-A3B (Q4_K_XL) q8_0 +draft"
         plt.close("all")
 
     def test_every_record_appears_in_the_legend_of_both_panels(self, tmp_path,
@@ -596,7 +596,7 @@ class TestDrawingIt:
         fit_mod.plot([*self.rows(), huge], tmp_path / "fit.png", rooms=[24 * GIB])
         _, (left, _right) = drawn[0]
         named = [t.get_text() for t in left.get_legend().get_texts()]
-        assert any("cragmoor-400B-Q4_K_M" in entry and "does not fit" in entry
+        assert any("cragmoor-400B (Q4_K_M)" in entry and "does not fit" in entry
                    for entry in named), named
         empty = [line for line in left.get_lines() if len(line.get_xdata()) == 0]
         assert empty, "the model that does not fit should draw a line with no points"
@@ -757,9 +757,9 @@ class TestTheCardsBehindIt:
 
         _figure, (left, right) = self.panels(tmp_path, monkeypatch, at=32768)
         [entry] = [t.get_text() for t in right.get_legend().get_texts()]
-        assert entry == "thornfield-8B-Q4_K_M: 6.0G + 1.00G/user at 32k"
+        assert entry == "thornfield-8B (Q4_K_M): 6.0G + 1.00G/user at 32k"
         [first] = [t.get_text() for t in left.get_legend().get_texts()]
-        assert first == "thornfield-8B-Q4_K_M (6.0G loaded)"
+        assert first == "thornfield-8B (Q4_K_M) (6.0G loaded)"
         plt.close("all")
 
 

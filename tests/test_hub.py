@@ -740,3 +740,45 @@ class TestChooseHead:
         assert f"  {self.FORK_ONLY}" in out
         assert "this build (mainline): withheld" in out
         assert "--build forkname (fork): hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf" in out
+
+
+class TestPrettyName:
+    def test_the_quantisation_moves_into_brackets_and_the_rest_goes(self):
+        from ml_stack.hub import pretty_name
+
+        assert pretty_name("hf:maker/thing-GGUF/UD-IQ4_XS/thing-Flash-UD-IQ4_XS-00001-of-00003.gguf") \
+            == "thing-Flash (IQ4_XS)"
+        assert pretty_name("gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf") == "gemma-4-E4B-it-qat (Q4_K_XL)"
+        assert pretty_name("gpt-oss-120b-mxfp4-00001-of-00003.gguf") == "gpt-oss-120b (mxfp4)"
+        assert pretty_name("mtp-thing-Flash-shared-Q8_0.gguf") == "mtp-thing-Flash-shared (Q8_0)"
+        assert pretty_name("thing-27B-UD-Q4_K_M.gguf") == "thing-27B (Q4_K_M)"
+        assert pretty_name("plain-name.gguf") == "plain-name"
+        assert pretty_name("") == ""
+
+    def test_the_pages_carry_the_same_rule(self):
+        """One rule, written twice: the pages cannot import Python, so the regex is copied
+        and held to the Python one by the same answers under node when it is present."""
+        import json
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        import ml_stack.fleet as fleet
+        import ml_stack.graph as graph
+        from ml_stack.hub import pretty_name
+
+        pages = [Path(fleet.__file__).parent / "web" / "fit.html",
+                 Path(graph.__file__).parent / "web" / "graph.html"]
+        for page in pages:
+            assert "(?:UD-)?((?:IQ|Q)\\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)" in page.read_text()
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("no node to run the page's copy")
+        names = ["a/b/thing-Flash-UD-IQ4_XS-00001-of-00003.gguf", "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+                 "gpt-oss-120b-mxfp4-00001-of-00003.gguf", "mtp-thing-shared-Q8_0.gguf", "plain.gguf"]
+        text = pages[0].read_text()
+        start = text.index("function prettyName")
+        end = text.index("\n  }\n", start) + 4
+        script = text[start:end] + "\nconsole.log(JSON.stringify(" + json.dumps(names) + ".map(prettyName)))"
+        said = subprocess.run([node, "-e", script], capture_output=True, text=True, check=True).stdout
+        assert json.loads(said) == [pretty_name(n) for n in names]

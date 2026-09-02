@@ -39,6 +39,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from ml_stack.hub import pretty_name
 
 __all__ = [
     "DEFAULT_PER_USER", "Fit", "Measured", "PLOT_CONTEXTS", "add", "label_of",
@@ -547,7 +548,8 @@ def _shape(fit: Fit) -> str:
 
 
 def _block(fit: Fit, contexts: list[int]) -> str:
-    lines = [f"{fit.model}", f"  {_headline(fit)}"]
+
+    lines = [f"{pretty_name(fit.model)}", f"  {_headline(fit)}"]
     lines.append(
         f"  weights {_human(fit.weights)}"
         + (f", draft {_human(fit.draft)}" if fit.draft else "")
@@ -568,7 +570,7 @@ def _block(fit: Fit, contexts: list[int]) -> str:
 
 
 def _block_md(fit: Fit, contexts: list[int]) -> str:
-    lines = [f"### {fit.model}", "", f"{_headline(fit)}.", ""]
+    lines = [f"### {pretty_name(fit.model)}", "", f"{_headline(fit)}.", ""]
     lines.append(
         f"- weights {_human(fit.weights)}"
         + (f", draft {_human(fit.draft)}" if fit.draft else "")
@@ -616,6 +618,7 @@ def _pyplot():
     all, on purpose, because it has to open on a machine with no packages. A PNG cannot be
     written that way, which is why this one has a dependency and that one does not.
     """
+
     try:
         import matplotlib
 
@@ -631,10 +634,8 @@ def label_of(fit: Fit) -> str:
     """What a line is called in the legend: the model, what its cache is stored as, and
     whether it was measured with a draft head -- the three things that make two records of
     the same weights different measurements."""
-    name = fit.model
-    for suffix in (".gguf", ".GGUF"):
-        name = name[: -len(suffix)] if name.endswith(suffix) else name
-    parts = [name]
+
+    parts = [pretty_name(fit.model)]
     if fit.cache_type and fit.cache_type != "f16":
         parts.append(fit.cache_type)
     if fit.spec:

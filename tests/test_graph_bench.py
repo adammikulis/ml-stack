@@ -809,7 +809,7 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
     assert head.split().index("speed") == head.split().index("draft") + 1, "beside draft"
     assert head.split().index("find") == head.split().index("speed") + 1, "then find"
     # "tried  32k x2  1 ..." -- the context field carries a space, so find is the eleventh word
-    assert lines[0].split()[10] == "meaning"
+    assert lines[0].split()[11] == "meaning"
     assert lines[1].split()[10] == "-"
 
     missed(runs(store), everything=True)
@@ -3136,7 +3136,8 @@ def test_the_run_the_table_the_detail_and_the_export_carry_the_cache_per_turn(tm
     table(runs(store))
     said = capsys.readouterr().out
     head = said.splitlines()[0].split()
-    assert head.index("pfx") == head.index("cached") + 1
+    assert head.index("peak") == head.index("cached") + 1
+    assert head.index("pfx") == head.index("peak") + 1
     new = next(ln for ln in said.splitlines() if ln.startswith("cached"))
     old = next(ln for ln in said.splitlines() if ln.startswith("tried"))
     assert "83%" in new.split() and "83%" not in old.split()
@@ -3474,3 +3475,26 @@ def test_show_last_lists_only_the_newest_runs(tmp_path, capsys):
     assert bench._main(["show", "--kept", str(store), "--last", "1"]) == 0
     said = capsys.readouterr().out
     assert "third" in said and "first" not in said and "second" not in said
+
+
+def test_the_table_shows_the_most_a_slot_held_in_any_one_call():
+    """With a rolling window the conversation's length says nothing about the cache; the
+    peak of cached-plus-read over every call is what a slot's context must hold."""
+    from ml_stack.graph.bench.show import peak
+
+    rows = [{"cache_calls": [[0, 3000], [3000, 900], [3900, 2500]]},
+            {"cache_calls": [[0, 2800], [2800, 11000]]},
+            {"cache_calls": []}, {}]
+    assert peak(rows) == 13800
+    assert peak([]) == 0 and peak([{"cache_calls": [["x", 1]]}]) == 0
+
+
+def test_show_prints_the_peak_column(tmp_path, capsys):
+    import ml_stack.graph.bench as bench
+
+    row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
+    row.cache_calls = [[0, 4000], [4000, 9000]]
+    bench.save(tmp_path / "runs.ladybug", [row])
+    assert bench._main(["show", "--kept", str(tmp_path / "runs.ladybug")]) == 0
+    out = capsys.readouterr().out
+    assert " peak " in out.splitlines()[0] and "12k" in out

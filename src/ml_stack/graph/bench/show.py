@@ -93,6 +93,25 @@ def _shown(label: Any, width: int = 28) -> str:
     return text if len(text) <= width else "…" + text[-(width - 1):]
 
 
+def peak(rows: Sequence[Mapping[str, Any]]) -> int:
+    """The most a slot held for any one call of the run: cached plus read tokens, the
+    largest of every call of every question. With a rolling window and recall, this --
+    not the conversation's length -- is what the slot's context must hold, and what
+    decides 16k against 32k per slot. 0 for a run kept before calls were counted."""
+    most = 0
+    for row in rows:
+        for call in row.get("cache_calls") or ():
+            try:
+                most = max(most, int(call[0]) + int(call[1]))
+            except (TypeError, ValueError, IndexError):
+                continue
+    return most
+
+
+def _k(n: int) -> str:
+    return "-" if not n else (f"{n / 1024:.1f}k" if n < 10240 else f"{n // 1024}k")
+
+
 def table(kept: Sequence[dict[str, Any]]) -> None:
     """Every run, one per line. Two runs compare; more than two want seeing at once."""
     if not kept:
@@ -130,7 +149,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     several = len(hosts_of(kept)) > 1
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
             + f"{'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
-            f"{'written':>8} {'cached':>8} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
+            f"{'written':>8} {'cached':>8} {'peak':>6} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling'}")
     print(head)
@@ -162,6 +181,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'processed_tokens'):>8.0f} "
               f"{_total(rows, 'completion_tokens'):>8.0f} "
               f"{_total(rows, 'cached_tokens'):>8.0f} "
+              f"{_k(peak(rows)):>6} "
               f"{prefixed(server):>4} "
               f"{drafting(rows):>6} "
               f"{_times(speedup(one, kept)):>6} "

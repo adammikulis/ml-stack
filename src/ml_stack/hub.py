@@ -843,3 +843,27 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+# The quantisation token in a GGUF file name: unsloth's dynamic builds prefix it with UD-.
+QUANT = re.compile(r"-(?:UD-)?((?:IQ|Q)\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)", re.IGNORECASE)
+SHARD = re.compile(r"-\d{5}-of-\d{5}$")
+
+
+def pretty_name(name: str) -> str:
+    """A model file's name as a person would say it: ``Qwen3.8-Flash-Next (IQ4_XS)`` for
+    ``hf:.../Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf``. The path, the ``.gguf``,
+    the shard suffix and the ``UD-`` prefix go; the quantisation moves into brackets. A
+    head keeps its ``mtp-``/``eagle3-`` prefix so a legend still says what it is. The
+    same rule is written once in JavaScript for the pages (``fit.html``, ``graph.html``)
+    and a test holds the two to the same answers."""
+    text = str(name or "").split("/")[-1].split("\\")[-1]
+    if text.lower().endswith(".gguf"):
+        text = text[:-5]
+    text = SHARD.sub("", text)
+    found = QUANT.search(text)
+    if not found:
+        return text
+    quant = found.group(1)
+    text = text[:found.start()] + text[found.end():]
+    return f"{text.strip('-')} ({quant})"

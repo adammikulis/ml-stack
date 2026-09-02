@@ -141,6 +141,15 @@
 </div>
 
 <script>
+  // the same rule as ml_stack.hub.pretty_name: path, .gguf, shard suffix and UD- go, the
+  // quantisation moves into brackets -- "Qwen3.8-Flash-Next (IQ4_XS)"
+  function prettyName(name) {
+    let text = String(name || '').split(/[\\/]/).pop().replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/, '');
+    const m = text.match(/-(?:UD-)?((?:IQ|Q)\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)/i);
+    if (!m) return text;
+    text = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).replace(/^-+|-+$/g, '');
+    return text + ' (' + m[1] + ')';
+  }
 "use strict";
 
 // ---------------------------------------------------------------- fit arithmetic
@@ -200,7 +209,7 @@ const commas = (n) => Math.round(n).toLocaleString();
     head was served -- the three things that make two records of the same weights two
     different measurements. `label_of` in fit.py says exactly this. */
 function labelOf(f) {
-  const parts = [f.model.replace(/\.gguf$/i, "")];
+  const parts = [prettyName(f.model)];
   if (f.cache_type && f.cache_type !== "f16") parts.push(f.cache_type);
   if (f.spec) parts.push("+draft");
   return parts.join(" ");

@@ -1013,8 +1013,14 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   // the same events in the past tense, once the answer has landed: zero counts left out
   // which model answered, and what it spent -- from the answer's `spent`; the whole record
   // goes on the label's title, so a tester can read every number without opening the console
+  // the same rule as ml_stack.hub.pretty_name: path, .gguf, shard suffix and UD- go, the
+  // quantisation moves into brackets -- "Qwen3.8-Flash-Next (IQ4_XS)"
   function modelShort(name) {
-    return String(name || '').split(/[\\/]/).pop().replace(/\.gguf$/, '').replace(/-\d{5}-of-\d{5}$/, '');
+    let text = String(name || '').split(/[\\/]/).pop().replace(/\.gguf$/i, '').replace(/-\d{5}-of-\d{5}$/, '');
+    const m = text.match(/-(?:UD-)?((?:IQ|Q)\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)/i);
+    if (!m) return text;
+    text = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).replace(/^-+|-+$/g, '');
+    return text + ' (' + m[1] + ')';
   }
   function kTokens(n) { return n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
   function spentLine(ev) {
