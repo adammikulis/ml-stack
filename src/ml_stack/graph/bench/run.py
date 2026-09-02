@@ -76,11 +76,15 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # the people joined to it -- a question about the asking, so one load
             out.append({"label": "rich", "terse": first["terse"], "rich": True,
                         **sampling_from(args)})
-        elif also == "tight":
-            # show is told to light only what answers the question, and what is lit is
-            # capped -- for the model that finds everything and then lights it all
-            out.append({"label": "tight", "terse": first["terse"], "tight": True,
+        elif also == "loose":
+            # the control: show told to name what the answer is about with no cap and no
+            # closing rule -- what every run before 2026-09-02 measured. Tight is the
+            # default asking now; Flash-Next went from 43% to 83% precision on it.
+            out.append({"label": "loose", "terse": first["terse"], "tight": False,
                         **sampling_from(args)})
+        elif also == "tight":
+            print("note: tight is the default asking now; --also tight measures nothing new "
+                  "(--also loose is the old asking, as a control)", file=sys.stderr)
     return out
 
 
@@ -408,7 +412,7 @@ def _parser() -> argparse.ArgumentParser:
                               "it suits this task -- it is not what a client sends otherwise")
     for one in (run, sweep):
         one.add_argument("--also", action="append", default=[],
-                         choices=("terse", "card", "greedy", "rich", "tight"),
+                         choices=("terse", "card", "greedy", "rich", "tight", "loose"),
                          help="ask the same served model another way as well. Whether the "
                               "tools are described briefly, what sampling is used, "
                               "whether look_up says why it matched (rich), and whether "
@@ -498,6 +502,40 @@ def _parser() -> argparse.ArgumentParser:
     show.add_argument("--cost", default="seconds",
                       choices=("seconds", "paid_tokens", "kv_bytes"),
                       help="which cost the frontier is drawn against (default: %(default)s)")
+
+    report = sub.add_parser("report", allow_abbrev=False,
+                            help="everything measured so far as one document: how each "
+                                 "model was asked, what a draft head was worth, how much "
+                                 "memory it wants, and what to serve")
+    report.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+                        help="the store the runs are in (default: %(default)s)")
+    report.add_argument("--since", default="", metavar="ISO",
+                        help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
+    report.add_argument("--last", type=int, default=0, metavar="N",
+                        help="only the newest N runs kept")
+    report.add_argument("--model", action="append", default=[], metavar="SUBSTRING",
+                        help="only models whose file or label contains this; repeatable")
+    report.add_argument("--min-n", type=int, default=6, metavar="N", dest="min_n",
+                        help="a run of fewer scored questions than this is counted in a "
+                             "footnote rather than tabled -- it proves the path works "
+                             "rather than how well the model answers (default: %(default)s)")
+    report.add_argument("--full-n", type=int, default=0, metavar="N", dest="full_n",
+                        help="the floor for the across-models table, so every model is "
+                             "read at the same number of questions (default: each model's "
+                             "own largest run)")
+    report.add_argument("--room", action="append", default=[], metavar="SIZE",
+                        help="also answer the memory table for a machine with this much "
+                             "room (24G, 24GiB, 24576M); repeatable")
+    report.add_argument("--at", type=int, default=32768, metavar="TOKENS",
+                        help="the per-user context the memory and serving lines answer at "
+                             "(default: %(default)s)")
+    report.add_argument("--md", default="", metavar="FILE",
+                        help="write the document here instead of to stdout")
+    report.add_argument("--text", action="store_true",
+                        help="plain text with fixed-width columns instead of Markdown")
+    report.add_argument("--open", action="store_true",
+                        help="with --md, open the file with whatever this desktop opens "
+                             "files with")
 
     gone = sub.add_parser("forget", allow_abbrev=False,
                           help="delete kept runs: the empty ones, or every run of one label")
@@ -811,6 +849,11 @@ def _run(args: Any) -> int:
         from ml_stack.graph.bench.extract import main as extracting
 
         return extracting(args)
+
+    if args.cmd == "report":
+        from ml_stack.graph.bench.report import main as reporting
+
+        return reporting(args)
 
     if args.cmd == "show":
         from ml_stack.graph.bench import extract as bench_extract
@@ -1296,7 +1339,10 @@ def main(argv: list[str] | None = None) -> int:
     """
     from ml_stack.lock import Busy, only_one
 
-    known = {*MEASURING, "show", "prepare", "forget", "status", "tail", "stop", "history"}
+    # every subcommand there is, so a *value* that happens to read like one -- `report
+    # --model run` -- is not mistaken for the command and sent through the lock
+    known = {*MEASURING, "show", "report", "prepare", "forget", "status", "tail", "stop",
+             "history"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

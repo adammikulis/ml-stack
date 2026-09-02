@@ -129,6 +129,22 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     table,
     timeouts,
 )
+from ml_stack.graph.bench.report import (  # noqa: F401
+    ASKINGS,
+    Doc,
+    across,
+    answering,
+    asking_of,
+    by_model,
+    cache_of,
+    fit_for,
+    fits_named,
+    head_of,
+    model_of,
+    recommended_head,
+    report,
+    thinking_of,
+)
 from ml_stack.graph.bench.serve import (
     EMBEDDED,  # noqa: F401
     SmokeFailed,
@@ -175,5 +191,6 @@ __all__ = ["Counting", "Estimate", "HOME", "NOISE", "PER_QUESTION", "QuestionTim
            "composed", "drafted", "estimate", "export", "ranking", "ask_from", "asking",
            "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
            "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
+           "report",
            "prefix_kept", "prepared", "read_questions", "references_in", "runs", "save",
            "slot_count", "speedup", "status", "stop", "table", "tail", "unread_named"]
