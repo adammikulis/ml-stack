@@ -390,9 +390,9 @@ def test_show_says_what_it_lit_and_is_capped_like_ids():
     model = ScriptedModel([call("show", ids=["person:ada", "person:bea"])])
     out = converse("who?", GRAPH, model, limit=1)
     assert out.show == ["person:ada"]
-    assert "lit 2 entries" in out.steps
+    assert "selected 2 entries" in out.steps
     one = ScriptedModel([call("show", ids=["person:ada"])])
-    assert "lit 1 entry" in converse("who?", GRAPH, one).steps
+    assert "selected 1 entry" in converse("who?", GRAPH, one).steps
 
 
 def test_show_is_offered_as_a_tool_over_any_graph():
@@ -1249,7 +1249,7 @@ def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
     assert out.show == ["person:p7", "person:p3", "person:p1", "person:p2", "person:p4",
                         "person:p5"]
     assert "cut 2 of 8 lit" in out.steps
-    assert "lit 8 entries" in out.steps, "what the model asked for is still on record"
+    assert "selected 8 entries" in out.steps, "what the model asked for is still on record"
     # the same script, flag off: all eight, capped only by LIT
     plain = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
     out = converse("who leads?", MANY, plain)

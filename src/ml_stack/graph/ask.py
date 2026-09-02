@@ -226,8 +226,8 @@ TOOLS = [
             "required": ["kind"]}}},
     {"type": "function", "function": {
         "name": "show",
-        "description": "Say which entries your answer is about, so they light up on the graph. "
-                       "Every answer ends with this call. An answer without it lights nothing "
+        "description": "Say which entries your answer is about, so they are selected on the graph. "
+                       "Every answer ends with this call. An answer without it selects nothing "
                        "and the reader is left looking at an empty graph, however good the "
                        "words were. Pass everyone and everything you actually wrote about — "
                        "including anyone you named from a quote — and nothing you merely "
@@ -286,7 +286,7 @@ TERSE = [
             "required": ["kind"]}}},
     {"type": "function", "function": {
         "name": "show",
-        "description": "The entries your answer is about, to light up on the graph. Call it "
+        "description": "The entries your answer is about, to select on the graph. Call it "
                        "once, last, with what you actually wrote about -- not everything "
                        "you opened on the way.",
         "parameters": {"type": "object", "properties": {
@@ -735,7 +735,7 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
 
     def light(args: Mapping[str, Any]) -> str:
         # the ids are the whole result; the model is told they arrived so it stops calling it
-        return f"lit {len(list(args.get('ids') or ()))} on the graph"
+        return f"selected {len(list(args.get('ids') or ()))} on the graph"
 
     does = {"look_up": find, "look_at": read, "path_between": trace,
             "list_kind": listing, "show": light}
@@ -1110,7 +1110,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 note(out.show, ids)
                 result = do(args)
                 real = sum(1 for i in ids if i in known)
-                out.steps.append(f"lit {real} entr" + ("y" if real == 1 else "ies"))
+                out.steps.append(f"selected {real} entr" + ("y" if real == 1 else "ies"))
             else:
                 result = do(args)
                 out.steps.append(f"used {name}")
