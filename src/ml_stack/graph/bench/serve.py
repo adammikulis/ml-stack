@@ -116,6 +116,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            spec_draft_max: int | None = None, cache_type: str = "",
            serving: Mapping[str, Any] | None = None,
+           trace: bool | None = None,
            per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
            smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
            spec_type: str = "",
@@ -297,6 +298,14 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     # how much one tool result may carry, in tokens: the asking again, and
                     # `Client` would refuse it exactly as it refused `tight`
                     reaching = asked.pop("reach", None)
+                    # The three ways of 2026-09-02, each the asking and not the client, and
+                    # each popped here for the same reason as `tight` before them: all the
+                    # lookups asked for in one turn, show kept to the kind the question
+                    # asked for, and the whole graph readable at a glance. Sent on only
+                    # when a way asked for one, so a run that asked for none reaches
+                    # `asking` with exactly the keywords it always had.
+                    ways_asked = {name: True for name in ("batch", "kinds", "summary")
+                                  if bool(asked.pop(name, False))}
                     client = Client(server.base_url,
                                     **{"timeout": per_question, **making, **asked})
                     if wants_card:
@@ -308,8 +317,10 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                  embed_model=embed_model, terse=how,
                                  rich=richly,
                                  tight=tightly,
-                                 reach=int(reaching) if reaching else None)
+                                 reach=int(reaching) if reaching else None,
+                                 **ways_asked)
                     got = bench.measure(ask, asking_these, label=here, client=client,
+                                        trace=trace,
                                         log=print,
                                   graph=graph, per_question=per_question)
                     for row in got:

@@ -1660,3 +1660,282 @@ def test_a_neighbour_only_ever_seen_inside_a_neighbourhood_may_still_be_lit():
     assert "org:tinsley" in out.found and "org:tinsley" not in out.read
     assert out.show == ["person:hollis", "org:tinsley"]
     assert not any("unread" in step for step in out.steps)
+
+
+# -- all the lookups in one turn ------------------------------------------------------------
+
+class ParallelModel:
+    """A model that asks for several tools in one reply, as llama-server returns them.
+
+    `ScriptedModel` issues one call per turn, which cannot show whether the loop runs every
+    call a reply carried or only the first. ``batches`` is a list of turns, each a list of
+    ``(name, args)``; a turn is issued when every tool in it is on offer, and once they are
+    spent it answers in words. ``chat`` carries `Client.chat`'s signature.
+    """
+
+    def __init__(self, batches, answer=ScriptedModel.ANSWER):
+        self.batches = [list(one) for one in batches]
+        self.answer = answer
+        self.seen: list[list[dict]] = []
+
+    def chat(self, messages, *, tools=None, tool_choice="auto", timeout=None,
+             on_delta=None, **extra):
+        self.seen.append(list(messages))
+        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+        if self.batches and all(name in offered for name, _args in self.batches[0]):
+            turn = self.batches.pop(0)
+            return Reply(content="", tool_calls=[
+                {"id": f"c{n}", "function": {"name": name,
+                                             "arguments": json.dumps(args)}}
+                for n, (name, args) in enumerate(turn)])
+        return Reply(content=self.answer)
+
+
+def test_every_tool_call_in_one_reply_is_run_before_the_next_model_turn():
+    """A reply may carry several calls at once, and all of them are the model's question:
+    running the first and dropping the rest would lose two thirds of a batched turn and
+    look, from the outside, exactly like a model that had not batched. Each is answered
+    with a tool message of its own, and the three of them are one round."""
+    model = ParallelModel([[call("look_at", ids=["person:ada"]),
+                            call("look_at", ids=["person:bea"]),
+                            call("look_up", text="Pellard")]])
+    out = converse("who works on compilers?", GRAPH, model)
+    assert out.read == ["person:ada", "person:bea"]
+    assert "org:pellard" in out.found
+    answered = [m for turn in model.seen for m in turn if m.get("role") == "tool"]
+    # three results, and the ids in them, so nothing was run and then thrown away
+    assert len({m["tool_call_id"] for m in answered}) == 3
+    assert any("Bea Marlow" in m["content"] for m in answered)
+    assert out.rounds == 1, "one reply, one round -- however many calls it carried"
+
+
+def test_reading_three_entries_in_one_call_is_one_round_not_three():
+    """What `batch` is for. The same question answered by naming everything in one look_up
+    and one look_around costs three rounds through the model where one entry at a time
+    costs seven, and the round is the round trip -- which is where the wall clock goes."""
+    model = ScriptedModel([call("look_up", texts=["compilers", "Ada", "Pellard"]),
+                           call("look_around", ids=["person:ada", "person:bea",
+                                                    "topic:compilers"]),
+                           call("show", ids=["person:ada", "person:bea"])])
+    out = converse("who works on compilers?", GRAPH, model, batch=True)
+    assert out.rounds == 3, "look_up, look_around, show"
+    assert out.spent.calls == 4, "three rounds and the turn that wrote the answer"
+    assert out.spent.tool_calls == 3
+    assert out.show == ["person:ada", "person:bea"]
+
+    slow = ScriptedModel([call("look_up", texts=["compilers"]),
+                          call("look_at", ids=["person:ada"]),
+                          call("look_at", ids=["person:bea"]),
+                          call("look_at", ids=["topic:compilers"]),
+                          call("show", ids=["person:ada", "person:bea"])])
+    assert converse("who works on compilers?", GRAPH, slow, batch=True).rounds == 5
+
+
+def test_a_turn_that_read_one_entry_while_more_were_found_is_told_to_read_the_rest():
+    from ml_stack.graph.ask import BATCH_NUDGE
+
+    one_at_a_time = ScriptedModel([call("look_up", text="compil"),
+                                   call("look_at", ids=["person:ada"]),
+                                   call("look_at", ids=["person:bea"])])
+    out = converse("who works on compilers?", GRAPH, one_at_a_time, batch=True)
+    said = [m for turn in one_at_a_time.seen for m in turn if m.get("role") == "user"]
+    assert any(m["content"] == BATCH_NUDGE for m in said)
+    assert "asked it to read the rest in one call" in out.steps
+
+    both_at_once = ScriptedModel([call("look_up", text="compil"),
+                                  call("look_at", ids=["person:ada", "person:bea"])])
+    converse("who works on compilers?", GRAPH, both_at_once, batch=True)
+    assert not any(m.get("content") == BATCH_NUDGE
+                   for turn in both_at_once.seen for m in turn)
+
+    # and never without asking for it: the nudge is a message in every prompt after it
+    off = ScriptedModel([call("look_up", text="compil"),
+                         call("look_at", ids=["person:ada"]),
+                         call("look_at", ids=["person:bea"])])
+    converse("who works on compilers?", GRAPH, off)
+    assert not any(m.get("content") == BATCH_NUDGE for turn in off.seen for m in turn)
+
+
+def test_the_batch_sentence_and_the_worked_calls_are_said_only_when_asked_for():
+    """On copies, like rich and tight: with the flag off the descriptions and the system
+    prompt are byte for byte what the ranking runs measured."""
+    from ml_stack.graph.ask import (BATCH_EXAMPLES, BATCH_SYSTEM_SENTENCE, TOOLS,
+                                    tools_for)
+
+    said = ScriptedModel([])
+    converse("who?", GRAPH, said, batch=True)
+    system = said.seen[0][0]["content"]
+    assert BATCH_SYSTEM_SENTENCE in system
+
+    quiet = ScriptedModel([])
+    converse("who?", GRAPH, quiet)
+    assert BATCH_SYSTEM_SENTENCE not in quiet.seen[0][0]["content"]
+
+    batched = {t["function"]["name"]: t["function"]["description"]
+               for t, _fn in tools_for(GRAPH, batch=True)}
+    for name, example in BATCH_EXAMPLES.items():
+        assert batched[name].endswith(example)
+        assert example not in _schema_text(TOOLS, name), "the base set is untouched"
+    assert "person:hollis" in batched["look_at"], "a three-entry call, written out"
+
+
+def _schema_text(schemas, name):
+    return next(t["function"]["description"] for t in schemas
+                if t["function"]["name"] == name)
+
+
+# -- the kind the question asked for ---------------------------------------------------------
+
+def test_asked_kinds_reads_the_question_word():
+    """The table, over the questions the bench actually asks. A question whose own words
+    settle the kind is filtered; one naming several kinds or none is left alone, because a
+    filter that guesses wrong empties the selection."""
+    from ml_stack.graph.ask import asked_kinds
+    from ml_stack.graph.community import QUESTIONS
+
+    table = {
+        "Who fixes machines?": {"person"},
+        "Who knows about robotics?": {"person"},
+        "Who is based in Dunmore?": {"person"},
+        "Someone who can sell things": {"person"},
+        "Who could introduce Iris Bellweather to a lawyer?": {"person"},
+        "Who here is called Vance?": {"person"},
+        "I need two people to build a healthcare AI prototype. Who?": {"person"},
+        "Which companies do people here work for?": {"org"},
+        "Which company employs the lawyer?": {"org"},
+        "Which company does surveying?": {"org"},
+        "Where does Alan Turing work?": {"org"},
+        "Where is Nell Ashgrove based?": {"place"},
+        "Which places do the people who do repair live in?": {"place"},
+        "Where do the people who went to Makers Night live?": {"place"},
+        "What events come up?": {"event"},
+        "Which events did Grace Hopper go to?": {"event"},
+        "What openings are there?": {"opportunity"},
+        "Any work going for a surveyor?": {"opportunity"},
+        "How are Otto Vance and Charles Babbage connected?": None,
+        "Tell me about Otto Vance.": None,
+    }
+    assert len(table) == 20
+    asked = {q["q"] for q in QUESTIONS}
+    for question, wanted in table.items():
+        assert question in asked, f"{question!r} is not one of the bench's questions"
+        assert asked_kinds(question) == wanted, question
+
+    # the question that mentions a person and asks about a subject: what comes last is
+    # what is being asked
+    assert asked_kinds("Somebody is selling a machine and needs help. "
+                       "What do they need?") is None
+    # several kinds named at once, and a topic question said plainly
+    assert asked_kinds("who and what is here?") is None
+    assert asked_kinds("Which people and companies are here?") is None
+    assert asked_kinds("What topics come up here?") == {"topic"}
+    assert asked_kinds("") is None
+
+
+def test_a_who_question_does_not_light_the_topic_it_was_found_through():
+    model = ScriptedModel([call("look_up", text="compil"),
+                           call("show", ids=["person:ada", "person:bea",
+                                             "topic:compilers"])])
+    out = converse("who knows about compilers?", GRAPH, model, kinds=True)
+    assert out.show == ["person:ada", "person:bea"]
+    assert any("another kind" in step for step in out.steps)
+
+    loose = ScriptedModel([call("look_up", text="compil"),
+                           call("show", ids=["person:ada", "person:bea",
+                                             "topic:compilers"])])
+    assert converse("who knows about compilers?", GRAPH, loose).show == \
+        ["person:ada", "person:bea", "topic:compilers"], "off unless asked for"
+
+
+def test_a_question_naming_no_kind_or_several_filters_nothing():
+    model = ScriptedModel([call("path_between", from_id="person:ada", to_id="person:bea"),
+                           call("show", ids=["person:ada", "topic:compilers",
+                                             "person:bea"])])
+    out = converse("How are Ada Lovelace and Bea Marlow connected?", GRAPH, model,
+                   kinds=True)
+    assert out.show == ["person:ada", "topic:compilers", "person:bea"]
+    assert not any("another kind" in step for step in out.steps)
+
+
+def test_a_listing_is_exempt_from_the_kind_filter_and_an_empty_selection_is_never_made():
+    """`list_kind` is exempt from the cap for the same reason it is exempt here: a
+    which-of-a-kind question has as many right answers as there are entries. And a filter
+    that would light nothing at all is not applied -- a blank graph is worse than a loose
+    selection."""
+    listing = ScriptedModel([call("list_kind", kind="topic"),
+                             call("show", ids=["topic:compilers", "org:pellard"])])
+    out = converse("Who is here?", GRAPH, listing, kinds=True)
+    assert out.show == ["topic:compilers"], "the listed entry stays; the other kind goes"
+
+    everything = ScriptedModel([call("look_up", text="compil"),
+                                call("show", ids=["topic:compilers"])])
+    kept = converse("who knows about compilers?", GRAPH, everything, kinds=True)
+    assert kept.show == ["topic:compilers"]
+    assert not any("another kind" in step for step in kept.steps)
+
+
+# -- the whole graph at a glance ---------------------------------------------------------------
+
+def test_summarise_reads_out_the_counts_the_top_entries_and_the_busiest_joins():
+    from ml_stack.graph.ask import summarise
+
+    text = summarise(GRAPH)
+    assert text.splitlines()[0] == \
+        "This graph holds 4 entries and 3 joins: 2 person, 1 org, 1 topic."
+    assert "person (2), most mentioned first:" in text
+    # each entry with its id in brackets, as look_around writes them, and a line of its words
+    assert "- Ada Lovelace [person:ada], analyst, Turin said: \"I am Ada" in text
+    assert "- Pellard Foundry [org:pellard], company" in text
+    assert "Busiest joins: interested_in (2), works_at (1)." in text
+    assert summarise({"nodes": [], "edges": []}) == "This graph holds 0 entries and 0 joins."
+
+
+def test_the_summary_tool_is_offered_only_when_asked_for_and_goes_away_last():
+    from ml_stack.graph.ask import SEARCHING, TOOLS, tools_for
+
+    assert "summarise" not in {t["function"]["name"] for t in TOOLS}
+    assert "summarise" not in {s["function"]["name"] for s, _fn in tools_for(GRAPH)}
+    assert "summarise" in {s["function"]["name"]
+                           for s, _fn in tools_for(GRAPH, summary=True)}
+    # a model that may still summarise will summarise instead of answering
+    assert "summarise" in SEARCHING
+
+
+def test_a_broad_question_calls_summarise_once_and_selects_the_top_entries():
+    model = ScriptedModel([call("summarise"),
+                           call("show", ids=["person:ada", "topic:compilers"])])
+    out = converse("what is this community about?", GRAPH, model, summary_tool=True)
+    assert out.steps.count("read the graph at a glance") == 1
+    assert out.show == ["person:ada", "topic:compilers"]
+    # what the summary read out counts as found, so it may be selected without a look_at
+    assert set(out.found) == {"person:ada", "person:bea", "topic:compilers", "org:pellard"}
+    assert not out.read
+    told = model.told()
+    assert "This graph holds 4 entries" in told
+
+
+def test_a_broad_question_routes_to_the_summary_only_where_it_is_offered():
+    """The examples are `graph.route`'s, and they are added only when the tool is: a broad
+    question routed to something the model was never given is a question with no tool."""
+    from ml_stack.graph.ask import SUMMARY_PROMPTS, TOOL_PROMPTS, prompts_for, routing_prompts
+    from ml_stack.graph.route import rank
+
+    def words(text):
+        return {w.strip(".,?!") for w in text.casefold().split()}
+
+    def fake_embedder(texts, **kw):
+        vocab = sorted({w for t in texts for w in words(t)})
+        return [[1.0 if w in words(t) else 0.0 for w in vocab] for t in texts]
+
+    def routed(question, **kw):
+        return rank(question, base_url="http://nowhere.invalid", model="pretend",
+                    embedder=fake_embedder, prompts=routing_prompts(**kw))
+
+    assert routed("what is this community about?", summary=True).order[0] == "summarise"
+    assert routed("what does this group actually do?", summary=True).order[0] == "summarise"
+    # a particular name is still a search, summary or not
+    assert routed("who fixes machines?", summary=True).order[0] == "look_up"
+    assert "summarise" not in routing_prompts()
+    assert "summarise" not in TOOL_PROMPTS, \
+        "TOOL_PROMPTS is read as 'every tool the model has'; the summary is offered on ask"
+    assert prompts_for("summarise") == SUMMARY_PROMPTS

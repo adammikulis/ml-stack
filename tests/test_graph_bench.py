@@ -3670,3 +3670,289 @@ def test_sweep_serve_flags_reach_the_spec_by_field_name(tmp_path, monkeypatch):
     # the word itself never reaches the server
     assert kw.get("mmproj") != "auto"
     assert serving_fields(type("A", (), {})()) == {}
+
+
+
+# -- the transcript, not only the totals ---------------------------------------------------
+
+class _Talkative:
+    """A model that looks something up, shows what it found, then answers -- with the
+    timings a served llama.cpp reports on every reply.
+
+    `Counting` reads its bill off exactly these fields, so a fake that returns none of them
+    would prove the counting and nothing about the trace. The tool calls are the point:
+    this is what one traced question is made of.
+    """
+
+    def __init__(self, found: str = "compiler") -> None:
+        self.text = found
+        self.seen: list[list[dict]] = []
+        self.sampling: dict = {}
+
+    def chat(self, messages, tools=None, **kw):
+        from ml_stack.graph.bench.selfcheck import _Reply
+
+        self.seen.append([dict(m) for m in messages])
+        offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
+        answered = sum(1 for m in messages if m.get("role") == "tool")
+        raw = {"model": "invented-e4b.gguf",
+               "usage": {"prompt_tokens": 900 + 40 * answered, "completion_tokens": 20},
+               "timings": {"prompt_ms": 120.0, "predicted_ms": 300.0,
+                           "prompt_n": 40 if answered else 900,
+                           "cache_n": 900 if answered else 0,
+                           "predicted_n": 20, "draft_n": 16, "draft_n_accepted": 12}}
+        if "look_up" in offered and not answered:
+            return _Reply(content="", raw=raw, thinking="thinking about it",
+                          finish_reason="tool_calls",
+                          tool_calls=[{"id": "c1", "function": {
+                              "name": "look_up",
+                              "arguments": json.dumps({"texts": [self.text]})}}])
+        if "show" in offered and answered == 1:
+            return _Reply(content="", raw=raw, finish_reason="tool_calls",
+                          tool_calls=[{"id": "c2", "function": {
+                              "name": "show",
+                              "arguments": json.dumps({"ids": ["topic:compiler"]})}}])
+        return _Reply(content="Ada Quill works on the compiler.", raw=raw,
+                      finish_reason="stop")
+
+
+def _one_traced_row():
+    """One question asked of `_Talkative` through the ordinary asking, traced."""
+    from ml_stack.graph.bench import asking, measure
+
+    model = _Talkative()
+    rows = measure(asking(TINY), [{"q": "who works on compilers?",
+                                   "expect": ["topic:compiler"]}],
+                   label="traced", client=model, graph=TINY, trace=True)
+    return rows[0], model
+
+
+def test_a_sampled_run_traces_and_the_hundred_does_not(monkeypatch):
+    """Traces are on where they are affordable and off where they are not, decided by the
+    only thing that knows -- how many questions are being asked -- rather than by a flag
+    somebody has to remember. The day's sweep scored thousands of tool calls and kept none
+    of them, and there is no way to get those back but to spend the GPU again."""
+    from ml_stack.graph.bench import SHORT, TRACE_ENV, wants_trace
+
+    monkeypatch.delenv(TRACE_ENV, raising=False)
+    assert wants_trace(2) and wants_trace(SHORT)
+    assert not wants_trace(SHORT + 1) and not wants_trace(100)
+    assert wants_trace(100, True) and not wants_trace(2, False)   # a person said so
+
+    monkeypatch.setenv(TRACE_ENV, "1")
+    assert wants_trace(100), "a run whose command line has no flag can still be traced"
+    monkeypatch.setenv(TRACE_ENV, "0")
+    assert not wants_trace(2)
+    assert wants_trace(2, True), "and the flag still wins over the environment"
+
+
+def test_a_traced_question_keeps_every_call_with_its_arguments_and_timings():
+    """What the row could not say: which calls the calls were. Each is kept with the tool,
+    the arguments, what came back and what the server spent -- the fields `Spent.note`
+    reads, so the per-call record and the per-answer totals are one measurement, twice."""
+    row, model = _one_traced_row()
+
+    assert row.trace and row.shown == ["topic:compiler"]
+    kinds = [e["role"] for e in row.trace]
+    assert kinds[0] == "tools", "the schemas the model was offered, kept once"
+    assert kinds[1:3] == ["system", "user"], "then the prompt it was given, in order"
+    assert kinds.count("assistant") == row.calls, "one entry per round trip, no more"
+
+    said = [e for e in row.trace if e["role"] == "assistant"]
+    assert [c["name"] for e in said for c in e["tool_calls"]] == ["look_up", "show"]
+    assert said[0]["tool_calls"][0]["args"] == {"texts": ["compiler"]}
+    assert said[1]["tool_calls"][0]["args"] == {"ids": ["topic:compiler"]}
+    assert said[0]["model"] == "invented-e4b.gguf" and said[0]["thinking_chars"] == 17
+    assert said[0]["finish"] == "tool_calls" and said[-1]["finish"] == "stop"
+    assert "look_up" in said[0]["offered"], "and which tools it had to choose from"
+    assert said[0]["timings"]["prompt_n"] == 900 and said[1]["timings"]["cache_n"] == 900
+    assert said[0]["timings"]["draft_n_accepted"] == 12
+    assert said[-1]["content"] == "Ada Quill works on the compiler."
+
+    # the totals are these numbers added up, not a second measurement of the same thing
+    assert row.completion_tokens == sum(e["tokens"]["completion"] for e in said)
+    assert row.prompt_tokens == sum(e["tokens"]["prompt"] for e in said)
+    assert row.draft_taken == sum(e["timings"]["draft_n_accepted"] for e in said)
+    assert row.calls == len(said)
+
+    results = [e for e in row.trace if e["role"] == "tool"]
+    assert [e["name"] for e in results] == ["look_up", "show"]
+    assert results[0]["ids"] == 1, "how many entries came back, not only how many bytes"
+    assert results[0]["chars"] == len(results[0]["content"])
+
+
+def test_a_question_asked_without_a_trace_keeps_none_of_it():
+    """The default for a hundred questions, and what every run kept before today: the
+    totals, and nothing measured in kilobytes."""
+    from ml_stack.graph.bench import asking, measure
+
+    rows = measure(asking(TINY), [{"q": "who works on compilers?",
+                                   "expect": ["topic:compiler"]}],
+                   label="untraced", client=_Talkative(), graph=TINY, trace=False)
+    assert rows[0].calls >= 2 and rows[0].trace == []
+
+
+def test_a_tool_result_is_cut_at_two_thousand_characters_and_says_how_long_it_was():
+    """A tool result is the largest thing in a conversation and the least of what is being
+    taught -- the lesson is the call, not the graph's answer. The whole length is kept
+    beside the cut text, so what it cost is not lost with the bytes."""
+    from ml_stack.graph.bench import TRACE_CAP, Counting
+    from ml_stack.graph.bench.selfcheck import _Reply
+
+    class Once:
+        def chat(self, messages, **kw):
+            return _Reply(content="done", raw={}, finish_reason="stop")
+
+    counting = Counting(Once(), trace=True)
+    huge = json.dumps([{"id": f"person:n{i}", "label": "Ada Quill"} for i in range(400)])
+    counting.chat([{"role": "user", "content": "who?"},
+                   {"role": "tool", "name": "look_up", "content": huge}])
+    kept = [e for e in counting.trace if e["role"] == "tool"][0]
+    assert len(kept["content"]) == TRACE_CAP and kept["cut"] is True
+    assert kept["chars"] == len(huge) > TRACE_CAP
+    assert kept["ids"] == 400, "counted before the cut, not after it"
+
+
+def test_a_traced_run_reads_back_out_of_the_store_with_its_trace_whole(tmp_path):
+    """The read-back is the only proof a run exists, and a trace that the store quietly
+    dropped would be a fine-tune's data gone the same way twelve runs once went."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    row, _ = _one_traced_row()
+    kept = tmp_path / "runs.ladybug"
+
+    key = save(kept, [row], held={"model": "invented-e4b.gguf", "context": 32768})
+    back = next(r for r in runs(kept) if r["key"] == key)
+    assert back["traced"] == 1, "the run says how many of its rows carry a transcript"
+    assert back["rows"][0]["trace"] == json.loads(json.dumps(row.trace))
+
+
+def test_an_untraced_run_is_kept_exactly_as_it_was_before_traces_existed(tmp_path):
+    """A field nobody filled in is a key that says nothing. Every row of every run carrying
+    an empty list is how a store grows without measuring anything."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    kept = tmp_path / "runs.ladybug"
+    key = save(kept, [a_row("who?", expected=["person:ada"], shown=["person:ada"])])
+    back = next(r for r in runs(kept) if r["key"] == key)
+    assert "trace" not in back["rows"][0] and back["traced"] == 0
+
+
+def test_show_trace_prints_one_line_per_call_with_what_it_called_and_what_it_cost(capsys):
+    """`ml-stack-bench show --trace LABEL`: the table says a question took three calls, and
+    this says which three. It is where a wrong answer is diagnosed and where a training
+    example is read before thousands of them are written from the same rows."""
+    from dataclasses import asdict
+
+    from ml_stack.graph.bench import transcript
+
+    row, _ = _one_traced_row()
+    kept = [{"label": "e4b-shortlist", "at": "2026-09-02T19:00:00",
+             "rows": [asdict(row)], "server": {}}]
+
+    transcript(kept, "e4b")
+    said = capsys.readouterr().out
+    assert "e4b-shortlist  who works on compilers?" in said
+    assert 'look_up({"texts": ["compiler"]})' in said
+    assert 'show({"ids": ["topic:compiler"]})' in said
+    assert "read 900+0 cached in 120ms" in said and "wrote 20 in 300ms" in said
+    assert "accepted 12/16" in said, "what the draft head was worth, call by call"
+    assert "2 ids" not in said and "1 ids" in said
+
+    transcript(kept, "e4b", "nothing like this question")
+    assert "no traced question found" in capsys.readouterr().out
+    transcript([], "")
+    assert "MLSTACK_BENCH_TRACE=1" in capsys.readouterr().out, "and how to get one"
+
+
+# -- batch, kinds and summary: three askings, one load -------------------------------------
+
+def test_the_three_askings_of_2026_09_02_are_ways_and_not_loads():
+    """None of the three changes anything the server is told, so measuring all three costs
+    one model load and not four -- which is the whole point of `--also`."""
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _parser, _ways
+
+    ways = _ways(Namespace(also=["batch", "kinds", "summary"], terse=False,
+                           temperature=0.0, reach=0))
+    assert [w.get("label") for w in ways] == [None, "batch", "kinds", "summary"]
+    assert ways[0] == {"terse": False, "temperature": 0.0}, \
+        "the first way is what was asked for, unchanged"
+    assert ways[1] == {"label": "batch", "terse": False, "batch": True, "temperature": 0.0}
+    assert ways[2] == {"label": "kinds", "terse": False, "kinds": True, "temperature": 0.0}
+    assert ways[3] == {"label": "summary", "terse": False, "summary": True,
+                       "temperature": 0.0}
+    for name in ("batch", "kinds", "summary"):
+        assert _parser().parse_args(["sweep", "--serve", "x", "--also", name]).also == [name]
+
+
+def test_the_three_askings_reach_the_serving_seam_and_never_the_client(tmp_path, monkeypatch,
+                                                                       capsys):
+    """Where each has to land: another way through the same load, labelled for itself,
+    building the asking with its own keyword -- while the way that asked for nothing reaches
+    `asking` with exactly the keywords it always had. And popped *before* the `Client` is
+    built, which is what `tight` was not: a keyword the client does not take took an 87G
+    load down with it.
+
+    `asking` itself forwards these to `converse`; what is asserted here is that `served`
+    hands them over and hands over nothing else.
+    """
+    import inspect
+
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    asked = []
+    real_asking = bench.asking
+    takes = set(inspect.signature(real_asking).parameters)
+
+    def watched(graph, **kw):
+        asked.append({k: v for k, v in kw.items() if k in ("batch", "kinds", "summary")})
+        return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
+
+    monkeypatch.setattr(bench, "asking", watched)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only",
+                        "--also", "batch", "--also", "kinds", "--also", "summary",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    assert asked == [{}, {"batch": True}, {"kinds": True}, {"summary": True}]
+    assert sorted(r["label"] for r in runs(seen["kept"])) == [
+        "tiny-plain", "tiny-plain-batch", "tiny-plain-kinds", "tiny-plain-summary"]
+    # one load for all four, because none of them is about the serving
+    assert seen["models"] == ["tiny.gguf"]
+    # and the client never saw them: `_ServedModel` binds against the real `Client`'s
+    # signature, so a keyword it does not take raises there rather than on the GPU
+
+
+def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_without_one(
+        monkeypatch):
+    """Three ways another agent added to `converse`; this only has to hand them on, and hand
+    the terse set in already built with the two that change what tools exist.
+
+    `summary` is renamed at this hop: `converse`'s own `summary` is a thread's rolling
+    summary and takes text, so passing the tool's bool as that one would hand a bool to
+    something that reads prose. Mutation: send them as `False` rather than leaving them out,
+    and a run that asked for none is no longer byte for byte the run the ranking was
+    written from."""
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.bench import asking
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    asking(TINY)("who?", _Scripted())
+    assert not {"batch", "kinds", "summary", "summary_tool"} & set(reached), \
+        "asked for none of them, sent none of them"
+
+    reached.clear()
+    asking(TINY, batch=True, kinds=True, summary=True)("who?", _Scripted())
+    assert reached.get("batch") is True and reached.get("kinds") is True
+    assert reached.get("summary_tool") is True and "summary" not in reached
+
+    reached.clear()
+    asking(TINY, terse=True, batch=True, summary=True)("who?", _Scripted())
+    named = [s["function"]["name"] for s, _ in reached["tools"]]
+    assert "summarise" in named, "the terse set is built here, so it is built with them too"

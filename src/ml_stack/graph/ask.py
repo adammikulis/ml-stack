@@ -64,7 +64,7 @@ REPEATS = 2
 # The web tools are searches too: a model that may still search will search instead of
 # answering, which is the failure the last turn exists to end.
 SEARCHING = frozenset({"look_up", "look_at", "look_around", "path_between", "list_kind",
-                       "web_search", "web_read", "web_look"})
+                       "summarise", "web_search", "web_read", "web_look"})
 # Openings that mean the model is planning rather than answering. gpt-oss puts its analysis
 # in a channel of its own, but when a turn spends its whole budget deciding what to do the
 # reply that comes back IS the analysis — not empty, so nothing caught it, and the reader
@@ -443,6 +443,214 @@ def _tight(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# ------------------------------------------------------------------ all the lookups at once
+#
+# The asking that costs the least, for the model that answers best. Measured 2026-09-02 on
+# Qwen3.8-Flash-Next: 25 seconds a question over about seven tool calls, and a tool call is
+# a whole round trip through the slow half of a model that reads eleven times faster than it
+# writes. The calls were not seven different questions -- they were one question asked one
+# entry at a time, because nothing in the prompt said the ids are a list. Every one of these
+# tools already takes several; this is the asking that says so, in the system text, in the
+# descriptions, and in a nudge the moment a turn reads one entry when more were found.
+#
+# Said on copies, for the same reason as RICH and TIGHT: with the flag off the descriptions
+# and the system prompt stay byte for byte as they were, so a run before this one is still
+# comparable with a run after it.
+BATCH_SYSTEM_SENTENCE = (
+    "Ask for everything you want in one call. look_up takes a list of words, and look_at "
+    "and look_around take a list of ids -- reading three entries in one call costs one turn "
+    "where three calls cost three, and a question that reads one entry at a time runs out of "
+    "turns before it answers. Name every entry you mean to read in a single call, and never "
+    "read them one at a time.")
+# What a turn is told when it read one entry and left the rest of what it found unread.
+BATCH_NUDGE = ("You read one entry, and more were found. Read the rest in one call: put "
+               "every id you still want into a single look_at or look_around, not one call "
+               "each.")
+# The worked example each searching tool gains: three things in one call, written out, since
+# a description that says a parameter is a list leaves a small model to infer that it should
+# fill one, and one that shows three ids in it does not.
+BATCH_EXAMPLES = {
+    "look_up": " Three words is still one call: {\"texts\": [\"pottery\", \"firing\", "
+               "\"Ambleford\"]}, never three calls of one word.",
+    "look_at": " ids is a list, so read everything you mean to write about at once: "
+               "{\"ids\": [\"person:wren\", \"person:hollis\", \"topic:ceramics\"]} is one "
+               "call for three entries. Reading them one at a time costs three turns and "
+               "tells you nothing more.",
+    "look_around": " ids is a list here too: {\"ids\": [\"topic:ceramics\", "
+                   "\"place:ambleford\", \"org:tinsley\"]} reads three neighbourhoods in "
+                   "one call.",
+}
+
+
+def _batched(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Those schemas, copied, with each searching tool shown a three-entry call."""
+    out = copy.deepcopy(list(schemas))
+    for schema in out:
+        more = BATCH_EXAMPLES.get(str(schema["function"]["name"]))
+        if more:
+            schema["function"]["description"] += more
+    return out
+
+
+# ------------------------------------------------------------------ what kind was asked for
+#
+# The precision miss that is not a retrieval failure. Measured 2026-09-02 on
+# Qwen3.8-Flash-Next: 85% recall against 65% precision, and what it lit beside the answer
+# was mostly right-adjacent -- the topic the people share, selected for a question that
+# asked *who*. The question word already says what kind the answer is, so a `who` question
+# keeps the people and drops the topic it found them through.
+#
+# Only where the question word is unambiguous. A question that asks for two kinds ("who and
+# what"), or names no kind at all ("how is X connected to Y", "tell me about X"), filters
+# nothing: a filter that guesses wrong empties the selection, and an empty selection is
+# worse than a loose one.
+_SEVERAL = re.compile(
+    r"\bwho and what\b|\bwhat and who\b"
+    r"|\b(?:people|persons?) and (?:companies|organisations?|organizations?|orgs?|firms?"
+    r"|places|towns?|topics?|subjects?|events?)\b"
+    r"|\b(?:companies|organisations?|organizations?|orgs?|firms?|places|towns?|topics?"
+    r"|subjects?|events?) and (?:people|persons?)\b")
+# (kind, what a question asking for it says). Read against the *asking* clause -- the last
+# sentence -- because "Somebody is selling a machine and needs help. What do they need?"
+# asks about a subject and merely mentions a person on the way.
+#
+# Checked over the bench's own 110 questions before it was measured on a model: 72 are
+# filtered to the kind their expected answer actually is, 31 are left alone, and exactly one
+# is filtered wrongly -- "Who is offering work keeping a production line running?", whose
+# answer is the company rather than a person. That is the shape of the trade, and it is why
+# a question naming several kinds or none filters nothing.
+ASKED_FOR: tuple[tuple[str, str], ...] = (
+    # "who" only where it opens the asking, or follows a comma. In the middle of a clause
+    # it is a relative pronoun and says nothing about the answer: "Which places do the
+    # people *who* do repair live in?" asks for places, and reading that `who` as the
+    # question word filtered the places out (measured against the bench's own set).
+    ("person", r"(?:^|,\s*)(?:whos?|whom|whose)\b"
+               r"|\bsomebody\b|\bsomeone\b|\banybody\b|\banyone\b"
+               r"|\bwhich (?:person|people|members)\b|\bwhat people\b"),
+    ("org", r"\bwhich (?:company|companies|organisations?|organizations?|orgs?|firms?"
+            r"|business|businesses|employers?)\b"
+            r"|\bwhat (?:company|companies|organisations?|organizations?|firms?|employers?)\b"
+            r"|\bwhere (?:do|does|did)\b[^?]*\bworks?\b"),
+    ("place", r"\bwhich (?:place|places|towns?|cit(?:y|ies))\b"
+              r"|\bwhat (?:place|places|towns?|cit(?:y|ies))\b"
+              r"|\bwhere\b[^?]*\b(?:based|live|lives|lived|located)\b"),
+    ("topic", r"\bwhich (?:topics?|subjects?)\b|\bwhat (?:topics?|subjects?)\b"
+              r"|\btalk about\b|\btalking about\b|\bdiscuss(?:ed|ing)?\b"),
+    ("event", r"\bwhich events?\b|\bwhat events?\b"),
+    ("opportunity", r"\bopenings?\b|\bopportunit(?:y|ies)\b|\bvacanc(?:y|ies)\b"
+                    r"|\bwork going\b|\bany work\b"),
+)
+_ASKED = tuple((kind, re.compile(pattern)) for kind, pattern in ASKED_FOR)
+_SENTENCE = re.compile(r"(?<=[.?!])\s+")
+
+
+def asking_clause(question: str) -> str:
+    """The sentence of a question that actually asks it: the last one.
+
+    "I need two people to build a prototype. Who?" asks for people, and "Somebody is
+    selling a machine. What do they need?" does not, though both say a person word. What
+    comes last is what is being asked.
+    """
+    parts = [p for p in _SENTENCE.split(" ".join((question or "").split())) if p.strip()]
+    return parts[-1] if parts else ""
+
+
+def asked_kinds(question: str) -> set[str] | None:
+    """The kind of entry this question asks for, or ``None`` for "it did not say".
+
+    ``None`` means filter nothing, and is the answer whenever the question named several
+    kinds or none: only a question whose own words settle the kind is acted on.
+
+        asked_kinds("Who fixes machines?")        # {"person"}
+        asked_kinds("Which company does surveying?")  # {"org"}
+        asked_kinds("Tell me about Otto Vance.")  # None
+    """
+    clause = asking_clause(question).casefold()
+    if not clause or _SEVERAL.search(clause):
+        return None
+    found = {kind for kind, pattern in _ASKED if pattern.search(clause)}
+    return found if len(found) == 1 else None
+
+
+# ------------------------------------------------------------------ the graph at a glance
+#
+# The broad question -- "what is this community about?" -- has no name in it to look up, so
+# a search answers it by finding whatever the words happen to hit, and the answer is about
+# five arbitrary entries. What it wants is the shape of the whole graph, and that is
+# arithmetic over the nodes and edges: no model, no round trip, the same text every time.
+SUMMARY_TOP = 10          # entries read out per kind, most mentioned first
+SUMMARY_RELATIONS = 8     # how many relations are named as the busiest
+SUMMARY_SAID = 140        # characters of one entry's own words
+
+
+def summarise(graph: Mapping[str, Any], *, top: int = SUMMARY_TOP,
+              relations: int = SUMMARY_RELATIONS) -> str:
+    """What the whole graph holds, in one text: counts per kind, the most-mentioned
+    entries of each kind with a line of their own words, and the busiest relations.
+
+    Computed from the graph and nothing else, so it costs no model call and reads the same
+    way twice. Ids are in brackets, as `look_around` writes them, so a model may select an
+    entry the summary named without looking it up.
+    """
+    nodes = list(graph.get("nodes") or ())
+    messages = graph.get("messages") or {}
+    by_kind: dict[str, list[Mapping[str, Any]]] = {}
+    for node in nodes:
+        by_kind.setdefault(_kind_of(node) or "entry", []).append(node)
+    order = sorted(by_kind, key=lambda k: (-len(by_kind[k]), k))
+    edges = list(graph.get("edges") or ())
+    counted = ", ".join(f"{len(by_kind[k])} {k}" for k in order)
+    lines = [f"This graph holds {len(nodes)} entries and {len(edges)} joins"
+             + (f": {counted}." if counted else ".")]
+    for kind in order:
+        rows = sorted(by_kind[kind], key=lambda n: (-int(n.get("mentions") or 0),
+                                                    str(n.get("label") or "")))
+        lines.append(f"{kind} ({len(rows)}), most mentioned first:")
+        for node in rows[:top]:
+            attrs = node.get("attrs") or {}
+            line = f"  - {node.get('label')} [{node['id']}]"
+            for key in ("role", "type", "location"):
+                if str(attrs.get(key) or "").strip():
+                    line += f", {attrs[key]}"
+            said = _said_lines(node, messages, most=1, chars=SUMMARY_SAID, indent="")
+            if said:
+                line += " " + said[0]
+            lines.append(line)
+        if len(rows) > top:
+            lines.append(f"  ... and {len(rows) - top} more {kind}")
+    busiest: dict[str, int] = {}
+    for edge in edges:
+        rel = str(edge.get("rel") or "joined to")
+        busiest[rel] = busiest.get(rel, 0) + 1
+    if busiest:
+        best = sorted(busiest.items(), key=lambda kv: (-kv[1], kv[0]))[:relations]
+        lines.append("Busiest joins: " + ", ".join(f"{rel} ({n})" for rel, n in best) + ".")
+    return "\n".join(lines)
+
+
+SUMMARY_SCHEMA: dict[str, Any] = {"type": "function", "function": {
+    "name": "summarise",
+    "description": "Read the whole graph at a glance: how many entries of each kind there "
+                   "are, the most-mentioned entries of each kind with a line of their own "
+                   "words and their ids in brackets, and which relations are busiest. Call "
+                   "it for a broad question -- what this community is about, what it does, "
+                   "what the main subjects are -- where no particular name is being looked "
+                   "for and a search would only find whatever the words happened to hit. "
+                   "One call answers it; then select the entries your answer is about. "
+                   "Example: for \"what does this group do?\" call summarise with {}.",
+    "parameters": {"type": "object", "properties": {}, "required": []}}}
+# Its questions, for a router. Kept out of `TOOL_PROMPTS` because that mapping is also read
+# as "every tool the model has" -- `ml-stack-train-tools` refuses a prompts key naming a
+# tool the schemas lack, and `summarise` is offered only when a caller asks for it.
+SUMMARY_PROMPTS: tuple[str, ...] = (
+    "what does this community do?",
+    "what is this group about?",
+    "what are the main subjects here?",
+    "give me an overview of the whole thing",
+    "summarise this graph for me",
+)
+
+
 # What a *question* looks like when it wants each tool -- for an embedder to match against,
 # and never sent to the chat model.
 #
@@ -532,7 +740,21 @@ TOOL_PROMPTS: dict[str, tuple[str, ...]] = {
 
 def prompts_for(name: str) -> tuple[str, ...]:
     """Example questions that should route to ``name``, for an embedder. May be empty."""
+    if name == "summarise":
+        return SUMMARY_PROMPTS
     return TOOL_PROMPTS.get(name, ())
+
+
+def routing_prompts(*, summary: bool = False) -> dict[str, tuple[str, ...]]:
+    """What to route a question against: `TOOL_PROMPTS`, and `summarise`'s when it is offered.
+
+        routed = rank(question, routing_prompts(summary=True), base_url=..., model=...)
+
+    A tool the model was not given must not be routed to, so the summary's questions are
+    added only when a caller asked for the tool -- otherwise a broad question would be sent
+    to something that is not on the table.
+    """
+    return {**TOOL_PROMPTS, "summarise": SUMMARY_PROMPTS} if summary else dict(TOOL_PROMPTS)
 
 
 @dataclass
@@ -559,6 +781,11 @@ class Answer:
     path: list[str] = field(default_factory=list)
     show: list[str] = field(default_factory=list)
     steps: list[str] = field(default_factory=list)
+    # How many turns of the loop asked for a tool. Not the same as `spent.tool_calls`: a
+    # turn that names three entries in one look_at is one round and three calls, and a turn
+    # that reads them one at a time is three rounds. The round is what costs the wall clock,
+    # because it is a round trip through the model, so it is what a way like `batch` moves.
+    rounds: int = 0
     # which model answered and what it spent -- see `Spent`; `model` is the short form
     spent: Spent = field(default_factory=Spent)
 
@@ -958,7 +1185,9 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False, rich: bool = False,
-              tight: bool = True, reach: int | None = None) -> list[tuple[dict[str, Any], Any]]:
+              tight: bool = True, reach: int | None = None,
+              batch: bool = False,
+              summary: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
@@ -980,6 +1209,10 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     it they behave exactly as they did, which is what a model with a small window and an
     expensive cache wants; with it a model whose context is cheap takes more per call and
     makes fewer calls. See `converse`.
+
+    ``batch`` shows each searching tool a three-entry call, on a copy -- the rest of what
+    it does is `converse`'s. ``summary`` adds the `summarise` tool: the whole graph at a
+    glance, computed without a model, for the broad question no search reaches.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -1020,12 +1253,19 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
         # the ids are the whole result; the model is told they arrived so it stops calling it
         return f"selected {len(list(args.get('ids') or ()))} on the graph"
 
+    def glance(args: Mapping[str, Any]) -> str:
+        return summarise(graph)
+
     does = {"look_up": find, "look_at": read, "look_around": around, "path_between": trace,
-            "list_kind": listing, "show": light}
+            "list_kind": listing, "show": light, "summarise": glance}
     if rich:
         schemas = RICH_TERSE if terse else RICH
     else:
         schemas = TERSE if terse else TOOLS
+    if summary:
+        schemas = [*schemas, SUMMARY_SCHEMA]
+    if batch:
+        schemas = _batched(schemas)
     if tight:
         schemas = _tight(schemas)
     # in the order the schemas are written, which is the order a model reads them in
@@ -1039,7 +1279,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              finder: Any = None, held: Sequence[str] = (),
              opening: Sequence[str] = (), rich: bool = False,
              tight: bool = True, reach: int | None = None, summary: Any = None,
-             recalled: Sequence[Any] = ()) -> Answer:
+             recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
+             summary_tool: bool = False) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -1077,11 +1318,30 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     turns outside the window that match this question, oldest first, the same shapes --
     follow it, each marked as recalled, before the window. With neither, the messages are
     byte for byte what they were.
+
+    Three ways of asking, each off by default and each measured by `ml-stack-bench --also`:
+
+    ``batch`` is all the lookups in one turn. The system prompt gains a sentence saying the
+    ids are a list, each searching tool's description gains a worked three-entry call, and a
+    turn that reads one entry while more are still unread is told once to read the rest in
+    one call. What it saves is *rounds* -- `Answer.rounds` -- and a round is a round trip
+    through the model, which is where the wall clock goes.
+
+    ``kinds`` drops from ``show`` the entries whose kind the question did not ask for: a
+    question that asks *who* keeps the people and drops the topic it found them through.
+    Only when the question word settles the kind -- see `asked_kinds`, which answers
+    ``None`` for a question naming several kinds or none, and then nothing is dropped. A
+    listing (`list_kind`) is exempt, as it is from the cap, and a filter that would empty
+    the selection is not applied.
+
+    ``summary_tool`` offers `summarise`: the whole graph at a glance -- counts per kind, the
+    most-mentioned entries of each kind, the busiest relations -- computed without a model,
+    for the broad question ("what is this group about?") that no search reaches.
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled)
+                     recalled=recalled, kinds=kinds, batch=batch, summary_tool=summary_tool)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -1092,7 +1352,8 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     finder: Any = None, held: Sequence[str] = (),
                     opening: Sequence[str] = (), rich: bool = False,
                     tight: bool = True, reach: int | None = None, summary: Any = None,
-                    recalled: Sequence[Any] = ()) -> Answer:
+                    recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
+                    summary_tool: bool = False) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -1105,7 +1366,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled)
+                     recalled=recalled, kinds=kinds, batch=batch, summary_tool=summary_tool)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -1182,6 +1443,25 @@ def _named_counts(graph: Mapping[str, Any], text: str, ids: Sequence[str]) -> di
     return out
 
 
+def _one_by_one(reply: Any) -> bool:
+    """Whether that reply read exactly one entry, in exactly one reading call.
+
+    The shape `batch` exists to stop: one `look_at` with one id, when a `look_up` has
+    already handed over several. Two calls in a turn is already the habit being asked for,
+    however few ids each carried.
+    """
+    reading = [call for call in (getattr(reply, "tool_calls", None) or [])
+               if str((call.get("function") or {}).get("name") or "")
+               in ("look_at", "look_around")]
+    if len(reading) != 1:
+        return False
+    try:
+        args = json.loads((reading[0].get("function") or {}).get("arguments") or "{}")
+    except ValueError:
+        return False
+    return isinstance(args, Mapping) and len(list(args.get("ids") or ())) == 1
+
+
 def _result_count(result: Any) -> int:
     if isinstance(result, (list, tuple)):
         return len(result)
@@ -1222,10 +1502,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
               rich: bool = False, tight: bool = True, reach: int | None = None,
-              summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
+              summary: Any = None, recalled: Sequence[Any] = (), kinds: bool = False,
+              batch: bool = False, summary_tool: bool = False) -> Answer:
     given = tools is not None
     if tools is None:
-        tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach)
+        tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach,
+                          batch=batch, summary=summary_tool)
     elif finder is not None:
         def _found(args: Mapping[str, Any]) -> Any:
             wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
@@ -1242,6 +1524,10 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
                  else (schema, _found)
                  for schema, fn in tools]
+    if batch and given:
+        # the same as tight: a caller's own tools are described on a copy, never in place
+        told = _batched([schema for schema, _ in tools])
+        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
     if tight and given:
         # a caller's own tools carry a show of their own; tight is about what it says
         told = _tight([schema for schema, _ in tools])
@@ -1252,6 +1538,8 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
     if tight:
         system = system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
+    if batch:
+        system = system + "\n\n" + BATCH_SYSTEM_SENTENCE
     lit = [str(h) for h in held if str(h) in known]
     if lit:
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
@@ -1371,6 +1659,10 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         if not calls:
             return False
         spent = True
+        # One round, however many calls it carried. A reply may ask for several at once --
+        # llama-server returns them in one message -- and every one of them is run below,
+        # in order, each answered with a tool message of its own.
+        out.rounds += 1
         messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": calls})
         for call in calls:
             fn = call.get("function") or {}
@@ -1422,6 +1714,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 result = do(args)
                 note(out.path, result.get("path") or [])
                 out.steps.append("traced a path" if result.get("path") else "found no path")
+            elif name == "summarise":
+                result = do(args)
+                # everything it named is bracketed, as look_around brackets its neighbours,
+                # so an entry the summary read out counts as found and may be selected
+                note(out.found, _ids_in(str(result)))
+                out.steps.append("read the graph at a glance")
             elif name == "list_kind":
                 result = do(args)
                 listed = result.get("entries") if isinstance(result, Mapping) else None
@@ -1480,6 +1778,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         return True
 
     answered = False
+    nudged = False
     for _ in range(rounds):
         if repeats >= REPEATS:
             # going in circles: the loop ends here and the answer is asked for below
@@ -1489,6 +1788,16 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         if not dispatch(reply):
             answered = True          # it stopped calling tools, so this reply is the answer
             break
+        # It read one entry and left the rest of what it found unread: the round it is
+        # about to spend on the second one buys nothing the first call could not have
+        # carried. Said once -- a model that ignores it twice is not going to be told into
+        # it, and the reminder costs a message in every prompt after it.
+        if batch and not nudged and _one_by_one(reply) and any(i not in out.read
+                                                               for i in out.found):
+            nudged = True
+            messages.append({"role": "user", "content": BATCH_NUDGE})
+            out.spent.part("question", BATCH_NUDGE)
+            out.steps.append("asked it to read the rest in one call")
         # Once it has said what its answer is about, more searching cannot improve that --
         # `show` is the last thing a turn does, and a round after it is a round trip spent
         # to be told the same. Only when the round did nothing else: a turn that showed and
@@ -1621,34 +1930,57 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             note(out.show, ids)
         if out.show:
             out.steps.append(f"selected {len(out.show)} entr" + ("y" if len(out.show) == 1 else "ies"))
-    if tight and out.show:
+    if (tight or kinds) and out.show:
         # The `made` case: a name in the prose that look_at never read is a guess, and
         # lighting it endorses the guess. What was handed over at the start was read to the
         # model too, so it counts as read. Then the cap: what the prose names is kept, most
         # named first, and what it merely lit goes.
         named = _named_counts(graph, out.content, out.show)
-        # Known is what any tool returned -- found by look_up, listed by list_kind, read,
-        # traced, handed over -- and what is joined to something read: measured 2026-09-02,
-        # `place:calderwick` was listed and joined to the people read, and dropping it as
-        # "unread" cut a right answer. Only a name no tool ever returned is a guess.
-        # `out.found` is where a `look_around` neighbourhood lands, so a neighbour the
-        # model only ever saw indented under something it asked for still counts as read.
-        seen = set(out.read) | set(start) | set(out.found) | set(out.path) | _joined_to(graph, out.read)
-        guessed = [i for i in out.show if named.get(i) and i not in seen]
-        if guessed:
-            out.show = [i for i in out.show if i not in guessed]
-            out.steps.append(f"dropped {len(guessed)} unread from show")
+        if tight:
+            # Known is what any tool returned -- found by look_up, listed by list_kind,
+            # read, traced, handed over -- and what is joined to something read: measured
+            # 2026-09-02, `place:calderwick` was listed and joined to the people read, and
+            # dropping it as "unread" cut a right answer. Only a name no tool ever returned
+            # is a guess. `out.found` is where a `look_around` neighbourhood lands, so a
+            # neighbour the model only ever saw indented under something it asked for still
+            # counts as read.
+            seen = (set(out.read) | set(start) | set(out.found) | set(out.path)
+                    | _joined_to(graph, out.read))
+            guessed = [i for i in out.show if named.get(i) and i not in seen]
+            if guessed:
+                out.show = [i for i in out.show if i not in guessed]
+                out.steps.append(f"dropped {len(guessed)} unread from show")
+        if kinds and out.show:
+            # The question word said what kind the answer is, so what is not of that kind
+            # was found on the way rather than asked for -- the topic that led to the
+            # people, for a question that asked *who*. A listing is exempt, as it is from
+            # the cap below; so is a question that named several kinds or none, which
+            # `asked_kinds` answers None for.
+            wanted = asked_kinds(question)
+            if wanted:
+                listed = set(out.listed)
+                of_kind = {str(n["id"]): _kind_of(n) for n in (graph.get("nodes") or ())}
+                kept = [i for i in out.show
+                        if i in listed or of_kind.get(i, "") in wanted or i not in of_kind]
+                # A filter that empties the selection lights nothing, which is worse than
+                # lighting the wrong kind: the reader is left looking at a blank graph.
+                if kept and len(kept) < len(out.show):
+                    out.steps.append(f"dropped {len(out.show) - len(kept)} of another kind "
+                                     f"from show, which asked for "
+                                     + "/".join(sorted(wanted)))
+                    out.show = kept
         # The cap never cuts a listing: "which companies are here?" has as many right
         # answers as there are companies, and cutting thirteen to six alphabetically threw
         # away three expected ones (measured 2026-09-02). It cuts among the rest, keeping
         # what the prose names first.
-        listed = set(out.listed)
-        rest = [i for i in out.show if i not in listed]
-        if len(rest) > LIT_TIGHT:
-            whole = len(out.show)
-            kept = sorted(rest, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
-            out.show = [i for i in out.show if i in listed] + kept
-            out.steps.append(f"cut {whole - len(out.show)} of {whole} lit")
+        if tight:
+            listed = set(out.listed)
+            rest = [i for i in out.show if i not in listed]
+            if len(rest) > LIT_TIGHT:
+                whole = len(out.show)
+                kept = sorted(rest, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
+                out.show = [i for i in out.show if i in listed] + kept
+                out.steps.append(f"cut {whole - len(out.show)} of {whole} lit")
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
             out.ids.append(one)

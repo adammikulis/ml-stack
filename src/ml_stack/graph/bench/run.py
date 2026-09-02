@@ -98,6 +98,29 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # default asking now; Flash-Next went from 43% to 83% precision on it.
             out.append({"label": "loose", "terse": first["terse"], "tight": False,
                         **sampling_from(args)})
+        elif also == "batch":
+            # All the lookups in one turn. Measured 2026-09-02, Qwen3.8-Flash-Next spent
+            # about seven tool calls and 25 seconds a question, and those calls were one
+            # question asked one entry at a time -- nothing in the prompt said the ids are
+            # a list. The system text says it, each searching tool is shown a three-entry
+            # call, and a turn that reads one entry while more are still unread is told
+            # once to read the rest in one call. What it should move is the `calls` column.
+            out.append({"label": "batch", "terse": first["terse"], "batch": True,
+                        **sampling_from(args)})
+        elif also == "kinds":
+            # The question word already says what kind the answer is, and the precision
+            # misses were mostly right-adjacent: 65% precision against 85% recall, with a
+            # topic lit beside the people for a "who" question. Drops from `show` what the
+            # question did not ask for, and nothing at all where it named several kinds or
+            # none.
+            out.append({"label": "kinds", "terse": first["terse"], "kinds": True,
+                        **sampling_from(args)})
+        elif also == "summary":
+            # The broad question -- "what is this group about?" -- has no name in it to
+            # look up, so a search answers it with whatever the words happened to hit.
+            # `summarise` is the whole graph at a glance, computed without a model.
+            out.append({"label": "summary", "terse": first["terse"], "summary": True,
+                        **sampling_from(args)})
         elif also == "tight":
             print("note: tight is the default asking now; --also tight measures nothing new "
                   "(--also loose is the old asking, as a control)", file=sys.stderr)
@@ -420,6 +443,12 @@ def _parser() -> argparse.ArgumentParser:
                             "plans over)")
 
     for one in (run, sweep, conc):
+        one.add_argument("--trace", action=argparse.BooleanOptionalAction, default=None,
+                         help="keep each question's transcript -- every call with its arguments, "
+                              "what came back and what it cost -- beside the totals, for "
+                              "`show --trace` and `ml-stack-train-tools from-bench`. Default: on "
+                              f"at {SHORT} questions or fewer, off for a full run, where the "
+                              "transcripts are tens of megabytes in a store nothing backs up")
         one.add_argument("--sample", type=int, default=0, metavar="N",
                          help="ask only N of the questions, keeping every kind of answer. "
                               "For a comparison where accuracy is not the variable -- draft "
@@ -465,7 +494,7 @@ def _parser() -> argparse.ArgumentParser:
                               f"the cheaper question (--also reach uses {REACH})")
         one.add_argument("--also", action="append", default=[],
                          choices=("terse", "card", "greedy", "rich", "tight", "loose",
-                                  "reach"),
+                                  "reach", "batch", "kinds", "summary"),
                          help="ask the same served model another way as well. Whether the "
                               "tools are described briefly, what sampling is used, "
                               "whether look_up says why it matched (rich), and whether "
@@ -473,9 +502,15 @@ def _parser() -> argparse.ArgumentParser:
                               "(loose -- the old asking, kept as a control against the "
                               "tight one every run uses now), and how much one tool result "
                               "may carry (reach -- fat results and look_around, for a model "
-                              "that reads faster than it writes) are questions about the "
-                              "asking, not the serving, so five of them cost one load "
-                              "rather than five. Repeatable")
+                              "that reads faster than it writes), whether every lookup is "
+                              "asked for in one turn (batch -- fewer rounds, which is where "
+                              "the wall clock goes), whether show keeps only the kind the "
+                              "question asked for (kinds -- a who question is answered by "
+                              "people, not by the topic they share) and whether the whole "
+                              "graph can be read at a glance (summary -- for the broad "
+                              "question no search reaches) are questions about the "
+                              "asking, not the serving, so eight of them cost one load "
+                              "rather than eight. Repeatable")
 
     for one in (run, sweep, heads, conc):
         one.add_argument("--per-question", type=float, default=PER_QUESTION,
@@ -511,6 +546,11 @@ def _parser() -> argparse.ArgumentParser:
 
     show = sub.add_parser("show", allow_abbrev=False,
                           help="compare two runs, or list what is kept")
+    show.add_argument("--trace", nargs="?", const="", default=None, metavar="LABEL",
+                      help="print a traced question as a conversation, one line per call: the "
+                           "newest run, or the run with this label; --question narrows it")
+    show.add_argument("--question", default="", metavar="SUBSTRING",
+                      help="with --trace: only the question containing this")
     show.add_argument("--last", type=int, default=0, metavar="N",
                       help="only the newest N runs kept")
     show.add_argument("--since", default="", metavar="ISO",
@@ -776,6 +816,7 @@ def _run(args: Any) -> int:
                        reasoning_budget=getattr(args, "reasoning_budget", None),
                        spec_draft_max=getattr(args, "n_max", None),
                        serving=serving_fields(args),
+                       trace=getattr(args, "trace", None),
                        smoke=sample(everything, SMOKE) if smoking else (),
                        **sampling_from(args))
             except ServerFailed as why:
@@ -806,6 +847,7 @@ def _run(args: Any) -> int:
                 # way to know later is to write it down now
                 used = dict(asking_with.sampling)
                 rows = bench.measure(ask, questions, label=label, client=asking_with,
+                                     trace=getattr(args, "trace", None),
                                      log=print,
                                graph=graph, per_question=args.per_question)
                 saved.append(save(args.kept, rows,
@@ -935,6 +977,9 @@ def _run(args: Any) -> int:
         answering = [r for r in everything if r.get("kind") != bench_extract.KIND]
         answering = newest(answering, last=int(getattr(args, "last", 0) or 0),
                            since=str(getattr(args, "since", "") or ""))
+        if getattr(args, "trace", None) is not None:
+            bench.transcript(answering, args.trace, getattr(args, "question", "") or "")
+            return 0
         if getattr(args, "extract", False):
             bench_extract.table(extracted)
             return 0
@@ -1003,6 +1048,7 @@ def _run(args: Any) -> int:
           + (f", look_up by {found}" if found else "")
           + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
     rows = bench.measure(ask, questions, label=args.label, client=client, log=print,
+                         trace=getattr(args, "trace", None),
                          graph=graph,
                    per_question=args.per_question)
     key = save(args.kept, rows,

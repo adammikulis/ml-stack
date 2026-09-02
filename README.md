@@ -251,6 +251,42 @@ one stage. The data is plain JSONL rows of `{"messages", "tools"}`, so `ml-stack
 that writes that shape. Whether the fine-tune beats its base is measured, never assumed:
 serve the GGUF and `ml-stack-bench run` it beside the model it came from.
 
+#### From what a model actually did
+
+```
+ml-stack-train-tools from-bench --kept ~/.ml-stack/bench/runs.ladybug \
+    --model e4b --min-f1 0.8 --out runs/caller/data
+```
+
+The descriptions teach the *shape* of a call. A benchmark's traces teach the calls that
+scored — on a real graph, with real ids, which no description can supply. Every question a
+run kept a transcript for that scored at least `--min-f1` becomes one training example per
+model turn: the conversation up to that turn as the input, the call the model made as the
+target. A question of four calls is four examples, each a decision made with strictly more
+evidence than the last.
+
+The rows are the shape `synth` writes, so both sources mix in one directory: `--out
+FILE.jsonl` writes one file, `--out DIR` writes `train.jsonl`, `holdout.jsonl` and a
+manifest. `--model` is a substring of the run's label or of the served model's file, because
+two models' turns in one dataset teach the average of two callers. One question in ten is
+held out by hash, with every turn of it. A turn the ceiling cut off is dropped — a truncated
+call is the one thing a tool caller must never learn — and each example carries only the
+tools that were offered on that call, since `graph.ask` takes tools away as a question goes
+on.
+
+Runs are traced by default when 20 questions or fewer are asked, and not on the hundred,
+where the transcripts would be tens of megabytes in a store nothing backs up;
+`MLSTACK_BENCH_TRACE=1` traces a run of any size, `=0` traces none. A trace holds, per call,
+the tool and its arguments, how much came back and how many ids were in it, and the timings
+`Spent` reads — so the per-call record and the per-answer totals are one measurement added
+up two ways. `from-bench --dry-run` says what a store would yield, and what it *would have*
+yielded had it been traced: for a store filled before tracing existed the answer is zero,
+and zero means nothing without the number beside it (2026-09-02: 751 scored questions, 4006
+model turns, none of them kept).
+
+`docs/research/tool-caller-finetune.md` is the plan this is the first half of — what to
+train, on whose traces, what it would cost, and what is unmeasured.
+
 The next recipe is embeddinggemma for `graph.route`: a contrastive fine-tune on the same
 question → tool pairs, so the router that chooses which tools to offer learns the project's
 questions as well. It is not built yet.
@@ -368,6 +404,30 @@ that no tool ever returned is dropped (`dropped N unread from show`). `tight=Fal
 loose asking kept as a **control** — the words the ranking runs and the answer cache
 fingerprinted, the same schema objects, byte for byte as they were — and
 `ml-stack-bench --also loose` measures it against the default on the same load.
+
+**Three more askings, each off until it is measured: `batch`, `kinds`, `summary`.**
+Measured 2026-09-02 over the invented community, Qwen3.8-Flash-Next answered at 70% F1 —
+85% recall, 65% precision — and spent 25 seconds a question over about seven tool calls.
+`converse(..., batch=True)` is for the seconds: the calls were one question asked one entry
+at a time, because nothing said the ids are a list, so the system prompt says it, each
+searching tool's description gains a worked three-entry call, and a turn that reads one
+entry while more are still unread is told once to *read the rest in one call*. What it
+should move is `Answer.rounds` — a round is a round trip through the model, and a reply that
+asks for three tools at once is one round, all three of them run before the next turn.
+`converse(..., kinds=True)` is for the precision: the misses were mostly right-adjacent —
+the topic lit beside the people for a question that asked *who* — and the question word
+already says what kind the answer is, so `asked_kinds` reads it off the asking clause and
+`show` keeps only that kind. It filters nothing when the question named several kinds or
+none (`how is X connected to Y`, `tell me about X`), a listing is exempt as it is from the
+cap, and a filter that would empty the selection is not applied; over the bench's own 110
+questions it filters 72 to the right kind, leaves 31 alone and gets exactly one wrong.
+`converse(..., summary_tool=True)` is for the broad question no search reaches — "what is
+this group about?" has no name in it to look up — and adds `summarise`: counts per kind, the
+ten most-mentioned entries of each kind with a line of their own words and their ids in
+brackets, and the busiest relations, computed from the graph with no model call at all.
+`routing_prompts(summary=True)` is what to route against when it is offered.
+`ml-stack-bench --also batch --also kinds --also summary` measures all three against the
+default on one load.
 
 **The page's routes come with the page.** `graph.html` streams its answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
@@ -525,7 +585,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-bench prepare\|run\|sweep\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`) |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
-| `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions |
+| `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
 | `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, and its commit; `leave` undoes it |
 | `ml-stack-mcp` | the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
