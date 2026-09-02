@@ -459,7 +459,9 @@ def cmd_fit(args: argparse.Namespace) -> int:
     if picture:
         try:
             drawn = fit_mod.plot(rows, picture,
-                                 rooms=asked_rooms or [machine_room()],
+                                 # this machine's room first, solid; each --room after it
+                                 rooms=[machine_room(), *(r for r in asked_rooms
+                                                          if r != machine_room())],
                                  at=int(getattr(args, "at", 32768) or 32768),
                                  machine=platform.node() or "this machine")
         except (RuntimeError, ValueError) as exc:
@@ -511,7 +513,14 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
 
     for named in args.model:
         model = resolve_model(str(named))
-        draft = drafted(model, str(getattr(args, "draft", "") or ""))
+        # told which binary serves, as `up` does: a head that borrows its target's embeddings
+        # is offered to a fork build and withheld from mainline -- asked without it, the
+        # Flash-Next head was withheld from the fork and the drafted record never existed
+        try:
+            serving_binary: Path | None = backend.binary
+        except Exception:  # noqa: BLE001 - no binary is choose_head's problem, said out loud
+            serving_binary = None
+        draft = drafted(model, str(getattr(args, "draft", "") or ""), binary=serving_binary)
         kind = ""
         if draft:
             from ml_stack.hub import spec_for
