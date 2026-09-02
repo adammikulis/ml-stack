@@ -510,6 +510,7 @@ class TestPreflightOnly:
         assert "ok    architecture" in out
 
     def test_a_failing_preflight_exits_one(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
         import ml_stack.setup as setup_module
 
         monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")

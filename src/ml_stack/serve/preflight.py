@@ -245,16 +245,47 @@ def _architecture_check(first_file: Path | None, binary: str | Path) -> Check:
         return Check("architecture", True,
                      f"{first_file} names no general.architecture; no opinion")
 
-    from ml_stack.setup import _arches
-
-    known = _arches(binary)
+    known = known_architectures(binary)
     if not known:
         return Check("architecture", True,
                      f"{arch!r} (this build's own architectures could not be read; no opinion)")
-    if arch in known:
+    if _plain(arch) in {_plain(k) for k in known}:
         return Check("architecture", True, arch)
     shown = ", ".join(sorted(known)[:6]) + (" ..." if len(known) > 6 else "")
     return Check("architecture", False, f"{arch!r} -- this build reads {shown}")
+
+
+def _plain(name: str) -> str:
+    """An architecture name with its punctuation gone, for comparing: llama.cpp writes
+    `gpt-oss`, a symbol table may say `gptoss`, and `strings` keeps whichever it finds."""
+    return "".join(c for c in str(name).lower() if c.isalnum())
+
+
+def known_architectures(binary: str | Path) -> set[str]:
+    """The architectures a build reads: the names in its source checkout's llama-arch.cpp
+    when the managed build's source is at hand, else what `strings` finds in libllama.
+
+    Measured 2026-09-01: the strings guess keeps only alphanumeric words beginning with a
+    family prefix, so `gpt-oss` was never in it and a preflight refused a model the same
+    build had served all afternoon. The source table is the truth when it exists."""
+    from ml_stack.setup import _arches
+
+    found: set[str] = set()
+    try:
+        from ml_stack.serve.build import _arches_from_source
+
+        found |= _arches_from_source(Path(source_dir()))
+    except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
+        pass
+    found |= _arches(binary)
+    return found
+
+
+def source_dir() -> Path:
+    """Where the managed build's source checkout lives; a seam so tests can point elsewhere."""
+    from ml_stack.serve.build import SRC_DIR
+
+    return Path(SRC_DIR)
 
 
 # ---------------------------------------------------------------- fit (weights + kv + runtime)

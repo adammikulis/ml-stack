@@ -302,14 +302,15 @@ def _arches(target: str | Path, *, known: set[str] | None = None) -> set[str]:
                 continue
             for line in got.stdout.splitlines():
                 word = line.strip()
-                if word and word.islower() and 4 <= len(word) <= 20 and word.isalnum():
+                if word and word.islower() and 4 <= len(word) <= 20 and word.replace("-", "").isalnum():
                     found.add(word)
             # Keep looking until an *architecture* turns up, not merely until some word
             # does: the first library in the directory is full of ordinary strings and
             # none of the names, and stopping there reported "supports nothing".
     guessed = {w for w in found if any(
         w.startswith(f) for f in ("qwen", "gemma", "llama", "phi", "mistral",
-                                  "deepseek", "granite", "olmo", "cohere"))}
+                                  "deepseek", "granite", "olmo", "cohere", "gpt", "glm",
+                                  "nemotron", "falcon", "mamba", "rwkv", "exaone"))}
     return guessed & known if known is not None else guessed
 
 

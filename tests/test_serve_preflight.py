@@ -22,6 +22,13 @@ from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 
 
+@pytest.fixture(autouse=True)
+def _no_source_table(monkeypatch, tmp_path):
+    """The tests fake a build's architectures; the machine's real source checkout must not
+    add the 144 names it reads (it did, and three refusals stopped refusing)."""
+    monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
+
+
 def write_gguf(path: Path, metadata: dict, *, tensor_count: int = 0) -> Path:
     """A real, minimal GGUF v3 file: magic, version, counts, one key/value pair per
     metadata item -- ints as uint32, floats as float32, strings as strings -- and no
@@ -512,3 +519,17 @@ def test_a_per_layer_head_count_is_summed_not_multiplied():
     assert _kv_estimate_bytes(dense, 100, "", "") == 4 * 2 * 8 * 100 * 4
     assert _kv_estimate_bytes(per_layer, 100, "", "") == (2 + 2 + 4 + 4) * 8 * 100 * 4
     assert _kv_estimate_bytes({**dense, "x.attention.head_count_kv": "nonsense"}, 100, "", "") == 0
+
+
+def test_an_architecture_with_a_hyphen_is_known_when_the_source_says_so(monkeypatch, tmp_path):
+    """gpt-oss is written `gpt-oss` in llama-arch.cpp and the strings guess kept only
+    alphanumeric words with a family prefix, so a preflight refused a model the same build
+    had served all afternoon (measured 2026-09-01). Mutation: compare without _plain, or
+    drop the source table."""
+    from ml_stack.serve import preflight
+
+    monkeypatch.setattr("ml_stack.serve.build._arches_from_source", lambda source: {"gpt-oss", "llama"})
+    monkeypatch.setattr("ml_stack.setup._arches", lambda binary, **k: {"llama", "gemma3"})
+    known = preflight.known_architectures(tmp_path / "llama-server")
+    assert "gpt-oss" in known
+    assert preflight._plain("gpt-oss") == "gptoss" == preflight._plain("GPT_OSS")
