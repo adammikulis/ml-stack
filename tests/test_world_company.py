@@ -234,7 +234,7 @@ def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
 
     short = sample(asked, SHORT, graph=graph)
     assert len(short) == SHORT
-    assert len(tools_for(graph)) == 5
+    assert len(tools_for(graph)) == 6
     who = next(q for q in asked if q["q"].startswith("Tell me about "))
     name = who["q"][len("Tell me about "):-1]
     person = next(i for i in who["expect"] if kinds[i] == "person")

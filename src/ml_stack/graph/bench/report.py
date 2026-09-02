@@ -50,7 +50,7 @@ __all__ = ["ASKINGS", "Doc", "across", "answering", "asking_of", "by_model",
 # ``shortlist`` is here beside ``plain`` although it is a half rather than a way: without
 # it `shortlist-terse` and `plain-terse` read as the same row, which is two measurements
 # printed as one -- the mistake every column in `show`'s table exists to prevent.
-ASKINGS = ("plain", "shortlist", "terse", "card", "greedy", "rich", "tight")
+ASKINGS = ("plain", "shortlist", "terse", "card", "greedy", "rich", "tight", "reach")
 
 _WORD = re.compile(r"[-_:@.]+")
 

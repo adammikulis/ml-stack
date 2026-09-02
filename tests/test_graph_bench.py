@@ -2637,10 +2637,94 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
-    ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True}]
+    ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
+            {"label": "reach", "reach": 8000}]
     bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
                  ways=ways, kept="")
-    assert len(built) == 3, "one strict client per way, none refused"
+    assert len(built) == 4, "one strict client per way, none refused"
+
+
+# -- --also reach: fat tool results, for a model that reads faster than it writes ----------
+
+def test_reach_is_a_way_of_its_own_and_also_a_setting_on_every_way(capsys):
+    """Two shapes, because they answer two questions. `--also reach` is "would this model
+    rather have fewer, fatter results?", which costs a second way through one load.
+    `--reach N` is "how fat", which is not a variant at all: it rides on every way asked."""
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _parser, _ways
+    from ml_stack.graph.bench.run import REACH
+
+    ways = _ways(Namespace(also=["reach"], terse=False, temperature=0.0, reach=0))
+    assert "reach" not in ways[0], "the first way is what was asked for, unchanged"
+    assert ways[1] == {"label": "reach", "terse": False, "reach": REACH, "temperature": 0.0}
+
+    every = _ways(Namespace(also=["loose"], terse=False, temperature=0.0, reach=2500))
+    assert [w["reach"] for w in every] == [2500, 2500], "a setting, not a variant"
+    both = _ways(Namespace(also=["reach"], terse=False, temperature=0.0, reach=2500))
+    assert both[1]["reach"] == 2500, "asked for a size, that is the size measured"
+
+    assert _parser().parse_args(["run", "x", "--also", "reach"]).also == ["reach"]
+    assert _parser().parse_args(["run", "x", "--reach", "8000"]).reach == 8000
+    assert _parser().parse_args(["run", "x"]).reach == 0, "off unless asked for"
+
+
+def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeypatch, capsys):
+    """Where `--also reach` has to land: a second way through the same load, labelled
+    `reach`, building the asking with a budget in tokens -- while the first way, asked for
+    nothing, has none at all. Mutation: default the pop to `REACH` and every run measures
+    fat results, including the ones the ranking was written from."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench.run import REACH
+
+    seen = _serving(monkeypatch, tmp_path)
+    asked_reach = []
+    real_asking = bench.asking
+
+    def watched(graph, **kw):
+        asked_reach.append(kw.get("reach"))
+        return real_asking(graph, **kw)
+
+    monkeypatch.setattr(bench, "asking", watched)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "reach",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    assert asked_reach == [None, REACH], "the default way has no budget; the way named for it does"
+    assert sorted(r["label"] for r in runs(seen["kept"])) == ["tiny-plain", "tiny-plain-reach"]
+
+    asked_reach.clear()
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--reach", "3000",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    assert asked_reach == [3000], "a size on every way, without a second load to pay for"
+
+
+def test_reach_reaches_converse_as_a_keyword_and_is_absent_without_one(monkeypatch):
+    """`converse(..., reach=...)` is ask's; this only has to hand it on, and hand the terse
+    set in already built with it, since that set is built here rather than chosen inside.
+    Mutation: send `reach=None` rather than leaving it out, and a run that asked for nothing
+    is no longer byte for byte the run the ranking was written from."""
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.bench import asking
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    asking(TINY)("who?", _Scripted())
+    assert "reach" not in reached, "asked for no budget, sent no budget"
+    reached.clear()
+    asking(TINY, reach=8000)("who?", _Scripted())
+    assert reached.get("reach") == 8000
+    reached.clear()
+    # the terse set is handed in, so it has to be built with the budget too
+    asking(TINY, terse=True, reach=8000)("who?", _Scripted())
+    assert reached.get("reach") == 8000 and "tools" in reached
+    named = [s["function"]["name"] for s, _ in reached["tools"]]
+    assert "look_around" in named, "the fat call is on the table wherever the budget is"
 
 
 # -- the smoke is the first step of a real run ----------------------------------------------

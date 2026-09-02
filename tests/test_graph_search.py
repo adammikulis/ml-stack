@@ -133,3 +133,63 @@ def test_a_rich_hit_names_the_voters_that_actually_fired():
     assert by_id["t:compilers"] == ["label", "words", "meaning"]
     assert by_id["p:bea"] == ["meaning"]
     assert by_id["p:ada"] == ["said"]
+
+
+class Embedded(Store):
+    """A store whose vectors have an opinion: `similar` says how close each id is, the way
+    the real one does, so the order of the fused hits can be adjusted by it."""
+
+    def __init__(self, by_word=(), near=()):
+        super().__init__(by_word=by_word, by_meaning=[i for i, _s in near])
+        self.near = list(near)
+
+    def similar(self, vector, model="", limit=10):
+        self.asked.append(("similar", tuple(vector)))
+        return [{"id": i, "similarity": s} for i, s in self.near][:limit]
+
+
+def test_reranking_changes_the_order_of_the_fused_hits_and_never_the_membership():
+    """Fusion answers "which entries", by agreement between three ways of looking. Which of
+    them the asker meant is a distance, and the vectors are the only thing here that knows
+    one -- so once the field is narrow, the first hits a model reads are put in their order.
+
+    Measured cheaply for exactly this reason: the same entries come back either way."""
+    from ml_stack.graph.search import hybrid
+
+    # the characters and the word index both put the topic first, so fusion does; the
+    # vectors are of the opposite opinion and, unlike a vote, say by how much
+    store = Embedded(by_word=["t:compilers"], near=[("p:ada", 0.81), ("t:compilers", 0.44)])
+    fused = hybrid(GRAPH, "compilers", store=store, vector=[0.1], rerank=False)
+    assert [h["id"] for h in fused] == ["t:compilers", "p:ada"]
+    ranked = hybrid(GRAPH, "compilers", store=store, vector=[0.1])
+    assert [h["id"] for h in ranked] == ["p:ada", "t:compilers"], "on by default"
+    assert {h["id"] for h in ranked} == {h["id"] for h in fused}, "order, never membership"
+    assert ranked[0]["label"] == "Ada Lovelace", "a whole hit moves, not just its id"
+
+
+def test_a_hit_the_vectors_never_saw_keeps_its_place():
+    """An exact label match with no embedding is still the right answer and must not be
+    pushed down the page by a candidate the embedder merely likes. Mutation: sort the whole
+    window with a missing similarity as zero, and the unembedded label sinks."""
+    from ml_stack.graph.search import RERANK, reranked
+
+    rows = [{"id": "a"}, {"id": "b"}, {"id": "c"}, {"id": "d"}]
+    # only b and d are embedded, so only their two places are re-ordered
+    assert [r["id"] for r in reranked(rows, {"b": 0.2, "d": 0.9})] == ["a", "d", "c", "b"]
+    # one opinion is not an order
+    assert [r["id"] for r in reranked(rows, {"b": 0.2})] == ["a", "b", "c", "d"]
+    assert [r["id"] for r in reranked(rows, {})] == ["a", "b", "c", "d"]
+    # equal scores keep the order fusion gave them
+    assert [r["id"] for r in reranked(rows, {"a": 0.5, "c": 0.5})] == ["a", "b", "c", "d"]
+    # nothing outside the window moves, whatever the vectors think of it
+    long = [{"id": str(i)} for i in range(RERANK + 3)]
+    tail = [r["id"] for r in reranked(long, {str(RERANK + 2): 1.0, "0": 0.1})]
+    assert tail[RERANK:] == [str(i) for i in range(RERANK, RERANK + 3)]
+
+
+def test_a_store_whose_rows_carry_no_similarity_is_simply_not_reranked():
+    """The vectors have to say how close, not just which: a `similar` that answers with ids
+    alone is one vote in the fusion and no opinion about the order."""
+    store = Store(by_word=[], by_meaning=["p:ada"])
+    assert [h["id"] for h in hybrid(GRAPH, "compilers", store=store, vector=[0.1])] == \
+        [h["id"] for h in hybrid(GRAPH, "compilers", store=store, vector=[0.1], rerank=False)]

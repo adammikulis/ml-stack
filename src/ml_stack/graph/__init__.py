@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from ml_stack.graph.access import (LockError, holder, reading, release_all, write_lock,
                                    writing)
-from ml_stack.graph.ask import Answer, converse, look_at, look_up, path_between
+from ml_stack.graph.ask import (Answer, converse, look_around, look_at, look_up,
+                                path_between)
 from ml_stack.graph.concerns import concerns
 from ml_stack.graph.page import kinds_of, render, world_outline
 from ml_stack.graph.propose import Change, apply, proposing, tools_for
@@ -70,6 +71,7 @@ __all__ = [
     "knn_edges",
     "lexical",
     "LockError",
+    "look_around",
     "look_at",
     "look_up",
     "morton_codes",

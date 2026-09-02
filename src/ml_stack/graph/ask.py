@@ -1,8 +1,9 @@
 """Asking a model a question about a graph.
 
 Handing a model the whole graph does not scale and handing it a pre-chosen slice makes the
-choosing the answer. This gives it four things it can do instead — find entries by name, read
-what is held on them, trace how two of them connect, list everything of one kind — and lets it
+choosing the answer. This gives it five things it can do instead — find entries by name, read
+what is held on them, read a whole neighbourhood at once, trace how two of them connect, list
+everything of one kind — and lets it
 decide which to use. What it touched comes back with the answer, which is what a caller needs
 to show its working.
 
@@ -26,6 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack.client.spent import Spent
+from ml_stack.client.tokens import estimate_tokens
 from ml_stack.graph.search import MATCHED_BY_RANK
 
 SYSTEM = (
@@ -61,7 +63,7 @@ REPEATS = 2
 # then is the tools that act (show, and whatever a caller adds -- a change request, say).
 # The web tools are searches too: a model that may still search will search instead of
 # answering, which is the failure the last turn exists to end.
-SEARCHING = frozenset({"look_up", "look_at", "path_between", "list_kind",
+SEARCHING = frozenset({"look_up", "look_at", "look_around", "path_between", "list_kind",
                        "web_search", "web_read", "web_look"})
 # Openings that mean the model is planning rather than answering. gpt-oss puts its analysis
 # in a channel of its own, but when a turn spends its whole budget deciding what to do the
@@ -148,6 +150,15 @@ LIT = 25
 # community of a few hundred people works for; a kind bigger than that is read most
 # mentioned first, and the total is stated so the model knows what it did not see.
 LISTED = 40
+# How many joined entries `look_around` reads out beside each entry it was given, and how
+# many entries it will read out in all. Twelve is `JOINED` -- what look_at already shows as
+# names -- said properly, with each one's kind, id and a line of its own words, so a model
+# can select a neighbour it never looked up.
+AROUND = 12
+AROUND_ENTRIES = 24
+# The flat cut on one tool result: the characters a tool message has always been trimmed to.
+# A conversation given a `reach` cuts by tokens instead -- see `_cut`.
+CUT = 6000
 
 # Every example below is invented, and deliberately shares no name with the community the
 # bench asks its questions of: an example that used the bench's own people would be teaching
@@ -192,6 +203,36 @@ TOOLS = [
             "ids": {"type": "array", "items": {"type": "string"},
                     "description": "entry ids exactly as look_up returned them, e.g. "
                                    "[\"person:wren\", \"org:tinsley\"]"}},
+            "required": ["ids"]}}},
+    # The call that replaces four of them. Measured 2026-09-02 on Qwen3.8-Flash-Next, a
+    # hybrid recurrent model with 256k of context at 48K bytes a token: recall 89-95%, and a
+    # question cost 5-9 tool calls at about 2k new tokens each, half the wall clock spent
+    # reading results back at ~390 tok/s and the other half writing at ~35 tok/s. Reading is
+    # eleven times cheaper than writing for that model, so the way to make a question
+    # cheaper is fewer, fatter calls -- one look_up and one look_around instead of a look_up
+    # and five look_at's. A small model has the opposite profile and is not made to use it.
+    {"type": "function", "function": {
+        "name": "look_around",
+        "description": "Read a whole neighbourhood at once: the entries you name — what is "
+                       "held on them and what they said — and, under each, everything joined "
+                       "to it, with the relation, that entry's kind, its id and a line of its "
+                       "own words. One call where reading each neighbour separately would "
+                       "take five. Call it when the question is about who or what is around "
+                       "something rather than about one entry on its own — who could help "
+                       "with a topic, who a place holds, what an organisation is tied to. "
+                       "Everything it returns you have read: you may write about a neighbour "
+                       "and select it by the id in brackets without looking it up. Example: "
+                       "having found \"topic:ceramics\", call look_around with "
+                       "{\"ids\": [\"topic:ceramics\"]}; pass {\"ids\": "
+                       "[\"topic:ceramics\"], \"hops\": 2} to take in the neighbours' "
+                       "neighbours too.",
+        "parameters": {"type": "object", "properties": {
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "entry ids to read the neighbourhood of, e.g. "
+                                   "[\"topic:ceramics\", \"place:ambleford\"]"},
+            "hops": {"type": "integer",
+                     "description": "how far out to read: 1 for the entries and what is "
+                                    "joined to them (the default), 2 to go one further"}},
             "required": ["ids"]}}},
     {"type": "function", "function": {
         "name": "path_between",
@@ -246,7 +287,7 @@ TOOLS = [
 ]
 
 
-# The same five tools, said briefly. What a model needs to be told depends entirely on the
+# The same six tools, said briefly. What a model needs to be told depends entirely on the
 # model: the worked examples above took gemma-4-E4B from 17% to 70% recall, and cost
 # gpt-oss-120b twenty points over the same questions. A model that already reaches for a
 # tool does not need telling to, and being told anyway spends its attention on instructions
@@ -271,6 +312,17 @@ TERSE = [
         "parameters": {"type": "object", "properties": {
             "ids": {"type": "array", "items": {"type": "string"},
                     "description": "entry ids, as returned by look_up"}},
+            "required": ["ids"]}}},
+    {"type": "function", "function": {
+        "name": "look_around",
+        "description": "The neighbourhood of some entries in one call: each entry, and "
+                       "everything joined to it with the relation, kind, id and a line of "
+                       "its words. One call instead of reading each neighbour separately.",
+        "parameters": {"type": "object", "properties": {
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "entry ids, as returned by look_up"},
+            "hops": {"type": "integer", "description": "1 for what is joined to them, 2 to "
+                                                       "go one further"}},
             "required": ["ids"]}}},
     {"type": "function", "function": {
         "name": "path_between",
@@ -434,6 +486,16 @@ TOOL_PROMPTS: dict[str, tuple[str, ...]] = {
         "what has this person actually said?",
         "more detail on those two",
     ),
+    # Not look_at's: "tell me about her" wants one entry read properly, and these want
+    # everyone standing next to something. Routed to look_at, a staffing question spends a
+    # call per neighbour and finds the neighbours by guessing their spellings first.
+    "look_around": (
+        "who is around Otto Vance?",
+        "everyone joined to that topic",
+        "who could help with a cracked kiln?",
+        "which people does that place hold?",
+        "what is attached to the foundry?",
+    ),
     "path_between": (
         "how are these two connected?",
         "who could introduce me to a lawyer?",
@@ -593,11 +655,57 @@ def _enriched(graph: Mapping[str, Any], rows: Sequence[Mapping[str, Any]]) -> li
     return out
 
 
-def look_at(graph: Mapping[str, Any], ids: Sequence[str]) -> str:
-    """What the graph holds on those entries, as text a model can answer from."""
+def _packed(blocks: Sequence[tuple[int, str, str]], budget: int | None) -> str:
+    """Those blocks as one text, and how much of them a ``budget`` of tokens will carry.
+
+    Without a budget every block goes, in the order it was built, which is what this always
+    did. With one, and only when they do not all fit, the most-mentioned go first and each
+    goes *whole* -- its quotes with it -- rather than every entry going with its words cut
+    out. The quote is the evidence; four entries entire answer a question that twelve
+    clipped ones do not.
+
+    Packing rather than stopping at the first block that will not fit: a small entry after a
+    large one still fits, and the budget is there to be spent. Ties are broken by id, so the
+    same graph and the same budget read out the same way twice.
+    """
+    if budget is None:
+        return "\n".join(text for _mentions, _node_id, text in blocks)
+    whole = "\n".join(text for _mentions, _node_id, text in blocks)
+    if not whole or estimate_tokens(whole) <= budget:
+        return whole
+    kept: list[str] = []
+    left = int(budget)
+    for mentions, node_id, text in sorted(blocks, key=lambda b: (-b[0], b[1])):
+        cost = estimate_tokens(text) + 1
+        if kept and cost > left:
+            continue
+        left -= cost
+        kept.append(text)
+    return "\n".join(kept)
+
+
+def _said_lines(node: Mapping[str, Any], messages: Mapping[str, Any], *, most: int,
+                chars: int = SAID_CHARS, indent: str = "    ") -> list[str]:
+    """What an entry said, at most ``most`` of them, each on one line."""
+    out: list[str] = []
+    for mid in (node.get("messages") or ())[:most]:
+        text = str((messages.get(mid) or {}).get("text") or "")
+        if text:
+            out.append(f'{indent}said: "{" ".join(text.split())[:chars]}"')
+    return out
+
+
+def look_at(graph: Mapping[str, Any], ids: Sequence[str], *,
+            budget: int | None = None) -> str:
+    """What the graph holds on those entries, as text a model can answer from.
+
+    ``budget`` is a conversation's `reach`: a ceiling in tokens on what one tool result may
+    carry. Without one nothing is packed and nothing is dropped -- what a caller asked for
+    is what it gets. See `_packed`.
+    """
     by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
     messages = graph.get("messages") or {}
-    lines: list[str] = []
+    blocks: list[tuple[int, str, str]] = []
     for node_id in ids:
         node = by_id.get(str(node_id))
         if node is None:
@@ -615,12 +723,94 @@ def look_at(graph: Mapping[str, Any], ids: Sequence[str]) -> str:
                 line += f", {attrs[key]}"
         if joined:
             line += ": " + "; ".join(joined[:JOINED])
-        lines.append(line)
-        for mid in (node.get("messages") or ())[:SAID]:
-            text = str((messages.get(mid) or {}).get("text") or "")
-            if text:
-                lines.append(f'    said: "{" ".join(text.split())[:SAID_CHARS]}"')
-    return "\n".join(lines)
+        lines = [line, *_said_lines(node, messages, most=SAID)]
+        blocks.append((int(node.get("mentions") or 0), str(node_id), "\n".join(lines)))
+    return _packed(blocks, budget)
+
+
+def _edges_around(graph: Mapping[str, Any], node_id: str) -> list[tuple[str, str, float]]:
+    """Everything joined to ``node_id``: ``(other id, how it reads, weight)``, best first.
+
+    Both directions, and the direction is kept in the reading -- ``-> works_at`` against
+    ``<- employs`` -- because "Wren employs the foundry" and "the foundry employs Wren" are
+    not the same fact and a model given the wrong one writes it down.
+
+    Heaviest edge first, then by id: a neighbourhood that reads out in a different order
+    each time cannot have two answers about it compared with each other.
+    """
+    best: dict[str, tuple[float, str]] = {}
+    for edge in graph.get("edges") or ():
+        source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+        if source == node_id:
+            other, reads = target, f"-> {edge.get('rel') or 'joined to'}"
+        elif target == node_id:
+            other, reads = source, f"<- {edge.get('rel') or 'joined to'}"
+        else:
+            continue
+        if not other or other == node_id:
+            continue
+        weight = float(edge.get("weight") or 0)
+        if other not in best or weight > best[other][0]:
+            best[other] = (weight, reads)
+    return sorted(((one, reads, weight) for one, (weight, reads) in best.items()),
+                  key=lambda row: (-row[2], row[0]))
+
+
+def look_around(graph: Mapping[str, Any], ids: Sequence[str], *, hops: int = 1,
+                joined: int = AROUND, entries: int = AROUND_ENTRIES,
+                budget: int | None = None) -> str:
+    """The neighbourhood of those entries, read out in one call.
+
+    Each entry as `look_at` gives it -- label, kind, what is held on it, what it said -- and
+    then, indented under it, everything joined to it: the relation and its direction, the
+    other entry's label, its id in brackets, its kind, and one line of its own words. The id
+    is the point of the brackets: a model may write about a neighbour and select it without
+    ever having looked it up, which is the four calls this replaces.
+
+    ``hops`` of 2 makes each neighbour an entry in its own right and reads its neighbourhood
+    too; ``entries`` caps how many entries are read out in all, whatever the hops.
+
+    For a model whose context is cheap and whose reading is fast, this is the shape that
+    suits it: one fat result instead of five thin ones, since a tool call costs a round trip
+    through the slow half of the model and reading the answer back costs the fast half.
+    ``budget`` -- a conversation's `reach` -- is what keeps that from being unbounded.
+    """
+    by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
+    messages = graph.get("messages") or {}
+    wanted: list[str] = []
+    for one in ids:
+        if str(one) in by_id and str(one) not in wanted:
+            wanted.append(str(one))
+    blocks: list[tuple[int, str, str]] = []
+    seen = set(wanted)
+    frontier = wanted
+    for _ in range(max(1, int(hops or 1))):
+        after: list[str] = []
+        for node_id in frontier:
+            if len(blocks) >= entries:
+                break
+            node = by_id[node_id]
+            attrs = node.get("attrs") or {}
+            head = (f"- {node.get('label')} [{node_id}] "
+                    f"({attrs.get('type') or node.get('kind') or 'entry'})")
+            for key in sorted(attrs):
+                if key != "type" and str(attrs[key]).strip():
+                    head += f", {key}: {attrs[key]}"
+            lines = [head, *_said_lines(node, messages, most=SAID)]
+            for other, reads, _weight in _edges_around(graph, node_id)[:joined]:
+                near = by_id.get(other)
+                if near is None:
+                    continue
+                kind = str((near.get("attrs") or {}).get("type")
+                           or near.get("kind") or "entry")
+                lines.append(f"    {reads} {near.get('label')} [{other}] ({kind})")
+                lines += _said_lines(near, messages, most=1, indent="        ")
+                if other not in seen:
+                    seen.add(other)
+                    after.append(other)
+            blocks.append((int(node.get("mentions") or 0), node_id, "\n".join(lines)))
+        frontier = after
+    return _packed(blocks, budget)
 
 
 def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, Any]:
@@ -658,7 +848,8 @@ def _singular(word: str) -> tuple[str, ...]:
     return tuple(ways)
 
 
-def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED) -> dict[str, Any]:
+def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED,
+              budget: int | None = None) -> dict[str, Any]:
     """Every entry of one kind, most mentioned first — or the kinds there are.
 
     For the question a search cannot reach: "which companies do people here work for?" is
@@ -667,6 +858,11 @@ def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED) -> di
     lists ``org``. A kind the graph does not have comes back as ``{"none": ..., "kinds":
     {name: count}}``, so a model that guessed wrong learns the real names on its first miss
     rather than guessing again.
+
+    ``budget`` -- a conversation's `reach` -- replaces ``limit`` rather than joining it: a
+    model that reads cheaply wants every organisation there is, and 40 was only ever a
+    guess at what a result may cost. With one, as many entries as that many tokens will
+    carry go, most mentioned first; ``total`` still says how many there were.
     """
     nodes = list(graph.get("nodes") or ())
     counts: dict[str, int] = {}
@@ -682,9 +878,69 @@ def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED) -> di
         return {"none": f"no kind {str(kind or '')!r}", "kinds": kinds}
     rows = [n for n in nodes if _kind_of(n) == found]
     rows.sort(key=lambda n: (-int(n.get("mentions") or 0), str(n.get("label") or "")))
-    return {"kind": found, "total": len(rows),
-            "entries": [{"id": str(n["id"]), "label": str(n.get("label") or ""),
-                         "mentions": int(n.get("mentions") or 0)} for n in rows[:limit]]}
+    entries = [{"id": str(n["id"]), "label": str(n.get("label") or ""),
+                "mentions": int(n.get("mentions") or 0)}
+               for n in (rows if budget is not None else rows[:limit])]
+    if budget is not None:
+        entries = _within(entries, budget)
+    return {"kind": found, "total": len(rows), "entries": entries}
+
+
+def _within(entries: Sequence[Mapping[str, Any]], budget: int) -> list[dict[str, Any]]:
+    """As many of those entries as ``budget`` tokens will carry, in the order given.
+
+    They arrive most-mentioned first, so this cuts the tail rather than choosing: a listing
+    read out of order is not a listing. One always goes, however long it is, because an
+    empty result reads to a model as "there are none".
+    """
+    kept: list[dict[str, Any]] = []
+    left = int(budget)
+    for row in entries:
+        left -= estimate_tokens(json.dumps(row, ensure_ascii=False)) + 1
+        if kept and left < 0:
+            break
+        kept.append(dict(row))
+    return kept
+
+
+def _cut(text: str, reach: int | None) -> str:
+    """One tool result, cut to what the conversation will carry it in.
+
+    Without a ``reach`` this is the flat `CUT` characters a tool message has always been
+    trimmed to -- byte for byte what it was, so nothing measured before moves. With one it
+    is that many tokens, found by halving rather than by a characters-per-token guess,
+    because the guess is wrong in both directions on the text a graph returns: ids and
+    punctuation cost more than prose, and prose costs less.
+    """
+    if not reach:
+        return text[:CUT]
+    if estimate_tokens(text) <= reach:
+        return text
+    low, high = 0, len(text)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimate_tokens(text[:mid]) <= reach:
+            low = mid
+        else:
+            high = mid - 1
+    return text[:low]
+
+
+_BRACKETED = re.compile(r"\[([^\[\]\s]{1,120})\]")
+
+
+def _ids_in(text: str) -> list[str]:
+    """The bracketed ids a `look_around` result read out, in the order it read them.
+
+    Read back off the text rather than recomputed, so what the answer counts as found is
+    exactly what the model was shown -- a neighbourhood the budget cut short did not happen.
+    Anything that is not an id in this graph is dropped by the caller.
+    """
+    out: list[str] = []
+    for one in _BRACKETED.findall(text or ""):
+        if one not in out:
+            out.append(one)
+    return out
 
 
 def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, Any]:
@@ -702,7 +958,7 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False, rich: bool = False,
-              tight: bool = True) -> list[tuple[dict[str, Any], Any]]:
+              tight: bool = True, reach: int | None = None) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
@@ -718,6 +974,12 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     says to light only what answers the question, see `TIGHT_SHOW`. The rest of what tight
     does (the nudge, the system sentence, the cap on what is lit) is `converse`'s.
     ``tight=False`` is the loose asking kept as a control: the sets themselves, unchanged.
+
+    ``reach`` is how much one tool result may carry, in tokens: `look_at`, `look_around`
+    and `list_kind` pack up to it instead of stopping at a fixed number of entries. Without
+    it they behave exactly as they did, which is what a model with a small window and an
+    expensive cache wants; with it a model whose context is cheap takes more per call and
+    makes fewer calls. See `converse`.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -738,19 +1000,27 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
                                 "Try different words, or answer with what you already have."}
 
     def read(args: Mapping[str, Any]) -> str:
-        return look_at(graph, [str(i) for i in (args.get("ids") or ())])
+        return look_at(graph, [str(i) for i in (args.get("ids") or ())], budget=reach)
+
+    def around(args: Mapping[str, Any]) -> str:
+        try:
+            hops = int(args.get("hops") or 1)
+        except (TypeError, ValueError):
+            hops = 1                  # a model that wrote "one" meant one, not an error
+        return look_around(graph, [str(i) for i in (args.get("ids") or ())],
+                           hops=max(1, min(hops, 3)), budget=reach)
 
     def trace(args: Mapping[str, Any]) -> dict[str, Any]:
         return path_between(graph, str(args.get("from_id") or ""), str(args.get("to_id") or ""))
 
     def listing(args: Mapping[str, Any]) -> dict[str, Any]:
-        return list_kind(graph, str(args.get("kind") or ""))
+        return list_kind(graph, str(args.get("kind") or ""), budget=reach)
 
     def light(args: Mapping[str, Any]) -> str:
         # the ids are the whole result; the model is told they arrived so it stops calling it
         return f"selected {len(list(args.get('ids') or ()))} on the graph"
 
-    does = {"look_up": find, "look_at": read, "path_between": trace,
+    does = {"look_up": find, "look_at": read, "look_around": around, "path_between": trace,
             "list_kind": listing, "show": light}
     if rich:
         schemas = RICH_TERSE if terse else RICH
@@ -768,7 +1038,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
              opening: Sequence[str] = (), rich: bool = False,
-             tight: bool = True, summary: Any = None,
+             tight: bool = True, reach: int | None = None, summary: Any = None,
              recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
@@ -789,6 +1059,16 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     the answer cache were fingerprinted on, kept as a control: with it, nothing observable
     changes from what this did before, byte for byte.
 
+    ``reach`` is how much one tool result may carry, in tokens, for this whole
+    conversation. ``None`` -- the default -- is the flat `CUT` characters a tool message
+    has always been trimmed to, and nothing else changes. An int is that many tokens per
+    result, and `look_at`, `look_around` and `list_kind` pack up to it: whole entries with
+    their quotes, most-mentioned first, rather than every entry with its words clipped.
+    Measured 2026-09-02: Qwen3.8-Flash-Next reads a tool result back at about 390 tok/s and
+    writes at about 35, so one fat result is far cheaper than the five thin ones it
+    replaces; a small model with an expensive cache has the opposite profile and is left
+    on the default.
+
     ``turns`` is the window: the last few turns, chosen by recency, sent whole and in
     order. ``summary`` -- a thread's rolling summary, as a ``Turn``, a mapping with
     ``text`` or ``content``, or a string -- goes first after the system prompt, as one
@@ -800,7 +1080,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
-                     opening=opening, rich=rich, tight=tight, summary=summary,
+                     opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
                      recalled=recalled)
 
 
@@ -811,7 +1091,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
                     opening: Sequence[str] = (), rich: bool = False,
-                    tight: bool = True, summary: Any = None,
+                    tight: bool = True, reach: int | None = None, summary: Any = None,
                     recalled: Sequence[Any] = ()) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
@@ -824,7 +1104,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     """
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
-                     opening=opening, rich=rich, tight=tight, summary=summary,
+                     opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
                      recalled=recalled)
 
 
@@ -834,6 +1114,11 @@ def _call_detail(name: str, args: Mapping[str, Any]) -> str:
     if name in ("look_at", "show"):
         ids = list(args.get("ids") or ())
         return f"{len(ids)} id" + ("" if len(ids) == 1 else "s")
+    if name == "look_around":
+        ids = list(args.get("ids") or ())
+        hops = int(args.get("hops") or 1)
+        return (f"{len(ids)} id" + ("" if len(ids) == 1 else "s")
+                + ("" if hops == 1 else f", {hops} hops"))
     if name == "path_between":
         return f"{args.get('from_id')} → {args.get('to_id')}"
     if name == "list_kind":
@@ -936,11 +1221,11 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              rich: bool = False, tight: bool = True, summary: Any = None,
-              recalled: Sequence[Any] = ()) -> Answer:
+              rich: bool = False, tight: bool = True, reach: int | None = None,
+              summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
     given = tools is not None
     if tools is None:
-        tools = tools_for(graph, finder=finder, rich=rich, tight=tight)
+        tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach)
     elif finder is not None:
         def _found(args: Mapping[str, Any]) -> Any:
             wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
@@ -1122,6 +1407,17 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 result = do(args) or "nothing on those"
                 real = sum(1 for i in ids if i in known)
                 out.steps.append(f"read {real} entr" + ("y" if real == 1 else "ies"))
+            elif name == "look_around":
+                # The centres are read; everything the result named -- read back off the
+                # text, so a neighbourhood the budget cut short is not counted -- is found.
+                # Between them that is what look_at's ids and look_up's hits are, so the
+                # score, the cap and tight's "did a tool return this" all treat it the same.
+                ids = [str(i) for i in (args.get("ids") or ())]
+                note(out.read, ids)
+                result = do(args) or "nothing is joined to those"
+                note(out.found, _ids_in(str(result)))
+                real = sum(1 for i in ids if i in known)
+                out.steps.append(f"looked around {real} entr" + ("y" if real == 1 else "ies"))
             elif name == "path_between":
                 result = do(args)
                 note(out.path, result.get("path") or [])
@@ -1176,8 +1472,8 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                 emit({"event": "tool_result", "name": name, "count": count})
             messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
                              "name": name,
-                             "content": json.dumps(result, ensure_ascii=False,
-                                                   default=_plain)[:6000]})
+                             "content": _cut(json.dumps(result, ensure_ascii=False,
+                                                        default=_plain), reach)})
             out.spent.part("tool_results", messages[-1]["content"])
             if seen is not None:
                 messages.append(seen)
@@ -1335,6 +1631,8 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # traced, handed over -- and what is joined to something read: measured 2026-09-02,
         # `place:calderwick` was listed and joined to the people read, and dropping it as
         # "unread" cut a right answer. Only a name no tool ever returned is a guess.
+        # `out.found` is where a `look_around` neighbourhood lands, so a neighbour the
+        # model only ever saw indented under something it asked for still counts as read.
         seen = set(out.read) | set(start) | set(out.found) | set(out.path) | _joined_to(graph, out.read)
         guessed = [i for i in out.show if named.get(i) and i not in seen]
         if guessed:

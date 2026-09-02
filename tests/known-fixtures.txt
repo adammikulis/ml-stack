@@ -192,3 +192,6 @@ assert label.lower
 
 # allowed with `hook allow` on 2026-09-02: not people
 Practical AI
+
+# allowed with `hook allow` on 2026-09-02: not people
+Tinsley Kilnworks

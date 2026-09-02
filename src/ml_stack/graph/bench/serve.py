@@ -282,6 +282,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     # tight is how everything asks now (Adam, 2026-09-02: "let's not
                     # ever use plain then"); `loose` is the bench's control
                     tightly = bool(asked.pop("tight", True))
+                    # how much one tool result may carry, in tokens: the asking again, and
+                    # `Client` would refuse it exactly as it refused `tight`
+                    reaching = asked.pop("reach", None)
                     client = Client(server.base_url,
                                     **{"timeout": per_question, **making, **asked})
                     if wants_card:
@@ -292,7 +295,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                        embed_url=embed_url,
                                  embed_model=embed_model, terse=how,
                                  rich=richly,
-                                 tight=tightly)
+                                 tight=tightly,
+                                 reach=int(reaching) if reaching else None)
                     got = bench.measure(ask, asking_these, label=here, client=client,
                                         log=print,
                                   graph=graph, per_question=per_question)

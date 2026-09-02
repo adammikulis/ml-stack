@@ -114,3 +114,24 @@ def test_allow_puts_a_phrase_on_the_list_once(tmp_path):
     out = io.StringIO()
     assert hook.main(["allow"], env=env, root=tmp_path, stdout=out) == 2
     assert "allow what?" in out.getvalue()
+
+
+def test_a_name_on_the_list_is_allowed_with_the_sentences_punctuation_on_it(tmp_path):
+    """'Tinsley Kilnworks.' at the end of a sentence is 'Tinsley Kilnworks' on the list."""
+    import io
+    import subprocess
+
+    from ml_stack.redact import hook
+
+    repo = tmp_path
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "t"], check=True)
+    fixtures = repo / "tests" / "known-fixtures.txt"
+    fixtures.parent.mkdir()
+    fixtures.write_text("Tinsley Kilnworks\n")
+    (repo / "note.py").write_text('# the kiln was moved to Tinsley Kilnworks. Then it cooled.\n')
+    subprocess.run(["git", "-C", str(repo), "add", "note.py", "tests/known-fixtures.txt"], check=True)
+    out = io.StringIO()
+    assert hook.main([], env={"NAMES_FIXTURES": "tests/known-fixtures.txt", "HOME": str(tmp_path)},
+                     root=repo, stdout=out) == 0, out.getvalue()

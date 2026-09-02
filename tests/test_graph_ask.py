@@ -657,7 +657,7 @@ def test_the_tools_can_be_said_briefly_or_at_length():
     from ml_stack.graph.ask import TERSE, TOOLS, tools_for
 
     assert [t["function"]["name"] for t in TERSE] \
-        == [t["function"]["name"] for t in TOOLS], "the same five tools, said differently"
+        == [t["function"]["name"] for t in TOOLS], "the same six tools, said differently"
     def shape(schema):
         """The callable shape: names, types and what is required -- not the prose."""
         params = schema["function"]["parameters"]
@@ -1493,3 +1493,170 @@ def test_the_parts_of_a_prompt_are_counted_when_a_window_and_a_summary_are_sent(
     assert out.spent.parts.get("window", 0) > 0 and out.spent.parts.get("summary", 0) > 0
     # no timings from this fake: the peak falls back to the usage, which is absent, so 0
     assert out.spent.context_peak == 0
+
+# -- look_around and reach: one fat call for a model that reads faster than it writes -------
+#
+# Measured 2026-09-02 on Qwen3.8-Flash-Next: 89-95% recall, 5-9 tool calls a question at
+# about 2k new tokens each, a result read back at ~390 tok/s and an answer written at ~35.
+# Half the wall clock was reading, so the cheaper question is fewer, fatter calls -- which
+# is what these two are. E4B and E2B have the opposite profile and are left on the default,
+# which is why `reach` is None unless a caller asks.
+
+AROUND_GRAPH = {
+    "nodes": [
+        {"id": "topic:ceramics", "kind": "topic", "label": "ceramics", "mentions": 9,
+         "attrs": {}, "messages": ["m1"]},
+        {"id": "person:wren", "kind": "person", "label": "Wren Halloway", "mentions": 5,
+         "attrs": {"role": "potter", "location": "Ambleford"}, "messages": ["m2"]},
+        {"id": "person:hollis", "kind": "person", "label": "Hollis Fen", "mentions": 2,
+         "attrs": {}, "messages": ["m3"]},
+        {"id": "org:tinsley", "kind": "org", "label": "Tinsley Kilnworks", "mentions": 1,
+         "attrs": {"type": "company"}, "messages": []},
+    ],
+    "edges": [
+        {"source": "person:wren", "target": "topic:ceramics", "rel": "fires", "weight": 2},
+        {"source": "person:hollis", "target": "topic:ceramics", "rel": "teaches", "weight": 9},
+        {"source": "person:wren", "target": "org:tinsley", "rel": "works_at", "weight": 1},
+    ],
+    "messages": {"m1": {"text": "the studio kiln cracked again"},
+                 "m2": {"text": "I fire the kiln most mornings."},
+                 "m3": {"text": "I teach the Tuesday class."}},
+}
+
+
+def test_look_around_reads_a_whole_neighbourhood_in_one_call():
+    """The five calls it replaces: a look_up finds the topic, and everyone on it comes back
+    with the relation, their kind, their id and a line of their own words -- so a staffing
+    question never spends a call per neighbour."""
+    from ml_stack.graph.ask import look_around
+
+    text = look_around(AROUND_GRAPH, ["topic:ceramics"])
+    assert text.startswith("- ceramics [topic:ceramics] (topic)")
+    assert 'said: "the studio kiln cracked again"' in text
+    # the heaviest edge first, then by id -- the same graph reads out the same way twice
+    assert text.index("Hollis Fen") < text.index("Wren Halloway")
+    assert "<- teaches Hollis Fen [person:hollis] (person)" in text
+    assert "<- fires Wren Halloway [person:wren] (person)" in text
+    # a neighbour's own words, so the answer can quote what it never looked up
+    assert 'said: "I teach the Tuesday class."' in text
+    # the direction is kept: "Wren works_at Tinsley" is not "Tinsley works_at Wren"
+    out = look_around(AROUND_GRAPH, ["person:wren"])
+    assert "-> works_at Tinsley Kilnworks [org:tinsley] (company)" in out
+    assert "location: Ambleford" in out and "role: potter" in out
+    assert look_around(AROUND_GRAPH, ["person:nobody"]) == ""
+
+
+def test_look_around_goes_a_second_hop_when_asked_and_never_loops():
+    from ml_stack.graph.ask import look_around
+
+    one = look_around(AROUND_GRAPH, ["topic:ceramics"])
+    two = look_around(AROUND_GRAPH, ["topic:ceramics"], hops=2)
+    assert one.count("\n- ") == 0, "one hop is one entry read out, with its joins under it"
+    # the neighbours become entries in their own right, each once however many edges lead back
+    assert two.count("\n- ") == 2 and two.startswith("- ceramics [topic:ceramics]")
+    assert "- Wren Halloway [person:wren] (person)" in two
+    assert "-> works_at Tinsley Kilnworks" in two, "a second hop reaches what one did not"
+
+
+def test_a_reach_packs_whole_entries_with_their_quotes_and_the_default_packs_nothing():
+    """A budget is a reading budget. Four entries entire answer a question that twelve with
+    their quotes cut out do not, so what a budget drops is entries, never words -- and the
+    most-mentioned go first. Without one nothing is packed at all: what a caller asked for
+    is what it gets, byte for byte as it always was."""
+    from ml_stack.graph.ask import look_at
+
+    ids = ["person:hollis", "person:wren", "topic:ceramics"]
+    whole = look_at(AROUND_GRAPH, ids)
+    assert look_at(AROUND_GRAPH, ids, budget=None) == whole
+    assert look_at(AROUND_GRAPH, ids, budget=10_000) == whole, "it all fits, so nothing moves"
+    tight = look_at(AROUND_GRAPH, ids, budget=24)
+    assert len(tight) < len(whole)
+    assert tight.startswith("- ceramics"), "the most-mentioned entry, whole"
+    assert 'said: "the studio kiln cracked again"' in tight, "with its quote, not without"
+    assert "- Hollis Fen" not in tight, "the entry that did not fit, not its words"
+
+
+def test_a_reach_lets_list_kind_read_out_more_than_its_fixed_forty():
+    """The cap was a guess at what a result may cost. A model whose context is cheap wants
+    every organisation there is, so a budget replaces the cap rather than joining it."""
+    from ml_stack.graph.ask import LISTED, list_kind
+
+    many = {"nodes": [{"id": f"org:o{i}", "kind": "org", "label": f"Org {i}", "mentions": i}
+                      for i in range(60)],
+            "edges": [], "messages": {}}
+    assert len(list_kind(many, "org")["entries"]) == LISTED
+    assert list_kind(many, "org")["total"] == 60
+    wide = list_kind(many, "org", budget=4000)
+    assert len(wide["entries"]) == 60, "a budget that fits them all reads them all"
+    narrow = list_kind(many, "org", budget=40)
+    assert 0 < len(narrow["entries"]) < LISTED and narrow["total"] == 60
+    assert narrow["entries"][0]["mentions"] == 59, "the tail is cut, not the order"
+
+
+def test_a_reach_cuts_a_tool_message_by_tokens_and_none_cuts_by_characters():
+    """The flat 6000 characters is what every run so far measured, so it is what a
+    conversation with no reach still gets."""
+    from ml_stack.client.tokens import estimate_tokens
+    from ml_stack.graph.ask import CUT, _cut
+
+    long = "the kiln cracked again. " * 2000
+    assert _cut(long, None) == long[:CUT]
+    assert _cut("short", None) == "short"
+    held = _cut(long, 200)
+    assert estimate_tokens(held) <= 200 and len(held) < len(long)
+    assert _cut("short", 200) == "short", "under the budget nothing is touched"
+
+
+def test_converse_offers_look_around_and_a_reach_reaches_its_result():
+    """The plumbing: `reach` is a conversation's, so it has to arrive at the tools and at
+    the cut on the tool message. Mutation: pass it to `tools_for` and not to `_cut`, and a
+    caller's own fat tool result is still trimmed at 6000 characters."""
+    model = ScriptedModel([call("look_around", ids=["topic:ceramics"])])
+    out = converse("who could help with a cracked kiln?", AROUND_GRAPH, model)
+    assert out.read == ["topic:ceramics"], "what it was given, it read"
+    # every entry the result named it found -- so the score, the cap and tight count them
+    assert set(out.found) == {"topic:ceramics", "person:hollis", "person:wren"}
+    assert out.steps == ["looked around 1 entry"]
+    handed = [m for turn in model.seen for m in turn if m.get("role") == "tool"]
+    assert "person:hollis" in handed[0]["content"]
+
+    # with a reach small enough to matter, the same call comes back shorter
+    small = ScriptedModel([call("look_around", ids=["topic:ceramics"])])
+    converse("who?", AROUND_GRAPH, small, reach=12)
+    short = [m for turn in small.seen for m in turn if m.get("role") == "tool"]
+    assert len(short[0]["content"]) < len(handed[0]["content"])
+    assert converse_stream("who?", AROUND_GRAPH,
+                           ScriptedModel([call("look_around", ids=["topic:ceramics"])]),
+                           on_event=lambda e: None, reach=8000).read == ["topic:ceramics"]
+
+
+def test_look_around_is_a_search_and_goes_away_on_the_last_turn():
+    """A model that may still look around will look around instead of answering, which is
+    the failure the last turn exists to end."""
+    from ml_stack.graph.ask import SEARCHING, TOOLS
+
+    assert "look_around" in SEARCHING
+    named = {t["function"]["name"] for t in TOOLS}
+    assert "look_around" in named
+    model = SayingModel([call("look_around", ids=["topic:ceramics"]),
+                         call("look_around", ids=["person:wren"])], "Hollis Fen teaches it.")
+    converse("who?", AROUND_GRAPH, model, rounds=1)
+    assert not any("look_around" in {t["function"]["name"] for t in offered}
+                   for offered in model.offered[1:]), "taken away with the other searches"
+
+
+def test_a_neighbour_only_ever_seen_inside_a_neighbourhood_may_still_be_lit():
+    """Tight drops a name no tool ever returned. What look_around read out *is* returned --
+    the whole point of one fat call -- so a model may write about a neighbour and select it
+    without a look_at of its own. Mutation: leave look_around out of `note(out.found, ...)`
+    and the right answer is dropped as a guess."""
+    model = SayingModel([call("look_around", ids=["topic:ceramics"], hops=2),
+                         call("show", ids=["person:hollis", "org:tinsley"])],
+                        "Hollis Fen teaches the class and Wren Halloway fires for "
+                        "Tinsley Kilnworks.")
+    out = converse("who could help with a cracked kiln?", AROUND_GRAPH, model)
+    # `org:tinsley` is two hops out: nothing was read that it is joined to, so the only
+    # thing that makes it known is that look_around read it out
+    assert "org:tinsley" in out.found and "org:tinsley" not in out.read
+    assert out.show == ["person:hollis", "org:tinsley"]
+    assert not any("unread" in step for step in out.steps)

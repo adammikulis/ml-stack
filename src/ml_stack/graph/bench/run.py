@@ -52,6 +52,10 @@ from ml_stack.graph.bench.serve import SmokeFailed, drafts, references_in, smoke
 from ml_stack.graph.bench.show import compare, missed, plot, rates, shape, table
 from ml_stack.graph.vectors import MARGIN
 
+# What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
+# `_ways`: a neighbourhood read whole, which a 256k window does not notice.
+REACH = 8000
+
 
 def _ways(args: Any) -> list[dict[str, Any]]:
     """The askings to make of one served model: what was asked for, plus each --also.
@@ -62,6 +66,9 @@ def _ways(args: Any) -> list[dict[str, Any]]:
     """
     first: dict[str, Any] = {"terse": bool(getattr(args, "terse", False)),
                              **sampling_from(args)}
+    # `--reach N` is not a way of its own: it is how much every way's tool results may
+    # carry, so it is put on each of them at the end rather than adding a load.
+    asked_reach = int(getattr(args, "reach", 0) or 0)
     out = [first]
     for also in getattr(args, "also", []) or []:
         if also == "terse":
@@ -76,6 +83,15 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # the people joined to it -- a question about the asking, so one load
             out.append({"label": "rich", "terse": first["terse"], "rich": True,
                         **sampling_from(args)})
+        elif also == "reach":
+            # What Flash-Next is for. Measured 2026-09-02: 256k of context at 48K bytes a
+            # token, a tool result read back at ~390 tok/s against ~35 tok/s written, and
+            # 5-9 calls a question -- so half the wall clock was reading and the way to
+            # spend less of it is fewer, fatter calls. `look_around` is the fat call and
+            # `reach` is what lets a result be worth making; 8000 tokens is a page of
+            # neighbourhood, which is nothing to a 256k window and too much for E2B's.
+            out.append({"label": "reach", "terse": first["terse"],
+                        "reach": asked_reach or REACH, **sampling_from(args)})
         elif also == "loose":
             # the control: show told to name what the answer is about with no cap and no
             # closing rule -- what every run before 2026-09-02 measured. Tight is the
@@ -85,6 +101,9 @@ def _ways(args: Any) -> list[dict[str, Any]]:
         elif also == "tight":
             print("note: tight is the default asking now; --also tight measures nothing new "
                   "(--also loose is the old asking, as a control)", file=sys.stderr)
+    for way in out:
+        if asked_reach:
+            way.setdefault("reach", asked_reach)
     return out
 
 
@@ -435,14 +454,26 @@ def _parser() -> argparse.ArgumentParser:
                          help="ask with what the model's own card recommends, to see whether "
                               "it suits this task -- it is not what a client sends otherwise")
     for one in (run, sweep):
+        one.add_argument("--reach", type=int, default=0, metavar="TOKENS",
+                         help="how much one tool result may carry, in tokens, on every way "
+                              "asked. Off by default, which is the flat character cut every "
+                              "run so far measured. With one, look_at, look_around and "
+                              "list_kind pack whole entries with their quotes up to it "
+                              "instead of stopping at a fixed count -- for a model whose "
+                              "context is cheap and whose reading is eleven times faster "
+                              "than its writing, which is what makes fewer, fatter calls "
+                              f"the cheaper question (--also reach uses {REACH})")
         one.add_argument("--also", action="append", default=[],
-                         choices=("terse", "card", "greedy", "rich", "tight", "loose"),
+                         choices=("terse", "card", "greedy", "rich", "tight", "loose",
+                                  "reach"),
                          help="ask the same served model another way as well. Whether the "
                               "tools are described briefly, what sampling is used, "
                               "whether look_up says why it matched (rich), and whether "
                               "show is told to name what the answer is about with no cap "
                               "(loose -- the old asking, kept as a control against the "
-                              "tight one every run uses now) are questions about the "
+                              "tight one every run uses now), and how much one tool result "
+                              "may carry (reach -- fat results and look_around, for a model "
+                              "that reads faster than it writes) are questions about the "
                               "asking, not the serving, so five of them cost one load "
                               "rather than five. Repeatable")
 

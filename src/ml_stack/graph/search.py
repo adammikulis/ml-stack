@@ -21,6 +21,11 @@ from typing import Any
 
 RRF_K = 60
 LIMIT = 12
+# How many of the fused hits are re-ordered by meaning before they are handed over. Fusion
+# decides which entries come back; this decides which of them a model reads first, and a
+# model reads the first few properly and skims the rest. Six is about a screenful -- past
+# it the order stopped mattering, because nothing looked.
+RERANK = 6
 
 # What a lexical rank means, for a hit to say why it matched. The whole label and part of it
 # are both "label" -- what tells them apart is the rank, and the score carries that. The
@@ -85,9 +90,36 @@ def lexical(graph: Mapping[str, Any], text: str, *, limit: int = LIMIT,
             for rank, _, node_id in scored[:limit]]
 
 
+def reranked(rows: Sequence[Mapping[str, Any]], near: Mapping[str, float], *,
+             top: int = RERANK) -> list[dict[str, Any]]:
+    """Those hits with the first ``top`` put in order of how close each is to the question.
+
+    Fusion answers "which entries", by agreement between three ways of looking; it cannot
+    answer "which of these did the asker mean", because a reciprocal rank is a vote count
+    and not a distance. The vectors can, and they are already in the store -- so once the
+    field is narrow enough to be worth reading, the hits the embedder actually knows are
+    put in the order it puts them.
+
+    Membership never changes and nothing outside the window moves, which is what makes this
+    cheap to measure: the same entries come back, read in a different order. A hit the
+    vectors have never seen keeps its place rather than sinking, because an exact label
+    match with no embedding is still the right answer and must not be pushed down the page
+    by a candidate the embedder merely likes. Equal scores keep the order fusion gave them.
+    """
+    window = list(rows[:top])
+    spots = [i for i, row in enumerate(window) if str(row.get("id") or "") in near]
+    if len(spots) < 2:
+        return list(rows)
+    moved = sorted((window[i] for i in spots), key=lambda row: -near[str(row["id"])])
+    for spot, row in zip(spots, moved, strict=True):
+        window[spot] = row
+    return window + list(rows[top:])
+
+
 def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
            vector: Sequence[float] | None = None, model: str = "",
-           limit: int = LIMIT, rich: bool = False) -> list[dict[str, Any]]:
+           limit: int = LIMIT, rich: bool = False,
+           rerank: bool = True) -> list[dict[str, Any]]:
     """The three ways, fused. Whatever is unavailable simply does not vote.
 
     ``store`` supplies the word index and the vectors; ``vector`` is the question already
@@ -99,10 +131,17 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
     found it -- ``"label"``, ``"attribute"`` or ``"said"`` from the characters, ``"words"``
     from the word index, ``"meaning"`` from the vectors -- so a reader can tell an exact
     label from one word in one quote. Off, the hit is exactly what it always was.
+
+    ``rerank`` puts the first `RERANK` fused hits in order of meaning -- see `reranked` --
+    whenever the store holds vectors for them and the question arrived embedded. It is on
+    because it changes the order and not the membership, which is the cheapest kind of
+    change to be wrong about: the same entries come back either way, and what moves is
+    which of them a model reads first. ``rerank=False`` is the fused order as it was.
     """
     found = lexical(graph, text, limit=limit * 2, rich=True)
     rankings: list[list[str]] = [[r["id"] for r in found]]
     voters: dict[str, list[str]] = {r["id"]: list(r["matched"]) for r in found}
+    near: dict[str, float] = {}
 
     def vote(ranking: list[str], name: str) -> None:
         rankings.append(ranking)
@@ -118,8 +157,16 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
             pass
         if vector is not None:
             try:
-                vote([r["id"] for r in store.similar(vector, model=model, limit=limit * 2)],
-                     MEANING)
+                # More than the votes are wanted when reranking: a hit fused out of the
+                # characters alone is only re-ordered if the vectors have an opinion on it,
+                # so the pool asked for is wider than the pool that votes. What votes is
+                # the same `limit * 2` either way -- what fusion returns must not depend on
+                # whether the order is about to be adjusted.
+                close = list(store.similar(vector, model=model,
+                                           limit=limit * (4 if rerank else 2)))
+                vote([r["id"] for r in close][:limit * 2], MEANING)
+                near = {str(r["id"]): float(r["similarity"]) for r in close
+                        if isinstance(r.get("similarity"), (int, float))}
             except Exception:  # noqa: BLE001
                 pass
     known = {str(n["id"]): n for n in (graph.get("nodes") or ())}
@@ -133,4 +180,4 @@ def hybrid(graph: Mapping[str, Any], text: str, *, store: Any = None,
             row["score"] = round(score, 3)
             row["matched"] = list(voters.get(node_id, ()))
         rows.append(row)
-    return rows
+    return reranked(rows, near) if rerank and near else rows

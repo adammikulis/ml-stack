@@ -287,7 +287,9 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
         why.append((path, 0, f"shape rule off: {off}"))
     for i, line in enumerate([] if off else lines, 1):
         for found in rules.nameish.finditer(line):
-            body = found.group(1).strip()
+            # the punctuation a sentence hangs on a name is not part of it: 'Tinsley
+            # Kilnworks.' was refused with 'Tinsley Kilnworks' on the list (2026-09-02)
+            body = found.group(1).strip().strip("’‘'\"`,.:; ")
             if body.casefold() in allowed:
                 fired: str | None = "fixtures"
             else:

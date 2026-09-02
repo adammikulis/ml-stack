@@ -566,7 +566,7 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
 def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | None = None,
            embed_url: str = "", embed_model: str = "", terse: bool = False,
            margin: float = MARGIN, rich: bool = False,
-           tight: bool = True) -> Callable[..., Any]:
+           tight: bool = True, reach: int | None = None) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -580,7 +580,11 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     ``rich`` asks with `converse(..., rich=True)`: look_up results carry a score and why
     they matched, and a topic hit brings the people joined to it. ``tight`` is the asking,
     as it is in `converse`: show is told to light only what answers the question, and what
-    is lit is capped. ``tight=False`` is the loose asking the ranking runs used, kept as a
+    is lit is capped. ``reach`` is `converse`'s too: a ceiling in tokens on what one tool
+    result may carry, with look_at, look_around and list_kind packing up to it rather than
+    stopping at a fixed number of entries. ``None`` is the flat character cut every run
+    before it measured, so a model left on the default is measured unchanged.
+    ``tight=False`` is the loose asking the ranking runs used, kept as a
     control, and it is passed on rather than left out -- left out it would be the default,
     which is now tight, and `--also loose` would have measured tight twice.
 
@@ -618,10 +622,15 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         # `finder` goes to both, because `converse` swaps look_up's callable in whichever
         # tools it is handed, and the terse set is handed in rather than chosen inside
         extra: dict[str, Any] = (
-            {"tools": tools_for(graph, terse=True, finder=finder, tight=tight)} if terse else {})
+            {"tools": tools_for(graph, terse=True, finder=finder, tight=tight, reach=reach)}
+            if terse else {})
         if rich:
             extra["rich"] = True
         extra["tight"] = bool(tight)
+        if reach:
+            # sent only when there is one: `None` is the default, and a way that asked for
+            # no reach must reach `converse` byte for byte as it always did
+            extra["reach"] = int(reach)
         return converse(question, graph, client, opening=opening, finder=finder,
                         turns=list(turns), **extra)
 
