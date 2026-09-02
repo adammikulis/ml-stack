@@ -26,6 +26,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip build
           python -m pip install pytest pytest-xdist numpy psutil pillow networkx gguf safetensors
+          # the store, the Hub client and the page reader: 150 tests build a real store,
+          # and a title read without trafilatura is a different title
+          python -m pip install -e ".[store,hub,web]"
           # CPU torch: 28 tests across backend, graph and recipes need a framework,
           # and without one they fail rather than skip.
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu

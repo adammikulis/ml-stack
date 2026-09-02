@@ -47,9 +47,13 @@ store = ["ladybug>=0.18"]
 scrape = ["playwright>=1.40"]
 # searching the web beside the graph: ddgs is keyless and rate-limited, SearXNG is not
 web = ["ddgs>=9", "trafilatura>=2"]
+# ml-stack-models fetch and hub.located read and fill the Hub cache through this
+hub = ["huggingface_hub>=0.20"]
 vision = ["numpy>=1.24", "pillow>=10.0"]
 testing = ["numpy>=1.24", "pytest>=7"]
 telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]
+# `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
+mcp = ["mcp>=1.0"]
 all = [
     "ml-stack[app,train,serve,gguf,graph,store,scrape,vision,testing,telemetry]",
 ]
@@ -70,6 +74,10 @@ ml-stack = "ml_stack.fleet.launch:main"
 ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
+# one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce
+ml-stack-fleet = "ml_stack.fleet.join:main"
+# the same functions the commands call, as MCP tools over stdio, for an agent to drive
+ml-stack-mcp = "ml_stack.mcp:main"
 ml-stack-train-run = "ml_stack.train.run:main"
 # a project's tools -> synthetic conversations -> a fine-tuned caller -> a GGUF
 ml-stack-train-tools = "ml_stack.train.tools:main"
