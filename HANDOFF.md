@@ -37,6 +37,17 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
   the `finally` runs on the refused attempt too, so the next asker sees "held by somebody".
   Fix in `lock.py` with a test that a refused attempt leaves the holder's record intact.
 
+- [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
+  join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
+  cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of
+  it has crossed a real network or a real Windows box. First: `ml-stack-fleet join --persist`
+  on the Windows machine (the README's Windows paragraph lists what to run and what each
+  prints), `ml-stack-fleet status` here, then `ml-stack-bench sweep --fleet --serve <two small
+  models> --sample 6` and `show` with a `host` column.
+- [ ] **`only_one(wait=False)` truncates the holder's pid when refused** (found 2026-09-02):
+  the `finally` runs on the refused attempt too, so the next asker sees "held by somebody".
+  Fix in `lock.py` with a test that a refused attempt leaves the holder's record intact.
+
 
 ## Verifying
 
