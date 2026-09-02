@@ -75,11 +75,13 @@ ml-stack-train-run = "ml_stack.train.run:main"
 ml-stack-train-tools = "ml_stack.train.tools:main"
 # what this machine can do, and what it does without being asked
 ml-stack-setup = "ml_stack.setup:main"
+ml-stack-doctor = "ml_stack.doctor:main"
 ml-stack-serve = "ml_stack.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
 ml-stack-bench = "ml_stack.graph.bench:main"
 # find a model newer than anything the assistant remembers, and print how to serve it
 ml-stack-models = "ml_stack.hub:main"
+ml-stack-store = "ml_stack.graph.store_cli:main"
 # an invented organised group -- company, community, university, open-source, nonprofit --
 # as a graph with people who could talk, and questions about it with known answers
 ml-stack-world = "ml_stack.world.cli:main"
