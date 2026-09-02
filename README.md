@@ -795,6 +795,21 @@ beats on both accuracy and cost, which are the only ones there is ever a reason 
 `--plot out.html` writes it as a scatter with the frontier joined — hand-built SVG, no
 library and no network, so it opens on any machine.
 
+`show --rank FILE.md` composes each model's line rather than reading it off one run, because
+a draft head cannot change an answer -- the target verifies every token -- only the wall
+clock and the memory. Accuracy comes from the model's largest run (the full sweep, undrafted,
+on mainline; the newest on a tie), and cost, printed per question so a twenty-question
+`drafts` run compares with a thirty-four, from its fastest run of at least `SHORT` questions
+whose F1 held within five points of that -- a head, a draft length and a fork included -- with
+the last column naming which run and which build it was (`--noise` widens or tightens the
+five). A run that fell outside the noise is listed under the table as `rejected`, so a head
+that hurt accuracy is seen rather than skipped, and a smoke run supplies neither accuracy nor
+cost. `--rates` and `--plot` carry the same composed point per model, marked `=` and drawn as
+a ring, beside the runs themselves. The question that made it was how to rank a model whose
+draft head was not yet settled: before this, the ranking took each model's best-F1 run and
+reported that run's cost, which ranked a drafted model at its undrafted speed, or not at all
+when the drafted run was short.
+
 `--n-predict` is a **ceiling, not a budget**: nothing is spent that is not generated, so a
 high one costs nothing and a low one truncates. It defaults high on purpose. A thinking
 model spends most of a turn reasoning before it writes anything — measured, gemma-4 filled

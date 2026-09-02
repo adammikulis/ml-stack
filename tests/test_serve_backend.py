@@ -218,7 +218,7 @@ class TestEmittedFlags:
                      "--pooling", "--kv-unified", "--no-kv-unified", "--cache-ram",
                      "--cache-idle-slots", "--no-cache-idle-slots",
                      "--slot-prompt-similarity", "--slot-save-path", "--cache-type-k",
-                     "--cache-type-v", "--no-mmap", "--mlock"):
+                     "--cache-type-v", "--no-mmap", "--mlock", "--reasoning-budget"):
             assert flag in flags, flag
         assert len(flags) == len(set(flags))
         assert not any(token.endswith(".gguf") for token in flags)
@@ -252,6 +252,29 @@ class TestMemoryFlags:
         backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
         assert "--mlock" in backend_.command(ServerSpec(model="m.gguf", mlock=True))
         assert "--mlock" not in backend_.command(ServerSpec(model="m.gguf", mlock=False))
+
+
+class TestReasoningBudget:
+    """A ceiling (`n_predict`) cuts the answer; a budget stops the thinking. Typed so a
+    sweep can bind it per served model and record it, like the cache type."""
+
+    def test_a_budget_is_emitted_with_its_value(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf", reasoning_budget=2048))
+        assert argv[argv.index("--reasoning-budget") + 1] == "2048"
+
+    def test_none_emits_nothing_and_minus_one_is_unlimited_not_nothing(self, tmp_path):
+        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        assert "--reasoning-budget" not in backend_.command(ServerSpec(model="m.gguf"))
+        argv = backend_.command(ServerSpec(model="m.gguf", reasoning_budget=-1))
+        assert argv[argv.index("--reasoning-budget") + 1] == "-1", "llama.cpp's own unlimited"
+
+    def test_a_build_without_the_flag_is_told_before_anything_starts(self, tmp_path):
+        """The fake help has no --reasoning-budget, like a release from before it existed."""
+        binary = fake_server(tmp_path)
+        argv = LlamaServerBackend(binary=binary).command(
+            ServerSpec(model="m.gguf", reasoning_budget=512))
+        assert "--reasoning-budget" in dict(unknown_flags(argv, flags_of(binary)))
 
 
 class TestLaunchRefusal:

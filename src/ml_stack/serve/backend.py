@@ -113,7 +113,7 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
         cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
         slot_prompt_similarity=0.5, slot_save_path="slots", cache_type_k="q8_0",
-        cache_type_v="q8_0", mlock=True)
+        cache_type_v="q8_0", mlock=True, reasoning_budget=2048)
     # the `--no-` forms are a third shape for the same reason: True and False exclude
     # each other on one spec
     shapes = (full,
@@ -235,6 +235,12 @@ class ServerSpec:
     # cannot be swapped back out; True costs the whole model's weight in wired memory.
     mmap: bool | None = None
     mlock: bool | None = None
+    # How many tokens a thinking model may spend reasoning before it is made to answer.
+    # `n_predict` is a ceiling over thinking, tool calls and answer together, and what a low
+    # ceiling cuts is always the answer; this is the budget that stops the thinking instead.
+    # None leaves the server's own default (-1: unlimited). Measured 2026-09-01: gemma-4-26B
+    # spent 252 s and 505 s on two questions under a 16k ceiling, all of it in the thinking.
+    reasoning_budget: int | None = None
     extra_args: tuple[str, ...] = ()
 
     @property
@@ -411,6 +417,8 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--no-mmap"]
         if spec.mlock:
             argv += ["--mlock"]
+        if spec.reasoning_budget is not None:
+            argv += ["--reasoning-budget", str(spec.reasoning_budget)]
 
         argv += list(spec.extra_args)
         return argv

@@ -26,7 +26,8 @@ from typing import Any
 from ml_stack.paths import repo_root
 from ml_stack.graph.vectors import MARGIN, stands_out
 
-__all__ = ["Counting", "HOME", "Row", "SHORT", "SMOKE", "beyond_weights", "export", "ranking",
+__all__ = ["Counting", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut", "Row", "SHORT",
+           "SMOKE", "beyond_weights", "choices", "composed", "export", "ranking",
            "ask_from", "asking", "compare", "concurrent", "detach", "empties", "finding",
            "footprint", "forget", "halves", "kv_short", "main", "measure", "measuring",
            "prefetch", "prepared", "read_questions", "references_in", "runs", "save",
@@ -127,6 +128,10 @@ class Row:
     first_token: float = 0.0       # seconds until the server began generating the first reply
     queued: float = 0.0            # wall clock the turn spent not being read or generated
     error: str = ""
+    # The question ran past `--per-question`: no answer, `seconds` is the cap, scored wrong.
+    # Measured 2026-09-01: gemma-4-26B-A4B took 252 s and 505 s on two questions, all of it
+    # in the thinking channel under a 16k ceiling; a run that waits for that is not a run.
+    timed_out: bool = False
 
     @property
     def hit(self) -> float:
@@ -161,8 +166,13 @@ class Counting:
     and nothing between here and there is going to add them up for you.
     """
 
-    def __init__(self, client: Any) -> None:
+    def __init__(self, client: Any, *, deadline: float | None = None) -> None:
         self.client = client
+        # When this question must be over, as `time.time()` reads it. Each call is given the
+        # time left, so a question of three calls gets one cap and not three; a call that
+        # ends at the deadline with an error is the timeout, whatever it was wrapped as.
+        self.deadline = deadline
+        self.timed_out = False
         self.calls = 0
         self.prompt_tokens = 0
         self.cached_tokens = 0
@@ -178,7 +188,26 @@ class Counting:
     def chat(self, messages: Any, **kw: Any) -> Any:
         self.calls += 1
         sent = time.time()
-        reply = self.client.chat(messages, **kw)
+        if self.deadline is not None:
+            left = self.deadline - sent
+            if left <= 0:
+                self.timed_out = True
+                raise QuestionTimedOut(f"no time left for call {self.calls}")
+            # The real client takes `timeout` per call and closes the connection when it
+            # expires -- urllib closes the socket on the exception it raises, and llama.cpp's
+            # server polls `is_connection_closed` while a non-streamed result is pending and
+            # cancels the slot's tasks when it is, so the slot stops generating rather than
+            # finishing a reply nobody is waiting for. A client without a `timeout` of its
+            # own is only held to the deadline between calls.
+            if hasattr(self.client, "timeout"):
+                kw.setdefault("timeout", max(0.1, left))
+        try:
+            reply = self.client.chat(messages, **kw)
+        except Exception as exc:
+            if self.deadline is not None and time.time() >= self.deadline - 0.5:
+                self.timed_out = True
+                raise QuestionTimedOut(f"call {self.calls}: {exc}") from exc
+            raise
         took = time.time() - sent
         raw = getattr(reply, "raw", None) or {}
         usage = raw.get("usage") or {}
@@ -210,6 +239,14 @@ class Counting:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.client, name)
+
+
+class QuestionTimedOut(RuntimeError):
+    """A question ran past its `--per-question` cap; the row records it and the run goes on."""
+
+
+# What one question may take before it is recorded as timed out and the run moves on.
+PER_QUESTION = 300.0
 
 
 def find_model(named: str) -> str:
@@ -462,15 +499,21 @@ def unread_named(text: str, graph: Mapping[str, Any],
 
 def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, client: Any,
               graph: Mapping[str, Any] | None = None, turns: Sequence[Mapping[str, str]] = (),
-              conversation: int = 0, turn: int = 0) -> tuple[Row, str]:
+              conversation: int = 0, turn: int = 0,
+              per_question: float = PER_QUESTION) -> tuple[Row, str]:
     """One question through ``ask(question, client)``, and what it cost; with the answer's
-    text, which a conversation carries into its next turn."""
-    counting = Counting(client)
+    text, which a conversation carries into its next turn.
+
+    ``per_question`` is the most it may take. Past that the row is kept as timed out: no
+    answer, the cap as its wall clock, scored wrong -- and the next question is asked. A
+    question that hangs is a result, not a reason for the run to.
+    """
+    began = time.time()
+    counting = Counting(client, deadline=began + per_question if per_question else None)
     row = Row(label=label, question=str(one.get("q") or ""),
               expected=[str(i) for i in (one.get("expect") or ())],
               conversation=conversation, turn=turn)
     said = ""
-    began = time.time()
     try:
         out = ask(row.question, counting, **({"turns": list(turns)} if turns else {}))
         # an Answer, or the payload a project sends its own page; both say the same things
@@ -487,6 +530,13 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     except Exception as exc:  # noqa: BLE001 - a failure is a result, not the end of the run
         row.error = f"{type(exc).__name__}: {exc}"[:200]
     row.seconds = round(time.time() - began, 2)
+    if counting.timed_out:
+        # Whatever `ask` made of the timeout -- raised it, or caught it and answered with
+        # what it had -- the question was not answered inside the cap, and is scored so.
+        row.timed_out = True
+        row.error = f"timed out after {per_question:.0f}s"
+        row.seconds = float(per_question)
+        row.shown, row.unread, row.unread_named, row.answer_chars, said = [], [], 0, 0, ""
     row.first_token = counting.first_token or 0.0
     row.queued = round(max(0.0, row.seconds - counting.generating_ms / 1000), 2)
     row.calls = counting.calls
@@ -501,18 +551,21 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
 
 def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]], *,
             label: str, client: Any, log: Callable[[str], None] | None = None,
-            graph: Mapping[str, Any] | None = None) -> list[Row]:
+            graph: Mapping[str, Any] | None = None,
+            per_question: float = PER_QUESTION) -> list[Row]:
     """Ask each question once through ``ask(question, client)`` and record what it cost.
 
     Given the ``graph``, each row also counts the entries the answer named that no tool
-    call produced -- see `unread_named`.
+    call produced -- see `unread_named`. ``per_question`` caps each question; see `_ask_once`.
     """
     rows = []
     for one in questions:
-        row, _ = _ask_once(ask, one, label=label, client=client, graph=graph)
+        row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
+                           per_question=per_question)
         rows.append(row)
         if log:
-            log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}")
+            log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}"
+                + ("  TIMED OUT" if row.timed_out else ""))
     return rows
 
 
@@ -570,7 +623,8 @@ class _Peak:
 def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], *,
                conversations: int, turns: int, label: str, client: Any,
                graph: Mapping[str, Any] | None = None, base_url: str = "",
-               log: Callable[[str], None] | None = None) -> tuple[list[Row], dict[str, Any]]:
+               log: Callable[[str], None] | None = None,
+               per_question: float = PER_QUESTION) -> tuple[list[Row], dict[str, Any]]:
     """N conversations of T turns each, asked of one server at the same time.
 
     Every other measurement here asks one question at a time, which is right for timing a
@@ -603,7 +657,8 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
         rows: list[Row] = []
         for t, question in enumerate(chains[c]):
             row, said = _ask_once(ask, question, label=label, client=client, graph=graph,
-                                  turns=prior, conversation=c, turn=t)
+                                  turns=prior, conversation=c, turn=t,
+                                  per_question=per_question)
             rows.append(row)
             prior += [{"role": "user", "content": row.question},
                       {"role": "assistant", "content": said}]
@@ -867,7 +922,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     head = (f"{'run':28} {'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'draft':>6} {'find':>7} {'conc':>5} "
             f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
-            f"{'made':>5}  {'sampling'}")
+            f"{'made':>5} {'t/o':>4}  {'sampling'}")
     print(head)
     print("-" * len(head))
     for one in kept:
@@ -880,12 +935,15 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         ctx = server.get("context") or 0
         slots = server.get("slots") or 0
         kv = kv_short(str(server.get("cache_type") or ""))
+        # `/rb`: served with a reasoning budget, which is another configuration again --
+        # the label carries the number, this says the run's thinking was stopped
+        budgeted = "/rb" if server.get("reasoning_budget") is not None else ""
         beyond = server.get("kv_and_run_bytes")
         per1k = server.get("bytes_per_1k_context")
         rss = server.get("resident_bytes")
         load = server.get("load_s")
         print(f"{_shown(one.get('label', '')):28} "
-              f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') if ctx else '-'):>10} "
+              f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
               f"{len(scored):>3} "
               f"{wall_of(one):>6.0f}s "
               f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
@@ -899,7 +957,15 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
-              f"{right:>5} {rec:>5} {prec:>5} {made(one):>5}  {sampled(server)}")
+              f"{right:>5} {rec:>5} {prec:>5} {made(one):>5} {timeouts(one):>4}  "
+              f"{sampled(server)}")
+
+
+def timeouts(one: Mapping[str, Any]) -> str:
+    """How many of a run's questions ran past `--per-question`; "" for none, so the eye
+    goes to the runs that did. Each is scored wrong and wall-clocked at the cap."""
+    n = sum(1 for r in (one.get("rows") or []) if r.get("timed_out"))
+    return str(n) if n else ""
 
 
 def wall_of(one: Mapping[str, Any]) -> float:
@@ -945,15 +1011,19 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False) -> No
         found = str(server.get("finder") or "-")
         together = at_once(server)
         load = server.get("load_s")
+        late = timeouts(one)
         print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
               + (f", {together} at once" if together else "")
-              + (f", load {float(load):.0f}s" if load is not None else "") + ")")
+              + (f", load {float(load):.0f}s" if load is not None else "")
+              + (f", {late} timed out" if late else "") + ")")
         if not shortfall:
             print("  every question answered in full")
             continue
         for r in shortfall:
             got, want = set(r.get("shown") or ()), set(r.get("expected") or ())
-            print(f"  {_hit(r) * 100:3.0f}%  {r.get('question', '')}")
+            print(f"  {_hit(r) * 100:3.0f}%  {r.get('question', '')}"
+                  + (f"   [timed out at {float(r.get('seconds') or 0):.0f}s]"
+                     if r.get("timed_out") else ""))
             print(f"        wanted  {', '.join(sorted(want)) or '-'}")
             print(f"        showed  {', '.join(sorted(got)) or '(nothing)'}")
             if want - got:
@@ -1099,7 +1169,12 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     Right-per-second and right-per-1k are rates: twice the figure is twice the accuracy for
     the same cost. `per_right` inverts them into what one right answer cost, which is the
     easier one to feel.
+
+    A point that carries ``derived`` already -- one `composed` built, with accuracy from one
+    run and cost from another -- is returned as it is.
     """
+    if "derived" in one:
+        return dict(one["derived"])
     rows = [r for r in (one.get("rows") or []) if r.get("expected")]
     if not rows:
         return {}
@@ -1115,12 +1190,16 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     # `right` is F1. Recall and precision are kept beside it because the pair is what says
     # *how* a run was wrong: a model that lights everything has high recall and no precision,
     # and under recall alone it looked like the most accurate model there was.
-    out = {"right": got, "recall": recall, "precision": precision,
-           "shown_per_question": shown, "wanted_per_question": wanted,
-           "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
-           "kv_bytes": memory, "questions": float(len(rows))}
-    # Rates, guarded: a run that took no time or paid nothing has nothing to divide by, and
-    # a zero score is a real answer rather than a missing one.
+    return _with_rates({"right": got, "recall": recall, "precision": precision,
+                        "shown_per_question": shown, "wanted_per_question": wanted,
+                        "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
+                        "kv_bytes": memory, "questions": float(len(rows))})
+
+
+def _with_rates(out: dict[str, float]) -> dict[str, float]:
+    """The rates, from the totals. Guarded: a run that took no time or paid nothing has
+    nothing to divide by, and a zero score is a real answer rather than a missing one."""
+    got, seconds, paid, memory = out["right"], out["seconds"], out["paid_tokens"], out["kv_bytes"]
     if seconds > 0:
         out["right_per_minute"] = got * 60.0 / seconds
     if paid > 0:
@@ -1128,8 +1207,8 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     if memory > 0:
         out["right_per_gb"] = got / (memory / 2**30)
     if got > 0:
-        out["seconds_per_right"] = seconds / (got * len(rows))
-        out["tokens_per_right"] = paid / (got * len(rows))
+        out["seconds_per_right"] = seconds / (got * out["questions"])
+        out["tokens_per_right"] = paid / (got * out["questions"])
     return out
 
 
@@ -1168,7 +1247,111 @@ def _which(graph: Mapping[str, Any]) -> str:
         return ""
 
 
-def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) -> str:
+# How far a run's F1 may fall under its model's accuracy run and still be the same answer,
+# as a fraction: 0.05 is five points. On a twenty-question run one question is worth five
+# points, so anything tighter rejects the noise of one question.
+NOISE = 0.05
+
+
+@dataclass
+class Choice:
+    """One model's row in the ranking: the run its accuracy came from, the run its cost came
+    from, and the runs that were faster but did not hold the accuracy."""
+
+    model: str
+    accuracy: Mapping[str, Any]
+    cost: Mapping[str, Any]
+    rejected: list[tuple[Mapping[str, Any], float]]     # (run, how far F1 fell, a fraction)
+
+    @property
+    def own(self) -> bool:
+        """The cost is the accuracy run's own: nothing faster held its score."""
+        return self.cost is self.accuracy
+
+
+def per_question(one: Mapping[str, Any]) -> float:
+    """What one question took, so a twenty-question run compares with a thirty-four."""
+    got = derived(one)
+    return got["seconds"] / got["questions"] if got.get("questions") else 0.0
+
+
+def choices(kept: Sequence[Mapping[str, Any]], *,
+            noise: float = NOISE) -> tuple[list[Choice], int]:
+    """Per model, where its accuracy comes from and where its cost comes from.
+
+    A draft head cannot change an answer -- the target verifies every token -- only the wall
+    clock and the memory. So a model's accuracy is its largest run, the full sweep, and its
+    cost is the fastest configuration that kept that accuracy: a `drafts` run of twenty
+    questions with a head and a draft length, possibly on another build, if its F1 held
+    within ``noise``. Taking both from one run ranked a drafted model at its undrafted
+    speed, or not at all when the drafted run was short.
+
+    Accuracy: the run with the most questions, the newest on a tie. Cost: the fastest per
+    question of the model's runs of at least `SHORT` questions whose F1 fell no more than
+    ``noise`` below the accuracy run's; the accuracy run itself when nothing faster held.
+    ``rejected`` holds the rest, so a head that hurt accuracy is seen rather than skipped.
+
+    Returns the choices, most accurate first, and how many runs were too short to count.
+    """
+    by_model: dict[str, list[Mapping[str, Any]]] = {}
+    too_few = 0
+    for one in kept:
+        got = derived(one)
+        if not got:
+            continue
+        # A smoke run asks two questions to prove the path works; its score is meaningless
+        # by construction, and it would otherwise rank a model on a coin toss. Anything
+        # below a short run is evidence that something ran, not evidence of how well --
+        # and not of what it cost either.
+        if got["questions"] < SHORT:
+            too_few += 1
+            continue
+        by_model.setdefault(str((one.get("server") or {}).get("model") or "?"), []).append(one)
+    out = []
+    for model, mine in by_model.items():
+        accuracy = max(mine, key=lambda o: (derived(o)["questions"], str(o.get("at") or "")))
+        top = derived(accuracy)["right"]
+        held = [o for o in mine if top - derived(o)["right"] <= noise + 1e-9]
+        cost = min(held, key=lambda o: (per_question(o), o is not accuracy))
+        if per_question(cost) >= per_question(accuracy):
+            cost = accuracy
+        rejected = sorted(((o, top - derived(o)["right"]) for o in mine if o not in held),
+                          key=lambda pair: -pair[1])
+        out.append(Choice(model, accuracy, cost, rejected))
+    return sorted(out, key=lambda c: -derived(c.accuracy)["right"]), too_few
+
+
+def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list[dict[str, Any]]:
+    """Each model as one point: accuracy from its largest run, cost from its fastest run
+    that held it, scaled to the accuracy run's question count so both are one run's worth.
+
+    `derived` reads one back as it is, so `pareto`, `rates` and `plot` take them beside the
+    runs; ``composed`` marks them, ``from`` names the run the cost came from.
+    """
+    out = []
+    for choice in choices(kept, noise=noise)[0]:
+        a, c = derived(choice.accuracy), derived(choice.cost)
+        scale = a["questions"] / c["questions"] if c.get("questions") else 1.0
+        point = {"right": a["right"], "recall": a["recall"], "precision": a["precision"],
+                 "shown_per_question": a["shown_per_question"],
+                 "wanted_per_question": a["wanted_per_question"], "questions": a["questions"],
+                 "seconds": c["seconds"] * scale, "paid_tokens": c["paid_tokens"] * scale,
+                 "calls": c["calls"] * scale, "kv_bytes": c["kv_bytes"]}
+        out.append({"label": choice.model, "composed": True, "model": choice.model,
+                    "from": str(choice.cost.get("label") or ""), "own": choice.own,
+                    "derived": _with_rates(point)})
+    return out
+
+
+def _build(binary: Any) -> str:
+    """Which llama-server a run was served by, as the last two path segments: a managed
+    build is ``<name>/llama-server``, so a fork's run says so and mainline's says current."""
+    parts = Path(str(binary)).parts if binary else ()
+    return "/".join(parts[-2:])
+
+
+def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, *,
+            noise: float = NOISE) -> str:
     """Which model to choose, as a conclusion rather than as evidence.
 
     The raw runs are not committed: they describe one machine and one llama.cpp build, go
@@ -1178,51 +1361,72 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None) 
     this library are set from, and a default with no recorded reason is a default nobody can
     argue with.
 
-    One line per model: its best run, and the questions and sampling that run used, because
-    a score without them is not comparable to anything.
+    One line per model, composed as `choices` composes it: accuracy from its largest run,
+    cost -- per question, so a short drafted run compares with a full one -- from its
+    fastest run that held that accuracy, and the last column saying which run and which
+    build that was. A run that was rejected for cost because its F1 fell is listed under
+    the table by name, so a head that hurt accuracy is visible rather than silently ignored.
     """
-    best: dict[str, Mapping[str, Any]] = {}
-    too_few = 0
-    for row in _exportable(kept)[0]:
-        # A smoke run asks two questions to prove the path works; its score is meaningless
-        # by construction, and it would otherwise rank a model on a coin toss. Anything
-        # below a short run is evidence that something ran, not evidence of how well.
-        if (row.get("questions") or 0) < SHORT:
-            too_few += 1
-            continue
-        name = str(row.get("model") or "?")
-        if name not in best or (row.get("f1") or 0) > (best[name].get("f1") or 0):
-            best[name] = row
-
-    order = sorted(best.values(), key=lambda r: -(r.get("f1") or 0))
+    over, skipped = _over_invented(kept)
+    chosen, too_few = choices(over, noise=noise)
+    pts = noise * 100
     lines = ["# Which model answers best",
              "",
              "Measured over the invented community that ships with this package, by",
              "`ml-stack-bench`. A conclusion, not evidence: the runs behind it are not in this",
              "repository. Re-measure after any model release -- none of this survives one.",
              "",
-             "| model | F1 | recall | precision | questions | seconds | load | resident "
-             "| sampling | find | made |",
-             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
-    for row in order:
-        gb = row.get("resident_bytes")
-        load = row.get("load_s")
-        temp = (row.get("sampling") or {}).get("temperature")
+             "Accuracy is each model's largest run -- the most questions, the newest on a tie --",
+             "since a draft head cannot change an answer, only the clock. Cost is the model's",
+             f"fastest run of at least {SHORT} questions whose F1 held within {pts:g} points of",
+             "that, per question, whatever head, draft length or build it ran on; the last",
+             "column says which run that was.",
+             "",
+             "| model | F1 | recall | precision | questions | s/question | load | resident "
+             "| kv+run | sampling | find | made | cost from |",
+             "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for choice in chosen:
+        a, c = _flat(choice.accuracy), _flat(choice.cost)
+        gb, kv, load = c.get("resident_bytes"), c.get("kv_and_run_bytes"), c.get("load_s")
+        temp = (a.get("sampling") or {}).get("temperature")
+        build = _build(c.get("binary"))
+        source = ("its own run" if choice.own
+                  else f"`{c.get('label')}`") + (f" on {build}" if build else "")
+        if not choice.own:
+            source += f" ({c.get('questions')} q)"
         lines.append(
-            f"| `{row.get('model')}` "
-            f"| {(row.get('f1') or 0) * 100:.0f}% "
-            f"| {(row.get('recall') or 0) * 100:.0f}% "
-            f"| {(row.get('precision') or 0) * 100:.0f}% "
-            f"| {row.get('questions') or '-'} "
-            f"| {row.get('seconds') or 0:.0f} "
+            f"| `{choice.model}` "
+            f"| {(a.get('f1') or 0) * 100:.0f}% "
+            f"| {(a.get('recall') or 0) * 100:.0f}% "
+            f"| {(a.get('precision') or 0) * 100:.0f}% "
+            f"| {a.get('questions') or '-'} "
+            f"| {per_question(choice.cost):.1f} "
             f"| {f'{float(load):.0f}s' if load is not None else '-'} "
             f"| {f'{gb / 2**30:.1f}G' if gb else '-'} "
+            f"| {f'{kv / 2**30:.1f}G' if kv else '-'} "
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
-            f"| {row.get('finder') or '-'} "
-            f"| {'-' if row.get('unread_named') is None else row['unread_named']} |")
+            f"| {a.get('finder') or '-'} "
+            f"| {'-' if a.get('unread_named') is None else a['unread_named']} "
+            f"| {source} |")
+    refused = [(choice, run, fell) for choice in chosen for run, fell in choice.rejected]
+    if refused:
+        lines += ["", f"Runs whose F1 fell more than {pts:g} points under their model's, so "
+                      f"their cost was not taken -- a head cannot change an answer, so look "
+                      f"at what else these changed:", ""]
+        for choice, run, fell in refused:
+            lines.append(f"- `{choice.model}` rejected: `{run.get('label')}` F1 "
+                         f"-{fell * 100:.0f} pts ({derived(run)['questions']:.0f} q, "
+                         f"{per_question(run):.1f} s/question)")
+    notes = []
     if too_few:
-        lines += ["", f"*{too_few} run(s) not ranked: fewer than {SHORT} questions, which is "
-                      f"a smoke run proving the path works rather than a measurement.*"]
+        notes.append(f"{too_few} run(s) not ranked: fewer than {SHORT} questions, which is a "
+                     f"smoke run proving the path works rather than a measurement -- it "
+                     f"supplies neither accuracy nor cost.")
+    if skipped:
+        notes.append(f"{skipped} run(s) not ranked: not measured over the community that "
+                     f"ships with this package.")
+    if notes:
+        lines += ["", "*" + " ".join(notes) + "*"]
     body = "\n".join(lines) + "\n"
     if where is not None:
         Path(where).expanduser().write_text(body, encoding="utf-8")
@@ -1237,56 +1441,73 @@ def invented_digest() -> str:
     return digest(invented())
 
 
-def _exportable(kept: Sequence[Mapping[str, Any]], *,
-                anyway: bool = False) -> tuple[list[dict[str, Any]], int]:
+def _over_invented(kept: Sequence[Mapping[str, Any]], *,
+                   anyway: bool = False) -> tuple[list[Mapping[str, Any]], int]:
     """The runs that may leave this machine, and how many were held back.
 
     Shared by `export` and `ranking` so the gate cannot be enforced in one and forgotten in
-    the other: only runs whose recorded graph fingerprint is the community that ships with
-    this package, and never a run from before that marker existed -- not knowing which graph
-    a run read is not the same as knowing it was invented.
+    the other: only scored runs whose recorded graph fingerprint is the community that ships
+    with this package, and never a run from before that marker existed -- not knowing which
+    graph a run read is not the same as knowing it was invented.
     """
     mine = "" if anyway else invented_digest()
-    out: list[dict[str, Any]] = []
+    out: list[Mapping[str, Any]] = []
     skipped = 0
     for one in kept:
-        rows = [r for r in (one.get("rows") or []) if r.get("expected")]
-        if not rows:
+        if not any(r.get("expected") for r in (one.get("rows") or [])):
             continue
         if mine and str((one.get("server") or {}).get("graph") or "") != mine:
             skipped += 1
             continue
-        got = derived(one)
-        server = one.get("server") or {}
-        out.append({
-            "at": one.get("at", ""), "label": one.get("label", ""),
-            "questions": len(rows),
-            "f1": round(got.get("right", 0), 4),
-            "recall": round(got.get("recall", 0), 4),
-            "precision": round(got.get("precision", 0), 4),
-            "lit_per_question": round(got.get("shown_per_question", 0), 2),
-            "seconds": round(got.get("seconds", 0)),
-            "calls": int(got.get("calls", 0)),
-            "read_tokens": int(_total(rows, "processed_tokens")),
-            "written_tokens": int(_total(rows, "completion_tokens")),
-            "draft_offered": int(_total(rows, "draft_tokens")),
-            "draft_kept": int(_total(rows, "draft_taken")),
-            "context": server.get("context"), "slots": server.get("slots"),
-            "cache_type": str(server.get("cache_type") or ""),
-            "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
-            # None for a run kept before the lease recorded it: not recorded is not instant
-            "load_s": server.get("load_s"),
-            "resident_bytes": server.get("resident_bytes"),
-            "kv_and_run_bytes": server.get("kv_and_run_bytes"),
-            "mmapped": bool(server.get("mmapped")),
-            "sampling": server.get("sampling") or {},
-            "finder": str(server.get("finder") or ""),
-            # None, not 0, for a run from before this was counted: not counted is not none
-            "unread_named": (int(_total(rows, "unread_named"))
-                             if any("unread_named" in r for r in rows) else None),
-            "concurrency": dict(server.get("concurrency") or {}) or None,
-        })
+        out.append(one)
     return out, skipped
+
+
+def _flat(one: Mapping[str, Any]) -> dict[str, Any]:
+    """One run as the totals and the server, and no question or entry: what `export` writes
+    and `ranking` reads."""
+    rows = [r for r in (one.get("rows") or []) if r.get("expected")]
+    got = derived(one)
+    server = one.get("server") or {}
+    return {
+        "at": one.get("at", ""), "label": one.get("label", ""),
+        "questions": len(rows),
+        "f1": round(got.get("right", 0), 4),
+        "recall": round(got.get("recall", 0), 4),
+        "precision": round(got.get("precision", 0), 4),
+        "lit_per_question": round(got.get("shown_per_question", 0), 2),
+        "seconds": round(got.get("seconds", 0)),
+        "calls": int(got.get("calls", 0)),
+        "read_tokens": int(_total(rows, "processed_tokens")),
+        "written_tokens": int(_total(rows, "completion_tokens")),
+        "draft_offered": int(_total(rows, "draft_tokens")),
+        "draft_kept": int(_total(rows, "draft_taken")),
+        "timed_out": sum(1 for r in rows if r.get("timed_out")),
+        "context": server.get("context"), "slots": server.get("slots"),
+        "cache_type": str(server.get("cache_type") or ""),
+        "reasoning_budget": server.get("reasoning_budget"),
+        "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
+        # the llama-server that served it, so a fork's run is told from mainline's
+        "binary": str(server.get("binary") or ""),
+        # None for a run kept before the lease recorded it: not recorded is not instant
+        "load_s": server.get("load_s"),
+        "resident_bytes": server.get("resident_bytes"),
+        "kv_and_run_bytes": server.get("kv_and_run_bytes"),
+        "mmapped": bool(server.get("mmapped")),
+        "sampling": server.get("sampling") or {},
+        "finder": str(server.get("finder") or ""),
+        # None, not 0, for a run from before this was counted: not counted is not none
+        "unread_named": (int(_total(rows, "unread_named"))
+                         if any("unread_named" in r for r in rows) else None),
+        "concurrency": dict(server.get("concurrency") or {}) or None,
+    }
+
+
+def _exportable(kept: Sequence[Mapping[str, Any]], *,
+                anyway: bool = False) -> tuple[list[dict[str, Any]], int]:
+    """`_over_invented`, flattened by `_flat`: what `export` writes."""
+    out, skipped = _over_invented(kept, anyway=anyway)
+    return [_flat(one) for one in out], skipped
 
 
 def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
@@ -1328,23 +1549,27 @@ def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     return str(target)
 
 
-def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
-    """Every run by what it cost to be right, frontier marked."""
+def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
+          noise: float = NOISE) -> None:
+    """Every run by what it cost to be right, frontier marked -- and each model once more
+    as `composed` composes it, marked ``=``, so the frontier holds what a model can do at
+    the speed of the configuration that held its accuracy."""
     if not kept:
         print("nothing kept yet")
         return
-    on_front = {id(one) for one in pareto(kept, cost=cost)}
+    points = list(kept) + composed(kept, noise=noise)
+    on_front = {id(one) for one in pareto(points, cost=cost)}
     head = (f"{'run':28} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
             f"{'F1/min':>8} {'F1/1k tok':>10} {'F1/GB':>7} {'s per':>7} {'tok per':>8}")
     print(head)
     print("-" * len(head))
-    for one in sorted(kept, key=lambda o: -(derived(o).get("right") or 0)):
+    for one in sorted(points, key=lambda o: -(derived(o).get("right") or 0)):
         d = derived(one)
         if not d:
             continue
         def num(key: str, fmt: str) -> str:
             return format(d[key], fmt) if key in d else "-"
-        mark = " *" if id(one) in on_front else "  "
+        mark = ("*" if id(one) in on_front else " ") + ("=" if one.get("composed") else " ")
         print(f"{str(one.get('label',''))[:18]:18}{mark} {d['questions']:>3.0f} "
               f"{100 * d['right']:>4.0f}% {100 * d['recall']:>4.0f}% "
               f"{100 * d['precision']:>4.0f}% {d['shown_per_question']:>6.1f} "
@@ -1353,6 +1578,8 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds") -> None:
               f"{num('tokens_per_right', '8.0f')}")
     print(f"\n* on the frontier for accuracy against {cost}: nothing is both more accurate "
           f"and cheaper.")
+    print(f"= a model composed: accuracy from its largest run, cost from its fastest run "
+          f"within {noise * 100:g} points of it, scaled to the same number of questions.")
 
 
 AXES = {"seconds": "wall clock (s)", "paid_tokens": "tokens paid for (read + written)",
@@ -1360,15 +1587,16 @@ AXES = {"seconds": "wall clock (s)", "paid_tokens": "tokens paid for (read + wri
 
 
 def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
-         cost: str = "seconds") -> str:
+         cost: str = "seconds", noise: float = NOISE) -> str:
     """Write accuracy against cost as a self-contained HTML scatter, frontier joined.
 
     Plain SVG built here rather than a plotting library: this has to open on a machine with
     no network and no packages, and a chart of a dozen points is a dozen circles. The
     frontier is drawn as a line through the runs nothing beats on both axes, so the shape of
-    the trade is visible rather than inferred from a column of numbers.
+    the trade is visible rather than inferred from a column of numbers. Each model's
+    `composed` point is drawn as a ring beside its runs.
     """
-    points = [(one, derived(one)) for one in kept]
+    points = [(one, derived(one)) for one in list(kept) + composed(kept, noise=noise)]
     points = [(one, d) for one, d in points if d and cost in d and d[cost] > 0]
     if not points:
         raise ValueError("nothing to plot")
@@ -1391,11 +1619,14 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
         cx, cy = x(d[cost]), y(d["right"])
         on = id(one) in front
         label = _shown(one.get("label", ""), 28)
+        kind = "composed" if one.get("composed") else ("front" if on else "dot")
+        note = (f'\ncomposed: cost from {one.get("from") or "its own run"}'
+                if one.get("composed") else "")
         dots.append(
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6 if on else 4.5}" '
-            f'class="{"front" if on else "dot"}"><title>{label}\n'
+            f'class="{kind}{" front" if on and kind == "composed" else ""}"><title>{label}\n'
             f'{100 * d["right"]:.0f}% right, {d[cost]:.0f} {cost}\n'
-            f'{d["questions"]:.0f} questions</title></circle>')
+            f'{d["questions"]:.0f} questions{note}</title></circle>')
         if on:
             marks.append((cx, cy))
             dots.append(f'<text x="{cx + 9:.1f}" y="{cy - 8:.1f}" class="tag">{label}</text>')
@@ -1432,13 +1663,16 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
   .ax   {{ fill: var(--dot); font-size: 11px; }}
   .dot  {{ fill: var(--dot); }}
   .front{{ fill: var(--front); }}
+  .composed {{ fill: none; stroke: var(--ink); stroke-width: 2; }}
+  .composed.front {{ stroke: var(--front); }}
   .edge {{ fill: none; stroke: var(--front); stroke-width: 2; stroke-dasharray: 5 4; }}
   .tag  {{ fill: var(--ink); font-size: 11px; }}
 </style>
 <h1>Answering the graph: accuracy against {AXES.get(cost, cost)}</h1>
-<p>Each point is one benchmark run. Green points are the Pareto frontier &mdash; nothing is
-both more accurate and cheaper &mdash; so choosing among them is choosing a budget, not
-choosing a better run. Hover a point for its numbers.</p>
+<p>Each point is one benchmark run; a ring is one model composed &mdash; accuracy from its
+largest run, cost from its fastest run that held that accuracy. Green points are the Pareto
+frontier &mdash; nothing is both more accurate and cheaper &mdash; so choosing among them is
+choosing a budget, not choosing a better run. Hover a point for its numbers.</p>
 <div class="wrap"><svg width="{wide}" height="{tall}" viewBox="0 0 {wide} {tall}"
   role="img" aria-label="accuracy against {cost}">
   {"".join(ticks)}
@@ -1479,6 +1713,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            spec_draft_max: int | None = None, cache_type: str = "",
+           per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
            **making: Any) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
@@ -1504,7 +1739,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     ``spec_draft_max`` is how many tokens the draft head guesses ahead, when one is served;
     ``cache_type`` quantises the KV cache (``q8_0``), and every label gets ``-kv-q8_0`` on
     its end, because a run with a quantised cache is another configuration and the label is
-    what the table shows.
+    what the table shows. ``reasoning_budget`` is the same again: bound at start, on the
+    label as ``-rbN``, and it stops a thinking model's thinking where `n_predict` would
+    have cut its answer. ``per_question`` caps each question -- see `_ask_once`.
 
     **The load is preflighted first** -- shards present, architecture read by this build,
     weights plus an estimated KV cache under what this machine may use, every flag one the
@@ -1520,7 +1757,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     from ml_stack.serve.binary import find_binary
 
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-    suffix = f"-kv-{cache_type}" if cache_type else ""
+    suffix = ((f"-kv-{cache_type}" if cache_type else "")
+              + (f"-rb{reasoning_budget}" if reasoning_budget is not None else ""))
 
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")
@@ -1550,6 +1788,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
             extra["spec_draft_max"] = int(spec_draft_max)
     if cache_type:
         extra["cache_type_k"] = extra["cache_type_v"] = cache_type
+    if reasoning_budget is not None:
+        extra["reasoning_budget"] = int(reasoning_budget)
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
@@ -1561,8 +1801,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     # architecture checks no opinion rather than a wrong one. `room()` is what this machine
     # may wire for a model, not what happens to be free.
     spec = ServerSpec(model=model, port=port, context=context, **extra)
-    report = checks.Preflight(spec, binary=binary or find_binary() or "llama-server",
-                              limit_bytes=hub.room())
+    build = str(binary or find_binary() or "llama-server")
+    report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
     if not report.ok:
         print(f"    preflight refused {name}{suffix}; not loaded:\n"
               + "\n".join(f"      {line}" for line in report.said().splitlines()))
@@ -1600,25 +1840,33 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                 if len(every) > 1:
                     print(f"\n  --- {here}")
                 wants_card = bool(asked.pop("_card", False))
-                client = Client(server.base_url, **{**making, **asked})
+                # the cap is the client's timeout too, so a call past it is cut off there
+                # and the connection closed, rather than waited on
+                client = Client(server.base_url, **{"timeout": per_question, **making, **asked})
                 if wants_card:
                     # what the model itself recommends, read from the GGUF it is serving
-                    client = Client(server.base_url, **{**making, **client.card})
+                    client = Client(server.base_url,
+                                    **{"timeout": per_question, **making, **client.card})
                 ask = asking(graph, shortlist=first, store=store, embed_url=embed_url,
                              embed_model=embed_model, terse=how,
                              rich=bool(asked.pop("rich", False)))
-                got = measure(ask, questions, label=here, client=client, log=print, graph=graph)
+                got = measure(ask, questions, label=here, client=client, log=print, graph=graph,
+                              per_question=per_question)
                 for row in got:
                     row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
+                # `binary` is the llama-server this ran on, so a run on a fork is told
+                # from one on mainline when the ranking takes its cost
                 held = {**footprint(server.base_url), "graph": _which(graph),
                         "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
-                        "load_s": load_s, "warmup_s": warmup_s}
+                        "load_s": load_s, "warmup_s": warmup_s, "binary": build}
                 if draft:
                     held["draft_model"] = str(draft).rsplit("/", 1)[-1]
                     if spec_draft_max is not None:
                         held["spec_draft_max"] = int(spec_draft_max)
                 if cache_type:
                     held["cache_type"] = cache_type
+                if reasoning_budget is not None:
+                    held["reasoning_budget"] = int(reasoning_budget)
                 if kept:
                     save(kept, got, held={**held, "sampling": dict(client.sampling)})
                 rows += got
@@ -1635,7 +1883,8 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
            parallel: int = 1, binary: str = "", kept: str | Path = "",
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
-           cache_type: str = "", **making: Any) -> list[Row]:
+           cache_type: str = "", per_question: float = PER_QUESTION,
+           **making: Any) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
     A draft head only *proposes*; the large model verifies every token, so a quantised head
@@ -1668,7 +1917,8 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
                           port=port, context=context, parallel=parallel, binary=binary,
                           kept=kept, store=store, embed_url=embed_url,
                           embed_model=embed_model, serve_timeout=serve_timeout,
-                          spec_draft_max=length, cache_type=cache_type, **making)
+                          spec_draft_max=length, cache_type=cache_type,
+                          per_question=per_question, **making)
     return out
 
 
@@ -1920,6 +2170,12 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
+                       help="tokens each --serve'd model may spend thinking before it must "
+                            "answer (llama-server --reasoning-budget; -1 is unlimited). A "
+                            "ceiling (--n-predict) cuts the answer; this is the budget that "
+                            "stops the thinking. Every label ends -rbN and the table's ctx "
+                            "column shows /rb, since it is another configuration")
     sweep.add_argument("--plain-only", action="store_true",
                        help="skip the shortlist half, just measure each model as it is")
     sweep.add_argument("--shortlist-for", default="", metavar="A,B",
@@ -1979,6 +2235,15 @@ def _parser() -> argparse.ArgumentParser:
                               "costs one model load rather than four. Repeatable")
 
     for one in (run, sweep, heads, conc):
+        one.add_argument("--per-question", type=float, default=PER_QUESTION,
+                         metavar="SECONDS",
+                         help="the most one question may take before it is recorded as "
+                              "timed out -- no answer, scored wrong, the cap as its wall "
+                              "clock -- and the next is asked (default: %(default)s). The "
+                              "table counts them under t/o and --detail names them. "
+                              "Measured: a 26B thinking model spent 505 s on one question "
+                              "under a 16k ceiling, and a run that waits for that is not "
+                              "a run")
         one.add_argument("--no-queue", action="store_true",
                          help="fail at once if another measurement holds the GPU, rather "
                               "than queue behind it. Read before the rest of the line is "
@@ -2023,9 +2288,15 @@ def _parser() -> argparse.ArgumentParser:
                            "beside the code that produced them")
     show.add_argument("--rank", default="", metavar="FILE.md",
                       help="write which model answers best, as a conclusion rather than as "
-                           "evidence: one line per model, its best run, and what that run "
-                           "cost. This is the part worth keeping in a repository -- the raw "
-                           "runs are not, since they describe one machine and one build")
+                           "evidence: one line per model -- accuracy from its largest run, "
+                           "cost per question from its fastest run that held that accuracy, "
+                           "a draft head or a fork included -- and which run that was. This "
+                           "is the part worth keeping in a repository -- the raw runs are "
+                           "not, since they describe one machine and one build")
+    show.add_argument("--noise", type=float, default=NOISE * 100, metavar="PTS",
+                      help="how far a run's F1 may fall under its model's largest run and "
+                           "still supply the cost, in points (default: %(default)s -- one "
+                           "question of a short run). A run outside it is listed as rejected")
     show.add_argument("--plot", default="", metavar="FILE.html",
                       help="write the runs as a scatter of accuracy against --cost, with "
                            "the frontier joined; opens with no network and no packages")
@@ -2149,6 +2420,8 @@ def _main(argv: list[str] | None = None) -> int:
                    store=args.store or None, embed_url=args.embed_url,
                    embed_model=args.embed_model, terse=getattr(args, "terse", False),
                    already=already, cache_type=getattr(args, "serve_kv", "") or "",
+                   per_question=args.per_question,
+                   reasoning_budget=getattr(args, "reasoning_budget", None),
                    **sampling_from(args))
             saved += [r["key"] for r in _kept(args.kept) if r["key"] not in before]
 
@@ -2164,13 +2437,14 @@ def _main(argv: list[str] | None = None) -> int:
                 print(f"\n{label} on {url}, look_up by {ask.finder}")
                 if not _idle(url, args):
                     return 3
-                asking_with = with_card(Client(url, **sampling_from(args)), args)
+                asking_with = with_card(Client(url, timeout=args.per_question,
+                                               **sampling_from(args)), args)
                 # what it will actually send, card and overrides together: a run measured at
                 # one temperature against a run at another is two measurements, and the only
                 # way to know later is to write it down now
                 used = dict(asking_with.sampling)
                 rows = measure(ask, questions, label=label, client=asking_with, log=print,
-                               graph=graph)
+                               graph=graph, per_question=args.per_question)
                 saved.append(save(args.kept, rows,
                                   held={**footprint(url), "sampling": used,
                                         "graph": _which(graph), "finder": ask.finder}))
@@ -2209,7 +2483,8 @@ def _main(argv: list[str] | None = None) -> int:
                       context=args.context, parallel=args.parallel, binary=args.binary,
                       kept=args.kept, store=prepared() or None,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
-                      cache_type=getattr(args, "serve_kv", "") or "")
+                      cache_type=getattr(args, "serve_kv", "") or "",
+                      per_question=args.per_question)
         print()
         if getattr(args, "smoke", False):
             saved = [r["key"] for r in _kept(args.kept) if r["key"] not in before]
@@ -2235,7 +2510,8 @@ def _main(argv: list[str] | None = None) -> int:
 
             if not _idle(args.base_url, args):
                 return 3
-            client = with_card(Client(args.base_url, **sampling_from(args)), args)
+            client = with_card(Client(args.base_url, timeout=args.per_question,
+                                      **sampling_from(args)), args)
         # a smoke run proves the path -- two conversations really overlapping, one turn
         # each -- and its numbers mean nothing, as with every other --smoke
         many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
@@ -2246,7 +2522,8 @@ def _main(argv: list[str] | None = None) -> int:
               f"look_up by {ask.finder}")
         rows, held = concurrent(ask, questions, conversations=many, turns=long,
                                 label=args.label, client=client, graph=graph,
-                                base_url="" if args.client else args.base_url, log=print)
+                                base_url="" if args.client else args.base_url, log=print,
+                                per_question=args.per_question)
         at = held["concurrency"]
         slots = at.get("slots") or 0
         print(f"  {at['seconds']:.1f}s for all of it"
@@ -2265,7 +2542,7 @@ def _main(argv: list[str] | None = None) -> int:
             print(compare(args.kept, *args.compare))
             return 0
         if args.rank:
-            ranking(runs(args.kept), args.rank)
+            ranking(runs(args.kept), args.rank, noise=args.noise / 100)
             print(args.rank)
             return 0
         if args.export:
@@ -2280,10 +2557,10 @@ def _main(argv: list[str] | None = None) -> int:
             shape(questions, invented())
             return 0
         if args.plot:
-            print(plot(runs(args.kept), args.plot, cost=args.cost))
+            print(plot(runs(args.kept), args.plot, cost=args.cost, noise=args.noise / 100))
             return 0
         if args.rates:
-            rates(runs(args.kept), cost=args.cost)
+            rates(runs(args.kept), cost=args.cost, noise=args.noise / 100)
             return 0
         if args.detail is not None:
             missed(runs(args.kept, args.detail), everything=args.all)
@@ -2319,7 +2596,8 @@ def _main(argv: list[str] | None = None) -> int:
     print(f"{args.label}: {len(questions)} questions over {where}"
           + (f", look_up by {found}" if found else "")
           + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
-    rows = measure(ask, questions, label=args.label, client=client, log=print, graph=graph)
+    rows = measure(ask, questions, label=args.label, client=client, log=print, graph=graph,
+                   per_question=args.per_question)
     key = save(args.kept, rows,
                held={**footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found})

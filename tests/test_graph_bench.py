@@ -923,8 +923,10 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     assert "made" in head
     assert head.split().index("made") == head.split().index("prec") + 1, "beside the scores"
     by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("tried", "older"))}
-    assert by_label["tried"].rstrip().endswith("100%     3  -"), "the total over the run"
-    assert by_label["older"].rstrip().endswith("100%        -"), "blank for a run from before, not 0"
+    # made, then t/o (blank: nothing timed out), then the sampling
+    assert by_label["tried"].rstrip().endswith("100%     3       -"), "the total over the run"
+    assert by_label["older"].rstrip().endswith("100%" + " " * 13 + "-"), \
+        "blank for a run from before, not 0"
 
     missed(runs(store, "tried"), everything=True)
     said = capsys.readouterr().out
@@ -2022,3 +2024,294 @@ def test_halves_and_the_ways_they_cross():
     assert [(w["label"], w["shortlist"], w["terse"]) for w in ways] == [
         ("plain", 0, False), ("plain-terse", 0, True),
         ("shortlist", 8, False), ("shortlist-terse", 8, True)]
+
+
+# -- the ranking composes accuracy and cost --------------------------------------------------
+#
+# Adam, 2026-09-01: "how can we properly rank flash-next if we haven't figured out the draft
+# head?" A head cannot change an answer, only the clock, so a model's accuracy is its largest
+# run and its cost is the fastest run that held that accuracy -- a short drafted run, on a
+# fork, included -- rather than both from one run.
+
+def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **server):
+    """A run of ``questions`` over the invented community, ``hits`` of them answered in
+    full, taking ``seconds`` altogether, served by ``binary``."""
+    from ml_stack.graph.bench import invented_digest
+
+    rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"] if n < hits else [])
+            for n in range(questions)]
+    for r in rows:
+        r.label, r.seconds = label, seconds / questions
+    return save(store, rows, held={"graph": invented_digest(), "model": model,
+                                   "binary": binary, **server})
+
+
+def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_path):
+    """A 34-question undrafted run on mainline says how well flash answers; a 20-question
+    drafted run on a fork, F1 held, says what it costs -- per question, so the two compare."""
+    from ml_stack.graph.bench import ranking
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
+              binary="/builds/current/llama-server", resident_bytes=8 * 2**30,
+              kv_and_run_bytes=3 * 2**30, load_s=30.0)
+    _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=20, hits=12,
+              seconds=200.0, binary="/builds/brayfork/llama-server", resident_bytes=9 * 2**30,
+              kv_and_run_bytes=4 * 2**30, load_s=40.0)
+    said = ranking(runs(store))
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert "| 59% |" in row, "accuracy is the 34-question run's (20 of 34), not the drafted 60%"
+    assert "| 34 |" in row and "| 10.0 |" in row, "cost is the drafted run's, per question"
+    assert "| 40s | 9.0G | 4.0G |" in row, "load, resident and kv+run from the same run"
+    assert row.endswith("| `draft:mtp-tiny@n4` on brayfork/llama-server (20 q) |")
+    assert "rejected" not in said
+    assert "| s/question |" in said and "| cost from |" in said
+    assert said.startswith("# Which model answers best\n")
+    assert "Accuracy is each model's largest run" in said and "Cost is the model's" in said
+
+
+def test_a_drafted_run_whose_f1_fell_is_rejected_and_named(tmp_path):
+    from ml_stack.graph.bench import ranking
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
+    _kept_run(store, "draft:mtp-tiny@n8", model="flash.gguf", questions=20, hits=10,
+              seconds=120.0)
+    said = ranking(runs(store))
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert "| 14.7 |" in row and row.endswith("| its own run |"), \
+        "the fast run did not hold the accuracy, so the cost is the accuracy run's own"
+    assert "- `flash.gguf` rejected: `draft:mtp-tiny@n8` F1 -9 pts (20 q, 6.0 s/question)" in said
+    # widen the noise and the same run supplies the cost
+    wider = ranking(runs(store), noise=0.10)
+    assert "rejected" not in wider and "| 6.0 |" in wider
+
+
+def test_a_model_with_one_run_uses_it_and_says_so(tmp_path):
+    from ml_stack.graph.bench import ranking
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "only", model="one.gguf", questions=20, hits=10, seconds=100.0,
+              binary="/builds/current/llama-server")
+    said = ranking(runs(store))
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `one.gguf`"))
+    assert "| 50% |" in row and "| 5.0 |" in row
+    assert row.endswith("| its own run on current/llama-server |")
+
+
+def test_a_smoke_run_never_supplies_cost_and_the_footnote_counts_it(tmp_path):
+    from ml_stack.graph.bench import SHORT, ranking
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
+    _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=2, hits=2, seconds=2.0)
+    said = ranking(runs(store))
+    row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
+    assert "| 14.7 |" in row and "its own run" in row, "two questions at a second each is not a cost"
+    assert f"*1 run(s) not ranked: fewer than {SHORT} questions" in said
+    assert "supplies neither accuracy nor cost" in said
+
+
+def test_accuracy_is_the_largest_run_and_the_newest_on_a_tie():
+    from ml_stack.graph.bench import choices, invented_digest
+
+    def run(label, at, hits, seconds):
+        rows = [{"expected": ["a"], "shown": ["a"] if n < hits else [], "seconds": seconds / 20}
+                for n in range(20)]
+        return {"label": label, "at": at, "rows": rows,
+                "server": {"model": "m.gguf", "graph": invented_digest()}}
+
+    older, newer = run("older", "2026-08-01T00:00:00", 12, 100.0), \
+        run("newer", "2026-09-01T00:00:00", 12, 150.0)
+    chosen, too_few = choices([older, newer])
+    assert too_few == 0 and len(chosen) == 1
+    assert chosen[0].accuracy is newer, "the same size: the newest"
+    assert chosen[0].cost is older, "and the older one, at the same F1, was faster"
+    assert not chosen[0].own and chosen[0].rejected == []
+
+
+def test_the_composed_frontier_holds_the_composed_point(tmp_path, capsys):
+    from ml_stack.graph.bench import composed, pareto, plot, rates
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
+    _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=20, hits=11,
+              seconds=200.0)
+    kept = runs(store)
+    points = composed(kept)
+    assert len(points) == 1 and points[0]["composed"] and points[0]["from"] == "draft:mtp-tiny@n4"
+    got = points[0]["derived"]
+    assert got["questions"] == 34 and got["seconds"] == pytest.approx(340.0), \
+        "the drafted run's 10 s/question over the accuracy run's 34 questions"
+    assert got["right"] == pytest.approx(20 / 34)
+    # 59% at 340 s: the undrafted run is as accurate and slower, so it falls off; the
+    # drafted run at 55% is cheaper and worse, so both it and the composed point stay
+    on = pareto(kept + points, cost="seconds")
+    assert any(o.get("composed") for o in on)
+    assert not any(o.get("label") == "flash-plain" for o in on), "dominated by its own model"
+
+    rates(kept)
+    said = capsys.readouterr().out
+    assert any(ln.startswith("flash.gguf") and "*=" in ln for ln in said.splitlines()), \
+        "the composed point, marked as composed and on the frontier"
+    assert "= a model composed" in said
+
+    drawn = pathlib.Path(plot(kept, tmp_path / "f.html")).read_text()
+    assert 'class="composed' in drawn and "cost from draft:mtp-tiny@n4" in drawn
+
+
+def test_an_export_carries_the_binary_and_the_timeouts(tmp_path):
+    from ml_stack.graph.bench import export
+
+    store = tmp_path / "runs.ladybug"
+    _kept_run(store, "only", model="one.gguf", questions=20, hits=10, seconds=100.0,
+              binary="/builds/fork/llama-server")
+    got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
+    assert got[0]["binary"] == "/builds/fork/llama-server" and got[0]["timed_out"] == 0
+
+
+# -- a question that runs past --per-question -------------------------------------------------
+
+class _Stalling:
+    """A client whose first call takes longer than the question is allowed and then fails
+    the way urllib does at its socket timeout; every later call answers at once."""
+
+    def __init__(self, stall: float) -> None:
+        self.stall = stall
+        self.timeout = 180.0            # the real client has one, so the cap is handed down
+        self.given: list[float | None] = []
+        self.calls = 0
+        self.sampling: dict = {}
+
+    def chat(self, messages, **kw):
+        from ml_stack.client import ServerUnreachable
+
+        self.calls += 1
+        self.given.append(kw.get("timeout"))
+        if self.calls == 1:
+            import time
+
+            time.sleep(self.stall)
+            raise ServerUnreachable("cannot reach http://127.0.0.1:1/completion (timed out)")
+        return type("R", (), {"content": "a compiler person", "thinking": None, "raw": {},
+                              "tool_calls": None})()
+
+
+def test_a_question_past_the_cap_is_kept_as_timed_out_and_the_run_moves_on(capsys):
+    from ml_stack.graph.bench import measure
+
+    client = _Stalling(stall=0.3)
+
+    def ask(question, counting):
+        return counting.chat([{"role": "user", "content": question}])
+
+    rows = measure(ask, [{"q": "who?", "expect": ["person:iris"]},
+                         {"q": "and who else?", "expect": ["person:iris"]}],
+                   label="t", client=client, log=print, per_question=0.25)
+    first, second = rows
+    assert first.timed_out and first.seconds == 0.25 and first.shown == []
+    assert first.error == "timed out after 0s" and first.hit == 0.0, "no answer, scored wrong"
+    assert client.given[0] == pytest.approx(0.25, abs=0.05), "the cap is the call's timeout"
+    assert not second.timed_out and second.error == "", "the next question was asked"
+    assert "TIMED OUT" in capsys.readouterr().out
+
+
+def test_a_deadline_already_spent_stops_the_next_call_before_it_is_made():
+    """Three calls get one cap between them, not three."""
+    from ml_stack.graph.bench import Counting, QuestionTimedOut
+
+    class Prompt:
+        def chat(self, messages, **kw):
+            return type("R", (), {"raw": {}})()
+
+    import time
+
+    counting = Counting(Prompt(), deadline=time.time() - 1)
+    with pytest.raises(QuestionTimedOut):
+        counting.chat([])
+    assert counting.timed_out
+
+
+def test_an_ask_that_swallows_the_timeout_is_still_scored_wrong():
+    from ml_stack.graph.bench import measure
+
+    client = _Stalling(stall=0.3)
+
+    def ask(question, counting):
+        try:
+            counting.chat([])
+        except Exception:
+            pass
+        return {"content": "Iris Tamsin, probably", "show": ["person:iris"]}
+
+    row, = measure(ask, [{"q": "who?", "expect": ["person:iris"]}], label="t", client=client,
+                   per_question=0.25)
+    assert row.timed_out and row.shown == [] and row.answer_chars == 0 and row.hit == 0.0
+
+
+def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
+    from ml_stack.graph.bench import missed
+
+    store = tmp_path / "runs.ladybug"
+    rows = [a_row("who?", expected=["person:iris"], shown=[]),
+            a_row("and who else?", expected=["person:iris"], shown=["person:iris"])]
+    rows[0].timed_out, rows[0].seconds, rows[0].error = True, 300.0, "timed out after 300s"
+    save(store, rows, held={"context": 32768, "slots": 1})
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0].split()
+    assert head.index("t/o") == head.index("made") + 1
+    line = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert line.split()[-2] == "1", "one timed out, before the sampling"
+    missed(runs(store))
+    said = capsys.readouterr().out
+    assert "1 timed out)" in said.splitlines()[1]
+    assert "who?   [timed out at 300s]" in said and "ERROR timed out after 300s" in said
+
+
+def test_per_question_reaches_the_client_and_the_measuring(tmp_path, monkeypatch, capsys):
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--per-question", "42",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    back = runs(seen["kept"])[0]
+    assert back["server"]["sampling"]["timeout"] == 42.0, "the served client was built with it"
+    assert all(r["timed_out"] is False for r in back["rows"])
+    assert "binary" in back["server"], "which llama-server served it is on the record"
+
+
+# -- a reasoning budget on every served model ------------------------------------------------
+
+def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path, monkeypatch,
+                                                                       capsys):
+    """A ceiling cuts the answer; a budget stops the thinking. Bound at start like the cache
+    type, so it is on the label and beside the context it was served with."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
+                        "--reasoning-budget", "2048", *seen["common"]]) == 0
+    capsys.readouterr()
+    assert seen["kwargs"][0]["reasoning_budget"] == 2048
+    assert seen["preflights"][0].reasoning_budget == 2048, "and the preflight saw the flag"
+    assert sorted(r["label"] for r in runs(seen["kept"])) == \
+        ["tiny-plain-rb2048", "tiny-plain-terse-rb2048"]
+    assert all(r["server"]["reasoning_budget"] == 2048 for r in runs(seen["kept"]))
+
+    save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768, "slots": 1})
+    table(runs(seen["kept"]))
+    said = capsys.readouterr().out
+    budgeted = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-rb"))
+    plain = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert budgeted.split()[1:4] == ["32k", "x1/rb", "1"], "ctx says so, n still fourth"
+    assert plain.split()[1:4] == ["32k", "x1", "1"]
+
+    # without the flag nothing is bound and no label says so
+    seen["kwargs"].clear()
+    assert bench._main(["sweep", "--serve", "other.gguf", "--plain-only", *seen["common"]]) == 0
+    capsys.readouterr()
+    assert "reasoning_budget" not in seen["kwargs"][0]
+    assert runs(seen["kept"], "other-plain")[0]["server"].get("reasoning_budget") is None
