@@ -31,6 +31,8 @@ from .environment import Environment
 from .models import Downloads, Models, ModelError, default_roots
 from .serving import Serving
 from .settings import Settings
+from ml_stack.platform import (
+    on_quit, private_file, process_group_kwargs, stop_gently, stop_pid)
 from .discovery import (
     Advertiser,
     Beacon,
@@ -106,6 +108,9 @@ class Job:
     started_at: float | None = None
     finished_at: float | None = None
     env: dict[str, str] = field(default_factory=dict)
+    log: str = ""
+    """Where its output goes, when that is not the runner's own ``job.log``: a bench job
+    started with ``--detach`` writes under the bench's home, and the runner reads that."""
 
     def public(self) -> dict[str, Any]:
         d = asdict(self)
@@ -148,6 +153,7 @@ class JobRunner:
         self.jobs: dict[str, Job] = {}
         self._queue: list[str] = []
         self._running: dict[str, subprocess.Popen] = {}
+        self._adopted: set[str] = set()
         self._lock = threading.Lock()
         self._wake = threading.Event()
         self._stop = threading.Event()
@@ -175,8 +181,9 @@ class JobRunner:
     def status(self) -> dict[str, Any]:
         """Capacity and what is on it. Taken under the lock, because a placement loop"""
         with self._lock:
-            running = sorted(self._running)
-            return {"slots": self.slots, "free": self.slots - len(running),
+            running = sorted({*self._running, *(j for j in self._adopted
+                                                 if self.jobs[j].state == "running")})
+            return {"slots": self.slots, "free": max(0, self.slots - len(running)),
                     "busy": bool(running), "running": running,
                     "queued": len(self._queue)}
 
@@ -190,7 +197,33 @@ class JobRunner:
         return self.files_root / "jobs" / job_id
 
     def log_path(self, job_id: str) -> Path:
+        job = self.jobs.get(job_id)
+        if job is not None and job.log:
+            return Path(job.log)
         return self.job_dir(job_id) / "job.log"
+
+    def adopt(self, job: Job) -> Job:
+        """Take in a job some other process owns -- a bench started detached, whose pid
+        and log are known -- so it is listed, polled and stopped like one of ours.
+
+        Whoever adopts it settles it: the runner has no ``Popen`` to wait on, so the
+        adopter watches the pid and calls `record` with the state it ended in.
+        """
+        if not job.pid:
+            raise DaemonError("an adopted job needs the pid of the process that owns it")
+        job.submitted_at = job.submitted_at or time.time()
+        job.started_at = job.started_at or time.time()
+        job.state = "running"
+        self.job_dir(job.id).mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            self.jobs[job.id] = job
+            self._adopted.add(job.id)
+        self.record(job)
+        return job
+
+    def record(self, job: Job) -> None:
+        """Write a job's public view beside its log, as `_run_one` does on every change."""
+        (self.job_dir(job.id) / "job.json").write_text(json.dumps(job.public(), indent=2))
 
     # -- submission ------------------------------------------------------
     def submit(self, name: str, argv: Iterable[str], cwd: str,
@@ -220,9 +253,21 @@ class JobRunner:
                 job.state = "stopped"
                 return job
             proc = self._running.get(job_id)
+            adopted = job_id in self._adopted
         if proc is None:
+            if adopted and job.state == "running" and job.pid:
+                # By pid, never by name: the bench turns the signal into an exit that
+                # takes its served model down, and nobody else's server with it. There
+                # is no Popen to hand `stop_gently`, so `stop_pid` does the same by pid.
+                with contextlib.suppress(OSError):
+                    stop_pid(job.pid)
+                job.state = "stopped"
+                job.finished_at = time.time()
+                self.record(job)
             return job
-        proc.send_signal(signal.SIGTERM)
+        # SIGTERM, or on Windows a CTRL_BREAK_EVENT aimed at the job's own process group
+        # -- the one thing there a checkpointing loop can catch (as SIGBREAK).
+        stop_gently(proc)
         deadline = time.time() + grace_s
         while time.time() < deadline and proc.poll() is None:
             time.sleep(0.25)
@@ -267,9 +312,11 @@ class JobRunner:
                 [str(self.environment.python.parent), env.get("PATH", "")])
         try:
             with log.open("ab") as fh:
+                # Its own process group (a session on POSIX, CREATE_NEW_PROCESS_GROUP on
+                # Windows), so a stop reaches this job and nothing beside it.
                 proc = subprocess.Popen(job.argv, cwd=job.cwd or None, env=env,
                                         stdout=fh, stderr=subprocess.STDOUT,
-                                        start_new_session=True)
+                                        **process_group_kwargs())
                 with self._lock:
                     self._running[job.id] = proc
                     job.state = "running"
@@ -598,7 +645,11 @@ def make_handler(runner: JobRunner, files_root: Path,
                  serving: "Serving | None" = None,
                  models: "Models | None" = None,
                  cluster_key_path: "Path | str | None" = None,
-                 tokens: "Callable[[], set[str]] | None" = None):
+                 tokens: "Callable[[], set[str]] | None" = None,
+                 bench: "Any | None" = None):
+    """``bench`` is a `fleet.bench.BenchHost`: with one, this daemon takes bench jobs
+    beside training jobs (``POST /bench``), says what it can measure (``GET /bench``) and
+    hands back what it measured (``GET /bench/export``)."""
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -792,6 +843,24 @@ def make_handler(runner: JobRunner, files_root: Path,
             if path == "/jobs":
                 self._send(200, {"jobs": runner.snapshot()})
                 return
+            if path == "/bench":
+                if bench is None:
+                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                self._send(200, {"ok": True, "name": name, **bench.report(),
+                                 "jobs": bench.snapshot()})
+                return
+            if path == "/bench/export":
+                if bench is None:
+                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                try:
+                    out = bench.export(since=q.get("since", [""])[0],
+                                       job=q.get("job", [""])[0],
+                                       full=q.get("full", ["0"])[0] not in ("", "0"),
+                                       anyway=q.get("anyway", ["0"])[0] not in ("", "0"))
+                except DaemonError as e:
+                    self._send(400, {"error": str(e)}); return
+                self._send(200, {**out, "host": name})
+                return
             m = re.match(r"^/jobs/([^/]+)(/log|/metrics)?$", path)
             if m:
                 job = runner.jobs.get(m.group(1))
@@ -882,6 +951,19 @@ def make_handler(runner: JobRunner, files_root: Path,
                     job = runner.submit(req.get("name", ""), argv or [],
                                         req.get("cwd") or str(files_root),
                                         req.get("env"))
+                except (DaemonError, ValueError) as e:
+                    self._send(400, {"error": str(e)}); return
+                self._send(201, job.public()); return
+            if parsed.path == "/bench":
+                if bench is None:
+                    self._send(501, {"error": "this daemon takes no bench jobs"}); return
+                from .bench import Job as BenchJob, Refused
+                try:
+                    job = bench.submit(BenchJob.from_request(json.loads(body or b"{}")))
+                except Refused as e:
+                    # 409: the job is well-formed and this peer will not run it now --
+                    # its code, its lock or its memory says so, and `refused` says which
+                    self._send(409, {"error": str(e), "refused": e.kind}); return
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)}); return
                 self._send(201, job.public()); return
@@ -1030,7 +1112,7 @@ def load_or_create_token(root: Path, cluster_key: bytes | None = None) -> str:
         root.mkdir(parents=True, exist_ok=True)
         if not p.exists() or p.read_text().strip() != tok:
             p.write_text(tok)
-        p.chmod(0o600)
+        private_file(p)
         return tok
     if p.exists():
         return p.read_text().strip()
@@ -1089,9 +1171,20 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     models = Models(default_roots(root), root / "models")
     conversations = Conversations(root / "chats")
     downloads = Downloads(models)
-    runner = JobRunner(root, files_root, slots=slots,
-                       gate=lambda: schedule.may_start(),
+    from .bench import BenchHost
+
+    bench_host: list[BenchHost] = []
+
+    def may_start() -> tuple[bool, str]:
+        """A measurement holds the GPU as surely as a job does, so nothing starts
+        beside one -- whether this daemon started it or someone at the keyboard did."""
+        if bench_host and bench_host[0].measuring():
+            return False, "a benchmark is measuring on this machine"
+        return schedule.may_start()
+
+    runner = JobRunner(root, files_root, slots=slots, gate=may_start,
                        environment=environment)
+    bench_host.append(BenchHost(runner, name=name))
     fetcher = Fetcher(files_root, key, slots=fetch_slots)
     interface = None
     setup_token = ""
@@ -1105,7 +1198,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     labels = sorted({s.strip() for s in labels if s and s.strip()})
 
     def report() -> dict[str, Any]:
-        return {**base_report(), "labels": labels}
+        return {**base_report(), "labels": labels, **bench_host[0].report()}
     def every_token() -> set[str]:
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
@@ -1115,7 +1208,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                              lambda: live_token[0], name, report,
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path, serving, models,
-                                             cluster_key_path, every_token))
+                                             cluster_key_path, every_token,
+                                             bench=bench_host[0]))
     from .updates import watch as watch_for_updates
     watch_for_updates(
         wanted=lambda: bool(getattr(settings, "auto_update", False)),
@@ -1217,6 +1311,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
             if setup_token:
                 print(f"  setup from the LAN with this one-time code: {setup_token}")
     print("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
+
+    def _quit(signum: int, _frame: Any) -> None:
+        # SIGTERM (launchd, systemd, kill) and on Windows SIGBREAK take the same exit as
+        # Ctrl+C, so the beacon stops and the server closes rather than vanishing.
+        raise KeyboardInterrupt(f"signal {signum}")
+
+    on_quit(_quit)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -1226,6 +1327,28 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
             advertiser.stop()
         runner.shutdown()
         httpd.server_close()
+
+
+def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> int:
+    """``ml-stack-traind --persist``: start at login from now on, the way ``ml-stack-serve
+    build --persist`` refreshes weekly. Says what was installed, or what a person must run."""
+    from . import autostart
+
+    done = autostart.install("login", slots=slots, labels=labels, report=report)
+    if done.installed:
+        print("installed to start at login")
+        if done.path is not None:
+            print(f"  {done.path}")
+        if done.note:
+            print(f"  {done.note}")
+        print("  starting now; 'ml-stack-peers ls' from another machine should list it")
+        return 0
+    print("not installed", file=sys.stderr)
+    if done.note:
+        print(f"  {done.note}", file=sys.stderr)
+    if done.command:
+        print(f"  run this yourself: {done.command}", file=sys.stderr)
+    return 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1276,7 +1399,16 @@ def main(argv: list[str] | None = None) -> int:
                     default=int(os.environ.get("ML_STACK_SLOTS") or 1),
                     help="how many jobs to run at once (default 1; raise it only on a "
                          "box whose work does not contend for one accelerator)")
+    ap.add_argument("--persist", action="store_true",
+                    help="do not serve; install this daemon (with these --slots, --label "
+                         "and --report) to start when you log in -- a LaunchAgent on "
+                         "macOS, a user systemd unit on Linux, a Scheduled Task on "
+                         "Windows -- and start it now. 'ml-stack-traind --persist' twice "
+                         "replaces the first install.")
     a = ap.parse_args(argv)
+    if a.persist:
+        return persist(slots=a.slots, labels=tuple(a.label), report=a.report[-1]
+                       if a.report else "")
     probes = [resolve_report(spec) for spec in a.report]
 
     def report() -> dict[str, Any]:

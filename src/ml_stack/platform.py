@@ -43,6 +43,7 @@ __all__ = [
     "process_group_kwargs",
     "quit_signals",
     "stop_gently",
+    "stop_pid",
 ]
 
 # subprocess only defines these on Windows; the values are Win32's own and do not change.
@@ -91,6 +92,28 @@ def stop_gently(proc: Any) -> str:
         return "CTRL_BREAK_EVENT"
     except OSError:
         proc.terminate()
+        return "TerminateProcess"
+
+
+def stop_pid(pid: int) -> str:
+    """`stop_gently` for a process there is no ``Popen`` for -- a bench the daemon adopted
+    after ``ml-stack-bench --detach`` started it. Returns what was sent.
+
+    POSIX: ``SIGTERM`` by pid, which the bench turns into an exit that releases its model
+    and its lock. Windows: ``os.kill`` with ``CTRL_BREAK_EVENT`` reaches the process group
+    ``pid`` heads, the way `stop_gently` does through a handle; a group with no console
+    -- a bench started ``DETACHED_PROCESS`` -- refuses it with ``OSError``, and then
+    ``os.kill`` with any other signal is ``TerminateProcess``, which nothing can catch, so
+    what was actually sent is said. A pid that is gone raises ``OSError`` either way.
+    """
+    if not is_windows():
+        os.kill(pid, signal.SIGTERM)
+        return "SIGTERM"
+    try:
+        os.kill(pid, CTRL_BREAK_EVENT)
+        return "CTRL_BREAK_EVENT"
+    except OSError:
+        os.kill(pid, signal.SIGTERM)
         return "TerminateProcess"
 
 

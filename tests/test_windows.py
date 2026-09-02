@@ -217,6 +217,54 @@ class TestProcessGroups:
         assert sent == [signal.SIGTERM]
 
 
+class TestStopByPid:
+    """A bench the daemon adopted after `--detach` is a pid with no Popen: `stop_pid` is
+    `stop_gently` for it, and says what it sent."""
+
+    def test_a_windows_pid_is_sent_ctrl_break_to_its_group(self, windows, monkeypatch):
+        from ml_stack.platform import CTRL_BREAK_EVENT, stop_pid
+
+        sent: list[tuple[int, int]] = []
+        monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
+        assert stop_pid(4242) == "CTRL_BREAK_EVENT"
+        assert sent == [(4242, CTRL_BREAK_EVENT)]
+
+    def test_a_detached_pid_with_no_console_is_terminated_and_that_is_said(self, windows,
+                                                                            monkeypatch):
+        """`ml-stack-bench --detach` starts its child DETACHED_PROCESS, so there is no
+        console for a Ctrl+Break to reach; the bench still has to stop."""
+        from ml_stack.platform import CTRL_BREAK_EVENT, stop_pid
+
+        sent: list[tuple[int, int]] = []
+
+        def kill(pid, sig):
+            if sig == CTRL_BREAK_EVENT:
+                raise OSError(errno.EINVAL, "The handle is invalid")
+            sent.append((pid, sig))
+
+        monkeypatch.setattr(os, "kill", kill)
+        assert stop_pid(4242) == "TerminateProcess"
+        assert sent == [(4242, signal.SIGTERM)]
+
+    def test_posix_sends_sigterm_by_pid(self, monkeypatch):
+        from ml_stack.platform import stop_pid
+
+        sent: list[tuple[int, int]] = []
+        monkeypatch.setattr(os, "kill", lambda pid, sig: sent.append((pid, sig)))
+        assert stop_pid(4242) == "SIGTERM"
+        assert sent == [(4242, signal.SIGTERM)]
+
+    def test_a_pid_that_is_gone_raises_so_the_caller_can_say_so(self, windows, monkeypatch):
+        from ml_stack.platform import stop_pid
+
+        def gone(pid, sig):
+            raise OSError(errno.ESRCH, "No such process")
+
+        monkeypatch.setattr(os, "kill", gone)
+        with pytest.raises(OSError):
+            stop_pid(4242)
+
+
 class _FakeProc:
     """A Popen that runs until it is signalled, recording what it was sent."""
 

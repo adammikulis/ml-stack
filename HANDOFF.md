@@ -17,10 +17,6 @@ shapes, the doctor, the split into `graph/bench/`); the registrations are in.
   it takes; what is about the serving, the asking and the client is implicit, which is how
   `tight` and `rich` leaked. Build one typed object from argv with three sections and pass
   it; the boundary becomes a type.
-- [ ] **Prompt-cache accounting per turn.** `cached` is per run; per turn it would show when a
-  change to the asking breaks the prefix — the cheapest speed lever there is, invisible.
-- [ ] **Estimates in the runner.** Before any measuring run, seconds per question from the
-  store × questions × ways × models printed, and a refusal over a ceiling without `--yes`.
 
 ## Conversations of any length (asked 2026-09-02)
 
@@ -30,20 +26,17 @@ recalled=)`); the app has to pass them and add them to the answer cache's contex
 
 ## Measuring across the fleet (asked 2026-09-02)
 
-- [ ] **`ml-stack-bench sweep --fleet`.** The bench side landed 2026-09-02 (host and commit on
-  every run, the host rule in the ranking, the `--fleet` flag calling `fleet.bench`'s
-  `plan`/`dispatch`/`wait`/`gather`); the fleet side, the Windows daemon and the one-command
-  join are in progress. Ready before that: `--on name=http://peer:port` measures a
-  server anywhere, `ml-stack-serve up --root` announces one and `ml-stack-peers` finds it,
-  and the community, the question sets and worlds are in the package or made from a seed.
-  Missing: (1) dispatch — assign each model to the peer whose reported memory fits it, start
-  the run there detached (the training daemon already runs jobs over the fleet; a bench
-  job is the same shape), know when it ended; (2) gather — `show --export` exists, an
-  `import` does not; runs come home into the one store with `server.host` recorded;
-  (3) comparability — a `host` column in the table, and `ranking` never composes one host's
-  accuracy with another's cost; (4) the pin — refuse a peer whose commit differs from the
-  dispatcher's (`history` records commits now); (5) a peer's lock is consulted before work
-  is sent. The Windows and Linux build paths are unit-tested against fakes only.
+- [ ] **Run it for real across two machines.** Everything landed 2026-09-02 (`ml-stack-fleet
+  join|status|leave`, the daemon's bench jobs, `sweep --fleet`, host on every run, the app's
+  cluster view, `ml-stack-mcp`), every branch tested against fakes and loopback peers; none of
+  it has crossed a real network or a real Windows box. First: `ml-stack-fleet join --persist`
+  on the Windows machine (the README's Windows paragraph lists what to run and what each
+  prints), `ml-stack-fleet status` here, then `ml-stack-bench sweep --fleet --serve <two small
+  models> --sample 6` and `show` with a `host` column.
+- [ ] **`only_one(wait=False)` truncates the holder's pid when refused** (found 2026-09-02):
+  the `finally` runs on the refused attempt too, so the next asker sees "held by somebody".
+  Fix in `lock.py` with a test that a refused attempt leaves the holder's record intact.
+
 
 ## Verifying
 
