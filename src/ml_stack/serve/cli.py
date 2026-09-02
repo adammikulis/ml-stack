@@ -466,6 +466,10 @@ def cmd_fit(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 2
         print(f"\ndrew {drawn}", file=sys.stderr)
+        if getattr(args, "open", False):
+            from ml_stack.platform import open_path
+
+            print(f"opened with {open_path(drawn)}", file=sys.stderr)
 
     where = str(getattr(args, "write", "") or "")
     if where:
@@ -785,6 +789,8 @@ def main(argv: list[str] | None = None) -> int:
                             "a small cache starts higher and climbs more slowly than a small "
                             "model with a fat one, and the picture is where they cross. "
                             ".png, .svg or .pdf; needs matplotlib")
+    fit_p.add_argument("--open", action="store_true",
+                       help="with --plot: open the picture when it is drawn")
     fit_p.add_argument("--at", type=int, default=32768, metavar="N",
                        help="the per-user context the second panel charges at "
                             "(default: 32768)")

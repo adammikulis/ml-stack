@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import sys
 import platform as _platform
 import signal
 import subprocess
@@ -170,3 +171,24 @@ def private_file(path: Path | str) -> None:
         subprocess.run(
             ["icacls", str(p), "/inheritance:r", "/grant:r", f"{owner}:F"],
             capture_output=True, check=False, timeout=30)
+
+
+def open_path(path: Path | str) -> str:
+    """Open ``path`` with whatever this desktop opens files with -- ``open`` on macOS,
+    the shell association on Windows, ``xdg-open`` elsewhere -- and return the command
+    used, or the reason it could not."""
+    import shutil
+    import subprocess
+
+    where = str(path)
+    if is_windows():
+        try:
+            os.startfile(where)  # type: ignore[attr-defined]  # noqa: S606 - the user's own file
+            return "startfile"
+        except OSError as exc:
+            return f"could not open {where}: {exc}"
+    tool = "open" if sys.platform == "darwin" else "xdg-open"
+    if shutil.which(tool) is None:
+        return f"could not open {where}: no {tool} on this machine"
+    subprocess.Popen([tool, where], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return tool

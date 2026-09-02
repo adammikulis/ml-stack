@@ -787,6 +787,17 @@ class TestTheCommandDraws:
         assert where.exists()
         assert str(where) in capsys.readouterr().err
 
+    def test_open_shows_the_picture_with_the_desktops_opener(self, tmp_path, monkeypatch,
+                                                            capsys, _fit_files_in_tmp):
+        self.some_records(_fit_files_in_tmp)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
+        opened = []
+        monkeypatch.setattr("ml_stack.platform.open_path", lambda p: opened.append(str(p)) or "open")
+        where = tmp_path / "fit.png"
+        assert self.run(["--plot", str(where), "--open"]) == 0
+        assert opened == [str(where)]
+        assert "opened with open" in capsys.readouterr().err
+
     def test_two_rooms_on_the_command_line_reach_the_chart(self, tmp_path, monkeypatch,
                                                            capsys, _fit_files_in_tmp):
         """`--room` is repeatable and both reach `plot`; the listing still answers for the
