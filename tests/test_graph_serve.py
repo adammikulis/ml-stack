@@ -559,3 +559,13 @@ def test_totals_over_nothing_is_an_empty_session():
 
     assert Spent.totals([])["answers"] == 0
     assert Spent.totals([None, {"calls": 0}])["answers"] == 0
+
+
+def test_the_session_totals_carry_the_peak_context_and_the_parts_summed():
+    from ml_stack.client.spent import Spent
+
+    a = {"calls": 2, "context_peak": 9000, "parts": {"system": 400, "window": 2000}}
+    b = {"calls": 1, "context_peak": 4000, "parts": {"system": 400, "recalled": 800}}
+    got = Spent.totals([a, b])
+    assert got["context_peak"] == 9000 and got["context_mean"] == 6500
+    assert got["parts"] == {"system": 800, "window": 2000, "recalled": 800}

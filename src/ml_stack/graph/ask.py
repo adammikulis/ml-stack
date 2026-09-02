@@ -987,6 +987,16 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         if text.strip():
             ahead.append({"role": role, "content": RECALLED + text[:SAID_CHARS_BACK]})
     messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *ahead, *said]
+    # what filled the prompt, by part -- with a window, a summary and recall the length of
+    # the conversation says nothing about what the slot holds; this does, and `spent`
+    # keeps the server's exact count beside it
+    out.spent.part("system", system)
+    out.spent.part("tools", json.dumps(schemas))
+    for one in ahead:
+        text = str(one.get("content") or "")
+        out.spent.part("summary" if text.startswith(EARLIER) else "recalled", text)
+    for one in said:
+        out.spent.part("window", one.get("content"))
 
     # A search has already been run — cheaply, by a small model that only measures meaning —
     # and what it found is read out before the first turn. Most questions are then answered
@@ -1010,9 +1020,11 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                          "A search turned up these entries; some may be irrelevant. Look at "
                          "the ones that seem to answer the question before trusting them, "
                          "and ignore the rest:\n" + str(material)})
+        out.spent.part("shortlist", material)
         if emit is not None:
             emit({"event": "tool", "name": "shortlist", "detail": f"{len(start)} to start from"})
     messages.append({"role": "user", "content": question})
+    out.spent.part("question", question)
 
     # The tools that go looking. Taking these away is how a turn is made to stop searching
     # and answer; taking away *every* tool is how it was also made unable to act. A message
@@ -1159,6 +1171,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                              "name": name,
                              "content": json.dumps(result, ensure_ascii=False,
                                                    default=_plain)[:6000]})
+            out.spent.part("tool_results", messages[-1]["content"])
             if seen is not None:
                 messages.append(seen)
         return True

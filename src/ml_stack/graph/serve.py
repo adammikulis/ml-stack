@@ -244,9 +244,24 @@ class AskRoutes:
         Empty when it cannot say; every answer still carries the name the server reported."""
         return ""
 
+    def serving_url(self) -> str:
+        """The answering server's base URL, when the subclass knows it; ``/ask/model`` then
+        also says how much context each slot holds and how many slots there are, which is
+        what a peak in `spent` is measured against."""
+        return ""
+
     def handle_model(self) -> dict[str, Any]:
-        """``GET /ask/model``: ``{"model": name}`` -- the page shows it in the ask pane."""
-        payload = {"model": self.model_name() or "", "ready": self.ready()}
+        """``GET /ask/model``: ``{"model": name, "slot_context": n, "slots": n}`` -- the
+        page shows the name in the ask pane and the slot beside each answer's peak."""
+        payload: dict[str, Any] = {"model": self.model_name() or "", "ready": self.ready()}
+        where = self.serving_url()
+        if where:
+            from ml_stack.client.health import serving_params
+
+            got = serving_params(where, timeout=1.0)
+            if got is not None:
+                payload["slot_context"] = got.n_ctx
+                payload["slots"] = got.total_slots
         self.send_json(200, payload)
         return payload
 

@@ -31,6 +31,16 @@ class Spent:
     thinking_chars: int = 0
     answer_chars: int = 0
     tool_calls: int = 0
+    # What the slot held: the largest prompt-plus-answer any one call put in the cache
+    # (timings.cache_n + prompt_n + predicted_n), and the last. With a rolling window,
+    # a summary and recall, the conversation's length says nothing about this; the peak
+    # is what bounds how many users fit -- `ml-stack-serve fit --per-user <peak>`.
+    context_peak: int = 0
+    context_last: int = 0
+    # Estimated tokens by what filled the prompt: system, tools, summary, recalled, window,
+    # shortlist, question, tool_results, thinking, answer. Estimated by the token counter
+    # in `ml_stack.client.tokens`; the server's own counts above are the exact ones.
+    parts: dict[str, int] = field(default_factory=dict)
     steps: list[str] = field(default_factory=list, repr=False)  # unused by the page; free
 
     def note(self, reply: Any, took: float) -> None:
@@ -54,6 +64,12 @@ class Spent:
                                   or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
                                   or 0)
         self.read_tokens += int(timings.get("prompt_n") or 0)
+        held = (int(timings.get("cache_n") or 0) + int(timings.get("prompt_n") or 0)
+                + int(timings.get("predicted_n") or 0))
+        if not held:
+            held = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
+        self.context_last = held
+        self.context_peak = max(self.context_peak, held)
         self.draft_tokens += int(timings.get("draft_n") or 0)
         self.draft_taken += int(timings.get("draft_n_accepted") or 0)
         finish = getattr(reply, "finish_reason", None)
@@ -62,7 +78,17 @@ class Spent:
             self.truncated = self.truncated or finish == "length"
         self.thinking_chars += len(getattr(reply, "thinking", None) or "")
         self.answer_chars += len(getattr(reply, "content", None) or "")
+        if getattr(reply, "thinking", None):
+            self.part("thinking", reply.thinking)
+        if getattr(reply, "content", None):
+            self.part("answer", reply.content)
         self.tool_calls += len(getattr(reply, "tool_calls", None) or ())
+
+    def part(self, name: str, text: Any) -> None:
+        """Count ``text`` (a string, or anything `str` makes one of) against ``name``."""
+        from ml_stack.client.tokens import estimate_tokens
+
+        self.parts[name] = self.parts.get(name, 0) + int(estimate_tokens(str(text or "")))
 
     @property
     def drafted(self) -> bool:
@@ -92,12 +118,19 @@ class Spent:
         answers = 0
         truncated = 0
         firsts: list[float] = []
+        peak = 0
+        peaks: list[int] = []
+        parts: dict[str, int] = {}
         for one in records or ():
             if not isinstance(one, Mapping) or not one.get("calls"):
                 continue
             answers += 1
             for k in summed:
                 summed[k] += one.get(k) or 0
+            peak = max(peak, int(one.get("context_peak") or 0))
+            peaks.append(int(one.get("context_peak") or 0))
+            for name, n in (one.get("parts") or {}).items():
+                parts[name] = parts.get(name, 0) + int(n or 0)
             name = str(one.get("model") or "")
             if name and name not in models:
                 models.append(name)
@@ -118,6 +151,9 @@ class Spent:
                                     if summed["generating_ms"] and summed["completion_tokens"]
                                     else None)
         out["first_token_mean"] = round(sum(firsts) / len(firsts), 3) if firsts else None
+        out["context_peak"] = peak
+        out["context_mean"] = round(sum(peaks) / len(peaks)) if peaks else 0
+        out["parts"] = parts
         return out
 
     def public(self) -> dict[str, Any]:

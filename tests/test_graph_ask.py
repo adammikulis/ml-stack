@@ -1439,3 +1439,25 @@ def test_an_answer_says_which_model_answered_and_what_every_call_spent():
     assert out.spent.acceptance == 0.7 and out.spent.drafted
     assert out.spent.finish == "stop" and not out.spent.truncated
     assert out.spent.seconds >= 0
+    # what the slot held is the server's count, per call, and the peak is what bounds users
+    assert out.spent.context_peak == 200 + 300 and out.spent.context_last == 500
+    # what filled the prompt, by part -- the window and summary are absent here, so the
+    # parts are the system text, the tool schemas, the question, what the tools returned,
+    # and the answer
+    assert {"system", "tools", "question", "tool_results", "answer"} <= set(out.spent.parts)
+    assert all(n > 0 for n in out.spent.parts.values())
+    assert "window" not in out.spent.parts and "summary" not in out.spent.parts
+
+
+def test_the_parts_of_a_prompt_are_counted_when_a_window_and_a_summary_are_sent():
+    from ml_stack.client.chat import Reply
+
+    class Model:
+        def chat(self, messages, tools=None, **kw):
+            return Reply(content="Ada.", raw={}, finish_reason="stop")
+
+    turns = [{"role": "user", "content": "who is Ada?"}, {"role": "assistant", "content": "A person."}]
+    out = converse("and Bea?", GRAPH, Model(), turns=turns, summary="Earlier they asked about Ada.")
+    assert out.spent.parts.get("window", 0) > 0 and out.spent.parts.get("summary", 0) > 0
+    # no timings from this fake: the peak falls back to the usage, which is absent, so 0
+    assert out.spent.context_peak == 0

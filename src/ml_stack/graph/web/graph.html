@@ -606,11 +606,13 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   // the same file is served from this machine and published as a flat page; only the served
   // one has a model behind it, and it is served over the tunnel as much as over loopback
   const served = !!window.GRAPH_LIVE;
+  let slotContext = 0;   // tokens one slot holds, from /ask/model, to show a peak against
   // the served model's name, before anything is asked: the pane says what will answer
   if (served) {
     fetch('/ask/model').then(r => r.ok ? r.json() : null).then(d => {
       const title = document.getElementById('askpane-title');
       if (d && d.model && title) { title.textContent = 'Ask ' + modelShort(d.model); title.title = d.model; }
+      if (d && d.slot_context) slotContext = d.slot_context;
     }).catch(() => {});
   }
   let answer = null;
@@ -1014,6 +1016,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   function modelShort(name) {
     return String(name || '').split(/[\\/]/).pop().replace(/\.gguf$/, '').replace(/-\d{5}-of-\d{5}$/, '');
   }
+  function kTokens(n) { return n >= 10000 ? Math.round(n / 1000) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
   function spentLine(ev) {
     const sp = ev.spent || {};
     const model = modelShort(ev.model || sp.model);
@@ -1026,6 +1029,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (sp.completion_tokens) bits.push('wrote ' + sp.completion_tokens);
     if (sp.tokens_per_second) bits.push(sp.tokens_per_second + ' tok/s');
     if (sp.drafted && sp.acceptance != null) bits.push('draft ' + Math.round(sp.acceptance * 100) + '%');
+    if (sp.context_peak) bits.push('context ' + kTokens(sp.context_peak) + (slotContext ? ' of ' + kTokens(slotContext) : ''));
     if (sp.truncated) bits.push('cut by the ceiling');
     return ' · ' + bits.join(' · ');
   }
@@ -1041,6 +1045,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     if (sess.tokens_per_second) bits.push(sess.tokens_per_second + ' tok/s');
     if (sess.drafted && sess.acceptance != null) bits.push('draft ' + Math.round(sess.acceptance * 100) + '%');
     if (sess.models && sess.models.length > 1) bits.push(sess.models.length + ' models');
+    if (sess.context_peak) bits.push('peak context ' + kTokens(sess.context_peak) + (slotContext ? ' of ' + kTokens(slotContext) : ''));
     if (sess.truncated) bits.push(sess.truncated + ' cut by the ceiling');
     el.textContent = bits.join(' · ');
     el.title = JSON.stringify(sess, null, 1);
