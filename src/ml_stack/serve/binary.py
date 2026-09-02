@@ -28,6 +28,11 @@ MANAGED_CURRENT = MANAGED_ROOT / "current"
 # points `MANAGED_NAMED / NAME` at it once it is verified.
 MANAGED_NAMED = MANAGED_ROOT / "named"
 
+# The repository `ml-stack-serve build` builds by default. A BUILD.json naming any other
+# `repo` is a fork, and a fork is the only kind of build that can load a draft head its
+# repository says "does not work on mainline".
+MAINLINE = "ggml-org/llama.cpp"
+
 # Directories that are on PATH only in a login shell, so a subprocess never sees them.
 _LOGIN_SHELL_DIRS = (
     Path.home() / "bin",
@@ -126,6 +131,77 @@ def require_binary(name: str = "llama-server", **kwargs: object) -> Path:
         f"release lags master by an architecture or two.\n"
         f"On macOS: brew install llama.cpp"
     )
+
+
+def manifest_of(binary: str | Path | None) -> dict:
+    """The ``BUILD.json`` `ml-stack-serve build` wrote beside ``binary``, or ``{}``.
+
+    Read beside the path as given and beside where it resolves to: `find_binary` resolves
+    the `named/<name>` link into `builds/<name>-<commit>/`, and the manifest lives in the
+    build directory, not at the link. A brew bottle, a release unpacked by hand and a
+    binary on PATH have no manifest, and ``{}`` is the honest answer for those.
+    """
+    if not binary:
+        return {}
+    import json
+
+    path = Path(binary).expanduser()
+    for where in (path.parent, path.resolve().parent):
+        manifest = where / "BUILD.json"
+        if not manifest.is_file():
+            continue
+        try:
+            return json.loads(manifest.read_text())
+        except (OSError, ValueError):
+            return {}
+    return {}
+
+
+def borrows(binary: str | Path | None) -> bool:
+    """Whether ``binary`` is a fork build -- one that can load a draft head that borrows.
+
+    Measured for real (2026-09-01): every `mtp-` head under
+    `unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` fails on mainline llama.cpp master with
+    `check_tensor_dims: tensor 'output_hc_norm.weight' not found`, because mainline loads a
+    draft as a whole model and those heads carry only the head, borrowing the trunk's
+    embeddings and output layer from the target. Only a fork's loader accepts that, so which
+    binary is serving decides which head may be offered -- and this is the one place that
+    decision is read off a binary.
+
+    A fork is a build kept under ``MANAGED_NAMED`` (`ml-stack-serve build --name NAME`), or
+    one whose ``BUILD.json`` names a ``repo`` other than ``ggml-org/llama.cpp``. `current`,
+    a brew bottle, a release, anything on PATH, and ``None`` are mainline.
+    """
+    if not binary:
+        return False
+    path = Path(binary).expanduser()
+    try:
+        path.relative_to(MANAGED_NAMED)
+        return True
+    except ValueError:
+        pass
+    info = manifest_of(path)
+    repo = str(info.get("repo") or MAINLINE).strip().lower()
+    return bool(info.get("name")) or repo != MAINLINE
+
+
+def named_builds(name: str = "llama-server") -> list[tuple[str, Path]]:
+    """Every named build on this machine as ``(name, binary)``, sorted by name.
+
+    Read off ``MANAGED_NAMED`` when asked, not at import, so a caller that points it
+    elsewhere (a test, a machine with a different home) sees that. A link that no longer
+    resolves -- its build directory removed by hand -- is skipped rather than reported as a
+    build that is not there.
+    """
+    if not MANAGED_NAMED.is_dir():
+        return []
+    out = []
+    for link in sorted(MANAGED_NAMED.iterdir()):
+        for candidate in _name_variants(name):
+            if (link.is_symlink() or link.is_dir()) and (link / candidate).is_file():
+                out.append((link.name, link / candidate))
+                break
+    return out
 
 
 def child_env(binary: Path | str, extra: dict[str, str] | None = None) -> dict[str, str]:

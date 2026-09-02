@@ -524,3 +524,216 @@ class TestDraftNote:
 
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
         assert hub.draft_note("maker/quiet-GGUF") == ""
+
+
+class TestChooseHead:
+    """One resolver for `serve up`, the bench and the app, told which binary will serve.
+
+    The bench's own `--serve-draft auto` chose Qwen3.8-Flash-Next's BF16 MTP head for
+    mainline twice on 2026-09-01 and paid an 87G load each time to reach `tensor
+    'output_hc_norm.weight' not found`. The gate lived in `draft_for(borrows=)` and only
+    `serve up` used it. Now `choose_head` reads the build off the binary itself."""
+
+    FORK_ONLY = "These do not work on mainline ggml-org/llama.cpp yet."
+
+    SHELVES = {
+        # a sharded model with three heads under MTP/, one of which borrows the target's
+        # embeddings and is the publisher's own recommendation -- the Flash-Next shape
+        "maker/flash-GGUF": [
+            ("UD-IQ4_XS/flash-UD-IQ4_XS-00001-of-00002.gguf", 40_000_000_000),
+            ("UD-IQ4_XS/flash-UD-IQ4_XS-00002-of-00002.gguf", 40_000_000_000),
+            ("MTP/mtp-flash-shared-BF16.gguf", 5_000_000_000),
+            ("MTP/mtp-flash-shared-Q8_0.gguf", 2_600_000_000),
+            ("MTP/mtp-flash-Q8_0.gguf", 3_900_000_000),
+        ],
+        # a QAT repository with its head at the root, the gemma shape
+        "maker/gem-GGUF": [
+            ("gem-Q4_K_M.gguf", 4_000_000_000),
+            ("mtp-gem.gguf", 40_000_000),
+        ],
+        "maker/bare-GGUF": [("bare-Q4_K_M.gguf", 4_000_000_000)],
+    }
+
+    def _hub(self, monkeypatch, tmp_path, *, notes: dict[str, str] | None = None):
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+        monkeypatch.setattr(hub, "files", lambda repo, **kw: self.SHELVES.get(repo, []))
+        notes = notes or {}
+
+        def fake_download(repo, filename, **kw):
+            if filename == "MTP/README.md" and repo in notes:
+                readme = tmp_path / f"{repo.replace('/', '--')}-README.md"
+                readme.write_text(notes[repo])
+                return str(readme)
+            raise OSError("no readme")
+
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        return hub
+
+    @staticmethod
+    def _binary(where, manifest: dict | None = None):
+        where.mkdir(parents=True, exist_ok=True)
+        binary = where / "llama-server"
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        if manifest is not None:
+            import json
+
+            (where / "BUILD.json").write_text(json.dumps(manifest))
+        return binary
+
+    def test_mainline_is_refused_a_head_whose_readme_names_a_fork(self, monkeypatch, tmp_path):
+        hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
+        mainline = self._binary(tmp_path / "current",
+                                {"commit": "abc1234", "repo": "ggml-org/llama.cpp"})
+
+        chosen = hub.choose_head("hf:maker/flash-GGUF/UD-IQ4_XS/flash-UD-IQ4_XS-00001-of-00002.gguf",
+                                 binary=mainline)
+        assert chosen.path == ""
+        assert chosen.spec_type == ""
+        assert chosen.borrows is False
+        assert chosen.why.startswith("withheld: the repository's README says it needs a fork")
+        assert chosen.note == self.FORK_ONLY
+
+        # a brew bottle or anything on PATH has no manifest at all, and is mainline too
+        bottle = self._binary(tmp_path / "bottle")
+        assert hub.choose_head("hf:maker/flash-GGUF", binary=bottle).path == ""
+
+    def test_a_named_fork_build_is_given_the_shared_q8_head(self, monkeypatch, tmp_path):
+        import ml_stack.serve.binary as binary_module
+
+        hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
+        named_root = tmp_path / "named"
+        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
+        fork = self._binary(named_root / "forkname")
+
+        chosen = hub.choose_head("hf:maker/flash-GGUF", binary=fork)
+        assert chosen.path == "hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf"
+        assert chosen.spec_type == "draft-mtp"
+        assert chosen.borrows is True
+        assert chosen.why == "shipped beside the weights"
+        assert chosen.note == self.FORK_ONLY   # still told, so `up` can print it
+
+    def test_a_manifest_naming_a_fork_borrows_wherever_it_lives(self, monkeypatch, tmp_path):
+        """`find_binary` resolves the `named/` link into `builds/<name>-<commit>/`, so the
+        path handed over is not under MANAGED_NAMED; the BUILD.json beside it says fork."""
+        hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
+        fork = self._binary(tmp_path / "builds" / "forkname-abc1234",
+                            {"commit": "abc1234", "repo": "someone/llama.cpp",
+                             "name": "forkname"})
+
+        chosen = hub.choose_head("hf:maker/flash-GGUF", binary=fork)
+        assert chosen.borrows is True
+        assert chosen.path.endswith("mtp-flash-shared-Q8_0.gguf")
+
+    def test_mainline_avoids_a_shared_head_when_the_readme_does_not_warn(
+            self, monkeypatch, tmp_path):
+        """A head that borrows its target's embeddings is what mainline cannot load, so
+        with no README to say so a mainline build still takes the head that carries its
+        own, and a fork takes the recommended shared one."""
+        hub = self._hub(monkeypatch, tmp_path)
+        mainline = self._binary(tmp_path / "current")
+        fork = self._binary(tmp_path / "fork", {"repo": "someone/llama.cpp"})
+
+        assert hub.choose_head("hf:maker/flash-GGUF", binary=mainline).path == \
+            "hf:maker/flash-GGUF/MTP/mtp-flash-Q8_0.gguf"
+        assert hub.choose_head("hf:maker/flash-GGUF", binary=fork).path == \
+            "hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf"
+        # an explicit preference outranks either default
+        assert hub.choose_head("hf:maker/flash-GGUF", binary=fork,
+                               prefer=("shared-bf16",)).path.endswith("shared-BF16.gguf")
+
+    def test_a_root_head_with_no_warning_is_chosen_on_mainline(self, monkeypatch, tmp_path):
+        hub = self._hub(monkeypatch, tmp_path)
+        mainline = self._binary(tmp_path / "current")
+
+        chosen = hub.choose_head("hf:maker/gem-GGUF/gem-Q4_K_M.gguf", binary=mainline)
+        assert chosen.path == "hf:maker/gem-GGUF/mtp-gem.gguf"
+        assert chosen.spec_type == "draft-mtp"
+        assert chosen.why == "shipped beside the weights"
+        assert chosen.borrows is False
+        assert chosen.note == ""
+
+    def test_no_head_is_an_empty_path_and_says_so(self, monkeypatch, tmp_path):
+        hub = self._hub(monkeypatch, tmp_path)
+        mainline = self._binary(tmp_path / "current")
+
+        chosen = hub.choose_head("hf:maker/bare-GGUF/bare-Q4_K_M.gguf", binary=mainline)
+        assert chosen == hub.Chosen("", "", "no head shipped beside the weights", False)
+
+        # a path from nowhere the Hub knows, with nothing beside it, is the same answer
+        lone = tmp_path / "elsewhere" / "lone.gguf"
+        lone.parent.mkdir()
+        lone.write_bytes(b"GGUF")
+        assert hub.choose_head(str(lone), binary=mainline).path == ""
+
+    def test_a_bare_name_resolves_through_the_hub_cache(self, monkeypatch, tmp_path):
+        """A filename copied out of `ml-stack-models files` names a file in the cache, whose
+        directory names the repository -- so the listing, the README and the head are all
+        found from nothing but the name."""
+        hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
+        cache = tmp_path / "hub"
+        snapshot = cache / "models--maker--flash-GGUF" / "snapshots" / "abc" / "UD-IQ4_XS"
+        snapshot.mkdir(parents=True)
+        (snapshot / "flash-UD-IQ4_XS-00001-of-00002.gguf").write_bytes(b"GGUF")
+        monkeypatch.setattr(hub, "HUB_CACHE", cache)
+        mainline = self._binary(tmp_path / "current")
+        fork = self._binary(tmp_path / "fork", {"repo": "someone/llama.cpp"})
+
+        assert hub.repo_of("flash-UD-IQ4_XS.gguf") == "maker/flash-GGUF"
+        assert hub.repo_of(str(snapshot / "flash-UD-IQ4_XS-00001-of-00002.gguf")) == \
+            "maker/flash-GGUF"
+        withheld = hub.choose_head("flash-UD-IQ4_XS.gguf", binary=mainline)
+        assert withheld.path == "" and withheld.why.startswith("withheld")
+        given = hub.choose_head("flash-UD-IQ4_XS.gguf", binary=fork)
+        assert given.path == "hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf"
+
+    def test_a_listing_that_cannot_be_fetched_is_answered_from_the_disk(
+            self, monkeypatch, tmp_path):
+        """Offline, the head already downloaded beside the weights is still the head."""
+        import huggingface_hub
+        import ml_stack.hub as hub
+
+        hub._DRAFT_NOTES.clear()
+
+        def offline(*a, **k):
+            raise OSError("no network")
+
+        monkeypatch.setattr(hub, "files", offline)
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", offline)
+        snapshot = tmp_path / "hub" / "models--maker--gem-GGUF" / "snapshots" / "abc"
+        snapshot.mkdir(parents=True)
+        weights = snapshot / "gem-Q4_K_M.gguf"
+        weights.write_bytes(b"GGUF")
+        (snapshot / "mtp-gem.gguf").write_bytes(b"head")
+        mainline = self._binary(tmp_path / "current")
+
+        chosen = hub.choose_head(str(weights), binary=mainline)
+        assert chosen.path == str(snapshot / "mtp-gem.gguf")
+        assert chosen.spec_type == "draft-mtp"
+        assert chosen.why == "found beside the weights on disk"
+
+    def test_the_listing_says_what_each_build_here_would_serve(
+            self, monkeypatch, tmp_path, capsys):
+        """`ml-stack-models files` names the head, its warning, and the chooser's answer for
+        the default build and every named build -- which `--build` a head needs, before a
+        load, is the whole point of asking."""
+        import ml_stack.serve.binary as binary_module
+
+        hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
+        monkeypatch.setattr(hub, "room", lambda: 0)
+        monkeypatch.setattr(hub, "held", lambda: {})
+        current = self._binary(tmp_path / "current")
+        named_root = tmp_path / "named"
+        self._binary(named_root / "forkname")
+        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
+        monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: current)
+
+        assert hub.main(["files", "maker/flash-GGUF"]) == 0
+        out = capsys.readouterr().out
+        assert "draft head shipped with it: hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf" in out
+        assert f"  {self.FORK_ONLY}" in out
+        assert "this build (mainline): withheld" in out
+        assert "--build forkname (fork): hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf" in out

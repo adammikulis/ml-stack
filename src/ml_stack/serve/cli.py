@@ -240,32 +240,26 @@ def alongside(model: str, asked: str, prefix: str, *, best: bool = False) -> str
     return ""
 
 
-def drafted(model: str, asked: str, *, borrows: bool = False) -> str:
+def drafted(model: str, asked: str, *, borrows: bool | None = None,
+            binary: str | Path | None = None) -> str:
     """The draft head to serve with ``model``, resolving 'auto'.
 
-    A head is named by the method it implements -- `mtp-` for multi-token prediction,
-    `eagle3-` for EAGLE3 -- so both are looked for, and `hub.spec_for` reads which
-    `--spec-type` the one found needs.
+    'auto' is `hub.choose_head`'s decision -- the one resolver `up`, the bench and the app
+    share -- made for ``binary`` (``None``: the one `find_binary` would pick), and its
+    reason is printed to stderr so a head withheld from mainline is withheld out loud.
+    ``borrows`` overrides what the binary says, for a caller that knows better.
 
-    An `hf:` reference is asked of the Hub, which also knows about a sibling `-MTP-GGUF`
-    repository. Everything else goes through `alongside`, which widens from the file to its
-    directory to every revision of the same repository -- because a Hub cache keeps one
-    folder per revision, and weights fetched in August sit beside nothing that was fetched
-    today.
-
-    ``borrows`` is passed straight to `hub.draft_for`: true only when serving through a
-    named fork build (`--build NAME`), the only case a head whose own README says it needs
-    one can actually load.
+    Anything other than 'auto' is taken as written. A head is named by the method it
+    implements -- `mtp-` for multi-token prediction, `eagle3-` for EAGLE3 -- and
+    `hub.spec_for` reads which `--spec-type` the one chosen needs.
     """
-    if asked.lower() == "auto" and str(model).startswith("hf:"):
-        from ml_stack.hub import draft_for
+    if asked.lower() != "auto":
+        return asked
+    from ml_stack.hub import choose_head
 
-        return draft_for("/".join(str(model)[3:].split("/")[:2]), borrows=borrows)
-    for prefix in ("mtp-", "eagle3-"):
-        found = alongside(model, asked, prefix)
-        if found:
-            return found
-    return ""
+    chosen = choose_head(model, binary=binary, borrows=borrows)
+    print(f"draft head: {chosen.path or 'none'} -- {chosen.why}", file=sys.stderr)
+    return chosen.path
 
 
 def resolve_model(named: str) -> str:
@@ -301,22 +295,30 @@ def cmd_up(args: argparse.Namespace) -> int:
         LlamaServerBackend(binary=chosen or None, build=build_name or None)
         if (chosen or build_name) else None,
         state_file=STATE_FILE)
-    # A named build is the only case a fork-only MTP head can actually load -- offering one
-    # to 'current' is offering something that fails at the far end of a multi-gigabyte load.
-    borrows = bool(build_name)
-    draft = drafted(model, str(getattr(args, "draft", "") or ""), borrows=borrows)
-    if str(getattr(args, "draft", "")).lower() == "auto" and not draft:
-        note = ""
-        if str(model).startswith("hf:"):
-            from ml_stack.hub import draft_note
+    asked = str(getattr(args, "draft", "") or "")
+    draft = asked
+    if asked.lower() == "auto":
+        # The chooser is told which binary will serve: a named fork build is the only case
+        # a head that borrows its target's embeddings can load, and offering one to
+        # 'current' is offering something that fails at the far end of a multi-gigabyte
+        # load. Which binary that is, it reads off the path -- not off the flags.
+        from ml_stack.hub import choose_head
 
-            note = draft_note("/".join(str(model)[3:].split("/")[:2]))
-        if note:
-            print(f"no draft head served -- {note} Serve with --build NAME to use one.",
+        try:
+            binary_path: Path | None = manager.backend.binary
+        except (BinaryNotFound, OSError):
+            binary_path = None
+        chosen = choose_head(model, binary=binary_path)
+        draft = chosen.path
+        build_said = "a fork build" if chosen.borrows else "mainline"
+        if draft:
+            print(f"draft head: {draft} -- {chosen.why} (serving with {build_said})",
                   file=sys.stderr)
         else:
-            print("no draft head is shipped beside that model; serving without one",
-                  file=sys.stderr)
+            print(f"no draft head served -- {chosen.why}", file=sys.stderr)
+        if chosen.note:
+            hint = "" if chosen.borrows else " Serve with --build NAME to use one."
+            print(f"  {chosen.note}{hint}", file=sys.stderr)
     seeing = alongside(model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
                        best=True)
     # A head implements one method and says which in its name. Serving an EAGLE3 head

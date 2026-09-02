@@ -14,9 +14,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Found", "PREFER", "advice", "aside", "beside", "builds", "card",
-           "draft_for", "draft_note", "fetch", "files", "find", "located", "main",
-           "mmproj_for", "DRAFT_KINDS", "held", "in_gguf", "ref", "room", "spec_for"]
+__all__ = ["Chosen", "Found", "PREFER", "advice", "aside", "beside", "builds", "card",
+           "choose_head", "draft_for", "draft_note", "fetch", "files", "find", "located",
+           "main", "mmproj_for", "DRAFT_KINDS", "held", "in_gguf", "ref", "repo_of", "room",
+           "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -128,35 +129,38 @@ def draft_for(repo: str, *, borrows: bool = False) -> str:
     multi-gigabyte load; ``borrows=False`` is the safe default. A repository whose README
     says nothing about a fork is unaffected either way.
     """
-    where = repo
-    found = ""
-    for prefix in DRAFT_KINDS:
-        found = beside(where, prefix, prefer=("shared-q8_0", "shared"))
-        if found:
-            break
-    if not found:
-        # Some publishers ship the head as its own repository beside the weights. Asking
-        # costs one request and is the difference between speculating and not.
-        #
-        # Beware what a `-MTP-GGUF` repository actually is: for Qwen3.6-35B-A3B it is not a
-        # draft head at all but the *whole model* rebuilt with the multi-token-prediction
-        # layers in it, 36G of weights, to be served with `--spec-type draft-mtp` rather
-        # than as a second model. Only a file actually named `mtp-` is taken here, so that
-        # repository correctly yields nothing rather than a 36G "draft".
-        stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
-        for sibling in (f"{stem}-MTP-GGUF", f"{stem}-MTP"):
-            for prefix in DRAFT_KINDS:
-                found = beside(sibling, prefix, prefer=("shared-q8_0", "shared"))
-                if found:
-                    where = sibling
-                    break
-            if found:
-                break
+    found, where = _head_in(repo, prefer=("shared-q8_0", "shared"))
     if not found:
         return ""
     if not borrows and draft_note(where):
         return ""
     return found
+
+
+def _head_in(repo: str, *, prefer: tuple[str, ...] = (),
+             avoid: tuple[str, ...] = ()) -> tuple[str, str]:
+    """The draft head shipped with ``repo``, and which repository it was found in.
+
+    ``(reference, repository)``, or ``("", "")``. The repository matters because its README
+    is where a publisher says whether the head needs a fork (`draft_note`), and a head found
+    in a sibling repository is warned about by the sibling's README, not the model's.
+
+    Some publishers ship the head as its own repository beside the weights. Asking costs
+    one request and is the difference between speculating and not.
+
+    Beware what a `-MTP-GGUF` repository actually is: for Qwen3.6-35B-A3B it is not a draft
+    head at all but the *whole model* rebuilt with the multi-token-prediction layers in it,
+    36G of weights, to be served with `--spec-type draft-mtp` rather than as a second model.
+    Only a file actually named for a method in `DRAFT_KINDS` is taken here, so that
+    repository correctly yields nothing rather than a 36G "draft".
+    """
+    stem = repo[: -len("-GGUF")] if repo.upper().endswith("-GGUF") else repo
+    for where in (repo, f"{stem}-MTP-GGUF", f"{stem}-MTP"):
+        for prefix in DRAFT_KINDS:
+            found = beside(where, prefix, prefer=prefer, avoid=avoid)
+            if found:
+                return found, where
+    return "", ""
 
 
 def spec_for(draft: str) -> str:
@@ -188,7 +192,7 @@ def _precision(name: str) -> int:
 
 
 def beside(repo: str, prefix: str, *, best: bool = False,
-          prefer: str | tuple[str, ...] = ()) -> str:
+          prefer: str | tuple[str, ...] = (), avoid: str | tuple[str, ...] = ()) -> str:
     """A file whose name starts with ``prefix`` in one repository, root copy preferred.
 
     The things that travel with a model are named by convention and filed wherever the
@@ -205,10 +209,15 @@ def beside(repo: str, prefix: str, *, best: bool = False,
     backwards. ``prefer`` is for exactly this: one or more substrings, most specific first,
     each tried in turn against the candidates found so far -- the first that matches
     anything narrows to those matches; nothing narrows when none does. `draft_for` asks for
-    ``("shared-q8_0", "shared")``.
+    ``("shared-q8_0", "shared")``. ``avoid`` is the other half: substrings a candidate is
+    set aside for while any candidate without them remains -- `choose_head` avoids
+    ``shared`` on a mainline binary, since a head that borrows its target's embeddings is
+    exactly what mainline cannot load. Nothing is set aside when every candidate matches.
     """
     words = (prefer,) if isinstance(prefer, str) else tuple(prefer)
     words = tuple(w for w in words if w)
+    unwanted = (avoid,) if isinstance(avoid, str) else tuple(avoid)
+    unwanted = tuple(w.lower() for w in unwanted if w)
     nested: list[str] = []
     root: list[str] = []
     try:
@@ -223,6 +232,9 @@ def beside(repo: str, prefix: str, *, best: bool = False,
     for found in (root, nested):
         if not found:
             continue
+        kept = [f for f in found if not any(w in f.lower() for w in unwanted)]
+        if kept:
+            found = kept
         for word in words:
             matched = [f for f in found if word.lower() in f.lower()]
             if matched:
@@ -513,6 +525,115 @@ def draft_note(repo: str) -> str:
     return note
 
 
+def repo_of(model: str | Path, *, cache: Path | None = None) -> str:
+    """The Hub repository ``model`` came from, as ``owner/name``, or ''.
+
+    An `hf:` reference names it outright. A path inside the Hub cache names it too --
+    the cache keeps one directory per repository, `models--owner--name/snapshots/<rev>/`,
+    so a file downloaded through `ml-stack-models fetch` or a lease still knows where it
+    came from and can be asked what shipped with it. A bare filename is looked up in the
+    cache first (`located`). A path anywhere else came from nowhere the Hub can say.
+    """
+    text = str(model)
+    if text.startswith("hf:"):
+        return "/".join(text[3:].split("/")[:2])
+    where = Path(text).expanduser()
+    if "/" not in text and not where.is_file():
+        found = located(text, cache=cache)
+        if found is None:
+            return ""
+        where = found
+    for part in where.resolve().parts:
+        if part.startswith("models--") and "--" in part[len("models--"):]:
+            owner, name = part[len("models--"):].split("--", 1)
+            return f"{owner}/{name}"
+    return ""
+
+
+@dataclass(frozen=True)
+class Chosen:
+    """What `choose_head` decided, and why in one sentence.
+
+    ``path`` is what to serve as the draft -- an `hf:` reference, a local path, or '' when
+    nothing should be. ``spec_type`` is the `--spec-type` it needs ('' when there is no
+    head). ``borrows`` is what was decided about the binary. ``note`` is the repository's
+    own sentence about needing a fork, when it has one, for printing under ``why``.
+    """
+
+    path: str
+    spec_type: str
+    why: str
+    borrows: bool
+    note: str = ""
+
+
+def choose_head(model: str | Path, *, binary: str | Path | None, prefer: tuple[str, ...] = (),
+                borrows: bool | None = None) -> Chosen:
+    """The draft head to serve with ``model`` through ``binary``, with the reason.
+
+    One resolver, because there were three. `ml-stack-serve up --draft auto` withheld a
+    fork-only head from mainline; the bench had its own `--serve-draft auto` that did not,
+    and on 2026-09-01 chose Qwen3.8-Flash-Next's BF16 MTP head for mainline twice, paying
+    an 87G load each time to reach `tensor 'output_hc_norm.weight' not found`. Every caller
+    now asks this, and the answer says what it is: "shipped beside the weights",
+    "withheld: the repository's README says it needs a fork and this build is mainline",
+    or "no head shipped".
+
+    ``binary`` decides ``borrows`` (`serve.binary.borrows`): a named build or a fork's
+    BUILD.json can load a head that borrows its target's embeddings; `current`, brew and
+    anything on PATH cannot. ``None`` means the binary `find_binary` would pick. A caller
+    that knows better -- a listing that serves nothing -- passes ``borrows`` outright.
+
+    ``model`` is an `hf:` reference, a local path (the repository is read off the Hub
+    cache's directory name, `repo_of`), or a bare filename (`located`). The repository's
+    listing is asked first, because that is where the publisher's own preference and the
+    README's warning are; a path outside the cache, or a listing that cannot be fetched,
+    is answered from the disk beside the weights the way `serve.cli.alongside` looks.
+
+    ``prefer`` narrows several heads by substring (`beside`). Unset, a fork build takes
+    unsloth's recommendation for Flash-Next -- `shared-Q8_0` -- and a mainline build
+    avoids ``shared`` altogether and takes a Q8_0 head when there is one, since a head
+    that borrows is exactly what mainline cannot load.
+    """
+    if borrows is None:
+        from ml_stack.serve.binary import borrows as _borrows
+        from ml_stack.serve.binary import find_binary
+
+        chosen_binary = binary if binary is not None else find_binary()
+        borrows = _borrows(chosen_binary)
+
+    words = tuple(prefer) or (("shared-q8_0", "shared") if borrows else ("q8_0",))
+    avoid = () if borrows else ("shared",)
+
+    repo = repo_of(model)
+    found, where = _head_in(repo, prefer=words, avoid=avoid) if repo else ("", "")
+    why = "shipped beside the weights"
+    if found and where != repo:
+        why = f"shipped in the sibling repository {where}"
+    if not found:
+        text = str(model)
+        local = Path(text).expanduser()
+        if "/" not in text and not local.is_file():
+            local = located(text) or local
+        if local.is_file():
+            from ml_stack.serve.cli import alongside
+
+            for prefix in DRAFT_KINDS:
+                found = alongside(str(local), "auto", prefix)
+                if found:
+                    break
+            where = repo
+            why = "found beside the weights on disk"
+    if not found:
+        return Chosen("", "", "no head shipped beside the weights", borrows)
+
+    note = draft_note(where) if where else ""
+    if note and not borrows:
+        return Chosen("", "", "withheld: the repository's README says it needs a fork and "
+                      "this build is mainline", borrows, note)
+    return Chosen(found, spec_for(found), why, borrows, note)
+
+
 def fetch(reference: str) -> Path:
     """Download an `hf:` reference into the Hub cache, without serving it.
 
@@ -578,6 +699,33 @@ def _human(size: int) -> str:
             return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
         size /= 1024.0
     return f"{size:.1f}G"
+
+
+def _head_lines(repo: str) -> list[str]:
+    """What `ml-stack-models files` says about a draft head: that one exists, what its
+    README warns, and what `choose_head` would serve through the default build and through
+    each named build on this machine -- so a person knows which `--build` a head needs
+    before spending a load on it, not after one fails at the far end.
+
+    This listing never serves anything, so the head is named even when every build here
+    would withhold it -- ``borrows=True`` -- and the per-build lines say who would.
+    """
+    from ml_stack.serve.binary import find_binary, named_builds
+
+    shown = choose_head(ref(repo), binary=None, borrows=True)
+    if not shown.path:
+        return []
+    out = [f"draft head shipped with it: {shown.path}"]
+    if shown.note:
+        out.append(f"  {shown.note}")
+    builds: list[tuple[str, Path | None]] = [("this build", find_binary())]
+    builds += [(f"--build {name}", binary) for name, binary in named_builds()]
+    for label, binary in builds:
+        one = choose_head(ref(repo), binary=binary)
+        kind = "fork" if one.borrows else "mainline"
+        said = f"{one.path} ({one.why})" if one.path else one.why
+        out.append(f"  {label} ({kind}): {said}")
+    return out
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -672,25 +820,17 @@ def main(argv: list[str] | None = None) -> int:
                 if aside(name):
                     print(f"{_human(size):>8}  {ref(args.repo, name)}  (alongside)")
             print(f"\nml-stack-models files {args.repo} --every  for individual files")
-            # This listing never serves anything, so it is told about a head even when it
-            # needs a fork -- borrows=True -- and the note underneath it says so, which is
-            # the whole point: know before spending a load, not after one fails at the end.
-            drafted = draft_for(args.repo, borrows=True)
-            if drafted:
-                print(f"draft head shipped with it: {drafted}")
-                warned = draft_note(args.repo)
-                if warned:
-                    print(f"  {warned}")
+            for line in _head_lines(args.repo):
+                print(line)
             return 0
         for name, size in listing:
             note = "  (alongside)" if aside(name) else ""
             print(f"{_human(size):>8}  {ref(args.repo, name)}{note}")
-        drafted = draft_for(args.repo, borrows=True)
-        if drafted:
-            print(f"\ndraft head shipped with it: {drafted}")
-            warned = draft_note(args.repo)
-            if warned:
-                print(f"  {warned}")
+        lines = _head_lines(args.repo)
+        if lines:
+            print("")
+        for line in lines:
+            print(line)
         return 0
     except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
         print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)

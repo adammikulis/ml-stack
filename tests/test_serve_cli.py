@@ -19,6 +19,7 @@ from ml_stack.client import is_healthy
 from ml_stack.serve import cli
 from ml_stack.serve.backend import ServerInfo, ServerSpec
 from ml_stack.serve.ports import free_port
+from ml_stack.testing import FakePreflight
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 
@@ -288,30 +289,80 @@ class TestTellingTheFleet:
         assert cli.beacon(str(root)) is None
 
 
-def test_a_draft_is_passed_through_and_auto_finds_the_head_shipped_with_the_model(monkeypatch):
-    """`--draft auto` reads the repository's own listing rather than guessing a filename."""
+def test_a_draft_is_passed_through_and_auto_asks_the_one_chooser(monkeypatch, tmp_path, capsys):
+    """`--draft auto` is `hub.choose_head`'s decision for the binary that will serve, and
+    the decision is said out loud; anything else is taken as written."""
+    import huggingface_hub
+
+    import ml_stack.hub as hub
     from ml_stack.serve.cli import drafted
 
-    seen = []
+    hub._DRAFT_NOTES.clear()
+    shelves = {"maker/thing-GGUF": [("weights.gguf", 4_000_000_000),
+                                    ("mtp-model.gguf", 40_000_000)]}
+    monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves.get(repo, []))
 
-    def fake_draft_for(repo, *, borrows=False):
-        seen.append(repo)
-        return f"hf:{repo}/mtp-model.gguf"
+    def no_readme(*a, **k):
+        raise OSError("no readme")
 
-    import ml_stack.hub
-    monkeypatch.setattr(ml_stack.hub, "draft_for", fake_draft_for)
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", no_readme)
+    binary = tmp_path / "llama-server"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
 
-    assert drafted("hf:maker/thing-GGUF/weights.gguf", "auto") == "hf:maker/thing-GGUF/mtp-model.gguf"
-    assert seen == ["maker/thing-GGUF"]
+    assert drafted("hf:maker/thing-GGUF/weights.gguf", "auto", binary=binary) == \
+        "hf:maker/thing-GGUF/mtp-model.gguf"
+    assert "shipped beside the weights" in capsys.readouterr().err
 
     # anything else is taken as written, and asked for nothing
     assert drafted("hf:maker/thing-GGUF/weights.gguf", "/models/small.gguf") == "/models/small.gguf"
     assert drafted("hf:maker/thing-GGUF/weights.gguf", "") == ""
-    assert len(seen) == 1
 
-    # a local file says nothing about which repository it came from, so auto has nowhere to look
-    assert drafted("/models/big.gguf", "auto") == ""
-    assert len(seen) == 1
+    # a local file from nowhere the Hub knows, with nothing beside it, has no head
+    assert drafted(str(tmp_path / "big.gguf"), "auto", binary=binary) == ""
+    assert "no head shipped" in capsys.readouterr().err
+
+
+def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, tmp_path, capsys):
+    """`up --draft auto` on a mainline binary serves no head whose README names a fork, and
+    prints the chooser's reason with the README's own sentence under it. Mutation: pass
+    `borrows=True` in `cmd_up` -- the head is served and the load fails at the far end."""
+    import huggingface_hub
+
+    import ml_stack.hub as hub
+    from ml_stack.serve import cli
+
+    hub._DRAFT_NOTES.clear()
+    shelves = {"maker/flash-GGUF": [("flash-Q4.gguf", 4_000_000_000),
+                                    ("MTP/mtp-flash-shared-Q8_0.gguf", 2_600_000_000)]}
+    monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves.get(repo, []))
+    readme = tmp_path / "MTP-README.md"
+    readme.write_text("These do not work on mainline ggml-org/llama.cpp yet.")
+
+    def fake_download(repo, filename, **kw):
+        if filename == "MTP/README.md":
+            return str(readme)
+        raise OSError("no readme")
+
+    monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+    preflight = FakePreflight()
+    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
+    monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
+    monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+    binary = tmp_path / "current" / "llama-server"
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\necho usage: llama-server\n")
+    binary.chmod(0o755)
+
+    code = cli.main(["up", "hf:maker/flash-GGUF/flash-Q4.gguf", "--preflight-only",
+                     "--binary", str(binary), "--draft", "auto", "--port", str(free_port())])
+    err = capsys.readouterr().err
+    assert code == 0, err
+    assert preflight.seen[0].draft is None
+    assert not preflight.seen[0].spec_type
+    assert "withheld: the repository's README says it needs a fork" in err
+    assert "These do not work on mainline" in err
+    assert "--build NAME" in err
 
 
 def test_auto_finds_the_draft_head_lying_beside_a_local_model(tmp_path):
@@ -339,7 +390,7 @@ def test_a_head_is_found_across_revisions_of_the_same_repository(tmp_path):
     fetched today land in different ones, so "beside the weights" finds nothing -- which is
     what happened: `--draft auto` reported no head for a model that ships three, and would
     have run a whole experiment unaccelerated without saying so."""
-    from ml_stack.serve.cli import alongside, drafted
+    from ml_stack.serve.cli import drafted
 
     snaps = tmp_path / "models--maker--thing-GGUF" / "snapshots"
     old = snaps / "aaaaaaaa" / "UD-IQ4_XS"
@@ -679,21 +730,8 @@ def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, ca
     model = tmp_path / "m.gguf"
     model.write_bytes(b"GGUF")
     monkeypatch.setattr("ml_stack.hub.fetch", lambda ref: head)
-    seen = {}
-
-    class Report:
-        ok = True
-        kv_estimate_bytes = 0
-        weights_bytes = 0
-
-        def said(self):
-            return "ok"
-
-    def fake_preflight(spec, *, binary, limit_bytes):
-        seen["draft"] = spec.draft
-        return Report()
-
-    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", fake_preflight)
+    preflight = FakePreflight()
+    monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
     monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
@@ -701,4 +739,4 @@ def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, ca
     code = cli.main(["up", str(model), "--preflight-only", "--binary", str(binary),
                      "--draft", "hf:owner/repo-GGUF/MTP/mtp-head-Q8_0.gguf"])
     assert code == 0, capsys.readouterr()
-    assert seen["draft"] == str(head)
+    assert preflight.seen[0].draft == str(head)
