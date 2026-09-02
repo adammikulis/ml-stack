@@ -389,6 +389,14 @@ def _flags_check(spec, binary: str | Path) -> Check:
     known = flags_of(binary)
     if not known:
         return Check("flags", True, "could not read this build's --help; no opinion")
+    # A draft named by hf: file is fetched and served by path at start(); this check is
+    # about flags, not files, so it builds the argv with a stand-in path rather than
+    # refusing the reference (measured 2026-09-02: it refused, and E4B's heads never ran).
+    parts = spec.hf_parts(spec.draft) if spec.draft else None
+    if parts and parts[1]:
+        from dataclasses import replace
+
+        spec = replace(spec, draft=Path("draft-head.gguf"))
     argv = LlamaServerBackend(binary=binary).command(spec)
     lacking = unknown_flags(argv, known)
     if lacking:

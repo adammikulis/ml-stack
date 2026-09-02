@@ -533,3 +533,17 @@ def test_an_architecture_with_a_hyphen_is_known_when_the_source_says_so(monkeypa
     known = preflight.known_architectures(tmp_path / "llama-server")
     assert "gpt-oss" in known
     assert preflight._plain("gpt-oss") == "gptoss" == preflight._plain("GPT_OSS")
+
+
+def test_the_flags_check_takes_a_draft_named_by_hf_file(tmp_path, monkeypatch):
+    """The check is about flags; a head still named by hf: file is fetched later at start().
+    Measured 2026-09-02: the check refused the reference and E4B's heads never ran.
+    Mutation: drop the stand-in."""
+    from ml_stack.serve import preflight
+    from ml_stack.serve.backend import ServerSpec
+
+    monkeypatch.setattr("ml_stack.serve.backend.flags_of", lambda b, **k: frozenset({"-m", "-md", "--port", "-c", "-np", "--spec-type", "-fa", "--jinja", "--flash-attn", "--ctx-size", "--parallel", "--model", "--model-draft", "--host"}))
+    spec = ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF/MTP/mtp-head-Q4_0.gguf", spec_type="draft-mtp")
+    check = preflight._flags_check(spec, tmp_path / "llama-server")
+    assert check.name == "flags"
+    assert "must be fetched" not in check.detail
