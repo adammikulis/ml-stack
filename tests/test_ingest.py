@@ -646,3 +646,16 @@ def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, cap
     finally:
         if child.poll() is None:
             child.kill()
+
+
+def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
+    from ml_stack.client.http import ServerError
+
+    class Client:
+        def extract(self, *a, **k):
+            raise ServerError("the reply was cut off (finish_reason=length)",
+                              body='{"concepts": [{"name": "Vault Currents"' * 40)
+
+    row = ingest.extract_unit(Client(), a_unit(), ingest.schema())
+    assert row.error.startswith("ServerError: the reply was cut off")
+    assert row.raw.count("Vault Currents") == 40

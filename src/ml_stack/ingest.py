@@ -179,6 +179,7 @@ class Read:
     images: int = 0
     timed_out: bool = False
     error: str = ""
+    raw: str = ""            # what the model wrote when it failed, whole, for reading later
     extracted: dict[str, Any] = field(default_factory=dict)
     calls: list[dict[str, Any]] = field(default_factory=list)
 
@@ -283,6 +284,10 @@ def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bo
         row.extracted = got if isinstance(got, dict) else {}
     except Exception as exc:  # noqa: BLE001 - one bad section does not end a shelf
         row.error = f"{type(exc).__name__}: {exc}"[:200]
+        # a unit that ran to the ceiling twice on the first shelf night left nothing to read
+        # but 120 characters; the whole reply is kept beside the unit, so the next person
+        # can see whether it looped or rambled without spending ten minutes of GPU again
+        row.raw = str(getattr(exc, "body", "") or "")
     row.seconds = round(time.time() - began, 2)
     if per_section and row.seconds >= per_section and row.error:
         row.timed_out = True

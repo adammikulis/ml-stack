@@ -18,6 +18,7 @@ def test_a_length_stop_names_the_knob(monkeypatch):
         client.extract("some text", {"type": "object"}, tries=1)
     said = str(err.value)
     assert "cut off" in said and "finish_reason=length" in said and "context" in said
+    assert err.value.body == half, "the whole reply rides on the error"
 
 
 def test_a_reply_that_stopped_on_its_own_is_still_not_json(monkeypatch):

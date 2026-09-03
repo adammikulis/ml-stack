@@ -394,11 +394,11 @@ class Client:
                 raise ServerError(
                     f"the reply was cut off (finish_reason=length) after {len(raw)} characters "
                     f"and is not whole JSON: the slot's context or n_predict ended it -- serve "
-                    f"more context per seat, raise n_predict, or split the text: {raw[:120]!r}"
-                )
+                    f"more context per seat, raise n_predict, or split the text: {raw[:120]!r}",
+                    body=raw)     # the whole reply rides on the error, so a caller can keep it
             raise ServerError(
-                f"the model returned something that is not JSON {tries} times: {raw[:200]!r}"
-            )
+                f"the model returned something that is not JSON {tries} times: {raw[:200]!r}",
+                body=raw)
         if isinstance(parsed, dict):
             return dict(parsed, _objections=objections)
         return parsed
