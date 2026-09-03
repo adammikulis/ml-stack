@@ -119,13 +119,27 @@ def _blame(value: Any, path: str = "value", seen: frozenset[int] = frozenset()) 
 
 
 def _unjson(raw: Any) -> dict[str, Any]:
+    """A JSON column as a dict. None, "" and null read as {}; any other non-object raises."""
     if isinstance(raw, dict):
         return raw
     try:
         out = json.loads(raw or "{}")
     except (TypeError, ValueError):
         return {}
-    return out if isinstance(out, dict) else {}
+    if out is None:
+        return {}
+    if not isinstance(out, dict):
+        kind = type(out).__name__
+        raise ValueError(f"{'an' if kind[0] in 'aeiou' else 'a'} {kind}, not an object")
+    return out
+
+
+def _column(raw: Any, what: str) -> dict[str, Any]:
+    """_unjson, with the record and column named when it refuses."""
+    try:
+        return _unjson(raw)
+    except ValueError as exc:
+        raise ValueError(f"{what}: {exc}") from None
 
 
 _MISSING = object()
@@ -485,7 +499,8 @@ class GraphStore:
               "n.mentions AS mentions, n.attrs AS attrs, n.data AS data ORDER BY n.id",
             {"kind": kind} if kind else None)
         return [{**{k: v for k, v in r.items() if k != "data"},
-                 "attrs": _unjson(r["attrs"]), **_unjson(r["data"])} for r in rows]
+                 "attrs": _column(r["attrs"], f"node {r['id']}: attrs"),
+                 **_column(r["data"], f"node {r['id']}: data")} for r in rows]
 
     def edges(self, rel: str | None = None) -> list[dict[str, Any]]:
         rows = self.query(
@@ -493,7 +508,9 @@ class GraphStore:
             + "RETURN a.id AS source, e.rel AS rel, b.id AS target, "
               "e.weight AS weight, e.data AS data ORDER BY a.id, e.rel, b.id",
             {"rel": rel} if rel else None)
-        return [{**{k: v for k, v in r.items() if k != "data"}, **_unjson(r["data"])} for r in rows]
+        return [{**{k: v for k, v in r.items() if k != "data"},
+                 **_column(r["data"], f"edge {r['source']} -{r['rel']}-> {r['target']}: data")}
+                for r in rows]
 
     def put_doc(self, key: str, value: Any) -> None:
         """Something about the graph as a whole: where it came from, what it counts.

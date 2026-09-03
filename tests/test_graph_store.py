@@ -734,3 +734,29 @@ def test_each_vector_search_on_a_handle_answers_its_own_question(tmp_path):
         second = store.similar([0.0, 1.0, 0.0], model="m", limit=1)
     assert [n["id"] for n in first] == ["topic:compilers"]
     assert [n["id"] for n in second] == ["place:turin"]
+
+
+# -- a column that does not hold an object is refused, never read as an empty one ----------
+
+def test_a_json_value_that_is_not_an_object_is_refused_by_name():
+    from ml_stack.graph.store import _unjson
+
+    assert _unjson(None) == {}
+    assert _unjson("") == {}
+    assert _unjson("null") == {}
+    assert _unjson('{"a": 1}') == {"a": 1}
+    assert _unjson({"a": 1}) == {"a": 1}
+    with pytest.raises(ValueError, match="a list, not an object"):
+        _unjson("[1, 2]")
+    with pytest.raises(ValueError, match="a str, not an object"):
+        _unjson('"role"')
+    with pytest.raises(ValueError, match="an int, not an object"):
+        _unjson("7")
+
+
+def test_a_node_whose_attrs_hold_a_list_is_refused_when_read(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.query("MATCH (n:Node {id:'person:ada'}) SET n.attrs = '[\"analyst\"]' /* by hand */")
+        with pytest.raises(ValueError, match="person:ada.*attrs.*a list, not an object"):
+            store.nodes()
