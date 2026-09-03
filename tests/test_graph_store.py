@@ -661,3 +661,12 @@ def test_a_node_or_edge_a_scan_reads_wrong_is_the_same_fault(tmp_path):
     assert ("edge person:ada -interested_in-> topic:compilers: scan and lookup disagree on "
             "data (lookup '{\"messages\": [\"C1-1.1\"]}', scan '')") in found
     assert len(found) == 5 + 3, found        # every node and every edge, nothing else
+
+
+def test_has_says_whether_a_node_is_in_the_store(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        assert store.has("person:ada") is True
+        assert store.has("person:nobody") is False
+        store.drop(["person:ada"])
+        assert store.has("person:ada") is False

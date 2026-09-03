@@ -415,9 +415,13 @@ class GraphStore:
         self._extension("fts")
         self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
 
+    def has(self, node_id: str) -> bool:
+        """Whether a node with this id is in the store."""
+        return bool(self.query("MATCH (n:Node {id:$id}) RETURN n.id AS id", {"id": str(node_id)}))
+
     def rename(self, node_id: str, label: str) -> bool:
         """Give a node a different label. False when it is not in the store."""
-        if not self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": str(node_id)}):
+        if not self.has(node_id):
             return False
         self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.label = $label"),
                            {"id": str(node_id), "label": str(label)})
@@ -624,7 +628,7 @@ class GraphStore:
         a path chosen on how well attested each link is, see ``ml_stack.entities.paths``.
         """
         if start == goal:
-            return [start] if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": start}) else []
+            return [start] if self.has(start) else []
         rows = self.query(
             f"MATCH p = (a:Node {{id:$s}})-[e:Edge* SHORTEST 1..{int(hops)}]-(b:Node {{id:$t}}) "
             "RETURN nodes(p) AS walked",
@@ -800,7 +804,7 @@ class GraphStore:
         gone = 0
         with self.transaction():
             for node_id in wanted:
-                if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": node_id}):
+                if self.has(node_id):
                     self._conn.execute(self._written("MATCH (n:Node {id:$id}) DETACH DELETE n"), {"id": node_id})
                     gone += 1
         return gone
