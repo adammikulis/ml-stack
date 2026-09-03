@@ -12,33 +12,36 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
 `src/ml_stack/data/profiles.json` (a model's measured shape, read by `ml-stack-serve up
 --profile`, `sweep`, `extract` and `converse`).
 
-## The next measurements (2026-09-03, small hours)
+## Where things stand (2026-09-03, night)
 
-The queues of 2026-09-02 are in the record: `docs/report-2026-09-02.md` (with its
-Extraction section), `docs/model-ranking.md`, `profiles.json`, `fit.json`,
-`docs/architectures/qwen4exp.md`. Settled tonight: draft length 4 for answering *and*
-extraction (6 equal, 8 slower, on both; and on textbook units, where the head is accepted
-97% of the time, 4 / 8 / 12 decoded at 50.6 / 44.5 / 48.5 tok/s -- `ml-stack-ingest --n-max`
-measures it); no per-workload draft field. Single and few on the
-small models at ten questions: `single` +8 pts on E4B (59 vs 51), +3 on E2B, +2 on
-gpt-oss-20b, all inside ±28 bands; `few` loses 20-30 pts everywhere; `--rounds 8` changed
-nothing (the extra turns went unused).
+The day's record: `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `profiles.json`,
+`fit.json`, `docs/architectures/qwen4exp.md`. Settled: Flash-Next answers (80% F1 at 27 s/q,
+100 questions) and extracts (96% node / 76% relation F1); draft length 4 for both, on
+textbook units too (97% acceptance, no faster at 8 or 12); one slot for extraction (two
+workers measured slower in aggregate); `single` +8 pts on E4B at ten questions, unconfirmed.
+Landed 2026-09-03: the ingest as a package with fold-as-you-go, provenance by pointer, a
+hidden run node, `show`/`status`/`shelf`/`ask`; `graph.tidy` (the separate hygiene pass,
+automated by a model judge that re-reads the source; `absorb` on the way in, wired into
+the ingest, the Slack pipeline and the simulator); the lifecycle closed (a backend
+launches nothing without a manager's `Lease`, a port is never reclaimed from a server we
+did not record, one detached run at a time, `jobs` with `wait`); one `Run` across bench,
+page, seat and ingest; the report's Ingest section; the isolation guards; ladybug 0.20.2
+with a write guard; `ml-stack-claude` and `ml_stack.harness`. Suite: 3,226 green.
 
-- [ ] **The shelf is reading** (started 2026-09-02T23:44, detached, Flash-Next on port 8080,
-  one slot, one unit at a time -- two workers measured slower in aggregate, 140 s a unit
-  against 86, and Adam: "we should never be splitting the GPU like that"): ten OpenStax PDFs from `~/Documents/Textbooks` plus
-  `~/Downloads/Psychology2e_WEB.pdf` into `~/.ml-stack/shelf.ladybug`. Chapter 2 of
-  Biology2e alone was 13 units in 19 min; the shelf is days of GPU, not
-  hours. `ml-stack-ingest status --out ~/.ml-stack/shelf.ladybug` says where it is; the log
-  is under `~/.ml-stack/ingest/logs/`; killed, the same command with `--resume` picks up
-  (a failed unit is read again). When it is done or stopped: `ml-stack-serve down --port
-  8080`, then ai_ceo's page back (`services/ui.sh fresh`). Then look at what it read --
-  which needs a command: `ml-stack-ingest show --out STORE [--book B] [--sample N]` (a few
-  concepts with their definitions, relations with page provenance, the folds it made);
-  tonight that was a python read of `GraphStore.edges()` by hand, which is a missing
-  command. First things seen: a person `created_by` a method (the verb's direction
-  reversed by the model -- gloss it with the person on the right), and relations across
-  books never joined (each book folds alone; a fold across the shelf is the next step).
+- [ ] **The shelf holds APBiology and Biology2e chapter 2, sound; nine books are unread.**
+  `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
+  provenance and the run that read each, after the judged pass (362 merges, 1,489 inverse
+  pairs, 622 conflicts judged with 282 edges dropped, 186 definitions, 113 suspects),
+  `ml-stack-store check` clean. Reads beside the store are the truth (`ml-stack-ingest
+  fold` rebuilds; two damaged stores from the 0.18 delete bug are kept beside it as
+  `shelf.ladybug.corrupt-*`). Whether the other nine books -- about four days of GPU at 86
+  s a unit, one slot -- are worth it is Adam's call; the command is `ml-stack-ingest
+  ~/Documents/Textbooks/<book>.pdf --out ~/.ml-stack/shelf.ladybug --model <flash-next>
+  --images --resume --serve-port 8080`, one book at a time, and it tidies itself at the
+  book's end. Two answers before that: what a question over the shelf scores
+  (`ml-stack-ingest ask --out ... --gold FILE`, no gold questions written yet), and what
+  `ml-stack-ingest shelf` says once a second full book is in.
+
 - [ ] **Watch for units that still run to the ceiling.** Two causes found and fixed on the
   first night: chapter-end question banks (`pdf.units` leaves them out) and a greedy
   decode circling a long relations array (63 clean concepts, then 378 relations of which
@@ -48,23 +51,14 @@ nothing (the extra turns went unused).
   file beside the store, and `ml-stack-ingest retry --out STORE` frees them after a fix.
   If one still circles under the cap, try DRY sampling for extraction and measure it on
   the gold gate.
-- [ ] **Judge APBiology before the other nine books.** The run reads it alone and stops at
-  its end. The hygiene pass is automated now -- `ml-stack-ingest wait && ml-stack-ingest
-  tidy --out ~/.ml-stack/shelf.ladybug --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`
-  merges names by case/spacing/plural, folds inverse pairs, flags clause-shaped labels, and
-  has the model judge the names a spelling apart (from knowledge, then from the passages
-  re-read out of the book), applying what it decides and keeping every verdict with its
-  reason in the store's `tidy:decisions`; a run started with the new code does this itself
-  at each book's end. Run 2026-09-03 13:18-13:31 over APBiology + Biology2e ch. 2: 377
-  pairs judged -- 348 different (RNA polymerase vs RNA Polymerase II, DNA vs RNA
-  polymerase III), 29 the same (bisphosphate/biphosphate, Vertebrata/vertebrates,
-  mucous/Mucus, T cell/T-cells) -- reading the passages once; the store at 9,989 nodes
-  and 26,794 edges. The verb-conflict, definition and suspect steps recorded nothing on
-  that run; a second run is checking whether they judge at all. Then `show --book apbiology
-  --sample 20` and a few questions over it (`graph.ask`) to see whether a book-scale graph
-  is worth four more days of GPU. Nothing in `docs/` yet says what reading a shelf taught
-  (question banks skipped, the relations-array loop capped, one slot only, the server-gone
-  stop, the tightened dedupe); it belongs beside `docs/architectures/`.
+- [ ] **Score answering over the shelf.** Write twenty invented-free but real-book
+  questions with expected concept ids (`ml-stack-ingest ask --gold FILE`, the bench's
+  scorer) and run them through Flash-Next in its profile; until that number exists, "a
+  usable bio graph" means queryable and sound, not scored. The judge's conflict verdicts
+  are worth reading first: it kept both edges in cases where its own reason said one was
+  a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the schema
+  offers keep both / keep one / unsure, and the instructions should say keep both only
+  when both are true.
 - [ ] **A fold across books.** Every book folds alone; `tidy` joins duplicates across the
   shelf after the fact, but nothing yet says "this concept in Biology2e is that one in
   APBiology" with a weight a person can read. `Shelf.graph()` per book plus `tidy`'s merge
@@ -101,27 +95,7 @@ nothing (the extra turns went unused).
 ## Improvements queued 2026-09-03 afternoon (Adam: "knock them out")
 
 Extraction quality
-- [ ] **Reconcile on the way in, everywhere.** Adam: "the same dedupe mechanism should be
-  used whenever the model is reading a new thing or learning something new and saving to
-  an existing graph. it will for sure re-encounter the same concepts as it learns more."
-  `graph.tidy.absorb(store, graph, judge=)` maps an incoming graph's nodes onto the
-  store's by same name and plural, and puts close spellings to the judge with the
-  incoming passage in hand; the ingest's fold calls it before every upsert (the run's
-  model as judge, the unit text as source). Still to wire: ai_ceo's pipeline merge
-  (`merge.py`, with `data/aliases.json` as `written`), `graph.thread` when an answer's
-  entities are kept, and the world simulator's emit.
-
 Store integrity
-- [ ] **`tidy` and `fold` should run `check` at their end** and refuse to report success
-  over a store that does not read back by id. Found the hard way: on ladybug 0.18.2 a
-  single `DETACH DELETE` on a ~10k-node store blanked other nodes' id/attrs/data (one
-  drop: 1,983 edges unfindable by their ends; 300: 3,360; the same in one transaction
-  and with the label index removed), so the judged pass wrecked the shelf twice; 0.20.2
-  deletes cleanly but doubles a node written twice; 0.19.1 passes both, and the pin moved
-  there (7b6fba6). The two damaged stores are kept at `~/.ml-stack/shelf.ladybug.corrupt-*`
-  for a report upstream; `tests/test_graph_store_scale.py` carries the two probes (a delete
-  at scale leaves strings intact; a write twice updates) so a future bump is measured, not
-  trusted. ai_ceo's venv is on 0.19.1 too.
 - [ ] **A recorded server whose owner has gone should be stopped by the lifecycle, not by
   hand.** Twice on 2026-09-03 `ml-stack-serve status` showed Flash-Next on 8080 with "the
   process that started it (pid N) has gone" -- a judged pass's `_serving` lease whose
@@ -130,14 +104,13 @@ Store integrity
   says "orphaned" and the next `lease` on that port (or `ml-stack-serve down --orphans`)
   stops it; and find why `_serving`'s exit did not release -- a `Stopped`/SIGTERM path
   that skips the context manager's exit, most likely.
-- [ ] **ladybug 0.20.2 is in (e695dc9), with a guard.** Its cached-physical-plan fast path
-  re-executed the store's edge MERGE after the node table it matches was rewritten and
-  segfaulted; every write statement now carries a counter in a comment so no plan is
-  reused for a write (`GraphStore._written`), and `search` hands back one row per id
-  (0.20's text index returns a node once per version written). The pin is
-  `>=0.19,<0.21`; `tests/test_graph_store_scale.py` and `tests/test_graph_store.py` gate
-  a bump. Still to file upstream, with Adam's go-ahead: the segfault (two lines of
-  reproduction in the store's docstring) and the duplicate search row.
+- [ ] **Two ladybug reports to file upstream, with Adam's go-ahead.** 0.18.x: a single
+  `DETACH DELETE` in a ~10k-node store blanks other nodes' string columns (reproduction:
+  `tests/test_graph_store_scale.py`). 0.20.2: the cached-physical-plan fast path
+  re-executes a parameterized MERGE against a table rewritten since and segfaults, and
+  the text index returns a node once per version written (reproduction: the store's
+  `_written` docstring; two lines). ml-stack is on 0.20.2 with the per-write guard and
+  the pin `>=0.19,<0.21`; the probes gate any bump.
 
 ## Library
 
@@ -148,11 +121,6 @@ Store integrity
   `_sliding_layers` the layer side). It is how a `docs/architectures/` note starts.
 - [ ] **`only_one(wait=False)` truncates the holder's pid when refused** (found 2026-09-02):
   the message read `pid 5` for pid 55017. Read the whole lock file before reporting it.
-- [ ] **ladybug 0.20.2 returns nothing from a fresh store's scans** (CI on Linux; ten store
-  tests read zero where one was written; 0.18.x pinned). Characterise with `ml-stack-store
-  check` on a scratch store under 0.20 and either adapt the queries or keep the pin with
-  the reason written down.
-
 ## Measuring across the fleet
 
 - [ ] **Run it for real across two machines.** Everything is tested against fakes and
@@ -173,6 +141,13 @@ Store integrity
 - [ ] **`ml-stack-serve status --every` and `ml-stack-setup` should say which model cache
   is in use and its size** (the installer's `--system` mode can point a service at a user's
   cache; nothing reports it yet).
+- [ ] **First real run of `ml-stack-claude` and `ml-stack-agent`.** Built and tested
+  against fakes only (Adam had the GPU). Run `ml-stack-claude <flash-next> -- --print
+  "say hello"` and one `ml-stack-agent "read README.md and say what this is" --model
+  <flash-next> --allow Read`; watch the served alias the model variables carry, the
+  stream-idle watchdog (five minutes of silence aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`),
+  and what `Usage` reports against the server's own `/metrics`; then measure a small task
+  set the bench's way so the local harness has a number beside the page's.
 
 ## Verifying
 
