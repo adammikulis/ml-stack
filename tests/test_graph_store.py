@@ -695,3 +695,42 @@ def test_folding_a_node_that_is_not_there_raises_rather_than_moving_nothing(tmp_
         with pytest.raises(KeyError, match="person:nobody"):
             store.merge_nodes("person:nobody", "person:ada")
         assert len(store.nodes()) == 5 and len(store.edges()) == 3
+
+
+# -- the word index answers for what the store holds now, on the handle that changed it ----
+
+def test_a_renamed_node_is_found_by_its_new_label_on_the_same_handle(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        assert [r["id"] for r in store.search("compilers")] == ["topic:compilers"]
+        store.rename("topic:compilers", "linkers")
+        assert [r["id"] for r in store.search("linkers")] == ["topic:compilers"]
+        assert store.search("compilers") == []
+        store.drop(["topic:compilers"])
+        assert store.search("linkers") == []
+        store.upsert_node({"id": "topic:loaders", "kind": "topic", "label": "loaders"})
+        assert [r["id"] for r in store.search("loaders")] == ["topic:loaders"]
+
+
+def test_each_search_on_a_handle_answers_its_own_question(tmp_path):
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write(GRAPH)
+        assert [r["id"] for r in store.search("compilers")] == ["topic:compilers"]
+        assert [r["id"] for r in store.search("turin")] == ["place:turin"]
+        assert store.search("nothing of the sort") == []
+    with GraphStore(path, read_only=True) as reader:
+        assert [r["id"] for r in reader.search("compilers")] == ["topic:compilers"]
+        assert [r["id"] for r in reader.search("turin")] == ["place:turin"]
+        assert reader.search("nothing of the sort") == []
+
+
+def test_each_vector_search_on_a_handle_answers_its_own_question(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.set_embedding("topic:compilers", [1.0, 0.0, 0.0], model="m")
+        store.set_embedding("place:turin", [0.0, 1.0, 0.0], model="m")
+        first = store.similar([1.0, 0.0, 0.0], model="m", limit=1)
+        second = store.similar([0.0, 1.0, 0.0], model="m", limit=1)
+    assert [n["id"] for n in first] == ["topic:compilers"]
+    assert [n["id"] for n in second] == ["place:turin"]

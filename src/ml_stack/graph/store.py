@@ -320,6 +320,16 @@ class GraphStore:
         self._writes = getattr(self, "_writes", 0) + 1
         return f"{cypher} /* w{self._writes} */"
 
+    def _asked(self, cypher: str) -> str:
+        """A word-index query's text, made unique for this execution.
+
+        The cached plan of QUERY_FTS_INDEX keeps its result set and its view of the index:
+        run again with another term it adds the earlier answers to the new ones, and after
+        a label was rewritten it answers for the label it first saw.
+        """
+        self._asks = getattr(self, "_asks", 0) + 1
+        return f"{cypher} /* q{self._asks} */"
+
     @contextmanager
     def transaction(self):
         """Everything inside lands together, or none of it does."""
@@ -753,9 +763,9 @@ class GraphStore:
         self._extension("fts")
         self._index("fts", "CALL CREATE_FTS_INDEX('Node', 'node_index', ['label'])")
         try:
-            rows = self.query(
+            rows = self.query(self._asked(
                 "CALL QUERY_FTS_INDEX('Node', 'node_index', $q, TOP := $k) "
-                "RETURN node.id AS id, node.label AS label, node.kind AS kind, score AS score",
+                "RETURN node.id AS id, node.label AS label, node.kind AS kind, score AS score"),
                 {"q": str(text), "k": int(limit)})
         except RuntimeError:
             return []                 # no index yet, which is not the same as no match
