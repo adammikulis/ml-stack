@@ -20,7 +20,7 @@ from typing import Any
 # time, never bound here at import.
 from ml_stack.graph import bench
 from ml_stack.graph.bench.keep import read_back, save
-from ml_stack.graph.bench.measure import finding
+from ml_stack.graph.bench.measure import found as finder_of
 from ml_stack.graph.bench.score import Row, _which
 from ml_stack.graph.bench.show import drafted
 
@@ -261,13 +261,14 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
             # `load_s` is the lease's own clock, process start to health; the stopwatch
             # here also holds an adopted server's nothing and a warm-up's something.
             loaded = time.time() - began
+            finder, why = finder_of(store, embed_url, embed_model)
             load_s = getattr(server, "load_s", None)
             warmup_s = getattr(server, "warmup_s", None)
             print(f"    up in {loaded:.0f}s"
                   + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
                                                        if warmup_s is not None else "") + ")"
                      if load_s is not None else "")
-                  + f", look_up by {finding(store, embed_url)}")
+                  + f", look_up by {finder}" + (f" ({why})" if why else ""))
             print("\n".join(f"      {line}" for line in report.said().splitlines()))
 
             def ask_every(asking_these: Sequence[Mapping[str, Any]],

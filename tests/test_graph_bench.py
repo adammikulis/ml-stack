@@ -690,13 +690,53 @@ def _tiny_store(tmp_path):
     return where
 
 
-def test_finding_names_what_a_run_measured():
+def test_finding_names_what_a_run_measured(tmp_path):
     from ml_stack.graph.bench import finding
 
     assert finding(None) == "chars"
     assert finding("") == "chars"
     assert finding("some.ladybug") == "words"
-    assert finding("some.ladybug", "http://127.0.0.1:8081") == "meaning"
+    assert finding(tmp_path / "not-there.ladybug", "http://127.0.0.1:8081") == "words", \
+        "an embedder and no store to search with it is the word index"
+
+
+def test_finding_says_meaning_only_when_the_store_holds_vectors(tmp_path):
+    """An embedder named on the command line is not a vector search: the store has to hold
+    vectors for that model, or `hybrid` reads the word index and the label is a lie."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    from ml_stack.graph.bench import finding
+    from ml_stack.graph.bench.measure import found
+    from ml_stack.graph.store import GraphStore
+
+    where = _tiny_store(tmp_path)
+    url = "http://127.0.0.1:8081"
+    assert finding(where, url, "embedder") == "words"
+    assert found(where, url, "embedder") == ("words", "no vectors for embedder in the store")
+    assert found(where, url) == ("words", "no vectors in the store")
+    assert found(where) == ("words", "") and found(None) == ("chars", "")
+
+    with GraphStore(where) as store:
+        store.set_embedding("person:iris", [0.1, 0.2, 0.3], model="embedder")
+    assert found(where, url, "embedder") == ("meaning", "")
+    assert finding(where, url, "embedder") == "meaning"
+    assert found(where, url, "other") == ("words", "no vectors for other in the store")
+    assert finding(where, url) == "meaning", "any model's vectors, when none is named"
+
+
+def test_a_run_given_an_embedder_and_no_vectors_measures_words_and_says_why(tmp_path,
+                                                                          monkeypatch,
+                                                                          capsys):
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    # `_serving`'s common flags name no store; the last --store given wins
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"],
+                        "--store", str(_tiny_store(tmp_path)),
+                        "--embed-url", "http://127.0.0.1:1", "--embed-model", "embedder"]) == 0
+    said = capsys.readouterr().out
+    assert "look_up by words (no vectors for embedder in the store)" in said, said
+    assert runs(seen["kept"], "tiny-plain")[0]["server"]["finder"] == "words"
 
 
 def test_a_run_given_a_store_looks_up_as_the_application_does(tmp_path):

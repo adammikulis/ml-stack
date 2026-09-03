@@ -34,18 +34,38 @@ from ml_stack.graph.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 
-def finding(store: str | Path | None, embed_url: str = "") -> str:
-    """Which look_up a run measures, named so two runs are never read against each other.
+def found(store: str | Path | None, embed_url: str = "",
+          embed_model: str = "") -> tuple[str, str]:
+    """``(finder, why)``: which look_up a run measures, and why it is not the one asked for.
 
-    ``chars``: no store, so `look_up` matches characters and nothing else -- what the bench
-    measured for months while the application shipped something better. ``words``: a store's
-    word index votes as well, so "compilers" finds "compiler". ``meaning``: and its vectors,
-    through the embedder at ``embed_url``. Recorded on every run and printed in the table,
-    for the same reason `ctx` is: a comparison across finders is two measurements.
+    ``chars``: no store, so `look_up` matches characters and nothing else. ``words``: a
+    store's word index votes as well, so "compilers" finds "compiler". ``meaning``: and its
+    vectors, through the embedder at ``embed_url`` -- only when the store holds vectors for
+    ``embed_model`` (any model's, when none is named), read from the store itself; an
+    embedder named beside a store with none is ``words``, and ``why`` says so. Recorded on
+    every run and printed in the table, for the same reason `ctx` is: a comparison across
+    finders is two measurements.
     """
     if store is None or not str(store):
-        return "chars"
-    return "meaning" if embed_url else "words"
+        return "chars", ""
+    if not embed_url:
+        return "words", ""
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.vectors import embedded
+
+    try:
+        with GraphStore(store, read_only=True) as held:
+            vectors = embedded(held, model=embed_model)
+    except Exception:  # noqa: BLE001 - a store that will not open holds no vectors
+        vectors = 0
+    if vectors:
+        return "meaning", ""
+    return "words", f"no vectors{f' for {embed_model}' if embed_model else ''} in the store"
+
+
+def finding(store: str | Path | None, embed_url: str = "", embed_model: str = "") -> str:
+    """Which look_up a run measures -- ``chars``, ``words`` or ``meaning`` -- see `found`."""
+    return found(store, embed_url, embed_model)[0]
 
 
 TRACE_ENV = "MLSTACK_BENCH_TRACE"
@@ -1096,8 +1116,11 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
         rich=rich, terse=terse, reach=reach or None, rounds=rounds or None,
         constrain_ids=constrain_ids)
 
+    finder_name = finding(store, embed_url, embed_model)
+
     def embedded(text: str) -> list[float] | None:
-        if not embed_url:
+        # no vectors to search means no vector to search with
+        if not embed_url or finder_name != "meaning":
             return None
         from ml_stack.client.embed import embed
         from ml_stack.graph.vectors import QUERY
@@ -1146,7 +1169,7 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
 
             return converse_with(question, client, finder, likely(question, held), turns)
 
-    ask.finder = finding(store, embed_url)  # type: ignore[attr-defined]
+    ask.finder = finder_name  # type: ignore[attr-defined]
     # The way, said once, in the words `converse` uses. Only what was asked for: a way that
     # asked for nothing carries `{"tight": True}` and no other key, so the record says what
     # the run did rather than what every default happened to be that week.
