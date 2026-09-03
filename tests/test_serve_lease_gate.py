@@ -67,3 +67,79 @@ def test_the_record_exists_before_the_process_and_is_filled_or_forgotten_after(t
     with pytest.raises(ServerFailed):
         manager.lease(ServerSpec(model="fail.gguf", port=other), roam=False, timeout=1.0)
     assert str(other) not in json.loads(state.read_text()), "a start that failed is forgotten"
+
+
+class _Backend:
+    name = "fake"
+
+    def start(self, spec, *, lease, timeout=300.0, **starting):
+        return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
+                          pid=4242, backend="fake")
+
+    def stop(self, info, *, grace_s=5.0):
+        return None
+
+
+def _sleeper():
+    import subprocess
+    import sys
+
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def _ended(proc, within: float = 10.0) -> bool:
+    import time
+
+    deadline = time.monotonic() + within
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return proc.poll() is not None
+
+
+def test_a_lease_stops_the_orphan_on_its_port_before_starting(tmp_path):
+    """A record whose leasing process has gone while its server runs on: the lease stops
+    that server, says so, and starts its own rather than adopting it."""
+    import os
+
+    state = tmp_path / "servers.json"
+    port = free_port()
+    orphan = _sleeper()
+    try:
+        state.write_text(json.dumps({str(port): {
+            "port": port, "pid": orphan.pid, "owner_pid": 999_999_998, "backend": "fake",
+            "model": "fine.gguf"}}))
+        said = []
+        manager = ServerManager(backend=_Backend(), state_file=state)
+        info = manager.lease(ServerSpec(model="fine.gguf", port=port), roam=False,
+                             timeout=1.0, say=said.append)
+        assert _ended(orphan), "the orphaned server is still running"
+        assert said and "orphaned" in said[0] and str(orphan.pid) in said[0]
+        assert info.pid == 4242 and not info.adopted
+        after = json.loads(state.read_text())[str(port)]
+        assert after["pid"] == 4242 and after["owner_pid"] == os.getpid()
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+        orphan.wait()
+
+
+def test_a_lease_leaves_a_server_another_live_process_holds(tmp_path):
+    import os
+
+    state = tmp_path / "servers.json"
+    port = free_port()
+    held = _sleeper()
+    try:
+        state.write_text(json.dumps({str(port): {
+            "port": port, "pid": held.pid, "owner_pid": os.getpid(), "backend": "fake",
+            "model": "fine.gguf"}}))
+        said = []
+        ServerManager(backend=_Backend(), state_file=state).lease(
+            ServerSpec(model="fine.gguf", port=port), roam=False, timeout=1.0,
+            say=said.append)
+        assert held.poll() is None, "a held server is not an orphan"
+        assert not any("orphaned" in line for line in said)
+    finally:
+        if held.poll() is None:
+            held.kill()
+        held.wait()

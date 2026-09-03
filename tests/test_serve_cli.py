@@ -138,6 +138,15 @@ class TestStatus:
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert "none on record" in capsys.readouterr().out
 
+    def test_a_server_whose_owner_has_gone_is_called_orphaned(self, server, state, capsys):
+        instance = server(serving())
+        record(state, instance.port, pid=999_999_997, owner_pid=999_999_998)
+
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+        out = capsys.readouterr().out
+        assert "orphaned" in out
+        assert "down --orphans" in out
+
 
 class TestUp:
     def test_it_adopts_a_compatible_server(self, server, state, capsys):
@@ -180,7 +189,7 @@ class TestUp:
     def test_the_flags_default_to_the_modules_own_shape(self, state, monkeypatch, capsys):
         seen: dict[str, object] = {}
 
-        def lease(self, spec, *, timeout=300.0):
+        def lease(self, spec, *, timeout=300.0, **kw):
             seen["spec"] = spec
             seen["timeout"] = timeout
             return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
@@ -245,6 +254,60 @@ class TestDown:
         port = free_port()
         assert cli.main(["down", "--port", str(port)]) == 1
         assert "nothing is serving" in capsys.readouterr().out
+
+
+def sleeper():
+    return subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+
+
+def ended(proc, within: float = 10.0) -> bool:
+    deadline = time.monotonic() + within
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+    return proc.poll() is not None
+
+
+class TestDownOrphans:
+    """`down --orphans` stops every recorded server whose leasing process has gone, and
+    nothing else: not one another live process holds, not one `up` detached under its
+    own pid."""
+
+    def test_it_stops_the_orphans_and_leaves_the_rest(self, state, capsys):
+        orphan, held, own = sleeper(), sleeper(), sleeper()
+        ports = free_port(), free_port(), free_port()
+        state.write_text(json.dumps({
+            str(ports[0]): {"port": ports[0], "pid": orphan.pid, "owner_pid": 999_999_998,
+                            "backend": "llama.cpp", "model": MODEL},
+            str(ports[1]): {"port": ports[1], "pid": held.pid, "owner_pid": os.getppid(),
+                            "backend": "llama.cpp", "model": MODEL},
+            str(ports[2]): {"port": ports[2], "pid": own.pid, "owner_pid": own.pid,
+                            "backend": "llama.cpp", "model": MODEL},
+        }))
+        try:
+            assert cli.main(["down", "--orphans"]) == 0
+            out = capsys.readouterr().out
+            assert f"stopped http://127.0.0.1:{ports[0]} (pid {orphan.pid})" in out
+            assert "orphaned by pid 999999998" in out
+            assert str(ports[1]) not in out and str(ports[2]) not in out
+            assert ended(orphan), "the orphan is still running"
+            assert held.poll() is None and own.poll() is None, "only the orphan is stopped"
+            left = json.loads(state.read_text())
+            assert set(left) == {str(ports[1]), str(ports[2])}
+        finally:
+            for proc in (orphan, held, own):
+                if proc.poll() is None:
+                    proc.kill()
+                proc.wait()
+
+    def test_a_record_whose_server_is_also_gone_is_not_an_orphan(self, state, capsys):
+        port = free_port()
+        record(state, port, pid=999_999_997, owner_pid=999_999_998)
+        assert cli.main(["down", "--orphans"]) == 0
+        assert "no orphaned server" in capsys.readouterr().out
+
+    def test_nothing_on_record_is_nothing_to_do(self, state, capsys):
+        assert cli.main(["down", "--orphans"]) == 0
+        assert "no orphaned server" in capsys.readouterr().out
 
 
 class TestTellingTheFleet:
@@ -514,7 +577,7 @@ class TestPreflightOnly:
         monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
 
-        def lease(self, spec, *, timeout=None, roam=True):
+        def lease(self, spec, *, timeout=None, roam=True, **kw):
             raise AssertionError("--preflight-only must never lease a server")
 
         monkeypatch.setattr(cli.ServerManager, "lease", lease)
@@ -599,7 +662,7 @@ class TestResolveModel:
                           + LLAMA_SERVER_HELP + "HELP\nfi\nexit 0\n")
         binary.chmod(0o755)
 
-        def lease(self, spec, *, timeout=None, roam=True):
+        def lease(self, spec, *, timeout=None, roam=True, **kw):
             raise AssertionError("--preflight-only must never lease a server")
 
         monkeypatch.setattr(cli.ServerManager, "lease", lease)
@@ -635,7 +698,7 @@ class TestBuildFlag:
 
         monkeypatch.setattr(backend_module, "LlamaServerBackend", Spy)
 
-        def lease(self, spec, *, timeout=None, roam=True):
+        def lease(self, spec, *, timeout=None, roam=True, **kw):
             raise AssertionError("this fixture only records how the backend was built")
 
         monkeypatch.setattr(cli.ServerManager, "lease", lease)

@@ -8,7 +8,7 @@ import os
 import threading
 import time
 from contextlib import contextmanager
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -90,6 +90,13 @@ def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
     return merged
 
 
+def orphaned(entry: dict) -> bool:
+    """Whether a record's server is running on after the process that leased it has gone."""
+    owner, pid = entry.get("owner_pid"), entry.get("pid")
+    return (isinstance(owner, int) and isinstance(pid, int) and owner != pid
+            and not pid_exists(owner) and pid_exists(pid))
+
+
 def model_matches(reported: str, wanted: str | Path) -> bool:
     """Whether a server reporting ``reported`` is serving ``wanted``."""
     wanted_name = Path(str(wanted).removeprefix("hf:")).name.lower()
@@ -158,6 +165,7 @@ class ServerManager:
     ) -> None:
         self.backend = backend or LlamaServerBackend()
         self.state_file = state_file or STATE_FILE
+        self.say: Callable[[str], None] | None = None
         self._mine: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
@@ -167,8 +175,12 @@ class ServerManager:
 
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
-              warmup_request: bool = True) -> ServerInfo:
+              warmup_request: bool = True,
+              say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
+
+        A server on the port whose record names a leasing process that has gone is
+        stopped first, and ``say`` (else ``self.say``, else the log) is told.
 
         When the port is busy with something else and this machine has the memory to hold
         both, it is served beside it on a free port rather than refused: a small model does
@@ -195,6 +207,7 @@ class ServerManager:
                     "warmup_request": warmup_request}
 
         with self._port_lock(spec.port):
+            self._stop_orphan(spec.port, say=say or self.say or logger.info)
             try:
                 adopted = self.adopt(spec)
             except ServerFailed:
@@ -218,6 +231,16 @@ class ServerManager:
             self._unavailable_until.pop(spec.port, None)
             self._record(spec, info)
             return info
+
+    def _stop_orphan(self, port: int, *, say: Callable[[str], None]) -> None:
+        """Stop the server recorded on ``port`` when the process that leased it has gone."""
+        entry = self._load().get(str(port))
+        if not isinstance(entry, dict) or not orphaned(entry):
+            return
+        say(f"port {port}: stopping the orphaned server (pid {entry['pid']}) the process "
+            f"that leased it (pid {entry['owner_pid']}) left behind")
+        kill_process_tree(int(entry["pid"]))
+        self._save()
 
     def _beside(self, spec: ServerSpec, *, timeout: float, **starting: Any) -> ServerInfo | None:
         """Serve it next to whatever holds the port, when there is room. None when there is not.
@@ -372,9 +395,14 @@ def serve(
     context: int = 4096,
     timeout: float | None = None,
     manager: ServerManager | None = None,
+    roam: bool = True,
+    say: Callable[[str], None] | None = None,
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
-    """Run a server for the duration of the block, yielding its ``ServerInfo``."""
+    """Run a server for the duration of the block, yielding its ``ServerInfo``.
+
+    ``roam`` and ``say`` go to :meth:`ServerManager.lease`.
+    """
     from ml_stack.serve.ports import free_port
 
     manager = manager or _DEFAULT
@@ -384,7 +412,7 @@ def serve(
         context=context,
         **spec_kwargs,  # type: ignore[arg-type]
     )
-    info = manager.lease(spec, timeout=timeout)
+    info = manager.lease(spec, timeout=timeout, roam=roam, say=say)
     try:
         yield info
     finally:

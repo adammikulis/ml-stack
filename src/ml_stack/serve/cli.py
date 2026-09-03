@@ -18,7 +18,13 @@ from ml_stack.fleet.serving import Serving
 from ml_stack.serve import build
 from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.manager import DEFAULT_TIMEOUT_S, STATE_FILE, ServerManager, recorded_servers
+from ml_stack.serve.manager import (
+    DEFAULT_TIMEOUT_S,
+    STATE_FILE,
+    ServerManager,
+    orphaned,
+    recorded_servers,
+)
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import pid_exists
 
@@ -114,7 +120,8 @@ def _lease_line(snapshot: Snapshot) -> str:
         return f"{pid}, started by 'ml-stack-serve up'"
     if snapshot.holder_running:
         return f"{pid}, held by process {snapshot.owner_pid}"
-    return f"{pid}, the process that started it (pid {snapshot.owner_pid}) has gone"
+    return (f"{pid}, orphaned -- the process that started it (pid {snapshot.owner_pid}) "
+            "has gone; 'ml-stack-serve down --orphans' stops it")
 
 
 def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
@@ -511,6 +518,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         print(report.said())
         return 0 if report.ok else 1
 
+    manager.say = lambda line: print(line, file=sys.stderr)
     try:
         info = manager.lease(spec, timeout=args.timeout)
     except UnknownFlag as exc:
@@ -926,8 +934,40 @@ def cmd_profile(args: argparse.Namespace) -> int:
     return 0
 
 
+def _withdraw(args: argparse.Namespace, port: int) -> None:
+    """Take ``port`` out of the fleet's beacon, when there is one."""
+    # A registration outlives the server it describes, and the beacon then sends work to a
+    # port nothing answers on. `live()` probes before advertising, so a stale entry is not
+    # fatal -- but leaving one behind means every peer pays a timeout to find that out.
+    try:
+        known = beacon(args.root)
+        if known is not None:
+            known.unregister(port)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  could not withdraw it from the fleet: {exc}", file=sys.stderr)
+
+
+def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
+    """Stop every recorded server whose leasing process has gone; leave every other."""
+    found = [(port, entry) for port, entry in sorted(records.items()) if orphaned(entry)]
+    if not found:
+        print("no orphaned server on record.")
+        return 0
+    manager = ServerManager(state_file=STATE_FILE)
+    for port, entry in found:
+        url = base_url_for(port)
+        pid = int(entry["pid"])
+        manager.release(ServerInfo(base_url=str(entry.get("base_url") or url), port=port,
+                                   pid=pid, backend=str(entry.get("backend") or "")))
+        _withdraw(args, port)
+        print(f"stopped {url} (pid {pid}), orphaned by pid {entry['owner_pid']}")
+    return 0
+
+
 def cmd_down(args: argparse.Namespace) -> int:
     records = recorded_servers(STATE_FILE)
+    if getattr(args, "orphans", False):
+        return cmd_down_orphans(args, records)
     entry = records.get(args.port)
     url = base_url_for(args.port)
 
@@ -954,15 +994,7 @@ def cmd_down(args: argparse.Namespace) -> int:
     ServerManager(state_file=STATE_FILE).release(
         ServerInfo(base_url=str(entry.get("base_url") or url), port=args.port, pid=pid,
                    backend=str(entry.get("backend") or "")))
-    # A registration outlives the server it describes, and the beacon then sends work to a
-    # port nothing answers on. `live()` probes before advertising, so a stale entry is not
-    # fatal — but leaving one behind means every peer pays a timeout to find that out.
-    try:
-        known = beacon(args.root)
-        if known is not None:
-            known.unregister(args.port)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  could not withdraw it from the fleet: {exc}", file=sys.stderr)
+    _withdraw(args, args.port)
 
     if running:
         print(f"stopped {url} (pid {pid})")
@@ -1207,6 +1239,9 @@ def main(argv: list[str] | None = None) -> int:
     down = sub.add_parser("down", help="stop a server started on this machine")
     down.add_argument("--port", type=int, default=DEFAULT_PORT,
                       help=f"port of the server to stop (default: {DEFAULT_PORT})")
+    down.add_argument("--orphans", action="store_true",
+                      help="instead of a port: stop every recorded server whose leasing "
+                           "process has gone, and nothing else")
     down.add_argument("--root", default=DEFAULT_ROOT,
                       help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})")
 
