@@ -308,8 +308,15 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     # asked for, and the whole graph readable at a glance. Sent on only
                     # when a way asked for one, so a run that asked for none reaches
                     # `asking` with exactly the keywords it always had.
-                    ways_asked = {name: True for name in ("batch", "kinds", "summary")
+                    # `single` and `few` join them on the same terms: the opposite of
+                    # batch (one entry to a read, more turns) and a three-tool offer, both
+                    # about the asking and neither a thing the client has ever heard of.
+                    ways_asked = {name: True
+                                  for name in ("batch", "kinds", "summary", "single", "few")
                                   if bool(asked.pop(name, False))}
+                    # how many tool-calling turns a question may spend -- a number, like
+                    # `reach`, and popped for the same reason
+                    rounding = asked.pop("rounds", None)
                     client = Client(server.base_url,
                                     **{"timeout": per_question, **making, **asked})
                     if wants_card:
@@ -322,6 +329,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                  rich=richly,
                                  tight=tightly,
                                  reach=int(reaching) if reaching else None,
+                                 rounds=int(rounding) if rounding else None,
                                  **ways_asked)
                     got = bench.measure(ask, asking_these, label=here, client=client,
                                         trace=trace,

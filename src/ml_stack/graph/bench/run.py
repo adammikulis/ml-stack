@@ -121,12 +121,35 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # `summarise` is the whole graph at a glance, computed without a model.
             out.append({"label": "summary", "terse": first["terse"], "summary": True,
                         **sampling_from(args)})
+        elif also == "single":
+            # `batch` turned around, and here for the opposite model. A fat tool result is
+            # a long thing to hold in mind: a small model handed a dozen entries in one
+            # message answers about the last one or about none of them. One entry to a
+            # read, more turns, each result short enough to still be in view when the
+            # answer is written -- measured against `--also batch` on the same load, since
+            # which trade a model wants is a number and not a taste.
+            out.append({"label": "single", "terse": first["terse"], "single": True,
+                        **sampling_from(args)})
+        elif also == "few":
+            # Three tools -- look_up, look_at, show -- and no other way of looking, for the
+            # model whose tool choice degrades with the number of schemas rather than with
+            # the question. Nothing is faked to cover what went: look_up's description says
+            # the offer has no path tool and no listing tool, and says how to answer those
+            # questions by reading, which is what the loop then does.
+            out.append({"label": "few", "terse": first["terse"], "few": True,
+                        **sampling_from(args)})
         elif also == "tight":
             print("note: tight is the default asking now; --also tight measures nothing new "
                   "(--also loose is the old asking, as a control)", file=sys.stderr)
+    asked_rounds = int(getattr(args, "rounds", 0) or 0)
     for way in out:
         if asked_reach:
             way.setdefault("reach", asked_reach)
+        if asked_rounds:
+            # `--rounds N` is not a way of its own either: it is how many tool-calling
+            # turns every way's questions may spend, and `few` and `single` both want more
+            # of them than `batch` does
+            way.setdefault("rounds", asked_rounds)
     for flag in ("batch", "kinds", "summary"):
         # --batch / --kinds / --summary ride on every way, the way --reach does: the
         # hundred-question run of "everything that held" is one way, not four
@@ -508,9 +531,16 @@ def _parser() -> argparse.ArgumentParser:
                               "context is cheap and whose reading is eleven times faster "
                               "than its writing, which is what makes fewer, fatter calls "
                               f"the cheaper question (--also reach uses {REACH})")
+        one.add_argument("--rounds", type=int, default=0, metavar="N",
+                         help="how many tool-calling turns one question may spend before "
+                              "it must answer, on every way asked (converse's `rounds`; "
+                              "unset is the library default). A three-tool offer and a "
+                              "one-entry-at-a-time read both want more of them and a "
+                              "batched read wants fewer, so this is measured beside "
+                              "--also few and --also single rather than fixed for all")
         one.add_argument("--also", action="append", default=[],
                          choices=("terse", "card", "greedy", "rich", "tight", "loose",
-                                  "reach", "batch", "kinds", "summary"),
+                                  "reach", "batch", "kinds", "summary", "single", "few"),
                          help="ask the same served model another way as well. Whether the "
                               "tools are described briefly, what sampling is used, "
                               "whether look_up says why it matched (rich), and whether "
@@ -524,9 +554,16 @@ def _parser() -> argparse.ArgumentParser:
                               "question asked for (kinds -- a who question is answered by "
                               "people, not by the topic they share) and whether the whole "
                               "graph can be read at a glance (summary -- for the broad "
-                              "question no search reaches) are questions about the "
-                              "asking, not the serving, so eight of them cost one load "
-                              "rather than eight. Repeatable")
+                              "question no search reaches), whether every read takes one "
+                              "entry and more turns (single -- batch turned around, for a "
+                              "model that loses the thread of a long result) and whether "
+                              "only three tools are offered (few -- look_up, look_at and "
+                              "show, for a model whose tool choice degrades with the "
+                              "number of schemas) are questions about the "
+                              "asking, not the serving, so ten of them cost one load "
+                              "rather than ten. There is no one asking every model wants: "
+                              "measure them per model, and `report --profile` writes the "
+                              "winner into that model's record. Repeatable")
 
     for one in (run, sweep, heads, conc):
         one.add_argument("--per-question", type=float, default=PER_QUESTION,
@@ -891,9 +928,14 @@ def _run(args: Any) -> int:
             ways = _asked(args, parts)
             for way in ways:
                 for flag, on in (shaped.get("asking") or {}).items():
-                    if on and flag in ("batch", "kinds", "summary", "tight", "rich") \
+                    if on and flag in ("batch", "kinds", "summary", "tight", "rich",
+                                       "single", "few") \
                             and not getattr(args, flag, False):
                         way.setdefault(flag, True)
+                    elif flag == "rounds" and on and not int(getattr(args, "rounds", 0) or 0):
+                        # a number rather than a switch, so it is carried across rather
+                        # than turned on: the record measured this many turns
+                        way.setdefault("rounds", int(on))
             try:
                 bench.served(model, questions, graph, label=stem, draft=head,
                        ways=ways,

@@ -36,7 +36,16 @@ __all__ = ["Profile", "add", "local_file", "package_file", "profile_for", "profi
 
 
 # The asking fields whose value is a plain on/off, in the order a person reads them out.
-WAYS = ("tight", "batch", "kinds", "summary", "rich", "terse")
+# `single` and `few` sit beside `batch` because they are the same question answered the
+# other way: how much one read carries, and how many tools there are to choose between.
+# Nothing here is a default -- a record says what *this* model measured, and two records
+# disagreeing about every one of these is the intended outcome, not a mistake.
+WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse")
+
+# The sampler settings a record keeps, and what each is called when it is read out. In the
+# order a publisher's card lists them, so a record and a card can be compared by eye.
+SAMPLERS = (("temperature", "temperature"), ("top_p", "top-p"), ("top_k", "top-k"),
+            ("min_p", "min-p"))
 
 # What a kept bench run cannot see about the serving, and so must never erase when it
 # rewrites a record: llama-server's own extra flags and the vision projector are in the
@@ -71,11 +80,14 @@ class Profile:
     # -- asking -------------------------------------------------------------------------
     tight: bool = True
     batch: bool = False
+    single: bool = False                 # one entry to a read, more turns -- batch's opposite
+    few: bool = False                    # three tools offered, not eight
     kinds: bool = False
     summary: bool = False                # `converse`'s summary_tool, named as the bench is
     rich: bool = False
     terse: bool = False                  # `tools_for`'s, not `converse`'s -- see `asking`
     reach: int | None = None
+    rounds: int | None = None            # tool-calling turns one question may spend
     sampling: Mapping[str, Any] = field(default_factory=dict)
 
     # -- what measured it ---------------------------------------------------------------
@@ -150,13 +162,15 @@ class Profile:
         and the client with them.
         """
         out: dict[str, Any] = {"tight": bool(self.tight)}
-        for way in ("batch", "kinds", "rich"):
+        for way in ("batch", "kinds", "rich", "single", "few"):
             if getattr(self, way):
                 out[way] = True
         if self.summary:
             out["summary_tool"] = True
         if self.reach is not None:
             out["reach"] = int(self.reach)
+        if self.rounds is not None:
+            out["rounds"] = int(self.rounds)
         return out
 
     # -- the file -----------------------------------------------------------------------
@@ -173,7 +187,8 @@ class Profile:
                                  "seat_context": self.seat_context,
                                  "parallel": self.parallel}
         ask: dict[str, Any] = {**{way: bool(getattr(self, way)) for way in WAYS},
-                               "reach": self.reach, "sampling": dict(self.sampling)}
+                               "reach": self.reach, "rounds": self.rounds,
+                               "sampling": dict(self.sampling)}
         measured = {"measured_at": self.measured_at, "label": self.label,
                     "questions": self.questions, "right": self.right,
                     "recall": self.recall, "precision": self.precision,
@@ -423,6 +438,23 @@ def _flags(profile: Profile) -> str:
     return " ".join(parts)
 
 
+def _sampled(sampling: Mapping[str, Any] | None) -> str:
+    """The sampler settings a record measured, read out: ``at temperature 1.0 / top-p 0.95
+    / top-k 20``, or the one word ``greedy``.
+
+    Greedy says the whole thing -- at temperature 0 no other sampler can change an argument
+    -- so it is one word. Anything else is read out in full, every setting the record
+    carries, because "the card asks for 1.0 and the measurement agreed" is exactly the
+    thing a person serving this model needs to see rather than infer.
+    """
+    held = dict(sampling or {})
+    temperature = held.get("temperature")
+    if temperature is not None and float(temperature) == 0:
+        return "greedy"
+    parts = [f"{name} {held[key]}" for key, name in SAMPLERS if held.get(key) is not None]
+    return "at " + " / ".join(parts) if parts else ""
+
+
 def _ways(profile: Profile) -> str:
     """The asking line, as the words the bench and `converse` both use."""
     said = [way for way in WAYS if getattr(profile, way)]
@@ -430,10 +462,14 @@ def _ways(profile: Profile) -> str:
         said.insert(0, "loose")
     if profile.reach is not None:
         said.append(f"reach {profile.reach}")
-    temperature = dict(profile.sampling).get("temperature")
-    if temperature is not None:
-        said.append("greedy" if float(temperature) == 0 else f"temperature {temperature}")
-    return " + ".join(said) or "the defaults"
+    if profile.rounds is not None:
+        said.append(f"rounds {profile.rounds}")
+    sampled = _sampled(profile.sampling)
+    if sampled == "greedy":
+        said.append("greedy")
+        sampled = ""
+    line = " + ".join(said) or "the defaults"
+    return f"{line} {sampled}".rstrip()
 
 
 def said(profile: Profile) -> str:

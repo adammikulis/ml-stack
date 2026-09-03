@@ -1784,6 +1784,150 @@ def _schema_text(schemas, name):
                 if t["function"]["name"] == name)
 
 
+# -- one entry at a time, and three tools ------------------------------------------------------
+#
+# The other two askings of 2026-09-02, and they exist because there is no one asking every
+# model wants (Adam: "some will need more tool calling turns with fewer tools per turn, some
+# the other way"). `single` is `batch` turned around and `few` is a shorter offer; both are
+# measured per model and neither is a default.
+
+def test_reading_one_entry_at_a_time_is_asked_for_and_nudged_when_it_is_not():
+    """The mirror of the batch nudge. A turn that read three entries in one call gets told,
+    once, to read them one at a time -- and a turn that already read one is left alone."""
+    from ml_stack.graph.ask import SINGLE_NUDGE
+
+    all_at_once = ScriptedModel([call("look_up", text="compil"),
+                                 call("look_at", ids=["person:ada", "person:bea"]),
+                                 call("look_at", ids=["topic:compilers"])])
+    out = converse("who works on compilers?", GRAPH, all_at_once, single=True)
+    # the last turn carries every message the conversation accumulated, so counting it
+    # there is counting how many times the nudge was actually appended
+    said = [m.get("content") for m in all_at_once.seen[-1] if m.get("role") == "user"]
+    assert said.count(SINGLE_NUDGE) == 1, "said once, not once a turn"
+    assert "asked it to read one at a time" in out.steps
+
+    one_by_one = ScriptedModel([call("look_up", text="compil"),
+                                call("look_at", ids=["person:ada"]),
+                                call("look_at", ids=["person:bea"])])
+    converse("who works on compilers?", GRAPH, one_by_one, single=True)
+    assert not any(m.get("content") == SINGLE_NUDGE
+                   for turn in one_by_one.seen for m in turn), "it did what was asked"
+
+    # and never without asking for it: the nudge is a message in every prompt after it
+    off = ScriptedModel([call("look_up", text="compil"),
+                         call("look_at", ids=["person:ada", "person:bea"])])
+    converse("who works on compilers?", GRAPH, off)
+    assert not any(m.get("content") == SINGLE_NUDGE for turn in off.seen for m in turn)
+
+
+def test_the_single_sentence_and_the_one_entry_calls_are_said_only_when_asked_for():
+    """On copies, like rich, tight and batch: with the flag off the descriptions and the
+    system prompt are byte for byte what every run before this measured."""
+    from ml_stack.graph.ask import (BATCH_SYSTEM_SENTENCE, SINGLE_EXAMPLES,
+                                    SINGLE_SYSTEM_SENTENCE, TOOLS, tools_for)
+
+    said = ScriptedModel([])
+    converse("who?", GRAPH, said, single=True)
+    assert SINGLE_SYSTEM_SENTENCE in said.seen[0][0]["content"]
+    assert BATCH_SYSTEM_SENTENCE not in said.seen[0][0]["content"], "the opposite asking"
+
+    quiet = ScriptedModel([])
+    converse("who?", GRAPH, quiet)
+    assert SINGLE_SYSTEM_SENTENCE not in quiet.seen[0][0]["content"]
+
+    singly = {t["function"]["name"]: t["function"]["description"]
+              for t, _fn in tools_for(GRAPH, single=True)}
+    for name, example in SINGLE_EXAMPLES.items():
+        assert singly[name].endswith(example)
+        assert example not in _schema_text(TOOLS, name), "the base set is untouched"
+    assert '"ids": ["person:wren"]' in singly["look_at"], "one id, written out"
+
+
+def test_few_offers_three_tools_and_takes_the_rest_of_the_looking_away():
+    """For the model whose tool choice degrades with the number of schemas. What goes is
+    every *way of looking* that is not look_up or look_at; `show` stays, and so does a
+    tool a caller added that does not search -- it is not a choice between ways to look."""
+    from ml_stack.graph.ask import FEW_SENTENCE, TOOLS, tools_for
+
+    offered = [t["function"]["name"] for t, _fn in tools_for(GRAPH, few=True)]
+    assert offered == ["look_up", "look_at", "show"]
+    assert [t["function"]["name"] for t, _fn in tools_for(GRAPH, few=True, summary=True)] \
+        == ["look_up", "look_at", "show"], "summarise is a way of looking too"
+
+    # the sentence is on a copy: the base look_up is untouched
+    assert FEW_SENTENCE in {t["function"]["name"]: t["function"]["description"]
+                            for t, _fn in tools_for(GRAPH, few=True)}["look_up"]
+    assert FEW_SENTENCE not in _schema_text(TOOLS, "look_up")
+
+
+def test_a_caller_s_acting_tool_survives_few_and_keeps_its_callable():
+    """`few` takes schemas away rather than rewriting them, so the callables are matched
+    back by name. Mutation: zip them positionally and a caller's change request runs
+    `look_at`."""
+    filed = {}
+
+    schema = {"type": "function", "function": {
+        "name": "request_change", "description": "Ask for an entry to be corrected.",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}}}}
+
+    def change(args):
+        filed["id"] = args.get("id")
+        return {"filed": True}
+
+    model = SayingModel([call("request_change", id="person:ada")], "Filed it.")
+    converse("fix Ada's role", GRAPH, model, few=True,
+             tools=[*tools_for(GRAPH), (schema, change)])
+    assert filed == {"id": "person:ada"}
+    assert [t["function"]["name"] for t in model.offered[0]] == \
+        ["look_up", "look_at", "show", "request_change"]
+
+
+def test_a_path_question_under_few_is_answered_by_reading_not_by_a_faked_tool():
+    """The honest part. There is no `path_between` in this offer, so nothing pretends
+    there is: look_up's description and the system prompt say to read both ends and follow
+    what each is joined to, and the loop does exactly that -- Ada, then the topic she is
+    joined to, then Bea. Mutation: fold the path into look_up's description as a form of
+    words ("ask for a path as 'path A to B'") and the model spends its turns on a call
+    nothing answers."""
+    from ml_stack.graph.ask import FEW_SYSTEM_SENTENCE, PATH_CLAUSE
+
+    model = SayingModel([call("look_up", texts=["Ada Lovelace", "Bea Marlow"]),
+                         call("look_at", ids=["person:ada"]),
+                         call("look_at", ids=["topic:compilers", "person:bea"]),
+                         call("show", ids=["person:ada", "topic:compilers", "person:bea"])],
+                        "Ada and Bea are connected through compilers.")
+    out = converse("how are Ada and Bea connected?", GRAPH, model, few=True)
+    assert [t["function"]["name"] for t in model.offered[0]] == \
+        ["look_up", "look_at", "show"]
+    assert "path_between" not in {t["function"]["name"]
+                                  for turn in model.offered for t in turn}
+    assert out.show == ["person:ada", "topic:compilers", "person:bea"], \
+        "the chain, read rather than traced"
+    assert out.path == [], "nothing traced a path, and nothing claims to have"
+
+    system = model.seen[0][0]["content"]
+    assert PATH_CLAUSE not in system, "the clause naming a tool this offer lacks is gone"
+    assert FEW_SYSTEM_SENTENCE in system
+    assert "path A to B" not in system, "no invented calling convention"
+
+    plain = ScriptedModel([])
+    converse("who?", GRAPH, plain)
+    assert PATH_CLAUSE in plain.seen[0][0]["content"], "and untouched when few is off"
+
+
+def test_rounds_is_what_a_way_may_spend_and_reaches_the_loop():
+    """`few` and `single` both want more tool-calling turns and `batch` wants fewer, which
+    is why the ceiling is measured beside them rather than fixed for every model."""
+    from ml_stack.graph.ask import ROUNDS
+
+    asking = [call("look_up", text="compil")] * 6
+    two = ScriptedModel(list(asking))
+    assert converse("who?", GRAPH, two, rounds=2).rounds <= 2
+    many = ScriptedModel(list(asking))
+    assert converse("who?", GRAPH, many, rounds=5).rounds > 2
+    assert ROUNDS == 10, "the library default, which a way that says nothing keeps"
+
+
 # -- the kind the question asked for ---------------------------------------------------------
 
 def test_asked_kinds_reads_the_question_word():

@@ -492,6 +492,124 @@ def _batched(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+# ------------------------------------------------------------------ one entry at a time
+#
+# The opposite of `batch`, and it is here for the opposite model. A fat tool result is a
+# long thing to hold in mind, and a small model handed a dozen entries in one message
+# answers about the last one it read or about none of them -- the thread goes, and what
+# comes back is fluent and about nothing. So this asks for the other trade: one entry per
+# read, more turns, each result short enough to still be in view when the answer is
+# written.
+#
+# Which of the two a model wants is not a matter of taste and is not one answer for every
+# model. It is a number in a store: `ml-stack-bench --also single` measures it against
+# `--also batch` on one load, and the profile keeps whichever won.
+#
+# Said on copies, for the same reason as RICH, TIGHT and BATCH: with the flag off the
+# descriptions and the system prompt stay byte for byte as they were.
+SINGLE_SYSTEM_SENTENCE = (
+    "Read one entry at a time. Put a single id in look_at and a single id in look_around, "
+    "then call again for the next one; look one word up at a time in the same way. You "
+    "have turns to spend, and a short result you can still see when you write the answer "
+    "is worth more than a long one you had to skim.")
+# What a turn is told when it read several entries in one call.
+SINGLE_NUDGE = ("You read several entries in one call. Read them one at a time instead: put "
+                "a single id in the next look_at or look_around, and call it again for the "
+                "next one.")
+# The worked example each searching tool gains -- one thing in the list, written out, for
+# the same reason BATCH_EXAMPLES writes out three.
+SINGLE_EXAMPLES = {
+    "look_up": " One word to a call: {\"texts\": [\"pottery\"]}, then another call for "
+               "\"firing\". Two words in one call give you two sets of hits to hold at once.",
+    "look_at": " One id to a call: {\"ids\": [\"person:wren\"]}, then another call for "
+               "{\"ids\": [\"person:hollis\"]}. What comes back is then short enough to "
+               "still be in front of you when you write the answer.",
+    "look_around": " One id to a call here too: {\"ids\": [\"topic:ceramics\"]}, then "
+                   "another call for the next neighbourhood.",
+}
+
+
+def _singled(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Those schemas, copied, with each searching tool shown a one-entry call."""
+    out = copy.deepcopy(list(schemas))
+    for schema in out:
+        more = SINGLE_EXAMPLES.get(str(schema["function"]["name"]))
+        if more:
+            schema["function"]["description"] += more
+    return out
+
+
+def _all_at_once(reply: Any) -> bool:
+    """Whether that reply read more than one entry in a single reading call.
+
+    The shape `single` exists to stop, and the mirror of `_one_by_one`: one `look_at`
+    carrying three ids is the fat result the thread gets lost in, however few calls the
+    turn made.
+    """
+    for call in (getattr(reply, "tool_calls", None) or []):
+        fn = call.get("function") or {}
+        if str(fn.get("name") or "") not in ("look_at", "look_around"):
+            continue
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            continue
+        if isinstance(args, Mapping) and len(list(args.get("ids") or ())) > 1:
+            return True
+    return False
+
+
+# ------------------------------------------------------------------ three tools, not eight
+#
+# Every schema in the offer is a decision the model makes before it reaches the one that
+# matters, and for some models the choosing itself is what goes wrong: eight descriptions
+# in, it picks `list_kind` for a question about two people. `few` offers three -- look_up,
+# look_at, show -- and takes away every other way of looking.
+#
+# Nothing is renamed and nothing is faked. There is no path tool and no listing tool in
+# this offer, so what look_up's description gains is how to answer those questions with
+# what is actually there: look both ends up, read them, and read on to whatever they are
+# joined to. Telling the model to "ask for a path as 'path A to B'" would be a tool that
+# does not exist, and a model that believed it would spend every turn it has on a call
+# nothing answers.
+FEW_TOOLS = ("look_up", "look_at", "show")
+FEW_SENTENCE = (
+    "This offer holds three tools and no others -- look_up, look_at and show -- so nothing "
+    "here traces a path or lists a kind for you. A question about how two entries are "
+    "connected is answered by looking both of them up, reading them, and reading on to "
+    "whatever they are joined to; a question about which entries of a kind there are is "
+    "answered by looking the kind's own words up and reading what comes back.")
+# The clause of SYSTEM that names a tool this offer does not have, and what it becomes.
+# Swapped rather than argued with, exactly as tight swaps the show paragraph.
+PATH_CLAUSE = ("and when the question is about how two things relate, trace the path "
+               "between them.")
+FEW_PATH_CLAUSE = ("and when the question is about how two things relate, read both ends "
+                   "and follow what each of them is joined to.")
+FEW_SYSTEM_SENTENCE = (
+    "You have three tools and no others: look_up finds entries by name, look_at reads what "
+    "is held on them and what they are joined to, and show says what your answer is about. "
+    "There is no path tool and no listing tool here; read your way to both of those.")
+
+
+def _few(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Those schemas, copied, with every way of looking but look_up and look_at taken away.
+
+    A tool that does not search is kept, whoever added it: this is about what the choosing
+    costs, and `show` -- or a caller's change request -- is not a choice between ways to
+    look. `look_up` is told what the offer no longer has, and how to answer those questions
+    with what it does.
+    """
+    out: list[dict[str, Any]] = []
+    for schema in copy.deepcopy(list(schemas)):
+        name = str((schema.get("function") or {}).get("name") or "")
+        if name in SEARCHING and name not in FEW_TOOLS:
+            continue
+        if name == "look_up":
+            schema["function"]["description"] += " " + FEW_SENTENCE
+        out.append(schema)
+    return out
+
+
 # ------------------------------------------------------------------ what kind was asked for
 #
 # The precision miss that is not a retrieval failure. Measured 2026-09-02 on
@@ -1186,7 +1304,7 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False, rich: bool = False,
               tight: bool = True, reach: int | None = None,
-              batch: bool = False,
+              batch: bool = False, single: bool = False, few: bool = False,
               summary: bool = False) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
@@ -1211,8 +1329,13 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     makes fewer calls. See `converse`.
 
     ``batch`` shows each searching tool a three-entry call, on a copy -- the rest of what
-    it does is `converse`'s. ``summary`` adds the `summarise` tool: the whole graph at a
-    glance, computed without a model, for the broad question no search reaches.
+    it does is `converse`'s. ``single`` is its opposite and shows each of them a one-entry
+    call, for the model that loses the thread of a long result. ``few`` takes away every
+    way of looking but `look_up` and `look_at`, and tells look_up what the offer no longer
+    has, for the model whose tool choice degrades with the number of schemas; a tool that
+    does not search is kept whoever added it. ``summary`` adds the `summarise` tool: the
+    whole graph at a glance, computed without a model, for the broad question no search
+    reaches -- and `few`, offering three, takes it away again.
     """
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
@@ -1266,6 +1389,12 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
         schemas = [*schemas, SUMMARY_SCHEMA]
     if batch:
         schemas = _batched(schemas)
+    if single:
+        schemas = _singled(schemas)
+    if few:
+        # after the worked calls and before tight: what is taken away is taken away
+        # whatever was written on it, and tight is about `show`, which stays
+        schemas = _few(schemas)
     if tight:
         schemas = _tight(schemas)
     # in the order the schemas are written, which is the order a model reads them in
@@ -1274,7 +1403,7 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
 
 # What each way of asking is when nobody says: a profile fills in only what is still this.
 _UNSAID = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
-           "summary_tool": False}
+           "summary_tool": False, "single": False, "few": False, "rounds": ROUNDS}
 
 
 def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
@@ -1305,6 +1434,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              opening: Sequence[str] = (), rich: bool = False,
              tight: bool = True, reach: int | None = None, summary: Any = None,
              recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
+             single: bool = False, few: bool = False,
              summary_tool: bool = False, profile: Any = None) -> Answer:
     """One question, answered with the graph in hand.
 
@@ -1344,7 +1474,10 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     follow it, each marked as recalled, before the window. With neither, the messages are
     byte for byte what they were.
 
-    Three ways of asking, each off by default and each measured by `ml-stack-bench --also`:
+    Five ways of asking, each off by default and each measured by `ml-stack-bench --also`.
+    None of them is a default waiting to be promoted: they exist so that one model can be
+    asked the way *it* measured best while another is asked the opposite, and which is
+    which lives in a profile (see ``profile`` below), never in a habit:
 
     ``batch`` is all the lookups in one turn. The system prompt gains a sentence saying the
     ids are a list, each searching tool's description gains a worked three-entry call, and a
@@ -1363,22 +1496,44 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     most-mentioned entries of each kind, the busiest relations -- computed without a model,
     for the broad question ("what is this group about?") that no search reaches.
 
+    ``single`` is `batch` turned around, for the model that loses the thread of a long tool
+    result rather than running out of turns: the system prompt says to read one entry at a
+    time, each searching tool is shown a one-entry call, and a turn that reads several
+    entries at once is told once to read them one at a time. It buys short results and
+    spends rounds, which is exactly the trade `batch` makes in the other direction.
+
+    ``few`` offers three tools -- `look_up`, `look_at`, `show` -- and takes away every other
+    way of looking, for the model whose tool choice degrades with the number of schemas. No
+    tool is faked to cover what went: look_up's description says the offer has no path tool
+    and no listing tool, and says how to answer those questions by reading, which is what
+    the loop then does. Anything that does not search -- a caller's change request -- is
+    kept, because it is not a choice between ways to look.
+
+    ``rounds`` is not a way but is measured beside them: how many tool-calling turns a
+    question may spend before it must answer. `few` and `single` both want more of them and
+    `batch` wants fewer, which is the whole reason they are measured together.
+
     ``profile`` is a :class:`~ml_stack.serve.Profile` or a model name, and supplies those
     ways from what that model *measured* best rather than from what a caller remembered:
     Flash-Next wants batch, kinds and summary together and gemma-4 wants none of them, and
-    which is which is a number in a store, not a habit. It fills in only what this call
-    left unsaid -- see `_under`.
+    which is which is a number in a store, not a habit. One asking per model is the point --
+    a model that answers better on three tools and twenty rounds is asked that way, and the
+    one that answers better on eight tools and six is not asked to match it. It fills in
+    only what this call left unsaid -- see `_under`.
     """
     if profile is not None:
         said = _under(profile, {"rich": rich, "tight": tight, "reach": reach,
                                 "kinds": kinds, "batch": batch,
-                                "summary_tool": summary_tool})
+                                "summary_tool": summary_tool, "single": single,
+                                "few": few, "rounds": rounds})
         rich, tight, reach = said["rich"], said["tight"], said["reach"]
         kinds, batch, summary_tool = said["kinds"], said["batch"], said["summary_tool"]
+        single, few, rounds = said["single"], said["few"], int(said["rounds"])
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled, kinds=kinds, batch=batch, summary_tool=summary_tool)
+                     recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
+                     summary_tool=summary_tool)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -1390,6 +1545,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     opening: Sequence[str] = (), rich: bool = False,
                     tight: bool = True, reach: int | None = None, summary: Any = None,
                     recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
+                    single: bool = False, few: bool = False,
                     summary_tool: bool = False) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
@@ -1403,7 +1559,8 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled, kinds=kinds, batch=batch, summary_tool=summary_tool)
+                     recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
+                     summary_tool=summary_tool)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -1540,11 +1697,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
               rich: bool = False, tight: bool = True, reach: int | None = None,
               summary: Any = None, recalled: Sequence[Any] = (), kinds: bool = False,
-              batch: bool = False, summary_tool: bool = False) -> Answer:
+              batch: bool = False, single: bool = False, few: bool = False,
+              summary_tool: bool = False) -> Answer:
     given = tools is not None
     if tools is None:
         tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach,
-                          batch=batch, summary=summary_tool)
+                          batch=batch, single=single, few=few, summary=summary_tool)
     elif finder is not None:
         def _found(args: Mapping[str, Any]) -> Any:
             wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
@@ -1565,6 +1723,16 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # the same as tight: a caller's own tools are described on a copy, never in place
         told = _batched([schema for schema, _ in tools])
         tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
+    if single and given:
+        told = _singled([schema for schema, _ in tools])
+        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
+    if few and given:
+        # this one takes schemas away rather than rewriting them, so the callables are
+        # matched back by name: a caller's own acting tool keeps the function it came with
+        kept = {str((schema.get("function") or {}).get("name") or ""): schema
+                for schema in _few([schema for schema, _ in tools])}
+        tools = [(kept[name], fn) for schema, fn in tools
+                 if (name := str((schema.get("function") or {}).get("name") or "")) in kept]
     if tight and given:
         # a caller's own tools carry a show of their own; tight is about what it says
         told = _tight([schema for schema, _ in tools])
@@ -1577,6 +1745,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         system = system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
     if batch:
         system = system + "\n\n" + BATCH_SYSTEM_SENTENCE
+    if single:
+        system = system + "\n\n" + SINGLE_SYSTEM_SENTENCE
+    if few:
+        # the prompt names `path_between` in its second sentence, and this offer has no
+        # such tool: swapped for what to do instead, never left to be reached for
+        system = system.replace(PATH_CLAUSE, FEW_PATH_CLAUSE) + "\n\n" + FEW_SYSTEM_SENTENCE
     lit = [str(h) for h in held if str(h) in known]
     if lit:
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
@@ -1816,6 +1990,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
 
     answered = False
     nudged = False
+    nudged_single = False
     for _ in range(rounds):
         if repeats >= REPEATS:
             # going in circles: the loop ends here and the answer is asked for below
@@ -1835,6 +2010,13 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             messages.append({"role": "user", "content": BATCH_NUDGE})
             out.spent.part("question", BATCH_NUDGE)
             out.steps.append("asked it to read the rest in one call")
+        # And the same thing from the other end: it read several entries at once, which is
+        # the fat result `single` exists to avoid. Said once, for the same reason.
+        if single and not nudged_single and _all_at_once(reply):
+            nudged_single = True
+            messages.append({"role": "user", "content": SINGLE_NUDGE})
+            out.spent.part("question", SINGLE_NUDGE)
+            out.steps.append("asked it to read one at a time")
         # Once it has said what its answer is about, more searching cannot improve that --
         # `show` is the last thing a turn does, and a round after it is a round trip spent
         # to be told the same. Only when the round did nothing else: a turn that showed and

@@ -35,6 +35,7 @@ from ml_stack.graph.bench.score import (
     NOISE,
     _head_of,
     derived,
+    held_up,
     host_of,
     hosts_of,
     per_question,
@@ -42,8 +43,8 @@ from ml_stack.graph.bench.score import (
 from ml_stack.graph.bench.show import drafted, kv_short, made
 
 __all__ = ["ASKINGS", "Doc", "WAYS", "across", "answering", "asking_of", "build_of",
-           "by_model", "cache_of", "fit_for", "fits_named", "head_of", "model_of",
-           "profile_of", "recommended_head", "report", "thinking_of", "ways_of",
+           "by_model", "cache_of", "fit_for", "fits_named", "head_of", "measured_best",
+           "model_of", "profile_of", "recommended_head", "report", "thinking_of", "ways_of",
            "write_profiles"]
 
 
@@ -203,7 +204,8 @@ def fit_for(model: str, fits: Sequence[Any]) -> Any | None:
 # than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
 # on a way rather than naming one, and a profile has to carry them or a model measured with
 # all three would be served with none.
-WAYS = ("tight", "batch", "kinds", "summary", "rich", "terse", "reach")
+WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse", "reach",
+        "rounds")
 
 
 def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
@@ -221,14 +223,16 @@ def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
     said = one.get("asking")
     if isinstance(said, Mapping) and said:
         out: dict[str, Any] = {"tight": bool(said.get("tight", True))}
-        for way in ("batch", "kinds", "summary", "rich", "terse"):
+        for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few"):
             out[way] = bool(said.get(way, False))
         if said.get("reach"):
             out["reach"] = int(said["reach"])
+        if said.get("rounds"):
+            out["rounds"] = int(said["rounds"])
         return out
     words = {w for w in _WORD.split(str(one.get("label") or "").lower()) if w}
     out = {"tight": "loose" not in words}
-    for way in ("batch", "kinds", "summary", "rich", "terse"):
+    for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few"):
         out[way] = way in words
     if "reach" in words:
         from ml_stack.graph.bench.run import REACH
@@ -259,6 +263,35 @@ def build_of(server: Mapping[str, Any]) -> str:
         except ValueError:
             return ""
     return named.parts[0] if named.parts else ""
+
+
+def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
+                  ) -> Mapping[str, Any] | None:
+    """The run one model's record should be written from: the fastest whose F1 held.
+
+    `across` ranks by F1 alone, which is the right question for "which model answers best"
+    and the wrong one for "how should this model be asked". Two askings the questions
+    cannot tell apart are not two accuracies -- their 95% bands overlap, which is all
+    twenty questions can say -- and between them the record takes the cheaper one, because
+    the seconds are a difference the questions *can* see. Held is `score.held_up`: it did
+    not fall at all, or the fall is inside what the questions can account for (`bands` and
+    `separated`, with the fixed `NOISE` where a run carries no interval).
+
+    Compared only among a model's longest runs, for `across`'s reason: a score means
+    nothing beside a score over a different number of questions. Ties -- two rows at the
+    same seconds -- go to the higher F1, then to the later run.
+    """
+    pool = [one for one in mine if derived(one)]
+    if not pool:
+        return None
+    floor = full_n or max(derived(one)["questions"] for one in pool)
+    pool = [one for one in pool if derived(one)["questions"] >= floor]
+    if not pool:
+        return None
+    best = max(pool, key=lambda o: (derived(o)["right"], str(o.get("at") or "")))
+    held = [one for one in pool if held_up(one, best)] or [best]
+    return min(held, key=lambda o: (per_question(o), -derived(o)["right"],
+                                    str(o.get("at") or "")))
 
 
 def profile_of(model: str, one: Mapping[str, Any]) -> Any:
@@ -301,9 +334,10 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
         precision=float(got.get("precision") or 0.0),
         seconds_per_question=float(per_question(one)),
         host=host_of(one),
-        note=(f"set from the best row of the store: `{one.get('label') or '?'}`, "
+        note=(f"set from the fastest row whose F1 held: `{one.get('label') or '?'}`, "
               f"{int(got.get('questions') or 0)} question(s) at "
-              f"{float(got.get('right') or 0.0) * 100:.0f}% F1"),
+              f"{float(got.get('right') or 0.0) * 100:.0f}% F1, "
+              f"{float(per_question(one)):.1f} s/question"),
         **ways_of(one))
 
 
@@ -311,14 +345,20 @@ def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
                    path: Path | None = None) -> list[tuple[Any, Path]]:
     """Write one record per model, from the row `across` ranks it by. Returns what it wrote.
 
-    The ranking is where this belongs: "best" there is already the best F1 among a model's
-    *longest* runs, which is the only comparison that means anything, and a profile written
-    from anything looser would be a shape chosen by a coin toss over two questions.
+    The ranking fixes the *order* and `measured_best` fixes the *row*. They are not the
+    same question: the ranking asks which model answers best, and a record asks how this
+    model should be asked, where two askings the questions cannot tell apart should be
+    settled by the seconds rather than by a hundredth of an F1. Both read only a model's
+    longest runs, so a profile is never a shape chosen by a coin toss over two questions.
     """
     from ml_stack.serve.profile import add
 
+    grouped = by_model(kept)
     out = []
-    for model, one in across(kept, full_n=full_n):
+    for model, _ranked in across(kept, full_n=full_n):
+        one = measured_best(grouped.get(model) or (), full_n=full_n)
+        if one is None:
+            continue
         made_one = profile_of(model, one)
         out.append((made_one, add(made_one, path=path)))
     return out

@@ -143,6 +143,7 @@ def shape_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
 # (`report` has a `WAYS` of its own, the words a *label* can carry; this is the record's
 # flags in the order a shape names them, and the two must not share a name in `bench`.)
 SHOWN_WAYS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
+              ("single", "single"), ("few", "few"),
               ("kinds", "kinds"), ("summary", "summary"))
 
 
@@ -170,6 +171,10 @@ def asked_as(one: Mapping[str, Any]) -> str:
     reach = int(asking.get("reach") or 0)
     if reach:
         bits.append(f"+reach{reach // 1000}k" if reach % 1000 == 0 else f"+reach{reach}")
+    if asking.get("rounds"):
+        # how many tool-calling turns a question had: `few` and `single` both want more of
+        # them than `batch` does, so two runs that differ only here are two measurements
+        bits.append(f"+rounds{int(asking['rounds'])}")
     if asking.get("shortlist"):
         bits.append(f"+list{int(asking['shortlist'])}")
     return "".join(bits) or "tight"

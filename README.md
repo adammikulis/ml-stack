@@ -504,6 +504,41 @@ brackets, and the busiest relations, computed from the graph with no model call 
 `ml-stack-bench --also batch --also kinds --also summary` measures all three against the
 default on one load.
 
+**Two more, pulling the other way: `single` and `few`.** `converse(..., single=True)` is
+`batch` turned around, and it is here for the opposite model. A fat tool result is a long
+thing to hold in mind: a small model handed a dozen entries in one message answers about the
+last one it read, or about none of them, and what comes back is fluent and about nothing. So
+the system prompt says to read one entry at a time, each searching tool's description gains a
+worked *one*-entry call, and a turn that reads several at once is told once to read them one
+at a time. It buys short results and spends rounds — exactly the trade `batch` makes in the
+other direction. `converse(..., few=True)` offers three tools — `look_up`, `look_at`, `show`
+— and takes away every other way of looking, for the model whose tool choice degrades with
+the number of schemas rather than with the question. **Nothing is faked to cover what went.**
+There is no path tool and no listing tool in that offer, so look_up's description and the
+system prompt say so, and say how to answer those questions with what is there: look both
+ends up, read them, and read on to whatever they are joined to. A description telling the
+model to "ask for a path as `path A to B`" would be a tool that does not exist, and a model
+that believed it would spend every turn it has on a call nothing answers. Anything that does
+not search survives `few` — `show`, and a caller's own change request — because it is not a
+choice between ways to look. `converse(..., rounds=N)` is the ceiling those two trade
+against: `--rounds N` rides on every way a sweep asks, the way `--reach` does.
+
+**One asking per model.** These ways exist to be *chosen per model by measurement*, never
+picked once and applied to everything. Flash-Next wants batch, kinds and summary together;
+a 2B that loses the thread of a long result wants `single` and more rounds; a model whose
+tool choice degrades with the offer wants `few` and more rounds still — and which is which
+is a number in a store, not a taste. The same goes for sampling: a model is measured at the
+temperature, top-p and top-k that suit *it*, not at one setting shared by all. So the choice
+lives in the model's **profile** (`ml_stack/data/profiles.json`,
+`ml_stack.serve.profile`, "A model's measured shape" below):
+`ml-stack-bench report --profile`
+writes, per model, the asking and the sampling of the fastest row whose F1 the questions
+could not tell apart from the best — F1 alone would trade real seconds for a hundredth of a
+point it cannot see — with the label of the row that set it. `converse(..., profile=MODEL)`
+then asks that way, filling in only what the call left unsaid, and `ml-stack-serve profile
+MODEL` reads it out: `ask with tight + few + rounds 20 at temperature 1.0 / top-p 0.95 /
+top-k 20`.
+
 **The page's routes come with the page.** `graph.html` streams its answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
 `ml_stack.graph.serve.AskRoutes` is that server side for any `http.server` handler. A
@@ -852,6 +887,14 @@ Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
   measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
 ```
 
+Another record in the same file is asked nothing like it, which is the point. Where a model
+measured better on a short offer, more turns and its publisher's own sampling, its `ask with`
+line reads:
+
+```
+  ask with    tight + few + rounds 20 at temperature 1.0 / top-p 0.95 / top-k 20
+```
+
 Because no two models want the same shape. Flash-Next answers well only on a fork build,
 with the shared MTP head at four, a q8_0 cache, its thinking off, `-ub 2048`,
 `--spec-draft-p-min 0.5` and three ways of asking at once; gemma-4 wants its thinking left
@@ -878,12 +921,20 @@ matched only by family (the same weights at another quantisation) comes back wit
 saying so: a shape measured on Q4_K_XL is the right place to start for IQ4_XS and is not a
 measurement of it.
 
-Nothing writes a record by hand. `ml-stack-bench report --profile` takes each model's best
-row — the same ranking `show --rank` writes, best F1 among that model's longest runs — and
-writes the build, head, cache, thinking, context and asking it was served with, saying in
-the record which row it was. The two things a kept run cannot see (llama-server's own extra
-flags and the vision projector) are carried from the record already there rather than
-erased.
+Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model, **the
+fastest row whose F1 the questions could not tell apart from the best** — among that model's
+longest runs, held is `score.held_up`, the two 95% bands overlapping — and writes the build,
+head, cache, thinking, context, asking and sampling it was served and asked with, saying in
+the record which row it was. Best F1 alone would trade real seconds for a hundredth of a
+point the questions cannot see; ranking *models* is still F1, because that is a different
+question. The two things a kept run cannot see (llama-server's own extra flags and the
+vision projector) are carried from the record already there rather than erased.
+
+The asking a record carries is the whole asking: `tight`, `batch`, `single`, `few`, `kinds`,
+`summary`, `rich`, `terse`, `reach` and `rounds`, plus the sampling — so a model measured on
+three tools, twenty rounds and its publisher's temperature is served and asked exactly that,
+while the next model in the same file is asked the opposite. One asking per model, and every
+one of them a number somebody paid for.
 
 **Every load preflights first.** Before a process starts, `LlamaServerBackend.start` checks
 that every shard of the GGUF is present and complete (an `hf:` reference is resolved through
@@ -1449,9 +1500,17 @@ on a run from before it was counted, because not counted is not none.
 `sweep --serve` asks the same served model in several ways for one load: `--also terse`
 describes the tools briefly, `--also card` asks with the model's own sampling, `--also
 greedy` at temperature 0, `--also rich` has `look_up` say what matched and why, with a
-topic hit bringing the people joined to it, and `--also loose` asks the old way — `show`
+topic hit bringing the people joined to it, `--also loose` asks the old way — `show`
 told to name what the answer is about, uncapped — as a control against the tight asking
-every run now uses. (`--also tight` is what the first way already does, and says so.)
+every run now uses, `--also reach` gives one tool result a page of neighbourhood rather than
+a flat character cut, `--also batch` asks for every read in one call, `--also single` asks
+for the opposite (one entry a read, more turns), `--also few` offers three tools and no
+other way of looking, `--also kinds` keeps only the kind the question asked for, and `--also
+summary` offers the whole graph at a glance. (`--also tight` is what the first way already
+does, and says so.) `--reach N` and `--rounds N` are not ways of their own: they ride on
+every way, as `--batch`, `--kinds` and `--summary` do. There is no asking every model wants,
+which is the point of measuring ten of them on one load — `report --profile` then writes the
+winner into that model's record.
 
 ```
 ml-stack-bench sweep --serve gemma-4-E2B-it --also terse --also card --detach

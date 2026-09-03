@@ -330,8 +330,14 @@ def test_a_model_nothing_measured_changes_nothing_about_the_asking():
 
 # -- ml-stack-bench report --profile ------------------------------------------------------
 
-def keep_run(store, label: str, *, right: float = 0.8, n: int = 10, **held) -> str:
-    """One run through the store the bench actually keeps runs in -- no JSON by hand."""
+def keep_run(store, label: str, *, right: float = 0.8, n: int = 10,
+             seconds: float = 2.0, **held) -> str:
+    """One run through the store the bench actually keeps runs in -- no JSON by hand.
+
+    ``seconds`` is the wall clock of each question, so a row can be made cheap or dear
+    without changing what it got right: which of two rows a record is written from is a
+    question about both at once.
+    """
     from ml_stack.graph import bench
     from ml_stack.graph.bench import Row
 
@@ -340,7 +346,7 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 10, **held) -> s
         rows.append(Row(label=label, question=f"who is here, question {question}?",
                         expected=["person:ada"],
                         shown=["person:ada"] if question < round(right * n) else [],
-                        seconds=2.0, calls=2, processed_tokens=100,
+                        seconds=seconds, calls=2, processed_tokens=100,
                         completion_tokens=10))
     server = {"model": MODEL, "binary": "/builds/current/llama-server", "slots": 2,
               "context": 65536, "host": "ladybug", **held}
@@ -382,10 +388,101 @@ def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
     assert ways_of({"label": "thornfield--plain", "asking": said}) == {
         "tight": True, "batch": True, "kinds": False, "summary": False, "rich": False,
-        "terse": False, "reach": 8000}
+        "terse": False, "single": False, "few": False, "reach": 8000}
     assert ways_of({"label": "thornfield--loose-plain-kinds"}) == {
         "tight": False, "batch": False, "kinds": True, "summary": False, "rich": False,
-        "terse": False}, "an older run has only its label, read by whole word"
+        "terse": False, "single": False, "few": False}, \
+        "an older run has only its label, read by whole word"
+    # the ways of one asking per model: a record has to carry them or a model measured on
+    # three tools and twenty turns would be served with eight and ten
+    assert ways_of({"label": "x", "asking": {"tight": True, "few": True, "single": True,
+                                             "rounds": 20}}) == {
+        "tight": True, "batch": False, "kinds": False, "summary": False, "rich": False,
+        "terse": False, "single": True, "few": True, "rounds": 20}
+
+
+def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_path):
+    """One asking per model, chosen by measurement. `across` ranks models by F1, which is
+    the right question for "which model answers best" and the wrong one for "how should
+    this model be asked": two askings whose 95% bands overlap are not two accuracies, and
+    between them the record takes the cheaper one, because the seconds are a difference
+    the questions can see.
+
+    Three rows over the same twenty questions: a slow one a hair ahead on F1, a fast one
+    whose band overlaps it, and a fast one that is genuinely worse -- separated, its band
+    clear below. The record has to take the middle one.
+
+    Mutation: rank by F1 alone and the slow row wins; drop the `held_up` guard and the
+    cheap wrong one does.
+    """
+    from ml_stack.graph import bench
+    from ml_stack.graph.bench.report import measured_best, write_profiles
+
+    store = str(tmp_path / "runs.ladybug")
+    keep_run(store, "thornfield--plain-batch", right=0.75, n=20, seconds=6.0,
+             asking={"tight": True, "batch": True})
+    keep_run(store, "thornfield--plain-few", right=0.70, n=20, seconds=1.0,
+             asking={"tight": True, "few": True, "rounds": 20})
+    keep_run(store, "thornfield--plain-single", right=0.10, n=20, seconds=0.5,
+             asking={"tight": True, "single": True})
+
+    kept = bench.runs(store)
+    from ml_stack.graph.bench.score import band, separated
+
+    slow = next(o for o in kept if o["label"].endswith("batch"))
+    quick = next(o for o in kept if o["label"].endswith("few"))
+    poor = next(o for o in kept if o["label"].endswith("single"))
+    assert band(quick) is not None, "twenty questions carry an interval"
+    assert separated(quick, slow) is False, "the questions cannot tell these two apart"
+    assert separated(poor, slow) is True, "and they can tell this one from both"
+
+    chosen = measured_best(kept)
+    assert chosen["label"] == "thornfield--plain-few"
+
+    where = tmp_path / "written.json"
+    write_profiles(kept, path=where)
+    one = prof.profiles(package=where, local=where)[0]
+    assert (one.few, one.rounds, one.batch, one.single) == (True, 20, False, False), \
+        "the winning row's asking, written down whole"
+    assert one.label == "thornfield--plain-few", "and the record says which row set it"
+    assert one.label in one.note and "fastest" in one.note
+
+
+def test_the_asking_a_profile_writes_is_the_whole_asking_and_reaches_converse():
+    """Every way the bench can measure has to survive the round trip into a record and back
+    out as `converse`'s keywords: a way measured and then dropped on the way to the record
+    is a measurement paid for and thrown away."""
+    made = record(MODEL, tight=True, few=True, single=False, batch=False, rounds=20,
+                  reach=8000, kinds=True, summary=True, rich=True,
+                  sampling={"temperature": 1.0, "top_p": 0.95, "top_k": 20})
+    assert made.asking() == {"tight": True, "kinds": True, "rich": True, "few": True,
+                             "summary_tool": True, "reach": 8000, "rounds": 20}
+    read_back = Profile.from_dict(made.as_dict())
+    assert read_back.asking() == made.asking()
+
+    add(made)
+    watching = Watcher()
+    converse("who is here?", GRAPH, watching, profile=MODEL)
+    assert watching.offered[0] == ["look_up", "look_at", "show"], \
+        "the record measured three tools, so three are what the model is offered"
+
+
+def test_the_shape_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
+    """A model card asking for temperature 1.0 and a measurement agreeing with it is the
+    thing a person about to serve it needs to see, not infer. Greedy is one word, because
+    at temperature 0 nothing else can change an argument."""
+    text = said(measured(few=True, rounds=20, sampling={"temperature": 1.0, "top_p": 0.95,
+                                                        "top_k": 20}))
+    line = next(one for one in text.splitlines() if "ask with" in one)
+    assert "few" in line and "rounds 20" in line
+    assert "at temperature 1.0 / top-p 0.95 / top-k 20" in line
+    assert "greedy" not in line
+
+    greedy = next(one for one in said(measured()).splitlines() if "ask with" in one)
+    assert greedy.endswith("greedy") and "temperature" not in greedy
+
+    bare = next(one for one in said(record(OTHER)).splitlines() if "ask with" in one)
+    assert bare.strip() == "ask with    tight".strip() or bare.endswith("tight")
 
 
 def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):

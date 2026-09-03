@@ -1026,7 +1026,8 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
            embed_url: str = "", embed_model: str = "", terse: bool = False,
            margin: float = MARGIN, rich: bool = False,
            tight: bool = True, reach: int | None = None, batch: bool = False,
-           kinds: bool = False, summary: bool = False) -> Callable[..., Any]:
+           kinds: bool = False, summary: bool = False, single: bool = False,
+           few: bool = False, rounds: int | None = None) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     Nothing here is any project's: it is `converse` over the graph you handed in. Two
@@ -1056,6 +1057,15 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     ``summary`` is a thread's rolling summary and the two must never be confused). Like
     ``rich`` and ``reach``, each is sent only when it is asked for, so a run that asked
     for none reaches `converse` byte for byte as it always did.
+
+    ``single``, ``few`` and ``rounds`` are the same again, and they are why this list is a
+    space rather than a set of defaults. ``single`` is ``batch`` turned around -- one entry
+    to a read, more turns -- for the model that loses the thread of a long tool result;
+    ``few`` offers three tools (look_up, look_at, show) and no other way of looking, for
+    the model whose tool choice degrades with the number of schemas; ``rounds`` is how many
+    tool-calling turns a question may spend, which is the thing the other two trade against
+    each other. Measuring them is the only way one model gets asked with three tools and
+    twenty rounds while another gets eight and six -- see `ml_stack.serve.profile`.
 
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
     which one it measured, and ``.asking``, which is the way itself: every keyword above
@@ -1099,7 +1109,7 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         # tools it is handed, and the terse set is handed in rather than chosen inside
         extra: dict[str, Any] = (
             {"tools": tools_for(graph, terse=True, finder=finder, tight=tight, reach=reach,
-                                batch=batch, summary=summary)}
+                                batch=batch, single=single, few=few, summary=summary)}
             if terse else {})
         if rich:
             extra["rich"] = True
@@ -1113,10 +1123,19 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
             # `summary_tool`, and passing this one as that one would hand a bool to
             # something that reads text
             extra["summary_tool"] = True
+        if single:
+            extra["single"] = True
+        if few:
+            extra["few"] = True
         if reach:
             # sent only when there is one: `None` is the default, and a way that asked for
             # no reach must reach `converse` byte for byte as it always did
             extra["reach"] = int(reach)
+        if rounds:
+            # `converse`'s own ceiling on tool-calling turns, sent the same way and for the
+            # same reason: unset is `ask.ROUNDS`, and a way that said nothing must not
+            # pin it here
+            extra["rounds"] = int(rounds)
         return converse(question, graph, client, opening=opening, finder=finder,
                         turns=list(turns), **extra)
 
@@ -1142,7 +1161,9 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
         "tight": bool(tight), "terse": bool(terse),
         **({"rich": True} if rich else {}), **({"batch": True} if batch else {}),
         **({"kinds": True} if kinds else {}), **({"summary": True} if summary else {}),
+        **({"single": True} if single else {}), **({"few": True} if few else {}),
         **({"reach": int(reach)} if reach else {}),
+        **({"rounds": int(rounds)} if rounds else {}),
         **({"shortlist": int(shortlist)} if shortlist else {}),
     }
     return ask

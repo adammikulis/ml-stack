@@ -3985,6 +3985,102 @@ def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypa
     assert all("summary" not in w for w in got)
 
 
+# -- one entry at a time, three tools, and how many turns ------------------------------------
+#
+# Two more askings and a ceiling, and they are here because there is no one asking every
+# model wants (Adam, 2026-09-02: "some will need more tool calling turns with fewer tools
+# per turn, some the other way"). What the bench has to do is measure them against each
+# other on one load and write down which won.
+
+def test_single_and_few_are_ways_and_rounds_rides_on_every_one_of_them():
+    from argparse import Namespace
+
+    from ml_stack.graph.bench import _parser, _ways
+
+    ways = _ways(Namespace(also=["batch", "single", "few"], terse=False,
+                           temperature=0.0, reach=0, rounds=0))
+    assert [w.get("label") for w in ways] == [None, "batch", "single", "few"]
+    assert ways[2] == {"label": "single", "terse": False, "single": True,
+                       "temperature": 0.0}
+    assert ways[3] == {"label": "few", "terse": False, "few": True, "temperature": 0.0}
+    for name in ("single", "few"):
+        assert _parser().parse_args(["sweep", "--serve", "x", "--also", name]).also == [name]
+
+    # `--rounds N` is not a way of its own: it is what every way's questions may spend,
+    # exactly as `--reach` is what every way's tool results may carry
+    every = _ways(Namespace(also=["single", "few"], terse=False, temperature=0.0,
+                            reach=0, rounds=20))
+    assert all(w.get("rounds") == 20 for w in every)
+    assert all("rounds" not in w for w in ways), "and absent when nobody asked"
+    assert _parser().parse_args(["sweep", "--serve", "x", "--rounds", "20"]).rounds == 20
+    assert _parser().parse_args(["run", "a-label", "--rounds", "6"]).rounds == 6
+
+
+def test_single_few_and_rounds_reach_the_serving_seam_and_never_the_client(tmp_path,
+                                                                           monkeypatch,
+                                                                           capsys):
+    """Where they have to land: another way through the same load, labelled for itself,
+    building the asking with its own keyword -- and popped before the `Client` is built,
+    which is what `tight` was not."""
+    import inspect
+
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    asked = []
+    real_asking = bench.asking
+    takes = set(inspect.signature(real_asking).parameters)
+
+    def watched(graph, **kw):
+        asked.append({k: v for k, v in kw.items() if k in ("single", "few", "rounds")})
+        return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
+
+    monkeypatch.setattr(bench, "asking", watched)
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only",
+                        "--also", "single", "--also", "few", "--rounds", "20",
+                        *seen["common"]]) == 0
+    capsys.readouterr()
+    assert asked == [{"rounds": 20}, {"single": True, "rounds": 20},
+                     {"few": True, "rounds": 20}]
+    assert sorted(r["label"] for r in runs(seen["kept"])) == [
+        "tiny-plain", "tiny-plain-few", "tiny-plain-single"]
+    assert seen["models"] == ["tiny.gguf"], "one load: none of them is about the serving"
+
+
+def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeypatch):
+    """The asking record is what a profile is written from, so what was asked has to be in
+    it. Mutation: send them as `False`/`ROUNDS` rather than leaving them out, and a run
+    that asked for none is no longer byte for byte the run the ranking was written from."""
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.bench import asking
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    plain = asking(TINY)
+    plain("who?", _Scripted())
+    assert not {"single", "few", "rounds"} & set(reached), "asked for none, sent none"
+    assert not {"single", "few", "rounds"} & set(plain.asking)
+
+    reached.clear()
+    ask = asking(TINY, single=True, few=True, rounds=20)
+    ask("who?", _Scripted())
+    assert reached.get("single") is True and reached.get("few") is True
+    assert reached.get("rounds") == 20
+    assert ask.asking["single"] is True and ask.asking["few"] is True
+    assert ask.asking["rounds"] == 20
+
+    reached.clear()
+    asking(TINY, terse=True, few=True)("who?", _Scripted())
+    named = [s["function"]["name"] for s, _ in reached["tools"]]
+    assert named == ["look_up", "look_at", "show"], \
+        "the terse set is built here, so it is built few too"
+
+
 # -- what a run was, and what its questions could tell apart -----------------------------------
 #
 # Two problems from one afternoon of measuring (2026-09-02). The shapes lived in the end of
