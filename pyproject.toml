@@ -118,6 +118,8 @@ ml-stack-claude = "ml_stack.claude:main"
 ml-stack-agent = "ml_stack.harness:main"
 # a rendered graph page served on loopback, with the model behind it
 ml-stack-graph = "ml_stack.graph.serve:main"
+# a task in words: a served model asks what is open, plans, asks go, then runs the commands
+ml-stack-do = "ml_stack.do:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]
