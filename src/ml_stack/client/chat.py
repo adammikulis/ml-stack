@@ -1,4 +1,9 @@
-"""One client for a local OpenAI-compatible model server."""
+"""One client for a model server: llama.cpp, a hosted OpenAI endpoint, or Ollama.
+
+``api`` says which -- ``"llama"`` (the default), ``"openai"`` (inferred from
+``api.openai.com``) or ``"ollama"`` (inferred from an ``ollama://host:port/tag`` URL, which
+names the model too). One ``chat()`` and one ``Reply`` shape whichever it is.
+"""
 
 from __future__ import annotations
 
@@ -32,7 +37,29 @@ _ASSISTANT_OPENERS = (
 # Sampler keys llama.cpp understands but the hosted OpenAI API rejects outright.
 _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "repeat_last_n", "mirostat", "mirostat_tau", "mirostat_eta",
-                       "n_predict", "cache_prompt", "id_slot", "grammar")
+                       "n_predict", "cache_prompt", "id_slot", "grammar",
+                       "chat_template_kwargs")
+
+APIS = ("llama", "openai", "ollama")
+
+
+def parse_url(base_url: str, api: str | None) -> tuple[str, str, str | None]:
+    """``(base_url, api, model)`` from a server URL: ``ollama://host:port/tag`` names all
+    three, ``api.openai.com`` names the second, anything else is llama.cpp's."""
+    url = base_url.rstrip("/")
+    model: str | None = None
+    if url.startswith("ollama://"):
+        rest = url[len("ollama://"):]
+        host, _, tag = rest.partition("/")
+        url = f"http://{host}"
+        model = tag or None
+        api = api or "ollama"
+    elif "api.openai.com" in url:
+        api = api or "openai"
+    api = api or "llama"
+    if api not in APIS:
+        raise ValueError(f"unknown api {api!r}; one of {', '.join(APIS)}")
+    return url, api, model
 
 
 # What each server turned out to be serving, so it is asked once rather than per client.
@@ -88,8 +115,18 @@ class Client:
         tries: int = 1,
         api_key: str | None = None,
         family: Family | str | None = None,
+        api: str | None = None,
+        model: str | None = None,
+        context: int | None = None,
+        keep_alive: str | int | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        self.base_url, self.api, found = parse_url(base_url, api)
+        # The model tag, where the server wants one named per request (openai, ollama).
+        self.model = model or found
+        # Ollama's num_ctx. Unset means the server's own default for the model, which for
+        # the Flash-Next tag is 262144 -- a cache nobody asked for.
+        self.context = context
+        self.keep_alive = keep_alive
         self.slot = slot
         # None means "whatever this model's card asks for", resolved once the family is
         # known; a number given here is the caller overriding its publisher, which is
@@ -120,6 +157,8 @@ class Client:
         else the one the model id at ``/v1/models`` names, else generic. Probed once."""
         if self.pinned_family is not None:
             return self.pinned_family
+        if self._probed is None and self.model:
+            self._probed = families.for_model_id(self.model)
         if self._probed is None:
             # Once per server, not once per client. A served model does not change while the
             # server is up, and callers build a client per request — so probing per client is
@@ -173,6 +212,8 @@ class Client:
         """The served model's own recommendation, asked of /props for where it lives."""
         if self._carded is None:
             self._carded = {}
+            if self.api != "llama":
+                return {}
             try:
                 from ml_stack.client.http import request_json
                 from ml_stack.hub import in_gguf
@@ -192,7 +233,7 @@ class Client:
 
     @property
     def _is_hosted_openai(self) -> bool:
-        return "api.openai.com" in self.base_url
+        return self.api == "openai"
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
@@ -207,13 +248,24 @@ class Client:
         response_format: str | dict[str, Any] | None = None,
         **extra: Any,
     ) -> dict[str, Any]:
-        """Build the ``/v1/chat/completions`` body."""
+        """The request body: ``/v1/chat/completions`` for llama.cpp and OpenAI, ``/api/chat``
+        for Ollama."""
+        if self.api == "ollama":
+            from ml_stack.client import ollama
+
+            return ollama.build_body(self.model, messages, sampling=self.sampling,
+                                     n_predict=self.n_predict, context=self.context,
+                                     keep_alive=self.keep_alive, tools=tools,
+                                     think=extra.pop("think", None),
+                                     response_format=response_format, extra=extra)
         body: dict[str, Any] = {
             "messages": messages,
             **self.sampling,
             "n_predict": self.n_predict,
             "stream": stream,
         }
+        if self.model:
+            body["model"] = self.model
         if self.slot is not None:
             body["id_slot"] = self.slot
             body["cache_prompt"] = True
@@ -242,8 +294,13 @@ class Client:
 
         if self._is_hosted_openai:
             body["max_tokens"] = body.pop("n_predict", None)
+            # The hosted API has no template flags; harmony's `reasoning_effort` is the one
+            # thinking switch it reads, so only that one survives.
+            effort = (body.get("chat_template_kwargs") or {}).get("reasoning_effort")
             for key in _OPENAI_UNSUPPORTED:
                 body.pop(key, None)
+            if effort is not None:
+                body["reasoning_effort"] = effort
 
         return body
 
@@ -265,8 +322,25 @@ class Client:
         ``("thinking", text)`` and ``("content", text)`` as pieces arrive, and the
         assembled Reply is returned as usual.
         """
+        if self.api == "ollama" and on_delta is not None:
+            raise NotImplementedError(
+                "streaming (on_delta) is not implemented for the Ollama api yet; call "
+                "chat() without on_delta and read the whole Reply")
         body = self.build_body(messages, tools=tools, tool_choice=tool_choice,
                                stream=on_delta is not None, **extra)
+        if self.api == "ollama":
+            from ml_stack.client import ollama
+
+            payload = request_json(
+                f"{self.base_url}/api/chat",
+                payload=body,
+                timeout=timeout or self.timeout,
+                tries=self.tries,
+                headers=self._headers(),
+            )
+            if not isinstance(payload, dict):
+                raise ServerError(f"unexpected response shape: {type(payload).__name__}")
+            return self.normalize(ollama.to_openai(payload), self.pinned_family or self.family)
         if on_delta is None:
             payload = request_json(
                 f"{self.base_url}/v1/chat/completions",
@@ -296,6 +370,10 @@ class Client:
         **extra: Any,
     ) -> str:
         """Raw ``/completion``, the endpoint to use when there is no chat template."""
+        if self.api == "ollama":
+            raise NotImplementedError(
+                "a raw completion under a grammar is llama.cpp's /completion; the Ollama api "
+                "has no grammar -- use chat() with a json_schema response_format")
         budget = n_predict if n_predict is not None else self.n_predict
         body: dict[str, Any] = {
             "prompt": prompt,
@@ -502,6 +580,55 @@ class Client:
         content = payload.get("content") if isinstance(payload, dict) else None
         return str(content or "")
 
+    # --------------------------------------------------------------- what is serving
+
+    def served_by(self) -> dict[str, Any]:
+        """What program serves this URL, and what it holds: ``program`` (``llama.cpp`` or
+        ``ollama``), ``version``, ``format`` (``gguf``/``safetensors``), ``runtime``
+        (``llama.cpp``/``mlx``), ``quant``, ``model`` and ``weights_bytes`` -- ``None`` for
+        anything the server does not say."""
+        from ml_stack.client import ollama
+
+        if self.api == "ollama":
+            return ollama.served_by(self.base_url, self.model, timeout=min(self.timeout, 10.0))
+        props = request_json(f"{self.base_url}/props", timeout=min(self.timeout, 10.0),
+                             method="GET", headers=self._headers()) or {}
+        where = str(props.get("model_path") or "")
+        name = where.rsplit("/", 1)[-1] or self.model
+        size: int | None = None
+        if where:
+            try:
+                size = Path(where).expanduser().stat().st_size
+            except OSError:
+                size = None
+        return {"program": "llama.cpp", "version": props.get("build_info"),
+                "format": "gguf" if where.lower().endswith(".gguf") or not where else None,
+                "runtime": "llama.cpp", "quant": ollama.quant_in_name(name) if name else None,
+                "model": name or None, "weights_bytes": size}
+
+    def processes(self) -> list[int]:
+        """The pids holding the weights behind this URL, for a memory sampler: the
+        ``llama-server`` whose command line carries this port, or every process under the
+        Ollama listener on it."""
+        from ml_stack.client import ollama
+
+        port = _port_of(self.base_url)
+        if self.api == "ollama":
+            return ollama.processes(port)
+        import psutil
+
+        pids: list[int] = []
+        for process in psutil.process_iter(["pid", "name", "cmdline"]):
+            info = getattr(process, "info", None) or {}
+            if "llama-server" not in str(info.get("name") or ""):
+                continue
+            argv = [str(a) for a in (info.get("cmdline") or [])]
+            if not argv or _is_zombie(process):
+                continue
+            if _port_in(argv) == port:
+                pids.append(int(info.get("pid") or process.pid))
+        return sorted(pids)
+
     # --------------------------------------------------------------- response shape
 
     @staticmethod
@@ -619,6 +746,37 @@ def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
     if model:
         assembled["model"] = model
     return assembled
+
+
+def _port_of(base_url: str) -> int:
+    """The port a server URL names, or the scheme's default."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(base_url)
+    if parts.port:
+        return int(parts.port)
+    return 443 if parts.scheme == "https" else 80
+
+
+def _is_zombie(process: Any) -> bool:
+    import psutil
+
+    try:
+        return process.status() == psutil.STATUS_ZOMBIE
+    except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+        return False
+
+
+def _port_in(argv: list[str]) -> int:
+    """The port a ``llama-server`` command line listens on: ``--port N``, else 8080."""
+    for i, arg in enumerate(argv):
+        if arg == "--port" and i + 1 < len(argv) and argv[i + 1].isdigit():
+            return int(argv[i + 1])
+        if arg.startswith("--port="):
+            tail = arg.split("=", 1)[1]
+            if tail.isdigit():
+                return int(tail)
+    return 8080
 
 
 def _rejection(objections: list[str]) -> str:
