@@ -94,6 +94,50 @@ nothing (the extra turns went unused).
   never set from fewer than 20. Its twenty questions belong on the 3090 Ti through the
   fleet (below), not on this machine (Adam: "don't test the smaller models on this device").
 
+## Improvements queued 2026-09-03 afternoon (Adam: "knock them out")
+
+Lifecycle and safety
+- [ ] **One `Run`/lease object across the stack.** The bench, the ingest, the page and
+  `seat()` each build their own lease from the profile; one object carrying shape, asking
+  and client so a knob cannot leak or drift (`measure.asking()`'s kwarg list is the seam).
+- [ ] **A foreign-server report.** `ml-stack-serve status` lists a listening llama-server
+  the record does not know as foreign, with its pid -- detection, since prevention is in
+  the library (`Lease`).
+- [ ] **Job records for every long command.** The ingest has a lease-like record (one at a
+  time, `wait`, `stop`); the bench has a lock and no `wait`; training has neither. One
+  `jobs` record with `wait`, `stop`, `status` for bench, ingest and train, so chaining is
+  always `wait && next`.
+- [ ] **Retry once on a server reset.** A single reset mid-request costs the unit today;
+  one retry after a health check before it is written down as failed.
+
+Extraction quality
+- [ ] **Measure the judge.** Its verdicts are recorded, not scored: a gold set of invented
+  pairs (same / different / unsure-then-same) through a gate, so a model or prompt change
+  shows as a number.
+- [ ] **Verb conflicts to the judge.** Two edges between the same ends with different verbs
+  (423 in APBiology) are the same question as duplicates; the judge picks or keeps both,
+  from the passage.
+- [ ] **Definitions merged, not first-wins.** A merged node keeps the definition it had
+  first; the judge picks the better, or the fold keeps both with provenance.
+- [ ] **Suspect labels resolved.** Clause-shaped labels are flagged; the judge rewrites to
+  a name or drops, from the passage.
+- [ ] **A shelf-level view.** Books fold alone; a `shelf` command shows concepts shared
+  across books and the edges between books' vocabularies.
+- [ ] **Answering over the shelf.** Nothing asks the page a biology question over the
+  store; the tools assume a community's kinds. Textbook questions through `graph.ask`, so
+  the graph's worth is a number.
+
+Telemetry and cost
+- [ ] **Per-unit cost rolled up.** Unit documents keep calls and seconds; `status` rolls
+  them to tokens per book, and the report carries an ingest section like extraction's.
+- [ ] **Fold cost.** A fold over a 9,000-node book is minutes and runs at every chapter end;
+  measure it, fold on a size-aware interval or make the name fold incremental.
+
+Tests and hygiene
+- [ ] **Port and cache isolation asserted.** A test fails the suite if any test opened a
+  real port or wrote under the home cache.
+- [ ] **The ingest module split** into a package, one file per concern, same public names.
+
 ## Library
 
 - [ ] **A `Run` object instead of twenty keyword arguments.** `served()` forwards most of what
