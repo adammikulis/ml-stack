@@ -146,6 +146,18 @@ in terms of the thing that makes it impossible, not in terms of what currently h
 The bar for mentioning a problem at all is the same as the bar for a commit: it changes
 what someone would do next.
 
+**A measurement that names a cause we control is a task, not a finding.** "Precision was
+low because the model selected everything it read", "both extractors listed topics at
+under 20% precision because the instructions never said what a topic is", "it thought
+through every call because the switch never reached the template" -- each names a prompt,
+a flag or a setting, which means the sentence is not finished until it says what was
+changed and what the re-measurement showed. Write the fix, run the smoke, queue the
+sampled run, and report cause, change and number together. A cause we cannot control (the
+weights, the hardware, an upstream PR) is reported as such, with what would change it.
+Adam, 2026-09-02: "if you say 'x had lowered accuracy because ___' and it's something that
+we can control like prompt or settings, it should be followed up by what you did to
+improve it".
+
 ## Never a real person
 
 No name, handle, email or phone number of a real person may appear anywhere in this repository:
