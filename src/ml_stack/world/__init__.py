@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["Message", "World"]
+__all__ = ["Message", "World", "check"]
 
 
 @dataclass(frozen=True)
@@ -66,3 +66,11 @@ class World:
     seed: int = 0
     size: str = "small"
     kind: str = "company"
+
+
+def __getattr__(name: str) -> Any:
+    if name == "check":
+        import importlib
+
+        return importlib.import_module("ml_stack.world.check")
+    raise AttributeError(name)

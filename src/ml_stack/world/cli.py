@@ -4,6 +4,7 @@
     ml-stack-world questions --world ./world --n 40 > questions.jsonl
     ml-stack-world simulate --world ./world --out ./talk --days 20
     ml-stack-world emit --from ./talk --as slack-export --out ./export
+    ml-stack-world check ./export ./mail.mbox --truth ./talk
 
 ``make`` writes ``graph.json`` (the graph, in the community schema), ``personas.json`` (a
 voice, a system prompt and what each person knows), ``calendar.json`` (empty: the simulation
@@ -12,7 +13,9 @@ summary -- as JSON with ``--json``. ``questions`` writes one question per line i
 ``ml-stack-bench run`` reads. ``simulate`` is `world.simulate.run`: the people talk for
 ``--days``, templated unless ``--model-url`` and ``--mix`` hand a share to a model.
 ``emit`` writes what was said the way a product exports it, so `ml_stack.sources` reads
-the invented corpus exactly as it reads a real one.
+the invented corpus exactly as it reads a real one. ``check`` is `world.check`: the
+corpus read back against the graph the simulation wrote, and every generated name through
+the name detector; exit 1 on any miss or hit.
 """
 
 from __future__ import annotations
@@ -25,6 +28,7 @@ from typing import Any
 
 from ml_stack.files import write_json
 from ml_stack.world import Message
+from ml_stack.world.check import default_fixtures
 from ml_stack.world.organisation import KINDS, SIZES, load, make, summary
 from ml_stack.world.questions import KINDS as QUESTION_KINDS, questions
 
@@ -129,6 +133,19 @@ def _emit(args: argparse.Namespace) -> int:
     return 0
 
 
+def _check(args: argparse.Namespace) -> int:
+    from ml_stack.world import check
+
+    try:
+        consistent = check.consistency(args.corpus, args.truth, domain=args.domain)
+        private = check.privacy(args.truth, fixtures=args.fixtures, allow=args.allow)
+    except (FileNotFoundError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    print(check.render(consistent, private))
+    return 0 if consistent.ok and private.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ml-stack-world",
@@ -176,6 +193,23 @@ def main(argv: list[str] | None = None) -> int:
     export.add_argument("--all", action="store_true",
                         help="every message, whichever product it was said in")
     export.set_defaults(run=_emit)
+
+    checked = subs.add_parser("check", help="read an export back against its truth, and run "
+                                            "every generated name through the name detector")
+    checked.add_argument("corpus", nargs="+",
+                         help="what `emit` wrote: a Slack export directory, an mbox, a Teams "
+                              "JSON or a rows JSONL; several to check them together")
+    checked.add_argument("--truth", required=True,
+                         help="the directory `simulate --out` wrote (its graph.json holds the "
+                              "outcomes), or a graph.json")
+    checked.add_argument("--fixtures", default=default_fixtures(),
+                         help="the allow-list of invented names (default: the repository's "
+                              "tests/known-fixtures.txt when there is one)")
+    checked.add_argument("--allow", default=str(Path.home() / ".config" / "pii-allow.txt"),
+                         help="a second allow-list (default: ~/.config/pii-allow.txt)")
+    checked.add_argument("--domain", default="example.com",
+                         help="the domain the corpus was emitted at")
+    checked.set_defaults(run=_check)
 
     args = parser.parse_args(argv)
     return int(args.run(args))
