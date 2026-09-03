@@ -328,3 +328,22 @@ def fit_files(tmp_path, monkeypatch):
         return types.SimpleNamespace(shipped=shipped, mine=local)
 
     return point
+
+
+@pytest.fixture(autouse=True)
+def _no_real_cache_or_ports(monkeypatch, tmp_path):
+    """No test writes into ~/.cache/ml_stack or reaches a real model server's port.
+
+    2026-09-03: a test started a fake server on the default port through the real backend;
+    the port was busy with the Flash-Next that had been reading a textbook shelf for twelve
+    hours, the backend reclaimed the port by killing it, and its log under the real cache
+    directory was truncated. The backend no longer kills a server it did not record; this
+    keeps the cache and logs in tmp_path as well, so a test that reaches them fails here.
+    """
+    from ml_stack.serve import backend, binary
+
+    cache = tmp_path / "cache"
+    monkeypatch.setattr(binary, "CACHE_ROOT", cache)
+    monkeypatch.setattr(backend, "CACHE_ROOT", cache)
+    monkeypatch.setattr(backend, "LOG_DIR", cache / "logs")
+    monkeypatch.setenv("ML_STACK_CACHE", str(cache))

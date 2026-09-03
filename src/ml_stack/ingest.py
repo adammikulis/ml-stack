@@ -712,9 +712,16 @@ class Progress:
         return int(entry.get("attempts") or 1) >= GIVE_UP
 
     def note(self, slug: str, read: Read) -> None:
-        """Write one finished unit down, at once: a run killed mid-book resumes from here."""
+        """Write one finished unit down, at once: a run killed mid-book resumes from here.
+
+        An unreachable server is not the unit's failure and does not count as one of its
+        attempts: the read is written down so `status` can say what happened, and the
+        next `--resume` reads it again as if for the first time."""
         before = (self.book(slug)["done"].get(read.unit) or {})
-        attempts = int(before.get("attempts") or (1 if before else 0)) + 1
+        # an entry from before attempts were counted is one attempt; zero is a number
+        attempts = int(before["attempts"]) if "attempts" in before else (1 if before else 0)
+        if not read.error.startswith("ServerUnreachable"):
+            attempts += 1
         self.book(slug)["done"][read.unit] = {
             "seconds": read.seconds, "concepts": read.concepts, "relations": read.relations,
             "figures": read.figures, "images": read.images, "error": read.error,
@@ -1459,6 +1466,14 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
                      **sampling)
 
 
+def _alive(client: Any) -> bool:
+    """Whether the run's server still answers at all."""
+    from ml_stack.client import is_healthy
+
+    base_url = str(getattr(client, "base_url", "") or "")
+    return bool(base_url) and is_healthy(base_url, timeout=3.0)
+
+
 def _serving_said(args: Any) -> str:
     """The measured shape a --model is served in, as one line, for the run record."""
     if not getattr(args, "model", ""):
@@ -1856,6 +1871,16 @@ def _read_run(args: Any) -> int:
                             spent.add(_call_of(call))
                         progress.note(slug, row)
                         _keep_reads(args.out, slug, [reads_by_unit[unit.id]])
+                        if row.error.startswith("ServerUnreachable") and not _alive(client):
+                            # the server is gone -- killed, crashed, evicted. Every unit
+                            # after this one would fail in a second and be written down as
+                            # a failure (2026-09-03: 209 of them, in under a minute), so the
+                            # run folds what it has and ends; the unit is written down but
+                            # not counted against, and --resume reads on once something
+                            # serves again
+                            print(f"  the model server went away at {unit.id}; folding what "
+                                  f"was read and stopping -- --resume reads on")
+                            raise Stopped("server gone")
                         since += 1
                         print(f"  ch {unit.chapter or '-':>3}  "
                               f"{unit.section or unit.section_title[:12]:<8}"

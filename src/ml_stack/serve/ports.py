@@ -59,19 +59,25 @@ def server_pids_on_port(port: int) -> list[int]:
 
 
 def reclaim_port(port: int, *, recorded_pids: list[int] | None = None) -> bool:
-    """Free ``port`` when it is held by a model server we started. Returns whether it was."""
-    reclaimed = False
+    """Free ``port`` when it is held by a model server *this* manager recorded. Returns
+    whether it was.
 
+    Only a recorded pid, never whatever llama-server happens to hold the port. The day
+    this was learned (2026-09-03): a test started a fake server on the default port with
+    the real backend, the port was busy, and the old "unrecorded server" branch killed the
+    Flash-Next that had been reading a textbook shelf for twelve hours -- mid-request, from
+    a process that had never leased it. A server another process started is that
+    process's to stop; here it is reported as held by something that is not ours, and the
+    caller refuses to kill it (the same rule the bash guard enforces on shells:
+    `pkill llama-server` is not a way to free a port).
+    """
+    reclaimed = False
     for pid in recorded_pids or []:
         if pid_exists(pid):
             logger.info("reclaiming port %s from our own stale server (pid %s)", port, pid)
             kill_pid(pid)
             reclaimed = True
-
-    if not reclaimed:
-        for pid in server_pids_on_port(port):
-            logger.info("reclaiming port %s from an unrecorded server (pid %s)", port, pid)
-            kill_pid(pid)
-            reclaimed = True
-
+    if not reclaimed and server_pids_on_port(port):
+        logger.info("port %s is held by a model server this manager did not start; "
+                    "leaving it alone", port)
     return reclaimed
