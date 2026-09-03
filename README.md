@@ -48,6 +48,7 @@ One script per platform, four modes. Re-running any of them upgrades in place.
 curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
 curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --headless
 curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --dev
+curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sudo sh -s -- --system
 ```
 
 **Windows**, in PowerShell. `iex` runs a piped script with no arguments, so the mode is an
@@ -57,6 +58,7 @@ environment variable rather than a scriptblock incantation:
 irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 $env:ML_STACK_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 $env:ML_STACK_MODE="dev";      irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+$env:ML_STACK_MODE="system";   irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex   # as administrator
 ```
 
 | | what it installs | what it downloads | how it updates itself |
@@ -1225,6 +1227,10 @@ through any of this. The summary and the recall keep it in the model's view for 
 thread; only an entry makes the tools find it next time, in any thread.
 
 ## What this measured, and what it changed
+
+Architectures that behave unlike a dense transformer when served have their own notes
+under [`docs/architectures/`](docs/architectures/README.md): what the header says, what it
+meant when measured. Flash-Next's 51B-parameter n-gram table is there.
 
 **IQ quantisations are the slow choice on Apple silicon.** Measured 2026-09-02, the same
 ten questions, the same fork build, the same 32k x 2 slots, Qwen3.8-Flash-Next answering
