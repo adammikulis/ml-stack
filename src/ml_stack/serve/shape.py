@@ -160,6 +160,7 @@ class Asking:
     terse: bool = False                  # `tools_for`'s schemas, not `converse`'s
     reach: int | None = None             # tokens one tool result may carry
     rounds: int | None = None            # tool-calling turns one question may spend
+    constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
 
     def converse(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.graph.ask.converse` takes.
@@ -171,7 +172,7 @@ class Asking:
         *schemas*, which is :func:`~ml_stack.graph.ask.tools_for`'s argument.
         """
         out: dict[str, Any] = {"tight": bool(self.tight)}
-        for way in ("batch", "kinds", "rich", "single", "few"):
+        for way in ("batch", "kinds", "rich", "single", "few", "constrain_ids"):
             if getattr(self, way):
                 out[way] = True
         if self.summary:
@@ -193,7 +194,7 @@ class Asking:
         """The way itself, in the words the bench keeps beside its rows: ``summary`` under
         its own name, ``terse`` said outright, and nothing that was not asked for."""
         out: dict[str, Any] = {"tight": bool(self.tight), "terse": bool(self.terse)}
-        for way in ("rich", "batch", "kinds", "summary", "single", "few"):
+        for way in ("rich", "batch", "kinds", "summary", "single", "few", "constrain_ids"):
             if getattr(self, way):
                 out[way] = True
         if self.reach:

@@ -4478,3 +4478,37 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke", "--no-profile",
                         "--kept", str(kept), "--questions", str(asked), "--serve-port", "1"]) == 0
     assert not seen["kwargs"][-1].get("draft") and not seen["kwargs"][-1].get("extra_args")
+
+
+def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monkeypatch):
+    from argparse import Namespace
+
+    import ml_stack.graph.ask as ask_module
+    from ml_stack.graph.bench import _parser, _ways, asked_as, asking
+    from ml_stack.graph.bench.run import _ways as ways
+
+    assert _parser().parse_args(["sweep", "--serve", "x", "--constrain-ids"]).constrain_ids
+    assert not _parser().parse_args(["sweep", "--serve", "x"]).constrain_ids
+    args = Namespace(also=["batch"], terse=False, constrain_ids=True, reach=0,
+                     temperature=None, top_p=None, top_k=None, min_p=None)
+    assert all(w.get("constrain_ids") is True for w in ways(args))
+    assert all("constrain_ids" not in w
+               for w in _ways(Namespace(also=["batch"], terse=False, temperature=0.0)))
+
+    reached = {}
+
+    def fake_converse(question, graph, client, **kw):
+        reached.update(kw)
+        return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
+
+    monkeypatch.setattr(ask_module, "converse", fake_converse)
+    ask = asking(TINY, constrain_ids=True)
+    ask("who?", _Scripted())
+    assert reached.get("constrain_ids") is True
+    assert ask.asking == {"tight": True, "terse": False, "constrain_ids": True}
+    reached.clear()
+    plain = asking(TINY)
+    plain("who?", _Scripted())
+    assert "constrain_ids" not in reached and "constrain_ids" not in plain.asking
+    assert asked_as({"asking": ask.asking}) == "+ids"
+    assert asked_as({"asking": plain.asking}) == "tight"

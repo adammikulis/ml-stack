@@ -144,7 +144,7 @@ def shape_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
 # flags in the order a shape names them, and the two must not share a name in `bench`.)
 SHOWN_WAYS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
               ("single", "single"), ("few", "few"),
-              ("kinds", "kinds"), ("summary", "summary"))
+              ("kinds", "kinds"), ("summary", "summary"), ("constrain_ids", "ids"))
 
 
 def asked_as(one: Mapping[str, Any]) -> str:

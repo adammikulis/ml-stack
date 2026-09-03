@@ -150,9 +150,10 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # turns every way's questions may spend, and `few` and `single` both want more
             # of them than `batch` does
             way.setdefault("rounds", asked_rounds)
-    for flag in ("batch", "kinds", "summary"):
-        # --batch / --kinds / --summary ride on every way, the way --reach does: the
-        # hundred-question run of "everything that held" is one way, not four
+    for flag in ("batch", "kinds", "summary", "constrain_ids"):
+        # --batch / --kinds / --summary / --constrain-ids ride on every way, the way
+        # --reach does: the hundred-question run of "everything that held" is one way,
+        # not four
         if getattr(args, flag, False):
             for way in out:
                 way.setdefault(flag, True)
@@ -444,7 +445,10 @@ def _parser() -> argparse.ArgumentParser:
                             "page does; measures what sight costs a text question")
     for flag, said in (("batch", "every read in one call, with the nudge when it is not"),
                        ("kinds", "keep only the kind the question asked for"),
-                       ("summary", "offer the summarise tool for the broad questions")):
+                       ("summary", "offer the summarise tool for the broad questions"),
+                       ("constrain-ids", "answer every turn that offers look_at, show or "
+                                         "path_between under a grammar in which an id can "
+                                         "only be one the graph holds")):
         sweep.add_argument(f"--{flag}", action="store_true",
                            help=f"{said} -- on every way this sweep asks, the way --reach is")
     sweep.add_argument("--n-max", type=int, default=None, metavar="N",

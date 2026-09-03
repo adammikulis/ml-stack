@@ -1028,7 +1028,8 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
            margin: float = MARGIN, rich: bool = False,
            tight: bool = True, reach: int | None = None, batch: bool = False,
            kinds: bool = False, summary: bool = False, single: bool = False,
-           few: bool = False, rounds: int | None = None) -> Callable[..., Any]:
+           few: bool = False, rounds: int | None = None,
+           constrain_ids: bool = False) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
     ``run`` is a :class:`~ml_stack.serve.Run`, and its ``asking`` is every way below said
@@ -1063,6 +1064,9 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
     ``rich`` and ``reach``, each is sent only when it is asked for, so a run that asked
     for none reaches `converse` byte for byte as it always did.
 
+    ``constrain_ids`` is `converse`'s too: every turn that offers a tool taking an id
+    answers under a grammar in which those ids can only be the graph's.
+
     ``single``, ``few`` and ``rounds`` are the same again, and they are why this list is a
     space rather than a set of defaults. ``single`` is ``batch`` turned around -- one entry
     to a read, more turns -- for the model that loses the thread of a long tool result;
@@ -1089,7 +1093,8 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
 
     how = run.asking if run is not None else Asking(
         tight=tight, batch=batch, single=single, few=few, kinds=kinds, summary=summary,
-        rich=rich, terse=terse, reach=reach or None, rounds=rounds or None)
+        rich=rich, terse=terse, reach=reach or None, rounds=rounds or None,
+        constrain_ids=constrain_ids)
 
     def embedded(text: str) -> list[float] | None:
         if not embed_url:
