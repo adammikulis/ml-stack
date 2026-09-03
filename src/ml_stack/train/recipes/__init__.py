@@ -20,6 +20,10 @@ class Built:
     batches: Callable[[int], Any]
     eval_batches: Callable[[int], Any] | None = None
     config: dict[str, Any] = field(default_factory=dict)
+    step: Any = None
+    """How to advance one step, when the framework's default is the wrong one. A LoRA's is
+    `train.lora.LoraStep`, whose checkpoints hold the adapter rather than the frozen 16G
+    base underneath it."""
 
 
 Recipe = Callable[..., Built]
@@ -45,11 +49,27 @@ def validate(recipe_id: str, config: dict[str, Any]) -> dict[str, Any]:
             f"it accepts {sorted(allowed)}")
 
     out = dict(config)
+    size = out.get("size") or ""
+    sizes = spec.get("sizes", {})
+    if size and size not in sizes:
+        raise ValueError(f"{recipe_id} has no size {size!r}; it has {sorted(sizes)}")
+    # A size may carry its own defaults: what fits and what is worth trying for *that*
+    # model, rather than one set of numbers that suits a 270m and starves an 8B. They fill
+    # in only where the caller said nothing, so --set always wins.
+    by_size = dict(sizes.get(size, {}).get("defaults", {})) if size else {}
+
     for name, f in fields.items():
         if name not in out or out[name] is None:
-            out[name] = f.get("default")
+            out[name] = by_size.get(name, f.get("default"))
             continue
-        value = float(out[name]) if f.get("type") == "float" else int(out[name])
+        kind = f.get("type")
+        if kind == "bool":
+            out[name] = bool(out[name])
+            continue
+        if kind == "text":
+            out[name] = str(out[name])
+            continue
+        value = float(out[name]) if kind == "float" else int(out[name])
         low, high = f.get("min"), f.get("max")
         if low is not None and value < low:
             raise ValueError(f"{name} must be at least {low}, got {value}")
@@ -57,10 +77,6 @@ def validate(recipe_id: str, config: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{name} must be at most {high}, got {value}")
         out[name] = value
 
-    size = out.get("size") or ""
-    sizes = spec.get("sizes", {})
-    if size and size not in sizes:
-        raise ValueError(f"{recipe_id} has no size {size!r}; it has {sorted(sizes)}")
     return out
 
 

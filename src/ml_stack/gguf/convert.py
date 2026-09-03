@@ -127,20 +127,29 @@ def export(
     intermediate: str = "f32",
     fix_space_prefix: bool | None = False,
     keep_intermediate: bool = False,
+    converter: Path | str | None = None,
+    quantizer: Path | str | None = None,
 ) -> ConversionResult:
-    """The whole path: convert, patch the tokenizer metadata, quantise."""
+    """The whole path: convert, patch the tokenizer metadata, quantise.
+
+    ``converter`` and ``quantizer`` name the tools to use; without them each is searched
+    for as ``find_converter``/``find_quantize`` describe. A caller that already knows which
+    llama.cpp this machine serves with -- ``ml_stack.train.lora.converter`` reads the
+    managed build's own source checkout -- hands them in, so the file is written by the
+    same code that will read it.
+    """
     from ml_stack.gguf.vocab import fix_space_prefix as _patch
 
     out_dir = Path(out_dir)
     raw = out_dir / f"{name}-{intermediate}.gguf"
     final = out_dir / f"{name}-{quant}.gguf"
 
-    convert(model_dir, raw, outtype=intermediate, write_sidecar=False)
+    convert(model_dir, raw, outtype=intermediate, write_sidecar=False, converter=converter)
 
     if fix_space_prefix is not None:
         _patch(raw, add_space_prefix=fix_space_prefix)
 
-    result = quantize(raw, final, quant)
+    result = quantize(raw, final, quant, binary=quantizer)
 
     if not keep_intermediate:
         raw.unlink(missing_ok=True)

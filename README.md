@@ -40,23 +40,65 @@ Everything runs on your own hardware. Nothing leaves the network.
 
 ## Installing
 
-**One line**, on macOS or Linux:
+One script per platform, four modes. Re-running any of them upgrades in place.
+
+**macOS and Linux:**
 
 ```
 curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --headless
+curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.sh | sh -s -- --dev
 ```
 
-On Windows, in PowerShell:
+**Windows**, in PowerShell. `iex` runs a piped script with no arguments, so the mode is an
+environment variable rather than a scriptblock incantation:
 
 ```
 irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+$env:ML_STACK_MODE="headless"; irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
+$env:ML_STACK_MODE="dev";      irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 ```
 
-It works out which machine it is on, fetches the right download, and opens it. You get a
-window that asks what to call the machine and which cluster to join, then sets the rest
-from the hardware it finds:
+| | what it installs | what it downloads | how it updates itself |
+|---|---|---|---|
+| **the app** (default) | the release zip for this machine, and a window | nothing, until you click: the first-run screen shows the models that fit, gemma-4-E2B suggested (2.6G, ~1.5s a question) beside E4B (4.4G, ~3s) and Flash-Next (104G, ~27s), the ones too big for the room greyed out | the newest published release, replacing the whole install — daemon, CLI and window — then restarting |
+| `--headless` | a venv under `~/.ml-stack` (Windows: `%LOCALAPPDATA%\ml-stack`), console scripts on PATH, no window | `--models auto`: the best measured model this machine has room for, unless `ML_STACK_MODELS=none` | releases, the same way — or `main`, if you installed from `main` |
+| `--dev` | a git checkout with `pip install -e .` | the same as headless | follows `main`: pulls, reinstalls if the packaging moved, restarts |
+| `--system` | `--headless`, plus a service that starts at boot with nobody logged in. Needs `sudo` / an administrator | the same as headless | the same as headless |
 
-![Setting up a machine](docs/images/setup.jpg)
+**Per user or per machine.** The first three need no administrator and the daemon runs
+while you are logged in; the fourth is per machine:
+
+| | per user (app, headless, dev) | per machine (`--system`) |
+|---|---|---|
+| rights | none | `sudo`, or PowerShell as administrator |
+| runs | while you are logged in | at boot, before anyone logs in |
+| as | you | still you — see below |
+| the Windows firewall | one approval prompt, once | the same, in the same step |
+| the macOS wired limit | `sudo` once, offered by the app's first run and by `ml-stack-setup` | applied in the same step, since it already has the rights |
+| the model cache | yours, `~/.cache/huggingface` | **the same one.** One cache per machine, shared, never duplicated |
+
+That last row is why `--system` installs the service to run **as the account that ran it**
+(a LaunchDaemon with `UserName`, a systemd unit with `User=`, a Scheduled Task with `/RU`)
+rather than as root or SYSTEM. A service under another account would have its own empty
+`~/.cache/huggingface` and download every model a second time; running as you, it opens the
+one that is already there, in place, and nothing is copied, linked or fetched twice. If you
+do point it at another account, the installer lists the models you have with their sizes and
+says they would be downloaded again; `--adopt-cache` *moves* the cache to the shared path and
+leaves a symlink behind, so your own tools keep working and every file still exists once.
+Declining leaves your cache alone. It never copies.
+
+Unattended, for a machine you are setting up from a script: `ML_STACK_NAME`,
+`ML_STACK_PASSPHRASE`, `ML_STACK_CLUSTER`, `ML_STACK_MODE`, `ML_STACK_MODELS`,
+`ML_STACK_ADOPT_CACHE`, `ML_STACK_REF` answer every prompt, and a machine with no terminal
+is never prompted at all. `ML_STACK_OFFLINE_ZIP` and `ML_STACK_OFFLINE_MODELS` install from
+local files and skip every network step. `--uninstall` takes it off and leaves the model
+cache where it is.
+
+Past the install, every step is an ml-stack command rather than shell -- `ml-stack-setup`
+(what this machine can do), `ml-stack-serve build` (llama.cpp), `ml-stack-models fetch`
+(into the one cache, every download checked against its sha256), `ml-stack-fleet join
+--persist`, and `ml-stack-doctor` at the end, whose lines it prints.
 
 **Or download it yourself** from the [latest release](../../releases/latest):
 
@@ -69,6 +111,8 @@ from the hardware it finds:
 Each download holds the app and `ml-stack-headless`, for a machine with no screen — the
 same daemon, serving the interface to a browser on your network.
 
+![Setting up a machine](docs/images/setup.jpg)
+
 Do the same on every machine you want to train with, typing the same passphrase. They
 find each other on their own.
 
@@ -78,7 +122,12 @@ stopped with a `CTRL_BREAK_EVENT` it can catch as `SIGBREAK`, the one-runner loc
 `msvcrt.locking` where POSIX has `flock`, the cluster key is made private with `icacls`
 where `chmod 600` would only flip the read-only bit, and `ml-stack-traind --persist`
 registers a Scheduled Task at logon (`com.ml-stack.traind.login`) the way `ml-stack-serve
-build --persist` registers its weekly refresh. Two things a Windows machine needs that the
+build --persist` registers its weekly refresh. `--system` registers a second one
+(`com.ml-stack.traind.system`) at `ONSTART` instead, so the machine is a peer before anyone
+logs in -- with `/RU <you>` rather than `/RU SYSTEM`, because SYSTEM has its own profile and
+would download every model again into an empty cache. It is a Scheduled Task rather than a
+real service because a service needs a wrapper to hold a long-lived Python process, while a
+startup task is one line and survives a reboot either way. Two things a Windows machine needs that the
 others do not: llama.cpp comes from `ml-stack-serve build --from release` (a release zip,
 since most Windows installs have no compiler), and **Windows Defender Firewall blocks the
 daemon's TCP 8770 and its UDP 8771 beacons inbound by default**, so `ml-stack-peers ls` on
@@ -283,6 +332,30 @@ up two ways. `from-bench --dry-run` says what a store would yield, and what it *
 yielded had it been traced: for a store filled before tracing existed the answer is zero,
 and zero means nothing without the number beside it (2026-09-02: 751 scored questions, 4006
 model turns, none of them kept).
+
+#### A model too big to fine-tune whole
+
+```
+ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf \
+    --data runs/caller/data --out runs/caller --set steps=1000 --yes
+```
+
+A full fine-tune of an 8B model needs about 128G of optimizer state; `--lora` trains two
+small matrices on each attention and MLP projection instead — ~40M parameters with the base
+frozen in bf16, ~19G resident for gemma-4 E4B on this machine. `--size e4b` brings the
+defaults that suit it (batch 4, context 2048, 1e-4, rank 16), `--lora-rank`,
+`--lora-alpha`, `--lora-dropout` and `--lora-targets` override them, and the checkpoints
+hold the adapter rather than a copy of the frozen base. Needs peft: `pip install
+'ml-stack[train-lora]'`.
+
+What the run will cost is printed before a weight is loaded — parameters, resident
+gigabytes, tokens a step, seconds a step, wall clock — and a run estimated past 30 minutes
+is refused with exit 5 unless `--yes`, the same ceiling and the same code the bench uses.
+`--dry-run` trains 20 real steps, writes nothing, and replaces the estimate with a measured
+seconds-per-step. `--export-gguf` then merges the adapter into the base, converts through
+the managed llama.cpp checkout the served binary was built from, quantises, and preflights
+the file before anyone waits on a load; `manifest.json` records the training data's hash and
+example count, so what a fine-tune learned from can be identified afterwards.
 
 `docs/research/tool-caller-finetune.md` is the plan this is the first half of — what to
 train, on whose traces, what it would cost, and what is unmeasured.
@@ -587,7 +660,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
-| `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, and its commit; `leave` undoes it |
+| `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, the commit it runs and how it updates itself; `leave` undoes it; `--track main` makes this machine follow a branch rather than releases |
 | `ml-stack-mcp` | the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
 
@@ -607,10 +680,44 @@ downloaded if there is none), asks for the passphrase every machine shares (or t
 the discovery port, and prints the peers that answered. `status` is that listing on its own:
 
 ```
-NAME             URL                          ROOM             STATE        COMMIT     SERVING
-studio           http://192.168.2.44:8770     96.0G            idle         0ce5bc5    quince-2b.gguf:8099
-larch            http://192.168.2.27:8770     20.5/24.0 GB     measuring    0ce5bc5    -
+NAME             URL                          ROOM             STATE        COMMIT       UPDATES      SERVING
+studio           http://192.168.2.44:8770     96.0G            idle         0ce5bc5 3h   main 4m      quince-2b.gguf:8099
+larch            http://192.168.2.27:8770     20.5/24.0 GB     measuring    0ce5bc5 3h   releases 2h  -
+harrowgate       http://192.168.2.31:8770     20.5/24.0 GB     idle         9f2c1ab 6d   off          -
 ```
+
+COMMIT is what each peer is running and how old that commit is; UPDATES is how it keeps
+current and when it last looked. A fleet half on one commit and half on another is the
+thing those two columns exist to make visible -- `harrowgate` above is six days behind and
+following nothing, which is a machine somebody has to visit.
+
+### Following main
+
+A machine that is a git checkout with an editable install can follow a branch instead of
+waiting for a release:
+
+```
+ml-stack-fleet join --persist --track main     # or: ml-stack-traind --track main
+```
+
+Every five minutes it asks `git ls-remote` for the head of `main`, and when it has moved:
+`git pull --ff-only` (never a merge -- a checkout holding commits `main` does not have is
+reported and left alone, because resetting somebody's work in progress at three in the
+morning is unforgivable), `pip install -e .` only if `pyproject.toml` or a lock file moved,
+and then a restart -- `launchctl kickstart` or `systemctl restart` where a login service is
+installed, a re-exec where there is not. A pull that fails changes nothing, so the daemon
+keeps running the code it started with and says so on the next `ml-stack-fleet status`.
+
+Neither this nor the release update ever interrupts work: both wait for no job running, no
+benchmark measuring (the same lock `ml-stack-bench status` reads, so a run started at the
+keyboard counts) and no model loaded. A machine part way through a sweep is left alone
+until it is not, however new the code is.
+
+Be honest about what this is: **it runs code nobody reviewed, minutes after it is pushed**.
+That is the right trade for a machine in the next room that you would otherwise have to walk
+over to, and the wrong one for anything else. `--track off` goes back to releases, and it is
+off unless asked for. It is remembered in the daemon's settings, so it is asked for once and
+survives a reboot.
 
 Discovery is multicast on UDP port **8771** (`239.255.77.70`, TTL 1 -- it never leaves the
 segment), one above the daemon's HTTP port 8770 so one firewall rule covers both;

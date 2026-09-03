@@ -1,7 +1,7 @@
 {
   "id": "tool-calls",
   "title": "Teach a model to call my tools",
-  "blurb": "Give it conversations that end in a tool call -- ml-stack-train-tools makes them from your tool schemas -- and a small chat model learns which tool a question wants and how to call it.",
+  "blurb": "Give it conversations that end in a tool call -- ml-stack-train-tools makes them from your tool schemas, or from what a model actually called on a bench run -- and a chat model learns which tool a question wants and how to call it. A small base is fine-tuned whole; anything bigger takes a LoRA.",
   "data": {
     "formats": [".jsonl"],
     "fields": ["messages", "tools"],
@@ -10,12 +10,19 @@
   },
   "requires": {"backend": "torch", "min_ram_gb": 8},
   "sizes": {
-    "270m": {"base": "google/functiongemma-270m-it", "params_m": 270, "needs_gb": 6}
+    "270m": {"base": "google/functiongemma-270m-it", "params_m": 270, "needs_gb": 6},
+    "e4b": {
+      "base": "unsloth/gemma-4-E4B-it",
+      "params_m": 7996, "active_m": 4000, "needs_gb": 32,
+      "note": "8.0B raw, ~4B active; a full fine-tune of it needs ~128G of optimizer state, so this size is the LoRA path. Defaults sized for a 128 GB unified-memory Mac.",
+      "defaults": {"lora": true, "batch_size": 4, "context": 2048, "steps": 1000,
+                   "learning_rate": 0.0001, "lora_rank": 16, "lora_alpha": 32}
+    }
   },
   "fields": [
     {"name": "steps", "type": "int", "default": 300, "min": 20, "max": 100000,
      "label": "How long to train",
-     "help": "A few hundred steps over a few hundred conversations is a pass or two. Watch the held-out score."},
+     "help": "A few hundred steps over a few hundred conversations is a pass or two. Watch the held-out score. One pass over 4,000 harvested turns at batch 4 is 1,000 steps."},
     {"name": "context", "type": "int", "default": 2048, "min": 64, "max": 32768,
      "label": "Longest conversation it reads",
      "help": "Tokens. The tool declarations are rendered into every row: the five graph tools with their worked examples measured 1,080 tokens through functiongemma's template, and a row the context cuts off is dropped, not taught."},
@@ -23,6 +30,20 @@
      "label": "Conversations per step"},
     {"name": "learning_rate", "type": "float", "default": 0.00002, "min": 0.0000001, "max": 0.01,
      "label": "Learning rate",
-     "help": "A full fine-tune of a pretrained model wants a small one; 3e-3 is for training from scratch."}
+     "help": "A full fine-tune of a pretrained model wants a small one; 3e-3 is for training from scratch, and a LoRA wants about 1e-4 because only the adapter moves."},
+    {"name": "lora", "type": "bool", "default": false,
+     "label": "Train an adapter instead of every weight",
+     "help": "Two small matrices on each projection, the base frozen: ~0.5% of the weights train, and an 8B model fits where a full fine-tune of it would need ~128G of optimizer state. Needs peft: pip install 'ml-stack[train-lora]'."},
+    {"name": "lora_rank", "type": "int", "default": 16, "min": 1, "max": 256,
+     "label": "Adapter rank",
+     "help": "How much the adapter can express, and what it costs. 16 is the usual answer for teaching a format and a habit; 64 is for teaching new knowledge, which this is not."},
+    {"name": "lora_alpha", "type": "int", "default": 32, "min": 1, "max": 1024,
+     "label": "Adapter scale",
+     "help": "The adapter's update is scaled by alpha/rank, so alpha = 2 x rank keeps that scale at 2 whatever the rank is."},
+    {"name": "lora_dropout", "type": "float", "default": 0.05, "min": 0.0, "max": 0.5,
+     "label": "Adapter dropout"},
+    {"name": "lora_targets", "type": "text", "default": "",
+     "label": "Which projections get an adapter",
+     "help": "Comma-separated module names; empty means q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj -- attention and MLP both, because a tool caller is being taught what to say and not only what to attend to."}
   ]
 }

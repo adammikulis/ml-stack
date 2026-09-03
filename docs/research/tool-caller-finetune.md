@@ -1,8 +1,8 @@
 # Fine-tuning a tool caller on its own traces
 
-*Asked 2026-09-02. A plan and a measurement, not a result: nothing here has been trained
-yet. Every number about this machine's models comes from `docs/model-ranking.md`; every
-number about training is an estimate and says so.*
+*Asked 2026-09-02, and the LoRA path built the same day. A plan and a measurement, not a
+result: nothing here has been trained yet. Every number about this machine's models comes
+from `docs/model-ranking.md`; every number about training is an estimate and says so.*
 
 ## What is wrong now
 
@@ -34,13 +34,22 @@ inference — the fine-tune has no shortlist to run and no extra context to read
    how many ids it held, and per call the timings `Spent.note` reads. On by default for a
    run of 20 questions or fewer, off for the hundred, `MLSTACK_BENCH_TRACE=1` to force it.
    (`bench.measure.Counting`, `bench.wants_trace`, `Row.trace`.)
-2. **Harvest.** `ml-stack-train-tools from-bench --kept STORE --model e4b --min-f1 0.8 --out
-   FILE.jsonl` turns every traced question that scored well enough into one example per
-   model turn.
+2. **Harvest.** `ml-stack-train-tools from-bench --kept STORE --model e4b --min-f1 0.8
+   --base unsloth/gemma-4-E4B-it --out DIR` turns every traced question that scored well
+   enough into one example per model turn. **Pass `--base`**: the manifest's base is what
+   the recipe renders the chat template with and fine-tunes, and its default is the 270m —
+   E4B traces written under that default would silently train the wrong model.
 3. **Train.** The `tool-calls` recipe over that file — the base model's own chat template,
-   loss on the assistant tokens only. See "Which model, and how" below: the target is E4B,
-   and E4B needs a LoRA path this repository does not have yet.
-4. **Export and serve.** `ml_stack.gguf.export`, then `ml-stack-serve up`.
+   loss on the assistant tokens only. `--lora` for anything above the 270m: rank 16 on the
+   attention and MLP projections, the base frozen in bf16, ~40M trainable parameters for
+   E4B. What it will cost is printed before a weight is loaded, and refused over the same
+   30-minute ceiling the bench uses unless `--yes` (see "Which model, and how").
+4. **Export and serve.** One command does it: `--export-gguf` merges the adapter back into
+   the base, converts through the *managed* llama.cpp checkout
+   (`~/.ml-stack/llama.cpp/src`, the same source `ml-stack-serve build` builds the server
+   this machine serves with), quantises, and runs `ml_stack.serve.preflight` over the file
+   — architecture, shards, fit, flags — before anybody waits on a load. Then
+   `ml-stack-serve up`.
 5. **Measure.** `ml-stack-bench run` the fine-tuned caller against its own base, same
    questions, same graph, same finder, same sampling. Nothing below is believed until this
    says so.
@@ -119,11 +128,37 @@ if it exists before you knew you wanted it.
 Same bench, same graph, same questions, one variable:
 
 ```
-ml-stack-bench sweep --serve <base>.gguf --serve <finetuned>.gguf \
-    --sample 100 --shortlist 8 --kept ~/.ml-stack/bench/runs.ladybug
+# smoke the whole path first: two questions, serve to score to store, a minute
+ml-stack-bench sweep --smoke \
+    --serve hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+    --serve ~/models/gemma-4-E4B-it-tools-Q8_0.gguf --shortlist 8
+
+# the deciding run: one variable, the weights
+ml-stack-bench sweep \
+    --serve hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf \
+    --serve ~/models/gemma-4-E4B-it-tools-Q8_0.gguf \
+    --sample 100 --shortlist 8 --trace \
+    --kept ~/.ml-stack/bench/runs.ladybug
 ml-stack-bench show --rates          # accuracy per second, per 1k tokens, per GB
 ml-stack-bench show --trace <label>  # and what it actually called, when it was wrong
 ```
+
+Two models, one sweep, so both are served by the same binary against the same store, the
+same hundred questions, the same shortlist and the same sampling; the fine-tune is the only
+thing that differs. `--trace` on, because a run that beats its base is also the next
+training set.
+
+**What "worth it" means, before the numbers arrive.** The fine-tune is kept only if
+
+> **F1 on the hundred is more than 5 points above base E4B's, at no more than base E4B's
+> seconds per question.**
+
+Five points is `bench.score.NOISE` — the ranking's own noise band, and the same rule that
+decides which run a model is ranked on — so a gain inside it is not a gain. The
+seconds-per-question half matters because the adapter is merged into the weights: it adds
+no context to read and no shortlist to run, so a fine-tune that is *slower* than its base
+is measuring something other than the weights and should be found out rather than shipped.
+A gain that only shows up with the shortlist off, or only on the twenty, is not this bar.
 
 What must move for this to have worked, in order of how much it would mean:
 
@@ -156,37 +191,79 @@ decides what to look up and what to light, and Flash-Next (or nothing at all) wr
 That splits the 25.4 s/question question in two and puts the expensive model on the part it
 is actually better at.
 
-**The gap: this repository has no LoRA.** The `tool-calls` recipe is a full fine-tune
-through `transformers`, which is right for `functiongemma-270m-it` (the default base, and
-the path that works end to end today) and wrong for E4B: bf16 weights, gradients and Adam
-moments for 8B parameters is ~128G of state before activations. What is needed is one of
+**The LoRA path, which now exists.** The `tool-calls` recipe was a full fine-tune through
+`transformers` — right for `functiongemma-270m-it` (the default base and the `270m` size)
+and impossible for E4B, where bf16 weights, gradients and two Adam moments for 8B
+parameters is ~128G of state before a single activation. `--lora` is the second size of the
+same recipe: peft adapters on the attention and MLP projections, the base frozen in bf16,
+~40M trainable parameters, everything else — the renderer, the assistant-only loss, the
+checkpoint/resume guarantees, the holdout — unchanged. The one thing that had to change
+underneath is what a checkpoint *is*: `train.lora.LoraStep` writes the adapter, not the
+16G base it is identical to, so `checkpoint_every` costs 80M instead of 16G.
 
-- **peft LoRA over the existing recipe** — rank 16 on the attention and MLP projections,
-  base held in bf16 or 4-bit, ~40M trainable parameters. Smallest change to what exists.
-- **MLX-LM's LoRA** — native on this machine, but a second training path beside
-  `ml_stack.train`, and the checkpoint/resume guarantees this repository is built on would
-  have to be rebuilt around it.
+The alternative was **MLX-LM's LoRA** — native here and faster, but a second training path
+beside `ml_stack.train`, with the checkpoint, resume, stall and divergence guarantees this
+repository is built on to be rebuilt around it. Worth revisiting if the estimate below
+turns out to be the wall; it is not worth two training paths before anything has been
+trained once.
 
-Either ends with a merge before `ml_stack.gguf.export` (llama.cpp can also serve a GGUF
-adapter with `--lora`, which is worth measuring separately: it makes A/B on one load
-possible).
+Merging comes before `ml_stack.gguf.export`, and `--export-gguf` does the whole tail in one
+command. (llama.cpp can also serve a GGUF adapter with `--lora`, which is worth measuring
+separately: it makes A/B on one load possible.)
+
+```
+# the command, once the traces are harvested
+ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf \
+    --data ~/.ml-stack/train/e4b-traces --out ~/.ml-stack/train/e4b-tools \
+    --set steps=1000 --yes
+```
+
+`--size e4b` carries its own defaults — `lora` on, batch 4, context 2048, 1000 steps, lr
+1e-4, rank 16, alpha 32 — because one set of numbers cannot suit a 270m and an 8B at once.
+`--yes` is there because the run is refused without it; that refusal is the point of the
+next table.
 
 ### What it would cost
 
-Estimates. Nothing here has been run, and the way to replace each with a measurement is on
-the right.
+What the command prints before it starts, for 4,006 harvested turns on this machine
+(128 GB, MPS):
+
+```
+lora: rank 16, alpha 32, dropout 0.05, on q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj; 40M trainable
+plan: unsloth/gemma-4-E4B-it on mps, batch 4 × context 2048 = 8192 tokens a step, 1000 steps over 4006 examples (1.00 epochs)
+fit: 8.0B parameters (4.0B active) ≈ 18.8G resident -- frozen base in bf16, adapter and its Adam moments, activations
+cost: estimated 65.5 s/step, 18 h 12 min in all (an estimate; --dry-run trains 20 real steps and measures it) -- over the ceiling
+error: estimated 18 h 12 min, over the 30 min ceiling -- a fine-tune is hours, so it is a
+decision and not an accident. Train fewer steps (--set steps=N), raise the ceiling
+(--ceiling MINUTES, or MLSTACK_TRAIN_CEILING), measure first (--dry-run), or pass --yes.
+```
+
+Exit 5, the bench's own code for a refused estimate, and nothing downloaded: an 8B base is
+16G, and finding out the run was 18 hours *after* fetching it is the failure this prevents.
+**18.8G resident is the headline** — a LoRA of an 8B model on a 128 GB machine is not close
+to the limit, and the wall is wall clock, not memory. Raising the batch does not move the
+wall clock (the same tokens either way); shortening the context does, and so does training
+fewer than one epoch.
 
 | | estimate | how to actually know |
 | --- | --- | --- |
 | data | 3–5k turns from 2–3 traced hundred-question runs | `from-bench --dry-run` after the runs |
 | GPU to gather | ~3 runs × 100 questions × 3–25 s ≈ 0.5–2 h | `ml-stack-bench estimate` before each |
-| LoRA, E4B, 1–2 epochs | ~2–5k steps at batch 4, ctx 4096 | `ml-stack-train-run --dry-run` trains 20 steps and writes nothing — that is s/step, measured |
-| wall clock to train | 1–4 h on this machine | the above × steps |
+| LoRA, E4B, one epoch | 1000 steps at batch 4, ctx 2048, 8192 tokens a step | printed by the command above, from the contract's own numbers |
+| s/step | ~65 s (500 tokens/s per billion active parameters, `lora.TOKENS_PER_S_PER_B`) | `ml-stack-train-run --dry-run` trains 20 real steps, writes nothing, and prints `measured: N s/step` |
+| wall clock to train | ~18 h for the epoch; ~5 h 30 for 300 steps; 22 min for the 20 a dry run does | the measured s/step × steps, which the dry run restates |
 | export + serve | minutes | — |
 | the deciding bench | 2 × 100 questions ≈ 20 min | `ml-stack-bench estimate`, and the ceiling refuses over it |
 
+The throughput constant is *derived*, not measured: about 4 FLOPs per active parameter per
+token for a LoRA'd forward and backward, against ~2 TFLOP/s of bf16 matmul through torch's
+MPS backend. It is the first thing a dry run should replace, and 20 steps costs 22 minutes
+to find out whether 18 hours was right.
+
 The GPU is busy with sweeps; a training run and a bench must not share it. `ml-stack-bench`
 already takes the measuring lock — a training run must take it too, or be scheduled after.
+That is still true and still not done: the ceiling makes the length of a run explicit, it
+does not stop two runs from colliding.
 
 ### What is unmeasured
 
@@ -201,7 +278,9 @@ already takes the measuring lock — a training run must take it too, or be sche
 - **Whether the fine-tune breaks the prose.** Loss on assistant tokens teaches the answer
   turn as well as the call turns. `answer_chars` and a read of a few answers, not just F1.
 - **Cost per step on this hardware.** MPS with `transformers` is not fast, and nobody here
-  has measured a step of an 8B LoRA on it.
+  has measured a step of an 8B LoRA on it. The 65 s/step above is arithmetic from FLOPs and
+  a throughput guess; `--dry-run` turns it into a number in 22 minutes, and that is the
+  first thing to spend the GPU on.
 - **Whether a 270m caller is enough.** `functiongemma-270m-it` fine-tuned on the same data
   is hours cheaper and might route acceptably. Untested, and worth testing first because it
   is the cheap experiment that would make the expensive one unnecessary.

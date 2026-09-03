@@ -154,11 +154,14 @@ def conversation_batches(rendered: Sequence[tuple[list[int], list[int]]], *, bat
 
 # -- the model ------------------------------------------------------------------------------------
 
-def load_base(base: str, *, device: Any = None) -> tuple[Any, Any]:
+def load_base(base: str, *, device: Any = None, dtype: Any = None) -> tuple[Any, Any]:
     """``(model, tokenizer)`` for a Hugging Face causal LM, on ``device``.
 
     Whatever ``transformers`` cannot import is reported as the seam it is, rather than as
-    a missing attribute three frames down.
+    a missing attribute three frames down. ``dtype`` is float32 unless a caller says
+    otherwise: a full fine-tune updates these weights and wants the width, while a LoRA
+    freezes them and asks for bf16, which is the difference between 32G and 16G of base
+    for an 8B model.
     """
     try:
         import torch
@@ -174,10 +177,22 @@ def load_base(base: str, *, device: Any = None) -> tuple[Any, Any]:
                          "pick an instruction-tuned base")
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
-    model = AutoModelForCausalLM.from_pretrained(base, dtype=torch.float32)
+    model = AutoModelForCausalLM.from_pretrained(base, dtype=dtype or torch.float32)
     model.config.use_cache = False
     model.to(device or device_for())
     return model, tokenizer
+
+
+def frozen_dtype(device: Any) -> Any:
+    """The width a *frozen* base is held at: bf16 on an accelerator, float32 on the CPU.
+
+    bf16 matmul on the CPU is emulated and slower than the float32 it saves memory over,
+    and a machine running the tests has memory to spare; on MPS or CUDA it halves the
+    resident base and is what the adapter is trained against anyway.
+    """
+    import torch
+
+    return torch.float32 if str(device).startswith("cpu") else torch.bfloat16
 
 
 # -- the recipe ------------------------------------------------------------------------------------
@@ -195,7 +210,9 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
     context = int(config["context"])
     seed = int(config.get("seed") or 0)
     device = device_for()
-    model, tokenizer = load_base(base, device=device)
+    wants_lora = bool(config.get("lora"))
+    model, tokenizer = load_base(base, device=device,
+                                 dtype=frozen_dtype(device) if wants_lora else None)
 
     def rendered(rows: Sequence[Mapping[str, Any]]) -> tuple[list, int]:
         kept, dropped = [], 0
@@ -216,17 +233,32 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
 
     import torch
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=float(config["learning_rate"]),
-                                  weight_decay=0.0)
-
     def loss(m: Any, batch: Mapping[str, np.ndarray]) -> Any:
         tensors = {k: torch.as_tensor(v, device=device) for k, v in batch.items()}
         return m(**tensors).loss
 
+    extra: dict[str, Any] = {}
+    step = None
+    if wants_lora:
+        from ml_stack.train.lora import Lora, LoraStep, attach, trainable_parameters
+
+        settings = Lora.of(config)
+        model = attach(model, settings)
+        trainable = trainable_parameters(model)
+        optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad],
+                                      lr=float(config["learning_rate"]), weight_decay=0.0)
+        step = LoraStep(model, optimizer, loss)
+        extra = {"lora_targets_used": list(settings.targets),
+                 "trainable_parameters": trainable,
+                 "base_dtype": str(next(model.parameters()).dtype)}
+    else:
+        optimizer = torch.optim.AdamW(model.parameters(), lr=float(config["learning_rate"]),
+                                      weight_decay=0.0)
+
     batch_size = int(config["batch_size"])
     pad = int(tokenizer.pad_token_id)
     return Built(
-        model=model, optimizer=optimizer, loss=loss,
+        model=model, optimizer=optimizer, loss=loss, step=step,
         batches=conversation_batches(train_rows, batch_size=batch_size, pad_id=pad, seed=seed),
         eval_batches=conversation_batches(holdout_rows or train_rows, batch_size=batch_size,
                                           pad_id=pad, seed=seed + 1),
@@ -235,7 +267,7 @@ def build_tool_caller(spec: dict[str, Any], config: dict[str, Any], data: Path,
                 "train_rows": len(train_rows), "holdout_rows": len(holdout_rows),
                 "dropped_at_context": train_dropped + holdout_dropped,
                 "answer_tokens": answer_tokens, "read_tokens": all_tokens - answer_tokens,
-                **config},
+                **extra, **config},
     )
 
 
@@ -248,6 +280,14 @@ def save_pretrained(run_dir: Path | str, base: str, out_dir: Path | str) -> Path
     latest = find_latest(run_dir)
     if latest is None:
         raise FileNotFoundError(f"no checkpoint under {run_dir}; train first")
+    from ml_stack.train.checkpoint import load_state
+
+    if load_state(latest).config.get("lora"):
+        raise ValueError(
+            f"{latest} is a LoRA checkpoint: it holds the adapter, not the whole model, so "
+            "there is nothing here to save as a Hugging Face directory. Merge it into the "
+            "base instead -- ml_stack.train.lora.merge, which `ml-stack-train-run "
+            "--export-gguf` runs for you.")
     from safetensors.torch import load_file
 
     model, tokenizer = load_base(base, device="cpu")

@@ -203,3 +203,13 @@ Tinsley Kilnworks
 # rule stands down, and a tool name that no rule stands down either
 Marla Quinn
 Loomcast Gateway
+
+# invented for the update and install tests (tests/test_fleet_updates.py,
+# tests/test_fleet_install.py): machine names and an account, none of them a person
+wrenfield
+harrowgate
+larchmere
+quincewood
+
+# allowed with `hook allow` on 2026-09-02: not people
+frozen base

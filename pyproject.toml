@@ -38,6 +38,10 @@ arrays = ["numpy>=1.24"]
 torch = ["torch>=2.2"]
 mlx = ["mlx>=0.20"]
 train = ["numpy>=1.24", "safetensors>=0.4"]
+# a LoRA rather than a full fine-tune: two small matrices on each projection, the
+# base frozen. What makes an 8B tool caller trainable on one machine, where a full
+# fine-tune of it would need ~128G of optimizer state.
+train-lora = ["ml-stack[train,torch]", "peft>=0.11", "transformers>=4.40"]
 serve = ["psutil>=5.9"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
