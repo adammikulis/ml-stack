@@ -25,9 +25,10 @@ gpt-oss-20b, all inside ±28 bands; `few` loses 20-30 pts everywhere; `--rounds 
 nothing (the extra turns went unused).
 
 - [ ] **The shelf is reading** (started 2026-09-02T23:44, detached, Flash-Next on port 8080,
-  two workers): ten OpenStax PDFs from `~/Documents/Textbooks` plus
+  one slot, one unit at a time -- two workers measured slower in aggregate, 140 s a unit
+  against 86, and Adam: "we should never be splitting the GPU like that"): ten OpenStax PDFs from `~/Documents/Textbooks` plus
   `~/Downloads/Psychology2e_WEB.pdf` into `~/.ml-stack/shelf.ladybug`. Chapter 2 of
-  Biology2e alone was 13 units in 19 min on one worker; the shelf is days of GPU, not
+  Biology2e alone was 13 units in 19 min; the shelf is days of GPU, not
   hours. `ml-stack-ingest status --out ~/.ml-stack/shelf.ladybug` says where it is; the log
   is under `~/.ml-stack/ingest/logs/`; killed, the same command with `--resume` picks up
   (a failed unit is read again). When it is done or stopped: `ml-stack-serve down --port

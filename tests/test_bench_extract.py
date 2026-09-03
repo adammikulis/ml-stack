@@ -425,7 +425,7 @@ def test_extract_is_a_measuring_subcommand_with_help(capsys):
                  "--detach", "--twice", "--context", "--parallel"):
         assert flag in out
     args = _parser().parse_args(["extract", "x", "--world", "w"])
-    assert args.sample == bx.SAMPLE and args.context == 65536 and args.parallel == 2
+    assert args.sample == bx.SAMPLE and args.context == 65536 and args.parallel == 1
     assert args.per_message == 300.0
 
 

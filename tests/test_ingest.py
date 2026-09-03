@@ -597,15 +597,17 @@ def test_the_book_fold_joins_a_plural_to_its_singular():
     assert "concept:acids" not in sources
 
 
-def test_context_is_per_worker_so_the_lease_is_that_many_times_over(monkeypatch, tmp_path):
-    """Four figures, 2,500 tokens of text and a long reply overran a 16k seat on the first
-    shelf night; each worker's seat gets the whole --context."""
+def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path):
+    """Adam: "we shouldn't be handling parallel requests while extracting ... we should never
+    be splitting the GPU like that" -- and measured: two workers averaged 140 s a unit
+    against 86 alone. One seat, and --context is all its own."""
     from ml_stack.serve import Shape
 
     seen = {}
 
     class Found:
         def shape(self, port, seats):
+            seen["seats"] = seats
             return Shape(model="x.gguf", port=port, seats=seats, seat_context=16384)
 
         def said(self):
@@ -624,9 +626,11 @@ def test_context_is_per_worker_so_the_lease_is_that_many_times_over(monkeypatch,
         '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
     import contextlib
     with contextlib.suppress(SystemExit):
-        ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x",
-                     "--workers", "2", "--context", "32768"])
-    assert seen["lease"]["context"] == 65536 and seen["lease"]["parallel"] == 2
+        ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x", "--context", "32768"])
+    assert seen["seats"] == 1 and seen["lease"]["parallel"] == 1
+    assert seen["lease"]["context"] == 32768
+    with pytest.raises(SystemExit):
+        ingest.parser().parse_args(["book.pdf", "--out", "s", "--workers", "2"])
 
 
 def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, capsys):

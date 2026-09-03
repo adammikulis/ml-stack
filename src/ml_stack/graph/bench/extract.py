@@ -906,8 +906,10 @@ def add_arguments(sub: Any) -> Any:
     ap.add_argument("--seed", type=int, default=0, help="which N (default: %(default)s)")
     ap.add_argument("--context", type=int, default=65536, metavar="N",
                     help="total context for a --serve'd model (default: %(default)s)")
-    ap.add_argument("--parallel", type=int, default=2, metavar="N",
-                    help="slots for a --serve'd model (default: %(default)s)")
+    ap.add_argument("--parallel", type=int, default=1, metavar="N",
+                    help="slots for a --serve'd model (default: %(default)s -- extraction "
+                         "reads one message at a time and never splits the GPU; a second "
+                         "slot only halves the context each has)")
     ap.add_argument("--serve-port", type=int, default=8099)
     ap.add_argument("--n-max", type=int, default=None, metavar="N",
                     help="tokens the draft head guesses ahead each step, over the profile's "

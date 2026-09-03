@@ -39,8 +39,7 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -54,8 +53,7 @@ HOME = Path(os.environ.get("MLSTACK_INGEST_HOME") or "~/.ml-stack/ingest").expan
 """Where a detached run's log and its record of itself live. Not the store: the store is
 the caller's, named by ``--out``."""
 
-PER_SECTION = 1200.0    # a ceiling, not a budget: a legitimate unit writes 6k tokens at ~30 tok/s on two workers
-WORKERS = 2
+PER_SECTION = 1200.0    # a ceiling, not a budget: a legitimate unit writes 6k tokens at ~50 tok/s
 GIVE_UP = 2             # failed attempts before --resume leaves a unit alone
 """The most one section may take before it is recorded as timed out and the next is read."""
 
@@ -869,12 +867,14 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
     from ml_stack.serve.manager import serve
 
     found = _find_model(args.model)
-    seats = max(1, int(getattr(args, "workers", 1) or 1))
-    # --context is per worker: a unit of 2,500 tokens, four figures through the projector,
-    # the instructions and a reply of several thousand tokens overran a 16k seat on the
-    # first night (finish_reason=length, JSON cut mid-object), so each seat gets the whole
-    # figure and the lease is that many times over
-    lease: dict[str, Any] = {"port": args.serve_port, "context": int(args.context) * seats,
+    # One slot, one unit at a time. Adam: "we shouldn't be handling parallel requests while
+    # extracting. In fact, we should never be splitting the GPU like that" -- and the shelf
+    # measured it: one worker read a unit in 86 s, two workers sharing the model averaged
+    # 140 s each, slower in aggregate as well as apiece. The whole --context is the one
+    # seat's: a 2,500-token unit with four figures through the projector and a reply of
+    # several thousand tokens overran a 16k seat on the first night.
+    seats = 1
+    lease: dict[str, Any] = {"port": args.serve_port, "context": int(args.context),
                              "parallel": seats, "timeout": 900.0, "cache_reuse": 256,
                              "warmup": False}
     manager = None
@@ -886,7 +886,7 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
             shape = measured.shape(port=args.serve_port, seats=seats)
             lease = {**lease, **{k: v for k, v in shape.lease().items()
                                  if k not in ("port", "parallel")}}
-            lease["context"] = max(int(args.context) * seats, int(lease.get("context") or 0))
+            lease["context"] = max(int(args.context), int(lease.get("context") or 0))
             manager = shape.manager()
             say(f"    serving in its measured shape: {said(measured)}")
     if not args.images:
@@ -1042,10 +1042,6 @@ def parser() -> argparse.ArgumentParser:
                     help="tokens the draft head guesses ahead each step, over the profile's "
                          "measured length -- extraction accepts far more of them than "
                          "answering does, so measure it here (default: the profile's)")
-    ap.add_argument("--workers", type=int, default=WORKERS, metavar="N",
-                    help="units read at once, each on its own slot of the served model "
-                         "(default: %(default)s). Decoding one sequence leaves most of the "
-                         "GPU idle; two roughly double a shelf's rate on the same load")
     ap.add_argument("--per-section", type=float, default=PER_SECTION, metavar="SECONDS",
                     help="the most one section may take (default: %(default)s)")
     ap.add_argument("--max-tokens", type=int, default=0, metavar="N",
@@ -1055,8 +1051,9 @@ def parser() -> argparse.ArgumentParser:
                     help="the answer's ceiling; a ceiling is not a budget, and a low one "
                          "truncates the extraction (default: %(default)s)")
     ap.add_argument("--context", type=int, default=32768, metavar="N",
-                    help="context per worker for a --model that is served, so the lease is "
-                         "this times --workers (default: %(default)s)")
+                    help="context of the one slot a --model is served with -- extraction "
+                         "reads one unit at a time and never splits the GPU (default: "
+                         "%(default)s)")
     ap.add_argument("--serve-port", type=int, default=8099)
     ap.add_argument("--cache", default="", metavar="DIR",
                     help="keep each extraction under this directory and do not ask twice "
@@ -1161,32 +1158,27 @@ def _read_run(args: Any) -> int:
                     continue
                 to_read.append(unit)
 
-            def read_one(unit: Any) -> tuple[Any, Any]:
-                return unit, extract_unit(client, unit, shape, images=args.images,
-                                          per_section=args.per_section,
-                                          cache_dir=args.cache or None)
-
-            # `--workers` units at once, one per slot; each is written down the moment it
-            # finishes, so a run killed mid-book loses at most the units in flight
-            workers = max(1, int(getattr(args, "workers", 1) or 1))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                for unit, row in pool.map(read_one, to_read) if workers == 1 else \
-                        _as_completed(pool, read_one, to_read):
-                    reads_by_unit[unit.id] = asdict(row)
-                    docs[f"ingest:unit:{unit.id}"] = {
-                        "unit": unit.id, "book": slug, "where": unit.where,
-                        "title": unit.section_title, "chapter_title": unit.chapter_title,
-                        "extracted": row.extracted, "calls": row.calls,
-                        "seconds": row.seconds, "error": row.error}
-                    for call in row.calls:
-                        spent.add(_call_of(call))
-                    progress.note(slug, row)
-                    _keep_reads(args.out, slug, [reads_by_unit[unit.id]])
-                    print(f"  ch {unit.chapter or '-':>3}  "
-                          f"{unit.section or unit.section_title[:12]:<8}"
-                          f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
-                          f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
-                          + (f"  {row.error}" if row.error else ""))
+            # one at a time, on the one slot: each unit is written down the moment it
+            # finishes, so a run killed mid-book loses at most the unit in flight
+            for unit in to_read:
+                row = extract_unit(client, unit, shape, images=args.images,
+                                   per_section=args.per_section,
+                                   cache_dir=args.cache or None)
+                reads_by_unit[unit.id] = asdict(row)
+                docs[f"ingest:unit:{unit.id}"] = {
+                    "unit": unit.id, "book": slug, "where": unit.where,
+                    "title": unit.section_title, "chapter_title": unit.chapter_title,
+                    "extracted": row.extracted, "calls": row.calls,
+                    "seconds": row.seconds, "error": row.error}
+                for call in row.calls:
+                    spent.add(_call_of(call))
+                progress.note(slug, row)
+                _keep_reads(args.out, slug, [reads_by_unit[unit.id]])
+                print(f"  ch {unit.chapter or '-':>3}  "
+                      f"{unit.section or unit.section_title[:12]:<8}"
+                      f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
+                      f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                      + (f"  {row.error}" if row.error else ""))
             reads = [reads_by_unit[unit.id] for unit in wanted if unit.id in reads_by_unit]
 
             _keep_reads(args.out, slug, reads)
@@ -1201,15 +1193,6 @@ def _read_run(args: Any) -> int:
           f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
           + (f"; {totals['failed']} failed" if totals["failed"] else ""))
     return code
-
-
-def _as_completed(pool: Any, fn: Callable[[Any], Any], items: Sequence[Any]) -> Iterator[Any]:
-    """``fn`` over ``items`` on the pool, yielded as each finishes rather than in order."""
-    from concurrent.futures import as_completed
-
-    futures = [pool.submit(fn, item) for item in items]
-    for done in as_completed(futures):
-        yield done.result()
 
 
 def _call_of(record: Mapping[str, Any]) -> Any:
