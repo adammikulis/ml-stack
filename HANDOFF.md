@@ -55,8 +55,12 @@ nothing (the extra turns went unused).
   has the model judge the names a spelling apart (from knowledge, then from the passages
   re-read out of the book), applying what it decides and keeping every verdict with its
   reason in the store's `tidy:decisions`; a run started with the new code does this itself
-  at each book's end. The dry run before the judge existed (2026-09-03 11:40): 263 merges,
-  1,216 inverse pairs, 71 suspects, 451 pairs for the judge. Then `show --book apbiology
+  at each book's end. Run 2026-09-03 13:18-13:31 over APBiology + Biology2e ch. 2: 377
+  pairs judged -- 348 different (RNA polymerase vs RNA Polymerase II, DNA vs RNA
+  polymerase III), 29 the same (bisphosphate/biphosphate, Vertebrata/vertebrates,
+  mucous/Mucus, T cell/T-cells) -- reading the passages once; the store at 9,989 nodes
+  and 26,794 edges. The verb-conflict, definition and suspect steps recorded nothing on
+  that run; a second run is checking whether they judge at all. Then `show --book apbiology
   --sample 20` and a few questions over it (`graph.ask`) to see whether a book-scale graph
   is worth four more days of GPU. Nothing in `docs/` yet says what reading a shelf taught
   (question banks skipped, the relations-array loop capped, one slot only, the server-gone
