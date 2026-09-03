@@ -50,6 +50,16 @@ def test_a_colour_chosen_for_a_kind_is_none_of_the_five_shipped_ones():
     assert not set(chosen) & shipped
 
 
+def test_a_colour_one_kind_was_given_is_not_chosen_for_another():
+    html = graph_page.render(
+        graph_with("group", "event"),
+        kinds=[{"k": "group", "label": "Groups", "shape": "square",
+                "colour": graph_page.PALETTE[0]},
+               {"k": "event", "label": "Events", "shape": "diamond"}])
+    kinds = {k["k"]: k["colour"] for k in payload_of(html)["kinds"]}
+    assert kinds["event"] != kinds["group"]
+
+
 def test_the_colour_rule_comes_after_the_templates_three_palette_blocks():
     html = graph_page.render(graph_with("group"))
     last_palette = html.rfind("--k-opportunity: #")

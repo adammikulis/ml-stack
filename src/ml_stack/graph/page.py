@@ -67,6 +67,8 @@ def coloured(kinds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Each kind entry with a ``colour``: the one given, a shipped kind's own, or the next
     of ``PALETTE`` for anything else."""
     out: list[dict[str, Any]] = []
+    taken = {str(e.get("colour")).lower() for e in kinds if e.get("colour")}
+    free = [c for c in PALETTE if c not in taken] or list(PALETTE)
     chosen = 0
     for entry in kinds:
         entry = dict(entry)
@@ -75,7 +77,7 @@ def coloured(kinds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
             if kind in SHIPPED:
                 entry["colour"] = SHIPPED[kind]
             else:
-                entry["colour"] = PALETTE[chosen % len(PALETTE)]
+                entry["colour"] = free[chosen % len(free)]
                 chosen += 1
         out.append(entry)
     return out

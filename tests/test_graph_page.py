@@ -859,3 +859,23 @@ def test_the_details_panel_can_go_back_wherever_you_came_from(open_page):
     page.wait_for_selector("#detail h2:text('Ada Lovelace')")
     assert "What is here" in page.locator("#detail #panel-back").inner_text()
     assert errors == []
+
+
+def test_a_kind_the_template_never_named_loads_clean_in_its_own_colour(open_page):
+    """graph.html: `SIZE[n.kind] || SIZE.org` back to `SIZE[n.kind]` -- a group node then
+    throws in `radius` before the first frame, and the page is blank."""
+    graph = sample_graph()
+    graph["nodes"].append({"id": "group:owls", "label": "night owl", "kind": "group",
+                           "mentions": 1, "attrs": {}, "messages": []})
+    graph["edges"].append({"source": "person:ada", "target": "group:owls", "rel": "member_of",
+                           "weight": 1, "messages": []})
+    page, errors = open_page(graph)
+    settle(page)
+    assert errors == []
+    fills = page.evaluate(
+        "[...document.querySelectorAll('.node path.mark')].map(e => getComputedStyle(e).fill)")
+    assert len(fills) == len(graph["nodes"])
+    assert "rgb(0, 0, 0)" not in fills
+    colour = page.evaluate("(JSON.parse(document.getElementById('data').textContent).kinds"
+                           ".find(k => k.k === 'group') || {}).colour")
+    assert colour and colour.startswith("#")
