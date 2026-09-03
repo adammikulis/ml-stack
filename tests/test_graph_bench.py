@@ -2111,6 +2111,35 @@ def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
     assert (seen["embed_url"], seen["embed_model"]) == ("", "")
 
 
+def test_a_resumed_sweep_with_shortlist_for_measures_only_the_half_not_kept(tmp_path,
+                                                                            monkeypatch,
+                                                                            capsys):
+    """The plain half kept today and the shortlist half not: one load, the plain half
+    skipped by name, the shortlist half measured."""
+    import ml_stack.graph.bench as bench
+
+    seen = _serving(monkeypatch, tmp_path)
+    row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"],
+                label="gemma-E2B-plain")
+    save(seen["kept"], [row], held={"context": 32768, "slots": 1})
+
+    assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--shortlist-for", "e2b",
+                        "--shortlist", "5", "--resume", *seen["common"]]) == 0
+    said = capsys.readouterr().out
+    assert "skipping gemma-E2B-plain: kept at" in said
+    assert seen["models"] == ["gemma-E2B.gguf"], "one load, for the half still to measure"
+    assert len(runs(seen["kept"], "gemma-E2B-shortlist")) == 1
+    assert len(runs(seen["kept"], "gemma-E2B-plain")) == 1, "the kept half was not measured again"
+
+    # both halves kept: the model is never loaded
+    seen["models"].clear()
+    assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--shortlist-for", "e2b",
+                        "--shortlist", "5", "--resume", *seen["common"]]) == 0
+    said = capsys.readouterr().out
+    assert "skipping gemma-E2B-shortlist: kept at" in said
+    assert seen["models"] == []
+
+
 def test_halves_and_the_ways_they_cross():
     from argparse import Namespace
 
