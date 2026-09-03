@@ -432,3 +432,19 @@ def test_absorb_without_a_judge_maps_the_plain_names_and_reports_the_spelling(tm
     out = {node["id"] for node in report.graph["nodes"]}
     assert out == {"concept:flux-ring", "in:vaulf"}
     assert "1 close spelling(s) left new" in report.absorbed()
+
+
+def test_a_graph_that_keeps_its_pointers_elsewhere_says_where(tmp_path):
+    """A community graph keeps message ids under data.messages, not provenance."""
+    texts = {"m1": "The flux rlng, a misprint for flux ring, holds charge.",
+             "m2": "A flux ring holds charge."}
+    client = Scripted({("flux ring", "flux rlng"): "unsure"},
+                      after_reading={("flux ring", "flux rlng"): "same"})
+    judge = ModelJudge(client, sources=texts.__getitem__,
+                       pointers=lambda node: list((node.get("data") or {}).get("messages") or ()))
+    a = {"id": "concept:flux-ring", "label": "flux ring", "kind": "concept", "mentions": 3,
+         "attrs": {}, "data": {"messages": ["m2"]}}
+    b = {"id": "concept:flux-rlng", "label": "flux rlng", "kind": "concept", "mentions": 1,
+         "attrs": {}, "data": {"messages": ["m1"]}}
+    got = judge.decide(a, b)
+    assert got["verdict"] == "same" and set(got["read"]) == {"m1", "m2"}

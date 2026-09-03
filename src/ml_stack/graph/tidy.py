@@ -202,9 +202,14 @@ class ModelJudge:
     """
 
     def __init__(self, client: Any, *, sources: Callable[[str], str] | None = None,
-                 model: str = "", excerpt_chars: int = 400, most_units: int = 4) -> None:
+                 model: str = "", excerpt_chars: int = 400, most_units: int = 4,
+                 pointers: Callable[[Mapping[str, Any]], list[str]] | None = None) -> None:
         self.client = client
         self.sources = sources
+        # where a node's pointers back to its source live: ``provenance`` (the ingest's
+        # unit ids) unless the graph keeps them elsewhere -- a community graph keeps
+        # message ids under ``data.messages`` -- so a caller says how to find them
+        self.pointers = pointers or (lambda node: list(node.get("provenance") or ()))
         self.model = model or str(getattr(client, "model", "") or "")
         self.excerpt_chars = excerpt_chars
         self.most_units = most_units
@@ -348,7 +353,7 @@ class ModelJudge:
         assert self.sources is not None
         label = str(node.get("label") or "")
         out: list[tuple[str, str]] = []
-        for unit in list(node.get("provenance") or ())[: self.most_units]:
+        for unit in list(self.pointers(node))[: self.most_units]:
             try:
                 text = self.sources(str(unit))
             except Exception:  # noqa: BLE001 - a book that cannot be re-read is skipped, said in why
