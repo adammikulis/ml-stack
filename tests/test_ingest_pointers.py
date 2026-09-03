@@ -120,3 +120,35 @@ def test_run_record_names_what_the_run_read_with(monkeypatch):
     assert record["model"].startswith("kestrel") and record["serving"] == "one slot, q8_0"
     assert len(record["schema_sha"]) == 16 and len(record["instructions_sha"]) == 16
     assert record["id"].startswith("run:") and record["images"] is True
+
+
+def test_a_second_books_names_land_on_the_first_books_nodes_on_the_way_in(tmp_path):
+    """Adam: "it will for sure re-encounter the same concepts as it learns more." The
+    second book says 'vaults' and 'Glimmer Node'; both land on the first book's nodes."""
+    out = tmp_path / "shelf"
+    first = a_unit()
+    _keep(tmp_path, "lattice", [_read(first, ["glimmer node", "vault"],
+                                      [("glimmer node", "part_of", "vault")])])
+    ingest.Progress(ingest.Progress.beside(out)).book("lattice", title="Lattice Studies",
+                                                      path="l.pdf", sections=1)
+    ingest.fold_into(out, "lattice")
+
+    second = a_unit(book="currents", book_title="Vault Currents", section="3.1",
+                    section_title="Currents", first_page=9, last_page=10)
+    _keep(tmp_path, "currents", [_read(second, ["vaults", "Glimmer Node", "current"],
+                                       [("current", "causes", "vaults"),
+                                        ("Glimmer Node", "requires", "current")])])
+    ingest.Progress(ingest.Progress.beside(out)).book("currents", title="Vault Currents",
+                                                      path="c.pdf", sections=1)
+    got = ingest.fold_into(out, "currents")
+    # 'Glimmer Node' already slugs to the first book's id, so it needs no mapping at all;
+    # 'vaults' is a plural of a node the store holds and lands on it
+    assert got["absorbed"]["plural"] == 1
+    with GraphStore(out, read_only=True) as store:
+        ids = {n["id"] for n in store.nodes()}
+        assert "concept:vaults" not in ids and "concept:glimmer-node" in ids
+        triples = {(e["source"], e["rel"], e["target"]) for e in store.edges()}
+        assert ("concept:current", "causes", "concept:vault") in triples
+        assert ("concept:glimmer-node", "requires", "concept:current") in triples
+        vault = next(n for n in store.nodes() if n["id"] == "concept:vault")
+        assert set(vault["provenance"]) == {first.id, second.id}

@@ -439,22 +439,48 @@ def _real_cache_and_state_untouched():
     def log_names() -> set[str]:
         return {p.name for p in LOG_DIR.iterdir()} if LOG_DIR.is_dir() else set()
 
-    def state_mark():
+    def state_entries() -> dict | None:
+        """The state file's entries by port, or None when there is no file. A file that
+        is not the manager's JSON reads as {"?": bytes} so any rewrite of it still shows."""
         if not STATE_FILE.exists():
             return None
-        stat = STATE_FILE.stat()
-        return (stat.st_mtime_ns, stat.st_size)
+        try:
+            held = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {"?": STATE_FILE.read_bytes() if STATE_FILE.exists() else b""}
+        return held if isinstance(held, dict) else {"?": held}
 
-    before_logs, before_state = log_names(), state_mark()
+    def ours(entry) -> bool:
+        """Whether an entry was written by this test session -- its owner is this
+        process, an ancestor or a descendant. A live ingest or a person's serve on this
+        machine rewrites the real state file while the suite runs; that is theirs."""
+        owner = entry.get("owner_pid") if isinstance(entry, dict) else None
+        if not isinstance(owner, int):
+            return True
+        try:
+            import psutil
+
+            me = psutil.Process(os.getpid())
+            tree = {me.pid, *(p.pid for p in me.parents()), *(p.pid for p in me.children(True))}
+            return owner in tree or not psutil.pid_exists(owner)
+        except Exception:  # noqa: BLE001 - no psutil: judge by the pid alone
+            return owner == os.getpid()
+
+    before_logs, before_state = log_names(), state_entries()
     yield
-    after_logs, after_state = log_names(), state_mark()
+    after_logs, after_state = log_names(), state_entries()
 
     problems = []
     new_logs = after_logs - before_logs
     if new_logs:
         problems.append(f"{LOG_DIR}: new file(s) {sorted(new_logs)}")
     if after_state != before_state:
-        problems.append(f"{STATE_FILE}: changed")
+        changed = {k: v for k, v in (after_state or {}).items()
+                   if (before_state or {}).get(k) != v}
+        gone = {k: v for k, v in (before_state or {}).items() if k not in (after_state or {})}
+        mine = [k for k, v in {**changed, **gone}.items() if ours(v)]
+        if mine or (before_state is None) != (after_state is None):
+            problems.append(f"{STATE_FILE}: changed (entries {sorted(mine) or 'created/removed'})")
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
                     pytrace=False)

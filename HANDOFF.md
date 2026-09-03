@@ -100,9 +100,6 @@ Lifecycle and safety
 - [ ] **One `Run`/lease object across the stack.** The bench, the ingest, the page and
   `seat()` each build their own lease from the profile; one object carrying shape, asking
   and client so a knob cannot leak or drift (`measure.asking()`'s kwarg list is the seam).
-- [ ] **A foreign-server report.** `ml-stack-serve status` lists a listening llama-server
-  the record does not know as foreign, with its pid -- detection, since prevention is in
-  the library (`Lease`).
 - [ ] **The ingest onto `jobs`.** `ml_stack.jobs` (record/alive/wait/stop/status) now backs
   the bench's detach and `ml-stack-bench wait`; the ingest still keeps its own
   `ingesting.json`. Swap it: `jobs.record("ingest", pid=child.pid, argv=rest, log=str(log),
@@ -110,45 +107,17 @@ Lifecycle and safety
   `jobs.stop(..., wait=STOP_WAIT)` with the before/after-fold report layered on top; then
   `ml-stack-jobs status` (a tiny CLI over `jobs.status`) shows every kind at once.
   Training has no detach yet; when it gets one it records the same way.
-- [ ] **Retry once on a server reset.** A single reset mid-request costs the unit today;
-  one retry after a health check before it is written down as failed.
-
 Extraction quality
 - [ ] **Reconcile on the way in, everywhere.** Adam: "the same dedupe mechanism should be
   used whenever the model is reading a new thing or learning something new and saving to
   an existing graph. it will for sure re-encounter the same concepts as it learns more."
-  `graph.tidy.absorb(store, graph, judge=)` (landing) maps an incoming graph's nodes onto
-  the store's by same name and plural, and puts close spellings to the judge with the
-  incoming passage in hand. Wire it into every writer of learned knowledge: the ingest's
-  `write()` before the upsert (the run's model as judge, the unit text as source),
-  ai_ceo's pipeline merge (`merge.py`, with `data/aliases.json` as `written`),
-  `graph.thread` when an answer's entities are kept, and the world simulator's emit. The
-  whole-store pass then only cleans what was written before `absorb` existed.
-- [ ] **Measure the judge.** Its verdicts are recorded, not scored: a gold set of invented
-  pairs (same / different / unsure-then-same) through a gate, so a model or prompt change
-  shows as a number.
-- [ ] **Verb conflicts to the judge.** Two edges between the same ends with different verbs
-  (423 in APBiology) are the same question as duplicates; the judge picks or keeps both,
-  from the passage.
-- [ ] **Definitions merged, not first-wins.** A merged node keeps the definition it had
-  first; the judge picks the better, or the fold keeps both with provenance.
-- [ ] **Suspect labels resolved.** Clause-shaped labels are flagged; the judge rewrites to
-  a name or drops, from the passage.
-- [ ] **A shelf-level view.** Books fold alone; a `shelf` command shows concepts shared
-  across books and the edges between books' vocabularies.
-- [ ] **Answering over the shelf.** Nothing asks the page a biology question over the
-  store; the tools assume a community's kinds. Textbook questions through `graph.ask`, so
-  the graph's worth is a number.
-
-Telemetry and cost
-- [ ] **Per-unit cost rolled up.** Unit documents keep calls and seconds; `status` rolls
-  them to tokens per book, and the report carries an ingest section like extraction's.
-- [ ] **Fold cost.** A fold over a 9,000-node book is minutes and runs at every chapter end;
-  measure it, fold on a size-aware interval or make the name fold incremental.
-
+  `graph.tidy.absorb(store, graph, judge=)` maps an incoming graph's nodes onto the
+  store's by same name and plural, and puts close spellings to the judge with the
+  incoming passage in hand; the ingest's fold calls it before every upsert (the run's
+  model as judge, the unit text as source). Still to wire: ai_ceo's pipeline merge
+  (`merge.py`, with `data/aliases.json` as `written`), `graph.thread` when an answer's
+  entities are kept, and the world simulator's emit.
 Tests and hygiene
-- [ ] **Port and cache isolation asserted.** A test fails the suite if any test opened a
-  real port or wrote under the home cache.
 - [ ] **The ingest module split** into a package, one file per concern, same public names.
 
 ## Library

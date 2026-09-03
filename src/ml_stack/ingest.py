@@ -1090,9 +1090,16 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
               reads: Sequence[Mapping[str, Any]] | None = None,
               units_by_id: Mapping[str, Any] | None = None,
               progress: Progress | None = None, rebuild: bool = False,
-              dry_run: bool = False,
+              dry_run: bool = False, judge: Any = None,
               log: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """Fold one book's reads so far and upsert them into the store.
+    """Fold one book's reads so far, reconcile it against the store, and upsert it.
+
+    Before the upsert the fold goes through `graph.tidy.absorb`: a name the store already
+    holds under case, spacing or plural lands on that node, and a close spelling goes to
+    ``judge`` when there is one (the run's own model, with the unit text in hand). Adam:
+    "the same dedupe mechanism should be used whenever the model is reading a new thing
+    or learning something new and saving to an existing graph." ``absorbed`` on the
+    result says how many names landed on existing nodes and how the judge ruled.
 
     Returns the counts: units read, nodes, edges, folds, ``seconds`` -- what the fold and
     the write took -- whether the book is partial, and ``new_nodes``/``new_edges``, what the
@@ -1119,6 +1126,17 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
            "seconds": round(time.time() - began, 2)}
     if dry_run:
         return got
+    if not rebuild and Path(out).expanduser().exists():
+        from ml_stack.graph.store import GraphStore
+        from ml_stack.graph.tidy import absorb
+
+        with GraphStore(out) as store:
+            taken = absorb(store, graph, judge=judge, sources=_texts_of(units), log=log)
+        graph = taken.graph
+        got["absorbed"] = {"same_name": taken.mapped_same_name, "plural": taken.mapped_plural,
+                           "judged_same": taken.judged_same,
+                           "judged_different": taken.judged_different,
+                           "possible": taken.left_possible}
     docs = _unit_docs(rows, slug)
     counts = write(out, graph, book=slug, title=name, docs=docs, replace=rebuild,
                    keep_units=set(units) if rebuild else None)
@@ -1128,6 +1146,16 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     record.folded(slug, units=len(rows), nodes=counts["nodes"], edges=counts["edges"],
                   seconds=got["seconds"])
     return got
+
+
+def _texts_of(units: Mapping[str, Any]) -> Callable[[str], str] | None:
+    """The unit text the judge may read, when the units in hand carry it (a run's do; a
+    fold from the reads file alone does not, and then the judge reads the book again
+    through `sources_for`)."""
+    held = {uid: str(getattr(u, "text", "") or "") for uid, u in units.items()}
+    if not any(held.values()):
+        return None
+    return lambda unit_id: held.get(unit_id, "")
 
 
 def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
@@ -2356,12 +2384,18 @@ def _read_run(args: Any) -> int:
     def keep(slug: str, title: str, rows: Sequence[Mapping[str, Any]],
              units_by_id: Mapping[str, Any]) -> dict[str, Any]:
         nonlocal folded_seconds
+        judge = None if args.no_tidy else _judge(client, args.out, model=args.model)
         got = fold_into(args.out, slug, title=title, reads=rows, units_by_id=units_by_id,
-                        progress=progress)
+                        progress=progress, judge=judge)
         folded_seconds = float(got["seconds"])
+        landed = got.get("absorbed") or {}
         print(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
               f"{got['nodes']} nodes, {got['edges']} edges"
               + (" (partial)" if got["partial"] else "")
+              + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
+                 f"nodes, judge: {landed['judged_same']} same, "
+                 f"{landed['judged_different']} different, {landed['possible']} left"
+                 if landed else "")
               + (f"; the next fold is {_fold_interval(folded_seconds)} unit(s) away"
                  if _fold_interval(folded_seconds) != FOLD_EVERY else ""))
         return got
