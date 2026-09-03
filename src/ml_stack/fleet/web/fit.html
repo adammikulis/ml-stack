@@ -185,7 +185,7 @@ function fdiv(a, b) {
 
 const Fit = {
   /** weights + draft + compute: what it costs with nobody on it. */
-  loaded: (f) => f.weights + f.draft + f.compute,
+  loaded: (f) => (f.weights_resident || f.weights_gpu || (f.weights + f.draft)) + f.compute,
   /** what is left for caches in a machine with `room` bytes; never negative. */
   free: (f, room) => Math.max(0, room - Fit.loaded(f)),
   /** what one more user at `ctx` tokens costs. */

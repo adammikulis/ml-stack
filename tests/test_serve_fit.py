@@ -15,6 +15,7 @@ arithmetic can be checked by hand rather than against the code that produced it.
 from __future__ import annotations
 
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -95,6 +96,62 @@ from /models/mtp-thornfield-8B.gguf (version GGUF V3 (latest))
 0.00.450.100 I llama_kv_cache: size =     3.00 MiB ( 32768 cells,   1 layers,  2/1 seqs), \
 K (f16):     1.50 MiB, V (f16):     1.50 MiB
 0.00.460.000 I sched_reserve:      Metal compute buffer size =    16.00 MiB
+"""
+
+
+# One model, and where its weights went. `load_tensors` prints one line per backend it put
+# tensors in -- the whole answer to "why is a 5G file only 4G of memory" -- then the layer
+# count it offloaded. Two layers stayed behind here, the output was not offloaded, and one
+# tensor type the backend had no kernel for was left on the CPU: three of the four reasons
+# a model is smaller in memory than on disk, each said out loud by llama.cpp.
+WEIGHTS_LOG = """\
+0.00.100.000 I llama_model_loader: loaded meta data with 30 key-value pairs and 291 tensors \
+from /models/thornfield-8B-Q4_K_M.gguf (version GGUF V3 (latest))
+0.00.101.000 I cmn  common_param: build 1 (a1b2c3d) with Apple clang for arm64-apple-darwin
+0.00.110.000 I llama_model_loader: - type  f32:   65 tensors
+0.00.110.001 I llama_model_loader: - type q4_K:  200 tensors
+0.00.110.002 I llama_model_loader: - type q6_K:   26 tensors
+0.00.150.000 I load_tensors: tensor 'output.weight' (q6_K) (and 3 others) cannot be used \
+with preferred buffer type Metal, using CPU instead
+0.00.160.000 I load_tensors: loading model tensors, this can take a while... (load_mode = mmap)
+0.00.170.000 I load_tensors: offloading 30 repeating layers to GPU
+0.00.170.001 I load_tensors: offloaded 30/32 layers to GPU
+0.00.170.002 I load_tensors:   CPU_Mapped model buffer size =  1024.00 MiB
+0.00.170.003 I load_tensors:  MTL0_Mapped model buffer size =  4096.00 MiB
+0.00.200.100 I llama_kv_cache: size =  1024.00 MiB ( 32768 cells,  32 layers,  2/1 seqs), \
+K (f16):   512.00 MiB, V (f16):   512.00 MiB
+0.00.300.000 I sched_reserve:      Metal compute buffer size =   304.00 MiB
+"""
+
+# The whole load a real server does: the target, a draft head, and a projector. Three models
+# arrive in memory and each prints its own lines; a sum over the lot with no boundaries would
+# charge the target for the projector's weights and read the head's cache as the target's.
+# mtmd's reader announces itself as `clip_model_loader` and prints one total rather than a
+# line per backend, which is why it is recognised separately.
+THREE_LOG = """\
+0.00.100.000 I llama_model_loader: loaded meta data with 30 key-value pairs and 291 tensors \
+from /models/quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf (version GGUF V3 (latest))
+0.00.101.000 I cmn  common_param: build 1 (a1b2c3d) with Apple clang for arm64-apple-darwin
+0.00.170.000 I load_tensors: offloading output layer to GPU
+0.00.170.001 I load_tensors: offloaded 32/32 layers to GPU
+0.00.170.002 I load_tensors:   CPU_Mapped model buffer size =   512.00 MiB
+0.00.170.003 I load_tensors:  MTL0_Mapped model buffer size =  2048.00 MiB
+0.00.200.100 I llama_kv_cache: size =   256.00 MiB ( 32768 cells,   8 layers,  2/1 seqs), \
+K (f16):   128.00 MiB, V (f16):   128.00 MiB
+0.00.300.000 I sched_reserve:      Metal compute buffer size =   128.00 MiB
+0.00.400.000 I llama_model_loader: loaded meta data with 24 key-value pairs and 30 tensors \
+from /models/mtp-quillhaven-E2B.gguf (version GGUF V3 (latest))
+0.00.410.000 I load_tensors: offloading output layer to GPU
+0.00.410.001 I load_tensors: offloaded 4/4 layers to GPU
+0.00.410.002 I load_tensors:   CPU_Mapped model buffer size =    16.00 MiB
+0.00.410.003 I load_tensors:  MTL0_Mapped model buffer size =    48.00 MiB
+0.00.450.100 I llama_kv_cache: size =     3.00 MiB ( 32768 cells,   1 layers,  2/1 seqs), \
+K (f16):     1.50 MiB, V (f16):     1.50 MiB
+0.00.500.000 I clip_model_loader: model name:   quillhaven vision
+0.00.500.001 I clip_model_loader: has vision encoder
+0.00.500.002 I clip_model_loader: model size:         256.00 MiB
+0.00.510.000 I clip_ctx: CLIP using Metal backend
+0.00.520.000 I clip_model_loader: loaded 199 tensors from /models/mmproj-quillhaven-BF16.gguf
 """
 
 
@@ -972,3 +1029,441 @@ class TestTheEstimateWithoutAMeasurement:
                 "x.attention.head_count_kv": 1, "x.attention.key_length": 16,
                 "x.attention.value_length": 8}
         assert self.estimate(meta, 100) == 2 * 1 * 100 * (16 * 2 + 8 * 2)
+
+
+# -- where the weights actually went ------------------------------------------------------
+
+def with_tensors(path: Path, metadata: dict,
+                 tensors: list[tuple[str, int, tuple[int, ...]]]) -> Path:
+    """A real GGUF with a real tensor table, built on `write_gguf`'s header.
+
+    `write_gguf` writes the magic, the counts and the metadata block and stops -- nothing
+    under test there reads a tensor. The tensor table is the next thing in the file, so it
+    is appended here rather than written by a second GGUF writer: name, dimension count,
+    the dimensions, the ggml type, the offset. No tensor *data* follows, because nothing
+    reads any: the whole point of `fit --tensors` is that a file's shape is a header read.
+    """
+    write_gguf(path, metadata, tensor_count=len(tensors))
+    body = b""
+    for name, kind, shape in tensors:
+        body += struct.pack("<Q", len(name.encode())) + name.encode()
+        body += struct.pack("<I", len(shape))
+        body += b"".join(struct.pack("<Q", int(d)) for d in shape)
+        body += struct.pack("<I", int(kind)) + struct.pack("<Q", 0)
+    with path.open("ab") as f:
+        f.write(body)
+    return path
+
+
+# The ggml type numbers the fixtures below are written with, so a test says `IQ4_NL` rather
+# than `20`. Straight out of ggml.h's enum.
+F32, F16, Q4_K, Q8_0, IQ4_NL = 0, 1, 12, 8, 20
+
+
+class TestWhereTheWeightsWent:
+    """The `load_tensors` lines: which backend took what, and what stayed mapped.
+
+    This is the whole reason a 103.7G file costs ~90G of "Real Mem". Every assertion here
+    is over a fixture log; no model is loaded and no process is measured.
+    """
+
+    def test_one_load_is_one_segment_split_by_backend(self):
+        """`CPU_Mapped` is the mapped half and `MTL0_Mapped` is the resident half, and the
+        difference between them is the whole question.
+
+        Mutation: sum the two lines, and the number that comes out is the file size again,
+        which is the answer that was already wrong.
+        """
+        got = parse_load_log(WEIGHTS_LOG)
+        [one] = got.segments
+        assert one.kind == "target"
+        assert one.model_file == "thornfield-8B-Q4_K_M.gguf"
+        assert one.buffers == (("CPU_Mapped", 1024 * MIB), ("MTL0_Mapped", 4096 * MIB))
+        assert one.gpu == 4096 * MIB
+        assert one.cpu == 1024 * MIB
+        assert one.total == 5120 * MIB
+        assert got.weights_gpu == 4096 * MIB
+        assert got.weights_cpu == 1024 * MIB
+
+    def test_the_compute_buffer_line_is_not_read_as_a_weights_buffer(self):
+        """`sched_reserve: Metal compute buffer size` and `load_tensors: MTL0_Mapped model
+        buffer size` are one word apart. Mutation: match on 'buffer size', and every
+        model's weights grow by its compute buffers."""
+        got = parse_load_log(WEIGHTS_LOG)
+        assert got.compute == 304 * MIB
+        assert got.weights_gpu + got.weights_cpu == 5120 * MIB
+
+    def test_the_offload_line_is_kept_and_layers_left_behind_are_named(self):
+        """`offloaded 30/32 layers to GPU` is two layers being paged, and a person looking
+        at a memory figure that is lower than expected wants to be told which.
+
+        Mutation: keep only the count, and 30/32 is indistinguishable from 32/32.
+        """
+        [one] = parse_load_log(WEIGHTS_LOG).segments
+        assert (one.offloaded, one.layers) == (30, 32)
+        assert not one.output_on_gpu
+        assert "2 of 32 layers past --n-gpu-layers" in one.why_cpu()
+        assert "the output layer" in one.why_cpu()
+
+    def test_a_tensor_the_backend_declined_is_quoted_back(self):
+        """llama.cpp names it: `tensor 'output.weight' (q6_K) (and 3 others) cannot be used
+        with preferred buffer type Metal, using CPU instead`. Mutation: drop it, and the
+        answer to "which tensors" is a shrug."""
+        [one] = parse_load_log(WEIGHTS_LOG).segments
+        assert any("output.weight" in said and "q6_K" in said for said in one.declined)
+        assert "3 others" in one.why_cpu()
+
+    def test_the_type_mixture_is_kept_because_that_is_where_a_missing_kernel_lives(self):
+        """A `Q4_K_M` is q4_K and q6_K and f32, and the minority types are the ones a
+        backend declines. Mutation: ignore them, and the listing cannot say what of."""
+        [one] = parse_load_log(WEIGHTS_LOG).segments
+        assert one.types == (("f32", 65), ("q4_K", 200), ("q6_K", 26))
+
+    def test_a_target_a_draft_head_and_a_projector_are_three_segments_in_load_order(self):
+        """Three models arrive and each prints its own lines. Kept apart, and in the order
+        they loaded, because "how big is it" has a different answer for each.
+
+        Mutation: one segment for the lot, and the target is charged for the projector.
+        """
+        got = parse_load_log(THREE_LOG)
+        assert [one.kind for one in got.segments] == ["target", "draft", "mmproj"]
+        target, draft, projector = got.segments
+        assert (target.gpu, target.cpu) == (2048 * MIB, 512 * MIB)
+        assert (draft.gpu, draft.cpu) == (48 * MIB, 16 * MIB)
+        assert draft.model_file == "mtp-quillhaven-E2B.gguf"
+        assert projector.model_file == "mmproj-quillhaven-BF16.gguf"
+
+    def test_a_projector_reports_one_total_and_the_backend_it_chose(self):
+        """mtmd's reader prints `model size: 256.00 MiB` and `CLIP using Metal backend`,
+        never a line per buffer. Mutation: expect llama.cpp's format, and a multimodal
+        server's projector is invisible in the totals."""
+        projector = parse_load_log(THREE_LOG).segments[-1]
+        assert projector.buffers == (("Metal", 256 * MIB),)
+        assert projector.gpu == 256 * MIB and projector.cpu == 0
+
+    def test_the_totals_are_over_every_model_the_load_brought_in(self):
+        got = parse_load_log(THREE_LOG)
+        assert got.weights_gpu == (2048 + 48 + 256) * MIB
+        assert got.weights_cpu == (512 + 16) * MIB
+
+    def test_the_targets_cache_is_still_the_only_cache_read(self):
+        """Adding the weights did not change which model's KV numbers are the record's.
+
+        Mutation: read the last segment's cache, and an 8B model reports the head's.
+        """
+        got = parse_load_log(THREE_LOG)
+        assert got.per_token == 256 * MIB // 32768
+        assert got.model_file == "quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf"
+
+    def test_a_load_that_explains_nothing_says_nothing_rather_than_guessing(self):
+        """Every layer offloaded, the output offloaded, no declined tensor: llama.cpp has
+        not said why anything is mapped, so neither does this. Mutation: invent a reason,
+        and a person is confidently told the wrong tensor."""
+        target = parse_load_log(THREE_LOG).segments[0]
+        assert target.why_cpu() == ""
+
+    def test_a_log_with_no_load_tensors_lines_has_no_segments(self):
+        """Older builds, and a log at the server's own verbosity. Mutation: fabricate an
+        empty segment, and `weights_gpu` reads 0 as "none of it is on the GPU"."""
+        assert parse_load_log(DENSE_LOG).segments == ()
+        assert parse_load_log(DENSE_LOG).weights_gpu == 0
+
+
+class TestTheThreeSizesOfAModel:
+    """On disk, in GPU memory, and actually resident -- and which one the arithmetic uses."""
+
+    def one(self, **over) -> Fit:
+        base = dict(model="marrowgate-A3B-UD-Q4_K_XL.gguf", weights=100 * GIB,
+                    draft=3 * GIB, room=110 * GIB, per_token=32768, per_seq=0,
+                    compute=GIB, weights_gpu=85 * GIB, weights_cpu=18 * GIB)
+        return Fit(**{**base, **over})
+
+    def test_the_file_size_is_the_two_on_disk_numbers_and_not_the_intercept(self):
+        assert self.one().weights_file == 103 * GIB
+
+    def test_the_intercept_is_what_is_resident_on_the_gpu(self):
+        """The 18G that stayed mapped is paged, not wired, so it is not competing with the
+        KV cache for `iogpu.wired_limit_mb`.
+
+        Mutation: keep the old `weights + draft + compute`, and a model that fits is
+        reported as not fitting by eighteen gigabytes.
+        """
+        assert self.one().loaded() == 85 * GIB + GIB
+        assert self.one().free() == 110 * GIB - 86 * GIB
+
+    def test_a_measured_resident_total_beats_the_load_log(self):
+        """A gathered table only becomes resident as it is walked, so the load log's figure
+        is a floor and a real run's peak is the fact. Mutation: prefer the log, and the
+        one number that had to be measured is thrown away."""
+        assert self.one(weights_resident=90 * GIB).loaded() == 90 * GIB + GIB
+
+    def test_a_record_measured_before_any_of_this_falls_back_to_the_file_size(self):
+        """Every record in the shipped file predates these lines. Mutation: use 0 as the
+        weights, and every old record claims to cost nothing but its compute buffers."""
+        old = self.one(weights_gpu=0, weights_cpu=0)
+        assert old.loaded() == 100 * GIB + 3 * GIB + GIB
+
+    def test_the_new_numbers_survive_a_round_trip_through_the_file(self):
+        row = self.one(cpu_tensors="the output layer", table_bytes=26 * GIB,
+                       weights_resident=90 * GIB, resident_after=100)
+        assert Fit.from_dict(row.as_dict()) == row
+
+    def test_a_resident_peak_has_the_runs_own_caches_taken_back_off(self):
+        """A peak RSS holds the compute buffers and one cache per slot as well as the
+        weights, and charging those twice would put the intercept above the room.
+
+        Mutation: store the raw peak, and a two-slot 32k measurement overstates the model
+        by exactly two caches.
+        """
+        measured = Measured(per_token=32768, per_seq=8 * MIB, compute=GIB,
+                            segments=(fit_mod.Segment(buffers=(("MTL0", 80 * GIB),)),))
+        held = 2 * (32768 * 32768 + 8 * MIB)
+        record = Fit.of(measured, model="marrowgate-A3B-UD-Q4_K_XL.gguf", context=32768,
+                        parallel=2, resident_peak=90 * GIB + GIB + held)
+        assert record.weights_resident == 90 * GIB
+
+    def test_a_resident_peak_is_never_below_what_the_log_said_was_on_the_gpu(self):
+        """A device buffer cannot be paged out, so a peak that arithmetics its way below
+        one was measured wrong. Mutation: trust the subtraction, and a short run reports a
+        model as smaller than its own resident weights."""
+        measured = Measured(per_token=32768, compute=GIB,
+                            segments=(fit_mod.Segment(buffers=(("MTL0", 80 * GIB),)),))
+        record = Fit.of(measured, model="m.gguf", context=32768, parallel=2,
+                        resident_peak=4 * GIB)
+        assert record.weights_resident == 80 * GIB
+
+    def test_no_peak_at_all_records_nothing_rather_than_zero(self):
+        measured = parse_load_log(WEIGHTS_LOG)
+        record = Fit.of(measured, model="thornfield-8B-Q4_K_M.gguf", context=32768)
+        assert record.weights_resident == 0
+        assert record.weights_gpu == 4096 * MIB
+        assert record.cpu_tensors.startswith("2 of 32 layers past --n-gpu-layers")
+
+
+class TestSayingWhereItWent:
+    def one(self, **over) -> Fit:
+        base = dict(model="marrowgate-A3B-UD-Q4_K_XL.gguf", weights=100 * GIB,
+                    draft=3 * GIB, room=110 * GIB, per_token=32768, compute=GIB,
+                    weights_gpu=85 * GIB, weights_cpu=18 * GIB,
+                    cpu_tensors="the output layer, which was not offloaded")
+        return Fit(**{**base, **over})
+
+    def test_the_listing_says_all_three_sizes_and_which_tensors(self):
+        """The line Adam asked the question with: 103G on disk, 85G in GPU memory, 18G
+        mapped. Mutation: print the file size alone, which is the number that started the
+        confusion."""
+        text = render([self.one()], [32768])
+        assert ("103.0G on disk: 85.0G in GPU memory, 18.0G mapped on the CPU "
+                "(the output layer, which was not offloaded)") in text
+
+    def test_a_load_that_did_not_say_which_points_at_the_command_that_can(self):
+        """Mutation: leave the parenthesis empty, and the reader has nowhere to go."""
+        assert "`fit MODEL --tensors` says what of" in render([self.one(cpu_tensors="")],
+                                                              [32768])
+
+    def test_a_gathered_table_and_a_measured_resident_figure_are_said_plainly(self):
+        """The whole Flash-Next story in one line: what it weighs, what is paged, what it
+        actually held, and after how long. Mutation: drop the run length, and a resident
+        figure that only means anything beside one is quoted as though it were fixed."""
+        text = render([self.one(table_bytes=26 * GIB, weights_resident=90 * GIB,
+                                resident_after=100)], [32768])
+        assert "of which a 26.0G lookup table is paged on demand, a row at a time" in text
+        assert "resident after 100 questions 90.0G (measured)" in text
+
+    def test_a_record_that_measured_none_of_this_says_none_of_it(self):
+        """An old record must not print "0B in GPU memory", which reads as a fact.
+
+        Mutation: print the line unconditionally.
+        """
+        text = render([self.one(weights_gpu=0, weights_cpu=0)], [32768])
+        assert "in GPU memory" not in text
+
+    def test_the_markdown_carries_the_same_line(self):
+        assert "- 103.0G on disk: 85.0G in GPU memory" in render([self.one()], [32768],
+                                                                 None, True)
+
+
+class TestWhatTheFileIsMadeOf:
+    """`fit --tensors`: the GGUF header's own tensor table, over a file written here.
+
+    No model on this machine is read. The fixture is a real GGUF -- `write_gguf`'s header
+    with a real tensor table appended -- holding one of each shape that matters, including
+    a gathered lookup table of the kind that is 26% of Flash-Next.
+    """
+
+    TENSORS = [
+        # a gathered n-gram table: the tensor that is paged a row at a time
+        ("per_layer_token_embd.weight", IQ4_NL, (160, 4096)),
+        ("blk.0.ffn_down_exps.weight", Q8_0, (256, 128, 4)),
+        ("blk.0.attn_q.weight", Q4_K, (256, 256)),
+        ("token_embd.weight", F16, (256, 512)),
+        ("output_norm.weight", F32, (256,)),
+    ]
+
+    def model(self, tmp_path: Path, name: str = "marrowgate-A3B-UD-Q4_K_XL.gguf") -> Path:
+        return with_tensors(tmp_path / name,
+                            {"general.architecture": "qwen4exp",
+                             "qwen4exp.block_count": 4,
+                             "qwen4exp.ple.ngram_size": 3},
+                            self.TENSORS)
+
+    def test_every_tensor_is_sized_the_way_ggml_sizes_it(self, tmp_path):
+        """Elements over the block size, times the bytes a block takes -- ggml_nbytes'
+        own arithmetic. IQ4_NL is 32 values in 18 bytes, Q8_0 is 32 in 34, Q4_K is 256 in
+        144. Mutation: use a bytes-per-element float, and a K-quant is off by a scale
+        block that the header never mentions.
+        """
+        found = {one.name: one for one in fit_mod.tensors_of(self.model(tmp_path))}
+        assert found["per_layer_token_embd.weight"].bytes == 160 * 4096 // 32 * 18
+        assert found["blk.0.ffn_down_exps.weight"].bytes == 256 * 128 * 4 // 32 * 34
+        assert found["blk.0.attn_q.weight"].bytes == 256 * 256 // 256 * 144
+        assert found["token_embd.weight"].bytes == 256 * 512 * 2
+        assert found["output_norm.weight"].bytes == 256 * 4
+        assert found["per_layer_token_embd.weight"].type == "iq4_nl"
+        assert found["per_layer_token_embd.weight"].shape == (160, 4096)
+
+    def test_they_come_back_largest_first(self, tmp_path):
+        """The listing exists to answer "what is the 15.7G of", and that question is
+        answered by the top of the list. Mutation: header order, which is alphabetical-ish
+        and says nothing."""
+        found = fit_mod.tensors_of(self.model(tmp_path))
+        assert found[0].name == "per_layer_token_embd.weight"
+        assert [one.bytes for one in found] == sorted(
+            (one.bytes for one in found), reverse=True)
+
+    def test_a_gathered_table_is_told_apart_from_an_expert_and_from_attention(self,
+                                                                             tmp_path):
+        """The one grouping that predicts residency: a table is paged a row at a time and
+        an expert is not. Mutation: group by name prefix, and `per_layer_token_embd` is
+        just another embedding."""
+        roles = {one.name: one.role for one in fit_mod.tensors_of(self.model(tmp_path))}
+        assert roles["per_layer_token_embd.weight"] == "table"
+        assert roles["blk.0.ffn_down_exps.weight"] == "experts"
+        assert roles["blk.0.attn_q.weight"] == "attention"
+        assert roles["token_embd.weight"] == "embedding"
+        assert roles["output_norm.weight"] == "other"
+
+    def test_the_totals_per_type_add_up_to_the_file(self, tmp_path):
+        found = fit_mod.tensors_of(self.model(tmp_path))
+        by_type = dict((name, size) for name, _n, size in fit_mod.totals_by_type(found))
+        assert by_type["iq4_nl"] == 160 * 4096 // 32 * 18
+        assert sum(by_type.values()) == sum(one.bytes for one in found)
+
+    def test_the_table_bytes_are_what_a_record_carries(self, tmp_path):
+        """`Fit.table_bytes` is an upper bound on how far a resident figure can still
+        climb. Mutation: count the ordinary token embedding too, and the bound is wrong in
+        the direction that matters."""
+        assert fit_mod.table_bytes(self.model(tmp_path)) == 160 * 4096 // 32 * 18
+
+    def test_a_file_that_is_not_a_gguf_costs_a_record_nothing(self, tmp_path):
+        """A record is worth writing without this number. Mutation: raise, and `--measure`
+        dies on a model whose header this cannot read."""
+        broken = tmp_path / "notagguf.gguf"
+        broken.write_bytes(b"nope")
+        assert fit_mod.table_bytes(broken) == 0
+        with pytest.raises(ValueError, match="not a GGUF file"):
+            fit_mod.tensors_of(broken)
+
+    def test_every_shard_of_a_sharded_model_is_summed(self, tmp_path):
+        """Flash-Next is four files and the question is about all four. Mutation: read the
+        first shard, and three quarters of the answer is missing."""
+        first = with_tensors(tmp_path / "cragmoor-400B-Q4_K_M-00001-of-00002.gguf",
+                             {"general.architecture": "llama"},
+                             [("blk.0.attn_q.weight", Q4_K, (256, 256))])
+        with_tensors(tmp_path / "cragmoor-400B-Q4_K_M-00002-of-00002.gguf",
+                     {"general.architecture": "llama"},
+                     [("blk.1.attn_q.weight", Q4_K, (256, 256))])
+        assert len(fit_mod.tensors_of(first)) == 2
+
+    def test_the_listing_names_the_table_the_types_and_the_roles(self, tmp_path):
+        text = fit_mod.render_tensors(self.model(tmp_path))
+        assert "per_layer_token_embd.weight" in text
+        assert "<- gathered table" in text
+        assert "iq4_nl" in text and "q8_0" in text
+        assert "experts" in text and "attention" in text
+        assert "(160, 4,096)" in text
+
+
+class TestTheTensorsFlag:
+    def run(self, argv: list[str]) -> int:
+        from ml_stack.serve.cli import main
+
+        return main(["fit", *argv])
+
+    def test_it_reads_the_header_and_prints_what_the_file_is_made_of(self, tmp_path,
+                                                                     capsys):
+        """No server, no lease, no GPU: `--tensors` is a header read and nothing else.
+
+        Mutation: route it through a measurement, and the one command that answers "what
+        is the missing 15.7G" needs the model served to answer it.
+        """
+        model = with_tensors(tmp_path / "marrowgate-A3B-UD-Q4_K_XL.gguf",
+                             {"general.architecture": "qwen4exp"},
+                             TestWhatTheFileIsMadeOf.TENSORS)
+        assert self.run([str(model), "--tensors"]) == 0
+        out = capsys.readouterr().out
+        assert "per_layer_token_embd.weight" in out
+        assert "gathered lookup table" in out
+
+    def test_it_needs_a_model(self, capsys):
+        assert self.run(["--tensors"]) == 2
+        assert "needs a model" in capsys.readouterr().err
+
+    def test_a_file_it_cannot_read_is_refused_by_name(self, tmp_path, capsys):
+        broken = tmp_path / "notagguf.gguf"
+        broken.write_bytes(b"nope")
+        assert self.run([str(broken), "--tensors"]) == 2
+        assert "cannot read" in capsys.readouterr().err
+
+
+class TestMeasuringRecordsWhereItWent:
+    def run(self, argv: list[str]) -> int:
+        from ml_stack.serve.cli import main
+
+        return main(["fit", *argv])
+
+    def test_a_measurement_records_the_split_and_the_table(self, tmp_path, monkeypatch,
+                                                           capsys, _fit_files_in_tmp):
+        """The whole path with the serving faked: the log's buffer lines become the
+        record's `weights_gpu`, and the file's own header becomes its `table_bytes`.
+
+        Mutation: record the file size as the GPU figure, and the intercept is back to
+        being the number that was never right.
+        """
+        model = with_tensors(tmp_path / "thornfield-8B-Q4_K_M.gguf",
+                             {"general.architecture": "llama"},
+                             TestWhatTheFileIsMadeOf.TENSORS)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: WEIGHTS_LOG)
+
+        assert self.run([str(model), "--measure", "--context", "32768"]) == 0
+        [row] = records()
+        assert row.weights_gpu == 4096 * MIB
+        assert row.weights_cpu == 1024 * MIB
+        assert row.table_bytes == 160 * 4096 // 32 * 18
+        assert "2 of 32 layers past --n-gpu-layers" in row.cpu_tensors
+        assert "mapped on the CPU" in capsys.readouterr().out
+
+    def test_a_resident_peak_from_a_real_run_can_be_recorded_with_it(self, tmp_path,
+                                                                     monkeypatch, capsys,
+                                                                     _fit_files_in_tmp):
+        """`--resident-peak` is the only number here that a load cannot produce, because a
+        gathered table only becomes resident as it is walked.
+
+        Mutation: ignore the flag, and the measured fact is silently dropped.
+        """
+        model = with_tensors(tmp_path / "thornfield-8B-Q4_K_M.gguf",
+                             {"general.architecture": "llama"},
+                             TestWhatTheFileIsMadeOf.TENSORS)
+        monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
+        monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: WEIGHTS_LOG)
+
+        held = 2 * (32768 * (1024 * MIB // 32768))
+        assert self.run([str(model), "--measure", "--context", "32768",
+                         "--resident-peak", str(6 * GIB + 304 * MIB + held),
+                         "--resident-after", "100"]) == 0
+        [row] = records()
+        assert row.weights_resident == 6 * GIB
+        assert row.resident_after == 100
+        assert row.loaded() == 6 * GIB + 304 * MIB
+        assert "resident after 100 questions" in capsys.readouterr().out

@@ -28,6 +28,59 @@ Measured, never assumed: `measure()` serves the model once at `-lv 4` (the llama
 library's own INFO lines are LOG_LEVEL_TRACE, so verbosity 3 -- the server's default --
 prints the server's lines and none of these), reads the log the backend already writes, and
 stops the server again.
+
+Why a model is smaller in memory than it is on disk
+---------------------------------------------------
+
+A 103.7G file that never costs more than about 90G of "Real Mem" is not a mystery and not a
+mis-measurement -- it is mmap. llama.cpp maps the GGUF and then, per tensor, decides which
+backend buffer the tensor belongs in. A tensor the GPU backend takes is copied into a device
+buffer and is resident; a tensor it does not take is left **where it already is** -- in the
+mapped file -- and is read through the page cache. The same load log says which is which,
+one line per backend::
+
+    load_tensors:   CPU_Mapped model buffer size =  1872.00 MiB
+    load_tensors:  MTL0_Mapped model buffer size =  4005.31 MiB
+
+Four things end up in the `CPU_Mapped` half, and they are what to look for:
+
+* **A lookup table that is gathered rather than multiplied.** This is the big one, and it
+  is what Flash-Next's missing gigabytes are. `Qwen3.8-Flash-Next-UD-Q4_K_XL` is 103.7G on
+  disk, of which a *single* tensor -- `per_layer_token_embd.weight`, IQ4_NL, shape
+  (160, 320001536) -- is 51.2B parameters and 26.8G of the file. The header says what it is
+  for: `qwen4exp.ple.ngram_size = 3`, `heads_per_ngram = 8`,
+  `embedding_length_per_layer_input = 160` -- sixteen heads of roughly twenty million rows,
+  an n-gram embedding table. A gather touches only the rows whose n-grams actually occur,
+  so with mmap the other rows' pages never become resident at all. The process settles at
+  about 90G -- the ~77G of everything else (the 512 experts are Q8_0; `ffn_down_exps` alone
+  is 0.8G a layer) plus however much of the table has been walked so far -- and climbs
+  slowly, bounded above by 26.8G of table.
+* **Tensors the backend has no kernel for at that type.** llama.cpp says so out loud --
+  ``tensor 'X' (q6_K) (and N others) cannot be used with preferred buffer type ..., using
+  CPU instead`` -- and a mixed quantisation is where this bites. `UD-Q4_K_XL` is not one
+  type: it is Q4_K for most of the weights and something wider for the parts that matter,
+  and the wide parts are the ones a backend is most likely to decline.
+* **The token embeddings, and on some architectures the output/`lm_head`.** These are a
+  lookup and a single matmul at the ends of the graph; several architectures leave them
+  mapped on purpose. ``load_tensors: offloading output layer to GPU`` is llama.cpp saying
+  it did *not* do that here -- its absence is the tell.
+* **Anything past ``--n-gpu-layers``.** ``load_tensors: offloaded 43/43 layers to GPU`` is
+  the whole story in one line; ``offloaded 39/43`` means four layers are being paged.
+
+None of that is free -- a mapped tensor is read from the page cache on every token that
+touches it -- but none of it is counted in Activity Monitor's "Real Mem" either, which is
+why a model appears to shrink. So the file size is never the intercept. `Fit.loaded()`
+takes, in order of preference: a **measured resident** total (`weights_resident`, from a
+peak RSS after a real run, with that run's own caches taken back off), else the
+**GPU-resident** total off the load log (`weights_gpu`), else the old file-size sum. The
+first two are the part that has to fit under `iogpu.wired_limit_mb` beside the KV cache; a
+paged lookup table competes for ordinary page cache instead, and `table_bytes` records how
+much of it is out there as an upper bound on the drift.
+
+For a specific model, ``ml-stack-serve fit MODEL --tensors`` totals the GGUF header's own
+per-tensor sizes -- the largest tensors with their type and shape, the lookup tables
+flagged, and experts against attention against table -- which answers "what is the 15.7G
+*of*" without serving anything.
 """
 
 from __future__ import annotations
@@ -35,6 +88,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import struct
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -42,9 +96,10 @@ from pathlib import Path
 from ml_stack.hub import pretty_name
 
 __all__ = [
-    "DEFAULT_PER_USER", "Fit", "Measured", "PLOT_CONTEXTS", "add", "label_of",
-    "local_file", "measure", "package_file", "parse_load_log", "parse_room", "plot",
-    "records", "render", "writable_file",
+    "DEFAULT_PER_USER", "Fit", "Measured", "PLOT_CONTEXTS", "Segment", "Tensor", "add",
+    "label_of", "local_file", "measure", "package_file", "parse_load_log", "parse_room",
+    "plot", "records", "render", "render_tensors", "table_bytes", "tensors_of",
+    "totals_by_role", "totals_by_type", "writable_file",
 ]
 
 _MIB = 1024 * 1024
@@ -85,13 +140,117 @@ _LOADED = re.compile(
     r"llama_model_loader:\s*loaded meta data with\s*\d+\s*key-value pairs and\s*\d+\s*"
     r"tensors from\s*(\S+)")
 
+# `clip_model_loader: model name:  ...` -- the projector is loaded by mtmd's own reader,
+# which prints neither `llama_model_loader` nor a per-backend buffer line. It is still a
+# model that arrives in memory, so it is still a segment; its size comes from
+# `clip_model_loader: model size: X MiB` and its backend from `clip_ctx: CLIP using X`.
+_CLIP_START = re.compile(r"clip_model_loader:\s*model name:")
+_CLIP_SIZE = re.compile(r"clip_model_loader:\s*model size:\s*([\d.]+)\s*MiB")
+_CLIP_FILE = re.compile(r"clip_model_loader:\s*loaded\s+\d+\s+tensors from\s+(\S+)")
+_CLIP_BACKEND = re.compile(r"clip_ctx:\s*CLIP using (\S+) backend")
+
+# `load_tensors:   CPU_Mapped model buffer size =  1872.00 MiB` -- one line per backend the
+# weights landed in, and the only place llama.cpp says where they went. `_COMPUTE` above
+# matches "compute buffer size"; this one must not, which is why "model" is in the pattern.
+_TENSOR_BUFFER = re.compile(r"load_tensors:\s*(\S+)\s+model buffer size\s*=\s*([\d.]+)\s*MiB")
+
+# `load_tensors: offloaded 43/43 layers to GPU`, and the two lines above it. `offloaded
+# 39/43` is four layers being paged; a missing "offloading output layer" is the output
+# staying mapped on the CPU, which several architectures do on purpose.
+_OFFLOADED = re.compile(r"load_tensors:\s*offloaded\s+(\d+)\s*/\s*(\d+)\s+layers to GPU")
+_OUTPUT_ON_GPU = re.compile(r"load_tensors:\s*offloading output layer to GPU")
+
+# `tensor 'X' (q6_K) (and 12 others) cannot be used with preferred buffer type Metal, using
+# CPU instead`, and `tensor X (48 MiB q6_K) buffer type overridden to CPU` -- llama.cpp
+# naming, out loud, a tensor the backend declined. Exactly the "which tensors" a person
+# wants when a model is smaller in memory than on disk.
+_NO_KERNEL = re.compile(
+    r"tensor '([^']+)'\s*\(([^)]*)\)\s*\(and (\d+) others\) cannot be used with preferred "
+    r"buffer type (\S+), using (\S+) instead")
+_OVERRIDDEN = re.compile(
+    r"tensor\s+(\S+)\s*\(\s*\d+\s*MiB\s+([^)]*)\)\s*buffer type overridden to\s+(\S+)")
+
+# `llama_model_loader: - type q4_0:  345 tensors` -- the mixture a quantisation actually is.
+_TYPE_COUNT = re.compile(r"llama_model_loader:\s*-\s*type\s+(\S+):\s*(\d+)\s+tensors")
+
 # `cmn  common_param: build N (<commit>) with Apple clang ...` -- LOG_TRC, so it is in the
 # log at `-lv 4` for the same reason everything else here is.
 _BUILD = re.compile(r"\bbuild\s+\d+\s+\(([0-9A-Za-z._-]+)\)")
 
+# The backends that are the CPU wearing a hat. Everything else -- MTL0, Metal, CUDA0,
+# ROCm0, Vulkan0, SYCL0 -- holds a device buffer whose bytes are resident. Matched on the
+# part before the underscore, so `CPU_Mapped` and `CPU_REPACK` are the CPU and
+# `MTL0_Mapped` is not.
+_HOST_BACKENDS = frozenset({"CPU", "AMX", "BLAS", "ACCELERATE", "HOST"})
+
+
+def _on_gpu(backend: str) -> bool:
+    """Whether a buffer named by llama.cpp is resident on a device rather than mapped."""
+    return backend.split("_", 1)[0].upper() not in _HOST_BACKENDS
+
 
 def _mib(text: str) -> int:
     return int(round(float(text) * _MIB))
+
+
+@dataclass(frozen=True, slots=True)
+class Segment:
+    """One model's arrival in memory, as its own load log says it went.
+
+    A server load is more than one model: the target, then a draft head, then a projector,
+    each printing the same lines again. They are kept apart and in load order, because
+    "where did the weights go" has a different answer for each and a summed one is not
+    checkable against anything.
+    """
+
+    kind: str = "target"
+    """``target``, ``draft`` or ``mmproj`` -- the first model loaded is the target."""
+    model_file: str = ""
+    buffers: tuple[tuple[str, int], ...] = ()
+    """``(backend, bytes)`` in the order llama.cpp printed them: `CPU_Mapped`,
+    `MTL0_Mapped`, `CUDA0`. The whole answer to where the weights went."""
+    offloaded: int = 0
+    """Layers put on the GPU, from ``offloaded N/M layers to GPU``."""
+    layers: int = 0
+    """The M of that line. ``offloaded < layers`` is layers past ``--n-gpu-layers``."""
+    output_on_gpu: bool = False
+    """Whether ``offloading output layer to GPU`` was printed. Its absence is the output
+    staying mapped, which is a real and frequently large part of the gap."""
+    types: tuple[tuple[str, int], ...] = ()
+    """``llama_model_loader: - type q4_0: 345 tensors`` -- what the quantisation is a
+    mixture of, which is where a backend finds something it has no kernel for."""
+    declined: tuple[str, ...] = ()
+    """Tensors llama.cpp said a backend would not take, verbatim enough to grep for."""
+
+    @property
+    def gpu(self) -> int:
+        """Bytes resident on a device."""
+        return sum(size for name, size in self.buffers if _on_gpu(name))
+
+    @property
+    def cpu(self) -> int:
+        """Bytes left mapped in the file and paged through the page cache."""
+        return sum(size for name, size in self.buffers if not _on_gpu(name))
+
+    @property
+    def total(self) -> int:
+        return sum(size for _, size in self.buffers)
+
+    def why_cpu(self) -> str:
+        """What the log itself says is on the CPU, or ``""`` when it does not say.
+
+        Never a guess: every clause here is a line llama.cpp printed. A load that explains
+        nothing gets an empty string and the caller points at `--tensors` instead, which is
+        an honest "go and look" rather than a plausible wrong answer.
+        """
+        said: list[str] = []
+        if self.layers and self.offloaded < self.layers:
+            said.append(f"{self.layers - self.offloaded} of {self.layers} layers past "
+                        "--n-gpu-layers")
+        if self.offloaded and not self.output_on_gpu:
+            said.append("the output layer, which was not offloaded")
+        said += list(self.declined)
+        return "; ".join(said)
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,12 +282,35 @@ class Measured:
     recurrent_bytes: int = 0
     model_file: str = ""
     build: str = ""
+    segments: tuple[Segment, ...] = ()
+    """Every model the load brought in, in load order -- the target, a draft head, a
+    projector -- and where each one's weights ended up, per backend."""
 
     @property
     def measured(self) -> bool:
         """Whether the log said anything at all. False for a log written at the server's
         default verbosity, where none of these lines exist."""
         return bool(self.per_token or self.per_seq or self.compute)
+
+    @property
+    def weights_gpu(self) -> int:
+        """Bytes of weights resident on a device, over every model the load brought in."""
+        return sum(one.gpu for one in self.segments)
+
+    @property
+    def weights_cpu(self) -> int:
+        """Bytes of weights left mapped on the CPU, over every model the load brought in.
+        The part "Real Mem" does not count and the file size does."""
+        return sum(one.cpu for one in self.segments)
+
+    def why_cpu(self) -> str:
+        """What the log says is on the CPU, named per model when more than one is."""
+        said = []
+        for one in self.segments:
+            because = one.why_cpu()
+            if because:
+                said.append(because if one.kind == "target" else f"{one.kind}: {because}")
+        return "; ".join(said)
 
     def said(self) -> str:
         """One line per fact, for a person reading a `--measure` that surprised them."""
@@ -144,17 +326,80 @@ class Measured:
             parts.append(f"a {self.swa_cells}-cell sliding window")
         if self.cache_type:
             parts.append(f"cache {self.cache_type}")
+        if self.segments:
+            parts.append(f"weights {_human(self.weights_gpu)} on the GPU, "
+                         f"{_human(self.weights_cpu)} mapped on the CPU")
         return ", ".join(parts)
 
 
 def _segments(text: str) -> list[str]:
     """The log split at each model load, so a draft head's cache is not read as the
-    target's. The text before the first load is dropped: nothing is allocated yet there."""
-    bounds = [m.start() for m in _LOADED.finditer(text)]
+    target's. The text before the first load is dropped: nothing is allocated yet there.
+
+    A projector is a load too, and mtmd's reader announces itself differently, so
+    `clip_model_loader` starts a segment as well as `llama_model_loader`.
+    """
+    bounds = sorted(m.start() for m in
+                    [*_LOADED.finditer(text), *_CLIP_START.finditer(text)])
     if not bounds:
         return [text]
     bounds.append(len(text))
     return [text[bounds[i]:bounds[i + 1]] for i in range(len(bounds) - 1)]
+
+
+def _kind_of(name: str, index: int) -> str:
+    """target / draft / mmproj, from the file's own name and the order it loaded in.
+
+    Order alone is not enough -- a projector can load before or after a draft head -- and
+    the name alone is not either, since a target is named whatever somebody named it. The
+    first model loaded is always the target; the rest are read off their names.
+    """
+    low = name.lower()
+    if "mmproj" in low or low.startswith("clip") or "-clip" in low:
+        return "mmproj"
+    if index == 0:
+        return "target"
+    return "draft"
+
+
+def _segment_of(text: str, index: int) -> Segment | None:
+    """One model's part of the log, as a ``Segment`` -- or None when it brought nothing."""
+    named = _LOADED.search(text) or _CLIP_FILE.search(text)
+    model_file = Path(named.group(1)).name if named else ""
+
+    buffers: list[tuple[str, int]] = []
+    for one in _TENSOR_BUFFER.finditer(text):
+        buffers.append((one.group(1), _mib(one.group(2))))
+    if not buffers:
+        # A projector prints one total and the backend it chose, not a line per buffer.
+        size, backend = _CLIP_SIZE.search(text), _CLIP_BACKEND.search(text)
+        if size:
+            buffers.append((backend.group(1) if backend else "CPU", _mib(size.group(1))))
+    if not buffers:
+        return None
+
+    offloaded = layers = 0
+    found = _OFFLOADED.search(text)
+    if found:
+        offloaded, layers = int(found.group(1)), int(found.group(2))
+
+    declined: list[str] = []
+    for one in _NO_KERNEL.finditer(text):
+        others = int(one.group(3))
+        declined.append(
+            f"{one.group(1)} ({one.group(2)})"
+            + (f" and {others} others" if others else "")
+            + f" -- no {one.group(4)} kernel, on the {one.group(5)}")
+    for one in _OVERRIDDEN.finditer(text):
+        declined.append(f"{one.group(1)} ({one.group(2)}) overridden to {one.group(3)}")
+
+    return Segment(
+        kind=_kind_of(model_file, index), model_file=model_file,
+        buffers=tuple(buffers), offloaded=offloaded, layers=layers,
+        output_on_gpu=bool(_OUTPUT_ON_GPU.search(text)),
+        types=tuple((one.group(1), int(one.group(2)))
+                    for one in _TYPE_COUNT.finditer(text)),
+        declined=tuple(declined))
 
 
 def parse_load_log(text: str) -> Measured:
@@ -164,15 +409,25 @@ def parse_load_log(text: str) -> Measured:
     `llama_memory_recurrent` line, one with no sliding window prints one `llama_kv_cache`
     line rather than two, and a log written at the default verbosity prints none of them --
     which comes back as an all-zero ``Measured`` whose ``measured`` is False, never as a
-    raise. Only the *first* model in the log is read: a draft head loads after the target
+    raise. Only the *first* model's **cache** is read: a draft head loads after the target
     and prints the same lines again.
+
+    The **weights** are read from every model in the log, kept apart as ``segments`` -- the
+    target, then a draft head, then a projector -- because "how big is it in memory" is not
+    the file size and llama.cpp is the only thing that knows the difference. See this
+    module's own docstring for why the two numbers differ and by how much.
     """
     build = ""
     found = _BUILD.search(text)
     if found:
         build = found.group(1)
 
-    for segment in _segments(text):
+    parts = _segments(text)
+    loaded = tuple(seg for seg in
+                   (_segment_of(part, i) for i, part in enumerate(parts))
+                   if seg is not None)
+
+    for segment in parts:
         kv = list(_KV_SIZE.finditer(segment))
         rs = list(_RS_SIZE.finditer(segment))
         if not kv and not rs:
@@ -222,9 +477,9 @@ def parse_load_log(text: str) -> Measured:
             cache_type=cache_type, kv_layers=kv_layers, recurrent_layers=recurrent_layers,
             cells=cells, seqs=share, swa_cells=swa_cells, kv_bytes=kv_bytes,
             swa_bytes=swa_bytes, recurrent_bytes=recurrent_bytes, model_file=model_file,
-            build=build)
+            build=build, segments=loaded)
 
-    return Measured(build=build)
+    return Measured(build=build, segments=loaded)
 
 
 # ------------------------------------------------------------------ one measured model
@@ -255,6 +510,38 @@ class Fit:
     kv_layers: int = 0
     recurrent_layers: int = 0
     swa_cells: int = 0
+    weights_gpu: int = 0
+    """Weights resident on a device, off the load log -- target, draft and projector
+    together. 0 for a record measured before this was read."""
+    weights_cpu: int = 0
+    """Weights left mapped in the file and paged. The difference between the file size and
+    what a process appears to hold."""
+    cpu_tensors: str = ""
+    """What the load log said is on the CPU, when it said: layers past ``--n-gpu-layers``,
+    an output that was not offloaded, a tensor a backend had no kernel for."""
+    table_bytes: int = 0
+    """Bytes of gathered lookup table in the file -- `per_layer_token_embd`, n-gram and
+    engram tensors. Read from the GGUF header, not the log. This is the part that is paged
+    in a row at a time as distinct keys are seen, so it is an *upper bound* on how much the
+    resident figure can still climb, never a cost paid at load."""
+    weights_resident: int = 0
+    """What the process actually held for weights, from a peak RSS after a real run with
+    that run's own caches and compute buffers taken back off. The truest intercept there
+    is, and 0 until somebody measures one -- see ``Fit.of``'s ``resident_peak``."""
+    resident_after: int = 0
+    """How many questions had been answered when that peak was taken. A resident figure
+    with no run length beside it cannot be argued with: a table paged in a row at a time
+    reads low after two questions and high after two hundred."""
+
+    @property
+    def weights_file(self) -> int:
+        """What the model weighs on disk: the target's file(s) and any draft head's.
+
+        Never the intercept. A GGUF is mmapped, and the tensors a backend declines are read
+        through the page cache rather than copied anywhere -- so this is reliably the
+        largest of the three numbers and reliably the wrong one to plan memory with.
+        """
+        return self.weights + self.draft
 
     @property
     def key(self) -> tuple[str, str, str]:
@@ -272,11 +559,24 @@ class Fit:
         return self.per_token * max(0, int(per_user_context)) + self.per_seq
 
     def loaded(self) -> int:
-        """What the model costs with nobody on it: the weights, a draft head, and the
-        compute buffers. The number a person means by "how big is it", and the one that
-        does *not* grow -- which is why a large model with a cheap cache overtakes a small
-        one with an expensive cache somewhere, rather than never."""
-        return self.weights + self.draft + self.compute
+        """What the model costs with nobody on it: the weights that are actually resident,
+        plus the compute buffers. The number a person means by "how big is it", and the one
+        that does *not* grow -- which is why a large model with a cheap cache overtakes a
+        small one with an expensive cache somewhere, rather than never.
+
+        Which weights count, in order of what has been measured:
+
+        1. ``weights_resident`` -- a peak RSS after a real run, less that run's caches.
+        2. ``weights_gpu`` -- what the load log says landed in a device buffer.
+        3. ``weights_file`` -- the file size, for a record measured before either existed.
+
+        The file size is the fallback and not the answer: with mmap, a tensor the backend
+        declines stays in the mapped file and is paged, so a 103.7G Flash-Next settles
+        around 90G resident and the file size overstates the intercept by the part of the
+        n-gram table nobody has walked yet. The module docstring has the whole story.
+        """
+        return (self.weights_resident or self.weights_gpu or self.weights_file
+                ) + self.compute
 
     def line(self, per_user_context: int) -> tuple[int, int]:
         """``(bytes with nobody on it, bytes each user adds)`` at that context.
@@ -316,6 +616,10 @@ class Fit:
             "build": self.build, "measured_at": self.measured_at, "context": self.context,
             "parallel": self.parallel, "kv_layers": self.kv_layers,
             "recurrent_layers": self.recurrent_layers, "swa_cells": self.swa_cells,
+            "weights_gpu": self.weights_gpu, "weights_cpu": self.weights_cpu,
+            "cpu_tensors": self.cpu_tensors, "table_bytes": self.table_bytes,
+            "weights_resident": self.weights_resident,
+            "resident_after": self.resident_after,
         }
 
     @classmethod
@@ -329,18 +633,36 @@ class Fit:
     @classmethod
     def of(cls, measured: Measured, *, model: str, weights: int = 0, draft: int = 0,
            room: int = 0, cache_type: str = "", spec: str = "", context: int = 0,
-           parallel: int = 0, build: str = "", when: str = "") -> Fit:
-        """A record from one measurement and the sizes around it."""
+           parallel: int = 0, build: str = "", when: str = "", table_bytes: int = 0,
+           resident_peak: int = 0, resident_after: int = 0) -> Fit:
+        """A record from one measurement and the sizes around it.
+
+        ``resident_peak`` is a whole process's peak RSS after a real run -- the bench's
+        ``resident_peak``, or anything else that watched the server. It is turned into a
+        *weights* figure here rather than stored raw, because an RSS holds the caches of
+        the run it was measured in as well: the compute buffers and one cache per slot come
+        back off, using the numbers this same load produced. Never below what the log said
+        was resident on the GPU, because that part cannot be paged out.
+        """
+        per_token, per_seq = measured.per_token, measured.per_seq
+        resident = 0
+        if resident_peak > 0:
+            held = max(1, int(parallel or 1)) * (per_token * max(0, int(context)) + per_seq)
+            resident = max(measured.weights_gpu,
+                           int(resident_peak) - measured.compute - held)
         return cls(
             model=model or measured.model_file,
             weights=weights, draft=draft, room=room,
-            per_token=measured.per_token, per_seq=measured.per_seq,
+            per_token=per_token, per_seq=per_seq,
             compute=measured.compute,
             cache_type=cache_type or measured.cache_type or "f16",
             spec=spec, build=build or measured.build,
             measured_at=when or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             context=context, parallel=parallel, kv_layers=measured.kv_layers,
-            recurrent_layers=measured.recurrent_layers, swa_cells=measured.swa_cells)
+            recurrent_layers=measured.recurrent_layers, swa_cells=measured.swa_cells,
+            weights_gpu=measured.weights_gpu, weights_cpu=measured.weights_cpu,
+            cpu_tensors=measured.why_cpu(), table_bytes=int(table_bytes),
+            weights_resident=resident, resident_after=int(resident_after))
 
 
 # ------------------------------------------------------------------ the file it lives in
@@ -547,6 +869,35 @@ def _shape(fit: Fit) -> str:
     return "; ".join(bits)
 
 
+def _where_it_went(fit: Fit) -> list[str]:
+    """The file size, and what of it is actually resident -- at most two lines.
+
+    Said out loud because the two numbers differ by tens of gigabytes on exactly the models
+    worth serving, and every reasonable-looking assumption about the difference is wrong.
+    A record measured before any of this was read says nothing extra rather than saying
+    zeroes, which would read as "none of it is on the GPU".
+    """
+    if not (fit.weights_gpu or fit.weights_cpu or fit.weights_resident):
+        return []
+    said = [f"{_human(fit.weights_file)} on disk: {_human(fit.weights_gpu)} in GPU memory, "
+            f"{_human(fit.weights_cpu)} mapped on the CPU"
+            + (f" ({fit.cpu_tensors})" if fit.cpu_tensors
+               else " (`fit MODEL --tensors` says what of)")]
+    after = []
+    if fit.table_bytes:
+        after.append(f"a {_human(fit.table_bytes)} lookup table is paged on demand, a row "
+                     "at a time")
+    if fit.weights_resident:
+        after.append(f"resident after {_tokens(fit.resident_after)} questions "
+                     f"{_human(fit.weights_resident)} (measured)"
+                     if fit.resident_after
+                     else f"resident {_human(fit.weights_resident)} (measured)")
+    if after:
+        said.append("of which " + "; ".join(after) if fit.table_bytes
+                    else "; ".join(after))
+    return said
+
+
 def _block(fit: Fit, contexts: list[int]) -> str:
 
     lines = [f"{pretty_name(fit.model)}", f"  {_headline(fit)}"]
@@ -555,6 +906,7 @@ def _block(fit: Fit, contexts: list[int]) -> str:
         + (f", draft {_human(fit.draft)}" if fit.draft else "")
         + f", compute {_human(fit.compute)}"
         + f" -- of {_human(fit.room)} room, {_human(fit.free())} is left for caches")
+    lines += [f"  {said}" for said in _where_it_went(fit)]
     lines.append(f"  {_human(fit.per_token)} per token of context, "
                  f"{_human(fit.per_seq)} fixed per sequence")
     shape = _shape(fit)
@@ -575,6 +927,7 @@ def _block_md(fit: Fit, contexts: list[int]) -> str:
         f"- weights {_human(fit.weights)}"
         + (f", draft {_human(fit.draft)}" if fit.draft else "")
         + f", compute {_human(fit.compute)}")
+    lines += [f"- {said}" for said in _where_it_went(fit)]
     lines.append(f"- room {_human(fit.room)}, of which {_human(fit.free())} is left for "
                  f"caches")
     lines.append(f"- **{_human(fit.per_token)} per token of context**, "
@@ -588,6 +941,217 @@ def _block_md(fit: Fit, contexts: list[int]) -> str:
         lines.append(f"| {_tokens(context)} | {fit.users(context)} | "
                      f"{_human(fit.cost(context))} |")
     lines += ["", f"One user, longest context: **{_tokens(fit.longest(1))} tokens**."]
+    return "\n".join(lines)
+
+
+# ------------------------------------------------------ what the file is made of
+
+# ggml's own block quantisation, as (name, values per block, bytes per block). Straight out
+# of `ggml.c`'s type_traits table; the arithmetic below is ggml_nbytes' arithmetic, which is
+# how a per-tensor size can be had from a header without reading a byte of tensor data.
+_GGML_TYPES: dict[int, tuple[str, int, int]] = {
+    0: ("f32", 1, 4), 1: ("f16", 1, 2), 2: ("q4_0", 32, 18), 3: ("q4_1", 32, 20),
+    6: ("q5_0", 32, 22), 7: ("q5_1", 32, 24), 8: ("q8_0", 32, 34), 9: ("q8_1", 32, 40),
+    10: ("q2_K", 256, 84), 11: ("q3_K", 256, 110), 12: ("q4_K", 256, 144),
+    13: ("q5_K", 256, 176), 14: ("q6_K", 256, 210), 15: ("q8_K", 256, 292),
+    16: ("iq2_xxs", 256, 66), 17: ("iq2_xs", 256, 74), 18: ("iq3_xxs", 256, 98),
+    19: ("iq1_s", 256, 50), 20: ("iq4_nl", 32, 18), 21: ("iq3_s", 256, 110),
+    22: ("iq2_s", 256, 82), 23: ("iq4_xs", 256, 136), 24: ("i8", 1, 1), 25: ("i16", 1, 2),
+    26: ("i32", 1, 4), 27: ("i64", 1, 8), 28: ("f64", 1, 8), 29: ("iq1_m", 256, 56),
+    30: ("bf16", 1, 2), 34: ("tq1_0", 256, 54), 35: ("tq2_0", 256, 66),
+    39: ("mxfp4", 32, 17),
+}
+
+# A gathered table, not a matmul: only the rows whose keys occur are ever touched, so with
+# mmap the rest of it never becomes resident. `per_layer_token_embd` is Flash-Next's n-gram
+# table -- 26.8G of a 103.7G file -- and the other two names are what the same idea is
+# called elsewhere.
+_TABLE_NAMES = ("per_layer_token_embd", "ngram", "engram")
+
+
+@dataclass(frozen=True, slots=True)
+class Tensor:
+    """One tensor as the GGUF header describes it: what it is called, what it is stored
+    as, how big it is, and how many bytes of the file it takes."""
+
+    name: str
+    type: str
+    shape: tuple[int, ...]
+    bytes: int
+
+    @property
+    def elements(self) -> int:
+        count = 1
+        for dim in self.shape:
+            count *= dim
+        return count
+
+    @property
+    def role(self) -> str:
+        """``table``, ``experts``, ``attention``, ``embedding`` or ``other``.
+
+        The point of the grouping is the first one: a table is paged a row at a time and an
+        expert is not, so two files of the same size can hold very different amounts of
+        resident memory and only the names say which.
+        """
+        low = self.name.lower()
+        if any(word in low for word in _TABLE_NAMES):
+            return "table"
+        if "exps" in low or ".experts" in low:
+            return "experts"
+        if "attn" in low or "attention" in low:
+            return "attention"
+        # `output.weight` is the lm_head; `output_norm.weight` is a norm and is not
+        # one, so the dot is load-bearing rather than tidiness.
+        if "token_embd" in low or low.startswith("output."):
+            return "embedding"
+        return "other"
+
+
+def _shard_paths(model: str | Path) -> list[Path]:
+    """Every shard of a model that is on this machine, from its first file's name."""
+    from ml_stack.serve.preflight import shard_names
+
+    first = Path(model).expanduser()
+    found = [first.parent / name for name in shard_names(first.name)]
+    return [one for one in found if one.is_file()] or [first]
+
+
+def _tensors_in(path: Path) -> list[Tensor]:
+    """Every tensor one GGUF file's header names, without reading any tensor data.
+
+    `preflight.read_gguf_header` deliberately stops before the tensor table -- nothing a
+    preflight needs is in it, and walking it is the expensive half. This walks the same
+    metadata block, with the same value-kind table, only to get past it to the table that
+    answers "what is this file made *of*". Still a header read: the offsets are read, the
+    bytes they point at never are.
+    """
+    from ml_stack.serve.preflight import _GGUF_MAGIC, _SCALAR_FMT
+
+    out: list[Tensor] = []
+    with Path(path).expanduser().open("rb") as f:
+        if f.read(4) != _GGUF_MAGIC:
+            raise ValueError(f"{path}: not a GGUF file (no GGUF magic at the start)")
+        struct.unpack("<I", f.read(4))                        # version -- unused here
+        (tensor_count,) = struct.unpack("<Q", f.read(8))
+        (kv_count,) = struct.unpack("<Q", f.read(8))
+
+        def text() -> str:
+            (n,) = struct.unpack("<Q", f.read(8))
+            return f.read(n).decode("utf-8", "replace")
+
+        def skip(kind: int) -> None:
+            if kind == 8:
+                text()
+                return
+            if kind == 9:
+                (item_kind,) = struct.unpack("<I", f.read(4))
+                (count,) = struct.unpack("<Q", f.read(8))
+                for _ in range(count):
+                    skip(item_kind)
+                return
+            f.read(struct.calcsize(_SCALAR_FMT[kind]))
+
+        for _ in range(kv_count):
+            text()
+            (kind,) = struct.unpack("<I", f.read(4))
+            skip(kind)
+
+        for _ in range(tensor_count):
+            name = text()
+            (dims,) = struct.unpack("<I", f.read(4))
+            shape = struct.unpack(f"<{dims}Q", f.read(8 * dims)) if dims else ()
+            (kind,) = struct.unpack("<I", f.read(4))
+            struct.unpack("<Q", f.read(8))                     # offset -- unused here
+            named, block, per_block = _GGML_TYPES.get(kind, (f"type{kind}", 1, 0))
+            count = 1
+            for dim in shape:
+                count *= dim
+            out.append(Tensor(name=name, type=named, shape=tuple(shape),
+                              bytes=count // block * per_block if block else 0))
+    return out
+
+
+def tensors_of(model: str | Path) -> list[Tensor]:
+    """Every tensor in a model, over all of its shards, largest first."""
+    found: list[Tensor] = []
+    for shard in _shard_paths(model):
+        found += _tensors_in(shard)
+    return sorted(found, key=lambda t: (-t.bytes, t.name))
+
+
+def totals_by_type(found: Iterable[Tensor]) -> list[tuple[str, int, int]]:
+    """``(type, how many tensors, how many bytes)``, largest first.
+
+    The listing that answers "what is the 15.7G of": a `UD-Q4_K_XL` is not one type, and
+    the types a backend declines are exactly the ones that are not the majority.
+    """
+    counts: dict[str, list[int]] = {}
+    for one in found:
+        row = counts.setdefault(one.type, [0, 0])
+        row[0] += 1
+        row[1] += one.bytes
+    return sorted(((name, n, size) for name, (n, size) in counts.items()),
+                  key=lambda row: -row[2])
+
+
+def totals_by_role(found: Iterable[Tensor]) -> list[tuple[str, int, int]]:
+    """The same bytes grouped by what the tensor is *for*, largest first -- table,
+    experts, attention, embedding, other. The one grouping that predicts residency."""
+    counts: dict[str, list[int]] = {}
+    for one in found:
+        row = counts.setdefault(one.role, [0, 0])
+        row[0] += 1
+        row[1] += one.bytes
+    return sorted(((name, n, size) for name, (n, size) in counts.items()),
+                  key=lambda row: -row[2])
+
+
+def table_bytes(model: str | Path) -> int:
+    """Bytes of gathered lookup table in a model's file, or 0 when it has none or cannot
+    be read. Never raises: a record is worth writing without this number."""
+    try:
+        return sum(one.bytes for one in tensors_of(model) if one.role == "table")
+    except (OSError, ValueError, struct.error):
+        return 0
+
+
+def _dims(shape: Sequence[int]) -> str:
+    return "(" + ", ".join(f"{int(d):,}" for d in shape) + ")"
+
+
+def render_tensors(model: str | Path, *, top: int = 12) -> str:
+    """What a model file is made of, from its header alone -- the answer to "why is it
+    smaller in memory than on disk" that needs no server and no GPU.
+
+    Three parts: the largest tensors with their type and shape (a lookup table marked, so
+    the one tensor that is 26% of Flash-Next is not just another row), the totals per
+    tensor type, and the totals per role. Sums every shard.
+    """
+    found = tensors_of(model)
+    if not found:
+        return f"{Path(model).name}: no tensors in the header"
+    shards = _shard_paths(model)
+    total = sum(one.bytes for one in found)
+
+    lines = [f"{pretty_name(Path(model).name)}"
+             + (f"  ({len(shards)} shards)" if len(shards) > 1 else ""),
+             f"  {len(found):,} tensors, {_human(total)} of weights in the header"]
+    table = sum(one.bytes for one in found if one.role == "table")
+    if table:
+        lines.append(f"  {_human(table)} of that is a gathered lookup table: paged a row "
+                     "at a time, so most of it never becomes resident")
+    lines += ["", f"  the {min(top, len(found))} largest tensors", ""]
+    for one in found[:top]:
+        lines.append(f"  {_human(one.bytes):>8}  {one.type:<8} {one.name:<40} "
+                     f"{_dims(one.shape)}"
+                     + ("   <- gathered table" if one.role == "table" else ""))
+    lines += ["", "  by type", ""]
+    for name, count, size in totals_by_type(found):
+        lines.append(f"  {_human(size):>8}  {name:<8} {count:>5} tensors")
+    lines += ["", "  by what it is for", ""]
+    for name, count, size in totals_by_role(found):
+        lines.append(f"  {_human(size):>8}  {name:<10} {count:>5} tensors")
     return "\n".join(lines)
 
 

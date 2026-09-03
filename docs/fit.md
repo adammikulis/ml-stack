@@ -2,6 +2,10 @@
 
 Measured at load, not estimated -- see `src/ml_stack/data/fit.json`.
 
+A model is smaller in memory than it is on disk, and the gap is tens of gigabytes on the models worth serving. llama.cpp mmaps the GGUF and copies into a device buffer only the tensors the backend takes; the rest stay mapped in the file and are paged, so they never appear in 'Real Mem'. Where a block below says *on disk / in GPU memory / mapped on the CPU*, those three numbers come from the load log's own `load_tensors: ... model buffer size` lines, and the one that has to fit beside the KV cache is the middle one.
+
+The usual culprits are a lookup table that is gathered rather than multiplied (`Qwen3.8-Flash-Next`'s `per_layer_token_embd.weight` is a single 26.8G n-gram table, paged a row at a time as distinct n-grams turn up), a tensor type the backend has no kernel for, an output layer that was not offloaded, and anything past `--n-gpu-layers`. `ml-stack-serve fit MODEL --tensors` totals a file's tensors by type and by what they are for, and needs nothing running.
+
 ![How many fit, and what it costs](fit.png)
 
 ## This machine (110.0G)

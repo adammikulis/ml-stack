@@ -538,12 +538,33 @@ def cmd_fit(args: argparse.Namespace) -> int:
     layer as full attention, and gemma4, gpt-oss and qwen4exp each disagree with that in a
     different way. `--measure` serves a model once at `-lv 4`, reads what llama.cpp says it
     allocated, and writes that into the source of truth.
+
+    `--tensors` is the other half of the same question and needs nothing running: a model
+    is reliably smaller in memory than on disk, and the GGUF header says what the missing
+    part is made of.
     """
+    import struct
+
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
 
     if getattr(args, "ui", False):
         return _fit_ui()
+
+    if getattr(args, "tensors", False):
+        # A header read, not a load: no server, no GPU, no lease. This is the command for
+        # "the file is 103.7G and the process holds 90G -- what is the other 13G of".
+        named = [str(m) for m in (getattr(args, "model", None) or [])]
+        if not named:
+            print("error: --tensors needs a model to look inside", file=sys.stderr)
+            return 2
+        for one in named:
+            try:
+                print(fit_mod.render_tensors(resolve_model(one)))
+            except (OSError, ValueError, struct.error) as exc:
+                print(f"error: cannot read {one}: {exc}", file=sys.stderr)
+                return 2
+        return 0
 
     asked_rooms: list[int] = []
     for said in (getattr(args, "room", None) or []):
@@ -609,8 +630,23 @@ def cmd_fit(args: argparse.Namespace) -> int:
     where = str(getattr(args, "write", "") or "")
     if where:
         every = fit_mod.records()
-        head = ("# What fits\n\nMeasured at load, not estimated -- see "
-                "`src/ml_stack/data/fit.json`.\n")
+        head = (
+            "# What fits\n\nMeasured at load, not estimated -- see "
+            "`src/ml_stack/data/fit.json`.\n"
+            "\nA model is smaller in memory than it is on disk, and the gap is tens of "
+            "gigabytes on the models worth serving. llama.cpp mmaps the GGUF and copies "
+            "into a device buffer only the tensors the backend takes; the rest stay mapped "
+            "in the file and are paged, so they never appear in 'Real Mem'. Where a block "
+            "below says *on disk / in GPU memory / mapped on the CPU*, those three numbers "
+            "come from the load log's own `load_tensors: ... model buffer size` lines, and "
+            "the one that has to fit beside the KV cache is the middle one.\n"
+            "\nThe usual culprits are a lookup table that is gathered rather than "
+            "multiplied (`Qwen3.8-Flash-Next`'s `per_layer_token_embd.weight` is a single "
+            "26.8G n-gram table, paged a row at a time as distinct n-grams turn up), a "
+            "tensor type the backend has no kernel for, an output layer that was not "
+            "offloaded, and anything past `--n-gpu-layers`. "
+            "`ml-stack-serve fit MODEL --tensors` totals a file's tensors by type and by "
+            "what they are for, and needs nothing running.\n")
         if drawn:
             # The chart sits beside the file it is named in, so the Markdown refers to it
             # by name alone and the pair can be moved together.
@@ -702,7 +738,12 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
             weights=_shards_of(spec)[0] or weight_of(model),
             draft=_ref_bytes(draft or None), room=room,
             cache_type=kv or measured.cache_type, spec=kind, context=args.context,
-            parallel=slots)
+            parallel=slots,
+            # from the header, not the log: how much of this file is a gathered table, and
+            # so how much of the file size is paged a row at a time rather than loaded
+            table_bytes=fit_mod.table_bytes(model),
+            resident_peak=int(getattr(args, "resident_peak", 0) or 0),
+            resident_after=int(getattr(args, "resident_after", 0) or 0))
         where = fit_mod.add(record)
         print(f"measured {record.model}: {measured.said()}", file=sys.stderr)
         print(f"  recorded in {where}", file=sys.stderr)
@@ -1044,6 +1085,31 @@ def main(argv: list[str] | None = None) -> int:
                             "gemma4 (18 layers share a cache, the rest slide), gpt-oss "
                             "(every other layer slides) and qwen4exp (three layers in four "
                             "are recurrent) each disagree with that differently")
+    fit_p.add_argument("--tensors", action="store_true",
+                       help="what the model file is made of, from its GGUF header alone -- "
+                            "no server, no GPU. The largest tensors with their type and "
+                            "shape, the totals per tensor type, and the totals per role "
+                            "(gathered table, experts, attention, embedding). This is the "
+                            "answer to 'the file is 103.7G and the process holds 90G, what "
+                            "is the rest': a gathered lookup table -- Flash-Next's "
+                            "`per_layer_token_embd.weight` is one 26.8G n-gram table -- is "
+                            "paged a row at a time and most of it never becomes resident")
+    fit_p.add_argument("--resident-peak", dest="resident_peak", type=int, default=0,
+                       metavar="BYTES",
+                       help="with --measure: the peak RSS the served process actually "
+                            "reached during a real run (the bench reports one). Recorded "
+                            "as a weights figure, with the compute buffers and that run's "
+                            "own caches taken back off, and used as the intercept in "
+                            "preference to anything read off the load log -- a paged "
+                            "lookup table only becomes resident as it is walked, so this "
+                            "is the one number the arithmetic cannot derive")
+    fit_p.add_argument("--resident-after", dest="resident_after", type=int, default=0,
+                       metavar="N",
+                       help="with --resident-peak: how many questions had been answered "
+                            "when that peak was taken. A resident figure with no run "
+                            "length beside it cannot be argued with -- a table paged a row "
+                            "at a time reads low after two questions and high after two "
+                            "hundred")
     fit_p.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
                        help="measure it with a draft head as well -- a path, an hf: "
                             "reference, or 'auto'. A draft *model* keeps its own cache at "
