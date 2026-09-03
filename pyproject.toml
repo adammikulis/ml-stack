@@ -68,6 +68,9 @@ testing = ["numpy>=1.24", "pytest>=7"]
 telemetry = ["darwin-perf>=0.1; sys_platform == 'darwin'"]
 # `ml-stack-mcp` speaks the protocol itself over stdio; with the SDK installed it uses that
 mcp = ["mcp>=1.0"]
+# `ml-stack-bench standard`: GSM8K, MMLU-Pro, IFEval and HumanEval through lm-evaluation-harness;
+# `ifeval` brings langdetect, immutabledict and nltk
+standard = ["lm-eval[ifeval]>=0.4"]
 all = [
     "ml-stack[app,train,serve,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
 ]
