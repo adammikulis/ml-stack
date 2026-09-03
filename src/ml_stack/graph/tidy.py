@@ -417,6 +417,7 @@ class Report:
     definitions_judged: int = 0
     suspects_resolved: int = 0
     suspects_dropped: int = 0
+    rejudged: int = 0
     conflicts: list[tuple[str, str, str, str]] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
     self_loops: list[tuple[str, str]] = field(default_factory=list)
@@ -459,7 +460,9 @@ class Report:
                 f"put {self.conflicts_judged} conflicting verb pair(s) to the judge "
                 f"({self.conflict_edges_dropped} edge(s) dropped) and "
                 f"{self.definitions_judged} definition(s); resolved {self.suspects_resolved} "
-                f"suspect label(s) ({self.suspects_dropped} node(s) dropped)")
+                f"suspect label(s) ({self.suspects_dropped} node(s) dropped)"
+                + (f"; asked the judge again about {self.rejudged} held verdict(s)"
+                   if self.rejudged else ""))
 
     def absorbed(self) -> str:
         """What `absorb` did to an incoming graph."""
@@ -627,14 +630,15 @@ def same_name(label: str) -> str:
 
 def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
          written: Mapping[str, str] | None = None, judge: Any = None,
-         log: Callable[[str], None] | None = None) -> Report:
+         log: Callable[[str], None] | None = None, rejudge: bool = False) -> Report:
     """The pass, over a `GraphStore` or the path to one. Dry by default. ``written`` is
     the map of duplicates a person settled (``{name: the name it is}``), applied as given.
     ``judge`` (a `ModelJudge`) decides the pairs a spelling apart, and with one the pass
     is automated: it applies everything it decides and writes every verdict to the store
     with its reason (Adam: "record the mergers but don't defer them to a human"). A pair
     once judged different is not asked again; a pair the judge cannot settle even after
-    reading the source is the one thing left for a person, as ``written``."""
+    reading the source is the one thing left for a person, as ``written``. ``rejudge``
+    asks the judge again about every verdict the store holds and writes the new ones."""
     from ml_stack.entities.spelling import close
     from ml_stack.graph.store import GraphStore
 
@@ -643,7 +647,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if isinstance(store, (str, Path)):
         with GraphStore(store, read_only=dry_run) as opened:
             return tidy(opened, dry_run=dry_run, established=established, written=written,
-                        judge=judge, log=log)
+                        judge=judge, log=log, rejudge=rejudge)
     report = Report(dry_run=dry_run)
     say = log or (lambda _line: None)
 
@@ -654,6 +658,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     nodes = {n["id"]: n for n in store.nodes() if not _hidden(n)}
     edges = [e for e in store.edges() if e["source"] in nodes and e["target"] in nodes]
     decisions = _decisions(store)
+    rejudge = bool(rejudge and judge is not None)
 
     # 1. duplicate nodes, within a kind
     by_kind: dict[str, list[dict[str, Any]]] = {}
@@ -695,7 +700,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
                     continue
                 a, b = by_label[one], by_label[other]
                 key = _pair_key(a["id"], b["id"])
-                held = decisions["pairs"].get(key)
+                held = _held(decisions, "pairs", key, rejudge=rejudge, report=report)
                 if held is None and judge is not None:
                     held = judge.decide(a, b)
                     held = {**held, "a": a["id"], "b": b["id"], "kind": kind,
@@ -788,7 +793,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             continue
         if judge is not None:
             _resolve_suspect(store, nodes, edges, node, why, judge=judge, decisions=decisions,
-                             report=report, note=note)
+                             report=report, note=note, rejudge=rejudge)
         elif not (node.get("attrs") or {}).get("suspect"):
             report.flagged += 1
             note(f"suspect: {node['label']!r} -- {why}")
@@ -814,7 +819,8 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             continue
         if judge is not None and a in nodes and b in nodes:
             rels = _resolve_conflict(store, nodes, edges, (a, b), group, rels, judge=judge,
-                                     decisions=decisions, report=report, note=note)
+                                     decisions=decisions, report=report, note=note,
+                                     rejudge=rejudge)
         if len(rels) > 1:
             report.conflicts.append((a, b, rels[0], rels[1]))
             note(f"conflict: {_label(nodes, a)} and {_label(nodes, b)} are joined by "
@@ -1058,6 +1064,17 @@ def _decisions(store: Any) -> dict[str, dict[str, Any]]:
             for name in _SECTIONS}
 
 
+def _held(decisions: dict[str, dict[str, Any]], section: str, key: str, *, rejudge: bool,
+          report: Report) -> dict[str, Any] | None:
+    """The verdict the store remembers under ``key``; None when there is none, or when it
+    is to be asked again."""
+    held = decisions[section].get(key)
+    if held is not None and rejudge:
+        report.rejudged += 1
+        return None
+    return held
+
+
 def _keep_decision(store: Any, decisions: dict[str, dict[str, Any]], section: str, key: str,
                    decision: Mapping[str, Any]) -> None:
     """One verdict into the store's decisions document, at once: a judge run killed
@@ -1076,7 +1093,7 @@ def _conflict_key(ends: tuple[str, str], one: str, other: str) -> str:
 def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
                       ends: tuple[str, str], group: dict[str, dict[str, Any]], rels: list[str],
                       *, judge: Any, decisions: dict[str, dict[str, Any]], report: Report,
-                      note: Callable[[str], None]) -> list[str]:
+                      note: Callable[[str], None], rejudge: bool = False) -> list[str]:
     """The verbs left between two nodes after the judge has been asked about each pair."""
     one, other = nodes[ends[0]], nodes[ends[1]]
     left = list(rels)
@@ -1084,7 +1101,7 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
     while at < len(left) - 1:
         a_rel, b_rel = left[at], left[at + 1]
         key = _conflict_key(ends, a_rel, b_rel)
-        held = decisions["conflicts"].get(key)
+        held = _held(decisions, "conflicts", key, rejudge=rejudge, report=report)
         if held is None:
             held = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
             held = {**held, "ends": list(ends), "verbs": sorted((a_rel, b_rel)),
@@ -1124,10 +1141,10 @@ def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
 def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
                      node: dict[str, Any], why: str, *, judge: Any,
                      decisions: dict[str, dict[str, Any]], report: Report,
-                     note: Callable[[str], None]) -> None:
+                     note: Callable[[str], None], rejudge: bool = False) -> None:
     """One doubtful label put to the judge: renamed, dropped, or kept with the flag cleared."""
     key = node["id"]
-    held = decisions["suspects"].get(key)
+    held = _held(decisions, "suspects", key, rejudge=rejudge, report=report)
     if held is None:
         held = judge.decide_suspect(node, why)
         held = {**held, "label": node.get("label"), "flagged": why,

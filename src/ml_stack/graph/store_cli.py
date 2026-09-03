@@ -4,6 +4,7 @@
     ml-stack-store check PATH --fix    # and rewrite the docs a scan reads empty
     ml-stack-store docs PATH           # the documents, with their sizes
     ml-stack-store tidy PATH --apply   # the hygiene pass over a whole store
+    ml-stack-store tidy PATH --base-url URL --rejudge   # every held verdict asked again
     ml-stack-store tidy --gold --base-url URL --fail-under 0.8   # score the judge
 
 Measured 2026-09-01: twelve bench runs read back empty through a full scan of ``Doc.value``
@@ -102,6 +103,9 @@ def main(argv: list[str] | None = None) -> int:
                               "from what it knows; with one the pass is automated and applies "
                               "what it decides (ml-stack-ingest tidy --model also re-reads the "
                               "source passages)")
+    hygiene.add_argument("--rejudge", action="store_true",
+                         help="with --base-url: ask the judge again about every verdict the "
+                              "store holds and write the new ones")
     hygiene.add_argument("--gold", nargs="?", const="", default=None, metavar="FILE",
                          help="score the judge instead of tidying a store: pairs whose right "
                               "verdicts are known, accuracy overall and per class, and how many "
@@ -130,7 +134,7 @@ def main(argv: list[str] | None = None) -> int:
 
                 judge = ModelJudge(Client(args.base_url, n_predict=1024))
             report = tidy(path, dry_run=not args.apply, written=written_from(args.written),
-                          judge=judge, log=print)
+                          judge=judge, log=print, rejudge=args.rejudge)
             return 0 if report.sound else 1
         return _docs(path)
     except StoreNeedsUpgrade as why:

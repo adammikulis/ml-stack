@@ -512,3 +512,38 @@ def test_conflicts_and_suspects_read_their_passages_through_the_pointers_the_cal
                        for held in (one, other, edge, rival, number)]
     assert plain.decide_conflict(*with_provenance[:4])["read"] == ["m1"]
     assert plain.decide_suspect(with_provenance[4], "a number")["read"] == ["m2"]
+
+
+def test_rejudge_asks_every_held_verdict_again_and_rewrites_the_document(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:glimmer-node", "glimmer node", mentions=4),
+        _node("concept:glimer-node", "glimer node", mentions=1),
+        _node("concept:vault-current", "vault current", mentions=4),
+        _node("concept:thrum-coil", "thrum coil", mentions=3),
+        _node("concept:number", "42"),
+    ], [_edge("concept:vault-current", "causes", "concept:thrum-coil", 2),
+        _edge("concept:vault-current", "regulates", "concept:thrum-coil", 5)])
+    first = Scripted({("glimmer node", "glimer node"): "different"},
+                     conflicts={("causes", "regulates"): "keep both"},
+                     suspects={("'42'",): {"verdict": "keep"}})
+    report = tidy(path, judge=ModelJudge(first))
+    assert len(first.calls) == 3 and report.rejudged == 0
+    assert tidy(path, judge=ModelJudge(first)).rejudged == 0
+    assert len(first.calls) == 3, "held verdicts are not asked again"
+
+    second = Scripted({("glimmer node", "glimer node"): "same"},
+                      conflicts={("causes", "regulates"): "keep regulates"},
+                      suspects={("'42'",): {"verdict": "drop"}})
+    report = tidy(path, judge=ModelJudge(second), rejudge=True)
+    assert len(second.calls) == 3 and report.rejudged == 3
+    assert "asked the judge again about 3 held verdict(s)" in report.said()
+    nodes, edges = _ids(path)
+    assert "concept:glimer-node" not in nodes and "concept:number" not in nodes
+    assert ("concept:vault-current", "causes", "concept:thrum-coil") not in edges
+    with GraphStore(path, read_only=True) as store:
+        held = store.get_doc(DECISIONS)
+    assert held["pairs"]["concept:glimer-node|concept:glimmer-node"]["verdict"] == "same"
+    key = "concept:thrum-coil|concept:vault-current::causes|regulates"
+    assert held["conflicts"][key]["verdict"] == "keep regulates"
+    assert held["suspects"]["concept:number"]["verdict"] == "drop"
+    assert report.sound
