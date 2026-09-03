@@ -507,6 +507,12 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
 
     matched: set[int] = set()
     said_rels = right_rels = 0
+    # the gold relations that can be scored at all: one with an end the messages asserted
+    # under ``others`` -- a project, a department -- is dropped from both sides, the way an
+    # entry naming one is, since the schema had no bucket to put it in and an extraction
+    # naming it is neither right nor wrong
+    scored = [i for i, (s, _rel, t) in enumerate(held["relations"])
+              if s in truth_all and t in truth_all]
     for r in folded.get("relations") or ():
         src, dst = end(str(r["from"])), end(str(r["to"]))
         if src == "" or dst == "":
@@ -514,13 +520,14 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
         said_rels += 1
         if src is None or dst is None:
             continue
-        for i, (s, rel, t) in enumerate(held["relations"]):
+        for i in scored:
+            s, rel, t = held["relations"][i]
             if s == src and t == dst and same(r["rel"], rel):
                 matched.add(i)
                 right_rels += 1
                 break
-    relations = {**_rates(len(matched), len(held["relations"]), said_rels),
-                 "of": len(held["relations"]), "found": len(matched), "said": said_rels,
+    relations = {**_rates(len(matched), len(scored), said_rels),
+                 "of": len(scored), "found": len(matched), "said": said_rels,
                  "invented": said_rels - right_rels}
 
     labels = {i: str(n.get("label") or "") for i, n in truth_all.items()}
@@ -560,7 +567,10 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
     for asserted in per_message:
         facts: list[Any] = [str(i) for b in BUCKETS for i in (asserted.get(b) or ())
                             if str(i) in truth_all]
-        facts += [tuple(map(str, r)) for r in (asserted.get("relations") or ()) if len(r) == 3]
+        for r in asserted.get("relations") or ():
+            triple = tuple(map(str, r))
+            if len(triple) == 3 and triple[0] in truth_all and triple[2] in truth_all:
+                facts.append(triple)
         if facts:
             shares.append(sum(1 for f in facts if (f in present if isinstance(f, str)
                                                    else f in kept_rels)) / len(facts))

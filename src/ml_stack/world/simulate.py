@@ -20,6 +20,11 @@ An arc's end writes a fact back into the graph -- a decision, a move, a new coll
 a joining -- as a typed edge carrying the message it was said in, so later conversations and
 the truth agree. Nothing here is a real person or organisation.
 
+Most messages also state one relation the graph already holds among the people talking --
+who works with whom, who reports to whom, what somebody works on, which unit they belong
+to -- as a plain sentence naming both ends in full, so a reader has an edge to find and
+not only names. See `_STATED` and `STATE`.
+
 Every message also says what it asserts, in ``attrs["asserts"]``: the ids of the people,
 organisations, topics, places and other entries the writer put into that sentence, and the
 relations it stated, as ``[source, rel, target]``. The template writer knows exactly which
@@ -120,6 +125,70 @@ def _poisson(rng: random.Random, mean: float) -> int:
         k += 1
 
 
+# -- the relations a message states ------------------------------------------------------------
+
+# Plain sentences that state one relation the graph already holds, naming both ends in
+# full. Without them a templated thread is first names and pronouns -- nothing a reader
+# could take a relation out of, and so nothing an extraction can be scored on: a run over
+# forty messages once yielded a single gold edge, which made the relation columns of
+# `ml-stack-bench extract` meaningless. The key is the relation as the world's own
+# vocabulary spells it (`world.organisation`), which is what the gold carries and what
+# conformance is measured against, so nothing here invents a relation name.
+_STATED: dict[str, tuple[str, ...]] = {
+    "works_with": ("{a} works with {b} on most of this.",
+                   "{a} and {b} work together, so either of them can pick it up.",
+                   "For context: {a} works with {b} week to week."),
+    "now_works_with": ("{a} works with {b} now.",
+                       "Since the change, {a} works with {b}.",
+                       "{a} and {b} are a pair now."),
+    "reports_to": ("{a} reports to {b}, so that is the line to take it up.",
+                   "Worth saying that {a} reports to {b}.",
+                   "{a} reports to {b} -- ask there first."),
+    "advises": ("{a} advises {b}.", "{b} is advised by {a}.",
+                "{a} advises {b}, so the two of them should agree it."),
+    "mentors": ("{a} mentors {b}.", "{a} is mentoring {b} this year.",
+                "{b} is being mentored by {a}."),
+    "leads": ("{a} leads {b}.", "{a} is the one who leads {b}.",
+              "{a} leads {b}, so it is their call."),
+    "chairs": ("{a} chairs {b}.", "{a} is the one who chairs {b}."),
+    "sits_on": ("{a} sits on {b}.", "{a} sits on {b} and can raise it there."),
+    "moderates": ("{a} moderates {b}.", "{a} moderates {b}, so flag it to them."),
+    "maintains": ("{a} maintains {b}.", "{a} is the one who maintains {b}."),
+    "member_of": ("{a} is a member of {b}.", "{a} is in {b}.",
+                  "{a} belongs to {b}, if that helps."),
+    "part_of": ("{a} is part of {b}.", "{a} is in {b}.",
+                "{a} belongs to {b}, if that helps."),
+    "works_on": ("{a} works on {b}.", "{a} is working on {b} at the moment.",
+                 "{b} is what {a} works on."),
+    "contributes_to": ("{a} contributes to {b}.", "{a} is a contributor to {b}."),
+    "works_at": ("{a} works at {b}.", "{a} is at {b}.",
+                 "{a} works at {b}, for anyone who has not met them."),
+    "based_in": ("{a} is based in {b}.", "{a} lives in {b}.",
+                 "{a} is based in {b}, so mind the hours."),
+    "experienced_in": ("{a} knows about {b}.", "{a} is experienced in {b}.",
+                       "{a} is the one who knows {b}."),
+    "attended": ("{a} attended {b}.", "{a} was at {b}."),
+    "joined": ("{a} joined {b}.", "{a} is in {b} now."),
+    "moved_to": ("{a} moved to {b}.", "{a} is with {b} now."),
+}
+
+# The share of messages that state one such relation. High, because the gold is only as
+# large as what was said and a stratified sample of forty messages is what it is scored
+# over; a message states a relation at most once, and never one already stated in its
+# own thread.
+STATE = 0.7
+
+# Relations about how the organisation is put together, rather than about one person.
+# A graph holds far more ``experienced_in`` than ``reports_to``, so drawing uniformly
+# would leave a forty-message sample with almost no reporting lines in it; these are
+# preferred `STRUCTURAL` of the time when the thread has one to state.
+_SHAPE = frozenset({"works_with", "now_works_with", "reports_to", "advises", "mentors",
+                    "leads", "chairs", "sits_on", "moderates", "maintains", "part_of",
+                    "member_of",
+                    "works_on", "contributes_to", "joined", "moved_to"})
+STRUCTURAL = 0.55
+
+
 # -- the graph as relations ------------------------------------------------------------------
 
 class _Relations:
@@ -136,11 +205,17 @@ class _Relations:
                 self.of.setdefault(p, []).append(gid)
         self.peers: dict[str, list[str]] = {p: [] for p in self.people}
         self.line: dict[str, list[str]] = {p: [] for p in self.people}
+        # every relation with a person at the near end that a message knows how to state
+        self.stated: dict[str, list[tuple[str, str, str]]] = {}
         for edge in graph.get("edges") or ():
             a, b = str(edge.get("source") or ""), str(edge.get("target") or "")
+            rel = str(edge.get("rel") or edge.get("relation") or "")
+            if rel in _STATED and a in self.of and b in self.by_id and a != b:
+                held = self.stated.setdefault(a, [])
+                if (a, rel, b) not in held:
+                    held.append((a, rel, b))
             if a not in self.of or b not in self.of:
                 continue
-            rel = str(edge.get("rel") or edge.get("relation") or "")
             if rel in PEER:
                 self._add(self.peers, a, b)
                 self._add(self.peers, b, a)
@@ -152,6 +227,18 @@ class _Relations:
     def _add(into: dict[str, list[str]], a: str, b: str) -> None:
         if b not in into[a]:
             into[a].append(b)
+
+    def facts(self, who: Sequence[str]) -> list[tuple[str, str, str]]:
+        """Every statable relation with one of ``who`` at the near end, in graph order.
+
+        What a thread among these people can truthfully say about itself: who they work
+        with, who they report to, what they work on, which unit they belong to, where
+        they are and what they know. The order is the graph's, so a seed reproduces it.
+        """
+        out: list[tuple[str, str, str]] = []
+        for one in who:
+            out.extend(self.stated.get(str(one), ()))
+        return list(dict.fromkeys(out))
 
     def common_group(self, a: str, b: str) -> str:
         shared = [g for g in self.of.get(a, ()) if g in self.of.get(b, ())]
@@ -548,21 +635,32 @@ def template_writer(rng: random.Random) -> Writer:
     has been, a varying tail is added, then a count, so the guarantee holds however long a
     thread runs.
 
-    After each call ``write.last`` is ``{"ids": [...]}``: the graph ids of exactly the
-    slots the chosen sentence was filled with -- the project, the place, the person
-    addressed -- which is what the message asserts and what an extraction of it is
-    scored against. A slot filled with a fallback ("the project") names nothing.
+    Most messages also state one relation the graph holds among the people in the thread,
+    appended as a plain sentence naming both ends in full -- "Ilva Rendevaan reports to
+    Osun Klaithe." -- drawn from ``context["truths"]`` and never the same one twice in a
+    thread. That is what an extraction has a relation to find at all; without it a
+    templated corpus asserts entities and almost no edges.
+
+    After each call ``write.last`` is ``{"ids": [...], "relations": [[s, rel, t]]}``: the
+    graph ids of exactly the slots the chosen sentence was filled with -- the project, the
+    place, the person addressed -- plus both ends of the relation it stated, and that
+    relation as a triple, in the world's own vocabulary. That is what the message asserts
+    and what an extraction of it is scored against. A slot filled with a fallback ("the
+    project") names nothing.
     """
     used: dict[str, set[str]] = {}
+    told: dict[str, set[tuple[str, str, str]]] = {}
 
     def write(persona: Mapping[str, Any], prompt: str, context: Mapping[str, Any]) -> str:
-        write.last = {"ids": []}  # type: ignore[attr-defined]
+        write.last = {"ids": [], "relations": []}  # type: ignore[attr-defined]
         thread = str(context.get("thread") or "")
         if thread not in used:
             if len(used) > 64:
                 used.clear()
+                told.clear()
             used[thread] = set()
-        seen = used[thread]
+            told[thread] = set()
+        seen, stated = used[thread], told.setdefault(thread, set())
         kind = str(context.get("kind") or "ask")
         org_kind = str(context.get("org_kind") or "company")
         seq, of = int(context.get("seq") or 0), int(context.get("of") or 2)
@@ -582,7 +680,16 @@ def template_writer(rng: random.Random) -> Writer:
 
         def said(template: str, sentence: str) -> str:
             seen.add(sentence)
-            write.last = {"ids": _filled(template, ids)}  # type: ignore[attr-defined]
+            named, relations = _filled(template, ids), []
+            fact = _fact(context, stated, rng)
+            if fact:
+                stated.add(fact)
+                source, rel, target = fact
+                sentence += " " + rng.choice(_STATED[rel]).format(
+                    a=_label(context, source), b=_label(context, target))
+                named += [i for i in (source, target) if i not in named]
+                relations = [[source, rel, target]]
+            write.last = {"ids": named, "relations": relations}  # type: ignore[attr-defined]
             return sentence
 
         for template, sentence in candidates:
@@ -600,8 +707,31 @@ def template_writer(rng: random.Random) -> Writer:
             n += 1
         return said(template, f"{base} ({n})")
 
-    write.last = {"ids": []}  # type: ignore[attr-defined]
+    write.last = {"ids": [], "relations": []}  # type: ignore[attr-defined]
     return write
+
+
+def _label(context: Mapping[str, Any], node_id: str) -> str:
+    """How a message names an entry: the label the graph gave it, else its id."""
+    return str((context.get("labels") or {}).get(node_id) or node_id)
+
+
+def _fact(context: Mapping[str, Any], stated: set[tuple[str, str, str]],
+          rng: random.Random) -> tuple[str, str, str] | None:
+    """One relation this message states, or None: a `STATE` share of them state one.
+
+    Drawn from the truths the thread's people carry, never one the thread has already
+    said, so a long thread walks through what is true about the people in it rather than
+    repeating the first fact eight times.
+    """
+    fresh = [tuple(f) for f in (context.get("truths") or ()) if tuple(f) not in stated]
+    if not fresh or rng.random() >= STATE:
+        return None
+    shape = [f for f in fresh if f[1] in _SHAPE]
+    rest = [f for f in fresh if f[1] not in _SHAPE]
+    pool = shape if shape and (not rest or rng.random() < STRUCTURAL) else rest or shape
+    picked = pool[rng.randrange(len(pool))]
+    return (str(picked[0]), str(picked[1]), str(picked[2]))
 
 
 def _slot_ids(persona: Mapping[str, Any], context: Mapping[str, Any]) -> dict[str, str]:
@@ -883,6 +1013,7 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
             root_id = f"msg:{counter:06d}"
             name = f"{arc_key or 'chat'}/{root_id}"
             said: list[tuple[str, str]] = []
+            truths = rel.facts(who)
             speaker = who[0]
             when = _work_start(day, zones.get(speaker, timezone.utc), rng, 8.0)
             for seq in range(length):
@@ -899,7 +1030,7 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
                            "where": (source, channel), "said": list(said),
                            "facts": plan.get("facts") or {}, "seq": seq, "of": length,
                            "speaker": speaker, "others": [p for p in who if p != speaker],
-                           "labels": rel.label, "arc": arc, "day": day,
+                           "labels": rel.label, "arc": arc, "day": day, "truths": truths,
                            "last": bool(plan.get("last")) and seq == length - 1,
                            "outcome": (arc or {}).get("outcome") if arc else None}
                 prompt = PROMPT.format(about=plan["about"])
@@ -910,11 +1041,14 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
                 if not text or any(text == t for _, t in said):
                     text, wrote = templated(persona, prompt, context), "template"
                 message_id = root_id if seq == 0 else f"msg:{counter:06d}"
+                stated: list[list[str]] = []
                 if wrote == "model":
                     asserted = list(getattr(writer, "last_ids", ()) or ())
                 else:
-                    asserted = list((getattr(templated, "last", None) or {}).get("ids") or ())
-                stated: list[list[str]] = []
+                    last = getattr(templated, "last", None) or {}
+                    asserted = list(last.get("ids") or ())
+                    # the relation the sentence stated outright, both ends named in full
+                    stated = [list(map(str, r)) for r in (last.get("relations") or ())]
                 if arc and plan.get("last") and seq == length - 1:
                     # the outcome is written either way; the message asserts it only
                     # when its sentence named both ends, since a closer that says "that

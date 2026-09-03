@@ -15,6 +15,12 @@ false premise about a real person; the right answer is the place as the graph ha
 ``quote`` (answerable from a person's own ``messages`` and nothing else). `KINDS` lists
 every tag, and ``kinds=`` draws only some.
 
+The relations the conversations state outright -- who reports to whom, who works with
+whom, who works on what, who belongs to which unit, which `world.simulate` writes into the
+messages and carries as gold -- are asked back as ``person`` questions ("Who does X report
+to?") and as ``path`` questions between two people the same edge joins, so what a reader
+of the corpus could have learnt is what it is asked.
+
 Nothing here assumes a company. Every generator reads a relation, and a kind that lacks
 that relation (a community has no ``reports_to``) simply contributes no such questions.
 """
@@ -53,6 +59,13 @@ _KINDS_LISTED = {
     "event": "What events come up?",
     "product": "What products are there?",
 }
+# a relation a message states about one person, and how to ask for its far end back
+_STATED_ASK = {
+    "reports_to": "Who does {} report to?",
+    "works_with": "Who works with {}?",
+}
+# relations whose shared far end joins two people: the path between them runs through it
+_STATED_JOIN = ("part_of", "works_on", "reports_to", "works_with", "advises", "maintains")
 _NOBODY = (
     "Nobody here does underwater welding. Who could?",
     "Who is the court jester?",
@@ -235,6 +248,31 @@ def _buckets(t: _Truth, rng: random.Random) -> dict[str, list[dict[str, Any]]]:
         unit = [u for u in t.out.get("part_of", {}).get(who, ()) if t.kind(u) == t.unit_kind][:1]
         place = t.out.get("based_in", {}).get(who, ())[:1]
         b.setdefault("about", []).append(_q(f"Tell me about {t.label(who)}.", [who, *unit, *place]))
+
+    # --- the relations the conversations state outright -------------------------------------
+    # `world.simulate` writes "A reports to B" and "A is part of C" into the messages
+    # themselves and carries each as gold; asked back here, the answer is the same edge,
+    # so a graph built by reading the corpus can be asked exactly what the corpus said.
+    for who in people:
+        for rel, phrase in _STATED_ASK.items():
+            others = [o for o in t.out.get(rel, {}).get(who, ()) if t.kind(o) == "person"]
+            if rel == "works_with":
+                others = sorted({*others, *[o for o in t.inc.get(rel, {}).get(who, ())
+                                            if t.kind(o) == "person"]})
+            if 1 <= len(others) <= 8:
+                b.setdefault("person", []).append(_q(phrase.format(t.label(who)), others))
+
+    # two people the stated relations put at the same end of one edge: the connection is
+    # that shared end, and the path through it is the answer
+    for rel in _STATED_JOIN:
+        for anchor, crowd in t.inc.get(rel, {}).items():
+            crowd = sorted({p for p in crowd if t.kind(p) == "person"})
+            if anchor == t.org or not 2 <= len(crowd) <= 8:
+                continue
+            for a, c in zip(crowd[::2], crowd[1::2]):
+                if anchor not in (a, c):
+                    b.setdefault("path", []).append(
+                        _q(f"How is {t.label(a)} connected to {t.label(c)}?", [a, anchor, c]))
 
     # --- how two people connect, through something more specific than the whole organisation --
     from ml_stack.entities.paths import between

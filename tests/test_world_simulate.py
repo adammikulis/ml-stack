@@ -496,8 +496,14 @@ def test_a_template_written_message_asserts_exactly_the_ids_its_sentence_names()
         assert all(nodes[i]["kind"] == "topic" for i in held["topics"])
         assert all(nodes[i]["kind"] == "place" for i in held["places"])
         assert all(nodes[i]["kind"] in ("project", "department") for i in held["others"])
+        # a relation is either an arc's outcome or one the truth graph already holds, and
+        # both its ends are named in the sentence it was stated in
+        vocabulary = {str(e.get("rel")) for e in world.graph["edges"]} | set(OUTCOMES)
         for source, rel, target in held["relations"]:
-            assert source in ids and target in ids and rel in OUTCOMES
+            assert source in ids and target in ids and rel in vocabulary
+            if rel not in OUTCOMES:
+                assert any(e["source"] == source and e.get("rel") == rel
+                           and e["target"] == target for e in world.graph["edges"])
 
 
 def test_the_union_of_asserts_over_a_run_is_the_set_of_entries_its_messages_mention():
@@ -528,7 +534,9 @@ def test_an_outcome_is_asserted_by_the_closing_message_only_when_it_names_both_e
         last = messages[-1]
         edge = next(e for e in world.graph["edges"] if e.get("rel") == "moved_to")
         assert edge["attrs"]["said_in"] == last.id
-        stated = last.attrs["asserts"]["relations"]
+        # a message may also state a relation the graph already holds; the outcome is the
+        # one relation this test is about
+        stated = [r for r in last.attrs["asserts"]["relations"] if r[1] in OUTCOMES]
         said = last.text.casefold()             # a voice flavour may lower-case the opener
         if "customer support" in said and "milo" in said:
             assert stated == [["person:milo", "moved_to", "dept:support"]]
