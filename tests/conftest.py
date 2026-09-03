@@ -347,3 +347,22 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     monkeypatch.setattr(backend, "CACHE_ROOT", cache)
     monkeypatch.setattr(backend, "LOG_DIR", cache / "logs")
     monkeypatch.setenv("ML_STACK_CACHE", str(cache))
+
+
+def leased(backend, spec, **starting):
+    """Start a server the only way the library allows: through a manager, on a temporary
+    state file, so the record exists before the process does. A spec on the default port
+    is given a free one -- a test never means port 8080. ``starting`` is what
+    `ServerManager.lease` forwards to the backend (timeout, check_flags, preflight,
+    warmup_request)."""
+    import tempfile
+    from dataclasses import replace
+    from pathlib import Path
+
+    from ml_stack.serve.manager import ServerManager
+    from ml_stack.serve.ports import free_port
+
+    if spec.port == 8080:
+        spec = replace(spec, port=free_port())
+    state = Path(tempfile.mkdtemp()) / "servers.json"
+    return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)

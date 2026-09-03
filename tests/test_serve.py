@@ -33,6 +33,7 @@ from ml_stack.serve import (
     shape_mismatch,
     tail,
 )
+from tests.conftest import leased
 
 
 @pytest.fixture
@@ -105,7 +106,7 @@ class TestStartGuards:
         reader looking for a slow load that never happened."""
         backend = LlamaServerBackend(binary=fake_binary)
         with pytest.raises(ServerFailed, match="no model file at"):
-            backend.start(ServerSpec(model=tmp_path / "absent.gguf"))
+            leased(backend, ServerSpec(model=tmp_path / "absent.gguf"))
 
     def test_a_foreign_process_on_the_port_is_refused_not_killed(self, fake_binary, gguf):
         """The port check matches our own binary names; anything else is somebody's
@@ -117,7 +118,7 @@ class TestStartGuards:
 
             backend = LlamaServerBackend(binary=fake_binary)
             with pytest.raises(ServerFailed, match="not one of ours"):
-                backend.start(ServerSpec(model=gguf, port=port), timeout=1.0)
+                leased(backend, ServerSpec(model=gguf, port=port), timeout=1.0)
 
             # Still listening: we refused rather than reclaiming.
             assert held.fileno() != -1
@@ -298,7 +299,7 @@ class TestScaledTimeout:
             def command(self, spec):
                 return ["fake"]
 
-            def start(self, spec, *, timeout=300.0):
+            def start(self, spec, *, lease, timeout=300.0, **starting):
                 started.append(timeout)
                 return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                   pid=1, backend="fake")
@@ -584,7 +585,7 @@ class TestServingBeside:
             def command(self, spec):
                 return ["fake"]
 
-            def start(self, spec, *, timeout=300.0):
+            def start(self, spec, *, lease, timeout=300.0, **starting):
                 started.append(spec)
                 return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                   pid=4242, backend="fake")

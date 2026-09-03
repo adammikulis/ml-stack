@@ -489,10 +489,13 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     monkeypatch.setattr(sp, "Popen",
                         lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
 
-    def lease(self, spec, *, timeout=300.0, roam=True):
-        # Straight to the launch, with the retired flag on the argv.
-        return self.backend.start(replace(spec, extra_args=("--draft-max", "3")),
-                                  timeout=timeout)
+    real_lease = cli.ServerManager.lease
+
+    def lease(self, spec, **kw):
+        # The real lease, with the retired flag put on the argv and a port nobody holds.
+        from ml_stack.serve.ports import free_port
+        return real_lease(self, replace(spec, extra_args=("--draft-max", "3"),
+                                        port=free_port()), **kw)
 
     monkeypatch.setattr(cli.ServerManager, "lease", lease)
     code = cli.main(["up", str(gguf), "--binary", str(binary), "--port", str(free_port())])

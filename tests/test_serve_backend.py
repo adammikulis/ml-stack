@@ -21,6 +21,7 @@ from ml_stack.serve.backend import (
     flags_of,
     unknown_flags,
 )
+from tests.conftest import leased
 
 HELP = """\
 usage: llama-server [options]
@@ -294,7 +295,7 @@ class TestLaunchRefusal:
         spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
 
         with pytest.raises(UnknownFlag) as caught:
-            LlamaServerBackend(binary=binary).start(spec, timeout=1.0)
+            leased(LlamaServerBackend(binary=binary), spec, timeout=1.0)
         assert str(caught.value) == "this llama-server has no --draft-max; it has --spec-draft-n-max"
         assert started == []
 
@@ -307,7 +308,7 @@ class TestLaunchRefusal:
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
         spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3", "--zzqx", "1"))
         with pytest.raises(UnknownFlag) as caught:
-            LlamaServerBackend(binary=binary).start(spec, timeout=1.0)
+            leased(LlamaServerBackend(binary=binary), spec, timeout=1.0)
         assert str(caught.value).splitlines() == [
             "this llama-server has no --draft-max; it has --spec-draft-n-max",
             "this llama-server has no --zzqx",
@@ -334,7 +335,7 @@ class TestLaunchRefusal:
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
         spec = ServerSpec(model=gguf, extra_args=("--draft-max", "3"))
         with pytest.raises(OSError, match="stop here"):
-            LlamaServerBackend(binary=binary).start(
+            leased(LlamaServerBackend(binary=binary), 
                 spec, timeout=1.0, check_flags=False, preflight=False)
         assert reached == ["popen"]
 
@@ -350,7 +351,7 @@ class TestLaunchRefusal:
         with pytest.raises(OSError, match="stop here"):
             # preflight=False: this stand-in gguf carries no real metadata, and what this
             # test is about is the flag check, not the preflight one.
-            LlamaServerBackend(binary=silent).start(
+            leased(LlamaServerBackend(binary=silent), 
                 ServerSpec(model=gguf, extra_args=("--draft-max", "3")), timeout=1.0,
                 preflight=False)
 

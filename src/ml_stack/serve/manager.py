@@ -11,10 +11,12 @@ from contextlib import contextmanager
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import ServingParams, serving_params
 from ml_stack.serve.backend import (
+    Lease,
     LlamaServerBackend,
     ServerBackend,
     ServerFailed,
@@ -164,7 +166,8 @@ class ServerManager:
     # ------------------------------------------------------------------ leasing
 
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
-              roam: bool = True) -> ServerInfo:
+              roam: bool = True, check_flags: bool = True, preflight: bool = True,
+              warmup_request: bool = True) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
 
         When the port is busy with something else and this machine has the memory to hold
@@ -188,13 +191,15 @@ class ServerManager:
 
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
+        starting = {"check_flags": check_flags, "preflight": preflight,
+                    "warmup_request": warmup_request}
 
         with self._port_lock(spec.port):
             try:
                 adopted = self.adopt(spec)
             except ServerFailed:
                 if not roam or not port_is_free(spec.port):
-                    elsewhere = (self._beside(spec, timeout=resolved_timeout)
+                    elsewhere = (self._beside(spec, timeout=resolved_timeout, **starting)
                                 if roam else None)
                     if elsewhere is not None:
                         return elsewhere
@@ -203,8 +208,10 @@ class ServerManager:
                 return adopted
 
             try:
-                info = self.backend.start(spec, timeout=resolved_timeout)
+                info = self.backend.start(spec, lease=self._pending(spec),
+                                          timeout=resolved_timeout, **starting)
             except ServerFailed:
+                self._forget(spec.port)
                 self._unavailable_until[spec.port] = time.monotonic() + UNAVAILABLE_COOLDOWN_S
                 raise
 
@@ -212,7 +219,7 @@ class ServerManager:
             self._record(spec, info)
             return info
 
-    def _beside(self, spec: ServerSpec, *, timeout: float) -> ServerInfo | None:
+    def _beside(self, spec: ServerSpec, *, timeout: float, **starting: Any) -> ServerInfo | None:
         """Serve it next to whatever holds the port, when there is room. None when there is not.
 
         Room is judged against the weights on disk: a model is roughly its file size in
@@ -226,8 +233,10 @@ class ServerManager:
         moved = replace(spec, port=free_port())
         with self._port_lock(moved.port):
             try:
-                info = self.backend.start(moved, timeout=timeout)
+                info = self.backend.start(moved, lease=self._pending(moved), timeout=timeout,
+                                          **starting)
             except ServerFailed:
+                self._forget(moved.port)
                 return None
             self._record(moved, info)
             return info
@@ -287,6 +296,21 @@ class ServerManager:
         return stopped
 
     # ------------------------------------------------------------------ state file
+
+    def _pending(self, spec: ServerSpec) -> Lease:
+        """Write the server down before it exists, and hand the backend the proof.
+
+        The record carries the port, the model and this process as owner with no pid yet;
+        `_record` fills the pid in once the server answers, `_forget` takes the entry out
+        if it never does. Between the two, a port that looks unrecorded is one this
+        manager is starting on -- never one it may kill.
+        """
+        self._mine[str(spec.port)] = {
+            "port": spec.port, "pid": None, "backend": self.backend.name,
+            "model": str(spec.model), "owner_pid": os.getpid(), "pending": True,
+        }
+        self._save()
+        return Lease(port=spec.port, owner_pid=os.getpid(), state_file=str(self.state_file))
 
     def _record(self, spec: ServerSpec, info: ServerInfo) -> None:
         self._mine[str(spec.port)] = {

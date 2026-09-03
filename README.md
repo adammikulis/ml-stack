@@ -804,6 +804,18 @@ caches it on first use, so there is no separate fetching step.
 
 ## Serving a model
 
+What makes this part worth having is the lifecycle, not the launcher. Every model server on
+a machine goes through one manager: it is written down *before* the process exists (the
+record carries the port, the model and the owner; the pid is filled in when the server
+answers, and a start that fails is forgotten), one shape is served per port and a lease
+that asks for another shape is refused with the field that differs named, a server already
+serving what was asked for is adopted rather than started again, a server the record does
+not know is reported as somebody else's and never killed, and the backend launches nothing
+without the manager's lease in hand -- so an untracked server cannot come out of the
+library at all. The measured shape of each model (`ml-stack-serve profile`) is what a
+lease is built from, so serving and asking use the numbers that were measured rather than
+remembered. The commands below are the surface of that.
+
 From a shell:
 
 ```

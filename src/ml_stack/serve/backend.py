@@ -285,13 +285,30 @@ class ServerInfo:
     warmup_s: float | None = None
 
 
+@dataclass(frozen=True)
+class Lease:
+    """The manager's proof that a server about to start is already on the record.
+
+    A backend launches nothing without one, so a server this code base spawns is recorded
+    by construction -- before the process exists, with the pid filled in after -- and
+    "a server nobody recorded" cannot come out of the library. Adam: "this wouldn't
+    happen in the first place if we ensured that it wasn't possible to have an untracked
+    server." Only `ServerManager` makes these; a test that wants a server goes through a
+    manager on a temporary state file, the way everything else does.
+    """
+
+    port: int
+    owner_pid: int
+    state_file: str
+
+
 class ServerBackend(ABC):
     """One way of putting a model behind an HTTP endpoint."""
 
     name: str
 
     @abstractmethod
-    def start(self, spec: ServerSpec, *, timeout: float = 300.0) -> ServerInfo:
+    def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0) -> ServerInfo:
         ...
 
     @abstractmethod
@@ -448,7 +465,7 @@ class LlamaServerBackend(ServerBackend):
         except Exception as exc:  # noqa: BLE001 - whatever the Hub said, say it here
             raise ServerFailed(f"could not fetch the draft {spec.draft}: {exc}") from exc
 
-    def start(self, spec: ServerSpec, *, timeout: float = 300.0,
+    def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0,
               check_flags: bool = True, preflight: bool = True,
               warmup_request: bool = True) -> ServerInfo:
         """Launch and wait until healthy. Raises ``ServerFailed`` with the log tail.
@@ -480,6 +497,9 @@ class LlamaServerBackend(ServerBackend):
                     f"this llama-server has no {flag}" + (f"; it has {near}" if near else "")
                     for flag, near in lacking))
 
+        if lease.port != spec.port:
+            raise ServerFailed(f"the lease is for port {lease.port}, not {spec.port}: a server "
+                               "starts only on the port its record names")
         if not port_is_free(spec.port):
             reclaim_port(spec.port)
             if not port_is_free(spec.port):

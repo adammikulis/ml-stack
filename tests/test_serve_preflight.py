@@ -21,6 +21,7 @@ from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 
 from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
+from tests.conftest import leased
 
 
 @pytest.fixture(autouse=True)
@@ -351,7 +352,7 @@ class TestStartRunsPreflight:
         monkeypatch.setattr(subprocess, "Popen", popen)
         spec = ServerSpec(model=gguf, port=free_port())
         with pytest.raises(PreflightFailed, match="architecture"):
-            LlamaServerBackend(binary=binary).start(spec, timeout=1.0)
+            leased(LlamaServerBackend(binary=binary), spec, timeout=1.0)
 
     def test_preflight_can_be_turned_off(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module
@@ -368,7 +369,7 @@ class TestStartRunsPreflight:
 
         monkeypatch.setattr(subprocess, "Popen", popen)
         with pytest.raises(OSError, match="stop here"):
-            LlamaServerBackend(binary=binary).start(
+            leased(LlamaServerBackend(binary=binary), 
                 ServerSpec(model=gguf), timeout=1.0, preflight=False)
         assert reached == [True]
 
@@ -440,7 +441,7 @@ class TestLoadTimingAndWarmUp:
 
         spec = self._spec(tmp_path, monkeypatch)
         binary = fake_server_process(tmp_path)
-        info = LlamaServerBackend(binary=binary).start(spec, timeout=10.0)
+        info = leased(LlamaServerBackend(binary=binary), spec, timeout=10.0)
         try:
             assert info.load_s is not None and info.load_s >= 0.0
             assert info.warmup_s is not None and info.warmup_s >= 0.0
@@ -452,7 +453,7 @@ class TestLoadTimingAndWarmUp:
 
         spec = self._spec(tmp_path, monkeypatch)
         binary = fake_server_process(tmp_path)
-        info = LlamaServerBackend(binary=binary).start(
+        info = leased(LlamaServerBackend(binary=binary), 
             spec, timeout=10.0, warmup_request=False)
         try:
             assert info.load_s is not None
