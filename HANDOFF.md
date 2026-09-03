@@ -122,19 +122,32 @@ Store integrity
   for a report upstream; `tests/test_graph_store_scale.py` carries the two probes (a delete
   at scale leaves strings intact; a write twice updates) so a future bump is measured, not
   trusted. ai_ceo's venv is on 0.19.1 too.
-- [ ] **ladybug 0.20.2 segfaults on the store's second `write()`** (Adam asked for the
-  upgrade, 2026-09-03 afternoon; measured, not taken). Release notes 0.20.0-0.20.2 are
-  about a cached-physical-plan fast path for re-executed parameterized queries and three
-  rounds of fixes to it ("SIGSEGV re-executing a parameterized write query string",
-  "stale rows on the cached-plan fast path"); it is still not right for our pattern.
-  Reproduction, two lines, `PYTHONFAULTHANDLER=1`: `store.write(GRAPH); store.write(GRAPH)`
-  from `tests/test_graph_store.py` -- Fatal Python error: Segmentation fault in
-  `ladybug/connection.py execute`, from `store.py write()`'s transaction (MERGE with
-  parameters, re-executed). Four store tests crash the interpreter and the FTS search
-  returns a duplicate row. A minimal MERGE-twice on a bare table does not crash, so the
-  trigger is our write sequence (transaction, MERGE node, MERGE edge, put_doc, index); the
-  bisect and the upstream issue are the next step (Adam's go-ahead before posting).
-  Until fixed upstream the pin stays `>=0.19,<0.20`; the scale probes gate any bump.
+- [ ] **A recorded server whose owner has gone should be stopped by the lifecycle, not by
+  hand.** Twice on 2026-09-03 `ml-stack-serve status` showed Flash-Next on 8080 with "the
+  process that started it (pid N) has gone" -- a judged pass's `_serving` lease whose
+  owner ended without releasing (a monitor's shell killed, once; the other unexplained),
+  ~90G of memory held until a person ran `down`. The record makes it ours, so: `status`
+  says "orphaned" and the next `lease` on that port (or `ml-stack-serve down --orphans`)
+  stops it; and find why `_serving`'s exit did not release -- a `Stopped`/SIGTERM path
+  that skips the context manager's exit, most likely.
+- [ ] **ladybug 0.20.2 is in (e695dc9), with a guard.** Its cached-physical-plan fast path
+  re-executed the store's edge MERGE after the node table it matches was rewritten and
+  segfaulted; every write statement now carries a counter in a comment so no plan is
+  reused for a write (`GraphStore._written`), and `search` hands back one row per id
+  (0.20's text index returns a node once per version written). The pin is
+  `>=0.19,<0.21`; `tests/test_graph_store_scale.py` and `tests/test_graph_store.py` gate
+  a bump. Still to file upstream, with Adam's go-ahead: the segfault (two lines of
+  reproduction in the store's docstring) and the duplicate search row.
+
+- [ ] **Claude Code and the Agent SDK on a served model.** Adam: "make a very clean/easy way
+  for me to launch claude code with llama-server", then "in ml-stack I mean, integrate
+  it." llama-server speaks the Messages API at `/v1/messages` (streaming, tool
+  use with `--jinja`, thinking, `count_tokens`), so no bridge: `ml-stack-claude MODEL [--
+  claude args]` leases the model in its measured shape (a `Run`), sets
+  `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` and every model variable to the served
+  alias, turns non-essential traffic off, and execs `claude`; `ml_stack.harness` wraps the
+  Python Agent SDK (`claude-agent-sdk`, an extra) the same way for programmatic use, with
+  each result's usage folded into `Spent`. In progress this evening.
 
 ## Library
 
