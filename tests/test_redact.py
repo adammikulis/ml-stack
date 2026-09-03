@@ -135,3 +135,152 @@ def test_a_name_on_the_list_is_allowed_with_the_sentences_punctuation_on_it(tmp_
     out = io.StringIO()
     assert hook.main([], env={"NAMES_FIXTURES": "tests/known-fixtures.txt", "HOME": str(tmp_path)},
                      root=repo, stdout=out) == 0, out.getvalue()
+
+
+def _repo(tmp_path, fixtures: str = "", graph: dict | None = None):
+    """A git repository with an allow-list and a graph of invented people, nothing staged."""
+    import json
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    for setting, value in (("user.email", "nobody@example.invalid"), ("user.name", "nobody")):
+        subprocess.run(["git", "-C", str(tmp_path), "config", setting, value], check=True)
+    (tmp_path / "tests").mkdir(exist_ok=True)
+    (tmp_path / "tests" / "known-fixtures.txt").write_text(fixtures, encoding="utf-8")
+    (tmp_path / "graph.json").write_text(json.dumps(graph or {"nodes": [], "messages": {}}),
+                                         encoding="utf-8")
+    return tmp_path
+
+
+def _check(tmp_path, why: bool = False, **files: str):
+    """Stage those files and run the hook over them. Returns (exit code, what it said)."""
+    import io
+    import subprocess
+
+    from ml_stack.redact import hook
+
+    for name, body in files.items():
+        (tmp_path / name).write_text(body, encoding="utf-8")
+        subprocess.run(["git", "-C", str(tmp_path), "add", name], check=True)
+    said = io.StringIO()
+    env = {"NAMES_FIXTURES": "tests/known-fixtures.txt", "HOME": str(tmp_path),
+           "NAMES_GRAPH": str(tmp_path / "graph.json")}
+    code = hook.main(["--why"] if why else [], env=env, root=tmp_path, stdout=said)
+    return code, said.getvalue()
+
+
+def _needs_recogniser():
+    """These fragments are found by Presidio and by nothing else, so without it there is
+    nothing to stand down and the test would pass for the wrong reason."""
+    import pytest
+
+    from ml_stack.redact import hook
+
+    if hook.recogniser() is None:
+        pytest.skip("presidio is not installed")
+
+
+def test_a_javascript_expression_is_not_a_person(tmp_path):
+    """`x1 - x0` out of a chart's JavaScript: an operator with a space beside it is an
+    operator, so the pair is an expression. Mutation: drop the `context_expression` clause
+    and this file is refused again."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, why=True, **{"fit.js": (
+        "const w = x1 - x0;\nconst h = y1 - y0;\nconst s = w || null || h;\n")})
+    assert code == 0, said
+    assert "cleared by context_expression" in said
+
+
+def test_a_number_in_a_markdown_table_cell_is_not_a_person(tmp_path):
+    """`| ~3 |`: a markdown row and a cell with no letters in it. Mutation: drop the
+    `context_table_cell` clause."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, why=True, **{"costs.md": "| ~3 |\n"})
+    assert code == 0, said
+    assert "cleared by context_table_cell" in said
+
+
+def test_a_keyword_and_an_identifier_is_not_a_person(tmp_path):
+    """`assert label.lower` off a test line: a Python keyword and one identifier after it.
+    Mutation: drop the `context_keyword` clause."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, why=True, **{"t_kiln.py": 'assert label.lower() == "kiln"\n'})
+    assert code == 0, said
+    assert "cleared by context_keyword: assert" in said
+
+
+def test_a_product_name_is_not_a_person(tmp_path):
+    """`Windows Defender Firewall` in a table, `'Practical AI'` in a list of channels: a
+    pair with a product, an OS or a vendor token in it. Mutation: drop the `context_product`
+    clause."""
+    repo = _repo(tmp_path)
+    code, said = _check(repo, why=True, **{
+        "notes.md": "| what | why |\n| --- | --- |\n| Windows Defender Firewall | blocks it |\n",
+        "channels.py": "CHANNELS = ['Practical AI']\n"})
+    assert code == 0, said
+    assert "cleared by context_product: AI" in said
+
+
+def test_an_invented_name_in_a_javascript_string_is_still_refused(tmp_path):
+    """The whole point of the context rules is that they stand down code, never a person.
+    A two-word name in a JS string, inside a call and beside operators, is still refused:
+    what surrounds a quoted literal says nothing about what is inside it."""
+    repo = _repo(tmp_path)
+    code, said = _check(repo, **{"chart.js": (
+        'const author = "Marla Quinn";\n'
+        'const all = ["Marla Quinn"];\n'
+        'label(w - 1, "Marla Quinn");\n')})
+    assert code == 1, said
+    assert "Marla Quinn" in said
+
+
+def test_an_invented_name_in_a_table_cell_is_still_refused(tmp_path):
+    """A table cell stands down when it has no letters in it. A cell with a name in it is
+    a name: nobody is in the graph here, so only the recogniser can catch this one.
+    Mutation: drop the `LETTER` check from `_table_cell`."""
+    _needs_recogniser()
+    repo = _repo(tmp_path)
+    code, said = _check(repo, **{"who.md": "| who | kiln |\n| --- | --- |\n| Marla Quinn | 3 |\n"})
+    assert code == 1, said
+    assert "Marla Quinn" in said
+
+
+def test_a_name_from_the_data_inside_an_expression_is_still_refused(tmp_path):
+    """The exact list read from the graph is never stood down by a context rule: brackets
+    and operators around a real name are exactly how one gets committed by accident."""
+    repo = _repo(tmp_path, graph={"nodes": [{"kind": "person", "label": "Wren Halloway"}],
+                                  "messages": {}})
+    code, said = _check(repo, **{"pick.js": "const who = (Wren Halloway) || null;\n"})
+    assert code == 1, said
+    assert "Wren Halloway" in said and "someone in the data" in said
+
+
+def test_allow_why_names_the_rule_that_almost_applied(tmp_path):
+    """`hook allow --why PHRASE` says which rule already covers the phrase, or which came
+    nearest -- so the next person adds a line to a rule, which covers every phrase of that
+    shape, rather than a fixture, which covers one."""
+    import io
+
+    from ml_stack.redact import hook
+
+    fixtures = tmp_path / "tests" / "known-fixtures.txt"
+    fixtures.parent.mkdir()
+    fixtures.write_text("", encoding="utf-8")
+    env = {"NAMES_FIXTURES": "tests/known-fixtures.txt"}
+    out = io.StringIO()
+    assert hook.main(["allow", "--why", "Practical AI"], env=env, root=tmp_path,
+                     stdout=out) == 0
+    assert "already stood down by context_product: AI" in out.getvalue()
+
+    out = io.StringIO()
+    assert hook.main(["allow", "--why", "Loomcast Gateway"], env=env, root=tmp_path,
+                     stdout=out) == 0
+    told = out.getvalue()
+    assert "no rule stood it down" in told and "nearest" in told
+    assert "name-shapes.json covers every phrase of that shape" in told
+    # --why is a flag, not a phrase to allow
+    assert "--why" not in fixtures.read_text()
+    assert "Loomcast Gateway" in fixtures.read_text()

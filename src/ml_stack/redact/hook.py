@@ -2,9 +2,12 @@
 
 Two detectors, an exact list read from a local database and a Presidio recogniser with a
 shape rule beside it, run over every staged file. The shape rule and everything that stands
-it down -- a place, a job title, a reserved domain, the inside of a uuid -- are data in
-``contracts/name-shapes.json``, one section per rule, so an exception is a data change and
-not a code change; every finding, and every pair stood down, names its section. Configuration
+it down -- a place, a job title, a reserved domain, the inside of a uuid, and a match that is
+code rather than a person (an expression, a table cell of digits, a keyword and an identifier,
+a product) -- are data in ``contracts/name-shapes.json``, one section per rule, so an
+exception is a data change and not a code change; every finding, and every pair stood down,
+names its section. The exact list is never stood down by any of it, and neither is a name
+inside a quoted string, so a person in a JavaScript string is still refused. Configuration
 is by environment variable:
 
     NAMES_GRAPH     a graph JSON; its person and org entries and its message senders are refused
@@ -13,12 +16,14 @@ is by environment variable:
                     relative to the repo root; an absolute path is used as given)
     NAMES_SHAPES    a shape-rules JSON to read instead of the shipped contract
     NAMES_WHY       set to anything (or pass ``--why``) to print, for every name-shaped pair
-                    and contact-shaped run that was cleared, which rule cleared it
+                    and contact-shaped run that was cleared, which rule cleared it --
+                    and, after ``allow``, the nearest rule to each phrase allowed
     SKIP_NAME_CHECK set to anything to skip the check
 """
 
 from __future__ import annotations
 
+import difflib
 import functools
 import json
 import os
@@ -38,7 +43,8 @@ __all__ = ["Shapes", "main", "recogniser", "shapes"]
 CONTRACT = "name-shapes.json"
 # every section the code reads; a rules file missing one is refused, not guessed at
 SECTIONS = ("place_first", "place_last", "role_last", "shapes_off", "reserved_domains",
-            "not_a_contact", "patterns", "skip_suffixes")
+            "not_a_contact", "context", "patterns", "skip_suffixes")
+CONTEXT_KEYS = ("operators", "brackets", "adjacent", "keywords", "products")
 DEFAULT_FIXTURES = "tests/known-fixtures.txt"
 FLOOR = 0.6
 SHOWN = 25
@@ -50,15 +56,32 @@ TIMESTAMP = re.compile(r"\d{4}[-/]\d{1,2}[-/]\d{1,2}")
 FRACTION = re.compile(r"\.\d{4,}")
 # shapes that are code rather than a person
 IDENTIFIER = re.compile(r"[_\[\](){}\"\n@/=]|^[a-z]+$")
+# `label.lower`, and not an initial between a forename and a surname, and not `St. Cloud`:
+# the left side is two characters or more and a letter follows the dot with no space, so a
+# middle initial is not read as attribute access
+ATTRIBUTE = re.compile(r"[A-Za-z_]\w+\.[A-Za-z_]")
+TABLE_ROW = re.compile(r"^\s*\|.*\|")
+LETTER = re.compile(r"[A-Za-z]")
+IDENT = re.compile(r"^[A-Za-z_][\w.]*$")
 # sender handles that are also ordinary words
 COMMON = {"contact", "team", "admin", "support", "info", "hello", "help", "sales"}
+
+
+def _closest(word: str, pool: Any) -> tuple[str, float]:
+    """The entry of ``pool`` nearest to ``word``, and how near, for ``near_misses``."""
+    near, ratio = "", 0.0
+    for entry in pool:
+        score = difflib.SequenceMatcher(None, word, entry).ratio()
+        if score > ratio:
+            near, ratio = entry, score
+    return near, ratio
 
 
 @dataclass(frozen=True)
 class Shapes:
     """The shape rules of one ``name-shapes.json``, compiled. Each ``stood_down`` /
-    ``reserved`` / ``inside_uuid`` answer is the rule that fired, as ``section: word``, or
-    None when nothing did -- that string is what ``--why`` prints."""
+    ``in_context`` / ``reserved`` / ``inside_uuid`` answer is the rule that fired, as
+    ``section: word``, or None when nothing did -- that string is what ``--why`` prints."""
 
     place_first: frozenset[str]
     place_last: frozenset[str]
@@ -67,6 +90,11 @@ class Shapes:
     shapes_off_suffixes: tuple[str, ...]
     reserved_domains: tuple[str, ...]
     not_a_contact: tuple[str, ...]
+    operators: tuple[str, ...]
+    brackets: tuple[str, ...]
+    adjacent: frozenset[str]
+    keywords: frozenset[str]
+    products: tuple[str, ...]
     uuid: re.Pattern[str]
     nameish: re.Pattern[str]
     skip_suffixes: tuple[str, ...]
@@ -80,6 +108,10 @@ class Shapes:
         for key in ("uuid", "nameish"):
             if key not in patterns:
                 raise ContractError(f"{where} lacks patterns.{key}")
+        context = data["context"]
+        for key in CONTEXT_KEYS:
+            if key not in context:
+                raise ContractError(f"{where} lacks context.{key}")
         off = data["shapes_off"]
         return cls(
             place_first=frozenset(w.casefold() for w in data["place_first"]),
@@ -89,6 +121,12 @@ class Shapes:
             shapes_off_suffixes=tuple(off["suffixes"]),
             reserved_domains=tuple(d.casefold() for d in data["reserved_domains"]),
             not_a_contact=tuple(data["not_a_contact"]),
+            # longest first, so '||' is reported rather than the '|' inside it
+            operators=tuple(sorted(context["operators"], key=len, reverse=True)),
+            brackets=tuple(context["brackets"]),
+            adjacent=frozenset(context["adjacent"]),
+            keywords=frozenset(w.casefold() for w in context["keywords"]),
+            products=tuple(context["products"]),
             uuid=re.compile(patterns["uuid"]),
             nameish=re.compile(patterns["nameish"]),
             skip_suffixes=tuple(data["skip_suffixes"]),
@@ -105,6 +143,99 @@ class Shapes:
         if last in self.role_last:
             return f"role_last: {last}"
         return None
+
+    def in_context(self, body: str, line: str = "", span: tuple[int, int] | None = None,
+                   ) -> str | None:
+        """The context rule that makes this match code rather than a person, or None. ``line``
+        is the whole line it was found on and ``span`` where in that line it sits -- pass
+        ``span`` only for a match that is not itself a quoted string, because a quoted string
+        is a literal and the code around it says nothing about what is inside it. Most
+        specific rule first, so ``assert label.lower`` is reported as the keyword and not as
+        the dot."""
+        body = body.strip()
+        if not body:
+            return None
+        return (self._table_cell(body, line) or self._keyword(body) or self._product(body)
+                or self._expression(body, line, span))
+
+    def _table_cell(self, body: str, line: str) -> str | None:
+        """`| ~3 |`: a markdown row, and a cell that is a number or a symbol. A cell with a
+        letter in it is not stood down, so a name in a table is still refused."""
+        if not TABLE_ROW.match(line) or LETTER.search(body) or not body.strip("| \t"):
+            return None
+        return f"context_table_cell: {body}"
+
+    def _keyword(self, body: str) -> str | None:
+        """`assert label.lower`: a keyword or builtin and one identifier after it. Two words
+        after it, or one that is capitalised and has no dot, is a name again."""
+        words = body.split()
+        if len(words) != 2 or words[0].casefold() not in self.keywords:
+            return None
+        rest = words[1]
+        if IDENT.match(rest) and (rest[:1].islower() or "." in rest):
+            return f"context_keyword: {words[0].casefold()}"
+        return None
+
+    def _product(self, body: str) -> str | None:
+        """`Windows Defender Firewall`, `Practical AI`: two words or more, one of them a
+        product, an operating system or a vendor."""
+        words = [w.strip(".,:;'\"()[]") for w in body.split()]
+        if len(words) < 2:
+            return None
+        known = {p.casefold(): p for p in self.products}
+        for word in words:
+            if word.casefold() in known:
+                return f"context_product: {known[word.casefold()]}"
+        return None
+
+    def _expression(self, body: str, line: str, span: tuple[int, int] | None) -> str | None:
+        """`x1 - x0`, `null ||`, `label.lower`, `(a)`: a bracket, an operator with a space
+        beside it, an attribute dot, or -- for an unquoted match -- operator characters
+        immediately either side of it. An operator wedged between letters (`Anne-Marie`) is
+        part of the word, not an operator."""
+        for bracket in self.brackets:
+            if bracket in body:
+                return f"context_expression: {bracket}"
+        for token in self.operators:
+            escaped = re.escape(token)
+            if re.search(rf"(?:^|\s){escaped}|{escaped}(?:\s|$)", body):
+                return f"context_expression: {token}"
+        if ATTRIBUTE.search(body):
+            return "context_expression: attribute"
+        if span and line:
+            start, end = span
+            before = line[start - 1] if start > 0 else ""
+            after = line[end] if end < len(line) else ""
+            if before in self.adjacent and after in self.adjacent:
+                return f"context_expression: adjacent {before}{after}"
+        return None
+
+    def near_misses(self, body: str, limit: int = 3) -> list[str]:
+        """The rules that came nearest to standing ``body`` down, closest first, each as
+        ``section: what is missing from it``. ``allow --why`` prints these, so that a phrase
+        a rule should cover becomes a line in that rule rather than a fixture of its own."""
+        words = [w.strip(".,:;'\"()[]") for w in body.split()] or [body]
+        scored: list[tuple[float, str]] = []
+        for section, pool, word in (
+                ("place_first", self.place_first, words[0].casefold()),
+                ("place_last", self.place_last, words[-1].casefold()),
+                ("role_last", self.role_last, words[-1].casefold()),
+                ("context.keywords", self.keywords, words[0].casefold())):
+            near, ratio = _closest(word, pool)
+            scored.append((ratio, f"{section}: nothing there matches {word!r}"
+                                  + (f" (nearest {near!r})" if near else "")))
+        best = max(((*_closest(w.casefold(), {p.casefold() for p in self.products}), w)
+                    for w in words), key=lambda t: t[1])
+        scored.append((best[1], f"context.products: no word of it is a product token; "
+                                f"{best[2]!r} is nearest {best[0]!r}"))
+        if not LETTER.search(body):
+            scored.append((0.75, "context.table_cell: it has no letters, so it stands down "
+                                 "on a markdown table row -- but this was not one"))
+        if any(t in body for t in self.operators) or ATTRIBUTE.search(body):
+            scored.append((0.75, "context.operators: it holds an operator, but wedged "
+                                 "between letters rather than used as one"))
+        scored.sort(key=lambda t: -t[0])
+        return [why for _, why in scored[:limit]]
 
     def reserved(self, domain: str) -> str | None:
         """The reserved-domain entry the address's domain falls under, or None. An entry
@@ -293,7 +424,9 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
             if body.casefold() in allowed:
                 fired: str | None = "fixtures"
             else:
-                fired = rules.stood_down(body)
+                # no span: the match is a quoted string, and what surrounds a literal says
+                # nothing about what is inside it -- a name in a JS string is still refused
+                fired = rules.stood_down(body) or rules.in_context(body, line)
             if fired is None:
                 yield path, i, f"{body!r} is shaped like a name (patterns: nameish; nothing stood it down)"
             elif why is not None:
@@ -307,7 +440,18 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
         # one CamelCase token is a class, not a person
         if not body or " " not in body or body.casefold() in allowed or IDENTIFIER.search(body):
             continue
-        yield path, blob.count("\n", 0, hit.start) + 1, f"{body!r} reads as a person"
+        at = blob.count("\n", 0, hit.start) + 1
+        opened = blob.rfind("\n", 0, hit.start) + 1
+        closed = blob.find("\n", hit.end)
+        line = blob[opened:closed if closed != -1 else len(blob)]
+        # the recogniser is left as strict as it was about people; what stands a hit down is
+        # only ever a shape that is code -- a table cell of digits, an expression, a product
+        fired = rules.in_context(body, line, (hit.start - opened, hit.end - opened))
+        if fired is not None:
+            if why is not None:
+                why.append((path, at, f"{body!r} cleared by {fired}"))
+            continue
+        yield path, at, f"{body!r} reads as a person"
 
 
 def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
@@ -326,7 +470,9 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         # 2026-09-02). A phrase already there is not added twice.
         where = os.fspath(root) if root is not None else _git(None, "rev-parse", "--show-toplevel").strip()
         fixtures = os.path.join(where, env.get("NAMES_FIXTURES", DEFAULT_FIXTURES))
-        return allow(fixtures, argv[1:], out)
+        asked = "--why" in argv or bool(env.get("NAMES_WHY"))
+        return allow(fixtures, [a for a in argv[1:] if a != "--why"], out,
+                     rules=_rules(env) if asked else None)
     if env.get("SKIP_NAME_CHECK"):
         return 0
     where = os.fspath(root) if root is not None else _git(None, "rev-parse", "--show-toplevel").strip()
@@ -370,13 +516,27 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
     return 1
 
 
-def allow(fixtures: str, phrases: list[str], out: TextIO) -> int:
+def allow(fixtures: str, phrases: list[str], out: TextIO, rules: Shapes | None = None) -> int:
     """Add ``phrases`` to the allow-list at ``fixtures``, once each, under a dated heading.
-    Refuses an empty list and says so."""
+    Refuses an empty list and says so. With ``rules`` (that is, ``--why`` or ``NAMES_WHY``)
+    it first says, for each phrase, which rule already covers it or which rule came nearest
+    -- because a fixture covers one phrase and a rule covers every phrase of that shape."""
     phrases = [p.strip() for p in phrases if p and p.strip()]
     if not phrases:
         print("allow what? e.g.: allow \"Windows Defender Firewall\" \"x1 - x0\"", file=out)
         return 2
+    if rules is not None:
+        for phrase in phrases:
+            fired = rules.stood_down(phrase) or rules.in_context(phrase)
+            if fired:
+                print(f"why {phrase!r}: already stood down by {fired}; no fixture needed",
+                      file=out)
+                continue
+            print(f"why {phrase!r}: no rule stood it down. The nearest:", file=out)
+            for miss in rules.near_misses(phrase):
+                print(f"           {miss}", file=out)
+            print(f"           a line in {CONTRACT} covers every phrase of that shape; "
+                  "a fixture covers only this one.", file=out)
     path = Path(fixtures)
     have = {ln.strip().casefold() for ln in path.read_text(encoding="utf-8").splitlines()} \
         if path.exists() else set()

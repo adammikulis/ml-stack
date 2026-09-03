@@ -198,3 +198,8 @@ Tinsley Kilnworks
 
 # allowed with `hook allow` on 2026-09-02: not people
 | ~3
+
+# invented for the context-rule tests in tests/test_redact.py (2026-09-02): a name that no
+# rule stands down, and a tool name that no rule stands down either
+Marla Quinn
+Loomcast Gateway
