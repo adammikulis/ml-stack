@@ -10,7 +10,10 @@ reproduce any of them.
 from __future__ import annotations
 
 import contextlib
+import inspect
 import json
+import os
+import socket
 import struct
 import sys
 import threading
@@ -347,6 +350,114 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     monkeypatch.setattr(backend, "CACHE_ROOT", cache)
     monkeypatch.setattr(backend, "LOG_DIR", cache / "logs")
     monkeypatch.setenv("ML_STACK_CACHE", str(cache))
+
+
+# -- the fixtures above are trusted; these fail the run if that trust is misplaced ------
+
+_GUARDED_PORTS = range(8080, 8100)
+"""Where a stray model server would collide with one already serving."""
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "real_port: exempt from _no_real_ports -- binds or connects to a real port on "
+        "purpose, using its own socket",
+    )
+
+
+def _call_site() -> str:
+    """The nearest frame outside this file and the socket module, as ``file:line``."""
+    for frame in inspect.stack()[1:]:
+        if frame.filename == __file__ or frame.filename.endswith(f"{os.sep}socket.py"):
+            continue
+        return f"{frame.filename}:{frame.lineno}"
+    return "<unknown call site>"
+
+
+@pytest.fixture(autouse=True)
+def _no_real_ports(request):
+    """No test binds a privileged or 8080-8099 port, or connects to one on loopback.
+
+    2026-09-03: a test started a fake server on the default port through the real
+    backend and killed the real Flash-Next that had been reading a textbook shelf for
+    twelve hours. Port 0 (ephemeral) stays allowed -- ``threaded_server`` and the
+    ``server`` fixture above both bind it. A test with a genuine reason to touch a real
+    port opts out with ``@pytest.mark.real_port``.
+    """
+    if request.node.get_closest_marker("real_port"):
+        yield
+        return
+
+    violations: list[str] = []
+    real_bind = socket.socket.bind
+    real_connect = socket.socket.connect
+
+    def guarded_bind(self, address):
+        if isinstance(address, tuple) and len(address) >= 2:
+            port = address[1]
+            if port and (port < 1024 or port in _GUARDED_PORTS):
+                violations.append(f"bind to port {port} at {_call_site()}")
+        return real_bind(self, address)
+
+    def guarded_connect(self, address):
+        if isinstance(address, tuple) and len(address) >= 2:
+            host, port = address[0], address[1]
+            if host in ("127.0.0.1", "localhost", "::1", "") and port in _GUARDED_PORTS:
+                violations.append(f"connect to {host}:{port} at {_call_site()}")
+        return real_connect(self, address)
+
+    socket.socket.bind = guarded_bind
+    socket.socket.connect = guarded_connect
+    try:
+        yield
+    finally:
+        socket.socket.bind = real_bind
+        socket.socket.connect = real_connect
+
+    if violations:
+        pytest.fail("a real port was touched:\n" + "\n".join(violations), pytrace=False)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _real_cache_and_state_untouched():
+    """Fails the run if a test wrote into the real ml_stack cache or server state.
+
+    Snapshots ``LOG_DIR`` and ``STATE_FILE`` -- the paths ``backend.py`` and
+    ``manager.py`` compute from the real ``$HOME``/``$ML_STACK_CACHE`` at import,
+    before any per-test fixture repoints them -- and compares again once every test in
+    the session has run. Safe when neither path exists.
+
+    ``LOG_DIR`` holds one growing file per server this machine is actually running, so
+    only a *new* filename appearing counts -- an existing one's size is a live server
+    writing, not a test. ``STATE_FILE`` is a single record touched only by a lease or a
+    release, so its mtime and size are compared directly.
+    """
+    from ml_stack.serve.backend import LOG_DIR
+    from ml_stack.serve.manager import STATE_FILE
+
+    def log_names() -> set[str]:
+        return {p.name for p in LOG_DIR.iterdir()} if LOG_DIR.is_dir() else set()
+
+    def state_mark():
+        if not STATE_FILE.exists():
+            return None
+        stat = STATE_FILE.stat()
+        return (stat.st_mtime_ns, stat.st_size)
+
+    before_logs, before_state = log_names(), state_mark()
+    yield
+    after_logs, after_state = log_names(), state_mark()
+
+    problems = []
+    new_logs = after_logs - before_logs
+    if new_logs:
+        problems.append(f"{LOG_DIR}: new file(s) {sorted(new_logs)}")
+    if after_state != before_state:
+        problems.append(f"{STATE_FILE}: changed")
+    if problems:
+        pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
+                    pytrace=False)
 
 
 def leased(backend, spec, **starting):
