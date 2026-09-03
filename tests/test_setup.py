@@ -226,3 +226,60 @@ def test_a_build_that_prints_no_help_is_not_accused_of_lacking_anything(tmp_path
     silent.chmod(0o755)
     monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: silent)
     assert not [f for f in setup.look() if f.name == "flags this build lacks"]
+
+
+def test_every_command_the_package_installs_is_looked_for_on_path(monkeypatch, tmp_path):
+    """A new entry point is invisible until `pip install -e . && pyenv rehash`; a queue
+    died on `command not found` for it. Setup names each missing command and the line."""
+    import shutil
+
+    import ml_stack.setup as setup
+
+    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    monkeypatch.setattr(shutil, "which",
+                        lambda name, *a, **k: None if name == "ml-stack-ingest"
+                        else f"/opt/bin/{name}")
+    found = [f for f in setup.look() if f.name == "commands on PATH"]
+    assert found and not found[0].good
+    assert "ml-stack-ingest" in found[0].said
+    assert "ml-stack-serve" not in found[0].said, "only what is missing is named"
+    assert found[0].fix == f"pip install -e {tmp_path} && pyenv rehash"
+
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: f"/opt/bin/{name}")
+    found = [f for f in setup.look() if f.name == "commands on PATH"]
+    assert found and found[0].good
+    assert "ml-stack-serve" in found[0].note
+
+
+def test_the_commands_are_read_from_the_install_and_the_checkouts_pyproject(monkeypatch,
+                                                                           tmp_path):
+    """The installed metadata says what was installed; the checkout's pyproject says what
+    should be -- and the difference is the command nobody can run yet."""
+    import ml_stack.setup as setup
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "ml-stack"\n[project.scripts]\n'
+        'ml-stack-serve = "ml_stack.serve.cli:main"\n'
+        'ml-stack-newthing = "ml_stack.newthing:main"\n')
+    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    names = setup._scripts()
+    assert {"ml-stack-serve", "ml-stack-setup", "ml-stack-ingest"} <= set(names)
+    assert "ml-stack-newthing" in names, "named in the checkout, not yet installed"
+    assert names == sorted(set(names))
+
+
+def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, capsys,
+                                                                   tmp_path):
+    import shutil
+
+    import ml_stack.setup as setup
+
+    monkeypatch.setattr(setup, "_checkout", lambda: tmp_path)
+    monkeypatch.setattr(shutil, "which",
+                        lambda name, *a, **k: None if name == "ml-stack-jobs"
+                        else f"/opt/bin/{name}")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    assert setup.main(["--quiet"]) == 1
+    out = capsys.readouterr().out
+    assert "ml-stack-jobs" in out
+    assert f"fix: pip install -e {tmp_path} && pyenv rehash" in out

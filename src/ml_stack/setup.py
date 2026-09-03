@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -202,11 +203,60 @@ def look() -> list[Finding]:
     except Exception:  # noqa: BLE001
         pass
 
+    out.append(_commands_finding())
+
     from ml_stack.platform import is_windows
 
     if is_windows():
         out.append(_firewall_finding())
     return out
+
+
+def _checkout() -> Path:
+    """The checkout this package is imported from, else the one `ml-stack-doctor` checks."""
+    here = Path(__file__).resolve().parents[2]
+    if (here / "pyproject.toml").is_file():
+        return here
+    from ml_stack.doctor import CHECKOUT
+
+    return CHECKOUT
+
+
+def _scripts() -> list[str]:
+    """Every command the package installs: the installed metadata's entry points, and the
+    `[project.scripts]` of the checkout's pyproject, together."""
+    names: set[str] = set()
+    try:
+        from importlib.metadata import distribution
+
+        names |= {one.name for one in distribution("ml-stack").entry_points
+                  if one.group == "console_scripts"}
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        import tomllib
+
+        table = tomllib.loads((_checkout() / "pyproject.toml").read_text(encoding="utf-8"))
+        names |= set(table.get("project", {}).get("scripts", {}))
+    except Exception:  # noqa: BLE001
+        pass
+    return sorted(names)
+
+
+def _commands_finding() -> Finding:
+    """Which of the package's commands are on PATH, and the line that puts the rest there."""
+    wanted = _scripts()
+    missing = [name for name in wanted if not shutil.which(name)]
+    return Finding(
+        name="commands on PATH",
+        good=not missing,
+        said=(f"{len(wanted)} command(s) found" if not missing
+              else "not found: " + ", ".join(missing)),
+        fix="" if not missing else f"pip install -e {_checkout()} && pyenv rehash",
+        note=(", ".join(wanted) if not missing else
+              "an entry point added to pyproject.toml is not a command until the package "
+              "is reinstalled and the shims rehashed; a queue step that names one dies "
+              "on 'command not found'"))
 
 
 def _firewall_rule_present(name: str) -> bool:
