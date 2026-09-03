@@ -399,6 +399,11 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
+                       help="serve each model in its measured shape from ml-stack's profiles "
+                            "-- the head at the length that measured best, its build, cache "
+                            "type, thinking budget, raw flags and asking -- for every flag "
+                            "this sweep leaves unset; --no-profile serves it bare")
     sweep.add_argument("--label-suffix", default="", metavar="TEXT",
                        help="appended to every label this sweep keeps, so a run that varies a "
                             "serving knob (--serve-arg, --serve-mlock, --serve-mmproj) is "
@@ -562,6 +567,9 @@ def _parser() -> argparse.ArgumentParser:
                            "newest run, or the run with this label; --question narrows it")
     show.add_argument("--question", default="", metavar="SUBSTRING",
                       help="with --trace: only the question containing this")
+    show.add_argument("--by", default="", choices=("shape",), metavar="shape",
+                      help="group the rows by identical serving shape and asking, one line "
+                           "per group with the mean and the band")
     show.add_argument("--last", type=int, default=0, metavar="N",
                       help="only the newest N runs kept")
     show.add_argument("--since", default="", metavar="ISO",
@@ -873,20 +881,37 @@ def _run(args: Any) -> int:
             before = {r["key"] for r in bench._kept(args.kept)}
             from ml_stack.serve.backend import ServerFailed
 
+            # The model's measured shape fills every flag this sweep did not set: the head
+            # at the length that measured best, the build that loads it, the cache type,
+            # the thinking budget, the raw flags, and the asking ways. Adam: "if a model
+            # has a drafting head that speeds it up at some config, always use it at that
+            # config (be sure to report it)". --no-profile serves it bare.
+            shaped = measured_shape(args, model, head, heads, n)
+            head = shaped.get("draft", head)
+            ways = _asked(args, parts)
+            for way in ways:
+                for flag, on in (shaped.get("asking") or {}).items():
+                    if on and flag in ("batch", "kinds", "summary", "tight", "rich") \
+                            and not getattr(args, flag, False):
+                        way.setdefault(flag, True)
             try:
                 bench.served(model, questions, graph, label=stem, draft=head,
-                       ways=_asked(args, parts),
+                       ways=ways,
                        port=args.serve_port,
                        context=total_context,
-                       parallel=getattr(args, "parallel", 1), binary=args.binary,
+                       parallel=getattr(args, "parallel", 1),
+                       binary=args.binary or shaped.get("binary"),
                        kept=args.kept,
                        store=args.store or None, embed_url=args.embed_url,
                        embed_model=args.embed_model, terse=getattr(args, "terse", False),
-                       already=already, cache_type=getattr(args, "serve_kv", "") or "",
+                       already=already,
+                       cache_type=getattr(args, "serve_kv", "") or shaped.get("cache_type", ""),
                        per_question=args.per_question,
-                       reasoning_budget=getattr(args, "reasoning_budget", None),
-                       spec_draft_max=getattr(args, "n_max", None),
-                       serving=serving_fields(args),
+                       reasoning_budget=(getattr(args, "reasoning_budget", None)
+                                         if getattr(args, "reasoning_budget", None) is not None
+                                         else shaped.get("reasoning_budget")),
+                       spec_draft_max=getattr(args, "n_max", None) or shaped.get("draft_n_max"),
+                       serving={**(shaped.get("serving") or {}), **serving_fields(args)},
                        trace=getattr(args, "trace", None),
                        smoke=sample(everything, SMOKE) if smoking else (),
                        **sampling_from(args))
@@ -1050,6 +1075,9 @@ def _run(args: Any) -> int:
                            since=str(getattr(args, "since", "") or ""))
         if getattr(args, "trace", None) is not None:
             bench.transcript(answering, args.trace, getattr(args, "question", "") or "")
+            return 0
+        if getattr(args, "by", "") == "shape":
+            bench.by_shape(answering)
             return 0
         if getattr(args, "extract", False):
             bench_extract.table(extracted)
@@ -1326,6 +1354,50 @@ def _last_line(log: Path) -> str:
     except OSError:
         return ""
     return next((ln for ln in reversed(lines) if ln.strip()), "")
+
+
+def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> dict[str, Any]:
+    """What the model's profile says to serve it with, for every flag this sweep left
+    unset -- and nothing when --no-profile or no record. Reports the shape it took."""
+    if not getattr(args, "profile", True):
+        return {}
+    try:
+        from ml_stack.serve.profile import profile_for
+    except ImportError:
+        return {}
+    found = profile_for(str(model))
+    if found is None:
+        return {}
+    shape = found.shape(port=int(getattr(args, "serve_port", 8099) or 8099),
+                        seats=int(getattr(args, "parallel", 1) or 1))
+    out: dict[str, Any] = {}
+    if n >= len(heads) and shape.draft:
+        out["draft"] = str(shape.draft)
+    if shape.build and not getattr(args, "binary", None):
+        from ml_stack.serve.backend import LlamaServerBackend
+
+        try:
+            out["binary"] = str(LlamaServerBackend(build=shape.build).binary)
+        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
+            print(f"    the profile names build {shape.build!r}, not found here: {exc}")
+    if shape.cache_type:
+        out["cache_type"] = shape.cache_type
+    if getattr(shape, "reasoning_budget", None) is not None:
+        out["reasoning_budget"] = int(shape.reasoning_budget)
+    if getattr(shape, "draft_n_max", None):
+        out["draft_n_max"] = int(shape.draft_n_max)
+    serving: dict[str, Any] = {}
+    if getattr(shape, "extra_args", None):
+        serving["extra_args"] = tuple(shape.extra_args)
+    if getattr(shape, "mmproj", None):
+        serving["mmproj"] = shape.mmproj
+    if serving:
+        out["serving"] = serving
+    out["asking"] = dict(found.asking() or {}) if hasattr(found, "asking") else {}
+    said = ", ".join(f"{k}={v}" for k, v in out.items() if k not in ("asking", "serving"))
+    print(f"    measured shape: {said}" + (f"; serving {serving}" if serving else "")
+          + (f"; asking {out['asking']}" if out["asking"] else ""))
+    return out
 
 
 def serving_fields(args: Any) -> dict[str, Any]:

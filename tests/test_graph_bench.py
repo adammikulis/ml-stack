@@ -808,9 +808,10 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
     assert "find" in head
     assert head.split().index("speed") == head.split().index("draft") + 1, "beside draft"
     assert head.split().index("find") == head.split().index("speed") + 1, "then find"
-    # "tried  32k x2  1 ..." -- the context field carries a space, so find is the eleventh word
-    assert lines[0].split()[11] == "meaning"
-    assert lines[1].split()[10] == "-"
+    # "tried  32k x2  1  -  ..." -- the context field carries a space and `shape` follows
+    # `n`, so find is the twelfth word
+    assert lines[0].split()[12] == "meaning"
+    assert lines[1].split()[11] == "-"
 
     missed(runs(store), everything=True)
     said = capsys.readouterr().out
@@ -1892,8 +1893,9 @@ def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_pa
     new = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain"))
     old = next(ln for ln in said.splitlines() if ln.startswith("tried"))
     assert new.split()[3] == "1" and old.split()[3] == "1", "n is the fourth word of both"
-    assert new.split()[5] == "42s", "the load, rounded, after the wall clock"
-    assert old.split()[5] != "42s" and not old.split()[5].endswith("s"), "blank, not 0s"
+    # then `shape`, then the wall clock, then the load
+    assert new.split()[6] == "42s", "the load, rounded, after the wall clock"
+    assert old.split()[6] != "42s" and not old.split()[6].endswith("s"), "blank, not 0s"
 
     missed(runs(seen["kept"], "tiny-plain"), everything=True)
     assert "load 42s" in capsys.readouterr().out.splitlines()[1]
@@ -2081,20 +2083,25 @@ def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_pat
 
 
 def test_a_drafted_run_whose_f1_fell_is_rejected_and_named(tmp_path):
+    """A fall these questions really did measure -- 59% against 10%, the two 95% intervals
+    nowhere near each other -- and the cost stays with the accuracy run."""
     from ml_stack.graph.bench import ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
-    _kept_run(store, "draft:mtp-tiny@n8", model="flash.gguf", questions=20, hits=10,
+    _kept_run(store, "draft:mtp-tiny@n8", model="flash.gguf", questions=20, hits=2,
               seconds=120.0)
     said = ranking(runs(store))
     row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
     assert "| 14.7 |" in row and row.endswith("| its own run |"), \
         "the fast run did not hold the accuracy, so the cost is the accuracy run's own"
-    assert "- `flash.gguf` rejected: `draft:mtp-tiny@n8` F1 -9 pts (20 q, 6.0 s/question)" in said
-    # widen the noise and the same run supplies the cost
-    wider = ranking(runs(store), noise=0.10)
-    assert "rejected" not in wider and "| 6.0 |" in wider
+    assert "- `flash.gguf` rejected: `draft:mtp-tiny@n8` F1 -49 pts (20 q, 6.0 s/question)" \
+        in said
+    # widening --noise does not rescue it: the questions separated the two, and a fixed
+    # number of points cannot un-measure that. --noise decides only where there is no
+    # interval to read -- a run of one question.
+    wider = ranking(runs(store), noise=0.40)
+    assert "rejected" in wider and "| 14.7 |" in wider
 
 
 def test_a_model_with_one_run_uses_it_and_says_so(tmp_path):
@@ -2458,14 +2465,19 @@ def test_the_detail_says_the_speedup_on_the_run_line(tmp_path, capsys):
 
 
 def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that_held():
-    """Three heads: the fastest lost twenty points of F1, so it is on the table and not in
-    the recommendation; the next fastest held within the noise and is what to serve."""
-    from ml_stack.graph.bench import NOISE, drafted
+    """Three heads: the fastest lost fifty points of F1 -- a fall these twenty questions
+    really did separate -- so it is on the table and not in the recommendation; the next
+    fastest was not separated from its baseline and is what to serve.
+
+    Every F1 carries the interval its own questions leave it: 55% ±22 against a baseline's
+    60% ±22 is not a five-point regression, it is twenty questions.
+    """
+    from ml_stack.graph.bench import drafted
 
     base = _measured("draft:none", hits=12, seconds=200.0, at="2026-09-01T11:00:00")
     slow = _measured("draft:mtp-a@n4", hits=12, seconds=140.0, draft="mtp-a.gguf",
                      guessed=100, taken=70)
-    fell = _measured("draft:mtp-a@n8", hits=8, seconds=100.0, draft="mtp-a.gguf",
+    fell = _measured("draft:mtp-a@n8", hits=2, seconds=100.0, draft="mtp-a.gguf",
                      guessed=100, taken=90)
     held = _measured("draft:mtp-b@n4", hits=11, seconds=125.0, draft="mtp-b.gguf",
                      guessed=100, taken=80)
@@ -2475,19 +2487,22 @@ def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that
     rows = [ln for ln in lines if ln.startswith("draft:")]
     assert [ln.split()[0] for ln in rows] == ["draft:mtp-a@n8", "draft:mtp-b@n4",
                                               "draft:mtp-a@n4"], "fastest first"
-    assert rows[0].split()[1:] == ["90%", "5.0", "2.00x", "40%", "-20", "draft:none"]
-    assert rows[1].split()[1:] == ["80%", "6.2", "1.60x", "55%", "-5", "draft:none"]
-    assert rows[2].split()[1:] == ["70%", "7.0", "1.43x", "60%", "+0", "draft:none"]
-    assert lines[-1] == (f"serve draft:mtp-b@n4: fastest whose F1 held within "
-                         f"{NOISE * 100:g} points of its baseline, 1.60x")
+    assert rows[0].split()[1:] == ["90%", "5.0", "2.00x", "10%", "±12", "-50", "draft:none"]
+    assert rows[1].split()[1:] == ["80%", "6.2", "1.60x", "55%", "±22", "-5", "draft:none"]
+    assert rows[2].split()[1:] == ["70%", "7.0", "1.43x", "60%", "±22", "+0", "draft:none"]
+    assert lines[-1] == ("serve draft:mtp-b@n4: fastest whose F1 held -- not separated "
+                         "from its baseline's, 1.60x"), \
+        "said so, rather than called a regression -- and still starting `whose F1 held`, "\
+        "which is what report.recommended_head reads this line back with"
     # the baseline may be an older run already kept, found among everything
     assert drafted([held], among=[base, held]).splitlines()[-1].startswith("serve draft:mtp-b@n4")
     # no baseline: every row says so, and there is nothing to recommend against
     alone = drafted([slow, held])
     assert all(ln.endswith("no baseline") for ln in alone.splitlines() if ln.startswith("draft:"))
     assert alone.splitlines()[-1].startswith("no baseline to recommend against")
-    # every head fell: serve none
-    assert drafted([base, fell]).splitlines()[-1].startswith("serve no head")
+    # every head fell: serve none, and the reason is separation and not a fixed line
+    ended = drafted([base, fell]).splitlines()[-1]
+    assert ended.startswith("serve no head") and "fell clear of its baseline's" in ended
     assert drafted([base]) == "no drafted run to summarise"
 
 
@@ -3968,3 +3983,411 @@ def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypa
     got = ways(args)
     assert all(w.get("batch") is True and w.get("kinds") is True for w in got)
     assert all("summary" not in w for w in got)
+
+
+# -- what a run was, and what its questions could tell apart -----------------------------------
+#
+# Two problems from one afternoon of measuring (2026-09-02). The shapes lived in the end of
+# a label -- `Qwen3.8-Flash--v2-plain-batch-kv-q8_0-rb0` -- so the micro-batch, the
+# speculative p-min, the projector and the asking were invisible in the table. And nothing
+# said what was noise: ten questions moved 15% in wall clock and five points of F1 between
+# identical runs, and the ranking called that a regression.
+
+def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=None, **server):
+    """A run kept with a full server record and, given one, an asking record."""
+    from ml_stack.graph.bench import invented_digest
+
+    rows = [a_row(f"q{n}?", expected=["person:iris"],
+                  shown=["person:iris"] if n < hits else ["person:wren"])
+            for n in range(questions)]
+    for r in rows:
+        r.label, r.seconds = label, seconds / questions
+    return save(store, rows,
+                held={"graph": invented_digest(), "model": "flash.gguf", "context": 32768,
+                      "slots": 1, **server},
+                asking=asking)
+
+
+def test_the_shape_says_what_the_label_only_hinted_at(tmp_path):
+    """Everything that decided a run and had nowhere to live, on one field."""
+    from ml_stack.graph.bench import asked_as, shape_of, shaped
+
+    one = {"server": {"cache_type": "q8_0", "reasoning_budget": 0,
+                      "extra_args": ["-ub", "2048", "--draft-p-min", "0.5"],
+                      "draft_model": "mtp-flash.gguf", "spec_draft_max": 4},
+           "asking": {"tight": True, "batch": True, "kinds": True}}
+    assert shape_of(one) == "q8/rb0/ub2048/pmin.5/mtp@4"
+    assert asked_as(one) == "+batch+kinds"
+    assert shaped(one) == "q8/rb0/ub2048/pmin.5/mtp@4+batch+kinds", "one word, so columns hold"
+
+    # the flag may be written either way, and a field of its own beats extra_args
+    assert "ub512" in shape_of({"server": {"extra_args": ["--ubatch=512"]}})
+    assert "ub4096" in shape_of({"server": {"n_ubatch": 4096, "extra_args": ["-ub", "512"]}})
+    assert shape_of({"server": {"mmproj": "mmproj-flash.gguf", "mlock": True}}) == "mmproj/mlock"
+
+
+def test_a_run_that_recorded_none_of_it_still_reads(tmp_path):
+    """Missing records show `-`, and `-` is not the same as "asked plainly"."""
+    from ml_stack.graph.bench import asked_as, shape_of, shaped
+
+    assert shape_of({}) == "-" and asked_as({}) == "-" and shaped({}) == "-"
+    assert shaped({"server": {"cache_type": "q8_0"}}) == "q8", "served shape, asking unknown"
+    plain = {"server": {"cache_type": "q8_0"}, "asking": {"tight": True, "terse": False}}
+    assert asked_as(plain) == "tight" and shaped(plain) == "q8+tight", \
+        "a plain asking that was recorded is not a missing record"
+    assert asked_as({"asking": {"tight": False, "reach": 8000}}) == "+loose+reach8k"
+
+
+def test_the_asking_is_kept_beside_the_rows_and_reads_back(tmp_path):
+    """The way a run asked survives the store, with the sampling joined to it."""
+    store = tmp_path / "runs.ladybug"
+    _shaped_run(store, "flash-batch", asking={"tight": True, "batch": True},
+                sampling={"temperature": 0.0})
+    _shaped_run(store, "flash-old")            # kept the way runs were before the record
+    kept = {r["label"]: r for r in runs(store)}
+    assert kept["flash-batch"]["asking"] == {"tight": True, "batch": True,
+                                             "sampling": {"temperature": 0.0}}
+    assert "asking" not in kept["flash-old"], \
+        "no record rather than an empty one: an empty record in every run says nothing"
+
+
+def test_asking_records_what_it_handed_converse(tmp_path):
+    """`asking` writes down the way it asked, so nothing has to read it off a label."""
+    from ml_stack.graph.bench import asking
+
+    graph = {"nodes": [{"id": "person:iris", "label": "Iris Calloway", "kind": "person"}],
+             "edges": []}
+    plain = asking(graph)
+    assert plain.asking == {"tight": True, "terse": False}
+    every = asking(graph, terse=True, tight=False, rich=True, batch=True, kinds=True,
+                   summary=True, reach=8000, shortlist=12)
+    assert every.asking == {"tight": False, "terse": True, "rich": True, "batch": True,
+                            "kinds": True, "summary": True, "reach": 8000, "shortlist": 12}
+
+
+def test_the_table_carries_the_shape_and_the_old_runs_still_read(tmp_path, capsys):
+    """The table leaves out what `ctx` already says, so the field prints whole."""
+    from ml_stack.graph.bench import shape_of
+
+    store = tmp_path / "runs.ladybug"
+    _shaped_run(store, "flash-batch", cache_type="q8_0", reasoning_budget=0,
+                extra_args=["-ub", "2048"], asking={"tight": True, "batch": True})
+    _shaped_run(store, "flash-old")
+    table(runs(store))
+    said = capsys.readouterr().out
+    assert "shape" in said.splitlines()[0]
+    new = next(ln for ln in said.splitlines() if ln.startswith("flash-batch"))
+    old = next(ln for ln in said.splitlines() if ln.startswith("flash-old"))
+    assert new.split()[4] == "ub2048+batch", "the shape is the fifth word, after n"
+    assert "q8/rb" in new.split()[2], "the cache and the budget stay in ctx, said once"
+    assert shape_of(runs(store)[0]) == "q8/rb0/ub2048", "and the shape itself carries them"
+    assert old.split()[4] == "-", "a run that recorded none of it is a dash, not a guess"
+
+
+def test_runs_of_the_same_shape_are_one_line(tmp_path, capsys):
+    """Four lines that are the same thing measured four times is a table of noise."""
+    from ml_stack.graph.bench import by_shape
+
+    store = tmp_path / "runs.ladybug"
+    shape = {"cache_type": "q8_0", "reasoning_budget": 0}
+    for hits in (14, 12):
+        _shaped_run(store, "flash-batch", hits=hits, seconds=200.0, asking={"batch": True},
+                    **shape)
+    _shaped_run(store, "flash-plain", hits=13, seconds=300.0, asking={"tight": True}, **shape)
+    _shaped_run(store, "flash-before")         # no record at all: its own group
+    by_shape(runs(store))
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("flash.gguf")]
+    assert len(lines) == 3, "two runs of one shape are one line; the other two are their own"
+    together = next(ln for ln in lines if "+batch" in ln)
+    assert together.split()[2:5] == ["-", "2", "40"], "two runs, forty questions pooled"
+    assert together.split()[5] == "65%", "the mean over both, not either one"
+    assert together.split()[7] == "10", "and how far the two runs' own means lie apart"
+    assert any(ln.split()[1] == "-" for ln in lines), "the run that recorded nothing"
+
+
+def test_the_band_shrinks_as_the_questions_are_added(tmp_path):
+    """What makes a difference readable is questions, and the band says how many it took.
+
+    The same mix of right and wrong answers over five questions and over eighty: the mean
+    is the same and the interval around it is not, because five questions cannot tell a
+    seventy from a fifty and eighty can.
+    """
+    from ml_stack.graph.bench import band, derived, half_band
+
+    def run(n):
+        rows = [{"expected": ["a"], "shown": ["a"] if i % 5 < 3 else ["b"], "seconds": 10.0}
+                for i in range(n)]
+        return {"label": f"n{n}", "rows": rows, "server": {"model": "m.gguf"}}
+
+    few, many = run(5), run(80)
+    assert derived(few)["right"] == pytest.approx(derived(many)["right"]), "the same mean"
+    assert half_band(few) > half_band(many) * 2, "sixteen times the questions, a much tighter band"
+    lo, hi = band(many)
+    assert lo < derived(many)["right"] < hi, "and the mean sits inside its own interval"
+    assert band({"rows": [{"expected": ["a"], "shown": ["a"], "seconds": 1.0}]}) is None, \
+        "one question has no spread to measure, and a zero-width band would claim one"
+    assert band(run(5), "seconds_per_question") == (10.0, 10.0), "a clock that never varied"
+
+
+def test_the_band_is_the_same_band_twice(tmp_path):
+    """Seeded: a band that moves when nothing was measured is a band nobody can quote."""
+    from ml_stack.graph.bench import bands
+
+    rows = [{"expected": ["a"], "shown": ["a"] if i % 3 else ["b"], "seconds": i / 10}
+            for i in range(30)]
+    assert bands(rows) == bands(list(rows))
+    assert bands(rows, seed=1) != bands(rows, seed=2), "a different draw is a different band"
+
+
+def test_a_difference_inside_the_band_is_not_called(tmp_path):
+    """Two twenty-question runs five points apart are not two measurements of anything.
+
+    This is the comparison that was being made every afternoon: 60% against 55% read as a
+    head that cost five points of accuracy, when the interval on each is twenty points
+    wide. `separated` says so, and the ranking stops rejecting on it.
+    """
+    from ml_stack.graph.bench import held_up, ranking, separated
+
+    store = tmp_path / "runs.ladybug"
+    _shaped_run(store, "flash-plain", questions=20, hits=12, seconds=300.0)
+    _shaped_run(store, "flash-drafted", questions=20, hits=11, seconds=200.0)
+    by_label = {r["label"]: r for r in runs(store)}
+    plain, drafted_ = by_label["flash-plain"], by_label["flash-drafted"]
+    assert separated(drafted_, plain) is False, "twenty questions cannot tell 60 from 55"
+    assert held_up(drafted_, plain), "so it held, and its cost is worth taking"
+    said = ranking(runs(store))
+    assert "rejected" not in said, "a five-point difference these questions did not measure"
+    assert "| 10.0 |" in said, "the faster run supplies the cost"
+    assert "not separated from that" in said, "and the document says what the rule is"
+
+    # separated is a claim about the interval, not about the means being equal
+    _shaped_run(store, "flash-broken", questions=20, hits=2, seconds=100.0)
+    apart = next(r for r in runs(store) if r["label"] == "flash-broken")
+    assert separated(apart, plain) is True and not held_up(apart, plain)
+    assert "rejected" in ranking(runs(store))
+    # a run of one question carries no interval, and the fixed noise answers instead
+    assert separated({"rows": [{"expected": ["a"], "shown": ["a"], "seconds": 1.0}]},
+                     plain) is None
+
+
+def test_the_score_carries_its_interval_wherever_it_is_printed(tmp_path, capsys):
+    from ml_stack.graph.bench import export, missed, ranking
+
+    store = tmp_path / "runs.ladybug"
+    _shaped_run(store, "flash-plain", questions=20, hits=14, seconds=200.0)
+    kept = runs(store)
+    table(kept)
+    assert "70% ±" in capsys.readouterr().out, "the table's F1 says how far it may move"
+    missed(kept, everything=True)
+    said = capsys.readouterr().out
+    assert "F1 70% ±" in said and "10.0 s/q ±" in said
+    assert "95% over its own 20 questions" in said
+    assert "| 70% ±" in ranking(kept), "and the conclusion is quoted with it"
+    got = json.loads(pathlib.Path(export(kept, tmp_path / "o.json")).read_text())
+    lo, hi = got[0]["f1_band"]
+    assert lo < 0.70 < hi and got[0]["seconds_per_question_band"][0] == pytest.approx(10.0)
+
+
+# -- what the machine was asked for while it was answering -------------------------------------
+#
+# Flash-Next was described as "about 90G" from readings taken after the last answer, and
+# nobody could say whether 90G was its peak or its trough -- so "how many users fit on this
+# box" had no number behind it. The sampler reads both figures Activity Monitor shows,
+# every couple of seconds, and keeps the worst.
+
+G = 2 ** 30
+
+
+class _FakeMemory:
+    def __init__(self, rss):
+        self.rss, self.vms = rss, rss * 2
+
+
+class _FakeProcess:
+    """A served process whose resident set climbs as the run goes on."""
+
+    def __init__(self, series, *, pid=4242, port=8099):
+        self.pid, self._series, self._n = pid, list(series), 0
+        self.info = {"pid": pid, "cmdline": ["llama-server", "--port", str(port)]}
+
+    def _next(self):
+        got = self._series[min(self._n, len(self._series) - 1)]
+        self._n += 1
+        return got
+
+    def memory_info(self):
+        return _FakeMemory(self._next())
+
+
+class _FakeVirtualMemory:
+    def __init__(self, wired, free, inactive):
+        self.wired, self.free, self.inactive = wired, free, inactive
+        self.total, self.available, self.percent, self.used = 128 * G, free + inactive, 50.0, 0
+
+
+class _FakePsutil:
+    """psutil, as far as the sampler uses it: one served process and a machine around it."""
+
+    def __init__(self, process, machine):
+        self._process, self._machine, self._n = process, list(machine), 0
+
+    def process_iter(self, _fields=()):
+        return [self._process] if self._process is not None else []
+
+    def virtual_memory(self):
+        got = self._machine[min(self._n, len(self._machine) - 1)]
+        self._n += 1
+        return _FakeVirtualMemory(*got)
+
+
+def test_the_sampler_keeps_the_worst_of_a_rising_series(monkeypatch):
+    """Sampled while the questions are asked, both figures, and the machine around them.
+
+    The series is what a load looks like: the resident set climbs as slots fill, the
+    footprint climbs behind it, wired follows, and the memory that is there for the asking
+    falls. What the run records is the worst of each -- and the worst of `available` is its
+    lowest, not its highest.
+    """
+    import sys
+
+    import ml_stack.graph.bench as measuring
+
+    footprints = iter([40 * G, 62 * G, 71 * G, 68 * G])
+    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: next(footprints))
+    monkeypatch.setitem(sys.modules, "psutil", _FakePsutil(
+        _FakeProcess([70 * G, 88 * G, 91 * G, 87 * G]),
+        [(84 * G, 30 * G, 6 * G), (92 * G, 14 * G, 5 * G),
+         (96 * G, 9 * G, 4 * G), (95 * G, 11 * G, 4 * G)]))
+
+    watcher = measuring.Watching("http://127.0.0.1:8099", every=0.01,
+                                 baseline={"wired": 41 * G}, start=False)
+    for _ in range(4):
+        watcher._once()
+    got = watcher.peaks
+
+    assert got["resident_peak"] == 91 * G, "Real Mem: the highest resident set seen"
+    assert got["footprint_peak"] == 71 * G, "Memory: the highest phys_footprint seen"
+    assert got["wired_peak"] == 96 * G and got["wired_baseline"] == 41 * G
+    assert got["wired_baseline_before_load"] is True
+    assert got["available_low"] == 13 * G, "free + inactive at its lowest, not its highest"
+    assert got["samples"] == 4 and got["sampled_every"] == 0.01
+    assert "sampled" not in got, "a run that sampled a real process says nothing extra"
+
+
+def test_a_run_against_someone_elses_server_samples_nothing_and_says_so(monkeypatch):
+    """Not sampled is not zero: a `--base-url` this machine does not own has no process to
+    read, and a row of 0.00G would read as a model that costs nothing."""
+    import sys
+
+    import ml_stack.graph.bench as measuring
+
+    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    monkeypatch.setitem(sys.modules, "psutil",
+                        _FakePsutil(None, [(80 * G, 20 * G, 4 * G)]))
+    watcher = measuring.Watching("http://elsewhere:8099", every=0.01, start=False)
+    watcher._once()
+    got = watcher.peaks
+    assert got["sampled"] == "no served process on this machine"
+    assert "resident_peak" not in got and "footprint_peak" not in got
+    assert got["wired_peak"] == 80 * G, "the machine is still this machine"
+
+
+def test_the_footprint_takes_the_peak_and_the_kv_follows_it(monkeypatch, tmp_path, capsys):
+    """A reading after the last answer is the trough. `footprint` folds in what was sampled
+    while the questions were being asked, and `kv+run` is computed from that."""
+    from ml_stack.graph.bench import beyond_weights, watched
+
+    watched("http://127.0.0.1:8099", {"resident_peak": 91 * G, "footprint_peak": 71 * G,
+                                      "wired_peak": 96 * G, "wired_baseline": 41 * G,
+                                      "wired_baseline_before_load": True,
+                                      "available_low": 13 * G, "sampled_every": 2.0})
+    held = beyond_weights({"resident_bytes": 70 * G, "weights_bytes": 60 * G,
+                           "resident_peak": 91 * G, "context": 32768, "slots": 1})
+    assert held["resident_bytes"] == 91 * G, "the peak, not the reading taken afterwards"
+    assert held["kv_and_run_bytes"] == 31 * G, "and the cache is measured against the peak"
+
+    store = tmp_path / "runs.ladybug"
+    save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768, "slots": 1, "resident_bytes": 91 * G,
+               "resident_peak": 91 * G, "footprint_peak": 71 * G, "wired_peak": 96 * G,
+               "wired_baseline": 41 * G, "wired_baseline_before_load": True,
+               "kv_and_run_bytes": 31 * G})
+    table(runs(store))
+    said = capsys.readouterr().out
+    head = said.splitlines()[0]
+    assert "real" in head and "mem" in head and "wired" in head
+    line = next(ln for ln in said.splitlines() if ln.startswith("tried"))
+    assert "91.00G" in line and "71.00G" in line, "Real Mem and Memory, both on the line"
+    assert "96.0G+55.0" in line, "the machine's wired, and what the server brought to it"
+
+
+def test_the_table_says_nothing_rather_than_zero_for_a_run_that_sampled_none(tmp_path, capsys):
+    store = tmp_path / "runs.ladybug"
+    save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
+         held={"context": 32768, "slots": 1})
+    table(runs(store))
+    line = next(ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("tried"))
+    assert "0.00G" not in line and "0.0G" not in line, "not sampled is not zero"
+
+
+def test_the_kernel_read_is_behind_a_seam_and_never_raises(monkeypatch):
+    """The one ctypes call in the package. It may fail on any machine, and a memory reading
+    is never worth a run not finishing."""
+    import ml_stack.graph.bench as measuring
+
+    class _Boom:
+        pid = 7
+        def memory_info(self):
+            raise OSError("gone")
+
+    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    assert measuring.footprint_of(_Boom()) == 0
+    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 5 * G)
+    assert measuring.footprint_of(_Boom()) == 5 * G, "the kernel read stands in for psutil"
+
+    class _Plain:
+        pid = 7
+        def memory_info(self):
+            return _FakeMemory(3 * G)
+
+    monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
+    assert measuring.footprint_of(_Plain()) == 3 * G, \
+        "no footprint anywhere: on Linux and Windows it is the resident set, said twice"
+
+
+def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, monkeypatch, capsys):
+    """Adam: 'if a model has a drafting head that speeds it up at some config, always use it
+    at that config (be sure to report it).' The profile fills every flag the sweep left
+    unset; an explicit flag wins; --no-profile serves bare."""
+    import ml_stack.graph.bench as bench
+    from ml_stack.serve import Shape
+
+    class Found:
+        def shape(self, port, seats):
+            return Shape(model="tiny.gguf", port=port, seats=seats, seat_context=4096,
+                         cache_type="q8_0", build="", draft="mtp-tiny.gguf", draft_n_max=4,
+                         reasoning_budget=0, extra_args=("-ub", "2048"))
+
+        def asking(self):
+            return {"tight": True, "batch": True}
+
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    seen = _serving(monkeypatch, tmp_path)
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]}) + "\n")
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
+                        "--kept", str(kept), "--questions", str(asked), "--serve-port", "1"]) == 0
+    kw = seen["kwargs"][0]
+    assert kw.get("draft") == "mtp-tiny.gguf" and kw.get("spec_draft_max") == 4
+    assert kw.get("cache_type_k") == "q8_0" and kw.get("reasoning_budget") == 0
+    assert kw.get("extra_args") == ("-ub", "2048")
+    assert "measured shape" in capsys.readouterr().out
+    # explicit flags win, and --no-profile serves bare
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke", "--n-max", "2",
+                        "--serve-kv", "f16", "--kept", str(kept), "--questions", str(asked),
+                        "--serve-port", "1"]) == 0
+    assert seen["kwargs"][-1].get("spec_draft_max") == 2 and seen["kwargs"][-1].get("cache_type_k") == "f16"
+    assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke", "--no-profile",
+                        "--kept", str(kept), "--questions", str(asked), "--serve-port", "1"]) == 0
+    assert not seen["kwargs"][-1].get("draft") and not seen["kwargs"][-1].get("extra_args")

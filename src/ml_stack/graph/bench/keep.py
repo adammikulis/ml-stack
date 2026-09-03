@@ -151,7 +151,25 @@ def _told(row: dict[str, Any]) -> dict[str, Any]:
     return row
 
 
-def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None) -> str:
+def asked_with(asking: Mapping[str, Any] | None,
+               held: Mapping[str, Any]) -> dict[str, Any]:
+    """A run's ``asking`` record: the way it asked, with the sampling it asked at.
+
+    `measure.asking` knows the keywords it handed `converse` and nothing about the client,
+    and the sampler settings are the other half of how a question was put -- so the two are
+    joined here, once, rather than at every call site. An explicit ``sampling`` in
+    ``asking`` wins; no asking at all stays no record.
+    """
+    if asking is None:
+        return {}
+    out = dict(asking)
+    if "sampling" not in out and held.get("sampling"):
+        out["sampling"] = dict(held["sampling"])
+    return out
+
+
+def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None,
+         asking: Mapping[str, Any] | None = None) -> str:
     """Keep a run where it can be compared with another one, later, by anybody.
 
     Then read it back the way `runs` will, on a fresh handle, and refuse to return until
@@ -159,6 +177,13 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
     as nothing: the store took them, a scan of it returned an empty string for each, and
     the sweep printed its summary from memory, so nobody knew until the next morning. The
     read-back is the only proof that a run exists, and it is cheap next to the run.
+
+    ``held`` is the server record -- what was serving, and how. ``asking`` is the other
+    half, the keywords `converse` was asked with (`measure.asking`), which used to live
+    only in the end of a label -- ``...-plain-batch-kv-q8_0-rb0`` -- where nothing could
+    group on them or even read them. Written only when there is one, so a run kept before
+    it existed and a run kept without it read back identically: an empty record in every
+    run is a key that says nothing.
     """
     from ml_stack.graph.bench.score import prefix_hits
     from ml_stack.graph.store import GraphStore
@@ -173,8 +198,10 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
             server["prefix_hits"] = hits
     stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
     kept_rows = [_told(asdict(r)) for r in rows]
+    asked = asked_with(asking, server)
     record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
-                     "server": server, "rows": kept_rows,
+                     "server": server, **({"asking": asked} if asked else {}),
+                     "rows": kept_rows,
                      # how many of the rows carry their transcript, so `show` and
                      # `train-tools from-bench` can say "this run kept none" rather than
                      # "this run found none"

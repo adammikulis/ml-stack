@@ -216,3 +216,6 @@ frozen base
 
 # allowed with `hook allow` on 2026-09-02: not people
 Real Mem
+
+# allowed with `hook allow` on 2026-09-02: not people
+Iris Calloway

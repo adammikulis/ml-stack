@@ -210,6 +210,118 @@ def _precision(row: Mapping[str, Any]) -> float:
     return _score(row.get("expected") or (), row.get("shown") or ())[1]
 
 
+# How wide the sampling is, and how it is drawn. A run's score is a mean over the questions
+# it happened to ask, and the questions are a sample: two identical configurations measured
+# on ten questions moved 15% in wall clock and five points of F1 (2026-09-02), and nothing
+# in the table said which of that was the change and which was the draw.
+#
+# So every mean carries the interval the questions themselves put around it: resample the
+# run's own questions with replacement, take the mean again, a thousand times, and keep the
+# 2.5th and 97.5th percentiles. It measures the only spread there is evidence for -- across
+# these questions, on this run -- and needs no second run to do it.
+#
+# Seeded, because a band that moves when nothing was measured is a band nobody can quote.
+# One resample serves all four figures, so F1, recall, precision and s/q are drawn from the
+# same questions each time, which is what they were measured on.
+BOOTSTRAP = 1000
+BOOTSTRAP_SEED = 20260902
+
+# Bands cost a thousand resamples and `derived` is called several times per run by every
+# table, ranking and frontier, so each is computed once. Keyed on the per-question figures
+# themselves rather than on the run's identity: two dicts holding the same questions are
+# the same measurement, and a dict has no identity worth trusting across a read-back.
+_BANDS: dict[Any, dict[str, tuple[float, float]]] = {}
+_BANDS_CAP = 512
+
+
+def _pct(sorted_values: Sequence[float], share: float) -> float:
+    """The value at ``share`` of the way through values already sorted."""
+    last = len(sorted_values) - 1
+    return sorted_values[min(last, max(0, int(round(share * last))))]
+
+
+def bands(rows: Sequence[Mapping[str, Any]], *, draws: int = BOOTSTRAP,
+          seed: int = BOOTSTRAP_SEED) -> dict[str, tuple[float, float]]:
+    """The 95% bootstrap interval each of a run's means sits in, over its own questions.
+
+    ``{"right": (lo, hi), "recall": ..., "precision": ..., "seconds_per_question": ...}``,
+    from resampling ``rows`` with replacement ``draws`` times. Empty for a run of one
+    question: one question has no spread, and an interval of zero width would claim a
+    precision that is not there.
+
+    The s/q band is over the per-question seconds whatever `wall_of` says, because it is
+    the per-question spread being asked about; a run asked concurrently has a wall clock
+    that is not the sum of its questions, and its band still describes the questions.
+    """
+    per = tuple((round(_hit(r), 6), round(_recall(r), 6), round(_precision(r), 6),
+                 round(float(r.get("seconds") or 0.0), 6)) for r in rows)
+    n = len(per)
+    if n < 2:
+        return {}
+    key = (draws, seed, per)
+    got = _BANDS.get(key)
+    if got is not None:
+        return got
+    import random
+
+    rand = random.Random(seed)
+    means: tuple[list[float], ...] = ([], [], [], [])
+    pool = range(n)
+    for _ in range(draws):
+        picked = [per[i] for i in rand.choices(pool, k=n)]
+        for axis in range(4):
+            means[axis].append(sum(p[axis] for p in picked) / n)
+    out = {}
+    for axis, name in enumerate(("right", "recall", "precision", "seconds_per_question")):
+        drawn = sorted(means[axis])
+        out[name] = (_pct(drawn, 0.025), _pct(drawn, 0.975))
+    if len(_BANDS) >= _BANDS_CAP:
+        _BANDS.clear()
+    _BANDS[key] = out
+    return out
+
+
+def band(one: Mapping[str, Any], key: str = "right") -> tuple[float, float] | None:
+    """A run's 95% interval for ``key``, or None where there is none -- a run of one
+    question, or a `composed` point, which is two runs and has no questions of its own."""
+    got = derived(one)
+    lo, hi = got.get(f"{key}_lo"), got.get(f"{key}_hi")
+    return (float(lo), float(hi)) if lo is not None and hi is not None else None
+
+
+def _pm(one: Mapping[str, Any], key: str = "right") -> str:
+    """`` ±6``, the half-interval in points, or "" for a run that carries none."""
+    half = half_band(one, key)
+    return f" ±{half * 100:.0f}" if half is not None else ""
+
+
+def half_band(one: Mapping[str, Any], key: str = "right") -> float | None:
+    """Half the width of a run's 95% interval for ``key``: the ``±`` a mean is printed with.
+
+    Half, because a bootstrap interval is not symmetric about the mean and printing both
+    ends everywhere would cost three columns; ``70% ±6`` says how far the questions leave
+    the number free to move, which is the only thing a reader does with it.
+    """
+    got = band(one, key)
+    return (got[1] - got[0]) / 2 if got is not None else None
+
+
+def separated(first: Mapping[str, Any], second: Mapping[str, Any],
+              key: str = "right") -> bool | None:
+    """Whether two runs differ by more than the questions can account for: True when their
+    95% intervals for ``key`` do not overlap, False when they do, None where either has no
+    interval and the fixed `NOISE` has to answer instead.
+
+    Not overlapping is the claim worth making. Overlapping is not evidence that two runs
+    are the same -- only that this many questions cannot tell them apart, which is why the
+    word everywhere is "not separated" and never "equal".
+    """
+    a, b = band(first, key), band(second, key)
+    if a is None or b is None:
+        return None
+    return a[1] < b[0] or b[1] < a[0]
+
+
 def derived(one: Mapping[str, Any]) -> dict[str, float]:
     """What a run cost per unit of getting the answer right.
 
@@ -242,10 +354,17 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     # `right` is F1. Recall and precision are kept beside it because the pair is what says
     # *how* a run was wrong: a model that lights everything has high recall and no precision,
     # and under recall alone it looked like the most accurate model there was.
-    return _with_rates({"right": got, "recall": recall, "precision": precision,
-                        "shown_per_question": shown, "wanted_per_question": wanted,
-                        "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
-                        "kv_bytes": memory, "questions": float(len(rows))})
+    out = _with_rates({"right": got, "recall": recall, "precision": precision,
+                       "shown_per_question": shown, "wanted_per_question": wanted,
+                       "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
+                       "kv_bytes": memory, "questions": float(len(rows)),
+                       "seconds_per_question": _total(rows, "seconds") / len(rows)})
+    # ...and what the questions can and cannot tell apart. `<key>_lo`/`<key>_hi` rather
+    # than a pair, so `derived` stays a flat mapping of numbers that `rates` and `_flat`
+    # can read a key at a time. Absent for a run of one question -- see `bands`.
+    for key, (lo, hi) in bands(rows).items():
+        out[f"{key}_lo"], out[f"{key}_hi"] = lo, hi
+    return out
 
 
 def _with_rates(out: dict[str, float]) -> dict[str, float]:
@@ -278,6 +397,21 @@ def _which(graph: Mapping[str, Any]) -> str:
 # as a fraction: 0.05 is five points. On a twenty-question run one question is worth five
 # points, so anything tighter rejects the noise of one question.
 NOISE = 0.05
+
+
+def held_up(one: Mapping[str, Any], against: Mapping[str, Any], *,
+            noise: float = NOISE) -> bool:
+    """Whether ``one``'s F1 stands beside ``against``'s rather than under it.
+
+    It held if it did not fall at all; if it fell, it held unless the fall is bigger than
+    the questions can account for -- the two 95% intervals not overlapping. Where either
+    run carries no interval, the fixed ``noise`` answers, as it did before there were any.
+    """
+    fell = derived(against).get("right", 0.0) - derived(one).get("right", 0.0)
+    if fell <= 0:
+        return True
+    apart = separated(one, against, "right")
+    return fell <= noise + 1e-9 if apart is None else not apart
 
 
 @dataclass
@@ -382,9 +516,13 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
 
     Accuracy: the run with the most questions, the best F1 among those, the newest on a
     full tie. Cost: the fastest per
-    question of the model's runs of at least `SHORT` questions whose F1 fell no more than
-    ``noise`` below the accuracy run's; the accuracy run itself when nothing faster held.
-    ``rejected`` holds the rest, so a head that hurt accuracy is seen rather than skipped.
+    question of the model's runs of at least `SHORT` questions whose F1 held up against the
+    accuracy run's -- `held_up`: it did not fall, or the fall is inside what these questions
+    can account for, the two 95% intervals still overlapping. Where a run carries no
+    interval the fixed ``noise`` decides, as it did before there were any. The accuracy run
+    itself when nothing faster held. ``rejected`` holds the rest, so a head that hurt
+    accuracy is seen rather than skipped -- and it now holds only the runs the questions
+    really did separate, rather than every run a fraction of a question below a fixed line.
 
     Never across hosts: a cost run from another machine than the accuracy run's is a
     different GPU, and goes under ``elsewhere`` -- listed by the ranking as "other host"
@@ -416,7 +554,7 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
         top = derived(accuracy)["right"]
         here = [o for o in mine if host_of(o) == host_of(accuracy)]
         elsewhere = [o for o in mine if o not in here]
-        held = [o for o in here if top - derived(o)["right"] <= noise + 1e-9]
+        held = [o for o in here if held_up(o, accuracy, noise=noise)]
         cost = min(held, key=lambda o: (per_question(o), o is not accuracy))
         if per_question(cost) >= per_question(accuracy):
             cost = accuracy
@@ -486,9 +624,12 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
              "",
              "Accuracy is each model's largest run -- the most questions, the newest on a tie --",
              "since a draft head cannot change an answer, only the clock. Cost is the model's",
-             f"fastest run of at least {SHORT} questions whose F1 held within {pts:g} points of",
-             "that, per question, whatever head, draft length or build it ran on; the last",
-             "column says which run that was.",
+             f"fastest run of at least {SHORT} questions whose F1 was not separated from that",
+             "-- the two 95% bootstrap intervals over their own questions overlapping, or,",
+             f"for a run carrying no interval, within {pts:g} points -- per question, whatever",
+             "head, draft length or build it ran on; the last column says which run that was.",
+             "Every F1 below carries the interval its questions put around it: a difference",
+             "smaller than the interval is a difference these questions did not measure.",
              "",
              "| model | F1 | recall | precision | questions | s/question | load | resident "
              "| kv+run | sampling | find | made |" + (" host |" if several else "")
@@ -505,11 +646,16 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
         if not choice.own:
             # and what the head was worth, when its baseline was measured: `1.42x`
             faster = c.get("speedup")
+            # ...and whether it is really faster. Two runs whose s/q intervals overlap are
+            # not separated by these questions, however the means fell, and a recommendation
+            # that does not say so is read as a measurement when it is a coin toss.
+            apart = separated(choice.cost, choice.accuracy, "seconds_per_question")
             source += (f" ({c.get('questions')} q"
-                       + (f", {_times(faster)}" if faster is not None else "") + ")")
+                       + (f", {_times(faster)}" if faster is not None else "")
+                       + (", s/q not separated" if apart is False else "") + ")")
         lines.append(
             f"| `{choice.model}` "
-            f"| {(a.get('f1') or 0) * 100:.0f}% "
+            f"| {(a.get('f1') or 0) * 100:.0f}%{_pm(choice.accuracy, 'right')} "
             f"| {(a.get('recall') or 0) * 100:.0f}% "
             f"| {(a.get('precision') or 0) * 100:.0f}% "
             f"| {a.get('questions') or '-'} "
@@ -524,9 +670,10 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
             + f"| {source} |")
     refused = [(choice, run, fell) for choice in chosen for run, fell in choice.rejected]
     if refused:
-        lines += ["", f"Runs whose F1 fell more than {pts:g} points under their model's, so "
-                      f"their cost was not taken -- a head cannot change an answer, so look "
-                      f"at what else these changed:", ""]
+        lines += ["", "Runs whose F1 fell clear of their model's -- separated, their 95% "
+                      "intervals not", f"overlapping, or, carrying none, more than {pts:g} "
+                      "points down -- so their cost was", "not taken. A head cannot change "
+                      "an answer, so look at what else these changed:", ""]
         for choice, run, fell in refused:
             lines.append(f"- `{choice.model}` rejected: `{run.get('label')}` F1 "
                          f"-{fell * 100:.0f} pts ({derived(run)['questions']:.0f} q, "
@@ -601,6 +748,12 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         "recall": round(got.get("recall", 0), 4),
         "precision": round(got.get("precision", 0), 4),
         "lit_per_question": round(got.get("shown_per_question", 0), 2),
+        # what these questions could and could not tell apart: the 95% bootstrap interval
+        # around F1 and around s/q. None for a run of one question -- see `bands`
+        "f1_band": [round(v, 4) for v in band(one, "right")] if band(one) else None,
+        "seconds_per_question_band": ([round(v, 3)
+                                       for v in band(one, "seconds_per_question")]
+                                      if band(one, "seconds_per_question") else None),
         "seconds": round(got.get("seconds", 0)),
         "calls": int(got.get("calls", 0)),
         "read_tokens": int(_total(rows, "processed_tokens")),
@@ -625,6 +778,14 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         # None for a run kept before the lease recorded it: not recorded is not instant
         "load_s": server.get("load_s"),
         "resident_bytes": server.get("resident_bytes"),
+        # what the machine was asked for while it answered -- see `measure.Watching`.
+        # None for a run kept before it was sampled, or one against a server this machine
+        # does not own: not sampled is not zero
+        "resident_peak": server.get("resident_peak"),
+        "footprint_peak": server.get("footprint_peak"),
+        "wired_peak": server.get("wired_peak"),
+        "wired_baseline": server.get("wired_baseline"),
+        "available_low": server.get("available_low"),
         "kv_and_run_bytes": server.get("kv_and_run_bytes"),
         "mmapped": bool(server.get("mmapped")),
         "sampling": server.get("sampling") or {},

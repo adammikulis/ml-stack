@@ -257,6 +257,10 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
 
     rows: list[Row] = []
     began = time.time()
+    # What the machine had wired before this model came up, so the server's own wired cost
+    # is a subtraction rather than a guess. Read here because here is the last moment it
+    # can be: `measure` carries it to `Watching`, which cannot go back before the load.
+    before_load = bench.machine_memory()
     try:
         with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
             # `load_s` is the lease's own clock, process start to health; the stopwatch
@@ -321,7 +325,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                                  **ways_asked)
                     got = bench.measure(ask, asking_these, label=here, client=client,
                                         trace=trace,
-                                        log=print,
+                                        log=print, baseline=before_load,
                                   graph=graph, per_question=per_question)
                     for row in got:
                         row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
@@ -342,7 +346,9 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                         held["host"] = host
                     if kept:
                         keys.append(save(kept, got,
-                                         held={**held, "sampling": dict(client.sampling)}))
+                                         held={**held, "sampling": dict(client.sampling)},
+                                         # the way, beside what was serving: see `save`
+                                         asking=getattr(ask, "asking", None)))
                     got_all += got
                 return got_all, keys
 

@@ -475,7 +475,8 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
 def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]], *,
             label: str, client: Any, log: Callable[[str], None] | None = None,
             graph: Mapping[str, Any] | None = None,
-            per_question: float = PER_QUESTION, trace: bool | None = None) -> list[Row]:
+            per_question: float = PER_QUESTION, trace: bool | None = None,
+            baseline: Mapping[str, int] | None = None) -> list[Row]:
     """Ask each question once through ``ask(question, client)`` and record what it cost.
 
     Given the ``graph``, each row also counts the entries the answer named that no tool
@@ -486,16 +487,30 @@ def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]],
     hundred. The default is here rather than on the command line so that every caller gets
     it: the day a sweep scored thousands of tool calls and kept none of them, the flag it
     needed did not exist yet either.
+
+    While the questions are asked, a `Watching` samples what the server holds -- Real Mem,
+    Memory, the machine's wired -- every `SAMPLE_EVERY` seconds and keeps the maxima, which
+    `footprint` folds into the run's record afterwards. Flash-Next was sized from single
+    readings taken after the last answer, and nobody could say whether ~90G was its peak or
+    its trough. ``baseline`` is what a caller read *before* the server came up, so the
+    server's own wired cost is a subtraction rather than a guess.
     """
+    from contextlib import nullcontext
+
     traced = wants_trace(len(questions), trace)
     rows = []
-    for one in questions:
-        row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
-                           per_question=per_question, trace=traced)
-        rows.append(row)
-        if log:
-            log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}"
-                + ("  TIMED OUT" if row.timed_out else ""))
+    # what the server holds while it is answering, sampled -- see `Watching`. The server is
+    # found from the client's own base_url, so nothing above has to carry a pid; a client
+    # with none, or a URL this machine does not own, samples nothing and says so.
+    at = str(getattr(client, "base_url", "") or "")
+    with watching(at, baseline=baseline) if at else nullcontext():
+        for one in questions:
+            row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
+                               per_question=per_question, trace=traced)
+            rows.append(row)
+            if log:
+                log(f"  {row.seconds:5.1f}s {row.calls:3} calls  {row.question[:56]}"
+                    + ("  TIMED OUT" if row.timed_out else ""))
     return rows
 
 
@@ -512,6 +527,263 @@ def slot_count(base_url: str) -> int:
     except Exception:  # noqa: BLE001 - a server that will not answer has an unknown count
         return -1
     return len(slots) if isinstance(slots, list) else -1
+
+
+# -------------------------------------------------------- what the server held, at its most
+#
+# `footprint` reads memory once, when the questions are over, and by then the cache that was
+# full while four conversations were in flight has been let go. Flash-Next was sized at ~90G
+# from readings like that and nobody could say whether 90G was the peak or the trough -- so
+# "how many of these fit on this machine" had no number behind it.
+#
+# Two figures per sample, because macOS shows two and they are not the same thing:
+#
+#   `resident_peak`  -- Activity Monitor's **Real Mem**. The resident set: every physical
+#                       page mapped in, shared and file-backed pages included. `ps -o rss`,
+#                       `psutil.Process.memory_info().rss`, `ri_resident_size`.
+#   `footprint_peak` -- Activity Monitor's **Memory**. The phys_footprint: dirty and
+#                       compressed pages this process is charged for, clean file-backed
+#                       pages excluded. `vmmap --summary`'s footprint, `ps -o footprint`,
+#                       `ri_phys_footprint`. psutil has no field for it, so it is read
+#                       through `proc_pid_rusage` -- see `_rusage_footprint`.
+#
+# They diverge exactly where it matters: llama.cpp mmaps its weights, so an 87G model can be
+# most of the resident set and almost none of the footprint. Memory pressure is charged on
+# the footprint and eviction is felt on the resident set, so both are kept and neither is
+# called "the memory".
+#
+# Beside them the machine's own: `wired_peak` (what nothing can page out) against
+# `wired_baseline` (the same, before the server came up -- the difference is the server's
+# own wired cost), and `available_low`, free plus inactive at its lowest, which is the
+# pressure proxy `vm_stat` gives.
+
+# How often the sampler looks. Two seconds against what it is watching: a llama-server's
+# resident set moves on the scale of a prompt being read, and a sample a second is a `ps`
+# and a process scan every second of a run that lasts an hour.
+SAMPLE_EVERY = 2.0
+
+# `proc_pid_rusage(pid, RUSAGE_INFO_V4, &buf)`, and where `ri_phys_footprint` sits in
+# `rusage_info_v4`: sixteen bytes of uuid, then user and system time, two wakeup counts,
+# pageins, wired size, resident size, and the footprint -- the eighth `uint64_t`. Verified
+# against `ps -o rss` on this machine rather than counted off the header, because counting
+# it off the header put it one slot late and read the process's start time as a footprint
+# of eight terabytes.
+RUSAGE_INFO_V4 = 4
+PHYS_FOOTPRINT_AT = 16 + 7 * 8
+
+
+def _rusage_footprint(pid: int) -> int:
+    """macOS's phys_footprint for ``pid`` -- Activity Monitor's "Memory" -- or 0.
+
+    The seam: everything else about the sampler is ordinary Python, and this one function
+    reaches into libSystem through ctypes. `footprint_of` calls it as ``bench.``, the way
+    everything patchable in this package is called, so a test replaces this one function and
+    nothing anywhere else has to pretend to be a kernel. 0 for a process that is gone, a platform without the
+    call, or any failure at all -- a memory reading is never worth a run not finishing.
+    """
+    if sys.platform != "darwin":
+        return 0
+    try:
+        import ctypes
+        import ctypes.util
+
+        lib = ctypes.CDLL(ctypes.util.find_library("System") or "libSystem.dylib")
+        buf = ctypes.create_string_buffer(1024)
+        if lib.proc_pid_rusage(ctypes.c_int(int(pid)), ctypes.c_int(RUSAGE_INFO_V4),
+                               ctypes.byref(buf)) != 0:
+            return 0
+        return int.from_bytes(buf.raw[PHYS_FOOTPRINT_AT:PHYS_FOOTPRINT_AT + 8], sys.byteorder)
+    except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
+        return 0
+
+
+def footprint_of(process: Any) -> int:
+    """One process's phys_footprint in bytes -- Activity Monitor's "Memory".
+
+    psutil's own field where a build has one (some expose it in ``memory_full_info``), the
+    `proc_pid_rusage` read where it does not, and the resident set on every platform that
+    has no such distinction -- Linux and Windows charge a process for what is resident, so
+    there the two figures are the same number and the table says so by printing it twice.
+    """
+    try:
+        info = process.memory_info()
+        for name in ("phys_footprint", "footprint"):
+            got = int(getattr(info, name, 0) or 0)
+            if got:
+                return got
+    except Exception:  # noqa: BLE001
+        pass
+    through_kernel = bench._rusage_footprint(int(getattr(process, "pid", 0) or 0))
+    if through_kernel:
+        return through_kernel
+    try:
+        return int(process.memory_info().rss)
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def machine_memory() -> dict[str, int]:
+    """``wired`` and ``unpressured`` for the whole machine, as far as this platform says.
+
+    ``wired`` is what nothing can page out -- the figure a server's own load moves, and the
+    one that decides whether a second model fits beside the first. ``unpressured`` is free
+    plus inactive: the pages that are there for the asking, which is the closest thing to
+    `vm_stat`'s pressure that a portable call gives. Missing keys on a platform whose
+    ``virtual_memory`` has no such field, rather than a zero that reads as measured.
+    """
+    out: dict[str, int] = {}
+    try:
+        import psutil
+
+        vm = psutil.virtual_memory()
+    except Exception:  # noqa: BLE001
+        return out
+    if hasattr(vm, "wired"):
+        out["wired"] = int(vm.wired)
+    free, inactive = int(getattr(vm, "free", 0) or 0), int(getattr(vm, "inactive", 0) or 0)
+    if free or inactive:
+        out["unpressured"] = free + inactive
+    elif getattr(vm, "available", 0):
+        out["unpressured"] = int(vm.available)
+    return out
+
+
+def serving_process(base_url: str) -> Any | None:
+    """The llama-server holding this port, as a psutil process, or None.
+
+    The same match `footprint` makes -- ``llama-server`` on the command line with
+    ``--port N`` on it -- and made once here so the sampler and the footprint agree about
+    which process they are talking about. None for a run against a ``--base-url`` somebody
+    else put up: nothing on this machine owns that port, and a run that samples nothing
+    must say nothing rather than report zeroes.
+    """
+    try:
+        import psutil
+
+        port = int(str(base_url).rsplit(":", 1)[-1].strip("/"))
+    except Exception:  # noqa: BLE001
+        return None
+    try:
+        for process in psutil.process_iter(["pid", "cmdline"]):
+            line = " ".join(process.info.get("cmdline") or ())
+            if "llama-server" in line and f"--port {port}" in line:
+                return process
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
+class Watching:
+    """A thread that reads what the server holds every `SAMPLE_EVERY` seconds, and keeps
+    the worst of it.
+
+    Started before the questions and stopped after them, so what it reports is the most the
+    machine was asked for *while it was answering* -- which is the number "how many users
+    fit on this box" is a division of, and the number a single reading after the fact
+    cannot give.
+
+    ``peaks`` is what goes into the run's record: ``resident_peak`` (Real Mem),
+    ``footprint_peak`` (Memory), ``wired_peak`` and ``wired_baseline`` for the machine,
+    ``available_low``, ``sampled_every`` and ``samples``. A run with no process to watch --
+    a ``--base-url`` this machine does not own -- reports ``sampled: "no served process on
+    this machine"`` and no figures, because nothing measured is not zero.
+    """
+
+    def __init__(self, base_url: str, *, every: float = SAMPLE_EVERY,
+                 baseline: Mapping[str, int] | None = None, start: bool = True) -> None:
+        self.base_url = base_url
+        self.every = float(every)
+        self.process = serving_process(base_url)
+        # taken before the server came up when a caller has one; otherwise the first thing
+        # this thread sees, which includes the server and is honest about saying so
+        self.baseline = dict(baseline) if baseline is not None else machine_memory()
+        self.baseline_before_load = baseline is not None
+        self.resident = self.footprint = self.wired = 0
+        self.available: int | None = None
+        self.samples = 0
+        self._stop = threading.Event()
+        # ``start=False`` leaves the thread unstarted and `_once` the only way it samples,
+        # which is how it is tested: a series read at times a test chooses says exactly what
+        # the maxima are, where a thread and a clock say something near them.
+        self._thread = threading.Thread(target=self._watch, daemon=True)
+        if start:
+            self._thread.start()
+
+    def _once(self) -> None:
+        if self.process is not None:
+            try:
+                self.resident = max(self.resident, int(self.process.memory_info().rss))
+                self.footprint = max(self.footprint, footprint_of(self.process))
+            except Exception:  # noqa: BLE001 - a server that has gone is not an error here
+                self.process = None
+        held = machine_memory()
+        if "wired" in held:
+            self.wired = max(self.wired, held["wired"])
+        if "unpressured" in held:
+            self.available = (held["unpressured"] if self.available is None
+                              else min(self.available, held["unpressured"]))
+        self.samples += 1
+
+    def _watch(self) -> None:
+        while not self._stop.is_set():
+            self._once()
+            self._stop.wait(self.every)
+
+    def stop(self) -> dict[str, Any]:
+        self._stop.set()
+        if self._thread.is_alive():
+            self._thread.join(timeout=30)
+        self._once()                     # one last look, so a short run samples at all
+        return self.peaks
+
+    @property
+    def peaks(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"sampled_every": self.every, "samples": self.samples}
+        if self.process is None and not self.resident:
+            out["sampled"] = "no served process on this machine"
+        if self.resident:
+            out["resident_peak"] = self.resident
+        if self.footprint:
+            out["footprint_peak"] = self.footprint
+        if self.wired:
+            out["wired_peak"] = self.wired
+        if "wired" in self.baseline:
+            out["wired_baseline"] = self.baseline["wired"]
+            # False when the baseline was taken with the server already up, so the
+            # difference is not the server's own wired cost and nothing should read it as one
+            out["wired_baseline_before_load"] = self.baseline_before_load
+        if self.available is not None:
+            out["available_low"] = self.available
+        return out
+
+
+# What the sampler saw, by the server it was watching, for `footprint` to fold into the
+# record. The two belong together -- both are "what the server costs" -- and putting the
+# handover here rather than through every caller is what lets a run keep peaks without the
+# serving path having to carry them. One bench measures one server at a time, under the
+# measuring lock, so the key is enough.
+_WATCHED: dict[str, dict[str, Any]] = {}
+
+
+def watched(base_url: str, peaks: Mapping[str, Any]) -> None:
+    """Leave what `Watching` recorded where `footprint` will find it."""
+    _WATCHED[str(base_url).rstrip("/")] = dict(peaks)
+
+
+def watching(base_url: str, *, every: float = SAMPLE_EVERY,
+             baseline: Mapping[str, int] | None = None) -> Any:
+    """`Watching` over ``base_url``, as a context manager that files its peaks on exit."""
+    from contextlib import contextmanager
+
+    @contextmanager
+    def held() -> Any:
+        watcher = Watching(base_url, every=every, baseline=baseline)
+        try:
+            yield watcher
+        finally:
+            watched(base_url, watcher.stop())
+
+    return held()
 
 
 class _Peak:
@@ -664,6 +936,11 @@ def footprint(base_url: str) -> dict[str, Any]:
     # So it is only reported when the model really is fully resident, and `resident_bytes`
     # is carried either way, because what the process actually holds is the number that
     # decides how many of them fit.
+    #
+    # And what it held at its most, if a `Watching` was running over this server while the
+    # questions were asked: a reading taken here is taken after the last answer, when the
+    # cache that was full during it has been let go. `beyond_weights` prefers the peak.
+    out.update(_WATCHED.pop(str(base_url).rstrip("/"), {}))
     try:
         return beyond_weights(out)
     except Exception:  # noqa: BLE001 - a summary line is never worth a run's answers
@@ -677,6 +954,11 @@ def beyond_weights(out: dict[str, Any]) -> dict[str, Any]:
     `kv_and_run_bytes` when a model is mmapped raised at the *end* of a run, after every
     question had been answered, and threw away a quarter hour of GPU for a summary line.
     """
+    # The peak where a run has one, because what decides how many conversations fit is what
+    # the machine was asked for while it was answering, not what was left over afterwards.
+    if out.get("resident_peak"):
+        out["resident_bytes"] = max(int(out["resident_peak"]),
+                                    int(out.get("resident_bytes") or 0))
     if "resident_bytes" in out and "weights_bytes" in out:
         beyond = out["resident_bytes"] - out["weights_bytes"]
         if beyond > 0:
@@ -776,8 +1058,15 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
     for none reaches `converse` byte for byte as it always did.
 
     The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
-    which one it measured, and takes ``turns=`` -- the earlier turns of a conversation, as
-    `converse` does -- so `concurrent` can carry one on.
+    which one it measured, and ``.asking``, which is the way itself: every keyword above
+    that changes what `converse` is asked, as `keep.save` writes it beside the rows and
+    `show.asked_as` prints it. The ways lived only in the end of a run's label --
+    ``...-plain-batch-kv-q8_0-rb0`` -- so nothing could group runs by them, say that two
+    runs differed only in the asking, or notice a micro-batch that had been left on. A
+    record is read; a suffix is guessed at.
+
+    It also takes ``turns=`` -- the earlier turns of a conversation, as `converse` does --
+    so `concurrent` can carry one on.
     """
     from ml_stack.graph.ask import converse, tools_for
     from ml_stack.graph.search import hybrid
@@ -846,4 +1135,14 @@ def asking(graph: Mapping[str, Any], *, shortlist: int = 0, store: str | Path | 
             return converse_with(question, client, finder, likely(question, held), turns)
 
     ask.finder = finding(store, embed_url)  # type: ignore[attr-defined]
+    # The way, said once, in the words `converse` uses. Only what was asked for: a way that
+    # asked for nothing carries `{"tight": True}` and no other key, so the record says what
+    # the run did rather than what every default happened to be that week.
+    ask.asking = {  # type: ignore[attr-defined]
+        "tight": bool(tight), "terse": bool(terse),
+        **({"rich": True} if rich else {}), **({"batch": True} if batch else {}),
+        **({"kinds": True} if kinds else {}), **({"summary": True} if summary else {}),
+        **({"reach": int(reach)} if reach else {}),
+        **({"shortlist": int(shortlist)} if shortlist else {}),
+    }
     return ask

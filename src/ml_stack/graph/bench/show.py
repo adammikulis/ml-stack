@@ -24,12 +24,16 @@ from ml_stack.graph.bench.score import (
     _recall,
     _times,
     _total,
+    band,
     baseline,
     composed,
     derived,
+    half_band,
+    held_up,
     host_of,
     hosts_of,
     per_question,
+    separated,
     speedup,
     wall_of,
 )
@@ -40,6 +44,165 @@ def kv_short(cache_type: str) -> str:
     common case and says nothing; ``q5_1`` keeps its ``_1`` because ``q5_0`` also exists,
     and two cache types printed as one is exactly what the column is there to prevent."""
     return str(cache_type or "").removesuffix("_0")
+
+
+def _flag(args: Sequence[Any], *names: str) -> str:
+    """The value ``--ubatch 2048`` was given as, read out of a run's ``extra_args``, or "".
+
+    A server flag that no field of the record names still decided the measurement, and
+    `ServerSpec.extra_args` is where those arrive. Both spellings are read --
+    ``--ubatch 2048`` and ``--ubatch=2048`` -- because both are what somebody typed.
+    """
+    words = [str(a) for a in args or ()]
+    for n, word in enumerate(words):
+        for name in names:
+            if word == name and n + 1 < len(words):
+                return words[n + 1]
+            if word.startswith(f"{name}="):
+                return word.split("=", 1)[1]
+    return ""
+
+
+def _num(value: Any) -> str:
+    """A number as a shape says it: ``2048``, ``.5``, ``1.2`` -- no trailing zeros, and no
+    leading one either, since a shape is read at a glance and ``0.5`` costs a character."""
+    try:
+        got = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    text = f"{got:g}"
+    return text[1:] if text.startswith("0.") else text
+
+
+def head_short(name: Any) -> str:
+    """A draft head as a shape names it: ``mtp``, ``eagle3``, ``ngram``, else its own stem.
+
+    The file is `mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf` and what tells one run from another is
+    the *kind* of head; which model it drafts for is the run's model, already on the line.
+    """
+    plain = str(name or "").rsplit("/", 1)[-1].removesuffix(".gguf")
+    low = plain.lower()
+    for known in ("eagle3", "eagle", "mtp", "ngram"):
+        if known in low:
+            return known
+    return plain[:10]
+
+
+def shape_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
+    """How a run was *served*, as one field: ``q8/rb0/ub2048/pmin.5/mtp@4``.
+
+    Every one of these decided the measurement and none of them had a column. They lived in
+    the end of the label instead -- `Qwen3.8-Flash--v2-plain-batch-kv-q8_0-rb0` -- where the
+    micro-batch, the speculative p-min, the projector and the lock were not written down at
+    all, so two runs that differed in one of them read as a repeat. A label is typed by a
+    person; a record is written by the code that set the flag.
+
+    In the order a person changes them: the KV cache type, the reasoning budget, the
+    micro-batch, the draft's p-min, the head and how far ahead it guesses, then the
+    projector and the lock. ``-`` for a run kept before any of it was recorded, and a field
+    the record does not carry is left out rather than guessed at.
+
+    ``ctx_shown`` leaves out the cache type and the reasoning budget, for `table`, whose
+    ``ctx`` column already prints both -- ``32k x1/q8/rb``. Dropping what is on the line
+    twice is what keeps the field narrow enough to print whole; cutting the front off
+    instead lost the micro-batch and left ``2048/pmin.5`` reading as nothing.
+    """
+    server = one.get("server") or {}
+    args = server.get("extra_args") or ()
+    bits = []
+    kv = kv_short(str(server.get("cache_type") or server.get("cache_type_k") or ""))
+    if kv and not ctx_shown:
+        bits.append(kv)
+    if server.get("reasoning_budget") is not None and not ctx_shown:
+        bits.append(f"rb{int(server['reasoning_budget'])}")
+    micro = (server.get("n_ubatch") or server.get("ubatch")
+             or _flag(args, "-ub", "--ubatch", "--ubatch-size"))
+    if micro:
+        bits.append(f"ub{_num(micro)}")
+    pmin = server.get("spec_p_min", server.get("draft_p_min"))
+    if pmin is None:
+        pmin = _flag(args, "--draft-p-min", "--spec-p-min", "-spec-p-min") or None
+    if pmin is not None:
+        bits.append(f"pmin{_num(pmin)}")
+    head = head_short(server.get("draft_model") or server.get("draft") or "")
+    if head:
+        ahead = server.get("spec_draft_max")
+        bits.append(f"{head}@{int(ahead)}" if ahead is not None else head)
+    elif server.get("spec_draft_max") is not None:
+        bits.append(f"n{int(server['spec_draft_max'])}")
+    if server.get("mmproj"):
+        bits.append("mmproj")
+    if server.get("mlock"):
+        bits.append("mlock")
+    return "/".join(bits) or "-"
+
+
+# The asking, in the order it is thought about: what the tools looked like, then what the
+# model was allowed to do with them. `tight` is the default asking now, so it says nothing
+# and its absence -- `loose` -- says everything.
+# (`report` has a `WAYS` of its own, the words a *label* can carry; this is the record's
+# flags in the order a shape names them, and the two must not share a name in `bench`.)
+SHOWN_WAYS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
+              ("kinds", "kinds"), ("summary", "summary"))
+
+
+def asked_as(one: Mapping[str, Any]) -> str:
+    """How a run *asked*, as one field: ``+batch+kinds``, ``tight``, ``+loose+reach8k``.
+
+    Read from the run's `asking` record -- the keywords `measure.asking` handed `converse`
+    -- and never from the label, which is where these used to live and where a suffix said
+    `batch` because somebody typed it rather than because anything did. ``-`` for a run
+    kept before the record existed: not recorded is not "asked plainly".
+
+    Only what differs from the plain asking is named, so a way shows what a person chose.
+    A run that chose nothing reads ``tight``, which is the plain asking said out loud, and
+    is how a plain run is told from one that kept no record at all.
+    """
+    asking = one.get("asking")
+    if not isinstance(asking, Mapping) or not asking:
+        return "-"
+    bits = []
+    if not asking.get("tight", True):
+        bits.append("+loose")
+    for key, name in SHOWN_WAYS:
+        if asking.get(key):
+            bits.append(f"+{name}")
+    reach = int(asking.get("reach") or 0)
+    if reach:
+        bits.append(f"+reach{reach // 1000}k" if reach % 1000 == 0 else f"+reach{reach}")
+    if asking.get("shortlist"):
+        bits.append(f"+list{int(asking['shortlist'])}")
+    return "".join(bits) or "tight"
+
+
+def shaped(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
+    """The whole configuration as one field: what was served, then how it was asked --
+    ``q8/rb0/mtp@4+batch+kinds``. What `by_shape` groups on, sampling beside it.
+
+    One word, with no space in it, because every column of the table is read by eye and by
+    ``split()`` -- the tests count words along a line, and a field that is sometimes one
+    word and sometimes two makes every column after it move. The asking's parts already
+    begin with ``+``, so the join needs no separator; a run that kept no record of its
+    asking carries the served shape alone, and one that recorded the plain asking says
+    ``+tight`` rather than nothing, since "asked plainly" and "did not say" are not the
+    same fact. ``ctx_shown`` is `shape_of`'s: leave out what the ``ctx`` column says.
+    """
+    form, way = shape_of(one, ctx_shown=ctx_shown), asked_as(one)
+    if way == "-":
+        return form
+    return f"{'' if form == '-' else form}{'+tight' if way == 'tight' else way}" or "-"
+
+
+def band_of(one: Mapping[str, Any], key: str = "right", *, unit: str = "pts") -> str:
+    """``±6`` for a run's 95% interval on ``key``, "" for a run that carries none.
+
+    Points for a score, seconds for a clock: half the interval in whatever the mean is in,
+    so ``F1 70% ±6`` and ``10.4 s/q ±1.2`` each read without a conversion.
+    """
+    half = half_band(one, key)
+    if half is None:
+        return ""
+    return f"±{half * 100:.0f}" if unit == "pts" else f"±{half:.1f}"
 
 
 def compare(store: str | Path, first: str, second: str) -> str:
@@ -147,11 +310,39 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # that found the previous call's whole prompt still cached. `cached` is a total and
     # cannot see a change to the asking that breaks the prefix; blank for a run kept
     # before it was counted.
+    #
+    # `real`, `mem` and `wired` are what the machine was asked for *while it was answering*,
+    # sampled every couple of seconds by `measure.Watching` and kept at their worst -- not
+    # read once after the last answer, which is how Flash-Next came to be described as
+    # "about 90G" with nobody able to say whether that was its peak or its trough.
+    #
+    #   `real`  -- Activity Monitor's **Real Mem**: the resident set, shared and mapped
+    #              pages included. Eviction is felt here.
+    #   `mem`   -- Activity Monitor's **Memory**: the phys_footprint, what the process is
+    #              charged for. Memory pressure is charged here, and for an mmapped 87G
+    #              model it is far below `real`.
+    #   `wired` -- the whole machine's wired memory at its peak, with `+N` beside it for
+    #              how much of that arrived after the server did, where a baseline was
+    #              taken before the load.
+    #
+    # A run against a `--base-url` this machine does not own samples nothing and prints
+    # `-`: not sampled is not zero. `kv+run` is computed from the peak where there is one.
+    #
+    # `shape` is everything else that decided the run and had nowhere to live: the cache
+    # type, the reasoning budget, the micro-batch, the draft's p-min and head, the
+    # projector and the lock -- then the asking, `+batch+kinds`. All of it used to be
+    # readable only as a guess at the end of a label, and half of it was not in the label
+    # either. `-` where a run kept no record of it: see `shape_of` and `asked_as`.
+    #
+    # `F1` carries the interval its own questions put around it -- `70% ±6` -- because a
+    # mean over twenty questions moves five points between identical runs, and a table that
+    # prints the mean alone invites a comparison the questions cannot support.
     several = len(hosts_of(kept)) > 1
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
-            + f"{'ctx':>10} {'n':>3} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
+            + f"{'ctx':>10} {'n':>3} {'shape':32} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'peak':>6} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
-            f"{'resident':>9} {'kv+run':>8} {'per 1k':>8} {'F1':>5} {'rec':>5} {'prec':>5} "
+            f"{'real':>9} {'mem':>9} {'wired':>8} {'kv+run':>8} {'per 1k':>8} {'F1':>8} "
+            f"{'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling'}")
     print(head)
     print("-" * len(head))
@@ -162,6 +353,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         def mean(f: Callable[[Mapping[str, Any]], float]) -> str:
             return f"{100 * sum(f(r) for r in scored) / len(scored):.0f}%" if scored else "-"
         right, rec, prec = mean(_hit), mean(_recall), mean(_precision)
+        spread = band_of(one, "right")
+        right = f"{right} {spread}" if spread else right
         ctx = server.get("context") or 0
         slots = server.get("slots") or 0
         kv = kv_short(str(server.get("cache_type") or ""))
@@ -176,6 +369,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
               + f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
               f"{len(scored):>3} "
+              f"{_shown(shaped(one, ctx_shown=True), 32):32} "
               f"{wall_of(one):>6.0f}s "
               f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
               f"{_total(rows, 'calls'):>6.0f} "
@@ -188,11 +382,88 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_times(speedup(one, kept)):>6} "
               f"{str(server.get('finder') or '-'):>7} "
               f"{at_once(server):>5} "
-              f"{(f'{rss / 2**30:.2f}G' if rss else '-'):>9} "
+              f"{_gb(rss):>9} {_gb(server.get('footprint_peak')):>9} {wired_of(server):>8} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
-              f"{right:>5} {rec:>5} {prec:>5} {made(one):>5} {timeouts(one):>4}  "
+              f"{right:>8} {rec:>5} {prec:>5} {made(one):>5} {timeouts(one):>4}  "
               f"{sampled(server)}")
+
+
+def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
+    """One line per configuration rather than per run: the runs that were the same thing
+    measured twice, gathered, with the mean and the spread of what they measured.
+
+    A sweep leaves a table of forty lines in which the same shape appears four times, and
+    reading the difference between two of them is reading noise -- ten questions moved 15%
+    in wall clock and five points of F1 between identical runs (2026-09-02). Gathered, the
+    question becomes the one worth asking: this shape against that one, with each side's
+    band beside it, and ``n`` runs saying how much of the difference is the draw.
+
+    A group is a model, a shape (`shape_of`), an asking (`asked_as`) and a sampling: change
+    any of them and it is another measurement, which is what every column of `table` is
+    there to say. The band is the questions' own -- pooled over the group's rows, so two
+    runs of twenty are read as forty -- and the runs' spread is printed beside it as the
+    range of their means, which is the part a band over one run cannot see.
+    """
+    if not kept:
+        print("nothing kept yet")
+        return
+    grouped: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
+    for one in kept:
+        if not derived(one):
+            continue
+        model = str((one.get("server") or {}).get("model") or "?")
+        grouped.setdefault((model, shaped(one), sampled(one.get("server") or {})),
+                           []).append(one)
+    if not grouped:
+        print("nothing scored yet")
+        return
+    head = (f"{'model':22} {'shape':40} {'sampling':14} {'runs':>4} {'n':>4} {'F1':>10} "
+            f"{'spread':>8} {'rec':>5} {'prec':>5} {'s/q':>10}")
+    print(head)
+    print("-" * len(head))
+    for (model, form, how), group in sorted(grouped.items()):
+        rows = [r for one in group for r in (one.get("rows") or []) if r.get("expected")]
+        pooled = {"rows": rows}
+        got = derived(pooled)
+        means = sorted(derived(one)["right"] for one in group)
+        # what the runs themselves did, which a band over pooled questions cannot show: two
+        # runs of the same shape 8 points apart is the answer to "is this worth re-running"
+        drift = f"{(means[-1] - means[0]) * 100:.0f}" if len(means) > 1 else "-"
+        right = f"{100 * got['right']:.0f}% {band_of(pooled)}".strip()
+        each = f"{got['seconds_per_question']:.1f} " \
+               + band_of(pooled, "seconds_per_question", unit="s")
+        print(f"{_shown(model, 22):22} {form:40} {_shown(how, 14):14} "
+              f"{len(group):>4} {len(rows):>4} {right:>10} {drift:>8} "
+              f"{100 * got['recall']:>4.0f}% {100 * got['precision']:>4.0f}% "
+              f"{each.strip():>10}")
+    print("\nOne line per shape: runs of the same model, server shape, asking and sampling, "
+          "read together.")
+    print("F1's ± is the 95% interval over the group's questions; spread is how far the "
+          "runs' own means lie apart, in points.")
+
+
+def _gb(value: Any) -> str:
+    """``2.00G``, or ``-`` for a figure nothing measured. Not ``0.00G``: a run against a
+    server this machine does not own sampled nothing, and nothing is not none."""
+    return f"{int(value) / 2**30:.2f}G" if value else "-"
+
+
+def wired_of(server: Mapping[str, Any]) -> str:
+    """The machine's wired memory at its peak, and how much of it the server brought.
+
+    ``93.4G+8.1`` when a baseline was read before the load, so the second number is the
+    server's own wired cost; ``93.4G`` when the baseline was taken with it already up and
+    the difference would be a subtraction of the wrong thing. ``-`` for a run that sampled
+    nothing at all.
+    """
+    peak = server.get("wired_peak")
+    if not peak:
+        return "-"
+    base = server.get("wired_baseline")
+    if base and server.get("wired_baseline_before_load"):
+        return f"{int(peak) / 2**30:.1f}G+{(int(peak) - int(base)) / 2**30:.1f}"
+    return f"{int(peak) / 2**30:.1f}G"
 
 
 def timeouts(one: Mapping[str, Any]) -> str:
@@ -265,6 +536,16 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
               + (f", {late} timed out" if late else "") + ")"
               + (f"  speedup {_times(faster)} over draft:none ({base.get('label', '')})"
                  if faster is not None and base is not None else ""))
+        # what these questions could and could not settle, before the questions themselves:
+        # a reader about to explain a five-point difference should see the band first
+        got = derived(one)
+        if band(one) is not None:
+            print(f"  F1 {100 * got['right']:.0f}% {band_of(one)}, "
+                  f"recall {100 * got['recall']:.0f}% {band_of(one, 'recall')}, "
+                  f"precision {100 * got['precision']:.0f}% {band_of(one, 'precision')}, "
+                  f"{got['seconds_per_question']:.1f} s/q "
+                  f"{band_of(one, 'seconds_per_question', unit='s')}"
+                  f"   (95% over its own {got['questions']:.0f} questions)")
         if not shortfall:
             print("  every question answered in full")
             continue
@@ -451,11 +732,18 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
     """The `drafts` summary: what each (head, n-max) was worth, and which to serve.
 
     One row per drafted run in ``kept`` -- acceptance, seconds per question, speedup over
-    the baseline `baseline` finds in ``among`` (``kept`` itself when not given), F1 and how
-    far it moved from the baseline's -- fastest first, the rows with no baseline last. Then
-    the recommendation: the fastest whose F1 held within ``noise`` of its baseline, since a
-    head cannot change an answer and one that did has changed something else. A head that
-    fell outside the noise is on the table, not in the recommendation.
+    the baseline `baseline` finds in ``among`` (``kept`` itself when not given), F1 with the
+    interval its questions put around it, and how far it moved from the baseline's --
+    fastest first, the rows with no baseline last. Then the recommendation: the fastest
+    whose F1 held up against its baseline's, since a head cannot change an answer and one
+    that did has changed something else.
+
+    Held up is `held_up`: not separated -- the two 95% intervals overlapping -- rather than
+    within a fixed ``noise``, which is what decides where either run carries an interval. A
+    head five points down over twenty questions was called a regression and is a coin toss,
+    and the recommendation now says which of the two it is looking at. Where the head's own
+    s/q is not separated from the baseline's either, the line says that too: a speedup
+    inside the clock's own spread is not a speedup.
     """
     pool = list(among) or list(kept)
     rows = []
@@ -469,38 +757,50 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
     if not rows:
         return "no drafted run to summarise"
     rows.sort(key=lambda r: -(r[2] if r[2] is not None else -1.0))
-    head = (f"{'draft':28} {'accept':>6} {'s/q':>6} {'speed':>6} {'F1':>5} {'dF1':>5}  "
+    head = (f"{'draft':28} {'accept':>6} {'s/q':>6} {'speed':>6} {'F1':>9} {'dF1':>5}  "
             f"against")
     lines = [head, "-" * len(head)]
     for one, base, faster, mine, theirs in rows:
         got = mine.get("right")
         delta = ((got - theirs["right"]) * 100
                  if got is not None and theirs.get("right") is not None else None)
+        spread = band_of(one, "right")
         lines.append(
             f"{_shown(one.get('label', '')):28} "
             f"{drafting(one.get('rows') or []):>6} "
             f"{per_question(one):>6.1f} "
             f"{_times(faster):>6} "
-            f"{(f'{got * 100:.0f}%' if got is not None else '-'):>5} "
+            f"{(f'{got * 100:.0f}% {spread}'.strip() if got is not None else '-'):>9} "
             f"{(f'{delta:+.0f}' if delta is not None else '-'):>5}  "
             f"{base.get('label', '') if base is not None else 'no baseline'}")
-    held = [(one, faster) for one, base, faster, mine, theirs in rows
-            if faster is not None and theirs.get("right") is not None
-            and theirs["right"] - mine.get("right", 0.0) <= noise + 1e-9]
+    held = [(one, faster, base) for one, base, faster, mine, theirs in rows
+            if faster is not None and base is not None and theirs.get("right") is not None
+            and held_up(one, base, noise=noise)]
     # a head that held its F1 but is slower than no head is worth nothing: gpt-oss's eagle3
     # head accepted 65% and still ran at 0.82x, and was recommended (2026-09-02)
-    won = [pair for pair in held if pair[1] > 1.0]
+    won = [trio for trio in held if trio[1] > 1.0]
     pts = noise * 100
     if won:
-        best, faster = max(won, key=lambda pair: pair[1])
-        lines.append(f"serve {best.get('label', '')}: fastest whose F1 held within "
-                     f"{pts:g} points of its baseline, {_times(faster)}")
+        best, faster, base = max(won, key=lambda trio: trio[1])
+        apart = separated(best, base, "right")
+        # "held" stays the first words of this line whichever rule decided it: `report`'s
+        # `recommended_head` reads the recommendation back out of here rather than keeping
+        # a second copy of the rule, and a reworded line reads to it as "no head at all"
+        why = ("held -- not separated from its baseline's" if apart is False
+               else f"held within {pts:g} points of its baseline")
+        # ...and whether the speedup itself is more than the clock's own spread
+        clock = separated(best, base, "seconds_per_question")
+        lines.append(f"serve {best.get('label', '')}: fastest whose F1 {why}, "
+                     f"{_times(faster)}"
+                     + (" -- but its s/q is not separated from the baseline's either, so "
+                        "that speedup is inside the noise" if clock is False else ""))
     elif held:
-        best, faster = max(held, key=lambda pair: pair[1])
+        best, faster, base = max(held, key=lambda trio: trio[1])
         lines.append(f"serve no head: the best that held its F1, {best.get('label', '')}, "
                      f"is slower than none at {_times(faster)}")
     elif any(faster is not None for _, _, faster, _, _ in rows):
-        lines.append(f"serve no head: none held its baseline's F1 within {pts:g} points")
+        lines.append("serve no head: every head's F1 fell clear of its baseline's -- "
+                     f"separated, or, carrying no interval, more than {pts:g} points")
     else:
         lines.append("no baseline to recommend against: measure draft:none too "
                      "(pass \"\" as a head)")
