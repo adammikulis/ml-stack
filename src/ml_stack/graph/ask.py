@@ -1209,7 +1209,7 @@ def list_kind(graph: Mapping[str, Any], kind: str, *, limit: int = LISTED,
     guess at what a result may cost. With one, as many entries as that many tokens will
     carry go, most mentioned first; ``total`` still says how many there were.
     """
-    nodes = list(graph.get("nodes") or ())
+    nodes = [n for n in graph.get("nodes") or () if not (n.get("attrs") or {}).get("hidden")]
     counts: dict[str, int] = {}
     for node in nodes:
         named = _kind_of(node)

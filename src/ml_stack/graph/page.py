@@ -29,12 +29,29 @@ SHAPES = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
 FALLBACK = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
 
 
+def hidden(node: Mapping[str, Any]) -> bool:
+    """A node kept for the record rather than the map -- an ingest run, a unit -- carries
+    ``attrs.hidden``; the page and the listing tools leave it out, a question about origin
+    can still reach it through the store."""
+    return bool((node.get("attrs") or {}).get("hidden"))
+
+
+def shown(graph: Mapping[str, Any]) -> dict[str, Any]:
+    """The graph without its hidden nodes and the edges that touch them."""
+    nodes = [n for n in graph.get("nodes") or () if not hidden(n)]
+    ids = {n.get("id") for n in nodes}
+    edges = [e for e in graph.get("edges") or ()
+             if e.get("source") in ids and e.get("target") in ids]
+    return {**graph, "nodes": nodes, "edges": edges}
+
+
 def kinds_of(graph: Mapping[str, Any]) -> list[dict[str, str]]:
-    """One entry per kind the graph actually holds, in the order they first appear."""
+    """One entry per kind the graph actually holds, in the order they first appear --
+    hidden nodes' kinds left out."""
     seen: list[str] = []
     for node in graph.get("nodes") or ():
         kind = str(node.get("kind") or "")
-        if kind and kind not in seen:
+        if kind and kind not in seen and not hidden(node):
             seen.append(kind)
     return [{"k": kind, "label": kind.replace("_", " ").title() + "s",
              "shape": FALLBACK[i % len(FALLBACK)]} for i, kind in enumerate(seen)]
@@ -66,7 +83,7 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
     whatever a caller's own panels need.
     """
     template = (WEB / "graph.html").read_text(encoding="utf-8")
-    payload = {"title": title, "graph": dict(graph), "points": list(points),
+    payload = {"title": title, "graph": shown(graph), "points": list(points),
                "kinds": list(kinds) if kinds is not None else kinds_of(graph),
                "copy": dict(copy or {}), "author": author, **dict(extra or {})}
     return (template

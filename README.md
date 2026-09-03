@@ -1830,7 +1830,10 @@ idea, it names itself, and it carries its own figures.
 ```sh
 ml-stack-ingest textbook.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --chapter 2
 ml-stack-ingest ~/books/*.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --resume --detach
-ml-stack-ingest status --out ./shelf.ladybug
+ml-stack-ingest status --out ./shelf.ladybug     # how far, what failed, how long is left
+ml-stack-ingest show   --out ./shelf.ladybug     # what each book was read as
+ml-stack-ingest fold   --out ./shelf.ladybug     # every book so far into the store
+ml-stack-ingest stop                             # end the run, after it folds what it read
 ```
 
 `ml_stack.sources.pdf` does the reading. `read(path)` gives a `Document` of `Chapter`s of
@@ -1850,14 +1853,18 @@ renamed by whoever downloaded it says nothing.
 
 `ml-stack-ingest` is the other half. Each unit goes through `Client.extract` against
 `contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
-*in the book's words or empty*, relations from a closed vocabulary of fourteen verb phrases,
+*in the book's words or empty*, relations from a closed vocabulary of eighteen glossed verb phrases,
 what each figure shows and which concepts it illustrates, and the key terms -- and the
 extractions are folded into one graph per book with `entities.fold`, so `has_part` and
 `haspart` are one relationship and a plural folds into the spelling the book uses more. Nodes
-and edges go into one `GraphStore`, every one of them carrying the book, chapter, section and
-page it was read from: a claim in a knowledge graph with no page behind it is a claim nobody
-can check. Each extraction's `ml_stack.telemetry.Call` is kept, so "the shelf took nine
-hours" breaks down into which book, which section and how much of it was prompt.
+and edges go into one `GraphStore`, every one of them *pointing at* the units it was read
+from -- `provenance` is unit ids and nothing else, the unit document holds the book,
+chapter, section and pages, and points in turn at the hidden `run` node that read it: the
+model, its build and head, sampling, the schema and instructions hashes, the version, the
+host, when. `located()` and `origin()` walk the pointers back to a page and a model, so a
+claim in a knowledge graph always has a page and a model behind it, without a string
+copied onto every node. Each extraction's `ml_stack.telemetry.Call` is kept, so "the shelf
+took nine hours" breaks down into which book, which section and how much of it was prompt.
 
 The model is served the way the bench serves one: `--model` takes a lease for the whole run
 in the shape its profile measured (`--no-profile` serves it bare), or `--base-url` uses a
@@ -1866,8 +1873,53 @@ pictures rather than only their captions -- the `_images` convention `graph.ask`
 without a projector the captions are all it gets, which it says rather than pretending
 otherwise. A shelf is hours, so `--detach` runs it in its own session with a log under
 `~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,
-`--resume` skips those, and `status` says how many sections of how many books are done and at
-what rate.
+`--resume` skips those, and `status` says how many sections of how many books are done, at
+what rate, what is in the store, and how long the rest will take.
+
+### A book is readable before it is finished
+
+A shelf of a few thousand sections is days at eighty-odd seconds a section, and a book that
+is only in the store once it is finished is a book nobody can ask about until then. Each
+unit's extraction lands in `<store>.<slug>.reads.json` the moment it comes back, and the
+book so far is folded and written into the store as the run goes -- at a chapter's end once
+twenty-five sections have gone by since the last fold, and inside a chapter longer than
+fifty. Writing a book is an upsert and nothing more -- a node the store lacks is added, one
+it has takes the fold's mentions, aliases, definition and provenance, an edge likewise, and
+nothing is merged or removed: a knowledge graph is updated by adding to it. Joining
+duplicates is a separate pass (`ml_stack.graph.tidy`), and `fold --rebuild` -- the book's
+own nodes and edges out, then the full fold from its reads -- is the one path that removes
+anything, for after a fix that changed what a read means. `fold --dry-run` says what a fold
+would add and writes nothing.
+
+The interval is a measured cost rather than a formality. The fold is `entities.fold`
+comparing every concept name against every other, so it grows with the square of the
+vocabulary: 400 invented sections of a twelve-word vocabulary fold and write in 3.8 s, and
+300 sections of a 2,700-word one take 44 s to fold and 9 s to write.
+
+`ml-stack-ingest fold --out STORE [--book SLUG]` does the same from the shelf on demand, and
+is idempotent. `show` prints what each book was read as -- concepts with their kind and
+definition, relations with their verb and the page behind them, the spellings and plurals
+the fold joined, how many figures -- and says which books are partial. `stop` ends a
+detached run: it raises inside the section being read, folds the book so far, and exits, and
+the command waits for it and says whether the fold landed.
+
+`Shelf` is the same thing for an application:
+
+```python
+from ml_stack.ingest import Shelf
+
+shelf = Shelf("./shelf.ladybug")
+for book in shelf.books():
+    print(book.slug, book.read, "of", book.wanted, "partial" if book.partial else "")
+
+graph = shelf.graph("velthorne-open-texts")   # folded from the reads: no store, no PDF
+with shelf.store() as store:                  # read-only, beside the running writer
+    store.nodes(kind="concept")
+```
+
+A unit that failed contributes nothing to the fold -- what a cut-off reply wrote is kept for
+reading, not for believing -- and every file beside the store is written through a rename,
+so a kill in the middle of one leaves the file that was there.
 
 ### Whether it does a good job
 
