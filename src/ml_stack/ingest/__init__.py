@@ -163,6 +163,7 @@ from ml_stack.ingest.run import (
 from ml_stack.ingest.serving import (
     _alive as _alive,
     _find_model as _find_model,
+    _run as _run,
     _serving as _serving,
     _serving_said as _serving_said,
 )
