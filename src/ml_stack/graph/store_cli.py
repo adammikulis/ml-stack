@@ -69,6 +69,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="rewrite a doc a scan reads empty while a lookup by key reads it whole")
     docs = sub.add_parser("docs", help="list the documents with their sizes")
     docs.add_argument("path", type=Path, help="the store directory")
+    hygiene = sub.add_parser(
+        "tidy", help="the hygiene pass: merge duplicate nodes and edges, fold inverse pairs, "
+                     "flag doubtful labels, report conflicts and orphans -- dry unless --apply")
+    hygiene.add_argument("path", type=Path, help="the store directory")
+    hygiene.add_argument("--apply", action="store_true",
+                         help="write the merges, folds and flags; without it, say what would be done")
+    hygiene.add_argument("--written", type=Path, default=None, metavar="FILE",
+                         help="a JSON object {name: the name it is} -- the possible duplicates "
+                              "a person settled; applied whatever the weights")
     args = parser.parse_args(argv)
 
     path = args.path.expanduser()
@@ -78,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "check":
             return _check(path, args.fix)
+        if args.command == "tidy":
+            from ml_stack.graph.tidy import tidy, written_from
+
+            tidy(path, dry_run=not args.apply, written=written_from(args.written), log=print)
+            return 0
         return _docs(path)
     except StoreNeedsUpgrade as why:
         print(str(why), file=sys.stderr)

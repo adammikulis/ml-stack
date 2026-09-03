@@ -49,7 +49,8 @@ from typing import Any
 
 from ml_stack.entities.fold import ESTABLISHED, fold_edges
 
-__all__ = ["INVERSES", "Report", "canonical_direction", "plurals", "same_name", "suspect", "tidy"]
+__all__ = ["INVERSES", "Report", "canonical_direction", "plurals", "same_name", "suspect", "tidy",
+           "written_from"]
 
 # The direction a fact is kept in, and the verbs that say the same thing the other way.
 INVERSES: dict[str, frozenset[str]] = {
@@ -103,6 +104,19 @@ class Report:
                 f"{len(self.possible)} possible duplicate(s) by spelling left for a person, "
                 f"{len(self.conflicts)} verb conflict(s), {len(self.orphans)} orphan(s), "
                 f"{len(self.self_loops)} self-loop(s) reported")
+
+
+def written_from(path: str | Path | None) -> dict[str, str]:
+    """The duplicates a person settled, from a JSON file ``{name: the name it is}``; an
+    empty map when no file is named. A file that is not that shape is an error said plainly."""
+    import json
+
+    if not path:
+        return {}
+    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    if not isinstance(held, dict) or not all(isinstance(v, str) for v in held.values()):
+        raise ValueError(f"{path}: expected a JSON object of name -> name")
+    return {str(k): v for k, v in held.items()}
 
 
 def plurals(names: Iterable[str]) -> dict[str, str]:

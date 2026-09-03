@@ -1729,6 +1729,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--apply", action="store_true",
                     help="with tidy: write the merges, folds and flags; without it, say what "
                          "would be done")
+    ap.add_argument("--written", default="", metavar="FILE",
+                    help="with tidy: a JSON object {name: the name it is} -- the possible "
+                         "duplicates a person settled")
     ap.add_argument("--rebuild", action="store_true",
                     help="with fold: drop each book's own nodes and edges first and write the "
                          "full fold from its reads -- the only way anything leaves the store, "
@@ -1801,8 +1804,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             # the hygiene pass is graph.tidy's -- a shelf, a Slack community, any store --
             # and lives beside the fold here only so the shelf's commands are in one place
             from ml_stack.graph.tidy import tidy as hygiene
+            from ml_stack.graph.tidy import written_from
 
-            hygiene(args.out, dry_run=not args.apply, log=print)
+            hygiene(args.out, dry_run=not args.apply, written=written_from(args.written),
+                    log=print)
             return 0
         return status(args.out)
     if not args.docs and not args.gold:

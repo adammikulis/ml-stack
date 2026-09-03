@@ -156,3 +156,19 @@ def test_the_store_and_ingest_commands_run_the_pass_dry_unless_told_to_apply(tmp
     assert ingest.main(["tidy", "--out", str(path), "--apply"]) == 0
     assert "merged 1 node(s)" in capsys.readouterr().out
     assert set(_ids(path)[0]) == {"concept:acid"}
+
+
+def test_a_written_file_settles_possible_duplicates_from_the_command_line(tmp_path, capsys):
+    import json
+
+    from ml_stack.graph import store_cli
+
+    path = _store(tmp_path, [_node("concept:glimmer-node", "glimmer node", mentions=4),
+                             _node("concept:glimer-node", "glimer node", mentions=1)], [])
+    assert store_cli.main(["tidy", str(path), "--apply"]) == 0
+    assert "1 possible duplicate" in capsys.readouterr().out
+    assert set(_ids(path)[0]) == {"concept:glimmer-node", "concept:glimer-node"}
+    decided = tmp_path / "written.json"
+    decided.write_text(json.dumps({"glimer node": "glimmer node"}))
+    assert store_cli.main(["tidy", str(path), "--apply", "--written", str(decided)]) == 0
+    assert set(_ids(path)[0]) == {"concept:glimmer-node"}
