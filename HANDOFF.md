@@ -17,7 +17,9 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
 The queues of 2026-09-02 are in the record: `docs/report-2026-09-02.md` (with its
 Extraction section), `docs/model-ranking.md`, `profiles.json`, `fit.json`,
 `docs/architectures/qwen4exp.md`. Settled tonight: draft length 4 for answering *and*
-extraction (6 equal, 8 slower, on both); no per-workload draft field. Single and few on the
+extraction (6 equal, 8 slower, on both; and on textbook units, where the head is accepted
+97% of the time, 4 / 8 / 12 decoded at 50.6 / 44.5 / 48.5 tok/s -- `ml-stack-ingest --n-max`
+measures it); no per-workload draft field. Single and few on the
 small models at ten questions: `single` +8 pts on E4B (59 vs 51), +3 on E2B, +2 on
 gpt-oss-20b, all inside ±28 bands; `few` loses 20-30 pts everywhere; `--rounds 8` changed
 nothing (the extra turns went unused).
