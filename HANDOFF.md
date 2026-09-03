@@ -38,11 +38,15 @@ nothing (the extra turns went unused).
   command. First things seen: a person `created_by` a method (the verb's direction
   reversed by the model -- gloss it with the person on the right), and relations across
   books never joined (each book folds alone; a fold across the shelf is the next step).
-- [ ] **Watch for units that still run to the ceiling.** The two that did on the first
-  night were chapter-end question banks (one part carried 66 lettered answers); `pdf.units`
-  now leaves those out and the ingest says how many. A unit that still fails keeps its
-  whole reply in the reads file beside the store (`raw`), so read that before spending GPU
-  on it. If any remains, try DRY sampling for extraction and measure it on the gold gate.
+- [ ] **Watch for units that still run to the ceiling.** Two causes found and fixed on the
+  first night: chapter-end question banks (`pdf.units` leaves them out) and a greedy
+  decode circling a long relations array (63 clean concepts, then 378 relations of which
+  282 were distinct, until n_predict) -- the document schema now caps every list
+  (`maxItems`), so the grammar closes the array. A unit that still fails is read once
+  more, then given up on; `status` counts those, its whole reply is `raw` in the reads
+  file beside the store, and `ml-stack-ingest retry --out STORE` frees them after a fix.
+  If one still circles under the cap, try DRY sampling for extraction and measure it on
+  the gold gate.
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change tonight
   that moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
