@@ -304,6 +304,22 @@ class GraphStore:
 
     # -- writing
 
+    def _written(self, cypher: str) -> str:
+        """A write statement's text, made unique for this execution.
+
+        ladybug 0.20 caches the physical plan of a parameterized statement by its text and
+        re-executes it on a fast path. Re-executing the store's edge MERGE after the node
+        table it matches against was rewritten reused state the rewrite had invalidated and
+        segfaulted (measured 2026-09-03: `write(GRAPH)` twice; nodes-only twice fine, edges
+        alone twice fine, a transaction boundary between them no help, the same statement
+        with a comment appended per execution fine). A comment carrying a counter makes
+        each write its own text, so no plan is ever reused for a write; reads keep theirs.
+        The cost is one plan compile per write, which is what every version before 0.20
+        paid anyway.
+        """
+        self._writes = getattr(self, "_writes", 0) + 1
+        return f"{cypher} /* w{self._writes} */"
+
     @contextmanager
     def transaction(self):
         """Everything inside lands together, or none of it does."""
@@ -335,9 +351,9 @@ class GraphStore:
                 "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
                 "attrs": _json(node.get("attrs")),
                 "data": _json({k: v for k, v in node.items() if k not in NODE_COLUMNS})}
-        self._conn.execute(
+        self._conn.execute(self._written(
             "MERGE (n:Node {id: $id}) SET n.kind=$kind, n.label=$label, "
-            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data", sent)
+            "n.mentions=$mentions, n.attrs=$attrs, n.data=$data"), sent)
         back = self.query(NODE_BY_ID, {"id": sent["id"]})
         if not back or back[0] != sent:
             raise StoreMismatch(
@@ -349,10 +365,10 @@ class GraphStore:
         sent = {"s": str(edge["source"]), "t": str(edge["target"]),
                 "rel": str(edge.get("rel") or ""), "weight": int(edge.get("weight") or 1),
                 "data": _json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})}
-        rows = self.query(
+        rows = self.query(self._written(
             "MATCH (a:Node {id:$s}), (b:Node {id:$t}) "
             "MERGE (a)-[e:Edge {rel:$rel}]->(b) SET e.weight=$weight, e.data=$data "
-            "RETURN e.rel AS rel, e.weight AS weight, e.data AS data", sent)
+            "RETURN e.rel AS rel, e.weight AS weight, e.data AS data"), sent)
         if not rows:
             return False
         # the RETURN reads the edge after the SET, which is a read-back for free
@@ -403,7 +419,7 @@ class GraphStore:
         """Give a node a different label. False when it is not in the store."""
         if not self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": str(node_id)}):
             return False
-        self._conn.execute("MATCH (n:Node {id:$id}) SET n.label = $label",
+        self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.label = $label"),
                            {"id": str(node_id), "label": str(label)})
         return True
 
@@ -414,7 +430,7 @@ class GraphStore:
             return False
         attrs = _unjson(rows[0]["attrs"])
         attrs[str(name)] = value
-        self._conn.execute("MATCH (n:Node {id:$id}) SET n.attrs = $attrs",
+        self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.attrs = $attrs"),
                            {"id": str(node_id), "attrs": _json(attrs)})
         return True
 
@@ -425,8 +441,8 @@ class GraphStore:
             {"s": str(source), "t": str(target), "rel": str(rel)})
         if not found:
             return False
-        self._conn.execute(
-            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) DELETE e",
+        self._conn.execute(self._written(
+            "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) DELETE e"),
             {"s": str(source), "t": str(target), "rel": str(rel)})
         return True
 
@@ -457,7 +473,7 @@ class GraphStore:
         documents can afford, and a store of measurements cannot afford to be without.
         """
         raw = _json(value)
-        self._conn.execute("MERGE (d:Doc {key: $key}) SET d.value = $value",
+        self._conn.execute(self._written("MERGE (d:Doc {key: $key}) SET d.value = $value"),
                            {"key": str(key), "value": raw})
         back = self.get_doc(str(key), _MISSING)
         if back is _MISSING or back != _unjson(raw):
@@ -473,7 +489,7 @@ class GraphStore:
         """Take one document out. False when there was none under that key."""
         if not self.query("MATCH (d:Doc {key:$key}) RETURN d.key AS key", {"key": str(key)}):
             return False
-        self._conn.execute("MATCH (d:Doc {key:$key}) DELETE d", {"key": str(key)})
+        self._conn.execute(self._written("MATCH (d:Doc {key:$key}) DELETE d"), {"key": str(key)})
         return True
 
     def doc_keys(self) -> list[str]:
@@ -671,7 +687,7 @@ class GraphStore:
         self._extension("vector")
         key = f"{node_id}\u0000{model}"
         if self.query("MATCH (e:Embedding {id:$id}) RETURN e.id AS id", {"id": key}):
-            self._conn.execute("MATCH (e:Embedding {id:$id}) SET e.vector = $v",
+            self._conn.execute(self._written("MATCH (e:Embedding {id:$id}) SET e.vector = $v"),
                                {"id": key, "v": values})
         else:
             self._conn.execute(
@@ -723,15 +739,19 @@ class GraphStore:
                 {"q": str(text), "k": int(limit)})
         except RuntimeError:
             return []                 # no index yet, which is not the same as no match
-        return rows[:limit]
+        # ladybug 0.20 hands a node back once per version it was written -- an upsert
+        # that MERGEd twice reads twice from the index -- so one row per id, first wins
+        seen: set[str] = set()
+        unique = [r for r in rows if not (r.get("id") in seen or seen.add(r.get("id")))]
+        return unique[:limit]
 
     # -- files that belong to something in the graph
 
     def add_asset(self, asset_id: str, node_id: str, blob: bytes, *, mime: str = "",
                   meta: Mapping[str, Any] | None = None) -> None:
         """Keep a file with the node it belongs to."""
-        self._conn.execute(
-            "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta",
+        self._conn.execute(self._written(
+            "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta"),
             {"id": str(asset_id), "n": str(node_id), "m": str(mime), "b": bytes(blob),
              "meta": _json(meta)})
 
@@ -781,6 +801,6 @@ class GraphStore:
         with self.transaction():
             for node_id in wanted:
                 if self.query("MATCH (n:Node {id:$id}) RETURN n.id", {"id": node_id}):
-                    self._conn.execute("MATCH (n:Node {id:$id}) DETACH DELETE n", {"id": node_id})
+                    self._conn.execute(self._written("MATCH (n:Node {id:$id}) DETACH DELETE n"), {"id": node_id})
                     gone += 1
         return gone
