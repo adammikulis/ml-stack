@@ -172,3 +172,23 @@ def test_a_written_file_settles_possible_duplicates_from_the_command_line(tmp_pa
     decided.write_text(json.dumps({"glimer node": "glimmer node"}))
     assert store_cli.main(["tidy", str(path), "--apply", "--written", str(decided)]) == 0
     assert set(_ids(path)[0]) == {"concept:glimmer-node"}
+
+
+def test_a_merge_keeps_both_definitions_rather_than_the_one_it_found_first(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:vault", "vault", mentions=5, definition="that holds plates"),
+        _node("concept:vaults", "vaults", mentions=2,
+              definition="a housing that holds a stack of lattice plates"),
+        _node("concept:ring", "ring", mentions=4, definition="a closed loop"),
+        _node("concept:rings", "rings", mentions=1, definition="a closed loop of lattice"),
+    ], [])
+    report = tidy(path, dry_run=False)
+    assert report.merged_nodes == 2 and report.definitions_judged == 0
+    nodes, _edges = _ids(path)
+    vault = nodes["concept:vault"]["attrs"]
+    assert vault["definition"] == "a housing that holds a stack of lattice plates", \
+        "the longer one that does not read as half a sentence"
+    assert vault["definitions_also"] == ["that holds plates"], "nothing is lost"
+    ring = nodes["concept:ring"]["attrs"]
+    assert ring["definition"] == "a closed loop of lattice"
+    assert not ring.get("definitions_also"), "one is the start of the other: not a second"

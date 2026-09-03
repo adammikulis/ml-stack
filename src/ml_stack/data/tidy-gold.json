@@ -1,0 +1,254 @@
+{
+  "about": "Pairs of names for scoring ml_stack.graph.tidy's judge. Every name, definition and passage is invented -- an imagined field of glimmer nodes, vault currents and thrum coils -- so a score is about the judge and never about what a model happens to have memorised. `class` says what the pair is meant to test; `verdict` is the right answer; `passages` is what each name was read from, reachable through each side's provenance.",
+  "classes": {
+    "same": "the names alone settle it: a typo, a hyphenation, a capitalisation, a synonym",
+    "different": "the names alone settle it: an isomer-shaped pair, a numbered form, a subtype",
+    "unsure-then-same": "the names cannot settle it; the passages say they are one thing",
+    "unsure-then-different": "the names cannot settle it; the passages say they are two"
+  },
+  "pairs": [
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "glimmer node", "kind": "concept", "mentions": 14, "definition": "a point of the lattice that holds charge between pulses", "provenance": ["gold:glimmer-node"]},
+      "b": {"label": "glimer node", "kind": "concept", "mentions": 2, "provenance": ["gold:glimer-node"]},
+      "passages": {
+        "gold:glimmer-node": "Each glimmer node holds charge between pulses. A lattice of glimmer nodes carries the charge from one rim to the other.",
+        "gold:glimer-node": "The glimer node holds charge between pulses, and a lattice of them carries it across."
+      }
+    },
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "flux-ring", "kind": "concept", "mentions": 9, "definition": "a closed loop of lattice that carries a standing current", "provenance": ["gold:flux-ring"]},
+      "b": {"label": "flux ring", "kind": "concept", "mentions": 5, "provenance": ["gold:flux-ring-2"]},
+      "passages": {
+        "gold:flux-ring": "A flux-ring is a closed loop of lattice carrying a standing current.",
+        "gold:flux-ring-2": "The flux ring, written with or without the hyphen, is the closed loop that carries the standing current."
+      }
+    },
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "Vault Current", "kind": "concept", "mentions": 7, "definition": "the current that runs the length of a vault", "provenance": ["gold:vault-current"]},
+      "b": {"label": "vault current", "kind": "concept", "mentions": 6, "provenance": ["gold:vault-current-2"]},
+      "passages": {
+        "gold:vault-current": "The Vault Current runs the whole length of a vault and reverses at each rim.",
+        "gold:vault-current-2": "In the tables the vault current is given per rim rather than per vault."
+      }
+    },
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "thrum coil", "kind": "concept", "mentions": 8, "definition": "a winding that turns a vault current into a standing hum", "provenance": ["gold:thrum-coil"]},
+      "b": {"label": "thrumm coil", "kind": "concept", "mentions": 1, "provenance": ["gold:thrumm-coil"]},
+      "passages": {
+        "gold:thrum-coil": "A thrum coil is the winding that turns a vault current into a standing hum.",
+        "gold:thrumm-coil": "The thrumm coil turns the vault current into a standing hum."
+      }
+    },
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "quill-bore", "kind": "concept", "mentions": 6, "definition": "the narrow channel cut through a lattice plate", "provenance": ["gold:quill-bore"]},
+      "b": {"label": "quillbore", "kind": "concept", "mentions": 3, "provenance": ["gold:quillbore"]},
+      "passages": {
+        "gold:quill-bore": "The quill-bore is the narrow channel cut through a lattice plate.",
+        "gold:quillbore": "A quillbore, cut through the plate, is narrow enough to hold one thread of current."
+      }
+    },
+    {
+      "class": "same",
+      "verdict": "same",
+      "a": {"label": "sablon", "kind": "concept", "mentions": 11, "definition": "the grey mineral the lattice plates are ground from", "provenance": ["gold:sablon"]},
+      "b": {"label": "sablonn", "kind": "concept", "mentions": 1, "provenance": ["gold:sablonn"]},
+      "passages": {
+        "gold:sablon": "Sablon is the grey mineral the lattice plates are ground from.",
+        "gold:sablonn": "Sablonn, the grey mineral, is ground into plates."
+      }
+    },
+
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "sylvane", "kind": "concept", "mentions": 9, "definition": "a light lattice binder with a single ring", "provenance": ["gold:sylvane"]},
+      "b": {"label": "sylvene", "kind": "concept", "mentions": 7, "definition": "a lattice binder with a double ring, which does not conduct", "provenance": ["gold:sylvene"]},
+      "passages": {
+        "gold:sylvane": "Sylvane has one ring and conducts along the plate.",
+        "gold:sylvene": "Sylvene carries a second ring in place of the first bond, and conducts nothing; the pair are told apart by that ring alone."
+      }
+    },
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "flux ring 1", "kind": "concept", "mentions": 4, "definition": "the inner standing loop of a vault", "provenance": ["gold:flux-ring-1"]},
+      "b": {"label": "flux ring 2", "kind": "concept", "mentions": 4, "definition": "the outer standing loop of a vault", "provenance": ["gold:flux-ring-2n"]},
+      "passages": {
+        "gold:flux-ring-1": "Flux ring 1 is the inner loop, nearest the core.",
+        "gold:flux-ring-2n": "Flux ring 2 lies outside flux ring 1 and turns the other way."
+      }
+    },
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "kestrel-8B", "kind": "concept", "mentions": 5, "definition": "the eight-billion-weight reader used on the shelf", "provenance": ["gold:kestrel-8b"]},
+      "b": {"label": "kestrel-8C", "kind": "concept", "mentions": 3, "definition": "a later reader of the same size with a different vocabulary", "provenance": ["gold:kestrel-8c"]},
+      "passages": {
+        "gold:kestrel-8b": "The kestrel-8B reader was measured over the whole shelf.",
+        "gold:kestrel-8c": "kestrel-8C is the same size as kestrel-8B but carries a different vocabulary and is scored apart from it."
+      }
+    },
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "marrow lattice", "kind": "concept", "mentions": 6, "definition": "the soft inner lattice of a vault plate", "provenance": ["gold:marrow-lattice"]},
+      "b": {"label": "narrow lattice", "kind": "concept", "mentions": 5, "definition": "a lattice cut to less than one bore in width", "provenance": ["gold:narrow-lattice"]},
+      "passages": {
+        "gold:marrow-lattice": "The marrow lattice is the soft inner lattice of a plate.",
+        "gold:narrow-lattice": "A narrow lattice is any lattice cut to less than one bore across, whatever it is made of."
+      }
+    },
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "thrum coil", "kind": "concept", "mentions": 8, "definition": "the winding that turns a vault current into a standing hum", "provenance": ["gold:thrum-coil-b"]},
+      "b": {"label": "thrum core", "kind": "concept", "mentions": 4, "definition": "the sablon rod a thrum coil is wound around", "provenance": ["gold:thrum-core"]},
+      "passages": {
+        "gold:thrum-coil-b": "The thrum coil is the winding itself.",
+        "gold:thrum-core": "The thrum core is the sablon rod the coil is wound around; coil and core are fitted together but bought apart."
+      }
+    },
+    {
+      "class": "different",
+      "verdict": "different",
+      "a": {"label": "glimmer node", "kind": "concept", "mentions": 14, "definition": "a point of the lattice that holds charge", "provenance": ["gold:glimmer-node-b"]},
+      "b": {"label": "glimmer nodule", "kind": "concept", "mentions": 3, "definition": "a bead of spare sablon left on a plate after grinding", "provenance": ["gold:glimmer-nodule"]},
+      "passages": {
+        "gold:glimmer-node-b": "A glimmer node holds charge at a point of the lattice.",
+        "gold:glimmer-nodule": "A glimmer nodule is a bead of spare sablon left on the plate after grinding; it holds no charge and is scraped off."
+      }
+    },
+
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "cinder vault", "kind": "concept", "mentions": 7, "provenance": ["gold:cinder-vault"]},
+      "b": {"label": "cinder vaulf", "kind": "concept", "mentions": 1, "provenance": ["gold:cinder-vaulf"]},
+      "passages": {
+        "gold:cinder-vault": "A cinder vault is the housing that holds a stack of lattice plates.",
+        "gold:cinder-vaulf": "The cinder vaulf -- a misprint for cinder vault, corrected in the second edition -- holds a stack of plates."
+      }
+    },
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "glimmer point", "kind": "concept", "mentions": 3, "provenance": ["gold:glimmer-point"]},
+      "b": {"label": "glimmer node", "kind": "concept", "mentions": 14, "provenance": ["gold:glimmer-node-c"]},
+      "passages": {
+        "gold:glimmer-point": "The glimmer point is what older editions call the glimmer node; the term was changed but the thing was not.",
+        "gold:glimmer-node-c": "A glimmer node holds charge at a point of the lattice."
+      }
+    },
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "vault flux", "kind": "concept", "mentions": 2, "provenance": ["gold:vault-flux"]},
+      "b": {"label": "vault current", "kind": "concept", "mentions": 9, "provenance": ["gold:vault-current-c"]},
+      "passages": {
+        "gold:vault-flux": "Vault flux is the first edition's name for what this book calls the vault current; the two are one quantity, measured the same way.",
+        "gold:vault-current-c": "The vault current runs the length of a vault and reverses at each rim."
+      }
+    },
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "dram coil", "kind": "concept", "mentions": 4, "provenance": ["gold:dram-coil"]},
+      "b": {"label": "drum coil", "kind": "concept", "mentions": 3, "provenance": ["gold:drum-coil"]},
+      "passages": {
+        "gold:dram-coil": "The dram coil is the short winding at the rim of a vault.",
+        "gold:drum-coil": "Chapter two prints drum coil for dram coil throughout; the same short rim winding is meant in both places."
+      }
+    },
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "tessel loop", "kind": "concept", "mentions": 3, "provenance": ["gold:tessel-loop"]},
+      "b": {"label": "tessel ring", "kind": "concept", "mentions": 6, "provenance": ["gold:tessel-ring"]},
+      "passages": {
+        "gold:tessel-loop": "A tessel loop, or tessel ring, is the six-sided circuit cut into a plate; either name is used.",
+        "gold:tessel-ring": "The tessel ring is the six-sided circuit cut into a plate."
+      }
+    },
+    {
+      "class": "unsure-then-same",
+      "verdict": "same",
+      "a": {"label": "ember lattice", "kind": "concept", "mentions": 5, "provenance": ["gold:ember-lattice"]},
+      "b": {"label": "emberweave lattice", "kind": "concept", "mentions": 2, "provenance": ["gold:emberweave"]},
+      "passages": {
+        "gold:ember-lattice": "The ember lattice is the warm-grade lattice used near a rim.",
+        "gold:emberweave": "Emberweave lattice is the trade name for the ember lattice; the plates are cut from the same stock to the same grade."
+      }
+    },
+
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "vault current", "kind": "concept", "mentions": 9, "provenance": ["gold:vault-current-d"]},
+      "b": {"label": "vault countercurrent", "kind": "concept", "mentions": 3, "provenance": ["gold:vault-countercurrent"]},
+      "passages": {
+        "gold:vault-current-d": "The vault current runs the length of a vault from core to rim.",
+        "gold:vault-countercurrent": "The vault countercurrent is a separate flow running rim to core against the vault current; the two are measured on different rims and never summed."
+      }
+    },
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "ember mesh", "kind": "concept", "mentions": 4, "provenance": ["gold:ember-mesh"]},
+      "b": {"label": "ember lattice", "kind": "concept", "mentions": 5, "provenance": ["gold:ember-lattice-d"]},
+      "passages": {
+        "gold:ember-mesh": "An ember mesh is a coarse screen laid over a plate to catch grinding dust; it holds no charge.",
+        "gold:ember-lattice-d": "The ember lattice is the warm-grade lattice that carries charge near a rim. It is not the mesh laid over it."
+      }
+    },
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "quill bore", "kind": "concept", "mentions": 6, "provenance": ["gold:quill-bore-d"]},
+      "b": {"label": "quill borer", "kind": "concept", "mentions": 2, "provenance": ["gold:quill-borer"]},
+      "passages": {
+        "gold:quill-bore-d": "The quill bore is the narrow channel cut through a lattice plate.",
+        "gold:quill-borer": "The quill borer is the hand tool that cuts the bore; tool and hole are listed apart in the parts table."
+      }
+    },
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "tessel ring", "kind": "concept", "mentions": 6, "provenance": ["gold:tessel-ring-d"]},
+      "b": {"label": "tessel ridge", "kind": "concept", "mentions": 2, "provenance": ["gold:tessel-ridge"]},
+      "passages": {
+        "gold:tessel-ring-d": "The tessel ring is the six-sided circuit cut into a plate.",
+        "gold:tessel-ridge": "The tessel ridge is the raised sablon rim standing around the ring; the ridge is what is ground away, the ring is what is kept."
+      }
+    },
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "pellum drift", "kind": "concept", "mentions": 5, "provenance": ["gold:pellum-drift"]},
+      "b": {"label": "pellum drag", "kind": "concept", "mentions": 3, "provenance": ["gold:pellum-drag"]},
+      "passages": {
+        "gold:pellum-drift": "Pellum drift is the slow wander of a standing current across a plate over hours.",
+        "gold:pellum-drag": "Pellum drag is the loss a current takes crossing a bore, measured in the same units but at a single instant; drift and drag are reported in separate columns."
+      }
+    },
+    {
+      "class": "unsure-then-different",
+      "verdict": "different",
+      "a": {"label": "sablon plate", "kind": "concept", "mentions": 8, "provenance": ["gold:sablon-plate"]},
+      "b": {"label": "sablon platen", "kind": "concept", "mentions": 2, "provenance": ["gold:sablon-platen"]},
+      "passages": {
+        "gold:sablon-plate": "A sablon plate is the ground disc the lattice is cut into.",
+        "gold:sablon-platen": "The sablon platen is the flat bed the plate is laid on while it is cut; one is the work and the other the bench."
+      }
+    }
+  ]
+}

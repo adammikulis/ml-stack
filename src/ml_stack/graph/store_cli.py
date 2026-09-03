@@ -3,6 +3,8 @@
     ml-stack-store check PATH          # every doc, node and edge by key and by scan
     ml-stack-store check PATH --fix    # and rewrite the docs a scan reads empty
     ml-stack-store docs PATH           # the documents, with their sizes
+    ml-stack-store tidy PATH --apply   # the hygiene pass over a whole store
+    ml-stack-store tidy --gold --base-url URL --fail-under 0.8   # score the judge
 
 Measured 2026-09-01: twelve bench runs read back empty through a full scan of ``Doc.value``
 while a lookup by key returned them whole, and nothing in the store said so. ``check``
@@ -57,6 +59,23 @@ def _docs(path: Path) -> int:
     return 0
 
 
+def _gold(gold: str, base_url: str, fail_under: float) -> int:
+    from ml_stack.graph.tidy import judge_gold, load_gold
+
+    if not base_url:
+        print("--gold needs --base-url: a model already serving to answer the pairs",
+              file=sys.stderr)
+        return 2
+    from ml_stack.client import Client
+
+    scored = judge_gold(Client(base_url, n_predict=1024), load_gold(gold or None), log=print)
+    if fail_under and scored.accuracy < fail_under:
+        print(f"below the bar: {scored.accuracy:.0%} of {scored.total} against "
+              f"{fail_under:.0%}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="ml-stack-store",
@@ -72,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
     hygiene = sub.add_parser(
         "tidy", help="the hygiene pass: merge duplicate nodes and edges, fold inverse pairs, "
                      "flag doubtful labels, report conflicts and orphans -- dry unless --apply")
-    hygiene.add_argument("path", type=Path, help="the store directory")
+    hygiene.add_argument("path", type=Path, nargs="?", help="the store directory")
     hygiene.add_argument("--apply", action="store_true",
                          help="write the merges, folds and flags; without it, say what would be done")
     hygiene.add_argument("--written", type=Path, default=None, metavar="FILE",
@@ -83,8 +102,18 @@ def main(argv: list[str] | None = None) -> int:
                               "from what it knows; with one the pass is automated and applies "
                               "what it decides (ml-stack-ingest tidy --model also re-reads the "
                               "source passages)")
+    hygiene.add_argument("--gold", nargs="?", const="", default=None, metavar="FILE",
+                         help="score the judge instead of tidying a store: pairs whose right "
+                              "verdicts are known, accuracy overall and per class, and how many "
+                              "needed the source passages (the shipped set when no file is named)")
+    hygiene.add_argument("--fail-under", type=float, default=0.0, metavar="F",
+                         help="with --gold: exit 1 when accuracy is under F (0-1)")
     args = parser.parse_args(argv)
 
+    if args.command == "tidy" and args.gold is not None:
+        return _gold(args.gold, args.base_url, args.fail_under)
+    if args.path is None:
+        parser.error("the store directory is needed")
     path = args.path.expanduser()
     if not path.exists():
         print(f"{path}: no store there", file=sys.stderr)
