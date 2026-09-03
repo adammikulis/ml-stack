@@ -1090,9 +1090,12 @@ def _read_run(args: Any) -> int:
                 wanted = wanted[:args.sample]
             slug = document.slug
             progress.book(slug, title=document.title, path=str(where), sections=len(wanted))
+            banks = pdf.question_banks(document, **({"max_tokens": args.max_tokens}
+                                                    if args.max_tokens else {}))
             print(f"{document.title}: {len(document.chapters)} chapter(s), "
                   f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
                   f"the {document.how}" + (", OpenStax" if document.openstax else "")
+                  + (f", {banks} question-bank part(s) skipped" if banks else "")
                   + f" -- read in {time.time() - began:.0f}s")
 
             units_by_id = {unit.id: unit for unit in wanted}

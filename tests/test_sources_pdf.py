@@ -242,3 +242,39 @@ def test_reading_the_same_book_twice_gives_the_same_units(tmp_path):
     first = [(u.id, u.text) for u in pdf.units(pdf.read(where))]
     second = [(u.id, u.text) for u in pdf.units(pdf.read(where))]
     assert first == second
+
+
+def test_a_chapter_end_question_bank_is_not_a_unit():
+    """An AP book's section 5.4 had a part with 66 lettered answers; the extractor ran to
+    the ceiling on it twice. It is questions restating the prose, not prose."""
+    from ml_stack.sources.pdf import is_question_bank
+
+    prose = "\n\n".join(f"Glimmer nodes sit inside vaults and hum, paragraph {i}." for i in range(20))
+    assert not is_question_bank(prose)
+    bank = "\n".join(
+        f"{n}. Which current feeds a glimmer node?\na. the vault current\nb. the lattice "
+        f"current\nc. the cascade\nd. none of these" for n in range(1, 8))
+    assert is_question_bank(bank)
+    mixed = prose + "\n\n" + "\n".join(
+        f"{n}. Which current feeds a glimmer node?\na. the vault current\nb. the lattice "
+        f"current" for n in range(1, 4))
+    assert not is_question_bank(mixed), "a few questions under a page of prose stay"
+
+
+def test_units_leave_question_banks_out_and_count_them(tmp_path):
+    from ml_stack.sources import pdf
+
+    bank = "\n".join(
+        f"{n}. Which current feeds a glimmer node?\na. the vault current\nb. the lattice "
+        f"current\nc. the cascade\nd. none of these" for n in range(1, 8))
+    section = pdf.Section(number="1.1", title="Glimmer Nodes", chapter="1",
+                          chapter_title="The Glimmer Cascade", first_page=2, last_page=3,
+                          text="Glimmer nodes sit inside vaults.\n\n" + bank)
+    chapter = pdf.Chapter(number="1", title="The Glimmer Cascade", first_page=2, last_page=3,
+                          sections=[section])
+    document = pdf.Document(path=str(tmp_path / "l.pdf"), title="Lattice Studies",
+                            page_count=3, chapters=[chapter])
+    kept = pdf.units(document, max_tokens=40)
+    assert kept and all(not pdf.is_question_bank(u.text) for u in kept)
+    assert pdf.question_banks(document, max_tokens=40) == 1
+    assert len(pdf.units(document, max_tokens=40, keep_questions=True)) == len(kept) + 1

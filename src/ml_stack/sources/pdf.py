@@ -716,12 +716,43 @@ def _captions(lines: Sequence[_Line], furniture: set[str]) -> list[tuple[_Line, 
 # -- the last cut ------------------------------------------------------------------------------
 
 
-def units(document: Document, *, max_tokens: int = MAX_TOKENS) -> list[Unit]:
+_QUESTION = re.compile(r"^\s*\d{1,3}\.\s+\S")
+_OPTION = re.compile(r"^\s*[a-eA-E]\.\s+\S")
+
+
+def is_question_bank(text: str, *, options: int = 12, share: float = 0.4) -> bool:
+    """Whether a stretch of text is a chapter-end question bank rather than prose.
+
+    A textbook ends a chapter with numbered questions and lettered answers -- an AP book's
+    section 5.4 had one part with 66 lettered options. Put through the extractor those run
+    to the ceiling: every option is a claim the model tries to turn into concepts and
+    relations, and it never reaches the end. A part is a question bank when it carries at
+    least ``options`` lettered answers and questions and answers together are ``share`` of
+    its lines; nothing in a graph is lost by skipping it, since the questions restate what
+    the chapter's prose already said.
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return False
+    answers = sum(1 for ln in lines if _OPTION.match(ln))
+    asked = sum(1 for ln in lines if _QUESTION.match(ln))
+    return answers >= options and (answers + asked) / len(lines) >= share
+
+
+def question_banks(document: Document, *, max_tokens: int = MAX_TOKENS) -> int:
+    """How many parts `units` leaves out of ``document`` as question banks."""
+    return sum(1 for unit in units(document, max_tokens=max_tokens, keep_questions=True)
+               if is_question_bank(unit.text))
+
+
+def units(document: Document, *, max_tokens: int = MAX_TOKENS,
+          keep_questions: bool = False) -> list[Unit]:
     """The document as units to extract from: a section, or one part of a long one.
 
     A section is split on paragraph boundaries only. A single paragraph over the ceiling is
     its own part rather than being cut in half: a cut paragraph is where a definition loses
-    its subject, which is the failure this whole module exists to avoid.
+    its subject, which is the failure this whole module exists to avoid. A part that is a
+    question bank (`is_question_bank`) is left out unless ``keep_questions``.
     """
     from ml_stack.client.tokens import estimate_tokens
 
@@ -749,6 +780,8 @@ def units(document: Document, *, max_tokens: int = MAX_TOKENS) -> list[Unit]:
                 text="\n\n".join(part).strip(), part=index, parts=len(parts),
                 key_terms=list(section.key_terms) if index == 1 else [],
                 figures=list(section.figures) if index == 1 else []))
+    if not keep_questions:
+        out = [unit for unit in out if not is_question_bank(unit.text)]
     return _unique(out)
 
 
