@@ -12,27 +12,57 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
 `src/ml_stack/data/profiles.json` (a model's measured shape, read by `ml-stack-serve up
 --profile`, `sweep`, `extract` and `converse`).
 
-## The next measurements (queued or waiting, 2026-09-02 evening)
+## The next measurements (2026-09-03, small hours)
 
-- [ ] **Read the evening's queues into the record.** Queues 9–12 (per-way comparison of
-  batch/kinds/summary/rich; the fit load of Flash-Next for its GPU/CPU split; extraction on
-  the relation-bearing world in each model's measured shape; every other model's knob pass)
-  were running when this was written; `ml-stack-bench status`, `show --since
-  2026-09-02T21`, `show --extract` and `report --since 2026-09-02T09 --profile` read them.
-  Then commit `docs/report-2026-09-02.md`, `docs/model-ranking.md`,
-  `src/ml_stack/data/{profiles,fit}.json` and, if the split came through,
-  `docs/architectures/qwen4exp.md`'s memory paragraph with the measured numbers.
-- [ ] **Measure the single and few ways** (`--also single --also few --rounds N`, landing
-  from the asking-space agent) on E2B, E4B and gpt-oss-20b -- the models whose tool choice
-  may degrade with the number of schemas -- ten questions each, then `report --profile`.
+The queues of 2026-09-02 are in the record: `docs/report-2026-09-02.md` (with its
+Extraction section), `docs/model-ranking.md`, `profiles.json`, `fit.json`,
+`docs/architectures/qwen4exp.md`. Settled tonight: draft length 4 for answering *and*
+extraction (6 equal, 8 slower, on both); no per-workload draft field. Single and few on the
+small models at ten questions: `single` +8 pts on E4B (59 vs 51), +3 on E2B, +2 on
+gpt-oss-20b, all inside ±28 bands; `few` loses 20-30 pts everywhere; `--rounds 8` changed
+nothing (the extra turns went unused).
+
+- [ ] **The shelf is reading** (started 2026-09-02T23:44, detached, Flash-Next on port 8080,
+  two workers): ten OpenStax PDFs from `~/Documents/Textbooks` plus
+  `~/Downloads/Psychology2e_WEB.pdf` into `~/.ml-stack/shelf.ladybug`. Chapter 2 of
+  Biology2e alone was 13 units in 19 min on one worker; the shelf is days of GPU, not
+  hours. `ml-stack-ingest status --out ~/.ml-stack/shelf.ladybug` says where it is; the log
+  is under `~/.ml-stack/ingest/logs/`; killed, the same command with `--resume` picks up
+  (a failed unit is read again). When it is done or stopped: `ml-stack-serve down --port
+  8080`, then ai_ceo's page back (`services/ui.sh fresh`). Then look at what it read --
+  which needs a command: `ml-stack-ingest show --out STORE [--book B] [--sample N]` (a few
+  concepts with their definitions, relations with page provenance, the folds it made);
+  tonight that was a python read of `GraphStore.edges()` by hand, which is a missing
+  command. First things seen: a person `created_by` a method (the verb's direction
+  reversed by the model -- gloss it with the person on the right), and relations across
+  books never joined (each book folds alone; a fold across the shelf is the next step).
+- [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
+  --profile --plain-only --also single --yes`, ~10 min): the one asking-way change tonight
+  that moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
+- [ ] **`ml-stack-ingest` serves on 8099 by default, the port the bench leaves its last
+  model on**; one shape per port refused it twice tonight, silently inside a queue. Either
+  the ingest takes the bench's lock and port discipline (`bench.serve` has both) or its
+  default moves; and a queue step that dies in under a second should print why (`step`'s
+  `tail` swallowed it).
+- [ ] **The gold set is nine triples**, two of them (`center_of`, `independent_from`) outside
+  the vocabulary on purpose, and precision against three triples a passage is not a model
+  score (the model states true things the gold omits). Write twenty invented passages with
+  everything they state written down (`tests/known-fixtures.txt` names), so the gate
+  measures precision too; `ingest.INVERSES` covers the flipped ones.
+- [ ] **A new entry point is invisible until `pip install -e . && pyenv rehash`**: every
+  textbook step in two queues died in 0 s on `command not found`. `ml-stack-setup` (or the
+  updater's dev track) should compare `[project.scripts]` with what is on PATH and say so.
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
-  (traces are on by default at ≤20 questions since tonight; the hundred-question runs
-  before that carry none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns),
-  then `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
+  (traces are on by default at ≤20 questions; the hundred-question runs before that carry
+  none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
+  `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
   here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
 - [ ] **Watch ggml-org/llama.cpp#27836.** When the qwen4exp MTP graph merges, `ml-stack-serve
   build` and `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance
   on an M3 Max against the fork's 73–79%. Then the profile's build field can go.
+- [ ] **The 27B is unranked** -- a two-question smoke is all the store holds, and a record is
+  never set from fewer than 20. Its twenty questions belong on the 3090 Ti through the
+  fleet (below), not on this machine (Adam: "don't test the smaller models on this device").
 
 ## Library
 
@@ -53,13 +83,6 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
   tests read zero where one was written; 0.18.x pinned). Characterise with `ml-stack-store
   check` on a scratch store under 0.20 and either adapt the queries or keep the pin with
   the reason written down.
-- [ ] **The tests, tidied.** ai_ceo's suite got the pass tonight (shared fakes in conftest,
-  duplicates merged, machine state isolated, slow marked); this suite (~2,950 tests, ~3 min
-  on every core) has the same duplication across `tests/test_graph_bench*.py`,
-  `test_serve_*.py` and `test_fleet_*.py`: shared `_serving`/`_measured`/`a_row` fakes,
-  `_fit_files_in_tmp`, the Scripted handler. Same brief; run with `-n 4` while anything
-  measures. `tests/test_mcp.py::test_the_sdk_server_carries_the_same_tools` flakes under
-  xdist (`asyncio.run` in a worker whose loop another test left running) -- isolate it.
 
 ## Measuring across the fleet
 
