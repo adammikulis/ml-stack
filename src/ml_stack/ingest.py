@@ -1112,6 +1112,47 @@ def fold(out: str | Path, *, book: str = "", rebuild: bool = False, dry_run: boo
     return 0
 
 
+def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
+                ) -> Callable[[str], str]:
+    """``unit id -> the text it was read from``, for the judge's second look.
+
+    ``texts`` are units already in memory (the run has them); anything else is found by
+    reading the book again from the path the progress file recorded -- once per book, and
+    kept for the rest of the pass. Adam: "allow it to go back over the source material
+    if needed".
+    """
+    from ml_stack.sources import pdf
+
+    shelf = Shelf(out)
+    known: dict[str, str] = dict(texts or {})
+    read_books: set[str] = set()
+
+    def text_of(unit_id: str) -> str:
+        if unit_id in known:
+            return known[unit_id]
+        slug = unit_id.split(":", 1)[0]
+        if slug in read_books:
+            return ""
+        read_books.add(slug)
+        book = shelf.book(slug)
+        if book is None or not book.path or not Path(book.path).expanduser().is_file():
+            return ""
+        document = pdf.read(book.path)
+        for unit in pdf.units(document, keep_questions=True):
+            known.setdefault(unit.id, unit.text)
+        return known.get(unit_id, "")
+
+    return text_of
+
+
+def _judge(client: Any, out: str | Path, *, model: str = "",
+           texts: Mapping[str, str] | None = None) -> Any:
+    """The pass's judge over this shelf: the run's model, and the books to re-read."""
+    from ml_stack.graph.tidy import ModelJudge
+
+    return ModelJudge(client, sources=sources_for(out, texts=texts), model=model)
+
+
 def _book_in_store(out: str | Path, slug: str) -> bool:
     """Whether the store holds ``book:<slug>`` -- written by a run before folds were
     recorded, so the progress file says nothing about it."""
@@ -1600,19 +1641,34 @@ def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
     return 0
 
 
+def wait(*, say: Callable[[str], None] = print, home: Path | None = None,
+         every: float = 60.0) -> int:
+    """``ml-stack-ingest wait``: block until the detached run this machine records has
+    ended, saying so every minute -- so the next command can follow it without a loop
+    written by hand (`ml-stack-ingest wait && ml-stack-ingest tidy --out ... --model ...`)."""
+    pid = _recorded_alive(home)
+    if not pid:
+        say("no detached ingest is running")
+        return 0
+    waited = 0.0
+    while _recorded_alive(home):
+        time.sleep(min(every, 5.0))
+        waited += min(every, 5.0)
+        if waited % every < 5.0:
+            say(f"  still running (pid {pid}) after {waited / 60:.0f} min")
+    say(f"the detached ingest (pid {pid}) has ended")
+    return 0
+
+
 def _recorded_alive(home: Path | None = None) -> int:
     """The pid of the detached run this machine records, when it is still alive; else 0."""
     held = _read_json((home or HOME) / "ingesting.json")
     pid = int(held.get("pid") or 0) if isinstance(held, dict) else 0
     if not pid:
         return 0
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return 0
-    except PermissionError:  # pragma: no cover - alive, somebody else's
-        return pid
-    return pid
+    # `_ended` reaps a child of this process on the way: a run that exited but was never
+    # collected would otherwise answer kill(pid, 0) forever
+    return 0 if _ended(pid) else pid
 
 
 def _out_of(argv: Iterable[str]) -> str:
@@ -1702,7 +1758,8 @@ def parser() -> argparse.ArgumentParser:
                "  fold     fold every book that has reads -- part-read ones too -- into the\n"
                "           store, replacing what the store held for it\n"
                "  retry    let the units given up on be read again by the next --resume\n"
-               "  stop     end the detached run, after it has folded what it has read\n")
+               "  stop     end the detached run, after it has folded what it has read\n"
+               "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
                     help="the PDFs to read; or one of `status`, `show`, `fold`, `retry`, "
                          "`stop` (see below), which does that and stops")
@@ -1729,6 +1786,10 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--apply", action="store_true",
                     help="with tidy: write the merges, folds and flags; without it, say what "
                          "would be done")
+    ap.add_argument("--no-tidy", action="store_true",
+                    help="do not run the hygiene pass over the store at the end of each book "
+                         "(it runs by default, with this run's model judging the names a "
+                         "spelling apart and re-reading the book where it must)")
     ap.add_argument("--written", default="", metavar="FILE",
                     help="with tidy: a JSON object {name: the name it is} -- the possible "
                          "duplicates a person settled")
@@ -1789,6 +1850,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.docs[:1] == ["stop"]:
         return stop()
+    if args.docs[:1] == ["wait"]:
+        return wait()
     word = args.docs[0] if args.docs[:1] and args.docs[0] in _WORDS else ""
     if word:
         if not args.out:
@@ -1806,6 +1869,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             from ml_stack.graph.tidy import tidy as hygiene
             from ml_stack.graph.tidy import written_from
 
+            if args.model or args.base_url != parser().get_default("base_url"):
+                # automated: the model judges the names a spelling apart, re-reading the
+                # books where it must, and the pass applies what it decides -- after the
+                # run that is reading, never beside it (one job on the GPU)
+                alive = _recorded_alive()
+                if alive:
+                    print(f"error: a detached ingest (pid {alive}) is still reading; "
+                          f"`ml-stack-ingest wait` first, then tidy", file=sys.stderr)
+                    return 2
+                with _serving(args) as client:
+                    judge = _judge(client, args.out, model=args.model)
+                    hygiene(args.out, written=written_from(args.written), judge=judge,
+                            log=print)
+                return 0
             hygiene(args.out, dry_run=not args.apply, written=written_from(args.written),
                     log=print)
             return 0
@@ -1947,6 +2024,15 @@ def _read_run(args: Any) -> int:
                     stopped = True
 
                 counts = keep(slug, document.title, _rows(wanted, reads_by_unit), units_by_id)
+                if not args.no_tidy:
+                    # the hygiene pass over the store, with this run's model as the judge
+                    # and the units still in memory as its source -- automated, recorded,
+                    # nothing deferred
+                    from ml_stack.graph.tidy import tidy as hygiene
+                    texts = {unit.id: unit.text for unit in wanted}
+                    judged = hygiene(args.out, judge=_judge(client, args.out, model=args.model,
+                                                            texts=texts), log=None)
+                    print(f"  tidied: {judged.said()}")
                 print(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
                       f"into {args.out}")
                 if stopped:

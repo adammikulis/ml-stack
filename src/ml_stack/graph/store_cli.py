@@ -78,6 +78,11 @@ def main(argv: list[str] | None = None) -> int:
     hygiene.add_argument("--written", type=Path, default=None, metavar="FILE",
                          help="a JSON object {name: the name it is} -- the possible duplicates "
                               "a person settled; applied whatever the weights")
+    hygiene.add_argument("--base-url", default="", metavar="URL",
+                         help="a model already serving, to judge the names a spelling apart "
+                              "from what it knows; with one the pass is automated and applies "
+                              "what it decides (ml-stack-ingest tidy --model also re-reads the "
+                              "source passages)")
     args = parser.parse_args(argv)
 
     path = args.path.expanduser()
@@ -88,9 +93,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "check":
             return _check(path, args.fix)
         if args.command == "tidy":
-            from ml_stack.graph.tidy import tidy, written_from
+            from ml_stack.graph.tidy import ModelJudge, tidy, written_from
 
-            tidy(path, dry_run=not args.apply, written=written_from(args.written), log=print)
+            judge = None
+            if args.base_url:
+                from ml_stack.client import Client
+
+                judge = ModelJudge(Client(args.base_url, n_predict=1024))
+            tidy(path, dry_run=not args.apply, written=written_from(args.written),
+                 judge=judge, log=print)
             return 0
         return _docs(path)
     except StoreNeedsUpgrade as why:

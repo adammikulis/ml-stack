@@ -48,20 +48,19 @@ nothing (the extra turns went unused).
   file beside the store, and `ml-stack-ingest retry --out STORE` frees them after a fix.
   If one still circles under the cap, try DRY sampling for extraction and measure it on
   the gold gate.
-- [ ] **Judge APBiology before the other nine books.** The shelf stops itself once APBiology
-  is complete and folded (a watcher; `ml-stack-ingest status --out ~/.ml-stack/shelf.ladybug`
-  says). Then: `ml-stack-ingest show --out ... --book apbiology --sample 20`,
-  `ml-stack-store tidy ~/.ml-stack/shelf.ladybug` (dry, 2026-09-03 11:40 over Biology2e
-  ch. 2 + APBiology: would merge 263 nodes by case/spacing/plural -- 'Prokaryotes' ->
-  'Prokaryote' with 95 edges, 'co-enzyme' -> 'coenzyme' -- fold 1,216 inverse pairs, flag
-  71 clause-shaped labels, and leaves 451 possible duplicates a spelling apart for a
-  person: real ones like 'Fructose-1,6-bisphosphate' ~ 'biphosphate' beside false ones
-  like 'RNA polymerase' ~ 'RNA Polymerase II'; settle the real ones in a JSON
-  `{name: name}` and hand it back as `--written FILE`, then `--apply`), and answer a few
-  questions over it through the page or `graph.ask` to see whether a book-scale graph is
-  worth four more days of GPU. What was learned reading it so far is in
-  `docs/architectures/`-style prose nowhere yet: chapter-end question banks skipped,
-  the relations-array loop capped by `maxItems`, one slot only, the server-gone stop.
+- [ ] **Judge APBiology before the other nine books.** The run reads it alone and stops at
+  its end. The hygiene pass is automated now -- `ml-stack-ingest wait && ml-stack-ingest
+  tidy --out ~/.ml-stack/shelf.ladybug --model Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`
+  merges names by case/spacing/plural, folds inverse pairs, flags clause-shaped labels, and
+  has the model judge the names a spelling apart (from knowledge, then from the passages
+  re-read out of the book), applying what it decides and keeping every verdict with its
+  reason in the store's `tidy:decisions`; a run started with the new code does this itself
+  at each book's end. The dry run before the judge existed (2026-09-03 11:40): 263 merges,
+  1,216 inverse pairs, 71 suspects, 451 pairs for the judge. Then `show --book apbiology
+  --sample 20` and a few questions over it (`graph.ask`) to see whether a book-scale graph
+  is worth four more days of GPU. Nothing in `docs/` yet says what reading a shelf taught
+  (question banks skipped, the relations-array loop capped, one slot only, the server-gone
+  stop, the tightened dedupe); it belongs beside `docs/architectures/`.
 - [ ] **A fold across books.** Every book folds alone; `tidy` joins duplicates across the
   shelf after the fact, but nothing yet says "this concept in Biology2e is that one in
   APBiology" with a weight a person can read. `Shelf.graph()` per book plus `tidy`'s merge

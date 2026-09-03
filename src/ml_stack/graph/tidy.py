@@ -17,9 +17,16 @@ What it does, in order:
    another is *reported* as a possible duplicate and not merged: that rule is right for a
    community's typos and wrong for a textbook, where the dry run over a biology shelf
    would have folded "Natrium" into "atrium", "Isobutene" into "isobutane" and
-   "Triacylglycerol" into "Diacylglycerol". A person settles those, and hands the
-   decision back as ``written`` (``{name: the name it is}``, casefolded keys), which the
-   pass applies whatever the weights. Figures, books and runs are never folded. A merge
+   "Triacylglycerol" into "Diacylglycerol". Those go to the **judge** when one is given
+   (`ModelJudge`: a model asked whether the two are one thing, from what it knows first,
+   and if it cannot say, from the passages the two names were read from, found through
+   their provenance -- Adam: "LLM should re-review the related text if it can't determine
+   from internal knowledge"). "Same" merges into the heavier name; "different" is
+   written down so the pair is never asked again; only what the model cannot settle after
+   reading stays for a person, who hands the decision back as ``written`` (``{name: the
+   name it is}``), applied whatever the weights. Every verdict is kept in the store
+   (``tidy:decisions``) with its reason, the model, and the units it read. Figures, books
+   and runs are never folded. A merge
    moves every edge to the survivor (an edge the survivor already had takes the sum of the
    weights and the union of the provenance), sums mentions, unions provenance, and keeps
    the merged name as an alias.
@@ -49,8 +56,8 @@ from typing import Any
 
 from ml_stack.entities.fold import ESTABLISHED, fold_edges
 
-__all__ = ["INVERSES", "Report", "canonical_direction", "plurals", "same_name", "suspect", "tidy",
-           "written_from"]
+__all__ = ["INVERSES", "ModelJudge", "Report", "VERDICTS", "canonical_direction", "excerpts",
+           "plurals", "same_name", "suspect", "tidy", "written_from"]
 
 # The direction a fact is kept in, and the verbs that say the same thing the other way.
 INVERSES: dict[str, frozenset[str]] = {
@@ -74,6 +81,128 @@ _GENERIC = frozenset({"thing", "things", "process", "form of science", "form", "
                       "concept", "part", "item", "object", "structure", "substance"})
 
 
+VERDICTS = ("same", "different", "unsure")
+DECISIONS = "tidy:decisions"      # the store document every judged pair is written to
+
+JUDGE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": list(VERDICTS)},
+        "why": {"type": "string", "maxLength": 300},
+    },
+    "required": ["verdict", "why"],
+    "additionalProperties": False,
+}
+
+JUDGE_INSTRUCTIONS = (
+    "Two names from a knowledge graph built from textbooks may be one thing spelled two "
+    "ways, or two different things a letter apart. Say which. `same` only when the two "
+    "names denote the very same thing (a typo, a variant spelling, a hyphenation, a "
+    "capitalisation, a synonym the field treats as identical). `different` when they name "
+    "distinct things, however alike -- an isomer, a numbered form, a subtype, a related "
+    "molecule or process. `unsure` when you cannot tell from the names, their definitions "
+    "and your own knowledge; you will then be shown the passages they were read from. "
+    "`why` is one sentence."
+)
+
+JUDGE_READ = (
+    "You said you were unsure. Here are passages from the books where each name was read. "
+    "Decide from them: `same` or `different`; `unsure` only if the passages do not settle it."
+)
+
+
+class ModelJudge:
+    """A model that says whether two names are one thing -- from knowledge first, from the
+    source passages when it cannot.
+
+    ``client`` is a `ml_stack.client.Client` (``extract`` against a small schema, so the
+    verdict is one of three words). ``sources`` turns a unit id into the text it was read
+    from, for the second look; without it, an unsure verdict stays unsure.
+    """
+
+    def __init__(self, client: Any, *, sources: Callable[[str], str] | None = None,
+                 model: str = "", excerpt_chars: int = 400, most_units: int = 4) -> None:
+        self.client = client
+        self.sources = sources
+        self.model = model or str(getattr(client, "model", "") or "")
+        self.excerpt_chars = excerpt_chars
+        self.most_units = most_units
+        self.asked = 0
+        self.read = 0
+
+    def decide(self, one: Mapping[str, Any], other: Mapping[str, Any]) -> dict[str, Any]:
+        """``{verdict, why, read: [unit ids the second look used]}``."""
+        self.asked += 1
+        text = self._question(one, other)
+        answer = self.client.extract(text, JUDGE_SCHEMA, instructions=JUDGE_INSTRUCTIONS,
+                                     tries=1, n_predict=1024)
+        verdict = str((answer or {}).get("verdict") or "unsure")
+        why = str((answer or {}).get("why") or "")
+        used: list[str] = []
+        if verdict == "unsure" and self.sources is not None:
+            passages = self._passages(one) + self._passages(other)
+            if passages:
+                self.read += 1
+                used = [unit for unit, _ in passages]
+                shown = "\n\n".join(f"[{unit}] {piece}" for unit, piece in passages)
+                answer = self.client.extract(
+                    text + "\n\n" + JUDGE_READ + "\n\n" + shown, JUDGE_SCHEMA,
+                    instructions=JUDGE_INSTRUCTIONS, tries=1, n_predict=1024)
+                verdict = str((answer or {}).get("verdict") or "unsure")
+                why = str((answer or {}).get("why") or why)
+        if verdict not in VERDICTS:
+            verdict = "unsure"
+        return {"verdict": verdict, "why": why, "read": used}
+
+    @staticmethod
+    def _question(one: Mapping[str, Any], other: Mapping[str, Any]) -> str:
+        def said(node: Mapping[str, Any]) -> str:
+            attrs = node.get("attrs") or {}
+            parts = [f"name: {node.get('label')!r}", f"kind: {node.get('kind')}"]
+            if attrs.get("definition"):
+                parts.append(f"definition: {attrs['definition']}")
+            if attrs.get("aliases"):
+                parts.append(f"also written: {', '.join(attrs['aliases'])}")
+            parts.append(f"mentioned {int(node.get('mentions') or 0)} time(s)")
+            return "\n".join(parts)
+
+        return "A.\n" + said(one) + "\n\nB.\n" + said(other)
+
+    def _passages(self, node: Mapping[str, Any]) -> list[tuple[str, str]]:
+        assert self.sources is not None
+        label = str(node.get("label") or "")
+        out: list[tuple[str, str]] = []
+        for unit in list(node.get("provenance") or ())[: self.most_units]:
+            try:
+                text = self.sources(str(unit))
+            except Exception:  # noqa: BLE001 - a book that cannot be re-read is skipped, said in why
+                continue
+            for piece in excerpts(text, label, chars=self.excerpt_chars, most=2):
+                out.append((str(unit), piece))
+        return out
+
+
+def excerpts(text: str, label: str, *, chars: int = 400, most: int = 2) -> list[str]:
+    """Up to ``most`` windows of ``chars`` characters around where ``label`` appears in
+    ``text``, case-insensitively; the first window of the text when it appears nowhere."""
+    if not text:
+        return []
+    low, needle = text.casefold(), str(label or "").casefold()
+    out: list[str] = []
+    start = 0
+    while needle and len(out) < most:
+        at = low.find(needle, start)
+        if at < 0:
+            break
+        left = max(0, at - chars // 2)
+        right = min(len(text), at + len(needle) + chars // 2)
+        out.append(" ".join(text[left:right].split()))
+        start = right
+    if not out:
+        out.append(" ".join(text[:chars].split()))
+    return out
+
+
 @dataclass
 class Report:
     """What one pass did or would do; every step's count, and a line per decision."""
@@ -81,6 +210,8 @@ class Report:
     dry_run: bool = True
     merged_nodes: int = 0
     possible: list[tuple[str, str]] = field(default_factory=list)   # close spellings, unmerged
+    judged_same: int = 0
+    judged_different: int = 0
     merged_edges: int = 0
     relations_folded: int = 0
     inverses_folded: int = 0
@@ -101,7 +232,9 @@ class Report:
         return (f"{head} {self.merged_nodes} node(s) ({self.merged_edges} edge(s) moved), "
                 f"folded {self.relations_folded} relation spelling(s) and "
                 f"{self.inverses_folded} inverse pair(s), flagged {self.flagged} label(s); "
-                f"{len(self.possible)} possible duplicate(s) by spelling left for a person, "
+                f"judged {self.judged_same} pair(s) the same and {self.judged_different} "
+                f"different; {len(self.possible)} possible duplicate(s) by spelling left for a "
+                f"person, "
                 f"{len(self.conflicts)} verb conflict(s), {len(self.orphans)} orphan(s), "
                 f"{len(self.self_loops)} self-loop(s) reported")
 
@@ -176,17 +309,24 @@ def same_name(label: str) -> str:
 
 
 def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
-         written: Mapping[str, str] | None = None,
+         written: Mapping[str, str] | None = None, judge: Any = None,
          log: Callable[[str], None] | None = None) -> Report:
     """The pass, over a `GraphStore` or the path to one. Dry by default. ``written`` is
-    the map of duplicates a person settled (``{name: the name it is}``), applied as given."""
+    the map of duplicates a person settled (``{name: the name it is}``), applied as given.
+    ``judge`` (a `ModelJudge`) decides the pairs a spelling apart, and with one the pass
+    is automated: it applies everything it decides and writes every verdict to the store
+    with its reason (Adam: "record the mergers but don't defer them to a human"). A pair
+    once judged different is not asked again; a pair the judge cannot settle even after
+    reading the source is the one thing left for a person, as ``written``."""
     from ml_stack.entities.spelling import close
     from ml_stack.graph.store import GraphStore
 
+    if judge is not None:
+        dry_run = False
     if isinstance(store, (str, Path)):
         with GraphStore(store, read_only=dry_run) as opened:
             return tidy(opened, dry_run=dry_run, established=established, written=written,
-                        log=log)
+                        judge=judge, log=log)
     report = Report(dry_run=dry_run)
     say = log or (lambda _line: None)
 
@@ -229,14 +369,42 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             name = next((lbl for lbl in by_label if lbl.casefold() == low), None)
             if name and into in by_label and name != into:
                 merged_into[by_label[name]["id"]] = by_label[into]["id"]
-        # close spellings: a person's call, reported
+        # close spellings: the judge's call when there is one, else a person's
+        decisions = _decisions(store)
         labels = [lbl for lbl in by_label if by_label[lbl]["id"] not in merged_into]
         for i, one in enumerate(labels):
             for other in labels[i + 1:]:
-                if close(same_name(one), same_name(other)):
+                if not close(same_name(one), same_name(other)):
+                    continue
+                a, b = by_label[one], by_label[other]
+                key = _pair_key(a["id"], b["id"])
+                held = decisions.get(key)
+                if held is None and judge is not None:
+                    held = judge.decide(a, b)
+                    held = {**held, "a": a["id"], "b": b["id"], "kind": kind,
+                            "model": getattr(judge, "model", ""),
+                            "when": _now()}
+                    decisions[key] = held
+                    _keep_decision(store, key, held)
+                verdict = str((held or {}).get("verdict") or "unsure")
+                if verdict == "same":
+                    heavier, lighter = ((a, b) if int(a.get("mentions") or 0)
+                                        >= int(b.get("mentions") or 0) else (b, a))
+                    if lighter["id"] not in merged_into:
+                        merged_into[lighter["id"]] = heavier["id"]
+                    report.judged_same += 1
+                    note(f"judged same ({kind}): {lighter['label']!r} -> {heavier['label']!r}"
+                         f" -- {held.get('why', '')}"
+                         + (f" (read {len(held.get('read') or ())} passage(s))"
+                            if held.get("read") else ""))
+                elif verdict == "different":
+                    report.judged_different += 1
+                    note(f"judged different ({kind}): {one!r} | {other!r} -- {held.get('why', '')}")
+                else:
                     report.possible.append((one, other))
-                    note(f"possible ({kind}): {one!r} ~ {other!r} -- a spelling apart; "
-                         f"hand it back as written if they are one")
+                    note(f"possible ({kind}): {one!r} ~ {other!r} -- a spelling apart"
+                         + ("; the judge could not settle it" if held else "")
+                         + "; hand it back as written if they are one")
     # follow chains a -> b -> c to their end
     for remove in list(merged_into):
         keep = merged_into[remove]
@@ -332,6 +500,33 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
              + ", ".join(_label(nodes, n) for n in report.orphans[:5]))
     note(report.said())
     return report
+
+
+def _pair_key(a: str, b: str) -> str:
+    return "|".join(sorted((a, b)))
+
+
+def _now() -> str:
+    import time
+
+    return time.strftime("%FT%T")
+
+
+def _decisions(store: Any) -> dict[str, dict[str, Any]]:
+    """Every judged pair the store remembers, keyed on the two ids."""
+    held = store.get_doc(DECISIONS) if hasattr(store, "get_doc") else None
+    pairs = (held or {}).get("pairs") if isinstance(held, dict) else None
+    return dict(pairs) if isinstance(pairs, dict) else {}
+
+
+def _keep_decision(store: Any, key: str, decision: Mapping[str, Any]) -> None:
+    """One verdict into the store's decisions document, at once: a judge run killed
+    halfway keeps what it paid for."""
+    if not hasattr(store, "put_doc") or getattr(store, "read_only", False):
+        return
+    held = _decisions(store)
+    held[key] = dict(decision)
+    store.put_doc(DECISIONS, {"pairs": held, "hidden": True})
 
 
 def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],

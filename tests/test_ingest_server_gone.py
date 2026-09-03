@@ -81,3 +81,37 @@ def test_stop_keeps_the_record_while_the_run_is_still_folding(tmp_path, capsys):
     finally:
         child.kill()
         child.wait()
+
+
+def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, capsys):
+    import json
+    import subprocess
+    import sys
+    import threading
+
+    assert ingest.wait(home=tmp_path) == 0
+    assert "no detached ingest is running" in capsys.readouterr().out
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
+    (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+    done = []
+    thread = threading.Thread(target=lambda: done.append(ingest.wait(home=tmp_path, every=1.0)))
+    thread.start()
+    thread.join(timeout=30)
+    child.wait()
+    assert done == [0] and "has ended" in capsys.readouterr().out
+
+
+def test_a_judged_tidy_refuses_beside_a_live_run(tmp_path, monkeypatch, capsys):
+    import json
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        assert ingest.main(["tidy", "--out", str(tmp_path / "s"), "--model", "x"]) == 2
+        assert "wait` first" in capsys.readouterr().err
+    finally:
+        child.kill()
+        child.wait()
