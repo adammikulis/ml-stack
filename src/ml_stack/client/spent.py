@@ -21,6 +21,13 @@ from typing import Any
 from ml_stack.telemetry import Call
 
 
+def _summed(total: int | None, count: int | None) -> int | None:
+    """``total + count``, or ``None`` once either side was not measured."""
+    if total is None or count is None:
+        return None
+    return total + count
+
+
 @dataclass
 class Spent:
     model: str = ""                 # what the server says it is serving, from the reply
@@ -33,9 +40,11 @@ class Spent:
     prompt_tokens: int = 0          # every token sent, every call (the conversation re-sends)
     completion_tokens: int = 0
     read_tokens: int = 0            # what the server had to read (timings.prompt_n)
-    cached_tokens: int = 0          # what it kept from the call before (timings.cache_n)
-    draft_tokens: int = 0           # guessed ahead by a draft head
-    draft_taken: int = 0            # and accepted
+    # None once any call came from a server that does not measure it (`Call.cache_n` /
+    # `Call.draft_n` None): not measured, which is not the same as none.
+    cached_tokens: int | None = 0   # what it kept from the call before (timings.cache_n)
+    draft_tokens: int | None = 0    # guessed ahead by a draft head
+    draft_taken: int | None = 0     # and accepted
     finish: str = ""                # the last reply's finish_reason
     truncated: bool = False         # any reply cut by the ceiling
     thinking_chars: int = 0
@@ -45,8 +54,8 @@ class Spent:
     # (timings.cache_n + prompt_n + predicted_n), and the last. With a rolling window,
     # a summary and recall, the conversation's length says nothing about this; the peak
     # is what bounds how many users fit -- `ml-stack-serve fit --per-user <peak>`.
-    context_peak: int = 0
-    context_last: int = 0
+    context_peak: int | None = 0
+    context_last: int | None = 0
     # Estimated tokens by what filled the prompt: system, tools, summary, recalled, window,
     # shortlist, question, tool_results, thinking, answer. Estimated by the token counter
     # in `ml_stack.client.tokens`; the server's own counts above are the exact ones.
@@ -91,12 +100,13 @@ class Spent:
             self.first_token = call.first_token
         self.prompt_tokens += call.prompt_tokens
         self.completion_tokens += call.completion_tokens
-        self.cached_tokens += call.cache_n
+        self.cached_tokens = _summed(self.cached_tokens, call.cache_n)
         self.read_tokens += call.prompt_n
         self.context_last = call.held
-        self.context_peak = max(self.context_peak, call.held)
-        self.draft_tokens += call.draft_n
-        self.draft_taken += call.draft_n_accepted
+        self.context_peak = (None if call.held is None or self.context_peak is None
+                             else max(self.context_peak, call.held))
+        self.draft_tokens = _summed(self.draft_tokens, call.draft_n)
+        self.draft_taken = _summed(self.draft_taken, call.draft_n_accepted)
         if call.finish:
             self.finish = call.finish
             self.truncated = self.truncated or call.finish == "length"
@@ -114,12 +124,15 @@ class Spent:
 
     @property
     def drafted(self) -> bool:
-        return self.draft_tokens > 0
+        return bool(self.draft_tokens)
 
     @property
     def acceptance(self) -> float | None:
-        """Share of drafted tokens the model accepted, or None without a draft head."""
-        return self.draft_taken / self.draft_tokens if self.draft_tokens else None
+        """Share of drafted tokens the model accepted, or None without a draft head -- or
+        on a server that does not count one."""
+        if not self.draft_tokens or self.draft_taken is None:
+            return None
+        return self.draft_taken / self.draft_tokens
 
     @property
     def tokens_per_second(self) -> float | None:
@@ -147,16 +160,16 @@ class Spent:
         """Every `public()` record of a session added up: the counts and tokens summed, the
         derived rates recomputed over the sums, the models named once each, and ``answers``
         for how many records went in. What the page shows as "this session"."""
-        summed = {k: 0 for k in ("calls", "seconds", "generating_ms", "prompt_ms", "predicted_ms",
-                                 "prompt_tokens",
-                                 "completion_tokens", "read_tokens", "cached_tokens",
-                                 "draft_tokens", "draft_taken", "thinking_chars",
-                                 "answer_chars", "tool_calls")}
+        summed: dict[str, Any] = {k: 0 for k in (
+            "calls", "seconds", "generating_ms", "prompt_ms", "predicted_ms", "prompt_tokens",
+            "completion_tokens", "read_tokens", "cached_tokens", "draft_tokens", "draft_taken",
+            "thinking_chars", "answer_chars", "tool_calls")}
+        unmeasured = ("cached_tokens", "draft_tokens", "draft_taken")
         models: list[str] = []
         answers = 0
         truncated = 0
         firsts: list[float] = []
-        peak = 0
+        peak: int | None = 0
         peaks: list[int] = []
         parts: dict[str, int] = {}
         for one in records or ():
@@ -164,9 +177,15 @@ class Spent:
                 continue
             answers += 1
             for k in summed:
-                summed[k] += one.get(k) or 0
-            peak = max(peak, int(one.get("context_peak") or 0))
-            peaks.append(int(one.get("context_peak") or 0))
+                if k in unmeasured and (k in one and one[k] is None):
+                    summed[k] = None
+                elif summed[k] is not None:
+                    summed[k] += one.get(k) or 0
+            if "context_peak" in one and one["context_peak"] is None:
+                peak = None
+            elif peak is not None:
+                peak = max(peak, int(one.get("context_peak") or 0))
+                peaks.append(int(one.get("context_peak") or 0))
             for name, n in (one.get("parts") or {}).items():
                 parts[name] = parts.get(name, 0) + int(n or 0)
             name = str(one.get("model") or "")
@@ -181,9 +200,10 @@ class Spent:
         out["models"] = models
         out["model"] = models[-1] if models else ""
         out["truncated"] = truncated
-        out["drafted"] = summed["draft_tokens"] > 0
+        out["drafted"] = bool(summed["draft_tokens"])
         out["acceptance"] = (round(summed["draft_taken"] / summed["draft_tokens"], 3)
-                             if summed["draft_tokens"] else None)
+                             if summed["draft_tokens"] and summed["draft_taken"] is not None
+                             else None)
         out["tokens_per_second"] = (round(summed["completion_tokens"]
                                           / (summed["generating_ms"] / 1000), 1)
                                     if summed["generating_ms"] and summed["completion_tokens"]

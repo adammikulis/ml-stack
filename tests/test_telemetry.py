@@ -233,3 +233,29 @@ class TestSpentIsTheSumOfItsCalls:
         assert got["answers"] == 2 and got["calls"] == 2
         assert got["read_tokens"] == 400 and got["completion_tokens"] == 60
         assert got["models"] == ["tiny-Q4.gguf"]
+
+
+# -- what a backend cannot measure ------------------------------------------------------
+class TestNotMeasured:
+    def test_an_explicit_null_timing_is_kept_as_none_and_an_absent_one_reads_zero(self):
+        """A backend that never counts a cached prefix writes ``null``; llama.cpp leaves
+        ``draft_n`` out when there is no draft head, and that stays 0."""
+        said_nothing = Reply(content="ok", raw={"timings": {"prompt_n": 10, "predicted_n": 2}})
+        assert Call.from_reply(said_nothing, 0.1).draft_n == 0
+        cannot = Reply(content="ok", raw={"timings": {"prompt_n": 10, "predicted_n": 2,
+                                                       "cache_n": None, "draft_n": None,
+                                                       "draft_n_accepted": None,
+                                                       "load_ms": 1500.0}})
+        one = Call.from_reply(cannot, 0.1)
+        assert one.cache_n is None and one.draft_n is None and one.held is None
+        assert one.load_ms == 1500.0 and one.public()["held"] is None
+
+    def test_a_total_that_mixes_a_measured_call_and_an_unmeasured_one_is_not_measured(self):
+        s = Spent()
+        s.note(reply(cache_n=600), 0.4)
+        s.note(Reply(content="ok", raw={"timings": {"prompt_n": 10, "predicted_n": 2,
+                                                     "cache_n": None, "draft_n": None,
+                                                     "draft_n_accepted": None}}), 0.1)
+        assert s.cached_tokens is None and s.draft_tokens is None and s.context_peak is None
+        assert s.read_tokens == 310
+        assert Spent.totals([s.public(), Spent().public()])["cached_tokens"] is None

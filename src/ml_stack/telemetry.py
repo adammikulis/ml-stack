@@ -75,6 +75,13 @@ def _offered(tools: Any) -> list[str]:
     return names
 
 
+def _counted(timings: Mapping[str, Any], key: str) -> int | None:
+    """``timings[key]`` as a count: 0 when the key is absent, ``None`` when it is null."""
+    if key in timings and timings[key] is None:
+        return None
+    return int(timings.get(key) or 0)
+
+
 def _asked(reply: Any, *, cap: int = ARGS_CAP) -> list[dict[str, Any]]:
     """The tool calls on one reply as ``[{"name", "args"}]``, arguments parsed.
 
@@ -116,11 +123,14 @@ class Call:
     thinking_chars: int = 0
     prompt_ms: float = 0.0          # the server reading the prompt
     predicted_ms: float = 0.0       # and writing the answer
+    load_ms: float = 0.0            # loading the weights first, when the server says
     prompt_n: int = 0               # tokens it had to read
-    cache_n: int = 0                # and kept from the call before
+    # None is "this server does not measure it" -- a backend with no cache count or no
+    # draft head writes null into ``timings``; a key left out reads 0 as before.
+    cache_n: int | None = 0         # and kept from the call before
     predicted_n: int = 0
-    draft_n: int = 0                # guessed ahead by a draft head
-    draft_n_accepted: int = 0       # and accepted
+    draft_n: int | None = 0         # guessed ahead by a draft head
+    draft_n_accepted: int | None = 0  # and accepted
     # The usage totals as well as the timings: a conversation re-sends everything every
     # turn, so `prompt_tokens` counts the same words over and over while `prompt_n` counts
     # what was actually read. `Spent` sums both, and cannot be the sum of its calls unless
@@ -147,9 +157,12 @@ class Call:
         usage = raw.get("usage") or {}
         timings = raw.get("timings") or {}
         made = _asked(reply, cap=cap)
-        cached = int(timings.get("cache_n")
-                     or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                     or 0)
+        if "cache_n" in timings and timings["cache_n"] is None:
+            cached = None
+        else:
+            cached = int(timings.get("cache_n")
+                         or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                         or 0)
         return cls(
             when=float(time.time() if when is None else when),
             model=str(model or raw.get("model") or ""),
@@ -166,11 +179,12 @@ class Call:
             thinking_chars=len(getattr(reply, "thinking", None) or ""),
             prompt_ms=float(timings.get("prompt_ms") or 0),
             predicted_ms=float(timings.get("predicted_ms") or 0),
+            load_ms=float(timings.get("load_ms") or 0),
             prompt_n=int(timings.get("prompt_n") or 0),
             cache_n=cached,
             predicted_n=int(timings.get("predicted_n") or 0),
-            draft_n=int(timings.get("draft_n") or 0),
-            draft_n_accepted=int(timings.get("draft_n_accepted") or 0),
+            draft_n=_counted(timings, "draft_n"),
+            draft_n_accepted=_counted(timings, "draft_n_accepted"),
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
             seconds=float(took),
@@ -241,10 +255,13 @@ class Call:
     # ------------------------------------------------------------------ arithmetic
 
     @property
-    def held(self) -> int:
+    def held(self) -> int | None:
         """What the slot held for this call: the prefix it kept, the prompt it read and the
         answer it wrote. Falls back to the usage totals on a server that reports no
-        timings, because a peak of zero would read as a slot that held nothing."""
+        timings, because a peak of zero would read as a slot that held nothing. ``None``
+        on a server that does not count the prefix it kept."""
+        if self.cache_n is None:
+            return None
         held = self.cache_n + self.prompt_n + self.predicted_n
         return held or (self.prompt_tokens + self.completion_tokens)
 
