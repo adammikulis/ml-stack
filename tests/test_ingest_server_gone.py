@@ -41,3 +41,43 @@ def test_the_run_stops_when_its_server_is_gone(tmp_path, server, monkeypatch, ca
     progress = ingest.Progress(ingest.Progress.beside(store))
     entries = next(iter(progress.state["books"].values()))["done"]
     assert len(entries) == 1 and next(iter(entries.values()))["attempts"] == 0
+
+
+def test_a_second_detach_is_refused_while_the_recorded_run_is_still_ending(tmp_path, monkeypatch, capsys):
+    """A run beside one still folding its way out adopted its server and lost it."""
+    import json
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        assert ingest.main(["book.pdf", "--out", str(tmp_path / "s"), "--detach"]) == 2
+        assert "still running or still folding" in capsys.readouterr().err
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_stop_keeps_the_record_while_the_run_is_still_folding(tmp_path, capsys):
+    import json
+    import subprocess
+    import sys
+
+    # a child that ignores SIGTERM for a while: a fold on its way out
+    child = subprocess.Popen([sys.executable, "-c",
+                              "import signal, sys, time; "
+                              "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                              "print('ready', flush=True); time.sleep(60)"], stdout=subprocess.PIPE)
+    try:
+        assert child.stdout.readline().strip() == b"ready", "the handler is in place"
+        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        assert ingest.stop(home=tmp_path, wait=1.0) == 1
+        out = capsys.readouterr().out
+        assert "still being written" in out and "no new run starts beside it" in out
+        assert (tmp_path / "ingesting.json").exists(), "the record stays until it has ended"
+        assert ingest._recorded_alive(tmp_path) == child.pid
+    finally:
+        child.kill()
+        child.wait()

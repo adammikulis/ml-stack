@@ -1546,13 +1546,18 @@ def retry(out: str | Path, *, say: Callable[[str], None] = print) -> int:
     return 0
 
 
+STOP_WAIT = 900.0       # a fold over a 7,000-node book took minutes on the way out
+
+
 def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
-         wait: float = 30.0) -> int:
+         wait: float = STOP_WAIT) -> int:
     """``ml-stack-ingest stop``: end the detached run and wait for its last fold to land.
 
-    The run folds the book it is on before it exits, so this waits ``wait`` seconds for the
-    process to go and says whether the store moved. Whatever was read is kept either way,
-    and the same command with ``--resume`` reads on.
+    The run folds the book it is on before it exits -- minutes, for a book of thousands of
+    nodes -- so this waits up to ``wait`` seconds for the process to go, saying so every
+    half minute, and then says whether the store moved. The record is kept while the run
+    is still ending, so `detach` refuses to start another beside it. Whatever was read is
+    kept either way, and the same command with ``--resume`` reads on.
     """
     import signal
 
@@ -1571,12 +1576,19 @@ def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
         say(f"the recorded ingest (pid {pid}) had already ended")
         record.unlink(missing_ok=True)
         return 1
-    ended = _wait_for(pid, wait)
-    record.unlink(missing_ok=True)
+    waited = 0.0
+    ended = _wait_for(pid, min(wait, 30.0))
+    waited += min(wait, 30.0)
+    while not ended and waited < wait:
+        say(f"  still folding after {waited:.0f}s (pid {pid})")
+        ended = _wait_for(pid, min(30.0, wait - waited))
+        waited += 30.0
     if not ended:
         say(f"asked the detached ingest (pid {pid}) to stop; it had not ended after "
-            f"{wait:.0f}s, so its last fold may still be being written")
+            f"{wait:.0f}s, so its last fold is still being written -- its record stays, and "
+            f"no new run starts beside it until it has")
         return 1
+    record.unlink(missing_ok=True)
     after = _folded_at(out)
     moved = [f"{slug} at unit {units}" for slug, units in sorted(after.items())
              if units != before.get(slug)]
@@ -1586,6 +1598,21 @@ def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
            else "its units so far are kept")
         + "; the same command with --resume reads on")
     return 0
+
+
+def _recorded_alive(home: Path | None = None) -> int:
+    """The pid of the detached run this machine records, when it is still alive; else 0."""
+    held = _read_json((home or HOME) / "ingesting.json")
+    pid = int(held.get("pid") or 0) if isinstance(held, dict) else 0
+    if not pid:
+        return 0
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return 0
+    except PermissionError:  # pragma: no cover - alive, somebody else's
+        return pid
+    return pid
 
 
 def _out_of(argv: Iterable[str]) -> str:
@@ -1658,7 +1685,7 @@ def _stopping() -> Any:
 # -- the command ---------------------------------------------------------------------------------
 
 
-_WORDS = ("status", "show", "fold", "retry")
+_WORDS = ("status", "show", "fold", "retry", "tidy")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -1699,6 +1726,9 @@ def parser() -> argparse.ArgumentParser:
                     help="read only the first N sections of each book -- a smoke of the "
                          "whole path before a shelf is spent on it; with `show`, how many "
                          "concepts and relations to print per book (default 5)")
+    ap.add_argument("--apply", action="store_true",
+                    help="with tidy: write the merges, folds and flags; without it, say what "
+                         "would be done")
     ap.add_argument("--rebuild", action="store_true",
                     help="with fold: drop each book's own nodes and edges first and write the "
                          "full fold from its reads -- the only way anything leaves the store, "
@@ -1767,6 +1797,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return show(args.out, book=args.book, most=args.sample or 5)
         if word == "retry":
             return retry(args.out)
+        if word == "tidy":
+            # the hygiene pass is graph.tidy's -- a shelf, a Slack community, any store --
+            # and lives beside the fold here only so the shelf's commands are in one place
+            from ml_stack.graph.tidy import tidy as hygiene
+
+            hygiene(args.out, dry_run=not args.apply, log=print)
+            return 0
         return status(args.out)
     if not args.docs and not args.gold:
         print("error: name at least one document, or --gold FILE", file=sys.stderr)
@@ -1775,6 +1812,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: reading a document needs --out STORE to write it into", file=sys.stderr)
         return 2
     if args.detach:
+        alive = _recorded_alive()
+        if alive:
+            # one run at a time, on one model, into one store: a second run beside one
+            # that is still folding its way out adopted its server and lost it when the
+            # first finished (2026-09-03). The record is the lease; it is cleared when
+            # the run ends or `stop` sees it end
+            print(f"error: a detached ingest (pid {alive}) is still running or still "
+                  f"folding on its way out; `ml-stack-ingest stop` waits for it", file=sys.stderr)
+            return 2
         log = detach(rest)
         print(f"detached; the log is {log}")
         print(f"  ml-stack-ingest status --out {args.out}")
