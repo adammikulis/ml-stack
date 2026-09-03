@@ -297,6 +297,46 @@ class TestStatus:
     def test_no_peers_says_what_to_run(self):
         assert "ml-stack-fleet join" in table([])
 
+    def test_a_tracking_peer_shows_its_commit_and_the_branch_it_follows(self):
+        """A fleet half on one commit and half on another is what this column exists to
+        make visible, so the age is when that peer last looked, not when it started."""
+        import time as _time
+
+        row = describe(Beacon(name="harrowgate", port=8770, host="10.0.0.4", device={
+            **DEVICE, "bench_commit": "9f2c1ab", "commit_age_s": 3 * 3600,
+            "version": "0.4.1", "tracking": "main",
+            "update_checked_at": _time.time() - 240}))
+        assert row["tracking"] == "main" and row["version"] == "0.4.1"
+
+        head, line = table([row]).splitlines()
+        assert "COMMIT" in head and "UPDATES" in head
+        assert "9f2c1ab 3h" in line, line
+        assert "main 4m" in line, line
+
+    def test_a_peer_following_releases_says_so_and_one_following_nothing_says_off(self):
+        releasing = describe(Beacon(name="quincewood", port=8770, device={
+            "tracking": "releases", "update_checked_at": 1.0}))
+        stuck = describe(Beacon(name="larchmere", port=8770, device={"tracking": "off"}))
+        text = table([releasing, stuck])
+        assert "releases" in text and "off" in text
+
+    def test_a_peer_whose_last_update_failed_is_marked_rather_than_looking_fine(self):
+        row = describe(Beacon(name="pellard", port=8770, device={
+            "tracking": "main", "update_checked_at": 2.0,
+            "update_error": "git pull --ff-only failed"}))
+        assert "main !" in table([row])
+
+    def test_a_branch_to_follow_is_written_where_the_daemon_will_read_it(self, tmp_path):
+        """Written into the settings rather than passed as a flag: the logon service that
+        brings the daemon back after a reboot carries no flags of ours."""
+        from ml_stack.fleet.settings import Settings
+
+        assert joining.remember_track(tmp_path, "main") == "main"
+        assert Settings.load(tmp_path / "settings.json").track_branch == "main"
+
+        assert joining.remember_track(tmp_path, "off") == ""
+        assert Settings.load(tmp_path / "settings.json").track_branch == ""
+
     def test_peers_lists_one_machine_once_across_two_clusters(self, key, udp, daemons):
         from ml_stack.fleet.discovery import join as join_cluster
 
@@ -330,6 +370,44 @@ class TestStatus:
     def test_status_in_no_cluster_says_join(self, key, capsys):
         assert main(["--cluster-key", str(key), "status"]) == 1
         assert "ml-stack-fleet join" in capsys.readouterr().err
+
+    def test_join_takes_the_passphrase_name_and_cluster_from_the_environment(
+            self, key, tmp_path, monkeypatch):
+        """An install script has no terminal to type a passphrase at, and prompting one
+        that cannot answer hangs the install rather than failing it."""
+        monkeypatch.setenv("ML_STACK_PASSPHRASE", WORDS)
+        monkeypatch.setenv("ML_STACK_NAME", "harrowgate")
+        monkeypatch.setenv("ML_STACK_CLUSTER", "attic")
+        asked: dict = {}
+
+        def fake_join(**kw):
+            asked.update(kw)
+            return joining.Joined(name=kw["name"], port=kw["port"],
+                                  root=Path(kw["root"]), group=kw["group"])
+
+        monkeypatch.setattr(joining, "join_machine", fake_join)
+        code = main(["--cluster-key", str(key), "--root", str(tmp_path), "join",
+                     "--track", "main"])
+
+        assert code == 0
+        assert asked["passphrase"] == WORDS
+        assert asked["name"] == "harrowgate"
+        assert asked["group"] == "attic"
+        assert asked["track"] == "main"
+
+    def test_a_flag_beats_the_environment(self, key, tmp_path, monkeypatch):
+        monkeypatch.setenv("ML_STACK_PASSPHRASE", "the wrong words entirely")
+        monkeypatch.setenv("ML_STACK_NAME", "harrowgate")
+        asked: dict = {}
+        monkeypatch.setattr(joining, "join_machine",
+                            lambda **kw: (asked.update(kw),
+                                          joining.Joined(name="x", port=1,
+                                                         root=Path(kw["root"]),
+                                                         group="g"))[1])
+        main(["--cluster-key", str(key), "--root", str(tmp_path), "join",
+              "--passphrase", WORDS, "--name", "larchmere"])
+
+        assert asked["passphrase"] == WORDS and asked["name"] == "larchmere"
 
 
 # -- leaving ---------------------------------------------------------------------------

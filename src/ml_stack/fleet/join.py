@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import subprocess
 import sys
 import time
@@ -41,8 +42,8 @@ from .discovery import (
 from .launch import HTTP_PORT, already_running, wait_for_health
 
 __all__ = ["Check", "JoinError", "Joined", "DEFAULT_ROOT", "STARTED_FILE", "checks",
-           "describe", "join_machine", "leave_machine", "main", "peers", "start_daemon",
-           "sweep_argv", "table"]
+           "describe", "join_machine", "leave_machine", "main", "peers", "remember_track",
+           "running_code", "start_daemon", "sweep_argv", "table", "updating"]
 
 DEFAULT_ROOT = "~/.ml-stack/traind"
 STARTED_FILE = "fleet-daemon.json"
@@ -80,6 +81,7 @@ class Joined:
     daemon_pid: int | None = None
     persisted: bool = False
     persist_note: str = ""
+    tracking: str = ""
     peers: list[dict[str, Any]] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
@@ -87,7 +89,7 @@ class Joined:
                 "group": self.group, "checks": [c.public() for c in self.checks],
                 "started": self.started, "daemon_pid": self.daemon_pid,
                 "persisted": self.persisted, "persist_note": self.persist_note,
-                "peers": self.peers}
+                "tracking": self.tracking, "peers": self.peers}
 
 
 # -- the checks ------------------------------------------------------------------------
@@ -174,6 +176,25 @@ def start_daemon(port: int, root: Path | str, name: str = "") -> int:
     return child.pid
 
 
+def remember_track(root: Path | str, branch: str) -> str:
+    """Write the branch this machine follows into the daemon's settings, before it starts.
+
+    Written rather than passed as a flag, because the daemon reads ``settings.json`` at
+    startup and the logon service that brings it back after a reboot carries no flags of
+    ours. ``off`` (or "") goes back to following releases. Returns what was stored.
+    """
+    from .settings import Settings
+
+    root = Path(root).expanduser()
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "settings.json"
+    settings = Settings.load(path)
+    wanted = (branch or "").strip()
+    settings.track_branch = "" if wanted.lower() in ("", "off", "none") else wanted
+    settings.save(path)
+    return settings.track_branch
+
+
 def _started_pid(root: Path | str) -> int | None:
     try:
         held = json.loads(started_file(root).read_text(encoding="utf-8"))
@@ -252,6 +273,11 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
         "models": [str(m.get("name")) for m in (d.get("models") or []) if m.get("name")],
         "lock": str(lock) if lock else "",
         "commit": str(d.get("bench_commit") or d.get("commit") or "?"),
+        "commit_age_s": float(d.get("commit_age_s") or 0.0),
+        "version": str(d.get("version") or ""),
+        "tracking": str(d.get("tracking") or ""),
+        "checked_at": float(d.get("update_checked_at") or 0.0),
+        "update_error": str(d.get("update_error") or ""),
         "gpu": str(d.get("gpu") or ""),
         "clusters": list(clusters),
         "is_self": bool(self_name) and beacon.name == self_name,
@@ -283,13 +309,53 @@ def peers(*, cluster_key_path: Path | str | None = None, timeout_s: float = 2.0,
     return sorted(found.values(), key=lambda r: (not r["is_self"], r["name"]))
 
 
+def _ago(seconds: float) -> str:
+    """A duration a person reads at a glance: 45s, 4m, 3h, 2d. "" for nothing."""
+    if seconds <= 0:
+        return ""
+    if seconds < 90:
+        return f"{int(seconds)}s"
+    if seconds < 5400:
+        return f"{int(seconds / 60)}m"
+    if seconds < 172800:
+        return f"{int(seconds / 3600)}h"
+    return f"{int(seconds / 86400)}d"
+
+
+def running_code(row: dict[str, Any]) -> str:
+    """What a peer runs: the short sha, and how old that commit is."""
+    commit = str(row.get("commit") or "?").split()[0][:7] or "?"
+    dirty = "*" if "dirty" in str(row.get("commit") or "") else ""
+    age = _ago(float(row.get("commit_age_s") or 0.0))
+    return f"{commit}{dirty} {age}".strip()
+
+
+def updating(row: dict[str, Any]) -> str:
+    """How a peer keeps current, and when it last looked.
+
+    A fleet half on one commit and half on another is the thing this column exists to make
+    visible: 'main 4m' is a machine following a branch that looked four minutes ago,
+    'releases' is one waiting for the next published build, 'off' is one that will sit on
+    the code it has until somebody visits it.
+    """
+    mode = str(row.get("tracking") or "") or "?"
+    if mode in ("off", "?"):
+        return mode
+    when = float(row.get("checked_at") or 0.0)
+    age = _ago(time.time() - when) if when else ""
+    if row.get("update_error"):
+        return f"{mode} !"
+    return f"{mode} {age}".strip()
+
+
 def table(rows: Sequence[dict[str, Any]]) -> str:
     """The listing, as text."""
     if not rows:
         return ("no peers answered.\n"
                 "  - is the daemon running there?  ml-stack-fleet join\n"
                 "  - same LAN, and the same passphrase?")
-    lines = [f"{'NAME':<16} {'URL':<28} {'ROOM':<16} {'STATE':<12} {'COMMIT':<10} SERVING"]
+    lines = [f"{'NAME':<16} {'URL':<28} {'ROOM':<16} {'STATE':<12} {'COMMIT':<12} "
+             f"{'UPDATES':<12} SERVING"]
     for r in rows:
         state = "busy" if r["busy"] or r["free"] == 0 else "idle"
         if r.get("queued"):
@@ -298,13 +364,13 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
             state = "measuring"
         serving = ", ".join(r["serving"]) or "-"
         lines.append(f"{r['name']:<16} {r['base_url']:<28} {r['room']:<16} {state:<12} "
-                     f"{r['commit']:<10} {serving}")
+                     f"{running_code(r):<12} {updating(r):<12} {serving}")
     return "\n".join(lines)
 
 
 # -- the join ---------------------------------------------------------------------------
 def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_CLUSTER,
-                 persist: bool = False, port: int = HTTP_PORT,
+                 persist: bool = False, track: str = "", port: int = HTTP_PORT,
                  root: Path | str = DEFAULT_ROOT,
                  cluster_key_path: Path | str | None = None,
                  timeout_s: float = 2.0, wait_s: float = 20.0,
@@ -328,6 +394,10 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
     root.mkdir(parents=True, exist_ok=True)
     group = (group or "").strip() or DEFAULT_CLUSTER
     joined = Joined(name=name, port=port, root=root, group=group)
+    if track:
+        joined.tracking = remember_track(root, track)
+        say(f"following '{joined.tracking}'" if joined.tracking
+            else "following releases")
 
     say("checking this machine")
     joined.checks = checks(root, ensure=ensure, say=say)
@@ -354,6 +424,9 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
     if running is not None:
         joined.name = str(running.get("name") or name)
         say(f"the daemon is already running as '{joined.name}' on port {port}")
+        if joined.tracking:
+            say(f"  it reads '{joined.tracking}' at its next start; restart it to follow "
+                "the branch now")
     else:
         if persist:
             joined.persisted, joined.persist_note = _persist(persist_with, say)
@@ -459,8 +532,18 @@ def sweep_argv(models: Sequence[str], *, peers: Sequence[str] = (), sample: int 
 
 # -- the command -----------------------------------------------------------------------
 def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
+    """The words, from the flag, the environment, a terminal, or standard input.
+
+    ``ML_STACK_PASSPHRASE`` is what makes an unattended install possible: a machine being
+    set up by a script has no terminal to type at, and prompting one that cannot answer
+    hangs the install rather than failing it. The order is deliberate -- an explicit flag
+    beats the environment, and both beat asking.
+    """
     if args.passphrase:
         return args.passphrase
+    told = os.environ.get("ML_STACK_PASSPHRASE", "").strip()
+    if told:
+        return told
     if in_cluster(key):
         return ""
     if sys.stdin.isatty():
@@ -474,8 +557,13 @@ def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
 
 def cmd_join(args: argparse.Namespace) -> int:
     words = _passphrase_from(args, args.cluster_key)
-    joined = join_machine(name=args.name, passphrase=words, group=args.group,
-                          persist=args.persist, port=args.port, root=args.root,
+    # An install script sets these rather than answering prompts it has no terminal for.
+    name = args.name or os.environ.get("ML_STACK_NAME", "").strip()
+    group = args.group if args.group != DEFAULT_CLUSTER else (
+        os.environ.get("ML_STACK_CLUSTER", "").strip() or DEFAULT_CLUSTER)
+    joined = join_machine(name=name, passphrase=words, group=group,
+                          persist=args.persist, track=args.track, port=args.port,
+                          root=args.root,
                           cluster_key_path=args.cluster_key, timeout_s=args.timeout)
     if args.json:
         print(json.dumps(joined.public(), indent=1))
@@ -483,6 +571,8 @@ def cmd_join(args: argparse.Namespace) -> int:
     print()
     print(f"this machine is '{joined.name}' on http://127.0.0.1:{joined.port}"
           + (", starting at logon" if joined.persisted else ""))
+    if joined.tracking:
+        print(f"  following {joined.tracking}: it updates itself when nothing is running")
     print("  ml-stack-fleet status   -- who is in the fleet, what each serves")
     print("  ml-stack-fleet leave    -- undo this")
     return 0
@@ -537,6 +627,12 @@ def main(argv: list[str] | None = None) -> int:
                              "when the machine is in no cluster yet")
     join_p.add_argument("--group", default=DEFAULT_CLUSTER,
                         help=f"which cluster the words belong to (default: {DEFAULT_CLUSTER})")
+    join_p.add_argument("--track", default="",
+                        help="follow a branch instead of releases, e.g. 'main': this "
+                             "machine pulls, reinstalls if the packaging moved and "
+                             "restarts whenever no job, benchmark or model is running. "
+                             "Needs a git checkout with an editable install, and runs "
+                             "code nobody reviewed. Remembered; '--track off' undoes it.")
     join_p.add_argument("--timeout", type=float, default=2.0,
                         help="seconds to listen for peers (default: 2)")
     join_p.add_argument("--json", action="store_true", help="print what was done as JSON")

@@ -27,6 +27,15 @@ class Settings:
     """Whether the first-run wizard was finished. A machine may finish it in no cluster."""
     on_close: str = ""
     auto_update: bool = True
+    """Follow releases: a bundled install replaces itself when a newer one is published,
+    once nothing is running on the machine. On unless turned off here; a pip install is
+    told to use pip instead."""
+    track_branch: str = ""
+    """Follow a branch instead -- ``main`` on a machine you trust to run what was pushed
+    minutes ago, unreviewed. One or the other: a machine that tracks a branch does not also
+    follow releases. Empty is off, which is what a checkout starts as."""
+    track_repo: str = ""
+    """Where to follow that branch from (default: the public repository)."""
     update_channel: str = "stable"
     fetch_slots: int = 2
     autodownload_models: bool = True

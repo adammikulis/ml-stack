@@ -1149,10 +1149,15 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                   setup_from_lan: bool = False,
                   busy_hours: Iterable[str] = (), free_hours: Iterable[str] = (),
                   on_paused: str = "stop",
-                  bench_home: Path | str | None = None) -> None:
+                  bench_home: Path | str | None = None,
+                  track: str | None = None) -> None:
     """``bench_home`` is where this machine's ``ml-stack-bench`` keeps its measuring
     lock; the ``bench`` beside ``root`` unless given (`fleet.bench.bench_home`), so a
-    daemon rooted in a test's directory never consults the real home."""
+    daemon rooted in a test's directory never consults the real home.
+
+    ``track`` is a branch this machine follows instead of releases -- ``main`` on a machine
+    you trust to run unreviewed code -- and it is remembered, so it is asked for once.
+    ``off`` turns it back to releases; None leaves whatever the settings hold."""
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
     live_token: list[str] = [""]
@@ -1185,6 +1190,10 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     settings.slots = slots
     settings.labels = [s.strip() for s in labels if s and s.strip()]
     settings.on_paused = on_paused
+    if track is not None:
+        wanted = track.strip()
+        settings.track_branch = "" if wanted.lower() in ("", "off", "none") else wanted
+        settings.save(settings_path)
 
     environment = Environment(root)
     serving = Serving(root / "serving.json")
@@ -1221,7 +1230,13 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     labels = sorted({s.strip() for s in labels if s and s.strip()})
 
     def report() -> dict[str, Any]:
-        return {**base_report(), "labels": labels, **bench_host[0].report()}
+        # `updates.state` puts the version, the commit and how this machine keeps current
+        # on the beacon, so `ml-stack-fleet status` can show a fleet that is half-updated
+        # rather than everyone guessing.
+        from . import updates as updating
+
+        return {**base_report(), "labels": labels, **bench_host[0].report(),
+                **updating.state()}
     def every_token() -> set[str]:
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}
@@ -1233,10 +1248,26 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                              schedule_path, serving, models,
                                              cluster_key_path, every_token,
                                              bench=bench_host[0]))
-    from .updates import watch as watch_for_updates
-    watch_for_updates(
-        wanted=lambda: bool(getattr(settings, "auto_update", False)),
-        idle=lambda: not runner.status()["busy"])
+    # Keeping this machine current, in one of two modes and never in both. Either way the
+    # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
+    from . import updates as updating
+
+    nothing_running = updating.quiet(
+        jobs=lambda: bool(runner.status()["busy"]),
+        measuring=lambda: bool(bench_host[0].measuring()),
+        leases=lambda: bool(serving.live()))
+    tracked = str(getattr(settings, "track_branch", "") or "").strip()
+    tracked_from = str(getattr(settings, "track_repo", "") or "") or updating.GIT_URL
+    checkout = updating.checkout_here() if tracked else None
+    if tracked and checkout is not None:
+        print(f"  following {tracked} on {tracked_from} in {checkout}")
+        updating.track(tracked_from, tracked, checkout, idle=nothing_running)
+    else:
+        if tracked:
+            print(f"  cannot follow '{tracked}': this copy is not a git checkout. "
+                  "Releases instead.")
+        updating.watch(wanted=lambda: bool(getattr(settings, "auto_update", False)),
+                       idle=nothing_running)
 
     advertiser: Advertiser | None = None
     advertisers: dict[str, Advertiser] = {}
@@ -1427,6 +1458,13 @@ def main(argv: list[str] | None = None) -> int:
                     default=int(os.environ.get("ML_STACK_SLOTS") or 1),
                     help="how many jobs to run at once (default 1; raise it only on a "
                          "box whose work does not contend for one accelerator)")
+    ap.add_argument("--track", default=None, metavar="BRANCH",
+                    help="follow a branch instead of releases: this machine pulls "
+                         "BRANCH (e.g. 'main'), reinstalls if the packaging moved and "
+                         "restarts, whenever no job, benchmark or model is running. "
+                         "Needs a git checkout with an editable install. Remembered, so "
+                         "it is asked for once; '--track off' goes back to releases. It "
+                         "runs code nobody reviewed -- only on a machine you trust to.")
     ap.add_argument("--persist", action="store_true",
                     help="do not serve; install this daemon (with these --slots, --label "
                          "and --report) to start when you log in -- a LaunchAgent on "
@@ -1455,7 +1493,7 @@ def main(argv: list[str] | None = None) -> int:
                   fetch_slots=a.fetch_slots, web=not a.no_web,
                   setup_from_lan=a.setup_from_lan,
                   busy_hours=a.busy, free_hours=a.free, on_paused=a.on_paused,
-                  bench_home=a.bench_home)
+                  bench_home=a.bench_home, track=a.track)
     return 0
 
 

@@ -1,4 +1,17 @@
-"""Checking for a newer release, downloading it, and putting it in place."""
+"""Keeping this machine's ml-stack current: a newer release, or the head of a branch.
+
+Two modes, and a machine picks one. **Releases** is what a bundled install does: ask
+GitHub for the newest release, download the zip for this platform, swap the whole bundle
+into place -- the daemon, the CLI and the app window are one download -- and restart.
+**A branch** is for a machine that is a git checkout with an editable install: poll
+``git ls-remote`` for the head of, say, ``main``, fast-forward onto it, reinstall only if
+the packaging changed, and restart. That one runs unreviewed code the moment it is pushed,
+so it is off unless asked for.
+
+Neither ever interrupts work. `quiet` is the gate both loops pass through: no job running,
+no benchmark measuring, no model loaded. A machine part way through a run is left alone
+until it is not, however new the code is.
+"""
 
 from __future__ import annotations
 
@@ -20,14 +33,30 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Release", "UpdateError", "apply_if_newer", "asset_for", "check",
-           "current_version", "watch",
-           "download", "install", "REPO"]
+__all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
+           "checkout_here", "current_version", "in_the_way", "quiet", "state", "track",
+           "track_once", "restart_after_update", "watch",
+           "download", "install", "REPO", "GIT_URL"]
 
 REPO = "adammikulis/ml-stack"
+GIT_URL = f"https://github.com/{REPO}"
 API = "https://api.github.com/repos/{repo}/releases/latest"
 TIMEOUT = 30.0
 CHUNK = 1 << 20
+GIT_TIMEOUT = 300.0
+PIP_TIMEOUT = 1800.0
+EVERY_S = 300.0
+"""How often a tracked branch is looked at: five minutes, the same order as a push."""
+
+COMPANIONS = ("ml-stack", "ml-stack-headless", "ml-stack.exe", "ml-stack-headless.exe")
+"""What a release download holds beside the thing that is running. An update replaces the
+whole install, not the one binary that happened to notice it: the daemon and the CLI on
+different versions is the bug this list exists to prevent."""
+
+INSTALL_TRIGGERS = ("pyproject.toml", "setup.py", "setup.cfg", "uv.lock", "poetry.lock",
+                    "requirements.txt", "requirements-dev.txt")
+"""A pull that changed one of these needs ``pip install -e .`` again; any other pull does
+not, because an editable install already reads the files that moved."""
 
 
 class UpdateError(RuntimeError):
@@ -200,9 +229,37 @@ def install(archive: Path | str, *, app_path: Path | str | None = None) -> Path:
             os.replace(target, backup)
         os.replace(found, target)
         shutil.rmtree(backup, ignore_errors=True)
+        _replace_companions(staging, target)
         return target
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def _replace_companions(staging: Path, target: Path) -> list[Path]:
+    """The rest of the download, put beside what was just replaced.
+
+    A headless install is two files -- ``ml-stack`` and ``ml-stack-headless`` -- from one
+    zip. Replacing only the one that noticed the release leaves the CLI a version behind
+    the daemon it drives, which is the shape of bug that costs an afternoon. Only names
+    that are already there are replaced: this puts nothing new on a machine.
+    """
+    done: list[Path] = []
+    for name in COMPANIONS:
+        if name == target.name:
+            continue
+        beside = target.parent / name
+        if not beside.is_file():
+            continue
+        new = _pick(staging, name)
+        if new is None or not new.is_file():
+            continue
+        _restore_modes(new)
+        try:
+            os.replace(new, beside)
+        except OSError:                               # a busy file on Windows; not fatal
+            continue
+        done.append(beside)
+    return done
 
 
 def _pick(staging: Path, name: str) -> Path | None:
@@ -259,6 +316,299 @@ def relaunch(*, delay_s: float = 1.5, stop: bool = True) -> bool:
     return True
 
 
+
+# -- what an update must never walk over ------------------------------------------------
+def in_the_way(*, jobs: "Callable[[], bool] | None" = None,
+               measuring: "Callable[[], bool] | None" = None,
+               leases: "Callable[[], bool] | None" = None) -> str:
+    """Why an update has to wait, or "" when nothing is in its way.
+
+    Three things, and any one of them is enough: a training job, a benchmark measuring
+    (the same lock ``ml-stack-bench status`` reads, so a run somebody started at the
+    keyboard counts), and a model server this machine holds a lease on. Replacing the code
+    under any of them turns a measurement into a mixture of two builds, or drops a served
+    model mid-answer. A check that raises counts as busy: not being able to tell is not a
+    reason to go ahead.
+    """
+    for why, look in (("a job is running", jobs),
+                      ("a benchmark is measuring", measuring),
+                      ("a model is loaded", leases)):
+        if look is None:
+            continue
+        try:
+            if look():
+                return why
+        except Exception:                             # noqa: BLE001
+            return f"could not tell whether {why}"
+    return ""
+
+
+def quiet(**checks: "Callable[[], bool] | None") -> "Callable[[], bool]":
+    """`in_the_way` as the ``idle`` gate `watch` and `track` take."""
+    return lambda: not in_the_way(**checks)
+
+
+# -- what this machine says about how it updates ----------------------------------------
+LAST: dict[str, Any] = {"tracking": "off", "checked_at": 0.0, "error": "", "commit": ""}
+"""The last look either loop took, for ``/health`` and so ``ml-stack-fleet status`` can
+show a peer's mode and when it last asked. Written by the loops, read by `state`."""
+
+_AGE: dict[str, float] = {}
+_COMMIT: list[str] = []
+
+
+def note(**fields: Any) -> None:
+    """Record what a loop just did. Every field lands in `state`."""
+    LAST.update(fields)
+
+
+def commit_age_s(commit: str = "", checkout: "Path | None" = None) -> float:
+    """How old the commit this machine runs is, in seconds; 0 when there is no telling.
+
+    Cached on the sha, because the beacon rebuilds its report every ten seconds and the
+    answer cannot change without the process restarting onto a different commit.
+    """
+    if not commit:
+        return 0.0
+    if commit in _AGE:
+        return _AGE[commit]
+    where = checkout if checkout is not None else checkout_here()
+    made = 0.0
+    if where is not None:
+        try:
+            done = subprocess.run(["git", "-C", str(where), "log", "-1", "--format=%ct"],
+                                  capture_output=True, text=True, timeout=15)
+            if done.returncode == 0 and done.stdout.strip().isdigit():
+                made = max(0.0, time.time() - float(done.stdout.strip()))
+        except (OSError, subprocess.SubprocessError, ValueError):
+            made = 0.0
+    _AGE[commit] = made
+    return made
+
+
+def _installed_commit() -> str:
+    """`bench.installed_commit`, asked once: it shells out to git, and the beacon rebuilds
+    its report every ten seconds. It cannot change without the process restarting."""
+    if not _COMMIT:
+        from .bench import installed_commit
+
+        _COMMIT.append(installed_commit())
+    return _COMMIT[0]
+
+
+def state() -> dict[str, Any]:
+    """What this machine runs and how it keeps current, for the beacon and ``/health``.
+
+    ``tracking`` is a branch name, ``releases``, or ``off``; ``update_checked_at`` is when
+    that was last looked at, so `fleet.join.table` can print "main, 4m ago" rather than a
+    claim nobody checked.
+    """
+    commit = str(LAST.get("commit") or "") or _installed_commit()
+    return {"version": current_version(), "commit": commit,
+            "commit_age_s": commit_age_s(commit),
+            "tracking": str(LAST.get("tracking") or "off"),
+            "update_checked_at": float(LAST.get("checked_at") or 0.0),
+            "update_error": str(LAST.get("error") or "")}
+
+
+# -- following a branch -----------------------------------------------------------------
+Git = Callable[[Any], "tuple[int, str]"]
+"""``(argv without 'git') -> (returncode, output)``. The seam a test replaces."""
+
+
+@dataclass(frozen=True, slots=True)
+class Pulled:
+    """One look at a tracked branch, and what it did about what it found."""
+
+    branch: str
+    was: str = ""
+    now: str = ""
+    remote: str = ""
+    pulled: bool = False
+    installed: bool = False
+    restarted: str = ""
+    diverged: bool = False
+    error: str = ""
+
+    @property
+    def ok(self) -> bool:
+        return not self.error
+
+    def public(self) -> dict[str, Any]:
+        return {"branch": self.branch, "was": self.was[:7], "now": self.now[:7],
+                "remote": self.remote[:7], "pulled": self.pulled,
+                "installed": self.installed, "restarted": self.restarted,
+                "diverged": self.diverged, "error": self.error}
+
+
+def checkout_here() -> "Path | None":
+    """The git working tree this package is imported from, or None for a plain install."""
+    from ml_stack.paths import repo_root
+
+    return repo_root(Path(__file__).resolve().parent)
+
+
+def git_in(checkout: "Path | str") -> Git:
+    """The real git, rooted in ``checkout``. Output is stdout and stderr together, because
+    what a failed pull says is on stderr and the report has to carry it."""
+    where = str(Path(checkout).expanduser())
+
+    def run(args: Any) -> "tuple[int, str]":
+        try:
+            done = subprocess.run(["git", "-C", where, *[str(a) for a in args]],
+                                  capture_output=True, text=True, timeout=GIT_TIMEOUT)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return 1, str(exc)
+        return done.returncode, f"{done.stdout}{done.stderr}".strip()
+
+    return run
+
+
+def pip_install(checkout: "Path | str") -> "tuple[int, str]":
+    """``pip install -e .`` in the checkout, with the interpreter that is running."""
+    try:
+        done = subprocess.run([sys.executable, "-m", "pip", "install", "-e", "."],
+                              cwd=str(Path(checkout).expanduser()), capture_output=True,
+                              text=True, timeout=PIP_TIMEOUT)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return 1, str(exc)
+    return done.returncode, f"{done.stdout}{done.stderr}".strip()[-2000:]
+
+
+def _same(a: str, b: str) -> bool:
+    """Two shas, one of which may be short."""
+    a, b = a.strip(), b.strip()
+    if not a or not b:
+        return False
+    n = min(len(a), len(b))
+    return n >= 7 and a[:n] == b[:n]
+
+
+def track_once(repo_url: str, branch: str, install_dir: "Path | str", *,
+               git: Git | None = None,
+               pip: "Callable[[Path], tuple[int, str]]" = pip_install,
+               restart: "Callable[[], Any] | None" = None) -> Pulled:
+    """One look at ``branch``: fast-forward onto it if it moved, and restart on the new code.
+
+    Never a merge. A checkout holding commits the branch does not have is *reported and
+    left alone* -- resolving that is a person's decision, and a daemon that reset someone's
+    work in progress at three in the morning would be unforgivable. ``pip install -e .``
+    runs only when the pull touched packaging (`INSTALL_TRIGGERS`); an editable install
+    already sees every other file that moved. A pull that fails changes nothing, so the
+    daemon keeps running the code it started with.
+
+    ``git``, ``pip`` and ``restart`` are the three seams; everything else is what the
+    machine does.
+    """
+    checkout = Path(install_dir).expanduser()
+    run = git if git is not None else git_in(checkout)
+    bring_back = restart if restart is not None else restart_after_update
+
+    rc, out = run(["ls-remote", repo_url, branch])
+    head = out.split()[0] if rc == 0 and out.split() else ""
+    if rc != 0 or not head:
+        return Pulled(branch, error=f"could not read {branch} on {repo_url}: "
+                                    f"{out or 'no such branch'}")
+
+    rc, out = run(["rev-parse", "HEAD"])
+    local = out.split()[0] if rc == 0 and out.split() else ""
+    if rc != 0 or not local:
+        return Pulled(branch, remote=head,
+                      error=f"{checkout} is not a git checkout: {out or 'no HEAD'}")
+    if _same(local, head):
+        return Pulled(branch, was=local, now=local, remote=head)
+
+    rc, out = run(["fetch", repo_url, branch])
+    if rc != 0:
+        return Pulled(branch, was=local, now=local, remote=head,
+                      error=f"could not fetch {branch}: {out}")
+
+    rc, _ = run(["merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD"])
+    if rc != 0:
+        return Pulled(branch, was=local, now=local, remote=head, diverged=True,
+                      error=f"{checkout} has commits {branch} does not, so it is left "
+                            f"alone. Merge or reset it by hand, then it follows again.")
+
+    rc, changed = run(["diff", "--name-only", "HEAD", "FETCH_HEAD"])
+    moved = [line.strip() for line in changed.splitlines() if line.strip()]
+    # Not being able to list what moved means installing anyway: a stale install is worse
+    # than a wasted minute.
+    needs_install = rc != 0 or any(Path(f).name in INSTALL_TRIGGERS for f in moved)
+
+    rc, out = run(["pull", "--ff-only", repo_url, branch])
+    if rc != 0:
+        return Pulled(branch, was=local, now=local, remote=head,
+                      error=f"git pull --ff-only failed, so this machine keeps the code "
+                            f"it has: {out}")
+
+    rc, out = run(["rev-parse", "HEAD"])
+    now = out.split()[0] if rc == 0 and out.split() else head
+
+    if needs_install:
+        code, said = pip(checkout)
+        if code != 0:
+            return Pulled(branch, was=local, now=now, remote=head, pulled=True,
+                          error=f"pulled {now[:7]}, but 'pip install -e .' failed and it "
+                                f"was not restarted: {said}")
+        return Pulled(branch, was=local, now=now, remote=head, pulled=True,
+                      installed=True, restarted=str(bring_back() or ""))
+    return Pulled(branch, was=local, now=now, remote=head, pulled=True,
+                  restarted=str(bring_back() or ""))
+
+
+def track(repo_url: str, branch: str, install_dir: "Path | str", *,
+          interval: float = EVERY_S, first_after_s: float = 30.0,
+          idle: "Callable[[], bool]" = lambda: True,
+          git: Git | None = None,
+          pip: "Callable[[Path], tuple[int, str]]" = pip_install,
+          restart: "Callable[[], Any] | None" = None,
+          rounds: int = 0) -> threading.Thread:
+    """Follow ``branch`` on a timer, on a machine that is a checkout with an editable install.
+
+    ``idle`` is `quiet`: nothing is pulled over a job, a measurement or a loaded model. The
+    thread stops once it has restarted, because the restart is what puts the new code in
+    charge -- either the process is gone or it re-execs. ``rounds`` bounds the loop for a
+    test; 0 is forever.
+    """
+    note(tracking=branch)
+
+    def loop() -> None:
+        time.sleep(first_after_s)
+        seen = 0
+        while not rounds or seen < rounds:
+            seen += 1
+            try:
+                if idle():
+                    got = track_once(repo_url, branch, install_dir, git=git, pip=pip,
+                                     restart=restart)
+                    note(checked_at=time.time(), error=got.error,
+                         commit=got.now or LAST.get("commit", ""))
+                    if got.restarted:
+                        return
+            except Exception as exc:                  # noqa: BLE001 - a loop that dies stops following
+                note(checked_at=time.time(), error=str(exc))
+            time.sleep(interval)
+
+    thread = threading.Thread(target=loop, daemon=True, name="track")
+    thread.start()
+    return thread
+
+
+# -- putting the new code in charge -------------------------------------------------------
+def restart_after_update() -> str:
+    """Run the code that is now on disk. Says how, or "" when it could do nothing.
+
+    A bundle relaunches itself -- that is the window coming back, and the headless binary
+    too. Anything else asks `autostart`, which lets the login service bring the daemon back
+    where there is one and re-execs where there is not.
+    """
+    if relaunch():
+        return "relaunched"
+    from . import autostart
+
+    return autostart.restart()
+
+
 def apply_if_newer() -> dict[str, Any]:
     """Put the newest release in place, if there is one. Says what happened."""
     if running_path() is None:
@@ -282,18 +632,32 @@ def apply_if_newer() -> dict[str, Any]:
 
 
 def watch(*, wanted: "Callable[[], bool]", idle: "Callable[[], bool]",
-          every_s: float = 24 * 3600, first_after_s: float = 300.0) -> threading.Thread:
+          every_s: float = 24 * 3600, first_after_s: float = 300.0,
+          restart: "Callable[[], Any] | None" = None,
+          rounds: int = 0) -> threading.Thread:
     """Check for a newer release on a timer, and put it on when nothing is running.
 
-    A machine part way through a training run is left alone until it is not.
+    A machine part way through a training run, a measurement or an answer is left alone
+    until it is not (``idle`` is `quiet`). ``restart`` is the seam: the release is the
+    whole install, so what comes back is the new daemon, the new CLI and, if this is the
+    windowed copy, the new window. ``rounds`` bounds the loop for a test; 0 is forever.
     """
+    bring_back = restart if restart is not None else restart_after_update
+    # Recorded here rather than from inside the thread: which mode this machine is in is
+    # known the moment the watcher is set up, and a loop writing it on every turn is a loop
+    # scribbling over shared state for no reason.
+    note(tracking="releases")
+
     def loop() -> None:
         time.sleep(first_after_s)
-        while True:
+        seen = 0
+        while not rounds or seen < rounds:
+            seen += 1
             try:
                 if wanted() and idle():
                     got = apply_if_newer()
-                    if got.get("installed") and relaunch():
+                    note(checked_at=time.time(), error=str(got.get("error") or ""))
+                    if got.get("installed") and bring_back():
                         return
             except Exception:                         # noqa: BLE001
                 pass
