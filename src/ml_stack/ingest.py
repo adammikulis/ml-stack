@@ -39,7 +39,8 @@ import re
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -53,7 +54,8 @@ HOME = Path(os.environ.get("MLSTACK_INGEST_HOME") or "~/.ml-stack/ingest").expan
 """Where a detached run's log and its record of itself live. Not the store: the store is
 the caller's, named by ``--out``."""
 
-PER_SECTION = 300.0
+PER_SECTION = 600.0     # a ceiling, not a budget: one long unit hit 300 and was lost
+WORKERS = 2
 """The most one section may take before it is recorded as timed out and the next is read."""
 
 IMAGES_PER_SECTION = 4
@@ -436,7 +438,7 @@ def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any]
 
     weight = {node["label"]: int(node["mentions"]) for node in nodes.values()
               if node["kind"] != "figure"}
-    canonical, name_folds = fold_names(weight, log=log, label="concepts",
+    canonical, name_folds = fold_names(weight, plurals(weight), log=log, label="concepts",
                                        settles="both spellings stay, and the book is right")
     moved = {f"concept:{_slug(name)}": f"concept:{_slug(into)}"
              for name, into in canonical.items() if into != name}
@@ -446,6 +448,27 @@ def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any]
     return {"nodes": sorted(nodes.values(), key=lambda n: n["id"]),
             "edges": sorted(edges.values(), key=lambda e: (e["source"], e["rel"], e["target"])),
             "folds": {"relations": relation_folds, "concepts": name_folds}}
+
+
+def plurals(names: Iterable[str]) -> dict[str, str]:
+    """``{plural (casefolded): singular}`` for every name whose singular is also a name.
+
+    Chapter 2 of a biology book came back with `acid` and `acids`, `hydrogen ion` and
+    `hydrogen ions`, each with its own edges, because `entities.close` -- rightly -- does
+    not call a plural one letter off. A book does not distinguish a thing from two of it,
+    so the plural folds into the singular however often each was said: handed to
+    `fold_names` as the map somebody decided, which is what it is.
+    """
+    held = {str(name).casefold(): str(name) for name in names}
+    out: dict[str, str] = {}
+    for low, name in held.items():
+        for ending, singular in (("ies", "y"), ("es", ""), ("s", "")):
+            if low.endswith(ending) and len(low) > len(ending) + 2:
+                stem = low[: -len(ending)] + singular
+                if stem in held and stem != low:
+                    out[low] = held[stem]
+                    break
+    return out
 
 
 def _apply(nodes: Mapping[str, dict[str, Any]],
@@ -548,7 +571,10 @@ class Progress:
         return held
 
     def done(self, slug: str, unit: str) -> bool:
-        return unit in (self.state["books"].get(slug, {}).get("done") or {})
+        """Finished and kept -- a unit that failed is written down, so `status` can say so,
+        and is not done: `--resume` reads it again."""
+        entry = (self.state["books"].get(slug, {}).get("done") or {}).get(unit)
+        return isinstance(entry, dict) and not entry.get("error")
 
     def note(self, slug: str, read: Read) -> None:
         """Write one finished unit down, at once: a run killed mid-book resumes from here."""
@@ -825,8 +851,9 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
     from ml_stack.serve.manager import serve
 
     found = _find_model(args.model)
+    seats = max(1, int(getattr(args, "workers", 1) or 1))
     lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
-                             "parallel": 1, "timeout": 900.0, "cache_reuse": 256,
+                             "parallel": seats, "timeout": 900.0, "cache_reuse": 256,
                              "warmup": False}
     manager = None
     if getattr(args, "profile", True):
@@ -834,7 +861,7 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
 
         measured = profile_for(str(found))
         if measured is not None:
-            shape = measured.shape(port=args.serve_port, seats=1)
+            shape = measured.shape(port=args.serve_port, seats=seats)
             lease = {**lease, **{k: v for k, v in shape.lease().items()
                                  if k not in ("port", "parallel")}}
             lease["context"] = max(args.context, int(lease.get("context") or 0))
@@ -934,6 +961,10 @@ def parser() -> argparse.ArgumentParser:
                          "any book")
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
                     help="exit 1 when --gold scores below this F1 (0-1)")
+    ap.add_argument("--workers", type=int, default=WORKERS, metavar="N",
+                    help="units read at once, each on its own slot of the served model "
+                         "(default: %(default)s). Decoding one sequence leaves most of the "
+                         "GPU idle; two roughly double a shelf's rate on the same load")
     ap.add_argument("--per-section", type=float, default=PER_SECTION, metavar="SECONDS",
                     help="the most one section may take (default: %(default)s)")
     ap.add_argument("--max-tokens", type=int, default=0, metavar="N",
@@ -1027,30 +1058,43 @@ def _read_run(args: Any) -> int:
                   + f" -- read in {time.time() - began:.0f}s")
 
             units_by_id = {unit.id: unit for unit in wanted}
-            reads: list[dict[str, Any]] = []
+            held_reads = _read_json(Path(str(args.out) + f".{slug}.reads.json"))
+            held_reads = held_reads if isinstance(held_reads, dict) else {}
+            reads_by_unit: dict[str, dict[str, Any]] = {}
             docs: dict[str, Any] = {}
+            to_read = []
             for unit in wanted:
-                if args.resume and progress.done(slug, unit.id):
-                    held = _read_json(Path(str(args.out) + f".{slug}.reads.json"))
-                    if isinstance(held, dict) and unit.id in held:
-                        reads.append(held[unit.id])
+                if args.resume and progress.done(slug, unit.id) and unit.id in held_reads:
+                    reads_by_unit[unit.id] = held_reads[unit.id]
                     continue
-                row = extract_unit(client, unit, shape, images=args.images,
-                                   per_section=args.per_section,
-                                   cache_dir=args.cache or None)
-                reads.append(asdict(row))
-                docs[f"ingest:unit:{unit.id}"] = {
-                    "unit": unit.id, "book": slug, "where": unit.where,
-                    "title": unit.section_title, "chapter_title": unit.chapter_title,
-                    "extracted": row.extracted, "calls": row.calls,
-                    "seconds": row.seconds, "error": row.error}
-                for call in row.calls:
-                    spent.add(_call_of(call))
-                progress.note(slug, row)
-                print(f"  ch {unit.chapter or '-':>3}  {unit.section or unit.section_title[:12]:<8}"
-                      f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
-                      f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
-                      + (f"  {row.error}" if row.error else ""))
+                to_read.append(unit)
+
+            def read_one(unit: Any) -> tuple[Any, Any]:
+                return unit, extract_unit(client, unit, shape, images=args.images,
+                                          per_section=args.per_section,
+                                          cache_dir=args.cache or None)
+
+            # `--workers` units at once, one per slot; each is written down the moment it
+            # finishes, so a run killed mid-book loses at most the units in flight
+            workers = max(1, int(getattr(args, "workers", 1) or 1))
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for unit, row in pool.map(read_one, to_read) if workers == 1 else \
+                        _as_completed(pool, read_one, to_read):
+                    reads_by_unit[unit.id] = asdict(row)
+                    docs[f"ingest:unit:{unit.id}"] = {
+                        "unit": unit.id, "book": slug, "where": unit.where,
+                        "title": unit.section_title, "chapter_title": unit.chapter_title,
+                        "extracted": row.extracted, "calls": row.calls,
+                        "seconds": row.seconds, "error": row.error}
+                    for call in row.calls:
+                        spent.add(_call_of(call))
+                    progress.note(slug, row)
+                    print(f"  ch {unit.chapter or '-':>3}  "
+                          f"{unit.section or unit.section_title[:12]:<8}"
+                          f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
+                          f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                          + (f"  {row.error}" if row.error else ""))
+            reads = [reads_by_unit[unit.id] for unit in wanted if unit.id in reads_by_unit]
 
             _keep_reads(args.out, slug, reads)
             graph = fold_book(reads, units_by_id, book_title=document.title, log=None)
@@ -1064,6 +1108,15 @@ def _read_run(args: Any) -> int:
           f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
           + (f"; {totals['failed']} failed" if totals["failed"] else ""))
     return code
+
+
+def _as_completed(pool: Any, fn: Callable[[Any], Any], items: Sequence[Any]) -> Iterator[Any]:
+    """``fn`` over ``items`` on the pool, yielded as each finishes rather than in order."""
+    from concurrent.futures import as_completed
+
+    futures = [pool.submit(fn, item) for item in items]
+    for done in as_completed(futures):
+        yield done.result()
 
 
 def _call_of(record: Mapping[str, Any]) -> Any:

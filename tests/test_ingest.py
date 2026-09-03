@@ -557,3 +557,41 @@ def test_a_gold_triple_written_the_other_way_round_is_still_found():
 def test_every_inverse_names_a_verb_the_schema_has():
     allowed = ingest.schema()["properties"]["relations"]["items"]["properties"]["rel"]["enum"]
     assert set(ingest.INVERSES) <= set(allowed)
+
+
+def test_a_unit_that_failed_is_not_done_so_resume_reads_it_again(tmp_path):
+    """Chapter 2 of a biology book lost one unit to a timeout, and --resume would have
+    skipped it forever: written down is not the same as finished."""
+    progress = ingest.Progress(tmp_path / "shelf.progress.json")
+    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=2)
+    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    progress.note("velthorne", ingest.Read(unit="velthorne:1:1.1#0", seconds=1.0, concepts=3,
+                                           relations=2, **fields))
+    progress.note("velthorne", ingest.Read(unit="velthorne:1:1.1#1", seconds=300.0,
+                                           error="ServerUnreachable: timed out", **fields))
+    assert progress.done("velthorne", "velthorne:1:1.1#0")
+    assert not progress.done("velthorne", "velthorne:1:1.1#1")
+    assert progress.totals()["failed"] == 1, "and status still says it failed"
+
+
+def test_plurals_fold_into_their_singular_and_nothing_else_does():
+    got = ingest.plurals(["acid", "Acids", "hydrogen ion", "hydrogen ions", "species",
+                          "base", "bases", "bus", "vertebrae", "Currents"])
+    assert got == {"acids": "acid", "hydrogen ions": "hydrogen ion", "bases": "base"}
+
+
+def test_the_book_fold_joins_a_plural_to_its_singular():
+    """acid and acids, each with its own edges, are one concept in the folded book."""
+    unit = a_unit()
+    reads = [{"unit": unit.id, "extracted": {
+        "concepts": [{"name": "acid", "kind": "substance", "definition": "", "aliases": []},
+                     {"name": "acids", "kind": "substance", "definition": "", "aliases": []},
+                     {"name": "base", "kind": "substance", "definition": "", "aliases": []}],
+        "relations": [{"from": "acid", "rel": "contrasts_with", "to": "base"},
+                      {"from": "acids", "rel": "produces", "to": "base"}],
+        "figures": [], "key_terms": []}}]
+    graph = ingest.fold_book(reads, {unit.id: unit}, book_title="Velthorne")
+    labels = {n["label"] for n in graph["nodes"] if n["kind"] != "figure"}
+    assert "acids" not in labels and "acid" in labels
+    sources = {e["source"] for e in graph["edges"]}
+    assert "concept:acids" not in sources
