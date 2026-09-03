@@ -127,12 +127,10 @@ JUDGE_READ = (
 )
 
 CONFLICT_INSTRUCTIONS = (
-    "Two edges in a knowledge graph join the same two things with different verbs. Both were "
-    "read from the passages below. Say whether the graph should keep both -- they are two "
-    "true and different relationships -- or only one, because the other is a weaker or wrong "
-    "reading of the same sentence. `keep both` when each verb states something the other does "
-    "not. `keep <verb>` when that verb is the relationship and the other should go. `unsure` "
-    "when the passages do not settle it. `why` is one sentence."
+    "Two edges in a knowledge graph join the same two things with different verbs. Decide "
+    "from the passages. `keep both` only when the passages support both relationships as "
+    "true. `keep <verb>` when the passages support that one and not the other. `unsure` when "
+    "the passages show neither. `why` is one sentence."
 )
 
 CONFLICT_READ = "Passages the two edges were read from:"
