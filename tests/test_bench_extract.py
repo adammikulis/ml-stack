@@ -426,3 +426,16 @@ def test_extract_is_a_measuring_subcommand_with_help(capsys):
     args = _parser().parse_args(["extract", "x", "--world", "w"])
     assert args.sample == bx.SAMPLE and args.context == 65536 and args.parallel == 2
     assert args.per_message == 300.0
+
+
+def test_the_instructions_say_what_a_topic_is_and_name_the_relation_vocabulary():
+    """Both extractors measured 2026-09-02 found every person and place and then listed
+    topics at under 20% precision and named relations outside the world's vocabulary: the
+    instructions had defined neither. They do now, and the words are held here so a
+    rewording that drops them is noticed."""
+    from ml_stack.graph.bench.extract import INSTRUCTIONS
+
+    assert "at most three" in INSTRUCTIONS and "is not a topic" in INSTRUCTIONS
+    for rel in ("works_with", "reports_to", "part_of", "works_on", "advises", "attended"):
+        assert rel in INSTRUCTIONS
+    assert "invent nothing" in INSTRUCTIONS

@@ -92,9 +92,15 @@ DAYS = 5
 INSTRUCTIONS = (
     "Read this message from an organised group and list the people, organisations, topics, "
     "places and relations it states; invent nothing. The sender is named before the "
-    "message: include them among the people. A field the message does not give is an "
-    "empty string. A relation joins two names from this message with a short lower-case "
-    "verb phrase, underscores for spaces, such as works_at, based_in, works_on, reports_to. "
+    "message: include them among the people. A topic is a subject area the message names "
+    "-- a field, a technology, a craft, an activity -- written as the message writes it, "
+    "at most three; the message's purpose, a project, an event, a request or a feeling is "
+    "not a topic, and a message about nothing in particular has none. An organisation is "
+    "a named company, team, institution or group, not a role or a department in passing. "
+    "A field the message does not give is an empty string. A relation joins two names "
+    "from this message with a short lower-case verb phrase, underscores for spaces, from "
+    "these where one fits: works_at, works_with, works_on, reports_to, part_of, based_in, "
+    "advises, attended, experienced_in; only otherwise a phrase of your own. "
     "Return only JSON matching the schema."
 )
 
