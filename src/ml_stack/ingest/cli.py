@@ -359,12 +359,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     return 2
                 with ingest._serving(args) as client:
                     judge = ingest._judge(client, args.out, model=args.model)
-                    hygiene(args.out, written=written_from(args.written), judge=judge,
-                            log=print)
-                return 0
-            hygiene(args.out, dry_run=not args.apply, written=written_from(args.written),
-                    log=print)
-            return 0
+                    report = hygiene(args.out, written=written_from(args.written),
+                                     judge=judge, log=print)
+                return 0 if report.sound else 1
+            report = hygiene(args.out, dry_run=not args.apply,
+                             written=written_from(args.written), log=print)
+            return 0 if report.sound else 1
         return status(args.out)
     if not args.docs and not args.gold:
         print("error: name at least one document, or --gold FILE", file=sys.stderr)

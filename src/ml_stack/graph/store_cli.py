@@ -129,9 +129,9 @@ def main(argv: list[str] | None = None) -> int:
                 from ml_stack.client import Client
 
                 judge = ModelJudge(Client(args.base_url, n_predict=1024))
-            tidy(path, dry_run=not args.apply, written=written_from(args.written),
-                 judge=judge, log=print)
-            return 0
+            report = tidy(path, dry_run=not args.apply, written=written_from(args.written),
+                          judge=judge, log=print)
+            return 0 if report.sound else 1
         return _docs(path)
     except StoreNeedsUpgrade as why:
         print(str(why), file=sys.stderr)

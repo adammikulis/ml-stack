@@ -462,7 +462,9 @@ def _real_cache_and_state_untouched():
 
             me = psutil.Process(os.getpid())
             tree = {me.pid, *(p.pid for p in me.parents()), *(p.pid for p in me.children(True))}
-            return owner in tree or not psutil.pid_exists(owner)
+            # an owner that has gone and was never in this tree was somebody else's server
+            # ending while the suite ran (a judged pass's, 2026-09-03) -- not ours
+            return owner in tree
         except Exception:  # noqa: BLE001 - no psutil: judge by the pid alone
             return owner == os.getpid()
 

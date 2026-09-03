@@ -152,3 +152,19 @@ def test_a_second_books_names_land_on_the_first_books_nodes_on_the_way_in(tmp_pa
         assert ("concept:glimmer-node", "requires", "concept:current") in triples
         vault = next(n for n in store.nodes() if n["id"] == "concept:vault")
         assert set(vault["provenance"]) == {first.id, second.id}
+
+
+def test_fold_checks_the_store_at_its_end(tmp_path, monkeypatch, capsys):
+    from ml_stack.graph.store import GraphStore
+
+    out = tmp_path / "shelf"
+    unit = a_unit()
+    _keep(tmp_path, "lattice", [_read(unit, ["glimmer node", "vault"],
+                                      [("glimmer node", "part_of", "vault")])])
+    ingest.Progress(ingest.Progress.beside(out)).book("lattice", title="Lattice Studies",
+                                                      path="l.pdf", sections=1)
+    assert ingest.fold(out) == 0
+    assert "reads back whole" in capsys.readouterr().out
+    monkeypatch.setattr(GraphStore, "check", lambda self: ["edge a -part_of-> : found by scan"])
+    assert ingest.fold(out) == 1
+    assert "NOT SOUND" in capsys.readouterr().out

@@ -192,3 +192,24 @@ def test_a_merge_keeps_both_definitions_rather_than_the_one_it_found_first(tmp_p
     ring = nodes["concept:ring"]["attrs"]
     assert ring["definition"] == "a closed loop of lattice"
     assert not ring.get("definitions_also"), "one is the start of the other: not a second"
+
+
+def test_the_pass_checks_the_store_after_its_writes_and_refuses_success_over_an_unsound_one(tmp_path, monkeypatch, capsys):
+    """2026-09-03: a store engine blanked other nodes' strings on a delete and the pass
+    reported success over a store that no longer read back by id."""
+    from ml_stack.graph import store_cli
+    from ml_stack.graph.store import GraphStore
+
+    path = _store(tmp_path, [_node("concept:acid", "acid", mentions=3),
+                             _node("concept:acids", "acids", mentions=1)], [])
+    report = tidy(path, dry_run=False)
+    assert report.sound and "NOT SOUND" not in report.said()
+
+    monkeypatch.setattr(GraphStore, "check", lambda self: ["node concept:x: found by scan, not by id"])
+    again = _store(tmp_path / "b", [_node("concept:vault", "vault", mentions=3),
+                                    _node("concept:vaults", "vaults", mentions=1)], [])
+    report = tidy(again, dry_run=False)
+    assert not report.sound and report.said().startswith("NOT SOUND")
+    assert store_cli.main(["tidy", str(again), "--apply"]) == 1
+    assert "NOT SOUND" in capsys.readouterr().out
+    assert tidy(again).sound, "a dry run writes nothing and checks nothing"

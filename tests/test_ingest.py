@@ -824,7 +824,7 @@ def test_fold_writes_a_part_read_book_into_the_store_and_says_it_is_partial(tmp_
 
     assert ingest.main(["fold", "--out", str(store)]) == 0
     line = capsys.readouterr().out.strip()
-    assert line.count("\n") == 0, "one line for what it did"
+    assert line.count("\n") == 1 and line.endswith("reads back whole"), "one line for what it did, and the check"
     assert "Velthorne Open Texts" in line and "2 of 4 units read" in line
     assert "partial" in line
     assert in_store(store) >= {"book:velthorne-open-texts", "concept:vault",

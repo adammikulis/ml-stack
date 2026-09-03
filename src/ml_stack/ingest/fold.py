@@ -436,4 +436,15 @@ def fold(out: str | Path, *, book: str = "", rebuild: bool = False, dry_run: boo
             f"{what} {got['new_nodes']} node(s) and {got['new_edges']} edge(s)"
             + (f" into {out}" if not dry_run else "")
             + ("  -- partial" if got["partial"] else ""))
+    if not dry_run:
+        from ml_stack.graph.store import GraphStore
+
+        with GraphStore(out, read_only=True) as store:
+            findings = store.check()
+        if findings:
+            say(f"NOT SOUND: {out} does not read back whole after the fold -- "
+                f"{len(findings)} finding(s), e.g. {findings[0]!r}; rebuild it from the reads "
+                f"into a fresh store and report the store engine version")
+            return 1
+        say(f"{out}: reads back whole")
     return 0

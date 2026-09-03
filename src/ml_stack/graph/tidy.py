@@ -404,6 +404,7 @@ class Report:
     """What one pass did or would do; every step's count, and a line per decision."""
 
     dry_run: bool = True
+    findings: list[str] = field(default_factory=list)   # the store's own check, after the writes
     merged_nodes: int = 0
     possible: list[tuple[str, str]] = field(default_factory=list)   # close spellings, unmerged
     judged_same: int = 0
@@ -433,7 +434,22 @@ class Report:
         return not (self.merged_nodes or self.relations_folded or self.inverses_folded
                     or self.flagged or self.conflict_edges_dropped or self.suspects_dropped)
 
+    @property
+    def sound(self) -> bool:
+        """Whether the store read back whole after the pass -- a pass that left a store
+        that does not read back by id is not a success, whatever it merged."""
+        return not self.findings
+
     def said(self) -> str:
+        head = "would merge" if self.dry_run else "merged"
+        if self.findings:
+            return (f"NOT SOUND: after the pass the store does not read back whole -- "
+                    f"{len(self.findings)} finding(s), e.g. {self.findings[0]!r}; the pass "
+                    f"is not a success. Rebuild from the reads (ml-stack-ingest fold) and "
+                    f"report the store engine version. It would have said: ") + self._said()
+        return self._said()
+
+    def _said(self) -> str:
         head = "would merge" if self.dry_run else "merged"
         return (f"{head} {self.merged_nodes} node(s) ({self.merged_edges} edge(s) moved), "
                 f"folded {self.relations_folded} relation spelling(s) and "
@@ -812,6 +828,11 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if report.orphans:
         note(f"orphans: {len(report.orphans)} node(s) with no relation, e.g. "
              + ", ".join(_label(nodes, n) for n in report.orphans[:5]))
+    if not dry_run and hasattr(store, "check"):
+        # 2026-09-03: a store engine blanked other nodes' strings on a delete, and the
+        # pass reported success over a store that no longer read back by id. Never again:
+        # the store's own check runs after the writes and the report carries what it found
+        report.findings = list(store.check())
     note(report.said())
     return report
 
