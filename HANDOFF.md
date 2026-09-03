@@ -103,10 +103,13 @@ Lifecycle and safety
 - [ ] **A foreign-server report.** `ml-stack-serve status` lists a listening llama-server
   the record does not know as foreign, with its pid -- detection, since prevention is in
   the library (`Lease`).
-- [ ] **Job records for every long command.** The ingest has a lease-like record (one at a
-  time, `wait`, `stop`); the bench has a lock and no `wait`; training has neither. One
-  `jobs` record with `wait`, `stop`, `status` for bench, ingest and train, so chaining is
-  always `wait && next`.
+- [ ] **The ingest onto `jobs`.** `ml_stack.jobs` (record/alive/wait/stop/status) now backs
+  the bench's detach and `ml-stack-bench wait`; the ingest still keeps its own
+  `ingesting.json`. Swap it: `jobs.record("ingest", pid=child.pid, argv=rest, log=str(log),
+  home=HOME / "jobs")` in `detach`, `jobs.alive` for `_recorded_alive`, `jobs.wait`,
+  `jobs.stop(..., wait=STOP_WAIT)` with the before/after-fold report layered on top; then
+  `ml-stack-jobs status` (a tiny CLI over `jobs.status`) shows every kind at once.
+  Training has no detach yet; when it gets one it records the same way.
 - [ ] **Retry once on a server reset.** A single reset mid-request costs the unit today;
   one retry after a health check before it is written down as failed.
 
