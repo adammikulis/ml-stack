@@ -721,3 +721,115 @@ def test_a_model_name_with_a_quote_in_it_does_not_break_the_exposition(served):
     line = [ln for ln in body.splitlines() if ln.startswith("model_info")][0]
     assert line == 'model_info{model="tiny \\"Q4\\"\\\\x.gguf"} 1'
     assert body.endswith("\n")
+
+
+# -- the concrete handler: the page, the exports, and a 404 for the rest ------------------
+
+from ml_stack.graph.serve import Handler, bind, main  # noqa: E402
+
+
+def fetch(url):
+    """(status, content-type, cache-control, body) for one GET, error bodies included."""
+    try:
+        with urllib.request.urlopen(url, timeout=5) as r:
+            return r.status, r.headers.get("Content-Type"), r.headers.get("Cache-Control"), r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.headers.get("Content-Type"), e.headers.get("Cache-Control"), e.read()
+
+
+@pytest.fixture
+def site(tmp_path):
+    """A rendered page and an export root with one JSON file in a subdirectory."""
+    from ml_stack.graph.page import render
+
+    page = tmp_path / "site" / "index.html"
+    page.parent.mkdir()
+    page.write_text(render(GRAPH, title="Invented"), encoding="utf-8")
+    export = tmp_path / "export"
+    (export / "a").mkdir(parents=True)
+    (export / "a" / "b.json").write_text(json.dumps({"kept": True}))
+    (export / "a" / "note.html").write_text("<p>hello</p>")
+    (export / "a" / "blob.bin").write_bytes(b"\x00\x01")
+    (tmp_path / "pyproject.toml").write_text("[secret]\n")
+    return page, export
+
+
+def test_the_root_serves_the_page_with_the_live_script_and_no_store(site):
+    page, export = site
+    with threaded_server(Handler.configured(site=page, export=export)) as url:
+        for path in ("/", "/index.html"):
+            status, ctype, cache, body = fetch(url + path)
+            assert status == 200
+            assert ctype.startswith("text/html")
+            assert cache == "no-store"
+            assert b"window.GRAPH_LIVE=1" in body
+            assert b"<title>Invented</title>" in body
+            assert body.index(b"GRAPH_LIVE") < body.index(b"<title>")
+
+
+def test_an_export_is_served_by_its_suffix(site):
+    page, export = site
+    with threaded_server(Handler.configured(site=page, export=export)) as url:
+        status, ctype, _, body = fetch(url + "/export/a/b.json")
+        assert (status, ctype) == (200, "application/json")
+        assert json.loads(body) == {"kept": True}
+        status, ctype, _, body = fetch(url + "/export/a/note.html")
+        assert status == 200 and ctype.startswith("text/html") and body == b"<p>hello</p>"
+        status, ctype, _, body = fetch(url + "/export/a/blob.bin")
+        assert (status, ctype, body) == (200, "application/octet-stream", b"\x00\x01")
+
+
+def test_a_path_that_climbs_out_of_the_export_root_is_a_404(site):
+    page, export = site
+    with threaded_server(Handler.configured(site=page, export=export)) as url:
+        for path in ("/export/../pyproject.toml", "/export/a/../../pyproject.toml",
+                     "/export/%2e%2e/pyproject.toml", "/export/a", "/export/missing.json",
+                     "/export/"):
+            status, _, _, body = fetch(url + path)
+            assert status == 404, path
+            assert b"secret" not in body
+
+
+def test_anything_else_is_a_404_and_the_ask_routes_still_answer(site):
+    page, export = site
+    with threaded_server(Handler.configured(site=page, export=export)) as url:
+        assert fetch(url + "/nothing")[0] == 404
+        assert fetch(url + "/site/index.html")[0] == 404
+        status, _, body = call(url + "/ask/model")
+        assert status == 200 and body["model"] == ""
+        assert call(url + "/metrics")[0] == 200
+        status, _, body = call(url + "/ask", "POST", {"question": "who?"})
+        assert status == 500 and "graph" in body["error"]
+
+
+def test_a_handler_without_an_export_root_has_no_export_route(site):
+    page, _ = site
+    with threaded_server(Handler.configured(site=page)) as url:
+        assert fetch(url + "/export/a/b.json")[0] == 404
+        assert fetch(url + "/")[0] == 200
+
+
+def test_bind_takes_the_command_line_and_answers_on_loopback(site, monkeypatch):
+    page, export = site
+    httpd = bind(["serve", "--site", str(page), "--export", str(export), "--port", "0",
+                  "--model", "hf:invented/model-GGUF/model.gguf"])
+    try:
+        assert httpd.server_address[0] == "127.0.0.1"
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        url = f"http://127.0.0.1:{httpd.server_address[1]}"
+        assert b"GRAPH_LIVE" in fetch(url + "/")[3]
+        status, _, body = call(url + "/ask/model")
+        assert status == 200 and body["model"] == "model.gguf"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+
+
+def test_main_prints_where_it_is_serving_then_serves(site, monkeypatch, capsys):
+    page, _ = site
+    served = []
+    monkeypatch.setattr("http.server.ThreadingHTTPServer.serve_forever",
+                        lambda self, *a, **k: served.append(self.server_address))
+    assert main(["serve", "--site", str(page), "--port", "0"]) == 0
+    assert served and served[0][0] == "127.0.0.1"
+    assert f"http://127.0.0.1:{served[0][1]}" in capsys.readouterr().out

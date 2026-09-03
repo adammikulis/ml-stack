@@ -51,22 +51,40 @@ this question, for ``converse(..., summary=, recalled=)``. A subclass that retur
 
 Nothing here decides who may ask. A page served over a tunnel and one on loopback get the
 same routes; refusing one is the subclass's policy, checked before these are called.
+
+``Handler`` is that subclass, once: ``GET /`` is a rendered page with ``window.GRAPH_LIVE``
+set ahead of it, ``GET /export/<path>`` a file under an export root, and the ask routes
+above. ``ml-stack-graph serve --site FILE`` binds one on loopback.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import time
 from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from ml_stack.graph.thread import EVERY, WINDOW
 
-__all__ = ["Ask", "AskRoutes", "History", "KEEP_ANSWERS", "STARTED", "answer_payload",
-           "prometheus", "sse", "thread_request"]
+__all__ = ["Ask", "AskRoutes", "Handler", "History", "KEEP_ANSWERS", "STARTED",
+           "answer_payload", "bind", "main", "prometheus", "sse", "thread_request"]
+
+LIVE = b"<script>window.GRAPH_LIVE=1</script>"
+"""What goes ahead of a served page and not a published one: the page asks a server it
+finds this on for answers, and asks nothing otherwise."""
+
+PORT = 8794
+"""Where ``ml-stack-graph serve`` listens unless told otherwise."""
+
+# what an export is sent as, by suffix; anything else is bytes
+EXPORT_TYPES = {".json": "application/json", ".html": "text/html; charset=utf-8"}
 
 STARTED = time.time()
 """When this process began, near enough: the moment this module was imported. ``/metrics``
@@ -735,3 +753,180 @@ def _drained(events: Iterator[Any], emit: Any) -> Any:
         elif emit is not None:
             emit(event)
     return last or {}
+
+
+class Handler(AskRoutes, BaseHTTPRequestHandler):
+    """The page, its exports and the ask routes, on one ``http.server`` handler.
+
+    Configured on the class, since ``http.server`` makes an instance per request:
+    ``site`` is the page file ``GET /`` serves, ``export`` the root ``GET /export/<path>``
+    reads under, ``graph`` what questions are answered over, ``store`` where conversations
+    are kept, and ``run`` the model (`AskRoutes.run`). :meth:`configured` makes a subclass
+    with those set, so two servers in one process do not share them.
+    """
+
+    site: Path | None = None
+    export: Path | None = None
+    graph: Mapping[str, Any] | None = None
+    store: Path | None = None
+
+    @classmethod
+    def configured(cls, *, site: Path | str | None = None, export: Path | str | None = None,
+                   graph: Mapping[str, Any] | None = None, store: Path | str | None = None,
+                   run: Any = None, name: str = "Configured") -> type[Handler]:
+        """A subclass of this handler with the given collaborators on it."""
+        fields = {"site": Path(site) if site else None,
+                  "export": Path(export).resolve() if export else None,
+                  "graph": graph, "store": Path(store) if store else None, "run": run}
+        return type(name, (cls,), fields)
+
+    # ------------------------------------------------------------- what AskRoutes asks
+
+    def asker(self, question: str, *, turns: list, held: list, stream: bool,
+              emit: Any) -> Any:
+        if self.graph is None:
+            raise RuntimeError("no graph on this server: serve with --graph FILE")
+        from ml_stack.graph.ask import converse, converse_stream
+
+        client = self.seated(index=0)
+        ways = dict(self.run.converse()) if self.run is not None else {}
+        ways.update(turns=turns, held=held, summary=getattr(turns, "summary", None),
+                    recalled=list(getattr(turns, "recalled", ()) or ()))
+        if stream:
+            return converse_stream(question, self.graph, client, on_event=emit, **ways)
+        return converse(question, self.graph, client, **ways)
+
+    def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
+        if self.store is None:
+            return None
+        from ml_stack.graph.store import GraphStore
+
+        return GraphStore(self.store, read_only=not write)
+
+    # ------------------------------------------------------------------- the routes
+
+    def do_GET(self) -> None:
+        path = urlsplit(self.path).path
+        if path in ("/", "/index.html"):
+            self.handle_page()
+        elif path == "/ask/model":
+            self.handle_model()
+        elif path == "/metrics":
+            self.handle_metrics()
+        elif path == "/metrics.prom":
+            self.handle_metrics_prom()
+        elif path.startswith("/export/"):
+            self.handle_export(path[len("/export/"):])
+        elif (want := thread_request(self.path)):
+            self.handle_thread(*want)
+        else:
+            self.send_error(404)
+
+    def do_POST(self) -> None:
+        body = self.read_body() or {}
+        if self.path == "/ask":
+            self.handle_ask(body)
+        elif self.path == "/ask/stream":
+            self.handle_ask_stream(body)
+        else:
+            self.send_error(404)
+
+    def handle_page(self) -> None:
+        """``GET /``: the page file, with `LIVE` ahead of it, never cached."""
+        if self.site is None or not self.site.is_file():
+            self.send_error(404)
+            return
+        page = self.site.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(LIVE) + len(page)))
+        self.end_headers()
+        self.wfile.write(LIVE + page)
+
+    def handle_export(self, rest: str) -> None:
+        """``GET /export/<path>``: one file under the export root, or a 404."""
+        target = exported(self.export, rest)
+        if target is None:
+            self.send_error(404)
+            return
+        blob = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type",
+                         EXPORT_TYPES.get(target.suffix.lower(), "application/octet-stream"))
+        self.send_header("Content-Length", str(len(blob)))
+        self.end_headers()
+        self.wfile.write(blob)
+
+
+def exported(root: Path | None, rest: str) -> Path | None:
+    """The file ``rest`` names under ``root``, or None when it is not a file under it."""
+    if root is None or not rest:
+        return None
+    target = (root / unquote(rest)).resolve()
+    try:
+        target.relative_to(root.resolve())
+    except ValueError:
+        return None
+    return target if target.is_file() else None
+
+
+# ---------------------------------------------------------------- the command
+
+
+def parser() -> argparse.ArgumentParser:
+    top = argparse.ArgumentParser(prog="ml-stack-graph",
+                                  description="A rendered graph page, served with a model behind it.")
+    subs = top.add_subparsers(dest="command", required=True)
+    serve = subs.add_parser("serve", help="serve a rendered page on loopback",
+                            description="GET / is the page with window.GRAPH_LIVE set; "
+                                        "/export/<path> a file under --export; /ask, "
+                                        "/ask/stream, /thread/<name> and /metrics answer "
+                                        "with the model.")
+    serve.add_argument("--site", required=True, type=Path,
+                       help="the rendered page (page.render's output) GET / serves")
+    serve.add_argument("--export", type=Path, help="a directory served under /export/")
+    serve.add_argument("--port", type=int, default=PORT, help=f"listen here (default {PORT})")
+    serve.add_argument("--model", default="",
+                       help="the model that answers, as ml-stack-serve up names it "
+                            "(a path or hf:owner/repo/file); leased on the first question")
+    serve.add_argument("--model-port", type=int, default=8080,
+                       help="the port the model is served on (default 8080)")
+    serve.add_argument("--graph", type=Path,
+                       help="the graph questions are answered over, as JSON")
+    serve.add_argument("--store", type=Path,
+                       help="a GraphStore path conversations are kept in")
+    return top
+
+
+def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
+    """A server bound on loopback from the command line, not yet serving."""
+    args = parser().parse_args(argv)
+    run = None
+    if args.model:
+        from ml_stack.serve.shape import Run, Shape
+
+        run = Run(shape=Shape(model=str(args.model), port=int(args.model_port)))
+    graph = None
+    if args.graph:
+        graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    handler = Handler.configured(site=args.site, export=args.export, graph=graph,
+                                 store=args.store, run=run)
+    return ThreadingHTTPServer(("127.0.0.1", int(args.port)), handler)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    httpd = bind(argv)
+    host, port = httpd.server_address[:2]
+    print(f"serving http://{host}:{port}", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -714,6 +714,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, the commit it runs and how it updates itself; `leave` undoes it; `--track main` makes this machine follow a branch rather than releases |
 | `ml-stack-mcp` | the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools |
 | `ml-stack` | the windowed app; `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
+| `ml-stack-graph serve --site FILE` | a rendered graph page (`graph.page.render`) served on loopback: `GET /` is the page with `window.GRAPH_LIVE` set so it asks this server rather than nothing, `/export/<path>` a file under `--export DIR` (JSON and HTML by their suffix, anything else as bytes, nothing outside the root), and the ask routes -- `/ask`, `/ask/stream`, `/thread/<name>`, `/ask/model`, `/metrics` -- answered over `--graph FILE` with `--model` leased on the first question (`--model-port` is where it is served), conversations kept in `--store PATH`; `--port` picks the listener |
 
 ## Joining the fleet
 
