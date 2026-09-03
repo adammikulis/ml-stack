@@ -585,7 +585,9 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   const kindById = Object.fromEntries(G.nodes.map(n => [n.id, n.kind]));
   const p2pCount = G.edges.filter(e => kindById[e.source] === 'person'
                                     && kindById[e.target] === 'person').length;
-  const color = k => `var(--k-${k})`;
+  // the payload's own colour is the fallback, so a kind the stylesheet never named is not black
+  const colourOf = k => (kindOf[k] && kindOf[k].colour) || '#888888';
+  const color = k => `var(--k-${k}, ${colourOf(k)})`;
   const swatch = (k, size = 9) => `<svg class="sw" width="${size}" height="${size}" viewBox="-7 -7 14 14"><path d="${d3.symbol().type(kindOf[k].shape).size(40)()}" fill="${color(k)}"/></svg>`;
   // show: drawn. hide: masked, but still shaping the layout. remove: out of the simulation, so
   // everything else re-settles without it.
@@ -672,7 +674,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
   function paintCounts() {
     const c = counted();
     document.getElementById('stats').innerHTML =
-      `<span><b>${st.messages ?? 0}</b> messages</span><span><b>${c.members}</b> members</span><span><b>${c.nodes}</b> nodes</span><span><b>${c.edges}</b> links</span>`;
+      `<span><b>${st.messages ?? 0}</b> messages${DATA.messagesLeftOut ? ` <span class="n">(${DATA.messagesLeftOut} not on this page)</span>` : ''}</span><span><b>${c.members}</b> members</span><span><b>${c.nodes}</b> nodes</span><span><b>${c.edges}</b> links</span>`;
   }
   const msgs = Object.values(G.messages || {});
   if (msgs.length) {
@@ -1823,7 +1825,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     // gathering must look like something in this view too: 2D outlines the mark, and
     // before this the same click changed nothing anyone could see
     if (picked.has('node:' + n.id) || glow.has(n.id)) return cssVar('--accent');
-    const base = cssVar(`--k-${n.kind}`);
+    const base = cssVar(`--k-${n.kind}`) || colourOf(n.kind);
     const vis = matches(n.ref), focus = selected ? (n.id === selected || (neighbors.get(selected) || new Set()).has(n.id)) : true;
     return (vis && focus) ? base : base + '22';
   }
@@ -2954,7 +2956,7 @@ aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 
     saveDisplay();
   }
 
-  const hexOf = kind => (getComputedStyle(document.documentElement).getPropertyValue(`--k-${kind}`).trim() || '#888888');
+  const hexOf = kind => (getComputedStyle(document.documentElement).getPropertyValue(`--k-${kind}`).trim() || colourOf(kind));
 
   function stateRow(parent, nameHtml, count, get, set, states, colorKind) {
     const row = document.createElement('div');

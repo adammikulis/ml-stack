@@ -27,6 +27,12 @@ WEB = Path(__file__).parent / "web"
 SHAPES = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
 # what a kind is drawn as, when the caller does not say
 FALLBACK = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
+# the five kinds graph.html paints itself, light and dark, in its own stylesheet
+SHIPPED = {"person": "#2a78d6", "org": "#eb6834", "place": "#1baf7a", "topic": "#eda100",
+           "opportunity": "#e87ba4"}
+# what any other kind is painted, by position, when the caller does not say
+PALETTE = ("#7a5af5", "#0e9aa7", "#b833a6", "#8a9a1b", "#d63a3a", "#4b4fbf", "#a0522d",
+           "#6b7a8f", "#2f9e44", "#c2410c")
 
 
 def hidden(node: Mapping[str, Any]) -> bool:
@@ -57,6 +63,49 @@ def kinds_of(graph: Mapping[str, Any]) -> list[dict[str, str]]:
              "shape": FALLBACK[i % len(FALLBACK)]} for i, kind in enumerate(seen)]
 
 
+def coloured(kinds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Each kind entry with a ``colour``: the one given, a shipped kind's own, or the next
+    of ``PALETTE`` for anything else."""
+    out: list[dict[str, Any]] = []
+    chosen = 0
+    for entry in kinds:
+        entry = dict(entry)
+        kind = str(entry.get("k") or "")
+        if not entry.get("colour"):
+            if kind in SHIPPED:
+                entry["colour"] = SHIPPED[kind]
+            else:
+                entry["colour"] = PALETTE[chosen % len(PALETTE)]
+                chosen += 1
+        out.append(entry)
+    return out
+
+
+def kind_style(kinds: Sequence[Mapping[str, Any]]) -> str:
+    """A ``<style>`` painting every kind that the template does not: a given colour, and
+    the palette colour of a kind the template never heard of. Empty when there is none."""
+    rules = [f"--k-{k['k']}:{k['colour']}" for k in kinds
+             if k.get("k") and k.get("colour") and k["colour"] != SHIPPED.get(k["k"])]
+    if not rules:
+        return ""
+    return ('<style id="kind-colours">:root, :root:not([data-theme="light"]), '
+            ':root[data-theme="dark"] {' + ";".join(rules) + '}</style>')
+
+
+def newest(graph: Mapping[str, Any], most: int) -> tuple[dict[str, Any], int]:
+    """The graph with only its ``most`` newest messages by ``ts``, and how many went."""
+    held = dict(graph.get("messages") or {})
+    if len(held) <= most:
+        return dict(graph), 0
+    order = sorted(held, key=lambda i: float((held[i] or {}).get("ts") or 0), reverse=True)
+    kept = set(order[:max(0, most)])
+    trimmed = {**graph, "messages": {i: held[i] for i in order[:max(0, most)]}}
+    for key in ("nodes", "edges"):
+        trimmed[key] = [{**one, "messages": [m for m in one.get("messages") or () if m in kept]}
+                        if "messages" in one else dict(one) for one in graph.get(key) or ()]
+    return trimmed, len(held) - len(kept)
+
+
 def world_outline() -> dict[str, Any]:
     """The land, as topojson, for a page that places things geographically."""
     raw = json.loads((WEB / "countries-50m.json").read_text(encoding="utf-8"))
@@ -74,19 +123,28 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
            copy: Mapping[str, str] | None = None,
            points: Sequence[Mapping[str, Any]] = (),
            world: Mapping[str, Any] | None = None,
-           author: str = "", extra: Mapping[str, Any] | None = None) -> str:
+           author: str = "", extra: Mapping[str, Any] | None = None,
+           most_messages: int | None = None) -> str:
     """The whole page, as one string.
 
     ``brand`` names whatever made the page, on the bar above it; ``title`` names the graph,
     over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to show
     on the map; passing none leaves the map empty. ``extra`` is merged into the payload the page reads, for
-    whatever a caller's own panels need.
+    whatever a caller's own panels need. A kind entry may carry ``colour`` (a hex string);
+    one without gets a colour of its own, so no kind paints black. ``most_messages`` keeps
+    only that many of the newest messages, and the payload's ``messagesLeftOut`` says how
+    many did not fit.
     """
     template = (WEB / "graph.html").read_text(encoding="utf-8")
-    payload = {"title": title, "graph": shown(graph), "points": list(points),
-               "kinds": list(kinds) if kinds is not None else kinds_of(graph),
+    visible, left_out = shown(graph), 0
+    if most_messages is not None:
+        visible, left_out = newest(visible, int(most_messages))
+    kinds = coloured(list(kinds) if kinds is not None else kinds_of(graph))
+    payload = {"title": title, "graph": visible, "points": list(points),
+               "kinds": kinds, "messagesLeftOut": left_out,
                "copy": dict(copy or {}), "author": author, **dict(extra or {})}
     return (template
+            .replace("</style>", "</style>\n" + kind_style(kinds), 1)
             .replace("__BRAND__", brand or title)
             .replace("__TITLE__", title)
             .replace("__DATA__", _embedded(payload))
