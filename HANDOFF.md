@@ -36,15 +36,11 @@ nothing (the extra turns went unused).
   command. First things seen: a person `created_by` a method (the verb's direction
   reversed by the model -- gloss it with the person on the right), and relations across
   books never joined (each book folds alone; a fold across the shelf is the next step).
-- [ ] **One APBiology unit runs to the ceiling every time** (`apbiology:3:3.2#0`, the
-  carbohydrates part with four figures and a block of review questions with a/b/c/d
-  answers, 8k characters): 547 s to a reply cut at 16k context, then 600 s to the client's
-  timeout at 32k. Every `--resume` pays ten minutes on it again. A failed unit now keeps
-  the whole reply in the reads file (`raw`), so after the next resume read it and see
-  whether the model loops or writes every answer option as a concept; then either strip
-  review-question blocks in `sources/pdf.units` or give extraction DRY sampling
-  (`--dry-multiplier`) and measure on the gold gate. Until then `--per-section 300`
-  bounds the cost.
+- [ ] **Watch for units that still run to the ceiling.** The two that did on the first
+  night were chapter-end question banks (one part carried 66 lettered answers); `pdf.units`
+  now leaves those out and the ingest says how many. A unit that still fails keeps its
+  whole reply in the reads file beside the store (`raw`), so read that before spending GPU
+  on it. If any remains, try DRY sampling for extraction and measure it on the gold gate.
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change tonight
   that moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
