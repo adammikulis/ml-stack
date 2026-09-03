@@ -42,6 +42,9 @@ def test_installing_ml_stack_brings_in_nothing():
 
 
 def test_the_web_assets_are_not_python():
+    """web/ is data, not code -- which is what keeps this package device tier. The tier
+    check only globs *.py, so it would not notice a module smuggled in here."""
     from ml_stack.fleet.ui import ASSETS
 
+    assert list(ASSETS.glob("*.html")), "an empty asset directory would pass anything"
     assert not list(ASSETS.glob("*.py"))

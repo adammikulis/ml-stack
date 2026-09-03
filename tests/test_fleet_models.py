@@ -604,6 +604,7 @@ class TestSuggestions:
     def test_every_one_is_a_reference_this_code_can_resolve(self):
         from ml_stack.fleet.models import SUGGESTED, _resolve
 
+        assert SUGGESTED, "nothing offered at all would pass every check below"
         for pick in SUGGESTED:
             assert pick.ref.startswith("hf:"), pick.ref
             url = _resolve(pick.ref)
@@ -614,6 +615,7 @@ class TestSuggestions:
     def test_names_and_files_do_not_repeat(self):
         from ml_stack.fleet.models import SUGGESTED
 
+        assert SUGGESTED, "an empty list has no repeats either"
         assert len({p.name for p in SUGGESTED}) == len(SUGGESTED)
         assert len({p.file for p in SUGGESTED}) == len(SUGGESTED)
 

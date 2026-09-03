@@ -13,7 +13,6 @@ from pathlib import Path
 import threading
 import urllib.error
 import urllib.request
-from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -21,6 +20,8 @@ import pytest
 from ml_stack.graph.ask import Answer
 from ml_stack.graph.serve import Ask, AskRoutes, History, answer_payload, sse, thread_request
 from ml_stack.graph.store import GraphStore
+
+from conftest import threaded_server
 from ml_stack.graph.thread import SUMMARY, WINDOW, follow
 
 GRAPH = {
@@ -106,17 +107,6 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
             self.end_headers()
 
 
-@contextmanager
-def running(handler):
-    """A live server on a free port for ``handler``; yields its url."""
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    try:
-        yield f"http://127.0.0.1:{srv.server_address[1]}"
-    finally:
-        srv.shutdown()
-
-
 @pytest.fixture
 def served(tmp_path):
     """A live server with a conversation store beside it; yields (url, handler class)."""
@@ -127,7 +117,7 @@ def served(tmp_path):
         store_path = tmp_path / "graph.ladybug"
         asked = []
 
-    with running(Handler) as url:
+    with threaded_server(Handler) as url:
         yield url, Handler
 
 
@@ -379,6 +369,9 @@ def notes(turns):
     return f"So far: Iris surveys land. Rests on: {', '.join(ids)}."
 
 
+@pytest.mark.slow
+
+
 def test_the_window_is_the_last_ten_turns_in_order_and_nothing_else(served):
     """With recall off and no summariser, what goes back is exactly the last WINDOW turns,
     chosen by recency, in the order they were said -- as it always was, only longer."""
@@ -397,6 +390,9 @@ def test_the_window_is_the_last_ten_turns_in_order_and_nothing_else(served):
     assert last["summary"] is None and last["recalled"] == []
 
 
+@pytest.mark.slow
+
+
 def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(tmp_path):
     """The new shape: the window as before, with the summary and what was recalled on it."""
     with GraphStore(tmp_path / "graph.ladybug") as held:
@@ -411,7 +407,7 @@ def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(
         def summariser(self):
             return notes
 
-    with running(Handler) as url:
+    with threaded_server(Handler) as url:
         call(url + "/ask", "POST", {"question": "who surveys land?", "thread": "c1"})
         assert Handler.asked[-1]["summary"] is None and Handler.asked[-1]["recalled"] == []
         call(url + "/ask", "POST", {"question": "what else?", "thread": "c1"})
@@ -465,7 +461,7 @@ def test_a_summariser_that_raises_loses_the_summary_not_the_answer(tmp_path, cap
                 raise RuntimeError("the writer went away")
             return broken
 
-    with running(Handler) as url:
+    with threaded_server(Handler) as url:
         code, _, out = call(url + "/ask", "POST", {"question": "who?", "thread": "c1"})
         assert code == 200 and out["content"] == "Iris surveys land."
         _, _, replay = call(url + "/thread/c1")
@@ -524,7 +520,7 @@ def test_the_session_totals_add_up_every_answer_in_the_thread(served):
     session's totals -- the conversation's cost so far, not the last turn's."""
     from urllib.request import urlopen
 
-    from urllib.request import Request, urlopen
+    from urllib.request import Request
 
     def post(where, body):
         req = Request(where, data=json.dumps(body).encode("utf-8"),
@@ -666,7 +662,7 @@ def test_the_ring_is_bounded_so_a_server_that_answers_all_week_does_not_grow(tmp
         keep_answers = 3
         answer = spent_answer()
 
-    with running(Handler) as url:
+    with threaded_server(Handler) as url:
         for i in range(5):
             post(url + "/ask", {"question": f"who is {i}?", "thread": "long"})
         got = json.loads(get(url + "/metrics")[2])
@@ -684,7 +680,7 @@ def test_two_servers_in_one_process_do_not_add_up_together(tmp_path):
         asked = []
         answer = spent_answer()
 
-    with running(One) as first, running(Two) as second:
+    with threaded_server(One) as first, threaded_server(Two) as second:
         post(first + "/ask", {"question": "who?"})
         post(first + "/ask", {"question": "who else?"})
         post(second + "/ask", {"question": "and here?"})

@@ -105,9 +105,12 @@ class TestAssets:
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
-        html = asset_bytes("index.html")[0].decode()
         import re
-        for ref in re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html):
+
+        html = asset_bytes("index.html")[0].decode()
+        refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html)
+        assert refs, "a page that references nothing would pass the loop below"
+        for ref in refs:
             assert asset_bytes(ref) is not None, f"index.html references missing {ref}"
 
     def test_every_screen_the_wizard_moves_to_is_defined(self):
@@ -119,12 +122,6 @@ class TestAssets:
         called = set(re.findall(r"return (\w+Step)\(", js))
         assert called, "the wizard moves to no screen at all"
         assert called <= defined, f"screens that are gone: {sorted(called - defined)}"
-
-    def test_there_is_no_python_hiding_in_the_asset_directory(self):
-        """web/ is data, not code -- which is what keeps this package device tier. The
-        tier check only globs *.py, so it would not notice a module smuggled in here."""
-        from ml_stack.fleet.ui import ASSETS
-        assert not list(ASSETS.glob("*.py"))
 
     def test_an_asset_that_was_not_shipped_is_not_served(self, serving):
         status, _, _ = serving.call("/ui/static/../daemon.py")
@@ -174,8 +171,8 @@ class TestFirstRunIsNotUpForGrabs:
     def test_the_api_is_unreachable_without_the_ui_header(self, serving):
         """A cross-origin form, image or link cannot set a custom header without a
         preflight -- and the daemon answers no preflight."""
-        status, _, _ = serving.call("/ui/setup", ui_header=False)
-        assert status == 403
+        status, body, _ = serving.call("/ui/setup", ui_header=False)
+        assert status == 403 and "header" in body["error"]
 
     def test_rejoining_needs_a_session_once_the_box_is_in_a_cluster(self, serving):
         serving.call("/ui/setup/join", method="POST",
@@ -434,12 +431,16 @@ class TestPreferences:
 
         for machine in ({"accelerator": True, "cpus": 16},
                         {"accelerator": False, "cpus": 64}):
-            assert "slots" not in suggest(machine)
+            offered = suggest(machine)
+            assert offered, "suggesting nothing at all would pass the line below"
+            assert "slots" not in offered
 
     def test_every_suggestion_carries_a_reason(self):
         from ml_stack.fleet.settings import suggest
 
-        for key, s in suggest({"accelerator": True, "cpus": 8}).items():
+        offered = suggest({"accelerator": True, "cpus": 8})
+        assert offered, "suggesting nothing at all would pass the loop below"
+        for key, s in offered.items():
             if key == "work_hours" and not s.value:
                 continue
             assert s.why, f"{key} was pre-selected with no reason shown"
@@ -704,6 +705,8 @@ class TestTheInterfaceAndTheDaemonAgree:
             path = pp.split("?", 1)[0]
             cleaned.add(re.sub(r"\$\{[^}]*\}", "x", path))
         return sorted(cleaned)
+
+    @pytest.mark.slow
 
     def test_the_page_calls_nothing_the_daemon_does_not_answer(self, signed_in,
                                                               monkeypatch):

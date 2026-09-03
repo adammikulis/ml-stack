@@ -23,6 +23,10 @@ import pytest
 
 pw = pytest.importorskip("playwright.sync_api")
 
+#: Every test here launches headless Chromium and drives a real page. Nothing in
+#: the module is under a second, so the whole of it is what `-m "not slow"` drops.
+pytestmark = pytest.mark.slow
+
 from ml_stack.graph import page as graph_page  # noqa: E402
 
 VENDOR = Path(__file__).resolve().parent / "support" / "vendor"

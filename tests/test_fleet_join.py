@@ -118,6 +118,7 @@ def daemons():
 
 # -- the join --------------------------------------------------------------------------
 class TestJoin:
+    @pytest.mark.slow
     def test_it_checks_joins_starts_announces_and_lists(self, tmp_path, key, udp, daemons):
         tcp = _free_tcp()
         said: list[str] = []
@@ -164,6 +165,8 @@ class TestJoin:
         assert "passphrase" in str(left.value)
         assert started == [], "nothing may start on a machine that cannot announce"
 
+    @pytest.mark.slow
+
     def test_a_running_daemon_is_reused_and_enrolled_through(self, tmp_path, key, udp, daemons):
         """Writing the key file under a running daemon leaves it announcing the old set;
         the cluster has to go in through the daemon, which re-reads them."""
@@ -187,6 +190,8 @@ class TestJoin:
         assert joined.name == "quince", "the running daemon's name wins over --name"
         assert [p["name"] for p in joined.peers] == ["quince"]
 
+    @pytest.mark.slow
+
     def test_already_in_a_cluster_needs_no_passphrase(self, tmp_path, key, udp, daemons):
         from ml_stack.fleet.discovery import join as join_cluster
 
@@ -196,6 +201,8 @@ class TestJoin:
         joined = join_machine(port=tcp, root=tmp_path, cluster_key_path=key,
                               discovery_port=udp, say=lambda s: None)
         assert joined.group == "home"
+
+    @pytest.mark.slow
 
     def test_persist_installs_at_logon_and_says_when_it_could_not(self, tmp_path, key, udp,
                                                                  daemons):
@@ -212,9 +219,12 @@ class TestJoin:
             asked.append(mode)
             return Autostart(mode, installed=True, path=tmp_path / "agent.plist")
 
+        # the fake logon service never brings a daemon up, so the first wait runs its
+        # deadline out on purpose; the FakeDaemon `start` puts up answers on the first poll,
+        # so a short deadline measures the same fall-through in three seconds instead of twenty
         joined = join_machine(passphrase=WORDS, persist=True, port=tcp, root=tmp_path,
                               cluster_key_path=key, start=start, persist_with=installs,
-                              discovery_port=udp, say=lambda s: None)
+                              discovery_port=udp, say=lambda s: None, wait_s=3.0)
         assert asked == ["login"] and joined.persisted and joined.persist_note == ""
 
         def refuses(mode: str, **kw) -> Autostart:
@@ -223,7 +233,7 @@ class TestJoin:
 
         joined = join_machine(persist=True, port=tcp, root=tmp_path, cluster_key_path=key,
                               start=start, persist_with=refuses, discovery_port=udp,
-                              say=lambda s: None)
+                              say=lambda s: None, wait_s=3.0)
         assert not joined.persisted
         assert "sudo cp" in joined.persist_note and "administrator" in joined.persist_note
 
@@ -336,6 +346,8 @@ class TestStatus:
 
         assert joining.remember_track(tmp_path, "off") == ""
         assert Settings.load(tmp_path / "settings.json").track_branch == ""
+
+    @pytest.mark.slow
 
     def test_peers_lists_one_machine_once_across_two_clusters(self, key, udp, daemons):
         from ml_stack.fleet.discovery import join as join_cluster
@@ -504,6 +516,8 @@ class TestThePage:
         assert larch["room"] == "20.5/24.0 GB" and larch["commit"] == "abc1234"
         assert body["models"] == ["larch-9b.gguf", "quince-2b.gguf"]
         assert body["bench"]["available"] and "nothing is measuring" in body["bench"]["text"]
+
+    @pytest.mark.slow
 
     def test_the_join_button_runs_the_same_join(self, page):
         s, cookie = page

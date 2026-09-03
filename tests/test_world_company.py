@@ -217,7 +217,7 @@ def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
     from ml_stack.graph.ask import list_kind, look_up, path_between, tools_for
-    from ml_stack.graph.bench import SHORT, read_questions, sample, shape
+    from ml_stack.graph.bench import SHORT, read_questions, sample
 
     from ml_stack.world.cli import main
 
@@ -369,7 +369,7 @@ def test_two_hops_answer_with_the_far_end_and_never_the_person_in_the_middle():
             seen.add("with")
         elif q["q"].startswith("Who works with someone in "):
             unit_label = q["q"][len("Who works with someone in "):q["q"].index(" who knows about ")]
-            unit = next(i for i, l in label.items() if l == unit_label and kinds[i] == "department")
+            unit = next(i for i, line in label.items() if line == unit_label and kinds[i] == "department")
             middle = knows[topic] & _to(world, "part_of")[unit]
             assert 1 <= len(middle) <= 3
             assert set(q["expect"]) == {c for p in middle for c in beside.get(p, ())} - middle
@@ -397,13 +397,13 @@ def test_a_false_premise_leaves_the_place_exactly_as_the_graph_has_it():
     for q in asked:
         m = re.fullmatch(r"Since (.+) moved to (.+), who (?:in (.+) )?is left in (.+)\?", q["q"])
         assert m, q["q"]
-        mover = next(i for i, l in label.items() if l == m.group(1) and kinds[i] == "person")
-        to = next(i for i, l in label.items() if l == m.group(2) and kinds[i] == "place")
-        place = next(i for i, l in label.items() if l == m.group(4) and kinds[i] == "place")
+        mover = next(i for i, line in label.items() if line == m.group(1) and kinds[i] == "person")
+        to = next(i for i, line in label.items() if line == m.group(2) and kinds[i] == "place")
+        place = next(i for i, line in label.items() if line == m.group(4) and kinds[i] == "place")
         assert to not in lives[mover] and place not in lives[mover], "the premise is false"
         here = {p for p in settled[place] if kinds[p] == "person"}
         if m.group(3):
-            unit = next(i for i, l in label.items() if l == m.group(3))
+            unit = next(i for i, line in label.items() if line == m.group(3))
             here &= _to(world, "part_of")[unit]
         assert set(q["expect"]) == here, "nobody subtracted"
 
@@ -420,11 +420,11 @@ def test_a_quote_question_is_answered_by_the_words_and_by_nothing_else():
         if q["q"].startswith("Who said they "):
             phrase = q["q"][len("Who said they "):-1]
             assert set(q["expect"]) == {who for who, lines in said.items()
-                                        if any(f"I {phrase}." in l for l in lines)}
+                                        if any(f"I {phrase}." in line for line in lines)}
         else:
-            who = next(i for i, l in label.items() if q["q"] == f"What did {l} say takes most of their time?")
+            who = next(i for i, line in label.items() if q["q"] == f"What did {line} say takes most of their time?")
             assert len(q["expect"]) == 1
-            assert any(f"Lately most of my time goes to {label[q['expect'][0]]}." in l for l in said[who])
+            assert any(f"Lately most of my time goes to {label[q['expect'][0]]}." in line for line in said[who])
 
 
 def test_kinds_draws_only_those_buckets_and_refuses_an_unknown_one(tmp_path, capsys):
@@ -439,8 +439,8 @@ def test_kinds_draws_only_those_buckets_and_refuses_an_unknown_one(tmp_path, cap
     assert main(["make", "--kind", "company", "--size", "small", "--seed", "0", "--out", str(out)]) == 0
     capsys.readouterr()
     assert main(["questions", "--world", str(out), "--n", "8", "--kinds", "aggregate,twohop"]) == 0
-    lines = [json.loads(l) for l in capsys.readouterr().out.strip().splitlines()]
-    assert len(lines) == 8 and {l["kind"] for l in lines} == {"aggregate", "twohop"}
+    lines = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert len(lines) == 8 and {line["kind"] for line in lines} == {"aggregate", "twohop"}
     assert main(["questions", "--world", str(out), "--n", "8", "--kinds", "riddle"]) == 2
     assert "riddle" in capsys.readouterr().err
 
@@ -497,7 +497,7 @@ def test_main_make_writes_the_three_files_and_says_what_it_made(tmp_path, capsys
 
     assert main(["questions", "--world", str(out), "--n", "12"]) == 0
     lines = capsys.readouterr().out.strip().splitlines()
-    assert len(lines) == 12 and all(set(json.loads(l)) == {"q", "expect", "kind"} for l in lines)
+    assert len(lines) == 12 and all(set(json.loads(line)) == {"q", "expect", "kind"} for line in lines)
 
 
 def test_main_make_writes_world_json_and_load_reads_kind_size_and_people_from_it(tmp_path):
@@ -539,7 +539,7 @@ def test_main_simulate_then_emit_writes_a_corpus_the_sources_read_back(tmp_path,
 
     assert main(["emit", "--from", str(talk / "messages.jsonl"), "--world", str(world_dir),
                  "--as", "rows", "--out", str(tmp_path / "rows.jsonl")]) == 0
-    rows = [json.loads(l) for l in (tmp_path / "rows.jsonl").read_text().splitlines()]
+    rows = [json.loads(line) for line in (tmp_path / "rows.jsonl").read_text().splitlines()]
     assert rows and all("channelId" in r and "ts" in r for r in rows)
     assert main(["emit", "--from", str(talk), "--as", "mbox", "--out", str(tmp_path / "mail.mbox")]) == 0
     assert (tmp_path / "mail.mbox").stat().st_size > 0

@@ -17,7 +17,7 @@ from ml_stack.gguf import tools
 #: what the shipped default actually is.
 REAL_SOURCE_DIRS = tools.SOURCE_DIRS
 
-from ml_stack.gguf import (
+from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
     ADD_SPACE_PREFIX,
     ConversionError,
     ToolNotFound,
@@ -235,7 +235,9 @@ class TestExportVerification:
 
         @contextlib.contextmanager
         def _serve(model, context=1024, **kw):
-            class _S: base_url = "http://127.0.0.1:0"
+            class _S:
+                base_url = "http://127.0.0.1:0"
+
             yield _S()
 
         return _serve, _Client
@@ -243,7 +245,9 @@ class TestExportVerification:
     def test_identical_tokenisation_passes(self, sample_gguf):
         from ml_stack.gguf import fix_space_prefix, verify_tokenizer_fidelity
         fix_space_prefix(sample_gguf)
-        enc = lambda t: [len(t), 7]
+        def enc(text):
+            return [len(text), 7]
+
         serve, client = self._fake_serving(lambda t: [len(t), 7])
         r = verify_tokenizer_fidelity(sample_gguf, enc, ["<user> go"],
                                       serve_fn=serve, client_cls=client)

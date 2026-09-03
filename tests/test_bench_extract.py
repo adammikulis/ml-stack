@@ -7,6 +7,7 @@ a real graph, a real store outside `tmp_path`, or a server.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import random
@@ -479,17 +480,26 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
 
     monkeypatch.setattr("ml_stack.serve.serve", fake_serve)
     args = type("A", (), {"serve": ["x.gguf"], "serve_port": 1, "context": 8192, "parallel": 2,
-                          "profile": True, "smoke": True, "world": str(tmp_path), "per_message": 1,
+                          "profile": True, "smoke": True, "world": str(_world_dir(tmp_path)),
+                          "per_message": 1,
                           "seed": 1, "sample": 3, "kept": str(tmp_path / "k.ladybug"),
                           "label": "t", "temperature": None, "top_p": None, "top_k": None,
                           "min_p": None, "twice": False, "anyway": False, "base_url": "",
                           "no_smoke": False, "yes": True, "ceiling": 0, "no_selfcheck": True,
                           "detach": False, "no_queue": True, "no_prefetch": True})()
-    try:
+    with contextlib.suppress(SystemExit):        # `fake_serve` stops the run at the seam
         ex.main(args)
-    except (SystemExit, Exception):
-        pass
-    lease = seen.get("lease")
-    if lease is not None:
-        assert lease["cache_type_k"] == "q8_0" and lease["extra_args"] == ("-ub", "2048")
-        assert lease["context"] == 8192 and lease["parallel"] == 2, "the run's own shape wins"
+    assert "lease" in seen, "the run never reached the serving seam, so no shape was asked for"
+    lease = seen["lease"]
+    assert lease["cache_type_k"] == "q8_0" and lease["extra_args"] == ("-ub", "2048")
+    assert lease["context"] == 8192 and lease["parallel"] == 2, "the run's own shape wins"
+
+    # ... and told bare, the measured shape is not asked for at all
+    seen.clear()
+    args.profile = False
+    with contextlib.suppress(SystemExit):
+        ex.main(args)
+    assert "lease" in seen
+    bare = seen["lease"]
+    assert not bare.get("cache_type_k") and not bare.get("extra_args")
+    assert not bare.get("draft") and not bare.get("draft_n_max")

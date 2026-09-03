@@ -29,7 +29,9 @@ def test_tier_ids_are_unique():
 
 
 def test_every_contract_file_is_valid_json():
-    for path in sorted(contracts_dir().glob("*.json")):
+    found = sorted(contracts_dir().glob("*.json"))
+    assert found, f"no contract shipped in {contracts_dir()}"     # an empty glob passed this
+    for path in found:
         json.loads(path.read_text(encoding="utf-8"))
 
 

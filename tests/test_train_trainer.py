@@ -298,7 +298,9 @@ class TestRecords:
 # -- batching ------------------------------------------------------------
 class TestBatchesFrom:
     def test_a_callable_is_left_alone(self):
-        fn = lambda step: step
+        def fn(step):
+            return step
+
         assert batches_from(fn) is fn
 
     def test_a_sequence_is_sliced_and_wraps(self):

@@ -119,6 +119,9 @@ def test_failing_job_is_reported_as_failed(daemon):
     assert done["returncode"] == 3
 
 
+@pytest.mark.slow
+
+
 def test_only_one_job_runs_at_a_time(daemon):
     """A GPU is not shareable: two jobs contend, both get slower, and the
     slowdown is silent. The second must queue, not compete."""
@@ -155,6 +158,9 @@ def test_stop_sends_sigterm_so_a_checkpointing_loop_can_save(daemon, tmp_path):
         time.sleep(0.2)
     assert marker.exists(), "process never received SIGTERM"
     assert marker.read_text() == "checkpointed"
+
+
+@pytest.mark.slow
 
 
 def test_stopping_a_queued_job_dequeues_it(daemon):
@@ -481,6 +487,9 @@ def test_slots_let_several_jobs_run_at_once(multi_daemon):
     status = runner.status()
     assert len(status["running"]) == 3
     assert status["slots"] == 3
+
+
+@pytest.mark.slow
 
 
 def test_stopping_one_job_does_not_kill_its_neighbour(multi_daemon):

@@ -419,6 +419,9 @@ def test_the_template_writer_never_says_the_same_thing_twice_in_a_thread():
         said.add(text)
 
 
+@pytest.mark.slow
+
+
 def test_run_with_a_model_takes_the_lock_keeps_memory_beside_the_output_and_prices_it(
         tmp_path, monkeypatch):
     pytest.importorskip("ladybug")

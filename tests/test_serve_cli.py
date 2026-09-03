@@ -14,7 +14,14 @@ import sys
 import time
 
 import pytest
-from conftest import json_reply
+from conftest import (
+    LLAMA_SERVER_HELP,
+    fake_binary,
+    fake_memory,
+    fake_process,
+    json_reply,
+    write_gguf,
+)
 from ml_stack.client import is_healthy
 from ml_stack.serve import cli
 from ml_stack.serve.backend import ServerInfo, ServerSpec
@@ -494,48 +501,9 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     assert err.strip() == "this llama-server has no --draft-max; it has --spec-draft-n-max"
 
 
-_FULL_HELP = (
-    "-m,    --model FNAME                    model path\n"
-    "-c,    --ctx-size N                     size of the prompt context\n"
-    "-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM\n"
-    "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
-    "       --host HOST                      ip address to listen on\n"
-    "       --port PORT                      port to listen on\n"
-    "       --jinja                          use jinja template for chat\n"
-)
-
-
-def _write_gguf(path, metadata):
-    """A real, minimal GGUF v3 file -- see ``tests/test_serve_preflight.py`` for the
-    format this hand-rolls: magic, version, counts, one key/value pair per item, no
-    tensors."""
-    import struct
-
-    def kv(name, value):
-        head = struct.pack("<Q", len(name.encode())) + name.encode()
-        if isinstance(value, bool):
-            return head + struct.pack("<I", 7) + struct.pack("<?", value)
-        if isinstance(value, int):
-            return head + struct.pack("<I", 4) + struct.pack("<I", value)
-        return head + struct.pack("<I", 8) + struct.pack("<Q", len(value.encode())) + value.encode()
-
-    body = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(metadata))
-    for name, value in metadata.items():
-        body += kv(name, value)
-    path.write_bytes(body)
-    return path
-
-
 class TestPreflightOnly:
     """``up --preflight-only`` runs every check a load would run and prints the report,
     without ever leasing a server."""
-
-    def _binary(self, tmp_path):
-        binary = tmp_path / "llama-server"
-        binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
-                          + _FULL_HELP + "HELP\nfi\nexit 0\n")
-        binary.chmod(0o755)
-        return binary
 
     def test_a_passing_preflight_exits_zero_and_never_leases(self, tmp_path, monkeypatch, capsys):
         import ml_stack.setup as setup_module
@@ -548,11 +516,11 @@ class TestPreflightOnly:
 
         monkeypatch.setattr(cli.ServerManager, "lease", lease)
 
-        gguf = _write_gguf(tmp_path / MODEL, {
+        gguf = write_gguf(tmp_path / MODEL, {
             "general.architecture": "llama", "llama.block_count": 32,
             "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
         })
-        binary = self._binary(tmp_path)
+        binary = fake_binary(tmp_path, help_text=LLAMA_SERVER_HELP)
         code = cli.main(["up", str(gguf), "--binary", str(binary), "--preflight-only",
                          "--port", str(free_port())])
         out = capsys.readouterr().out
@@ -567,11 +535,11 @@ class TestPreflightOnly:
         monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not llama
 
-        gguf = _write_gguf(tmp_path / MODEL, {
+        gguf = write_gguf(tmp_path / MODEL, {
             "general.architecture": "llama", "llama.block_count": 32,
             "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
         })
-        binary = self._binary(tmp_path)
+        binary = fake_binary(tmp_path, help_text=LLAMA_SERVER_HELP)
         code = cli.main(["up", str(gguf), "--binary", str(binary), "--preflight-only",
                          "--port", str(free_port())])
         out = capsys.readouterr().out
@@ -616,7 +584,7 @@ class TestResolveModel:
         cache = tmp_path / "hub"
         snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
-        gguf = _write_gguf(snapshot / MODEL, {
+        gguf = write_gguf(snapshot / MODEL, {
             "general.architecture": "llama", "llama.block_count": 32,
             "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
         })
@@ -625,7 +593,7 @@ class TestResolveModel:
 
         binary = tmp_path / "llama-server"
         binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
-                          + _FULL_HELP + "HELP\nfi\nexit 0\n")
+                          + LLAMA_SERVER_HELP + "HELP\nfi\nexit 0\n")
         binary.chmod(0o755)
 
         def lease(self, spec, *, timeout=None, roam=True):
@@ -644,10 +612,14 @@ class TestResolveModel:
 class TestBuildFlag:
     """``up --build NAME`` picks the binary through the named build rather than 'current'."""
 
-    def test_the_named_build_is_threaded_into_the_backend(self, tmp_path, monkeypatch):
-        """`Preflight` itself builds a second `LlamaServerBackend` (with the already
-        -resolved path) to check flags, so every construction is recorded rather than one
-        captured value overwritten -- only the *first* is `cmd_up`'s own."""
+    @pytest.fixture
+    def built(self, tmp_path, monkeypatch):
+        """Every `LlamaServerBackend` built while `up` runs, in order, without leasing one.
+
+        `Preflight` builds a second one (with the already-resolved path) to check flags, so
+        every construction is recorded rather than one captured value overwritten -- only
+        the *first* is `cmd_up`'s own.
+        """
         from ml_stack.serve import backend as backend_module
 
         monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
@@ -661,43 +633,28 @@ class TestBuildFlag:
         monkeypatch.setattr(backend_module, "LlamaServerBackend", Spy)
 
         def lease(self, spec, *, timeout=None, roam=True):
-            raise AssertionError("this test only checks how the backend was built")
+            raise AssertionError("this fixture only records how the backend was built")
 
         monkeypatch.setattr(cli.ServerManager, "lease", lease)
 
         gguf = tmp_path / MODEL
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
-        cli.main(["up", str(gguf), "--build", "unsloth", "--preflight-only",
-                 "--port", str(free_port())])
 
-        assert calls, "cmd_up must construct its own backend when --build is given"
+        def run(*extra: str) -> list[dict]:
+            calls.clear()
+            cli.main(["up", str(gguf), *extra, "--preflight-only", "--port", str(free_port())])
+            assert calls, "cmd_up must construct its own backend"
+            return calls
+
+        return run
+
+    def test_the_named_build_is_threaded_into_the_backend(self, built):
+        calls = built("--build", "unsloth")
         assert calls[0].get("build") == "unsloth"
-        assert not calls[0].get("binary")
+        assert not calls[0].get("binary"), "no --binary was given, so none may be invented"
 
-    def test_an_explicit_binary_is_passed_alongside_and_wins_at_resolution(
-            self, tmp_path, monkeypatch):
-        from ml_stack.serve import backend as backend_module
-
-        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
-        calls: list[dict] = []
-
-        class Spy(backend_module.LlamaServerBackend):
-            def __init__(self, **kw):
-                calls.append(dict(kw))
-                super().__init__(**kw)
-
-        monkeypatch.setattr(backend_module, "LlamaServerBackend", Spy)
-
-        def lease(self, spec, *, timeout=None, roam=True):
-            raise AssertionError("this test only checks how the backend was built")
-
-        monkeypatch.setattr(cli.ServerManager, "lease", lease)
-
-        gguf = tmp_path / MODEL
-        gguf.write_bytes(b"GGUF" + b"\x00" * 64)
-        cli.main(["up", str(gguf), "--binary", "/some/llama-server", "--build", "unsloth",
-                 "--preflight-only", "--port", str(free_port())])
-
+    def test_an_explicit_binary_is_passed_alongside_and_wins_at_resolution(self, built):
+        calls = built("--binary", "/some/llama-server", "--build", "unsloth")
         assert calls[0].get("binary") == "/some/llama-server"
         assert calls[0].get("build") == "unsloth"
 
@@ -768,22 +725,14 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
 def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monkeypatch, capsys):
     """A stray server -- a Homebrew one from before the managed build -- holds memory a lease
     cannot see; `status --every` names it, and `pgrep` by hand is what the guard refuses."""
-    import types
-    from pathlib import Path
-
     import psutil
 
-    def proc(pid, argv, rss, state="running"):
-        return types.SimpleNamespace(info={"pid": pid, "name": Path(argv[0]).name, "cmdline": argv,
-                                           "memory_info": types.SimpleNamespace(rss=rss)},
-                                     status=lambda: state)
-
-    fakes = [proc(11, ["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
-                       "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30),
-             proc(12, ["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
-                       "--port", "8082"], 60 * 2**30),
-             proc(13, ["/usr/bin/python3", "-m", "something"], 5),
-             proc(14, ["llama-server"], 0, state=psutil.STATUS_ZOMBIE)]
+    fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
+                           "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
+             fake_process(["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
+                           "--port", "8082"], 60 * 2**30, pid=12),
+             fake_process(["/usr/bin/python3", "-m", "something"], 5, pid=13),
+             fake_process(["llama-server"], 0, pid=14, state=psutil.STATUS_ZOMBIE)]
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: fakes)
     monkeypatch.setattr(cli, "recorded_servers", lambda path: {8082: {"pid": 12}})
     assert cli.main(["status", "--every"]) == 0
@@ -798,23 +747,15 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
 
 
 def test_machine_memory_splits_the_servers_from_everything_else(monkeypatch):
-    import types
-    from pathlib import Path
-
     import psutil
 
     G = 2**30
     monkeypatch.setattr(psutil, "virtual_memory",
-                        lambda: types.SimpleNamespace(total=128 * G, available=17 * G, wired=67 * G))
-
-    def proc(argv, rss):
-        return types.SimpleNamespace(info={"name": Path(argv[0]).name, "cmdline": argv,
-                                           "memory_info": types.SimpleNamespace(rss=rss)})
-
+                        lambda: fake_memory(total=128 * G, available=17 * G, wired=67 * G))
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [
-        proc(["/x/llama-server", "--port", "8099"], 73 * G),
-        proc(["/Applications/Browser.app/Contents/MacOS/Browser"], 2 * G),
-        proc(["/usr/bin/editor"], 1 * G)])
+        fake_process(["/x/llama-server", "--port", "8099"], 73 * G),
+        fake_process(["/Applications/Browser.app/Contents/MacOS/Browser"], 2 * G),
+        fake_process(["/usr/bin/editor"], 1 * G)])
     got = cli.machine_memory()
     assert got["total"] == 128 * G and got["used"] == 111 * G and got["wired"] == 67 * G
     assert got["servers"] == 73 * G and got["others"] == 3 * G

@@ -53,16 +53,9 @@ RECORDS = [
 
 
 @pytest.fixture(autouse=True)
-def _measurements_in_tmp(tmp_path, monkeypatch):
+def _measurements_in_tmp(fit_files):
     """Both halves of the source of truth in ``tmp_path``, and a fixed room."""
-    shipped = tmp_path / "ssot" / "fit.json"
-    shipped.parent.mkdir(parents=True, exist_ok=True)
-    shipped.write_text(json.dumps([f.as_dict() for f in RECORDS], indent=2), encoding="utf-8")
-    monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
-    monkeypatch.setattr(fit_mod, "writable_file", lambda: shipped)
-    monkeypatch.setenv("MLSTACK_FIT_FILE", str(tmp_path / "local" / "fit.json"))
-    monkeypatch.setattr("ml_stack.hub.room", lambda: ROOM)
-    return shipped
+    return fit_files(RECORDS, room=ROOM).shipped
 
 
 class Page:
@@ -119,7 +112,9 @@ class TestThePage:
 
     def test_every_asset_it_asks_for_exists(self):
         html = asset_bytes("fit.html")[0].decode()
-        for ref in re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html):
+        refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html)
+        assert refs, "a page that references nothing would pass the loop below"
+        for ref in refs:
             assert asset_bytes(ref) is not None, f"fit.html references missing {ref}"
 
     def test_nothing_is_loaded_over_a_network(self):
@@ -169,6 +164,7 @@ class TestTheDataRoute:
 
     def test_each_record_carries_the_numbers_the_page_composes(self, page):
         _, got, _ = page.call("/ui/fit.json")
+        assert len(got["records"]) == len(RECORDS), "an empty route would pass the loop below"
         for row in got["records"]:
             for key in ("weights", "draft", "compute", "per_token", "per_seq",
                         "cache_type", "spec"):

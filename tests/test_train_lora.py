@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import stat
-import struct
 import sys
 from pathlib import Path
 
@@ -24,6 +23,8 @@ from ml_stack.train.recipes import validate
 from ml_stack.train.run import main, plan_for, run
 from ml_stack.train.tools import synthesise, write_dataset
 from test_train_tools import PROMPTS, TOOLS, make_tiny_base
+
+from conftest import write_gguf
 
 # One invented base, named the way the recipe's e4b size names it, for the plans that must
 # never load anything.
@@ -41,24 +42,6 @@ GEMMA_META = {
 def on_the_cpu(monkeypatch):
     monkeypatch.setenv("ML_STACK_DEVICE", "cpu")
     monkeypatch.delenv("MLSTACK_TRAIN_CEILING", raising=False)
-
-
-def write_gguf(path: Path, metadata: dict) -> Path:
-    """A real, minimal GGUF v3 file: magic, version, counts, and string/int metadata."""
-
-    def kv(name: str, value: object) -> bytes:
-        head = struct.pack("<Q", len(name.encode())) + name.encode()
-        if isinstance(value, int):
-            return head + struct.pack("<I", 4) + struct.pack("<I", value)
-        encoded = str(value).encode()
-        return head + struct.pack("<I", 8) + struct.pack("<Q", len(encoded)) + encoded
-
-    body = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack(
-        "<Q", len(metadata))
-    for name, value in metadata.items():
-        body += kv(name, value)
-    path.write_bytes(body)
-    return path
 
 
 @pytest.fixture

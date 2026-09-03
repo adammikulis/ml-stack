@@ -36,6 +36,10 @@ from ml_stack.fleet.discovery import (
 )
 from ml_stack.fleet.remote import Peer
 
+#: Real UDP on a real interface and a real daemon subprocess, per the docstring
+#: above -- so every test here waits out a network timeout at least once.
+pytestmark = pytest.mark.slow
+
 REPO = Path(__file__).resolve().parent.parent
 
 

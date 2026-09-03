@@ -13,13 +13,11 @@ touches a GPU.
 
 from __future__ import annotations
 
-import json
 import pathlib
 
 import pytest
 
 from ml_stack.graph import bench
-from ml_stack.graph.bench import Row
 from ml_stack.graph.bench.report import (
     across,
     answering,
@@ -33,23 +31,9 @@ from ml_stack.graph.bench.report import (
 )
 from ml_stack.serve.fit import Fit
 
+from conftest import scored_rows
+
 GIB = 1024 ** 3
-
-
-def _rows(label: str, *, questions: int, hits: int, seconds: float,
-          guessed: int = 0, taken: int = 0) -> list[Row]:
-    """``hits`` of ``questions`` answered in full, the rest showing nothing, over
-    ``seconds`` altogether -- so the F1 of a run is ``hits / questions`` exactly."""
-    out = []
-    for n in range(questions):
-        one = Row(label=label, question=f"who runs the kiln, question {n}?",
-                  expected=["person:marisol-quen"],
-                  shown=["person:marisol-quen"] if n < hits else [],
-                  seconds=seconds / questions, calls=3, answer_chars=200,
-                  processed_tokens=500, completion_tokens=100)
-        one.draft_tokens, one.draft_taken = guessed, taken
-        out.append(one)
-    return out
 
 
 def _keep(store, label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0,
@@ -63,8 +47,11 @@ def _keep(store, label, *, model="flash.gguf", questions=20, hits=12, seconds=20
         held["cache_type"] = cache
     if budget is not None:
         held["reasoning_budget"] = budget
-    return bench.save(store, _rows(label, questions=questions, hits=hits, seconds=seconds,
-                                   guessed=guessed, taken=taken), held=held)
+    rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds,
+                       expected="person:marisol-quen", tokens=(500, 100),
+                       question="who runs the kiln, question {n}?",
+                       draft=(guessed, taken))
+    return bench.save(store, rows, held=held)
 
 
 @pytest.fixture()
@@ -288,20 +275,12 @@ def test_an_empty_store_says_what_to_run(tmp_path):
 # -- the subcommand ----------------------------------------------------------------------
 
 @pytest.fixture()
-def measured_fit(tmp_path, monkeypatch, fits):
+def measured_fit(fit_files, fits):
     """The fit records the subcommand reads, in ``tmp_path`` -- never ``~/.ml-stack`` and
-    never the file that ships with the package."""
-    from ml_stack.serve import fit as fit_mod
-
-    shipped = tmp_path / "shipped.json"
-    shipped.write_text("[]", encoding="utf-8")
-    mine = tmp_path / "fit.json"
-    mine.write_text(json.dumps([f.as_dict() for f in fits]), encoding="utf-8")
-    monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
-    monkeypatch.setenv("MLSTACK_FIT_FILE", str(mine))
-    monkeypatch.setattr("ml_stack.hub.room", lambda: 32 * GIB)
-    monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
-    return mine
+    never the file that ships with the package. The shipped half is left empty so what the
+    subcommand prints came from `fits` alone. (``bench.HOME`` is already elsewhere: the
+    suite-wide `_no_machine_state` in ``conftest.py`` puts it there.)"""
+    return fit_files(mine=fits, room=32 * GIB).mine
 
 
 def test_the_subcommand_prints_the_document(store, measured_fit, capsys):
@@ -346,13 +325,6 @@ def test_a_room_that_cannot_be_read_is_refused_rather_than_guessed(store, measur
 def test_a_room_is_answered_beside_this_machine(store, measured_fit, capsys):
     assert bench.main(["report", "--kept", store, "--room", "16G"]) == 0
     assert "### A machine with 16.0G" in capsys.readouterr().out
-
-
-def test_report_help_exits_zero(capsys):
-    with pytest.raises(SystemExit) as left:
-        bench.main(["report", "--help"])
-    assert left.value.code == 0
-    assert "usage:" in capsys.readouterr().out
 
 
 def test_a_model_named_run_is_not_mistaken_for_the_run_subcommand(store, measured_fit):

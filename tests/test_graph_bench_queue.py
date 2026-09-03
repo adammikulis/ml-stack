@@ -16,14 +16,10 @@ import pytest
 import ml_stack.graph.bench as bench
 from ml_stack.graph.bench import queue as q
 
+from conftest import a_row
+
 FX = ("hf:hearthstone/Bellwether-12B-GGUF/UD-Q4_K_XL/"
       "Bellwether-12B-UD-Q4_K_XL-00001-of-00002.gguf")
-
-
-@pytest.fixture(autouse=True)
-def _own_home(tmp_path, monkeypatch):
-    """Never ~/.ml-stack: the queue's state file and any store it reads live here."""
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
 
 
 def a_queue(tmp_path, text: str) -> pathlib.Path:
@@ -214,16 +210,15 @@ def test_dry_run_prints_the_steps_expanded_and_runs_none_of_them(tmp_path, capsy
 def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsys):
     """A queue stopped half-way does not measure the first half again -- and what counts as
     done is a run in the store since this queue started, not a line in a log."""
-    from ml_stack.graph.bench import Row, save
+    from ml_stack.graph.bench import save
 
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n")
     fake = FakeBench()
     assert q.run_queue(where, runner=fake) == 0
     kept = bench.HOME / "runs.ladybug"
-    save(kept, [Row(label="raincoat-2b.gg-plain", question="who welds?",
-                    expected=["person:iris"], shown=["person:iris"], calls=2,
-                    answer_chars=90)])
+    save(kept, [a_row("who welds?", expected=["person:iris"], shown=["person:iris"],
+                      calls=2, chars=90, label="raincoat-2b.gg-plain")])
 
     again = FakeBench()
     assert q.run_queue(where, runner=again, resume=True) == 0
@@ -236,13 +231,11 @@ def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsy
 def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatch):
     """`ml-stack-bench status` reads the same file the queue writes as it goes, so what is
     running is a fact about the machine and not a line somebody remembers typing."""
-    from ml_stack.graph.bench import run as running
-
-    monkeypatch.setattr(running, "serving_lines", lambda: [])
-    monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n"
                               "show --rank ranking.md\n")
+    from ml_stack.graph.bench import run as running
+
     seen = []
 
     def looking(argv):

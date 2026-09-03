@@ -11,8 +11,8 @@ from datetime import datetime
 import pytest
 
 from ml_stack.scrape.browser import within_hours
-from ml_stack.scrape.presets import DISCORD, SLACK, WEBSITE, Site, preset
-from ml_stack.scrape.read import read_all, read_once, scroll
+from ml_stack.scrape.presets import DISCORD, SLACK, WEBSITE, preset
+from ml_stack.scrape.read import read_all, read_once
 from ml_stack.scrape.seen import Seen
 
 

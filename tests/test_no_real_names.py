@@ -259,6 +259,9 @@ def test_the_recogniser_is_built_once_per_process():
     assert hook.recogniser() is hook.recogniser()
 
 
+@pytest.mark.slow
+
+
 def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
     """`sh scripts/hooks/no-real-names`, the way git runs it: a clean file commits, a name
     from the graph is refused with the same exit codes and message as in-process."""
@@ -268,6 +271,9 @@ def test_the_shell_wrapper_runs_the_hook_end_to_end(tmp_path):
     code, said = check_wrapper(where, tmp_path, notes="Ask Wren Halloway about the kiln.\n")
     assert code == 1
     assert "Wren Halloway" in said and "refusing to commit" in said
+
+
+@pytest.mark.slow
 
 
 def test_the_wrapper_finds_the_source_tree_when_ml_stack_is_not_installed(tmp_path):

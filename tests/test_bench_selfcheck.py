@@ -21,14 +21,6 @@ from ml_stack.graph.bench.selfcheck import (
     selfcheck,
 )
 
-pytestmark = pytest.mark.usefixtures("_no_real_home")
-
-
-@pytest.fixture
-def _no_real_home(monkeypatch, tmp_path):
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
-
-
 # -- the fakes are strict -------------------------------------------------------------------------
 
 def test_the_scripted_model_takes_exactly_what_the_client_takes():
@@ -54,6 +46,8 @@ def test_the_scripted_model_looks_up_once_then_answers():
 
 
 # -- the self-check passes for every measuring command ----------------------------------------------
+
+@pytest.mark.slow
 
 def test_a_four_way_sweep_passes_and_every_way_of_both_halves_is_kept():
     said = selfcheck(["sweep", "--serve", "tiny.gguf", "--also", "terse", "--also", "card",
@@ -83,6 +77,9 @@ def test_extract_passes_over_a_tiny_invented_world():
     assert "message(s)" in selfcheck(["extract", "reading", "--world", "/nowhere/at/all"])
 
 
+@pytest.mark.slow
+
+
 def test_the_flags_about_the_serving_and_the_asking_ride_along():
     """The store, the shortlist, the KV cache, the reasoning budget, the per-question cap:
     each is on the run the self-check keeps, so a flag that breaks one of them breaks
@@ -101,6 +98,9 @@ def test_a_command_line_that_does_not_parse_exits_as_it_would(capsys):
         selfcheck(["sweep", "--serve", "tiny.gguf", "--also", "nonsense"])
     assert left.value.code == 2
     capsys.readouterr()
+
+
+@pytest.mark.slow
 
 
 def test_the_self_check_is_fast_enough_to_run_every_time():
@@ -307,6 +307,9 @@ def test_a_check_that_refuses_fails_the_self_check_with_the_report(monkeypatch):
                         lambda *a, **k: Check("fit", False, "selfcheck test: does not fit"))
     with pytest.raises(SelfCheckFailed, match="FAIL  fit: selfcheck test: does not fit"):
         selfcheck(["sweep", "--serve", "tiny.gguf"])
+
+
+@pytest.mark.slow
 
 
 def test_the_shapes_that_died_in_the_preflight_pass_and_read_nothing(monkeypatch):

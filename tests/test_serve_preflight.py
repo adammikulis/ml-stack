@@ -11,7 +11,6 @@ socket, the same way the rest of this suite prefers a real server to a mocked tr
 
 from __future__ import annotations
 
-import struct
 import subprocess
 from pathlib import Path
 
@@ -21,6 +20,8 @@ from ml_stack.serve import preflight
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 
+from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
+
 
 @pytest.fixture(autouse=True)
 def _no_source_table(monkeypatch, tmp_path):
@@ -29,59 +30,12 @@ def _no_source_table(monkeypatch, tmp_path):
     monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
 
 
-def write_gguf(path: Path, metadata: dict, *, tensor_count: int = 0) -> Path:
-    """A real, minimal GGUF v3 file: magic, version, counts, one key/value pair per
-    metadata item -- ints as uint32, floats as float32, strings as strings -- and no
-    tensors, because nothing under test reads them."""
-
-    def kv(name: str, value: object) -> bytes:
-        head = struct.pack("<Q", len(name.encode())) + name.encode()
-        if isinstance(value, bool):
-            return head + struct.pack("<I", 7) + struct.pack("<?", value)
-        if isinstance(value, int):
-            return head + struct.pack("<I", 4) + struct.pack("<I", value)
-        if isinstance(value, float):
-            return head + struct.pack("<I", 6) + struct.pack("<f", value)
-        if isinstance(value, str):
-            encoded = value.encode()
-            return head + struct.pack("<I", 8) + struct.pack("<Q", len(encoded)) + encoded
-        raise TypeError(f"unsupported metadata type: {type(value)}")
-
-    body = (b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", tensor_count)
-           + struct.pack("<Q", len(metadata)))
-    for name, value in metadata.items():
-        body += kv(name, value)
-    path.write_bytes(body)
-    return path
-
-
 LLAMA_META = {
     "general.architecture": "llama",
     "llama.block_count": 32,
     "llama.attention.head_count_kv": 8,
     "llama.attention.key_length": 128,
 }
-
-
-# Enough of a real --help to answer every flag `command()` emits for a bare ServerSpec, so
-# the pre-existing flag check (which nothing here is testing) does not itself refuse.
-FULL_HELP = (
-    "-m,    --model FNAME                    model path\n"
-    "-c,    --ctx-size N                     size of the prompt context\n"
-    "-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM\n"
-    "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
-    "       --host HOST                      ip address to listen on\n"
-    "       --port PORT                      port to listen on\n"
-    "       --jinja                          use jinja template for chat\n"
-)
-
-
-def fake_binary(tmp_path: Path, *, help_text: str = "-m, --model FNAME  model path\n") -> Path:
-    path = tmp_path / "llama-server"
-    path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
-                    + help_text + "HELP\nexit 0\nfi\nexit 0\n")
-    path.chmod(0o755)
-    return path
 
 
 @pytest.fixture(autouse=True)
@@ -386,7 +340,7 @@ class TestStartRunsPreflight:
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not "llama"
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
-        binary = fake_binary(tmp_path, help_text=FULL_HELP)
+        binary = fake_binary(tmp_path, help_text=LLAMA_SERVER_HELP)
         backend_module.flags_of(binary)   # the help is read here, once; after this nothing may run
 
         def popen(*a, **k):
@@ -404,7 +358,7 @@ class TestStartRunsPreflight:
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
-        binary = fake_binary(tmp_path, help_text=FULL_HELP)
+        binary = fake_binary(tmp_path, help_text=LLAMA_SERVER_HELP)
         backend_module.flags_of(binary)   # the help is read here, once; after this nothing may run
         reached = []
 
@@ -421,7 +375,7 @@ class TestStartRunsPreflight:
 
 def fake_server_process(tmp_path: Path) -> Path:
     """A real, tiny executable standing in for llama-server: answers ``--help`` with
-    ``FULL_HELP``, otherwise serves ``/health``, ``/props``, ``/v1/models`` and
+    ``LLAMA_SERVER_HELP``, otherwise serves ``/health``, ``/props``, ``/v1/models`` and
     ``/completion`` over a real loopback socket. Spawned for real by ``Popen``, so this
     exercises the whole path -- health polling, ``load_s``, the warm-up completion -- with
     nothing mocked below the socket."""
@@ -430,7 +384,7 @@ def fake_server_process(tmp_path: Path) -> Path:
         "#!/usr/bin/env python3\n"
         "import sys, json, http.server, socketserver\n"
         "argv = sys.argv[1:]\n"
-        f"HELP = {FULL_HELP!r}\n"
+        f"HELP = {LLAMA_SERVER_HELP!r}\n"
         "if '--help' in argv:\n"
         "    sys.stdout.write(HELP)\n"
         "    sys.exit(0)\n"

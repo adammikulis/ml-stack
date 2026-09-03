@@ -268,6 +268,8 @@ class TestChattingThroughTheInterface:
         assert status == 501
         assert "run a model" in body["error"]
 
+    @pytest.mark.slow
+
     def test_asking_for_a_model_answers_before_it_has_arrived(self, bare, tmp_path):
         """A multi-gigabyte fetch must not be held open inside one request."""
         import os

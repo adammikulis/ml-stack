@@ -16,32 +16,26 @@ from __future__ import annotations
 
 import json
 import struct
-import sys
 from pathlib import Path
 
 import pytest
 from ml_stack.serve import fit as fit_mod
 from ml_stack.serve.fit import Fit, Measured, parse_load_log, parse_room, records, render
 
+from conftest import write_gguf
+
 MIB = 1024 * 1024
 GIB = 1024 ** 3
 
 
 @pytest.fixture(autouse=True)
-def _fit_files_in_tmp(tmp_path, monkeypatch):
+def _fit_files_in_tmp(fit_files):
     """Both halves of the source of truth, pointed at an empty directory.
 
-    ``package_file`` is a function for exactly this reason; the local half moves with
-    ``$MLSTACK_FIT_FILE``. Without both, a test would read the measurements this repository
-    ships and a `--measure` test would write into it.
+    The pointing is `fit_files` in ``conftest.py``, shared with the two other modules that
+    needed it; this is the shipped half, empty, which is what these tests write into.
     """
-    shipped = tmp_path / "ssot" / "fit.json"
-    shipped.parent.mkdir(parents=True, exist_ok=True)
-    shipped.write_text("[]\n", encoding="utf-8")
-    monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
-    monkeypatch.setenv("MLSTACK_FIT_FILE", str(tmp_path / "local" / "fit.json"))
-    monkeypatch.setattr(fit_mod, "writable_file", lambda: shipped)
-    return shipped
+    return fit_files().shipped
 
 
 # -- the logs ---------------------------------------------------------------------------
@@ -934,9 +928,6 @@ class TestTheCommandDraws:
 
 
 # -- the estimate, for when nothing has been measured -------------------------------------
-
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_serve_preflight import write_gguf  # noqa: E402
 
 
 class TestTheEstimateWithoutAMeasurement:

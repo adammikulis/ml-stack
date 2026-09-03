@@ -80,6 +80,7 @@ class TestTheProtocol:
         assert "serve_everything" in reply["result"]["content"][0]["text"]
 
     def test_every_tool_has_a_schema_the_sdk_would_agree_with(self):
+        assert {t.name for t in server.TOOLS} == EXPECTED
         for tool in server.TOOLS:
             schema = tool.schema()
             for name, prop in schema["properties"].items():
@@ -180,10 +181,14 @@ class TestTheCommand:
 
     @pytest.mark.skipif(not server.sdk_available(), reason="the mcp SDK is not installed")
     def test_the_sdk_server_carries_the_same_tools(self):
-        import asyncio
+        # `asyncio.run` refuses to run inside a live loop, so this went red whenever a
+        # neighbour in the same xdist worker left one running -- on the ordering alone, and
+        # so only when some unrelated test file was added. `on_a_fresh_loop` is the helper
+        # conftest already keeps for exactly that.
+        from conftest import on_a_fresh_loop
 
         app = server.build_sdk_server()
-        listed = asyncio.run(app.list_tools())
+        listed = on_a_fresh_loop(app.list_tools())
         assert {t.name for t in listed} == EXPECTED
         by_name = {t.name: t for t in listed}
         assert by_name["bench_run"].inputSchema["required"] == ["argv"]

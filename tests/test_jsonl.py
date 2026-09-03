@@ -19,7 +19,7 @@ def test_the_last_line_per_key_wins(tmp_path):
                {"id": "b", "text": "something else"},
                {"id": "a", "text": "what was meant"}])
     assert compact(p, _key) == (2, 1)
-    rows = [json.loads(l) for l in p.read_text().splitlines()]
+    rows = [json.loads(line) for line in p.read_text().splitlines()]
     assert [r["text"] for r in rows] == ["what was meant", "something else"]
     assert "first thoughts" not in p.read_text()
 
@@ -28,7 +28,7 @@ def test_output_keeps_the_order_keys_first_appeared(tmp_path):
     p = tmp_path / "log.jsonl"
     _write(p, [{"id": "b", "n": 1}, {"id": "a", "n": 1}, {"id": "b", "n": 2}])
     compact(p, _key)
-    assert [json.loads(l)["id"] for l in p.read_text().splitlines()] == ["b", "a"]
+    assert [json.loads(line)["id"] for line in p.read_text().splitlines()] == ["b", "a"]
 
 
 def test_an_already_tidy_file_is_not_rewritten(tmp_path):
@@ -50,7 +50,7 @@ def test_junk_lines_and_keyless_rows_are_dropped(tmp_path):
     p = tmp_path / "log.jsonl"
     p.write_text('{"id": "a", "n": 1}\nnot json\n{"n": 2}\n')
     assert compact(p, _key) == (1, 2)
-    assert [json.loads(l)["id"] for l in p.read_text().splitlines()] == ["a"]
+    assert [json.loads(line)["id"] for line in p.read_text().splitlines()] == ["a"]
 
 
 def test_order_picks_the_greatest_not_the_last(tmp_path):

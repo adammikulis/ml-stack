@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.graph.snapshots import (Snapshot, SnapshotError, clone_file, prune, read_manifest,
+from ml_stack.graph.snapshots import (SnapshotError, clone_file, read_manifest,
                                       remove_store, restore, snapshots, take, unmanaged)
 
 

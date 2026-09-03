@@ -129,11 +129,6 @@ def wired(tmp_path, model):
 
 
 class TestRegistry:
-    def test_a_registered_server_that_answers_is_live(self, tmp_path, model):
-        s = Serving(tmp_path / "s.json")
-        s.register(model.port, ["a.gguf"])
-        assert [x.port for x in s.live()] == [model.port]
-
     def test_a_registered_server_that_died_is_not(self, tmp_path, model):
         """Registration is a claim. A beacon advertising a model nobody can reach
         sends work to a dead port."""
@@ -141,6 +136,8 @@ class TestRegistry:
         s.register(model.port, ["a.gguf"])
         model.close()
         assert s.live() == []
+
+    @pytest.mark.slow
 
     def test_a_hung_server_does_not_stall_the_beacon(self, tmp_path):
         """A port that accepts and then says nothing is the slow case: every health
@@ -170,7 +167,8 @@ class TestRegistry:
         assert [x.port for x in s.live()] == [model.port]
         assert s.live(force=True) == []
 
-    def test_registering_clears_what_was_cached(self, tmp_path, model):
+    def test_registering_clears_what_was_cached_and_a_live_server_is_live(self, tmp_path,
+                                                                           model):
         s = Serving(tmp_path / "s.json")
         assert s.live() == []
         s.register(model.port, ["a.gguf"])
@@ -208,6 +206,8 @@ class TestProxy:
                          {"messages": [{"role": "user", "content": "hi"}]}) as r:
             body = json.loads(r.read())
         assert body["choices"][0]["message"]["content"] == "hello"
+
+    @pytest.mark.slow
 
     def test_a_streamed_completion_arrives_as_it_is_generated(self, wired):
         """read(n) blocks until it has n bytes and a token is tens of bytes, so a

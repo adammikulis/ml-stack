@@ -39,10 +39,12 @@ def reviews(tmp_path):
 
 class TestContracts:
     def test_every_recipe_contract_has_a_builder(self):
+        assert recipes(), "no recipe ships at all"
         for spec in recipes():
             assert spec["id"] in known()
 
     def test_every_recipe_describes_itself_to_a_person(self):
+        assert recipes(), "no recipe ships at all"
         for spec in recipes():
             assert spec.get("title") and spec.get("blurb")
             assert spec["data"]["formats"]
@@ -113,6 +115,7 @@ class TestStratified:
 
 
 class TestBuild:
+    @pytest.mark.slow
     def test_a_language_model_trains_on_real_text(self, corpus, tmp_path):
         from ml_stack.train.run import run
 

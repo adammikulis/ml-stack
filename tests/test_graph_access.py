@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.graph import access
 from ml_stack.graph.access import (LockError, ReaderCache, holder, lock_path, pid_alive,
                                    reading, recover_stale, release_all, write_lock, writing)
 

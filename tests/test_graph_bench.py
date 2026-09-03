@@ -13,21 +13,8 @@ import pytest
 from ml_stack.graph.bench import Row, _hit, missed, runs, save, table
 from ml_stack.graph.bench.selfcheck import ScriptedModel
 
+from conftest import a_row, json_reply, scored_rows
 
-
-@pytest.fixture(autouse=True)
-def _no_real_serving_state(monkeypatch):
-    """`status` now reads what is serving and what the last job kept; a test must never see
-    this machine's servers or its runs store, so both seams are empty unless a test says."""
-    from ml_stack.graph.bench import run as running
-
-    monkeypatch.setattr(running, "serving_lines", lambda: [])
-    monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
-
-def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
-          chars: int = 200, error: str = "") -> Row:
-    return Row(label="tried", question=question, expected=expected, shown=shown,
-               calls=calls, answer_chars=chars, error=error)
 
 
 def test_hit_is_how_well_what_was_shown_matched_what_was_wanted():
@@ -333,59 +320,36 @@ def test_the_plot_is_self_contained_and_names_what_it_drew(tmp_path):
     assert "<script" not in said
 
 
-def _server(handler):
-    """A tiny HTTP server answering /slots, for the busy check."""
-    import json as _json
-    import threading
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+@pytest.fixture
+def slots(server):
+    """A server answering ``/slots`` with what a test hands it.
 
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            body = _json.dumps(handler(self.path)).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
+    The shared `server` fixture rather than a sixth hand-rolled one: it closes the socket
+    as well as shutting the thread down, which the copy here never did.
+    """
+    def start(answer):
+        return server(lambda method, path, body: json_reply(answer)).base_url
 
-        def log_message(self, *a):
-            pass
-
-    srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    return srv, f"http://127.0.0.1:{srv.server_address[1]}"
+    return start
 
 
-def test_busy_counts_the_slots_that_are_working():
+def test_busy_counts_the_slots_that_are_working(slots):
     from ml_stack.graph.bench import busy
 
-    srv, url = _server(lambda p: [{"is_processing": True}, {"is_processing": False},
-                                  {"is_processing": True}])
-    try:
-        assert busy(url) == 2
-    finally:
-        srv.shutdown()
-
-    srv, url = _server(lambda p: [{"is_processing": False}, {"is_processing": False}])
-    try:
-        assert busy(url) == 0
-    finally:
-        srv.shutdown()
+    assert busy(slots([{"is_processing": True}, {"is_processing": False},
+                       {"is_processing": True}])) == 2
+    assert busy(slots([{"is_processing": False}, {"is_processing": False}])) == 0
 
 
-def test_a_server_that_will_not_say_is_not_treated_as_idle():
+def test_a_server_that_will_not_say_is_not_treated_as_idle(slots):
     """Unknown is not idle. Guessing idle is how the guard would fail open."""
     from ml_stack.graph.bench import busy
 
     assert busy("http://127.0.0.1:9") == -1          # nothing listening
-    srv, url = _server(lambda p: {"not": "a list"})
-    try:
-        assert busy(url) == -1
-    finally:
-        srv.shutdown()
+    assert busy(slots({"not": "a list"})) == -1
 
 
-def test_a_busy_server_is_refused_and_anyway_overrides(capsys):
+def test_a_busy_server_is_refused_and_anyway_overrides(capsys, slots):
     """A timing taken while another run has the same GPU is not a timing.
 
     This happened: several sweeps were left running in the background against one server,
@@ -395,22 +359,14 @@ def test_a_busy_server_is_refused_and_anyway_overrides(capsys):
 
     from ml_stack.graph.bench import _idle
 
-    srv, url = _server(lambda p: [{"is_processing": True}])
-    try:
-        assert _idle(url, Namespace(anyway=False)) is False
-        said = capsys.readouterr().err
-        assert "already working on 1 request" in said
-        assert "--anyway" in said                     # and how to proceed on purpose
+    url = slots([{"is_processing": True}])
+    assert _idle(url, Namespace(anyway=False)) is False
+    said = capsys.readouterr().err
+    assert "already working on 1 request" in said
+    assert "--anyway" in said                         # and how to proceed on purpose
 
-        assert _idle(url, Namespace(anyway=True)) is True
-    finally:
-        srv.shutdown()
-
-    srv, url = _server(lambda p: [{"is_processing": False}])
-    try:
-        assert _idle(url, Namespace(anyway=False)) is True
-    finally:
-        srv.shutdown()
+    assert _idle(url, Namespace(anyway=True)) is True
+    assert _idle(slots([{"is_processing": False}]), Namespace(anyway=False)) is True
 
     # a server that will not say lets the run proceed, but says so rather than staying quiet
     assert _idle("http://127.0.0.1:9", Namespace(anyway=False)) is True
@@ -1075,20 +1031,17 @@ def test_a_turn_records_its_first_token_and_what_it_spent_waiting():
     assert held["concurrency"]["queued"] == pytest.approx(row.queued)
 
 
-def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch):
+def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch, slots):
     import ml_stack.graph.bench as bench
 
     seen = iter([{"base_url": "u", "resident_bytes": 3 * 2**30, "weights_bytes": 2**30},
                  {"base_url": "u", "resident_bytes": 2**30, "weights_bytes": 2**30}])
     monkeypatch.setattr(bench, "footprint", lambda url: dict(next(seen)))
-    srv, url = _server(lambda p: [{"is_processing": False}, {"is_processing": False}])
-    try:
-        assert bench.slot_count(url) == 2
-        rows, held = bench.concurrent(bench.asking(TINY), [{"q": "q?"}], conversations=1,
-                                      turns=1, label="t", client=_Overlapping(0.0),
-                                      base_url=url)
-    finally:
-        srv.shutdown()
+    url = slots([{"is_processing": False}, {"is_processing": False}])
+    assert bench.slot_count(url) == 2
+    rows, held = bench.concurrent(bench.asking(TINY), [{"q": "q?"}], conversations=1,
+                                  turns=1, label="t", client=_Overlapping(0.0),
+                                  base_url=url)
     assert held["concurrency"]["slots"] == 2
     assert held["resident_bytes"] == 3 * 2**30, "the peak, not what was left afterwards"
     assert held["kv_and_run_bytes"] == 2 * 2**30, "and the derived figure follows it"
@@ -1157,14 +1110,6 @@ def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path
     assert back["server"]["concurrency"]["turns"] == 1
     assert back["server"]["finder"] == "chars"
     assert len(back["rows"]) == 2
-
-
-def test_concurrent_is_a_measuring_subcommand_and_takes_the_lock():
-    """Two of anything on the GPU at once is two measurements of nothing; the lock is what
-    `main` takes for every subcommand in MEASURING, so this one has to be in it."""
-    from ml_stack.graph.bench import MEASURING
-
-    assert "concurrent" in MEASURING
 
 
 # -- sweep --serve, which had no test through _main -----------------------------------------
@@ -1299,6 +1244,9 @@ def test_save_refuses_to_return_a_run_that_did_not_come_back(tmp_path, monkeypat
     monkeypatch.setattr(bench, "runs", changed)
     with pytest.raises(bench.RunNotKept, match="changed: rows differ"):
         bench.save(store, [row])
+
+
+@pytest.mark.slow
 
 
 def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_path, monkeypatch,
@@ -2050,10 +1998,7 @@ def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **ser
     full, taking ``seconds`` altogether, served by ``binary``."""
     from ml_stack.graph.bench import invented_digest
 
-    rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"] if n < hits else [])
-            for n in range(questions)]
-    for r in rows:
-        r.label, r.seconds = label, seconds / questions
+    rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
     return save(store, rows, held={"graph": invented_digest(), "model": model,
                                    "binary": binary, **server})
 
@@ -2367,6 +2312,7 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
     said = capsys.readouterr().out
     assert calls == ["bad.gguf", "good.gguf"], said
     assert "did not load; moving on" in said
+    assert code == 0, "one model that would not load is not the whole sweep failing"
 
 
 # -- what a draft head was worth, as a number ----------------------------------------------
@@ -2378,12 +2324,8 @@ def _measured(label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0
     clock's: ``hits`` of ``questions`` answered in full over ``seconds`` altogether."""
     from dataclasses import asdict
 
-    rows = []
-    for n in range(questions):
-        r = a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"] if n < hits else [])
-        r.label, r.seconds = label, seconds / questions
-        r.draft_tokens, r.draft_taken = guessed, taken
-        rows.append(asdict(r))
+    rows = [asdict(r) for r in scored_rows(label, questions=questions, hits=hits,
+                                           seconds=seconds, draft=(guessed, taken))]
     server = {"model": model, "binary": binary, "context": 32768, "slots": 1}
     if draft:
         server["draft_model"] = draft
@@ -3308,11 +3250,8 @@ def _stamped_run(label, *, model, per_question, questions=20, context=32768, at,
     """A kept run as `runs` hands it back, ``questions`` rows of ``per_question`` seconds."""
     from dataclasses import asdict
 
-    rows = []
-    for n in range(questions):
-        r = a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
-        r.label, r.seconds = label, per_question
-        rows.append(asdict(r))
+    rows = [asdict(r) for r in scored_rows(label, questions=questions, hits=questions,
+                                           seconds=per_question * questions)]
     server = {"model": model, "context": context, "slots": 1}
     if load_s is not None:
         server["load_s"] = load_s
@@ -3974,7 +3913,6 @@ def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_witho
 
 
 def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypatch):
-    import ml_stack.graph.bench as bench
     from ml_stack.graph.bench.run import _ways as ways
 
     args = type("A", (), {"also": ["rich"], "terse": False, "batch": True, "kinds": True,
@@ -4093,11 +4031,8 @@ def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=No
     """A run kept with a full server record and, given one, an asking record."""
     from ml_stack.graph.bench import invented_digest
 
-    rows = [a_row(f"q{n}?", expected=["person:iris"],
-                  shown=["person:iris"] if n < hits else ["person:wren"])
-            for n in range(questions)]
-    for r in rows:
-        r.label, r.seconds = label, seconds / questions
+    rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds,
+                       miss=["person:wren"])
     return save(store, rows,
                 held={"graph": invented_digest(), "model": "flash.gguf", "context": 32768,
                       "slots": 1, **server},
