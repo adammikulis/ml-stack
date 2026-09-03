@@ -454,7 +454,7 @@ class GraphStore:
         self._set_attrs(node_id, attrs)
         return True
 
-    def remove_edge(self, source: str, target: str, rel: str) -> bool:
+    def remove_edge(self, source: str, rel: str, target: str) -> bool:
         """Take one edge out, leaving both ends. False when it is not in the store."""
         found = self.query(
             "MATCH (a:Node {id:$s})-[e:Edge {rel:$rel}]->(b:Node {id:$t}) RETURN e.rel AS rel",

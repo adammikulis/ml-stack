@@ -327,12 +327,13 @@ def test_an_edge_can_be_removed_without_touching_its_ends(tmp_path):
     path = tmp_path / "g"
     with GraphStore(path) as store:
         store.write(GRAPH)
-        assert store.remove_edge("person:ada", "topic:compilers", "interested_in") is True
-        assert store.remove_edge("person:ada", "topic:compilers", "interested_in") is False
-        assert store.remove_edge("person:ada", "person:nobody", "knows") is False
+        # the same (source, rel, target) order as every edge tuple the store hands back
+        assert store.remove_edge("person:ada", "based_in", "place:turin") is True
+        assert store.remove_edge("person:ada", "based_in", "place:turin") is False
+        assert store.remove_edge("person:ada", "knows", "person:nobody") is False
     with GraphStore(path) as reopened:
         joined = {(e["source"], e["rel"], e["target"]) for e in reopened.edges()}
-        assert ("person:ada", "interested_in", "topic:compilers") not in joined
+        assert ("person:ada", "based_in", "place:turin") not in joined
         assert len(joined) == 2
         assert {n["id"] for n in reopened.nodes()} == {n["id"] for n in GRAPH["nodes"]}
 

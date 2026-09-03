@@ -298,11 +298,11 @@ def _drop_book(store: Any, book: str, *, keep_units: Iterable[str] | None = None
     prefix = f"{book}:"
     for edge in store.edges():
         if edge["rel"] == "read_from" and edge["target"] == book_id:
-            store.remove_edge(edge["source"], edge["target"], edge["rel"])
+            store.remove_edge(edge["source"], edge["rel"], edge["target"])
         elif any(str(u).startswith(prefix) for u in (edge.get("provenance") or ())):
             # this book's edge, by its pointers; an edge two books both stated keeps
             # the other book's pointer and goes when that book is rebuilt
-            store.remove_edge(edge["source"], edge["target"], edge["rel"])
+            store.remove_edge(edge["source"], edge["rel"], edge["target"])
     return gone
 
 

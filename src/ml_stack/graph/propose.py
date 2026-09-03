@@ -255,7 +255,7 @@ def _land(store: Any, change: Change, ident: Callable[[Change], str]) -> bool:
     if change.op == "remove_node":
         return bool(store.drop([change.target]))
     if change.op == "remove_edge":
-        return store.remove_edge(change.target, change.other, change.name)
+        return store.remove_edge(change.target, change.name, change.other)
     if change.op == "merge_nodes":
         store.merge_nodes(change.target, change.other)
         return True

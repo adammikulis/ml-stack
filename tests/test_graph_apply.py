@@ -91,7 +91,7 @@ def test_a_change_sound_when_proposed_but_stale_at_apply_is_skipped(tmp_path):
             call("remove_edge", from_id="person:ada", to_id="topic:compilers",
                  rel="interested_in", reason="stale by the time it is applied"))
         assert changes[0].sound
-        store.remove_edge("person:ada", "topic:compilers", "interested_in")
+        store.remove_edge("person:ada", "interested_in", "topic:compilers")
         out = apply(store, changes)
     assert out["applied"] == []
     assert "not joined that way" in out["skipped"][0].problems[0]

@@ -759,7 +759,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if records and not dry_run:
         for key in keyed:
             if key not in folded:
-                store.remove_edge(key[0], key[2], key[1])
+                store.remove_edge(*key)
         for key, edge in folded.items():
             store.upsert_edge({**edge, "source": key[0], "rel": key[1], "target": key[2]})
     edges = [e for e in edges if e["rel"] in _SOURCE_LINKS] + list(folded.values())
@@ -780,7 +780,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         note(f"inverse: {_label(nodes, source)} {rel} {_label(nodes, target)} -> "
              f"{_label(nodes, target)} {keep_rel} {_label(nodes, source)}")
         if not dry_run:
-            store.remove_edge(source, target, rel)
+            store.remove_edge(source, rel, target)
             store.upsert_edge(merged)
         by_triple.pop(triple)
         by_triple[canonical_triple] = merged
@@ -1130,7 +1130,7 @@ def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
     """``gone`` out of the store and the working list, its weight and provenance into ``keep``."""
     keep["weight"] = int(keep.get("weight") or 0) + int(gone.get("weight") or 0)
     keep["provenance"] = _union(keep.get("provenance"), gone.get("provenance"))
-    store.remove_edge(gone["source"], gone["target"], gone["rel"])
+    store.remove_edge(gone["source"], gone["rel"], gone["target"])
     store.upsert_edge(keep)
     for at, edge in enumerate(edges):
         if edge is gone:
@@ -1264,7 +1264,7 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
             # a relation between the two names being joined says nothing once they are one
             by_triple.pop((edge["source"], edge["rel"], edge["target"]), None)
             if not dry_run:
-                store.remove_edge(edge["source"], edge["target"], edge["rel"])
+                store.remove_edge(edge["source"], edge["rel"], edge["target"])
             continue
         other = by_triple.get((source, edge["rel"], target))
         merged = {"source": source, "rel": edge["rel"], "target": target,
@@ -1274,7 +1274,7 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
         by_triple[(source, edge["rel"], target)] = merged
         moved += 1
         if not dry_run:
-            store.remove_edge(edge["source"], edge["target"], edge["rel"])
+            store.remove_edge(edge["source"], edge["rel"], edge["target"])
             store.upsert_edge(merged)
     attrs = dict(kept.get("attrs") or {})
     aliases = list(attrs.get("aliases") or [])
