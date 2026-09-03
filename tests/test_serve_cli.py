@@ -749,6 +749,51 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert "no llama-server is running" in capsys.readouterr().out
 
 
+def test_status_reports_a_foreign_server_and_leaves_it_alone(state, server, monkeypatch,
+                                                              capsys):
+    """A server answering health checks that this machine never recorded is named foreign,
+    with its pid -- never judged for adopting or starting over it (the backend now never
+    kills one it did not start; `ports.reclaim_port`)."""
+    from ml_stack.serve import cli
+
+    def handled(method, path, body):
+        if path == "/health":
+            return json_reply({})
+        if path == "/v1/models":
+            return json_reply({"data": [{"id": "foreign-model.gguf"}]})
+        return 404, b"{}"
+
+    instance = server(handled)
+    monkeypatch.setattr(cli, "server_pids_on_port", lambda port: [9911] if port == instance.port
+                        else [])
+
+    assert cli.main(["status", "--port", str(instance.port)]) == 0
+    out = capsys.readouterr().out
+    assert instance.base_url in out
+    assert "foreign -- pid 9911, not started by ml-stack; left alone" in out
+    assert "not reported" not in out, "a foreign server is not judged for adopting"
+
+    assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["foreign"] == [{"port": instance.port, "pid": 9911}]
+    assert payload["servers"] == []
+    assert payload["serving"] is True
+
+
+def test_status_every_json_carries_the_foreign_list(monkeypatch, capsys):
+    from ml_stack.serve import cli
+
+    fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
+                           "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
+             fake_process(["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
+                           "--port", "8082"], 60 * 2**30, pid=12)]
+    monkeypatch.setattr("psutil.process_iter", lambda attrs=None: fakes)
+    monkeypatch.setattr(cli, "recorded_servers", lambda path: {8082: {"pid": 12}})
+    assert cli.main(["status", "--every", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["foreign"] == [{"port": 8081, "pid": 11}]
+
+
 def test_machine_memory_splits_the_servers_from_everything_else(monkeypatch):
     import psutil
 

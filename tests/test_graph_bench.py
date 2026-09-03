@@ -2921,6 +2921,56 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
         ["argv: run tried", f"started: {held['started']}"]
 
 
+def test_detach_records_the_job_for_wait_and_status(tmp_path, monkeypatch, capsys):
+    """`ml-stack-bench wait` blocks on the same pid `detach` wrote, through `ml_stack.jobs`,
+    without refusing a second `--detach` -- the queue behind the lock is bench's own."""
+    import subprocess
+
+    import ml_stack.graph.bench as bench
+    from ml_stack import jobs
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(subprocess, "Popen",
+                        lambda command, **kw: type("C", (), {"pid": 4242})())
+    assert bench.main(["sweep", "--serve", "models/tiny.gguf", "--detach", "--smoke"]) == 0
+    capsys.readouterr()
+
+    job_home = tmp_path / "home" / "jobs"
+    held = json.loads((job_home / "bench.json").read_text())
+    assert held["pid"] == 4242
+    assert held["argv"] == ["sweep", "--serve", "models/tiny.gguf", "--smoke"]
+    assert jobs.alive("bench", home=job_home) == 0, "pid 4242 is not a real process here"
+
+    # a second detach is not refused: bench queues it behind the measuring lock itself
+    assert bench.main(["sweep", "--serve", "models/tiny.gguf", "--detach", "--smoke"]) == 0
+
+
+def test_wait_blocks_on_the_detached_pid_and_says_when_it_has_ended(tmp_path, monkeypatch,
+                                                                    capsys):
+    import subprocess
+    import sys
+
+    import ml_stack.graph.bench as bench
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    assert bench.main(["wait"]) == 0
+    assert "no bench job is running" in capsys.readouterr().out
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.3)"])
+    from ml_stack import jobs
+
+    jobs.record("bench", pid=child.pid, argv=["sweep"], log="s.log",
+               home=tmp_path / "home" / "jobs")
+    try:
+        assert bench.main(["wait", "--every", "0.05"]) == 0
+        assert f"the bench job (pid {child.pid}) has ended" in capsys.readouterr().out
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait(timeout=10)
+
+
 def test_commit_reads_the_short_sha_and_marks_a_dirty_tree(tmp_path):
     """Best effort against a repository made here: the sha, `(dirty)` once a file is left
     uncommitted, and "" where there is no repository at all."""

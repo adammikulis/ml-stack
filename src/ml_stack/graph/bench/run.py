@@ -721,6 +721,12 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("stop", allow_abbrev=False,
                    help="end the detached measurement: SIGTERM to its pid, so it takes down "
                         "any server it put up, then wait up to a minute. Never by name")
+    waiting = sub.add_parser("wait", allow_abbrev=False,
+                             help="block until the detached measurement has ended, saying so "
+                                  "every minute -- so the next command can follow it "
+                                  "(ml-stack-bench wait && ml-stack-bench report --profile)")
+    waiting.add_argument("--every", type=float, default=60.0, metavar="SECONDS",
+                         help="how often to say it is still running (default: %(default)s)")
 
     # The positional is `label` rather than `file` on purpose: `_named_in` reads it, so a
     # detached queue's log is named after the queue file instead of "bench".
@@ -810,6 +816,10 @@ def _run(args: Any) -> int:
     if args.cmd == "stop":
         print(stop())
         return 0
+    if args.cmd == "wait":
+        from ml_stack import jobs
+
+        return jobs.wait("bench", every=args.every, home=bench.HOME / "jobs")
     if args.cmd == "queue":
         # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
         # the measuring lock itself, so a step of a queue and a run started by hand still
@@ -1387,6 +1397,13 @@ def detach(argv: Sequence[str]) -> Path:
     measuring_file().write_text(json.dumps({
         "pid": child.pid, "argv": list(rest), "log": str(log),
         "started": started, "commit": commit}, indent=1), encoding="utf-8")
+    from ml_stack import jobs
+
+    # bench queues a second `--detach` behind the measuring lock rather than refusing it
+    # (the child waits on `only_one`), so this never raises `Busy` the way a caller with no
+    # queue of its own would want it to.
+    jobs.record("bench", pid=child.pid, argv=rest, log=str(log), started=started,
+               home=bench.HOME / "jobs", refuse_if_alive=False)
     return log
 
 
@@ -1662,7 +1679,7 @@ def main(argv: list[str] | None = None) -> int:
     # every subcommand there is, so a *value* that happens to read like one -- `report
     # --model run` -- is not mistaken for the command and sent through the lock
     known = {*MEASURING, "show", "report", "prepare", "forget", "status", "tail", "stop",
-             "history"}
+             "wait", "history"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

@@ -173,6 +173,12 @@ def cmd_status(args: argparse.Namespace) -> int:
         from ml_stack.hub import pretty_name
 
         found = every_server()
+        strays = [o for o in found if o["port"] not in records and not o.get("defunct")]
+        foreign = [{"port": o["port"], "pid": o["pid"]} for o in strays]
+        if args.json:
+            print(json.dumps({"serving": bool(found), "servers": found, "foreign": foreign},
+                             indent=2))
+            return 0 if found else 1
         if not found:
             print("no llama-server is running on this machine.")
             return 1
@@ -185,7 +191,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
             print(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
                   f"{rss} resident  {leased}  ({one['binary']})")
-        strays = [o for o in found if o["port"] not in records and not o.get("defunct")]
+            if one["port"] not in records:
+                print(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
         if strays:
             print(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
         return 0
@@ -193,10 +200,19 @@ def cmd_status(args: argparse.Namespace) -> int:
     manager = ServerManager(state_file=STATE_FILE)
 
     found: list[Snapshot] = []
+    foreign: list[dict[str, int]] = []
     for port in ports:
         snapshot = look(port, records)
         if snapshot is None:
             continue
+        if not snapshot.recorded:
+            # a health-answering server this machine never leased -- the backend never
+            # kills one (`ports.reclaim_port`), so it is reported and left alone rather
+            # than judged for adopting or starting over
+            pids = server_pids_on_port(port)
+            if pids:
+                foreign.extend({"port": port, "pid": pid} for pid in pids)
+                continue
         model = args.model or snapshot.model
         if model:
             snapshot = judge(
@@ -209,12 +225,12 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     if args.json:
         print(json.dumps(
-            {"serving": bool(found), "ports_checked": ports,
-             "servers": [asdict(s) for s in found]},
+            {"serving": bool(found) or bool(foreign), "ports_checked": ports,
+             "servers": [asdict(s) for s in found], "foreign": foreign},
             indent=2))
-        return 0 if found else 1
+        return 0 if (found or foreign) else 1
 
-    if not found:
+    if not found and not foreign:
         print("nothing is serving on port " + ", ".join(str(p) for p in ports) + ".")
         print(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
         return 1
@@ -233,6 +249,9 @@ def cmd_status(args: argparse.Namespace) -> int:
         if snapshot.verdict:
             print("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
                                        args.parallel))
+    for held in foreign:
+        print(base_url_for(held["port"]))
+        print(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
     return 0
 
 
