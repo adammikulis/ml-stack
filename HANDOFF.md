@@ -111,6 +111,16 @@ Lifecycle and safety
   one retry after a health check before it is written down as failed.
 
 Extraction quality
+- [ ] **Reconcile on the way in, everywhere.** Adam: "the same dedupe mechanism should be
+  used whenever the model is reading a new thing or learning something new and saving to
+  an existing graph. it will for sure re-encounter the same concepts as it learns more."
+  `graph.tidy.absorb(store, graph, judge=)` (landing) maps an incoming graph's nodes onto
+  the store's by same name and plural, and puts close spellings to the judge with the
+  incoming passage in hand. Wire it into every writer of learned knowledge: the ingest's
+  `write()` before the upsert (the run's model as judge, the unit text as source),
+  ai_ceo's pipeline merge (`merge.py`, with `data/aliases.json` as `written`),
+  `graph.thread` when an answer's entities are kept, and the world simulator's emit. The
+  whole-store pass then only cleans what was written before `absorb` existed.
 - [ ] **Measure the judge.** Its verdicts are recorded, not scored: a gold set of invented
   pairs (same / different / unsure-then-same) through a gate, so a model or prompt change
   shows as a number.
