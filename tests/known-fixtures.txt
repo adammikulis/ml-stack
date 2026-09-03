@@ -225,3 +225,12 @@ Iris Calloway
 | sh
 | sudo
 python3 python3-venv
+
+# the invented textbook the PDF reader and the ingest tests are written against
+Velthorne Open Texts
+Lattice Studies
+The Glimmer Cascade
+Vault Currents
+Glimmer Nodes
+Currents in Practice
+Key Terms

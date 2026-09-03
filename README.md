@@ -694,6 +694,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-serve status\|up\|down\|profile\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in and `up --profile` fills every flag not given from it; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`) |
 | `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
+| `ml-stack-ingest DOCS --out STORE` | a shelf of documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per book with `entities.fold`, and written with the book, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, and `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate) |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
@@ -1817,6 +1818,72 @@ which units or places those people are in -- the far end, never the middle), `tr
 false premise about a real person, whose right answer is the place exactly as the graph
 has it) and `quote` (answerable from what a person said and from nothing else). Every
 question carries its `kind`, which the bench ignores, and `--kinds` draws only some.
+
+## Documents into a graph
+
+A book is not a document to a model. A thousand-page PDF has no prompt that fits it, and the
+obvious cut -- a page, a fixed number of characters -- goes through the middle of a
+definition, so the sentence that says what a thing *is* arrives without the name it defines.
+The unit that survives being read alone is a **section**: the book itself decided it was one
+idea, it names itself, and it carries its own figures.
+
+```sh
+ml-stack-ingest textbook.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --chapter 2
+ml-stack-ingest ~/books/*.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --resume --detach
+ml-stack-ingest status --out ./shelf.ladybug
+```
+
+`ml_stack.sources.pdf` does the reading. `read(path)` gives a `Document` of `Chapter`s of
+`Section`s: a publisher's PDF carries an outline (`doc.get_toc()`) and that is believed, and
+a book printed to PDF by a browser has none, so the headings are found by the way they are
+set -- a section heading is numbered `N.M` and set larger than the body, a chapter opens with
+`CHAPTER N` above the largest line on its page. Which reading was used is on the document as
+`how`, because "the sections look wrong" is answered by knowing which. The text is cleaned
+the way reading it aloud would clean it: a word broken across a line is put back together,
+and the running head, the running foot and the page number are dropped -- found by
+*repetition*, a margin line that says almost the same thing on a fifth of the pages, rather
+than by matching any particular wording. The two things worth keeping that are not prose are
+kept and labelled: a figure's caption, as `[Figure 2.9] ...`, and the terms the book sets in
+bold. `units()` is the last cut, splitting a section over ~2,500 tokens on paragraph
+boundaries and never inside one. `is_openstax()` reads the licence page, because a file
+renamed by whoever downloaded it says nothing.
+
+`ml-stack-ingest` is the other half. Each unit goes through `Client.extract` against
+`contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
+*in the book's words or empty*, relations from a closed vocabulary of fourteen verb phrases,
+what each figure shows and which concepts it illustrates, and the key terms -- and the
+extractions are folded into one graph per book with `entities.fold`, so `has_part` and
+`haspart` are one relationship and a plural folds into the spelling the book uses more. Nodes
+and edges go into one `GraphStore`, every one of them carrying the book, chapter, section and
+page it was read from: a claim in a knowledge graph with no page behind it is a claim nobody
+can check. Each extraction's `ml_stack.telemetry.Call` is kept, so "the shelf took nine
+hours" breaks down into which book, which section and how much of it was prompt.
+
+The model is served the way the bench serves one: `--model` takes a lease for the whole run
+in the shape its profile measured (`--no-profile` serves it bare), or `--base-url` uses a
+server that is already up. `--images` hands the model each section's rendered figures as
+pictures rather than only their captions -- the `_images` convention `graph.ask` uses -- and
+without a projector the captions are all it gets, which it says rather than pretending
+otherwise. A shelf is hours, so `--detach` runs it in its own session with a log under
+`~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,
+`--resume` skips those, and `status` says how many sections of how many books are done and at
+what rate.
+
+### Whether it does a good job
+
+```sh
+ml-stack-ingest --gold gold.json --model Qwen3.8-Flash-Next --fail-under 0.7
+```
+
+`--gold FILE` is the measurement, not an opinion. The file holds passages with the triples
+they state -- `{"subject", "predicate", "object"}` and, for each, the other names a right
+answer may use -- and every passage goes through *the same* extraction the shelf is read
+with: the same prompt, the same schema, the same sampling. Subjects and objects are matched
+through their aliases and `entities.close`, predicates through theirs, and what comes back is
+recall, precision, F1 and every triple that was missed or invented, listed. Aliases are the
+point: an extractor writing the singular where the gold writes the plural is right, and a
+scorer without them reports a failure that is not one. `--fail-under` turns the score into a
+gate.
 
 ## Searching the web
 
