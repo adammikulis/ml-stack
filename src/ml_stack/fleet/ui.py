@@ -45,6 +45,33 @@ def asset_bytes(name: str) -> tuple[bytes, str] | None:
     return path.read_bytes(), kind or "application/octet-stream"
 
 
+SCRAPE_TIMEOUT_S = 4.0
+"""A page that is answering a question has one thread busy and this one waiting; four
+seconds is long enough for a loopback JSON body and short enough that a view polling it
+does not stack up."""
+
+
+def _scraped(source: str) -> dict[str, Any]:
+    """One ``/metrics`` body, fetched from here rather than from the browser.
+
+    ``http`` and ``https`` only, and the URL is whatever a person typed into the view --
+    which is the same trust as the address bar of the browser they typed it in, since this
+    route is already behind the UI header and a session. A page that is not there, or is
+    not JSON, is a note and not a 500: the view says what it could not read and keeps
+    polling, because the usual reason is that the page has not been started yet.
+    """
+    import urllib.request
+
+    if not source.startswith(("http://", "https://")):
+        return {"error": "a /metrics address starts with http:// or https://"}
+    try:
+        with urllib.request.urlopen(source, timeout=SCRAPE_TIMEOUT_S) as got:
+            raw = got.read(1_000_000)
+        return {"serving": True, "metrics": json.loads(raw or b"{}")}
+    except (OSError, ValueError) as exc:
+        return {"serving": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
+
+
 def app_location() -> Path | None:
     """The bundle this is running from, which cannot delete itself."""
     import sys
@@ -85,6 +112,10 @@ class UI:
         self._leases: dict[int, Any] = {}
         self.detach: Any = None
         """How a sweep is started: the bench's own `detach` unless a test hands in a fake."""
+        self.answers: Any = None
+        """``() -> dict``: this process's own answering telemetry, when it answers anything.
+        `AskRoutes.metrics` is that callable. None on a daemon that only serves models,
+        which is most of them -- the Telemetry view is then pointed at a page that does."""
         self.discovery_port: int | None = None
         self.persist_with: Any = None
         self.name = name
@@ -396,6 +427,29 @@ class UI:
         rows.sort(key=lambda r: -r.get("right", 0.0))
         return {"runs": rows, "axes": dict(AXES), "store": str(store), "noise": NOISE}
 
+    def telemetry(self, source: str = "") -> dict[str, Any]:
+        """What has been answered: this daemon's own record, or another page's ``/metrics``.
+
+        The fleet daemon serves models and does not usually answer questions itself, so
+        there is normally nothing local to show -- a host that does answer hangs its
+        handler's ``metrics`` on ``ui.answers`` and it appears here. Either way the view
+        can be pointed at a page that does answer, by its ``/metrics`` URL, and *this*
+        process fetches it: a page on loopback has no reason to allow a cross-origin read,
+        and asking the browser to do it would fail silently in exactly the case it is
+        wanted. Nothing here measures anything; it reads a number someone else wrote down.
+        """
+        if source:
+            return {"source": source, **_scraped(source)}
+        answers = getattr(self, "answers", None)
+        if callable(answers):
+            try:
+                return {"source": "", "serving": True, "metrics": answers()}
+            except Exception as exc:  # noqa: BLE001 - a broken counter is not a broken page
+                return {"source": "", "serving": True, "error": str(exc)[:200]}
+        return {"source": "", "serving": False,
+                "note": ("this daemon answers no questions itself, so it has spent nothing. "
+                         "Point this at a page that does: its address and /metrics.")}
+
     def start_sweep(self, argv: list[str]) -> dict[str, Any]:
         """Start ``ml-stack-bench argv`` detached and hand back its log and pid."""
         import shlex
@@ -647,6 +701,11 @@ def routes(ui: UI, handler: Any) -> bool:
 
     if path == "/ui/rates.json" and method == "GET":
         send(200, ui.rates())
+        return True
+
+    if path == "/ui/telemetry.json" and method == "GET":
+        asked = urllib.parse.parse_qs(parsed.query)
+        send(200, ui.telemetry(str(asked.get("from", [""])[0] or "")[:400]))
         return True
 
     if path == "/ui/settings":

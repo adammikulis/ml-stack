@@ -425,3 +425,108 @@ class TestTheRatesRoute:
     def test_it_is_unreachable_without_the_ui_header(self, page, store):
         status, got, _ = page.call("/ui/rates.json", ui_header=False)
         assert status == 403 and "header" in got["error"]
+
+
+# -- the telemetry view ------------------------------------------------------------------
+#
+# The third view: not what a model *would* cost, but what answering has already cost. The
+# route is a reader -- of this process, when it answers anything, and otherwise of another
+# page's `/metrics`, fetched from here because a page on loopback has no reason to allow a
+# cross-origin read. Both halves are driven over a real socket; the second one against a
+# real `AskRoutes` server, so what is being read is the format that is actually served and
+# not a fixture shaped like it.
+
+
+class Answering:
+    """A real `AskRoutes` server on a free port, answering with no model at all."""
+
+    def __init__(self) -> None:
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        from ml_stack.graph.serve import AskRoutes
+
+        class Handler(AskRoutes, BaseHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+
+            def model_name(self):
+                return "quillhaven-E2B-Q4.gguf"
+
+            def do_GET(self):
+                if self.path == "/metrics":
+                    self.handle_metrics()
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.httpd.server_port}"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self) -> None:
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@pytest.fixture
+def answering():
+    served = Answering()
+    try:
+        yield served
+    finally:
+        served.close()
+
+
+class TestTheTelemetryView:
+    def test_it_is_offered_beside_what_fits_and_what_it_cost(self):
+        html = asset_bytes("fit.html")[0].decode()
+        views = re.search(r"const VIEWS = \[(.+?)\];", html, re.S)
+        assert views and '"telemetry"' in views.group(1)
+        assert "/ui/telemetry.json" in html, "the view reads no route"
+
+    def test_a_daemon_that_answers_nothing_says_so_rather_than_showing_zeros(self, page):
+        """Zeros would read as a server that answered nothing; this one was never asked."""
+        status, got, _ = page.call("/ui/telemetry.json")
+        assert status == 200 and got["serving"] is False
+        assert "answers no questions itself" in got["note"]
+
+    def test_a_host_that_does_answer_hands_over_its_own_record(self, page):
+        page.httpd.RequestHandlerClass.ui.answers = lambda: {"answers": 3, "totals": {"calls": 7}}
+        try:
+            status, got, _ = page.call("/ui/telemetry.json")
+            assert status == 200 and got["serving"] is True
+            assert got["metrics"]["answers"] == 3 and got["metrics"]["totals"]["calls"] == 7
+        finally:
+            page.httpd.RequestHandlerClass.ui.answers = None
+
+    def test_a_counter_that_raises_is_a_note_and_not_a_broken_page(self, page):
+        def broken():
+            raise RuntimeError("the ring went away")
+
+        page.httpd.RequestHandlerClass.ui.answers = broken
+        try:
+            status, got, _ = page.call("/ui/telemetry.json")
+            assert status == 200 and "the ring went away" in got["error"]
+        finally:
+            page.httpd.RequestHandlerClass.ui.answers = None
+
+    def test_it_reads_another_pages_metrics_from_here_and_not_from_the_browser(
+            self, page, answering):
+        status, got, _ = page.call(f"/ui/telemetry.json?from={answering.url}/metrics")
+        assert status == 200 and got["serving"] is True
+        assert got["source"] == f"{answering.url}/metrics"
+        assert got["metrics"]["model"] == "quillhaven-E2B-Q4.gguf"
+        assert got["metrics"]["answers"] == 0 and got["metrics"]["totals"]["answers"] == 0
+
+    def test_a_page_that_is_not_there_is_a_note_and_keeps_the_view_polling(self, page):
+        """The usual reason is that it has not been started yet."""
+        status, got, _ = page.call("/ui/telemetry.json?from=http://127.0.0.1:1/metrics")
+        assert status == 200 and got["serving"] is False and got["error"]
+
+    def test_only_an_http_address_is_fetched(self, page):
+        status, got, _ = page.call("/ui/telemetry.json?from=file:///etc/hosts")
+        assert status == 200 and "http://" in got["error"]
+
+    def test_it_is_unreachable_without_the_ui_header(self, page):
+        status, got, _ = page.call("/ui/telemetry.json", ui_header=False)
+        assert status == 403 and "header" in got["error"]

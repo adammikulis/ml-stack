@@ -4,6 +4,12 @@ read, wrote, kept and drafted. One object per answer; every reply is noted into 
 The bench's `Metered` counts the same things per question for a table. This is the shape
 that rides along with an answer, so the page -- and a person testing one -- can see what
 the served model is and what it spent, without a benchmark.
+
+A `Spent` is the sum of its calls: `note` turns one reply into a `ml_stack.telemetry.Call`
+-- the one record every part of the stack now writes -- and `add` folds it in. With
+``keep_calls`` the calls are kept as well as summed, so an answer can be read call by call;
+off by default, because the page wants a footer and not a transcript, and a hundred-turn
+conversation with every call kept is megabytes nobody asked for. The bench turns it on.
 """
 
 from __future__ import annotations
@@ -11,6 +17,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from typing import Any
+
+from ml_stack.telemetry import Call
 
 
 @dataclass
@@ -44,49 +52,59 @@ class Spent:
     # in `ml_stack.client.tokens`; the server's own counts above are the exact ones.
     parts: dict[str, int] = field(default_factory=dict)
     steps: list[str] = field(default_factory=list, repr=False)  # unused by the page; free
+    # Every call, kept rather than only summed. Off by default: the page shows a footer and
+    # the answer is written into a conversation store, where a transcript per turn is
+    # megabytes. `ml-stack-bench` turns it on, and so does anything printing a trace.
+    keep_calls: bool = False
+    calls_detail: list[Call] = field(default_factory=list, repr=False)
 
-    def note(self, reply: Any, took: float) -> None:
-        """Add one reply and the seconds it took to arrive."""
-        self.calls += 1
-        self.seconds += float(took)
-        raw = getattr(reply, "raw", None) or {}
-        model = raw.get("model")
-        if isinstance(model, str) and model and not self.model:
-            self.model = model
-        usage = raw.get("usage") or {}
-        timings = raw.get("timings") or {}
-        prompt_ms = float(timings.get("prompt_ms") or 0)
-        predicted_ms = float(timings.get("predicted_ms") or 0)
-        self.generating_ms += prompt_ms + predicted_ms
-        self.prompt_ms += prompt_ms
-        self.predicted_ms += predicted_ms
-        if self.first_token is None:
-            self.first_token = round(max(0.0, float(took) - predicted_ms / 1000), 3)
-        self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
-        self.completion_tokens += int(usage.get("completion_tokens") or 0)
-        self.cached_tokens += int(timings.get("cache_n")
-                                  or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                                  or 0)
-        self.read_tokens += int(timings.get("prompt_n") or 0)
-        held = (int(timings.get("cache_n") or 0) + int(timings.get("prompt_n") or 0)
-                + int(timings.get("predicted_n") or 0))
-        if not held:
-            held = int(usage.get("prompt_tokens") or 0) + int(usage.get("completion_tokens") or 0)
-        self.context_last = held
-        self.context_peak = max(self.context_peak, held)
-        self.draft_tokens += int(timings.get("draft_n") or 0)
-        self.draft_taken += int(timings.get("draft_n_accepted") or 0)
-        finish = getattr(reply, "finish_reason", None)
-        if finish:
-            self.finish = str(finish)
-            self.truncated = self.truncated or finish == "length"
-        self.thinking_chars += len(getattr(reply, "thinking", None) or "")
-        self.answer_chars += len(getattr(reply, "content", None) or "")
+    def note(self, reply: Any, took: float, **detail: Any) -> None:
+        """Add one reply and the seconds it took to arrive.
+
+        ``detail`` is what the reply cannot say and the caller can -- ``host``, ``port``,
+        ``tool``, ``result_ids`` -- and goes straight to `Call.from_reply`.
+        """
+        call = Call.from_reply(reply, took, **detail)
+        self.add(call)
+        # The parts are estimated from the text, not counted off the reply, so they need
+        # the reply itself and not the record of it.
         if getattr(reply, "thinking", None):
             self.part("thinking", reply.thinking)
         if getattr(reply, "content", None):
             self.part("answer", reply.content)
-        self.tool_calls += len(getattr(reply, "tool_calls", None) or ())
+
+    def add(self, call: Call) -> None:
+        """Fold one `Call` into the totals -- and keep it, with ``keep_calls``.
+
+        Every number the page and the bench show is added up here and nowhere else, which
+        is the point of there being one record: a timing that arrives on the reply is read
+        by `Call.from_reply`, and everything downstream of it sums the same field.
+        """
+        self.calls += 1
+        self.seconds += call.seconds
+        if call.model and not self.model:
+            self.model = call.model
+        self.generating_ms += call.generating_ms
+        self.prompt_ms += call.prompt_ms
+        self.predicted_ms += call.predicted_ms
+        if self.first_token is None:
+            self.first_token = call.first_token
+        self.prompt_tokens += call.prompt_tokens
+        self.completion_tokens += call.completion_tokens
+        self.cached_tokens += call.cache_n
+        self.read_tokens += call.prompt_n
+        self.context_last = call.held
+        self.context_peak = max(self.context_peak, call.held)
+        self.draft_tokens += call.draft_n
+        self.draft_taken += call.draft_n_accepted
+        if call.finish:
+            self.finish = call.finish
+            self.truncated = self.truncated or call.finish == "length"
+        self.thinking_chars += call.thinking_chars
+        self.answer_chars += call.result_chars
+        self.tool_calls += len(call.asked)
+        if self.keep_calls:
+            self.calls_detail.append(call)
 
     def part(self, name: str, text: Any) -> None:
         """Count ``text`` (a string, or anything `str` makes one of) against ``name``."""
@@ -186,6 +204,12 @@ class Spent:
         """Every field plus the derived ones, JSON-ready."""
         out = asdict(self)
         out.pop("steps", None)
+        # Kept off the public record unless they were asked for: `keep_calls` is a knob and
+        # not telemetry, and without it the record is byte-for-byte what it always was.
+        out.pop("keep_calls", None)
+        out.pop("calls_detail", None)
+        if self.keep_calls:
+            out["calls_detail"] = [one.public() for one in self.calls_detail]
         out["seconds"] = round(self.seconds, 3)
         out["generating_ms"] = round(self.generating_ms, 1)
         out["drafted"] = self.drafted

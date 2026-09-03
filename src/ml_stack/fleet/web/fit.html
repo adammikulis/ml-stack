@@ -122,6 +122,22 @@
   table.fit tbody tr.nofit td { color: var(--dim); }
   table.fit td.name { display: flex; align-items: center; gap: 7px; font-size: 12px; }
   table.fit .bad { color: var(--bad); }
+  .stats { display: grid; gap: 12px; margin-top: 18px;
+           grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+  .stat { background: var(--bg-raised); border: 1px solid var(--line); border-radius: 9px;
+          padding: 10px 12px; }
+  .stat .cap { color: var(--muted); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .07em; }
+  .stat .big { font-family: var(--mono); font-size: 19px; margin-top: 3px; }
+  .stat .sub { color: var(--dim); font-size: 11px; margin-top: 2px; }
+  .ctl button.go {
+    background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
+    border-radius: 7px; padding: 5px 12px; font: inherit; cursor: pointer;
+  }
+  .ctl input[type=text] {
+    background: var(--bg-sunken); color: var(--text); border: 1px solid var(--line-bright);
+    border-radius: 7px; padding: 5px 7px; font: inherit; width: 100%;
+  }
   .note { color: var(--dim); font-size: 12px; margin-top: 14px; max-width: 82ch; }
   .empty { color: var(--muted); padding: 40px 0; }
 </style>
@@ -137,6 +153,7 @@
 <div class="wrap">
   <div class="controls" id="controls"></div>
   <div class="controls" id="rate-controls" hidden></div>
+  <div class="controls" id="tele-controls" hidden></div>
   <div id="body"></div>
 </div>
 
@@ -236,6 +253,9 @@ const state = {
   zoom: null,             // [x0, x1] on panel B once someone has zoomed
   view: "fit",            // or "rates"
   runs: null, axes: {}, cost: "seconds", showing: "both", hotRun: null, ratesError: "",
+  // the Telemetry view: what a /metrics body last said, where it came from, and whether
+  // this page is re-reading it on a timer
+  tele: null, teleFrom: "", teleNote: "", teleError: "", teleTimer: null, teleWatch: true,
 };
 
 async function load() {
@@ -900,10 +920,156 @@ function drawRates() {
   paintHotRun();
 }
 
+// ---------------------------------------------------------------- what it has spent
+//
+// `AskRoutes.metrics` -- one JSON body per answering process: how many answers, what they
+// cost added up (`Spent.totals`), and the last two hundred of them one row each. Nothing
+// here measures anything and nothing here is a benchmark: these are answers real people
+// asked for, which is the one thing a bench cannot tell you.
+//
+// The daemon usually answers nothing itself, so the interesting case is the second one:
+// type a page's /metrics address and the *daemon* fetches it, because a page on loopback
+// has no reason to allow a cross-origin read from here.
+
+const TELE_EVERY_MS = 3000;
+
+async function loadTelemetry() {
+  const where = "/ui/telemetry.json"
+    + (state.teleFrom ? "?from=" + encodeURIComponent(state.teleFrom) : "");
+  state.teleError = state.teleNote = "";
+  try {
+    const r = await fetch(where, { headers: { "X-ML-Stack-UI": "1" } });
+    const got = await r.json();
+    if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
+    state.tele = got.metrics || null;
+    state.teleNote = got.note || "";
+    state.teleError = got.error || "";
+  } catch (e) {
+    state.tele = null;
+    state.teleError = e.message;
+  }
+}
+
+/** Poll while the view is open, and stop the moment it is not: a timer left running on a
+    background tab is a request per three seconds forever, at a page nobody is reading. */
+function teleWatching(on) {
+  if (state.teleTimer) { clearInterval(state.teleTimer); state.teleTimer = null; }
+  if (on && state.teleWatch) {
+    state.teleTimer = setInterval(async () => {
+      if (state.view !== "telemetry") { teleWatching(false); return; }
+      await loadTelemetry();
+      drawTelemetry();
+    }, TELE_EVERY_MS);
+  }
+}
+
+function buildTeleControls() {
+  const box = document.getElementById("tele-controls");
+  ref.teleUrl = el("input", { type: "text", placeholder: "http://127.0.0.1:8099/metrics",
+    value: state.teleFrom });
+  const go = async () => {
+    state.teleFrom = ref.teleUrl.value.trim();
+    await loadTelemetry();
+    drawTelemetry();
+  };
+  ref.teleUrl.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+  box.append(el("div", { class: "ctl wide" },
+    el("div", { class: "cap" }, el("span", {}, "read from")),
+    el("div", { class: "pair" }, ref.teleUrl,
+       el("button", { class: "go", onclick: go }, "read")),
+    el("div", { class: "hint" }, "empty for this daemon's own answers — otherwise the "
+                                 + "/metrics address of a page that answers questions; "
+                                 + "this machine fetches it, not your browser")));
+
+  ref.teleWatch = el("input", { type: "checkbox", onchange: (e) => {
+    state.teleWatch = e.target.checked;
+    teleWatching(state.view === "telemetry");
+  } });
+  ref.teleWatch.checked = state.teleWatch;
+  box.append(el("div", { class: "ctl" },
+    el("div", { class: "cap" }, el("span", {}, "keep looking")),
+    el("label", {}, ref.teleWatch, " re-read every three seconds"),
+    el("div", { class: "hint" }, "the ring holds the last two hundred answers; a counter "
+                                 + "that stops moving is a server that stopped answering")));
+}
+
+const secs = (s) => (s === null || s === undefined ? "—"
+  : s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Number(s).toFixed(1)}s`);
+const rate = (v, digits = 1) => (v === null || v === undefined ? "—" : Number(v).toFixed(digits));
+
+function teleStats(m) {
+  const t = m.totals || {};
+  const stat = (cap, big, sub) => el("div", { class: "stat" },
+    el("div", { class: "cap" }, cap), el("div", { class: "big" }, big),
+    sub ? el("div", { class: "sub" }, sub) : null);
+  const kept = t.read_tokens + t.cached_tokens;
+  return el("div", { class: "stats" },
+    stat("answers", commas(m.answers || 0), `${commas(m.kept || 0)} kept in the ring`),
+    stat("calls", commas(t.calls || 0), `${secs(t.seconds)} of wall clock`),
+    stat("wrote", commas(t.completion_tokens || 0) + " tok",
+         `${rate(t.decode_tokens_per_second)} tok/s decoding`),
+    stat("read", commas(t.read_tokens || 0) + " tok",
+         kept ? `${((t.cached_tokens / kept) * 100).toFixed(0)}% came from the cache` : "nothing yet"),
+    stat("drafted", t.draft_tokens ? `${(t.acceptance * 100).toFixed(0)}%` : "—",
+         t.draft_tokens ? `${commas(t.draft_taken)} of ${commas(t.draft_tokens)} accepted`
+                        : "no draft head"),
+    stat("context peak", commas(t.context_peak || 0),
+         `mean ${commas(t.context_mean || 0)} — what one slot held`),
+    stat("uptime", secs(m.uptime), m.ready ? String(m.ready) : "answering"));
+}
+
+function teleTable(rows) {
+  const body = el("tbody", {});
+  for (const r of [...rows].reverse()) {
+    const kept = (r.read_tokens || 0) + (r.cached_tokens || 0);
+    body.append(el("tr", {},
+      el("td", { class: "name" }, prettyName(r.model) || "—"),
+      el("td", {}, r.thread || "—"),
+      el("td", {}, commas(r.calls || 0)),
+      el("td", {}, secs(r.seconds)),
+      el("td", {}, rate(r.decode_tokens_per_second)),
+      el("td", {}, secs((r.prompt_ms || 0) / 1000)),
+      el("td", {}, kept ? `${((r.cached_tokens / kept) * 100).toFixed(0)}%` : "—"),
+      el("td", {}, r.draft_tokens ? `${(r.acceptance * 100).toFixed(0)}%` : "—"),
+      el("td", {}, commas(r.context_peak || 0))));
+  }
+  return el("table", { class: "fit" },
+    el("thead", {}, el("tr", {},
+      ...["model", "thread", "calls", "took", "wrote at tok/s", "read for", "prompt cached",
+          "drafted", "context peak"].map((h) => el("th", {}, h)))),
+    body);
+}
+
+function drawTelemetry() {
+  const body = document.getElementById("body");
+  const m = state.tele;
+  if (!m) {
+    body.replaceChildren(el("p", { class: "empty" },
+      state.teleError ? `Could not read it: ${state.teleError}`
+                      : state.teleNote || "Nothing has answered anything here yet."));
+    return;
+  }
+  const where = state.teleFrom || m.url || "this process";
+  body.replaceChildren(
+    el("p", { class: "note" },
+      `${prettyName(m.model) || "no model named"} · ${where}`
+      + (m.threads && Object.keys(m.threads).length
+         ? ` · ${Object.keys(m.threads).length} conversation(s)` : "")),
+    teleStats(m),
+    (m.recent || []).length ? teleTable(m.recent)
+      : el("p", { class: "empty" }, "Up, and asked nothing yet."),
+    el("p", { class: "note" },
+      "Every row is one answer a person actually asked for, off the same `Spent` record "
+      + "the page's footer shows and the bench sums per question. The same numbers are at "
+      + "/metrics.prom in the Prometheus text format, so a scraper already installed can "
+      + "watch this without knowing anything about it."));
+}
+
 // ---------------------------------------------------------------- drawing it all
 
 /** The two views share the header, the styles and the tooltip; nothing else. */
-const VIEWS = [["fit", "What fits"], ["rates", "What it cost to be right"]];
+const VIEWS = [["fit", "What fits"], ["rates", "What it cost to be right"],
+               ["telemetry", "What it has spent"]];
 
 function buildViews() {
   const nav = document.getElementById("views");
@@ -921,6 +1087,11 @@ async function go(view) {
     await loadRates();
     if (!ref.showButtons) buildRateControls();
   }
+  if (view === "telemetry") {
+    if (!ref.teleUrl) buildTeleControls();
+    await loadTelemetry();
+  }
+  teleWatching(view === "telemetry");
   draw();
 }
 
@@ -930,8 +1101,10 @@ function draw() {
     VIEWS.find(([k]) => k === state.view)[1];
   document.getElementById("controls").hidden = state.view !== "fit";
   document.getElementById("rate-controls").hidden = state.view !== "rates";
+  document.getElementById("tele-controls").hidden = state.view !== "telemetry";
   state.hot = state.hotRun = null;
   if (state.view === "rates") { drawRates(); return; }
+  if (state.view === "telemetry") { drawTelemetry(); return; }
   drawFit();
 }
 

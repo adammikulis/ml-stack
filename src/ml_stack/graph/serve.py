@@ -6,7 +6,13 @@ whole answer. A server without that route gets the same question at ``/ask`` and
 one JSON body. And ``GET /thread/<name>`` reopens a conversation the graph is holding, so
 closing the tab does not end it and another machine can pick it up.
 
-Those three routes were the same in every project that rendered the page, and lived in none
+``GET /metrics`` and ``GET /metrics.prom`` are the same server saying what it has spent:
+every answer's `Spent` is kept in a ring on the handler class as it goes out, and the two
+routes are that ring as JSON and as Prometheus text. Nothing has to be running for them to
+answer -- a server that has answered nothing reports zeros and its uptime, which is how a
+scraper tells a quiet server from a missing one.
+
+Those routes were the same in every project that rendered the page, and lived in none
 of them here. ``AskRoutes`` is that server-side half, with no opinion about where the graph
 comes from or which model answers: a subclass says how a question is answered (``asker``)
 and where conversations are kept (``threads``), and hangs whatever it wants -- a journal, a
@@ -37,6 +43,12 @@ this question, for ``converse(..., summary=, recalled=)``. A subclass that retur
             elif self.path == "/ask/stream":
                 self.handle_ask_stream(body)
 
+        def do_GET(self):
+            if self.path == "/metrics":
+                self.handle_metrics()
+            elif self.path == "/metrics.prom":
+                self.handle_metrics_prom()
+
 Nothing here decides who may ask. A page served over a tunnel and one on loopback get the
 same routes; refusing one is the subclass's policy, checked before these are called.
 """
@@ -46,13 +58,84 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from typing import Any
 
 from ml_stack.graph.thread import EVERY, WINDOW
 
-__all__ = ["Ask", "AskRoutes", "History", "answer_payload", "sse", "thread_request"]
+__all__ = ["Ask", "AskRoutes", "History", "KEEP_ANSWERS", "STARTED", "answer_payload",
+           "prometheus", "sse", "thread_request"]
+
+STARTED = time.time()
+"""When this process began, near enough: the moment this module was imported. ``/metrics``
+reports uptime against it, which is what tells a scraper that a server was restarted
+between two scrapes rather than having answered nothing."""
+
+KEEP_ANSWERS = 200
+"""How many answers the metrics ring holds. A ring and not a log: a server that answers for
+a week must not grow for a week, and what a scraper wants is the recent shape, not the
+history -- the history is in the conversation store, which is on disk and is not this."""
+
+# What `/metrics.prom` exposes, in order: the name a scraper sees, the key on
+# `Spent.totals`, whether it only ever goes up, and the line that says what it is.
+PROM = (
+    ("answers_total", "answers", "counter", "Answers given since this process started."),
+    ("calls_total", "calls", "counter", "Calls made to the model server."),
+    ("tokens_read_total", "read_tokens", "counter",
+     "Prompt tokens the server actually read (timings.prompt_n)."),
+    ("tokens_cached_total", "cached_tokens", "counter",
+     "Prompt tokens it kept from the call before (timings.cache_n)."),
+    ("tokens_written_total", "completion_tokens", "counter", "Tokens generated."),
+    ("draft_tokens_total", "draft_tokens", "counter", "Tokens guessed ahead by a draft head."),
+    ("draft_accepted_total", "draft_taken", "counter", "And accepted by the large model."),
+    ("seconds_total", "seconds", "counter", "Wall clock spent answering, on this side."),
+    ("context_peak", "context_peak", "gauge",
+     "The most one slot held: prompt plus answer, the largest of any single call."),
+)
+
+
+def prometheus(totals: Mapping[str, Any], *, model: str = "", uptime: float | None = None,
+               ) -> str:
+    """`Spent.totals` in the Prometheus text exposition format, ready to be scraped.
+
+    One HELP and one TYPE line per metric, then the value: counters for everything that
+    only goes up, gauges for the peak and the uptime, and ``model_info`` carrying the
+    served model's name as a label, which is how a name is exposed to a system that only
+    stores numbers. A missing total is 0 and not a missing line -- a scraper that loses a
+    series cannot tell a quiet server from a broken one.
+    """
+    lines: list[str] = []
+    for name, key, kind, said in PROM:
+        value = totals.get(key) or 0
+        lines += [f"# HELP {name} {said}", f"# TYPE {name} {kind}",
+                  f"{name} {_number(value)}"]
+    if uptime is not None:
+        lines += ["# HELP uptime_seconds How long this process has been up.",
+                  "# TYPE uptime_seconds gauge", f"uptime_seconds {_number(uptime)}"]
+    lines += ["# HELP model_info The served model, as a label; the value is always 1.",
+              "# TYPE model_info gauge",
+              f'model_info{{model="{_label(model)}"}} 1']
+    return "\n".join(lines) + "\n"
+
+
+def _number(value: Any) -> str:
+    """A metric value: an int stays an int, everything else is a float a scraper parses."""
+    if isinstance(value, bool) or value is None:
+        return "0"
+    if isinstance(value, int):
+        return str(value)
+    try:
+        return repr(round(float(value), 3))
+    except (TypeError, ValueError):
+        return "0"
+
+
+def _label(text: Any) -> str:
+    """A label value, escaped the way the exposition format asks: backslash, quote, newline."""
+    return (str(text or "").replace("\\", "\\\\").replace('"', '\\"')
+            .replace("\n", "\\n"))
 
 # what an answer carries to the page, in the order the page reads them: `content` is the
 # words, `ids` everything the tools touched, then the four ways they touched it, then the
@@ -205,6 +288,10 @@ class AskRoutes:
         thing happened before it has.
     ``failed(ask, exc)``
         Called when answering raised, before the error is sent.
+    ``keep_answers``
+        How many answers `metrics` keeps. The ring is per concrete handler class, made on
+        first use, and every answer is recorded into it by the ask routes themselves -- a
+        subclass that overrides ``answered`` without calling ``super()`` still counts.
     ``remembered_turns``
         How many turns of history go back to the model with the question: the window,
         chosen by recency alone and never trimmed for what else is sent. ``WINDOW``.
@@ -301,6 +388,88 @@ class AskRoutes:
     def failed(self, ask: Ask, exc: BaseException) -> None:
         print(f"{time.strftime('%FT%T')} ask failed: {exc}", file=sys.stderr)
 
+    # ------------------------------------------------------------ what it has spent
+
+    keep_answers: int = KEEP_ANSWERS
+
+    @classmethod
+    def _kept(cls) -> dict[str, Any]:
+        """This handler class's telemetry: when it started, how many answers, and a ring.
+
+        On the class, because ``http.server`` builds a handler per request and an instance
+        remembers nothing. On the *concrete* class and not on `AskRoutes`, so two servers
+        in one process -- a test's, and the one it is testing -- do not add up together.
+        """
+        held = cls.__dict__.get("_telemetry")
+        if held is None:
+            held = {"started": time.time(), "answers": 0,
+                    "ring": deque(maxlen=max(1, int(cls.keep_answers)))}
+            cls._telemetry = held               # on this class, not on a base of it
+        return held
+
+    def record(self, ask: Ask | None, payload: Mapping[str, Any]) -> None:
+        """Note one answered question in the ring. Never raises: telemetry is not the answer.
+
+        What is kept is the answer's `Spent.public()` with the thread and the clock on it,
+        which is exactly what `Spent.totals` reads -- so the totals over a ring, over a
+        thread's slice of it, and over a conversation in the store are all the same
+        function over the same records. An answer no model was asked for -- a greeting, one
+        that came back from the cache -- has nothing to add and is counted, not kept.
+        """
+        try:
+            kept = self._kept()
+            kept["answers"] += 1
+            spent = payload.get("spent")
+            if isinstance(spent, Mapping) and spent.get("calls"):
+                kept["ring"].append({**spent, "at": round(time.time(), 3),
+                                     "thread": (ask.thread if ask else "")})
+        except Exception:  # noqa: BLE001 - a metric is never worth an answer
+            pass
+
+    def metrics(self) -> dict[str, Any]:
+        """The whole of this process's telemetry, as `/metrics` sends it.
+
+        ``answers`` counts every answer since the process started; ``recent`` is the last
+        `keep_answers` of them as `Spent.public()` records, newest last; ``totals`` is
+        `Spent.totals` over that ring and ``threads`` the same totals per conversation, so
+        a reader can see which thread is spending the tokens without opening the store.
+        """
+        from ml_stack.client.spent import Spent
+
+        kept = self._kept()
+        recent = list(kept["ring"])
+        threads: dict[str, Any] = {}
+        for name in dict.fromkeys(str(one.get("thread") or "") for one in recent):
+            if name:
+                threads[name] = Spent.totals([one for one in recent
+                                              if str(one.get("thread") or "") == name])
+        return {"answers": int(kept["answers"]),
+                "kept": len(recent),
+                "uptime": round(time.time() - STARTED, 1),
+                "started": round(kept["started"], 3),
+                "model": self.model_name() or (recent[-1].get("model") if recent else "") or "",
+                "url": self.serving_url(),
+                "ready": self.ready(),
+                "totals": Spent.totals(recent),
+                "threads": threads,
+                "recent": recent}
+
+    def handle_metrics(self) -> dict[str, Any]:
+        """``GET /metrics``: this process's telemetry as one JSON body."""
+        return self.send_json(200, self.metrics())
+
+    def handle_metrics_prom(self) -> str:
+        """``GET /metrics.prom``: the same numbers in the Prometheus text exposition format.
+
+        The point of the second route is that nothing has to know anything about this
+        server to watch it: a scraper already installed picks up answers, calls, tokens
+        read against tokens cached, draft acceptance and the context peak, and the peak is
+        the number that says how many more users this machine holds.
+        """
+        got = self.metrics()
+        body = prometheus(got["totals"], model=got["model"], uptime=got["uptime"])
+        return self.send_text(200, body, "text/plain; version=0.0.4; charset=utf-8")
+
     # ---------------------------------------------------------------- the routes
 
     def handle_ask(self, body: Mapping[str, Any]) -> dict[str, Any]:
@@ -314,6 +483,7 @@ class AskRoutes:
         try:
             out = self._answer(ask, stream=False, emit=None)
             payload = self.answered(ask, out, answer_payload(out))
+            self.record(ask, payload)
         except Exception as exc:  # noqa: BLE001 - the page is told, whatever it was
             self.failed(ask, exc)
             return self.send_json(500, {"error": str(exc)[:200]})
@@ -346,6 +516,7 @@ class AskRoutes:
         try:
             out = self._answer(ask, stream=True, emit=relay)
             payload = self.answered(ask, out, answer_payload(out))
+            self.record(ask, payload)
             frame = {"event": "done", **payload}
             sse(self.wfile, frame)
             return frame
@@ -475,6 +646,17 @@ class AskRoutes:
         self.end_headers()
         self.wfile.write(blob)
         return payload
+
+    def send_text(self, code: int, text: str, content_type: str = "text/plain; charset=utf-8",
+                  ) -> str:
+        """Write one text response with its length. Returns the text, for the caller."""
+        blob = text.encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(blob)))
+        self.end_headers()
+        self.wfile.write(blob)
+        return text
 
     def _opened(self, *, write: bool = False) -> AbstractContextManager[Any]:
         """The conversation store as a context manager, or one that yields None."""

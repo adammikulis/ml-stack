@@ -82,6 +82,12 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
         if self.path == "/ask/model":
             self.handle_model()
             return
+        if self.path == "/metrics":
+            self.handle_metrics()
+            return
+        if self.path == "/metrics.prom":
+            self.handle_metrics_prom()
+            return
         want = thread_request(self.path)
         if want:
             self.handle_thread(*want)
@@ -571,3 +577,151 @@ def test_the_session_totals_carry_the_peak_context_and_the_parts_summed():
     got = Spent.totals([a, b])
     assert got["context_peak"] == 9000 and got["context_mean"] == 6500
     assert got["parts"] == {"system": 800, "window": 2000, "recalled": 800}
+
+
+# -- what the server has spent ---------------------------------------------------------
+#
+# `/metrics` and `/metrics.prom` are the same ring of answers, as JSON and as Prometheus
+# text. The ring is on the handler class, so these drive a real server and read it back
+# rather than calling `metrics()` on an instance that never served anything.
+
+
+def spent_answer(*, calls=1, content="Iris surveys land.", **timings):
+    """An `Answer` carrying a `Spent` with ``calls`` replies noted into it."""
+    from ml_stack.client.chat import Reply
+
+    out = Answer(content=content, ids=["person:iris"], read=["person:iris"],
+                 show=["person:iris"], steps=["found 2 entries"])
+    for _ in range(calls):
+        out.spent.note(Reply(content=content, finish_reason="stop", raw={
+            "model": "tiny-Q4.gguf",
+            "usage": {"prompt_tokens": 900, "completion_tokens": 40},
+            "timings": {"prompt_ms": 100.0, "predicted_ms": 400.0,
+                        "prompt_n": timings.get("prompt_n", 300),
+                        "cache_n": timings.get("cache_n", 600),
+                        "predicted_n": 40,
+                        "draft_n": timings.get("draft_n", 20),
+                        "draft_n_accepted": timings.get("draft_taken", 15)}}), 0.8)
+    return out
+
+
+def get(url):
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return r.status, r.headers.get("Content-Type"), r.read().decode("utf-8")
+
+
+def post(url, body):
+    req = urllib.request.Request(url, data=json.dumps(body).encode("utf-8"),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def test_metrics_answers_before_anything_was_asked(served):
+    """A server that has answered nothing reports zeros and its uptime -- which is how a
+    scraper tells a quiet server from one that is not there at all."""
+    url, _ = served
+    status, kind, raw = get(url + "/metrics")
+    got = json.loads(raw)
+    assert status == 200 and "application/json" in kind
+    assert got["answers"] == 0 and got["recent"] == [] and got["totals"]["answers"] == 0
+    assert got["uptime"] >= 0 and got["threads"] == {}
+
+
+def test_metrics_counts_every_answer_and_keeps_the_last_ones(served):
+    url, handler = served
+    kept = handler.answer
+    try:
+        handler.answer = spent_answer(calls=2)
+        post(url + "/ask", {"question": "who surveys?", "thread": "t1"})
+        stream(url + "/ask/stream", {"question": "and again?", "thread": "t2"})
+        got = json.loads(get(url + "/metrics")[2])
+        assert got["answers"] == 2 and len(got["recent"]) == 2
+        assert got["totals"]["calls"] == 4 and got["totals"]["read_tokens"] == 1200
+        assert got["totals"]["cached_tokens"] == 2400 and got["totals"]["context_peak"] == 940
+        assert got["model"] == "tiny-Q4.gguf"
+        # each record is `Spent.public()` with the thread and the clock on it
+        first = got["recent"][0]
+        assert first["calls"] == 2 and first["thread"] == "t1" and first["at"] > 0
+        assert set(got["threads"]) == {"t1", "t2"}
+        assert got["threads"]["t1"]["answers"] == 1 and got["threads"]["t1"]["calls"] == 2
+    finally:
+        handler.answer = kept
+
+
+def test_an_answer_no_model_was_asked_for_is_counted_and_not_kept(served):
+    """A greeting, or an answer that came back from the cache, spent nothing. It still
+    happened -- so it is counted -- but there is no record of a call to keep."""
+    url, handler = served
+    got = json.loads(get(url + "/metrics")[2])
+    assert got["answers"] == 0
+    post(url + "/ask", {"question": "hello?"})           # the fixture's answer has no spent
+    got = json.loads(get(url + "/metrics")[2])
+    assert got["answers"] == 1 and got["recent"] == []
+
+
+def test_the_ring_is_bounded_so_a_server_that_answers_all_week_does_not_grow(tmp_path):
+    class Handler(Scripted):
+        asked = []
+        keep_answers = 3
+        answer = spent_answer()
+
+    with running(Handler) as url:
+        for i in range(5):
+            post(url + "/ask", {"question": f"who is {i}?", "thread": "long"})
+        got = json.loads(get(url + "/metrics")[2])
+    assert got["answers"] == 5 and got["kept"] == 3 and len(got["recent"]) == 3
+    assert got["totals"]["answers"] == 3, "the totals are over what is kept, and say so"
+
+
+def test_two_servers_in_one_process_do_not_add_up_together(tmp_path):
+    """The ring lives on the concrete handler class, not on `AskRoutes`."""
+    class One(Scripted):
+        asked = []
+        answer = spent_answer()
+
+    class Two(Scripted):
+        asked = []
+        answer = spent_answer()
+
+    with running(One) as first, running(Two) as second:
+        post(first + "/ask", {"question": "who?"})
+        post(first + "/ask", {"question": "who else?"})
+        post(second + "/ask", {"question": "and here?"})
+        assert json.loads(get(first + "/metrics")[2])["answers"] == 2
+        assert json.loads(get(second + "/metrics")[2])["answers"] == 1
+
+
+def test_metrics_prom_is_the_same_numbers_a_scraper_can_read(served):
+    url, handler = served
+    kept = handler.answer
+    try:
+        handler.answer = spent_answer(calls=2)
+        handler.model = "tiny-Q4.gguf"
+        post(url + "/ask", {"question": "who surveys?", "thread": "t1"})
+        status, kind, body = get(url + "/metrics.prom")
+        assert status == 200 and kind.startswith("text/plain")
+        lines = [ln for ln in body.splitlines() if ln and not ln.startswith("#")]
+        said = dict(ln.split(" ", 1) for ln in lines if not ln.startswith("model_info"))
+        assert said["answers_total"] == "1" and said["calls_total"] == "2"
+        assert said["tokens_read_total"] == "600" and said["tokens_cached_total"] == "1200"
+        assert said["tokens_written_total"] == "80" and said["context_peak"] == "940"
+        assert said["draft_tokens_total"] == "40" and said["draft_accepted_total"] == "30"
+        assert float(said["seconds_total"]) == 1.6
+        assert 'model_info{model="tiny-Q4.gguf"} 1' in body
+        # every metric a scraper reads is declared, once, before its value
+        for name, _, kind_, _said in __import__("ml_stack.graph.serve", fromlist=["PROM"]).PROM:
+            assert f"# TYPE {name} {kind_}" in body and f"# HELP {name} " in body
+    finally:
+        handler.answer = kept
+        handler.model = ""
+
+
+def test_a_model_name_with_a_quote_in_it_does_not_break_the_exposition(served):
+    """A label value is escaped, or one odd model name makes the whole scrape unparsable."""
+    from ml_stack.graph.serve import prometheus
+
+    body = prometheus({"answers": 1}, model='tiny "Q4"\\x.gguf', uptime=3.0)
+    line = [ln for ln in body.splitlines() if ln.startswith("model_info")][0]
+    assert line == 'model_info{model="tiny \\"Q4\\"\\\\x.gguf"} 1'
+    assert body.endswith("\n")
