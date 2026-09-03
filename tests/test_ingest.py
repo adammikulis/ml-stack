@@ -530,3 +530,11 @@ def test_what_a_section_cost_is_kept_call_by_call(tmp_path, server):
     assert row.concepts == 3 and row.relations == 2 and row.figures == 1
     assert len(row.calls) == 1 and row.calls[0]["tool"] == "extract"
     assert row.calls[0]["seconds"] >= 0.0 and not row.error
+
+
+def test_the_schema_verbs_are_the_glossed_verbs_and_the_instructions_name_each():
+    """A verb the schema allows without a gloss would be used for whatever the model guessed."""
+    allowed = ingest.schema()["properties"]["relations"]["items"]["properties"]["rel"]["enum"]
+    assert list(ingest.VERBS) == allowed
+    for verb, gloss in ingest.VERBS.items():
+        assert f"{verb} -- {gloss}" in ingest.INSTRUCTIONS

@@ -43,8 +43,9 @@
             "type": "string",
             "enum": ["is_a", "part_of", "has_part", "causes", "produces", "consumes",
                      "regulates", "located_in", "measured_in", "defined_by", "example_of",
-                     "contrasts_with", "precedes", "requires"],
-            "$comment": "A closed vocabulary: fourteen verb phrases that between them say what a textbook says. Nothing outside it, and nothing the section does not state."
+                     "contrasts_with", "precedes", "requires", "converts",
+                     "created_by", "adopted_by", "member_of"],
+            "$comment": "A closed vocabulary: eighteen verb phrases that between them say what a textbook says -- ingest.VERBS glosses each, and a test keeps the two lists equal. Nothing outside it, and nothing the section does not state."
           },
           "to": {"type": "string", "maxLength": 120}
         },

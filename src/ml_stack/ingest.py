@@ -45,7 +45,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["HOME", "INSTRUCTIONS", "PER_SECTION", "Progress", "Scored", "build", "detach",
+__all__ = ["HOME", "INSTRUCTIONS", "PER_SECTION", "VERBS", "Progress", "Scored", "build", "detach",
            "extract_unit", "fold_book", "gold_score", "main", "read_gold", "schema",
            "status", "write"]
 
@@ -64,6 +64,38 @@ textbook has a dozen plates; a dozen images is a prompt of images with a paragra
 _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
 
 
+VERBS: dict[str, str] = {
+    "is_a": "a kind of (mitochondria is_a organelle)",
+    "part_of": "belongs inside a larger whole (nucleus part_of cell)",
+    "has_part": "the whole, naming a part (cell has_part nucleus)",
+    "causes": "brings about (mutation causes variation)",
+    "produces": "makes or yields (mitochondria produces ATP)",
+    "consumes": "uses up (photosynthesis consumes carbon dioxide)",
+    "regulates": "controls the rate or amount of (insulin regulates blood glucose)",
+    "located_in": "found in a place or region (mitochondria located_in cytoplasm)",
+    "measured_in": "the unit a quantity takes (force measured_in newton)",
+    "defined_by": "fixed by a law, equation or definition (momentum defined_by mass times velocity)",
+    "example_of": "one instance of a general thing (glucose example_of monosaccharide)",
+    "contrasts_with": "set against, as the text opposes them (prokaryote contrasts_with eukaryote)",
+    "precedes": "comes before, in a sequence or in time (prophase precedes metaphase)",
+    "requires": "cannot happen without (respiration requires oxygen)",
+    "converts": "turns one thing into another (the sun converts hydrogen, fuses it, into helium)",
+    "created_by": "written, proposed, discovered or built by a person or body (the declaration created_by its author)",
+    "adopted_by": "enacted, ratified or taken up by a body (the declaration adopted_by the congress)",
+    "member_of": "one of a group, class or body (a delegate member_of the congress)",
+}
+"""The closed relation vocabulary, each verb glossed with the sense the model should take.
+
+The schema's enum is this list; a test keeps them equal. The gloss is what moved
+precision on the Slack graph -- a model told what a verb means uses it for that and
+nothing else -- so every verb here has one, and a verb without a gloss is not added."""
+
+
+def _verbs_line() -> str:
+    return "The verb phrases, and what each means: " + "; ".join(
+        f"{verb} -- {gloss}" for verb, gloss in VERBS.items()) + ".\n"
+
+
 INSTRUCTIONS = (
     "You are reading one section of a textbook into a knowledge graph. List the concepts "
     "the section names, how they stand to one another, what its figures show, and the "
@@ -77,6 +109,7 @@ INSTRUCTIONS = (
     "abbreviation, a symbol. Not synonyms you happen to know.\n"
     "A relation joins two concept names from your own `concepts` list, using one of the "
     "verb phrases the schema allows and no other. State only what the section states.\n"
+    + _verbs_line() +
     "A caption is marked in the text as [Figure 2.9]. For each figure, `shows` is what "
     "the picture shows in one line, and `concepts` are only those the caption or the "
     "surrounding text says it illustrates -- never a concept guessed from the picture.\n"
