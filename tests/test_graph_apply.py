@@ -162,3 +162,23 @@ def test_an_unset_attribute_lands_as_a_missing_key(tmp_path):
     with GraphStore(path) as reopened:
         back = {n["id"]: n for n in reopened.nodes()}
     assert back["person:ada"]["attrs"] == {}
+
+
+def test_a_merge_gone_stale_between_checking_and_landing_is_reported_not_applied(tmp_path):
+    path = tmp_path / "g"
+    with a_store_holding(path) as store:
+        changes = proposals(
+            store,
+            call("merge_nodes", keep_id="person:ada", remove_id="person:bea",
+                 reason="the same person"))
+        assert changes[0].sound
+        held = store.read()
+        store.read = lambda: held          # what apply checks against no longer says
+        store.drop(["person:bea"])
+        out = apply(store, changes)
+    assert out["applied"] == []
+    assert [c.op for c in out["skipped"]] == ["merge_nodes"]
+    assert "person:bea" in out["skipped"][0].problems[0]
+    with GraphStore(path) as reopened:
+        assert {n["id"] for n in reopened.nodes()} == {"person:ada", "topic:compilers"}
+        assert len(reopened.edges()) == 1

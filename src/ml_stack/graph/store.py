@@ -788,7 +788,13 @@ class GraphStore:
             "MATCH (a:Asset {node_id:$n}) RETURN a.id AS id ORDER BY a.id", {"n": str(node_id)})]
 
     def merge_nodes(self, keep: str, remove: str) -> int:
-        """Fold one node into another, moving everything joined to it. Returns edges moved."""
+        """Fold one node into another, moving everything joined to it. Returns edges moved.
+
+        Raises KeyError naming whichever of the two is not in the store.
+        """
+        for node_id in (keep, remove):
+            if not self.has(node_id):
+                raise KeyError(str(node_id))
         if keep == remove:
             return 0
         moved = 0

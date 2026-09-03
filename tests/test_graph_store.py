@@ -685,3 +685,13 @@ def test_unsetting_an_attribute_takes_the_key_out_rather_than_blanking_it(tmp_pa
         ada = next(n for n in reopened.nodes() if n["id"] == "person:ada")
     assert ada["attrs"] == {"member": True}
     assert "role" not in ada["attrs"]
+
+
+def test_folding_a_node_that_is_not_there_raises_rather_than_moving_nothing(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        with pytest.raises(KeyError, match="person:nobody"):
+            store.merge_nodes("person:ada", "person:nobody")
+        with pytest.raises(KeyError, match="person:nobody"):
+            store.merge_nodes("person:nobody", "person:ada")
+        assert len(store.nodes()) == 5 and len(store.edges()) == 3

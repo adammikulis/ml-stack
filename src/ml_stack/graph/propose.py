@@ -257,7 +257,11 @@ def _land(store: Any, change: Change, ident: Callable[[Change], str]) -> bool:
     if change.op == "remove_edge":
         return store.remove_edge(change.target, change.name, change.other)
     if change.op == "merge_nodes":
-        store.merge_nodes(change.target, change.other)
+        try:
+            store.merge_nodes(change.target, change.other)
+        except KeyError as exc:
+            change.problems.append(f"{exc.args[0]!r} is no longer in the store")
+            return False
         return True
     return False
 
