@@ -139,16 +139,6 @@ Store integrity
   a bump. Still to file upstream, with Adam's go-ahead: the segfault (two lines of
   reproduction in the store's docstring) and the duplicate search row.
 
-- [ ] **Claude Code and the Agent SDK on a served model.** Adam: "make a very clean/easy way
-  for me to launch claude code with llama-server", then "in ml-stack I mean, integrate
-  it." llama-server speaks the Messages API at `/v1/messages` (streaming, tool
-  use with `--jinja`, thinking, `count_tokens`), so no bridge: `ml-stack-claude MODEL [--
-  claude args]` leases the model in its measured shape (a `Run`), sets
-  `ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN` and every model variable to the served
-  alias, turns non-essential traffic off, and execs `claude`; `ml_stack.harness` wraps the
-  Python Agent SDK (`claude-agent-sdk`, an extra) the same way for programmatic use, with
-  each result's usage folded into `Spent`. In progress this evening.
-
 ## Library
 
 - [ ] **`ml-stack-models layout MODEL`**: the attention layout off the GGUF header in one

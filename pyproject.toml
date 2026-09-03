@@ -34,6 +34,7 @@ dependencies = []
 privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
 test = ["pytest>=8", "pytest-xdist>=3.5"]
 app = ["pywebview>=5.0"]
+claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]
 torch = ["torch>=2.2"]
 mlx = ["mlx>=0.20"]
@@ -110,6 +111,8 @@ ml-stack-world = "ml_stack.world.cli:main"
 ml-stack-ingest = "ml_stack.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"
+ml-stack-claude = "ml_stack.claude:main"
+ml-stack-agent = "ml_stack.harness:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]
