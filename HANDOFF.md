@@ -129,9 +129,22 @@ Store integrity
   and with the label index removed), so the judged pass wrecked the shelf twice; 0.20.2
   deletes cleanly but doubles a node written twice; 0.19.1 passes both, and the pin moved
   there (7b6fba6). The two damaged stores are kept at `~/.ml-stack/shelf.ladybug.corrupt-*`
-  for a report upstream; `tests/test_graph_store.py` should carry the two probes (a delete
+  for a report upstream; `tests/test_graph_store_scale.py` carries the two probes (a delete
   at scale leaves strings intact; a write twice updates) so a future bump is measured, not
   trusted. ai_ceo's venv is on 0.19.1 too.
+- [ ] **ladybug 0.20.2 segfaults on the store's second `write()`** (Adam asked for the
+  upgrade, 2026-09-03 afternoon; measured, not taken). Release notes 0.20.0-0.20.2 are
+  about a cached-physical-plan fast path for re-executed parameterized queries and three
+  rounds of fixes to it ("SIGSEGV re-executing a parameterized write query string",
+  "stale rows on the cached-plan fast path"); it is still not right for our pattern.
+  Reproduction, two lines, `PYTHONFAULTHANDLER=1`: `store.write(GRAPH); store.write(GRAPH)`
+  from `tests/test_graph_store.py` -- Fatal Python error: Segmentation fault in
+  `ladybug/connection.py execute`, from `store.py write()`'s transaction (MERGE with
+  parameters, re-executed). Four store tests crash the interpreter and the FTS search
+  returns a duplicate row. A minimal MERGE-twice on a bare table does not crash, so the
+  trigger is our write sequence (transaction, MERGE node, MERGE edge, put_doc, index); the
+  bisect and the upstream issue are the next step (Adam's go-ahead before posting).
+  Until fixed upstream the pin stays `>=0.19,<0.20`; the scale probes gate any bump.
 
 ## Library
 

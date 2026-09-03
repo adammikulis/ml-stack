@@ -441,7 +441,6 @@ class Report:
         return not self.findings
 
     def said(self) -> str:
-        head = "would merge" if self.dry_run else "merged"
         if self.findings:
             return (f"NOT SOUND: after the pass the store does not read back whole -- "
                     f"{len(self.findings)} finding(s), e.g. {self.findings[0]!r}; the pass "
