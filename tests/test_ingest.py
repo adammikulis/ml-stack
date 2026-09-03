@@ -649,13 +649,17 @@ def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, cap
 
 
 def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
-    from ml_stack.client.http import ServerError
+    """The server cut the reply; the row keeps every character it did write."""
+    from ml_stack.client import Client
+    from ml_stack.client.chat import Reply
 
-    class Client:
-        def extract(self, *a, **k):
-            raise ServerError("the reply was cut off (finish_reason=length)",
-                              body='{"concepts": [{"name": "Vault Currents"' * 40)
+    client = Client("http://127.0.0.1:1")
+    half = '{"concepts": [{"name": "Vault Currents", "kind": "concept"}' * 40
 
-    row = ingest.extract_unit(Client(), a_unit(), ingest.schema())
+    def cut(*a, **k):
+        return Reply(content=half, finish_reason="length")
+
+    monkeypatch.setattr(client, "chat", cut)
+    row = ingest.extract_unit(client, a_unit(), ingest.schema())
     assert row.error.startswith("ServerError: the reply was cut off")
-    assert row.raw.count("Vault Currents") == 40
+    assert row.raw == half
