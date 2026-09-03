@@ -476,3 +476,39 @@ def test_a_failed_model_call_leaves_the_pair_unsure_and_undecided_and_the_pass_g
     with GraphStore(path, read_only=True) as store:
         pairs = store.get_doc(DECISIONS)["pairs"]
     assert len(pairs) == 1 and "concept:vaulf" not in "".join(pairs), "a failure is not a verdict"
+
+
+def test_conflicts_and_suspects_read_their_passages_through_the_pointers_the_caller_named():
+    """A community graph keeps message ids under ``messages`` on nodes and edges alike, and
+    has no ``provenance`` at all."""
+    texts = {"m1": "The vault current regulates the thrum coil; it does not cause the coil.",
+             "m2": "Table 42 lists the plate grades."}
+    client = Scripted(conflicts={("causes", "regulates"): "keep regulates"},
+                      suspects={("'42'",): {"verdict": "drop"}})
+    judge = ModelJudge(client, sources=texts.__getitem__,
+                       pointers=lambda node: list(node.get("messages") or ()))
+    one = {"id": "concept:vault-current", "label": "vault current", "kind": "concept",
+           "mentions": 4, "attrs": {}, "messages": ["m1"]}
+    other = {"id": "concept:thrum-coil", "label": "thrum coil", "kind": "concept",
+             "mentions": 3, "attrs": {}, "messages": ["m1"]}
+    edge = {"source": one["id"], "target": other["id"], "rel": "causes", "weight": 2,
+            "messages": ["m1"]}
+    rival = {**edge, "rel": "regulates", "weight": 5}
+    got = judge.decide_conflict(one, other, edge, rival)
+    assert got["verdict"] == "keep regulates" and got["read"] == ["m1"]
+    assert "does not cause the coil" in client.calls[-1]
+
+    number = {"id": "concept:number", "label": "42", "kind": "concept", "mentions": 1,
+              "attrs": {}, "messages": ["m2"]}
+    got = judge.decide_suspect(number, "a number")
+    assert got["verdict"] == "drop" and got["read"] == ["m2"]
+    assert "plate grades" in client.calls[-1]
+    assert judge.read == 2
+
+    plain = ModelJudge(client, sources=texts.__getitem__)
+    assert plain.decide_conflict(one, other, edge, rival)["read"] == []
+    assert plain.decide_suspect(number, "a number")["read"] == []
+    with_provenance = [{**held, "provenance": held["messages"]}
+                       for held in (one, other, edge, rival, number)]
+    assert plain.decide_conflict(*with_provenance[:4])["read"] == ["m1"]
+    assert plain.decide_suspect(with_provenance[4], "a number")["read"] == ["m2"]

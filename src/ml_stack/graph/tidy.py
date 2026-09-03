@@ -265,7 +265,7 @@ class ModelJudge:
                 + self._edge_line(one, other, edge) + "\nEdge 2: "
                 + self._edge_line(one, other, rival))
         used: list[str] = []
-        units = _union(edge.get("provenance"), rival.get("provenance"))[: self.most_units]
+        units = _union(self.pointers(edge), self.pointers(rival))[: self.most_units]
         passages = self._around(units, [one, other])
         if passages:
             self.read += 1
@@ -297,7 +297,7 @@ class ModelJudge:
         self.asked += 1
         text = self._said(node) + f"\n\nflagged: {why}"
         used: list[str] = []
-        passages = self._around(list(node.get("provenance") or ())[: self.most_units], [node])
+        passages = self._around(list(self.pointers(node))[: self.most_units], [node])
         if passages:
             self.read += 1
             used = list(dict.fromkeys(unit for unit, _ in passages))
