@@ -209,13 +209,18 @@ class ServerSpec:
     # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
     # off the GPU without keeping all of it off.
     #
-    # This is what Qwen3.8-Flash-Next's N-gram Embedding wants, and it is a different thing
-    # entirely from the n-gram *speculation* above. That is a decoding trick; this is
-    # architecture: a 51B-parameter table looked up by the current token and the few before
-    # it, adding capacity at almost no compute per token. Its lookups are known in advance,
-    # so the table is meant to sit in host memory and be prefetched alongside the
-    # computation rather than occupy the GPU permanently. Naming its tensors here is how
-    # that is arranged.
+    # The case for it is Qwen3.8-Flash-Next's N-gram Embedding on a *discrete* GPU -- a
+    # different thing entirely from the n-gram *speculation* above. That is a decoding
+    # trick; this is architecture: a 51B-parameter table looked up by the current token
+    # and the few before it, adding capacity at almost no compute per token. A gather
+    # touches a few rows a token, so on a card whose VRAM the 27G table would not fit
+    # beside the weights, naming its tensor here keeps it in host memory at no real cost.
+    #
+    # On unified memory -- a Mac -- do not: the CPU and GPU halves are one pool of RAM,
+    # the build already leaves the table mapped on the host side of its own accord (the
+    # `CPU_Mapped` line of the load log, which `fit` reads back), and an override changes nothing
+    # but adds a flag to explain. ml-stack never sets one by itself; `--on-cpu` is the
+    # person's call, for the machine in front of them.
     #
     # Find the pattern from the model rather than guessing: `gguf_dump` or llama-server's
     # own load log lists the tensor names.

@@ -1025,11 +1025,13 @@ def main(argv: list[str] | None = None) -> int:
                     help="tokens guessed ahead each step (server default 3)")
     up.add_argument("--on-cpu", action="append", default=[], metavar="PATTERN=BUFFER",
                     help="keep tensors matching a pattern off the GPU, e.g. "
-                         "'ngram.*=CPU'. This is what Qwen3.8-Flash-Next's N-gram Embedding "
-                         "wants -- a 51B lookup table whose addresses are known in advance, "
-                         "meant to sit in host memory and be prefetched rather than hold "
-                         "GPU. Repeatable. Read the tensor names from the model rather than "
-                         "guessing at the pattern")
+                         "'per_layer_token_embd=CPU' for Qwen3.8-Flash-Next's 27G n-gram "
+                         "table on a discrete GPU whose VRAM it would not fit beside the "
+                         "weights. Never on unified memory (a Mac): there the CPU and GPU "
+                         "halves are the same RAM, the build already places the table "
+                         "where a gather is cheapest, and forcing it buys nothing. "
+                         "ml-stack sets none of these by itself. Repeatable. Read the tensor "
+                         "names from the model rather than guessing at the pattern")
     up.add_argument("--cpu-moe", action="store_true",
                     help="keep every Mixture-of-Experts weight on the CPU, which is how a "
                          "35B with 3B active fits a machine that could not hold it all")

@@ -30,8 +30,13 @@ measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is t
   questions. Measured split in the serving shape (`fit`, q8_0 cache, 32k x 2, 2026-09-02
   evening): 106.3G on disk with the head, 78.8G of it in GPU memory and 27.5G mapped on the
   CPU -- the table -- so the GPU holds ~79G of weights and the resident peak over a hundred
-  questions was 99G. Capacity planning starts from the GPU-mapped weights plus a measured
-  resident peak, never the file size (`ml-stack-serve fit --tensors`, `fit --measure`).
+  questions was 99G. That split is llama.cpp's own placement, not a flag of ours: an
+  input-side table gathered per token stays host-mapped the way token embeddings do. On
+  unified memory the two halves are one pool of RAM and nothing is gained by forcing it
+  either way, so ml-stack passes no override on a Mac; `--on-cpu per_layer_token_embd=CPU`
+  is for a discrete GPU whose VRAM the table would not fit beside the weights. Capacity
+  planning starts from the GPU-mapped weights plus a measured resident peak, never the
+  file size (`ml-stack-serve fit --tensors`, `fit --measure`).
 - **The cache is tiny**: 48K bytes a token on the 12 attention layers at f16 (26K at q8_0),
   plus a fixed ~257M a sequence for the recurrent state and sliding cells (~594M with the
   MTP head's own cache). At 32k a user costs 1.8G (f16) or ~1.4G (q8_0). Users at 32k on

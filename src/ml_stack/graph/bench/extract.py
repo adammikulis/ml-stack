@@ -909,6 +909,11 @@ def add_arguments(sub: Any) -> Any:
     ap.add_argument("--parallel", type=int, default=2, metavar="N",
                     help="slots for a --serve'd model (default: %(default)s)")
     ap.add_argument("--serve-port", type=int, default=8099)
+    ap.add_argument("--n-max", type=int, default=None, metavar="N",
+                    help="tokens the draft head guesses ahead each step, over the profile's "
+                         "measured length. Extraction repeats what it has just read -- "
+                         "names, ids, the schema's own keys -- so a longer draft may pay "
+                         "here where it lost on answering; this is how that is measured")
     ap.add_argument("--per-message", type=float, default=PER_QUESTION, metavar="SECONDS",
                     help="the most one message may take before it is recorded as timed out "
                          "-- nothing extracted, the cap as its wall clock -- and the next is "
@@ -1049,11 +1054,20 @@ def main(args: Any) -> int:
                 manager = shape.manager()
                 print(f"    serving in its measured shape: {measured.said()}"
                       if hasattr(measured, "said") else "    serving in its measured shape")
+        if getattr(args, "n_max", None) is not None:
+            if not lease.get("draft"):
+                print("    --n-max: no draft head is being served, so there is no draft "
+                      "to lengthen", file=sys.stderr)
+                return 2
+            lease["spec_draft_max"] = int(args.n_max)
+            print(f"    draft length {args.n_max} over the profile's")
         with serve(found, manager=manager, **lease) as server:
             print(f"    up in {time.time() - began:.0f}s")
             client = Client(server.base_url, timeout=args.per_message, **sampling)
             held = {**footprint(server.base_url), "sampling": dict(client.sampling),
                     "load_s": getattr(server, "load_s", None)}
+            if lease.get("spec_draft_max") is not None:
+                held["spec_draft_max"] = int(lease["spec_draft_max"])
             if wants_smoke(args):
                 # first, on this load: a few messages through the whole path, kept and
                 # read back, before the sample that costs the GPU
