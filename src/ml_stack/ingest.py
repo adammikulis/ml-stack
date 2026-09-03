@@ -948,6 +948,25 @@ def detach(argv: Sequence[str]) -> Path:
     return log
 
 
+def retry(out: str | Path, *, say: Callable[[str], None] = print) -> int:
+    """``ml-stack-ingest retry --out STORE``: the units given up on are read again by the
+    next ``--resume`` -- for after the fix that made them fail is in."""
+    where = Progress.beside(out)
+    if not where.is_file():
+        say(f"nothing ingested into {out}: no {where.name}")
+        return 1
+    progress = Progress(where)
+    freed = 0
+    for book in progress.state["books"].values():
+        for entry in (book.get("done") or {}).values():
+            if entry.get("error") and int(entry.get("attempts") or 1) >= GIVE_UP:
+                entry["attempts"] = 0
+                freed += 1
+    progress.save()
+    say(f"{freed} unit(s) will be read again on the next --resume")
+    return 0
+
+
 def stop(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
     """``ml-stack-ingest stop``: end the detached run this machine's record names.
 
@@ -1057,6 +1076,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.docs[:1] == ["stop"]:
         return stop()
+    if args.docs[:1] == ["retry"]:
+        if not args.out:
+            print("error: retry needs --out STORE", file=sys.stderr)
+            return 2
+        return retry(args.out)
     if args.docs[:1] == ["status"]:
         if not args.out:
             print("error: status needs --out STORE", file=sys.stderr)

@@ -708,3 +708,28 @@ def test_a_unit_that_failed_twice_is_left_alone_and_status_says_so(tmp_path, cap
     assert progress.totals()["given_up"] == 1
     ingest.status(tmp_path / "shelf")
     assert "given up" in capsys.readouterr().out
+
+
+def test_the_schema_caps_every_list_so_a_greedy_decode_cannot_circle():
+    """One unit wrote 378 relations, 282 of them distinct, until n_predict cut it."""
+    from ml_stack.contracts.jsonschema import grammar_for
+
+    shape = ingest.schema()
+    for name in ("concepts", "relations", "figures", "key_terms"):
+        assert shape["properties"][name].get("maxItems"), name
+    assert "root" in grammar_for(shape), "and the grammar builder accepts the caps"
+
+
+def test_retry_frees_the_units_given_up_on(tmp_path, capsys):
+    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
+    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=1)
+    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    bad = ingest.Read(unit="velthorne:1:1.1#0", seconds=700.0, error="cut off", **fields)
+    progress.note("velthorne", bad)
+    progress.note("velthorne", bad)
+    assert progress.done("velthorne", bad.unit)
+    assert ingest.retry(tmp_path / "shelf") == 0
+    assert "1 unit(s)" in capsys.readouterr().out
+    again = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
+    assert not again.done("velthorne", bad.unit)
+    assert ingest.main(["retry"]) == 2, "retry needs --out"

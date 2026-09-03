@@ -14,8 +14,18 @@
           },
           "kind": {
             "type": "string",
-            "enum": ["concept", "process", "structure", "substance", "law", "method",
-                     "person", "organisation", "place", "unit"],
+            "enum": [
+              "concept",
+              "process",
+              "structure",
+              "substance",
+              "law",
+              "method",
+              "person",
+              "organisation",
+              "place",
+              "unit"
+            ],
             "$comment": "`unit` is a unit of measurement; `law` a named law, principle or theorem; `structure` a thing with parts (an organ, an organelle, a machine); `process` something that happens over time. Anything the section names that fits none of these is a `concept`."
           },
           "definition": {
@@ -25,33 +35,71 @@
           },
           "aliases": {
             "type": "array",
-            "items": {"type": "string", "maxLength": 120},
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            },
             "$comment": "Other names the section itself uses for the same thing: a plural, an abbreviation, a symbol."
           }
         },
-        "required": ["name", "kind", "definition", "aliases"],
+        "required": [
+          "name",
+          "kind",
+          "definition",
+          "aliases"
+        ],
         "additionalProperties": false
-      }
+      },
+      "maxItems": 96,
+      "$comment": "At most 96: a 2,500-token unit never needs more (the most seen was 75), and without a ceiling a greedy decode can circle the same entries -- one unit wrote 378 relations, 282 of them distinct, until n_predict cut it. The grammar closes the array; the model cannot loop."
     },
     "relations": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "from": {"type": "string", "maxLength": 120},
+          "from": {
+            "type": "string",
+            "maxLength": 120
+          },
           "rel": {
             "type": "string",
-            "enum": ["is_a", "part_of", "has_part", "causes", "produces", "consumes",
-                     "regulates", "located_in", "measured_in", "defined_by", "example_of",
-                     "contrasts_with", "precedes", "requires", "converts",
-                     "created_by", "adopted_by", "member_of"],
+            "enum": [
+              "is_a",
+              "part_of",
+              "has_part",
+              "causes",
+              "produces",
+              "consumes",
+              "regulates",
+              "located_in",
+              "measured_in",
+              "defined_by",
+              "example_of",
+              "contrasts_with",
+              "precedes",
+              "requires",
+              "converts",
+              "created_by",
+              "adopted_by",
+              "member_of"
+            ],
             "$comment": "A closed vocabulary: eighteen verb phrases that between them say what a textbook says -- ingest.VERBS glosses each, and a test keeps the two lists equal. Nothing outside it, and nothing the section does not state."
           },
-          "to": {"type": "string", "maxLength": 120}
+          "to": {
+            "type": "string",
+            "maxLength": 120
+          }
         },
-        "required": ["from", "rel", "to"],
+        "required": [
+          "from",
+          "rel",
+          "to"
+        ],
         "additionalProperties": false
-      }
+      },
+      "maxItems": 96,
+      "$comment": "At most 96: a 2,500-token unit never needs more (the most seen was 75), and without a ceiling a greedy decode can circle the same entries -- one unit wrote 378 relations, 282 of them distinct, until n_predict cut it. The grammar closes the array; the model cannot loop."
     },
     "figures": {
       "type": "array",
@@ -63,7 +111,10 @@
             "maxLength": 40,
             "$comment": "The book's own name for it, e.g. \"Figure 2.9\"; empty when the section gives none."
           },
-          "caption": {"type": "string", "maxLength": 400},
+          "caption": {
+            "type": "string",
+            "maxLength": 400
+          },
           "shows": {
             "type": "string",
             "maxLength": 400,
@@ -71,27 +122,53 @@
           },
           "concepts": {
             "type": "array",
-            "items": {"type": "string", "maxLength": 120},
+            "items": {
+              "type": "string",
+              "maxLength": 120
+            },
             "$comment": "Only the concepts the caption or the surrounding text says the figure illustrates. A concept guessed from the picture alone does not belong here."
           }
         },
-        "required": ["label", "caption", "shows", "concepts"],
+        "required": [
+          "label",
+          "caption",
+          "shows",
+          "concepts"
+        ],
         "additionalProperties": false
-      }
+      },
+      "maxItems": 16,
+      "$comment": "At most 16: a 2,500-token unit never needs more (the most seen was 75), and without a ceiling a greedy decode can circle the same entries -- one unit wrote 378 relations, 282 of them distinct, until n_predict cut it. The grammar closes the array; the model cannot loop."
     },
     "key_terms": {
       "type": "array",
       "items": {
         "type": "object",
         "properties": {
-          "term": {"type": "string", "maxLength": 120},
-          "definition": {"type": "string", "maxLength": 400}
+          "term": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "definition": {
+            "type": "string",
+            "maxLength": 400
+          }
         },
-        "required": ["term", "definition"],
+        "required": [
+          "term",
+          "definition"
+        ],
         "additionalProperties": false
-      }
+      },
+      "maxItems": 64,
+      "$comment": "At most 64: a 2,500-token unit never needs more (the most seen was 75), and without a ceiling a greedy decode can circle the same entries -- one unit wrote 378 relations, 282 of them distinct, until n_predict cut it. The grammar closes the array; the model cannot loop."
     }
   },
-  "required": ["concepts", "relations", "figures", "key_terms"],
+  "required": [
+    "concepts",
+    "relations",
+    "figures",
+    "key_terms"
+  ],
   "additionalProperties": false
 }
