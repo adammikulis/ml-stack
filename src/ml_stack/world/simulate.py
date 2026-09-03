@@ -1077,8 +1077,52 @@ def simulate(world: World, *, days: int, writer: Writer | None, rng: random.Rand
                 yield message
 
 
+def _namespace(graph: Mapping[str, Any]) -> str:
+    """What one world's own quote ids are told apart by, when its graph meets another's."""
+    meta = (graph.get("meta") or {}).get("world") or {}
+    return f"{meta.get('kind', '')}/{meta.get('size', '')}/{meta.get('seed', '')}"
+
+
+def _reconcilable(graph: Mapping[str, Any]) -> dict[str, Any]:
+    """``graph`` with each node's own introduction quotes as its `provenance`, namespaced to
+    this world, and their text joined into `attrs.passage` -- what `absorb` reads a node by."""
+    ns = _namespace(graph)
+    said = graph.get("messages") or {}
+    nodes = []
+    for node in graph.get("nodes") or ():
+        mids = [str(m) for m in (node.get("messages") or ())]
+        passage = " ".join(str((said.get(m) or {}).get("text") or "") for m in mids).strip()
+        attrs = dict(node.get("attrs") or {})
+        if passage:
+            attrs["passage"] = passage
+        nodes.append({**node, "attrs": attrs, "provenance": [f"{ns}:{m}" for m in mids]})
+    return {**graph, "nodes": nodes, "messages": {f"{ns}:{m}": v for m, v in said.items()}}
+
+
+def _absorbed(store: Any, graph: Mapping[str, Any], *, judge: Any = None) -> dict[str, Any]:
+    """``graph`` reconciled against what ``store`` already holds -- the same concepts land on
+    the nodes a previous world or run already gave them, before this one is written.
+
+    Read for the judge's second look: this world's own quotes first, then the store's
+    (an earlier world's, still there under its own namespace); the two are merged into what
+    is written back, so a later reconciliation can still read both.
+    """
+    from ml_stack.graph.tidy import absorb
+
+    incoming = _reconcilable(graph)
+    held = store.get_doc("messages") if hasattr(store, "get_doc") else None
+    texts = dict(held) if isinstance(held, Mapping) else {}
+
+    def sources(unit: str) -> str:
+        found = texts.get(unit) or incoming["messages"].get(unit)
+        return str((found or {}).get("text") or "")
+
+    report = absorb(store, incoming, judge=judge, sources=sources)
+    return {**report.graph, "messages": {**texts, **incoming["messages"]}}
+
+
 def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
-        model_url: str | None = None, seed: int) -> dict[str, Any]:
+        model_url: str | None = None, seed: int, judge: Any = None) -> dict[str, Any]:
     """Simulate a world on disk and write what was said beside it.
 
     Reads ``graph.json``, ``personas.json`` and, when present, ``calendar.json`` and
@@ -1087,6 +1131,12 @@ def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
     ``calendar.json`` used into ``out_dir``. With ``model_url`` and ``mix > 0`` the model
     share is written by `model_writer` with memory in ``out_dir/memory.ladybug``, under
     `ml_stack.lock.only_one` on ``out_dir/simulate.lock`` so two runs never share a model.
+    Before that memory is written, `_absorbed` reconciles this world's graph against
+    whatever it already holds -- a second run, or a different invented world sharing the
+    same store -- so the same person or organisation under a plural or a case variant lands
+    on the node already there rather than doubling it. ``judge`` is a `ml_stack.graph.tidy
+    .ModelJudge` for the close spellings a plain match cannot settle; without one those are
+    left as new nodes and reported, the way `absorb` always leaves them.
     Returns the counts: threads, messages, the model/template split, outcomes, and what a
     message cost in model calls.
     """
@@ -1138,7 +1188,7 @@ def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
 
         with only_one(out_dir / "simulate.lock"):
             with GraphStore(out_dir / "memory.ladybug") as store:
-                store.write(world.graph)
+                store.write(_absorbed(store, world.graph, judge=judge))
                 write_all(model_writer(Client(model_url), world, store), store)
     else:
         write_all(None, None)

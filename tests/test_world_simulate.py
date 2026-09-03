@@ -28,7 +28,7 @@ def spoken_as(persona: str) -> str:
     return persona + " " + TIGHT_SYSTEM_SENTENCE
 
 PEOPLE = {
-    "person:ada": ("Ada Lovelace", "eng", "place:turin", "terse and dry"),
+    "person:ada": ("Orlan Vesk", "eng", "place:turin", "terse and dry"),
     "person:bea": ("Bea Marlow", "eng", "place:turin", "warm"),
     "person:hedy": ("Hedy Marchetti", "eng", "place:turin", "careful"),
     "person:charles": ("Charles Babbage", "eng", "place:dunmore", "formal"),
@@ -273,7 +273,7 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
     world = tiny_world()
     model = SpeakingModel()
     writer = model_writer(model, world)
-    persona = dict(world.personas["person:ada"], id="person:ada", label="Ada Lovelace")
+    persona = dict(world.personas["person:ada"], id="person:ada", label="Orlan Vesk")
     context = {"thread": "msg:000000", "arc_key": "", "kind": "incident", "org_kind": "company",
                "about": "the outage in Lantern", "said": [("person:mary", "It is down.")],
                "labels": {"person:mary": "Mary Somerville"}, "speaker": "person:ada",
@@ -288,7 +288,7 @@ def test_a_persona_speaks_over_the_subgraph_it_knows_with_its_own_system_prompt(
     assert first[-1]["content"] == "Reply in character."
     # what the thread is about was read out first, from the subgraph Ada knows
     handed = [m["content"] for m in first if "A search turned up" in m.get("content", "")][0]
-    assert "Ada Lovelace (person)" in handed and "works_on Lantern" in handed
+    assert "Orlan Vesk (person)" in handed and "works_on Lantern" in handed
     assert "Bea Marlow" in handed                # engineering is in Ada's subgraph
     assert "Mary Somerville" not in handed       # support is not
     assert "robotics" not in handed              # nor an edge to an entry she does not know
@@ -407,7 +407,7 @@ def test_run_without_a_graph_says_so(tmp_path):
 
 def test_the_template_writer_never_says_the_same_thing_twice_in_a_thread():
     writer = template_writer(random.Random(0))
-    persona = {"id": "person:ada", "label": "Ada Lovelace", "voice": "terse"}
+    persona = {"id": "person:ada", "label": "Orlan Vesk", "voice": "terse"}
     said = set()
     for seq in range(40):
         context = {"thread": "t", "kind": "standup", "org_kind": "company", "seq": seq,
@@ -585,3 +585,133 @@ def test_asserts_round_trip_through_messages_jsonl_and_the_scraper_rows(tmp_path
     # the scraper-row reader ignores the key, as it ignores anything it does not know
     read = scraper.read(written, people)
     assert read and all("asserts" not in m.attrs for m in read)
+
+
+# -- reconciling a world's graph against a store, on the way in ------------------------------
+
+
+def _quoted_graph() -> dict:
+    return {
+        "nodes": [
+            {"id": "person:iris-bellweather", "kind": "person", "label": "Iris Bellweather",
+             "mentions": 3, "attrs": {}, "messages": ["m0"]},
+            {"id": "org:pellard", "kind": "org", "label": "Pellard Foundry", "mentions": 2,
+             "attrs": {}, "messages": []},
+        ],
+        "edges": [],
+        "messages": {"m0": {"text": "Iris Bellweather leads support out of Dunmore."}},
+        "meta": {"world": {"kind": "company", "size": "small", "seed": 1}},
+    }
+
+
+def test_reconcilable_carries_a_nodes_own_quotes_as_provenance_and_passage():
+    from ml_stack.world.simulate import _reconcilable
+
+    out = _reconcilable(_quoted_graph())
+    iris = next(n for n in out["nodes"] if n["id"] == "person:iris-bellweather")
+    assert iris["provenance"] == ["company/small/1:m0"]
+    assert iris["attrs"]["passage"] == "Iris Bellweather leads support out of Dunmore."
+    assert out["messages"] == {"company/small/1:m0":
+                               {"text": "Iris Bellweather leads support out of Dunmore."}}
+    pellard = next(n for n in out["nodes"] if n["id"] == "org:pellard")
+    assert pellard["provenance"] == [] and "passage" not in pellard["attrs"]
+
+
+def test_absorbed_leaves_an_empty_store_unchanged(tmp_path):
+    pytest.importorskip("ladybug")
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.world.simulate import _absorbed
+
+    with GraphStore(tmp_path / "memory.ladybug") as store:
+        out = _absorbed(store, _quoted_graph())
+    ids = {n["id"] for n in out["nodes"]}
+    assert ids == {"person:iris-bellweather", "org:pellard"}
+    iris = next(n for n in out["nodes"] if n["id"] == "person:iris-bellweather")
+    assert "aliases" not in iris["attrs"]
+
+
+def test_absorbed_lands_a_plural_variant_on_the_existing_node_with_provenance_unioned(tmp_path):
+    pytest.importorskip("ladybug")
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.world.simulate import _absorbed, _reconcilable
+
+    with GraphStore(tmp_path / "memory.ladybug") as store:
+        store.write(_reconcilable(_quoted_graph()))
+
+        second = {
+            "nodes": [
+                {"id": "person:iris-bellweathers", "kind": "person", "label": "Iris Bellweathers",
+                 "mentions": 2, "attrs": {}, "messages": ["m0"]},
+                {"id": "org:new-foundry", "kind": "org", "label": "New Foundry", "mentions": 1,
+                 "attrs": {}, "messages": []},
+            ],
+            "edges": [{"source": "person:iris-bellweathers", "rel": "member_of",
+                       "target": "org:new-foundry"}],
+            "messages": {"m0": {"text": "Iris Bellweathers just joined New Foundry."}},
+            "meta": {"world": {"kind": "company", "size": "small", "seed": 2}},
+        }
+        out = _absorbed(store, second)
+        ids = {n["id"] for n in out["nodes"]}
+        assert ids == {"person:iris-bellweather", "org:new-foundry"}, \
+            "the incoming graph, rewritten -- not the whole store"
+        iris = next(n for n in out["nodes"] if n["id"] == "person:iris-bellweather")
+        assert iris["attrs"]["aliases"] == ["Iris Bellweathers"]
+        assert set(iris["provenance"]) == {"company/small/1:m0", "company/small/2:m0"}
+        assert iris["mentions"] == 5
+        edges = {(e["source"], e["rel"], e["target"]) for e in out["edges"]}
+        assert ("person:iris-bellweather", "member_of", "org:new-foundry") in edges
+        store.write(out)
+
+    with GraphStore(tmp_path / "memory.ladybug", read_only=True) as store:
+        held = {n["id"]: n for n in store.nodes()}
+    assert len(held) == 3, "the plural landed on the existing person, not beside it"
+
+
+def test_run_absorbs_a_second_worlds_graph_into_the_store_the_first_left(tmp_path, monkeypatch):
+    pytest.importorskip("ladybug")
+    import ml_stack.client
+    from ml_stack.graph.store import GraphStore
+
+    def fake_client(url, **_):
+        return SpeakingModel()
+
+    monkeypatch.setattr(ml_stack.client, "Client", fake_client)
+
+    first = tiny_world()
+    first.calendar = [{"day": 0, "until": 0, "kind": "incident",
+                       "who": ["person:ada", "person:bea"], "about": "the outage in Lantern",
+                       "where": [("slack", "incidents")], "outcome": "decision",
+                       "group": "dept:eng", "to": "dept:eng", "subject": "project:lantern"}]
+    (tmp_path / "world-a").mkdir()
+    (tmp_path / "world-a" / "graph.json").write_text(json.dumps(first.graph))
+    (tmp_path / "world-a" / "personas.json").write_text(json.dumps(first.personas))
+    (tmp_path / "world-a" / "calendar.json").write_text(json.dumps(first.calendar))
+    run(tmp_path / "world-a", tmp_path / "out", days=1, mix=1.0,
+        model_url="http://127.0.0.1:8080", seed=1)
+
+    second = tiny_world()
+    second.graph["nodes"] = [
+        {**n, "id": "person:ada-lovelaces", "label": "Orlan Vesks"} if n["id"] == "person:ada"
+        else n for n in second.graph["nodes"]]
+    for edge in second.graph["edges"]:
+        if edge["source"] == "person:ada":
+            edge["source"] = "person:ada-lovelaces"
+        if edge["target"] == "person:ada":
+            edge["target"] = "person:ada-lovelaces"
+    second.personas["person:ada-lovelaces"] = second.personas.pop("person:ada")
+    second.people = ["person:ada-lovelaces" if p == "person:ada" else p for p in second.people]
+    second.calendar = [{"day": 0, "until": 0, "kind": "incident",
+                        "who": ["person:ada-lovelaces", "person:bea"],
+                        "about": "the outage in Lantern", "where": [("slack", "incidents")],
+                        "outcome": "decision", "group": "dept:eng", "to": "dept:eng",
+                        "subject": "project:lantern"}]
+    (tmp_path / "world-b").mkdir()
+    (tmp_path / "world-b" / "graph.json").write_text(json.dumps(second.graph))
+    (tmp_path / "world-b" / "personas.json").write_text(json.dumps(second.personas))
+    (tmp_path / "world-b" / "calendar.json").write_text(json.dumps(second.calendar))
+    run(tmp_path / "world-b", tmp_path / "out", days=1, mix=1.0,
+        model_url="http://127.0.0.1:8080", seed=2)
+
+    with GraphStore(tmp_path / "out" / "memory.ladybug", read_only=True) as store:
+        ids = {n["id"] for n in store.nodes()}
+    assert "person:ada" in ids and "person:ada-lovelaces" not in ids
