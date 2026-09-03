@@ -122,19 +122,16 @@ Extraction quality
   entities are kept, and the world simulator's emit.
 
 Store integrity
-- [ ] **The shelf store came back with 9,225 nodes whose id, attrs and data were empty
-  strings** after the judged pass (2026-09-03 15:16; `ml-stack-store check`: 34,597 edges
-  found by scan and not by their ends; numbers and labels intact, every string column
-  blank), on ladybug 0.18.2. The pass makes thousands of small writes -- drop, upsert,
-  set_attribute, one node at a time, each its own transaction. The damaged store is kept
-  at `~/.ml-stack/shelf.ladybug.corrupt-2026-09-03`; the store was rebuilt from the reads
-  (`ml-stack-ingest fold` into a fresh store, the decisions document put back from
-  `shelf.decisions-2026-09-03.json`, `check` clean) and the pass replayed on it with a
-  `check` after. If the check fails again the pass is the trigger: batch its writes in
-  one `store.transaction()` per step, and characterise on a scratch store with the
-  store's own API (thousands of drop/upsert pairs) before blaming ladybug. Either way,
-  `tidy` should run `check` at its end and refuse to report success over a store that
-  does not read back by id.
+- [ ] **`tidy` and `fold` should run `check` at their end** and refuse to report success
+  over a store that does not read back by id. Found the hard way: on ladybug 0.18.2 a
+  single `DETACH DELETE` on a ~10k-node store blanked other nodes' id/attrs/data (one
+  drop: 1,983 edges unfindable by their ends; 300: 3,360; the same in one transaction
+  and with the label index removed), so the judged pass wrecked the shelf twice; 0.20.2
+  deletes cleanly but doubles a node written twice; 0.19.1 passes both, and the pin moved
+  there (7b6fba6). The two damaged stores are kept at `~/.ml-stack/shelf.ladybug.corrupt-*`
+  for a report upstream; `tests/test_graph_store.py` should carry the two probes (a delete
+  at scale leaves strings intact; a write twice updates) so a future bump is measured, not
+  trusted. ai_ceo's venv is on 0.19.1 too.
 
 ## Library
 
