@@ -137,8 +137,17 @@ class FakeClient:
         tries: int = 1,
         api_key: str | None = None,
         family: Family | str | None = None,
+        api: str | None = None,
+        model: str | None = None,
+        context: int | None = None,
+        keep_alive: str | int | None = None,
     ) -> None:
-        self.base_url = base_url.rstrip("/")
+        from ml_stack.client.chat import parse_url
+
+        self.base_url, self.api, found = parse_url(base_url, api)
+        self.model = model or found
+        self.context = context
+        self.keep_alive = keep_alive
         self.slot = slot
         self.asked_temperature = temperature
         self.asked_top_p = top_p
