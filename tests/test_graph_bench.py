@@ -2082,6 +2082,35 @@ def test_shortlist_for_gives_both_halves_to_the_models_named_in_one_load(tmp_pat
     assert len(runs(seen["kept"], "gemma-E2B-plain")) == 2
 
 
+def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
+    """A head is measured against the look_up the ranking measures: `drafts` takes
+    `--store`, `--embed-url` and `--embed-model` and gives all three to `drafts()`."""
+    import ml_stack.graph.bench as bench
+    import ml_stack.graph.bench.run as run_mod
+
+    seen = {}
+
+    def fake_drafts(run, heads, questions, graph, **kw):
+        seen.update(kw, heads=list(heads), model=run.shape.model)
+        return []
+
+    monkeypatch.setattr(run_mod, "drafts", fake_drafts)
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    kept = str(tmp_path / "runs.ladybug")
+    store = str(tmp_path / "graph.ladybug")
+    bench._main(["drafts", "tiny.gguf", "--draft", "", "--kept", kept, "--store", store,
+                 "--embed-url", "http://127.0.0.1:1", "--embed-model", "embedder"])
+    assert seen["model"] == "tiny.gguf" and seen["heads"] == [""]
+    assert (seen["store"], seen["embed_url"], seen["embed_model"]) == \
+        (store, "http://127.0.0.1:1", "embedder")
+
+    seen.clear()
+    bench._main(["drafts", "tiny.gguf", "--draft", "", "--kept", kept])
+    assert seen["store"] is None, "nothing prepared here, so no store"
+    assert (seen["embed_url"], seen["embed_model"]) == ("", "")
+
+
 def test_halves_and_the_ways_they_cross():
     from argparse import Namespace
 

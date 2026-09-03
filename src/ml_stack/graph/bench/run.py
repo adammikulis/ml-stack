@@ -329,6 +329,14 @@ def _parser() -> argparse.ArgumentParser:
     heads.add_argument("--binary", default="", help="a llama-server that reads this model")
     heads.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"))
     heads.add_argument("--questions", default="")
+    heads.add_argument("--store", default=bench.prepared(),
+                       help="a graph store with the word index and vectors: look_up searches "
+                            "it as the application does, so a head is measured against the "
+                            "look_up the ranking measures (default: what `prepare` built, "
+                            "when it has been)")
+    heads.add_argument("--embed-url", default="",
+                       help="a server that embeds, for look_up to search by meaning")
+    heads.add_argument("--embed-model", default="", help="the model that embedded the graph")
     heads.add_argument("--sample", type=int, default=SHORT, metavar="N",
                        help="how many questions to ask each head (default: %(default)s). "
                             "A draft cannot change an answer -- the large model verifies "
@@ -1030,7 +1038,8 @@ def _run(args: Any) -> int:
                             port=args.port),
                       args.draft or [""], asked, invented(),
                       binary=args.binary,
-                      kept=args.kept, store=bench.prepared() or None,
+                      kept=args.kept, store=args.store or None,
+                      embed_url=args.embed_url, embed_model=args.embed_model,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
                       smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
         print()
