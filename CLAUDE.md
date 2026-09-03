@@ -101,6 +101,26 @@ merges done by three agents, not three branches handed back for it to sort out.
 Do not remove a worktree you did not create — another agent may still be in it. Leave it
 and say so.
 
+What a day without this rule cost (2026-09-03, five agents in the primary checkout at
+once, Adam: "are agents not using their own trees? that needs to be a rule, both main and
+subagents"): a bare `git commit` in the primary checkout swept in another agent's staged
+deletion and pushed a head with no `ml_stack.ingest` for forty minutes; a running command
+imported a module another agent was halfway through splitting and died on it; every
+agent's full-suite run saw everyone else's partial edits and reported failures that were
+nobody's. So, spelled out:
+
+- The primary checkout is what *runs* — the editable install, a detached ingest, the
+  page. It changes only by landing a branch: tests green on the branch, a fast-forward
+  or rebase merge into `main`, then push. Never an edit, never a `git add`, never a bare
+  `git commit` there.
+- A brief to a subagent names the worktree rule and gives it a branch (the Agent tool's
+  worktree isolation does the first half). A subagent told to commit nothing still
+  commits on its own branch by named files before it reports — staged-and-uncommitted is
+  the state that leaks — and reports the branch, the commits, and the suite result on
+  that branch.
+- The main session lands each branch it asked for, or the agent does, but one of them
+  does, the same day. A branch nobody lands is work nobody has.
+
 A new worktree has no `dist/`, and one test builds a real environment out of it. Run
 `python packaging/build.py` in the worktree before trusting a full test run there.
 
