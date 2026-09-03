@@ -146,6 +146,39 @@ class Profile:
                      reasoning_budget=self.reasoning_budget, build=self.build,
                      extra_args=tuple(self.extra_args))
 
+    def asked(self) -> Any:
+        """The ways this record measured, as an :class:`~ml_stack.serve.Asking`: every one
+        of `WAYS`, ``terse`` included, plus ``reach`` and ``rounds``."""
+        from ml_stack.serve.shape import Asking
+
+        return Asking(**{way: bool(getattr(self, way)) for way in WAYS},
+                      reach=self.reach, rounds=self.rounds)
+
+    def talking(self, *, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+        """The client this record measured with, as a :class:`~ml_stack.serve.Talking`.
+
+        The sampling is the record's. The ceiling and the timeout are the caller's: how
+        long a machine will wait for one call is not what a measurement decided.
+        """
+        from ml_stack.serve.shape import Talking
+
+        return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling))
+
+    def run(self, *, port: int = 8080, seats: int | None = None, model: str = "",
+            resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
+        """This record whole, as a :class:`~ml_stack.serve.Run`: the shape to serve it in,
+        the ways to ask it, and the client to ask it with.
+
+        One object built once and handed on, so a bench row, a page answer and a seated
+        client for this model are the same lease and the same asking. ``port``, ``seats``,
+        ``model`` and ``resolve`` are :meth:`shape`'s.
+        """
+        from ml_stack.serve.shape import Run
+
+        return Run(shape=self.shape(port=port, seats=seats, model=model, resolve=resolve),
+                   asking=self.asked(),
+                   talking=self.talking(n_predict=n_predict, timeout=timeout))
+
     def asking(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.graph.ask.converse` takes.
 
@@ -157,21 +190,10 @@ class Profile:
 
         ``terse`` and ``sampling`` are not here and cannot be: ``terse`` chooses the tool
         *schemas*, which is :func:`~ml_stack.graph.ask.tools_for`'s argument, and sampling
-        is the client's. Both are on the record because both were measured; a caller that
-        wants them reads ``profile.terse`` and ``profile.sampling`` and builds the tools
-        and the client with them.
+        is the client's. Both are on the record because both were measured, and
+        :meth:`run` is what carries all three of them together.
         """
-        out: dict[str, Any] = {"tight": bool(self.tight)}
-        for way in ("batch", "kinds", "rich", "single", "few"):
-            if getattr(self, way):
-                out[way] = True
-        if self.summary:
-            out["summary_tool"] = True
-        if self.reach is not None:
-            out["reach"] = int(self.reach)
-        if self.rounds is not None:
-            out["rounds"] = int(self.rounds)
-        return out
+        return dict(self.asked().converse())
 
     # -- the file -----------------------------------------------------------------------
 

@@ -268,6 +268,11 @@ class AskRoutes:
     ``do_GET`` and ``do_POST``; each writes its own response and returns what it sent.
     Two things are the subclass's to say, and the rest has a default:
 
+    ``run``
+        The :class:`~ml_stack.serve.Run` this page answers with: the shape its model is
+        served in, the ways it is asked, and the client. Given one, ``seated()`` leases the
+        server and hands out a seat of it, and ``model_name`` and ``serving_url`` answer
+        from it.
     ``asker(question, *, turns, held, stream, emit)``
         Answers. Returns an ``Answer`` (or a mapping in ``answer_payload``'s shape).
         When ``stream`` is true the model's events are reported through ``emit`` as they
@@ -312,12 +317,30 @@ class AskRoutes:
     recalled_turns: int = 3
     summary_every: int = EVERY
     asking: Ask | None = None
+    run: Any = None
 
     # ------------------------------------------------------------- what a subclass says
 
     def asker(self, question: str, *, turns: list, held: list, stream: bool,
               emit: Any) -> Any:
         raise NotImplementedError("a subclass says how a question is answered")
+
+    def seated(self, *, index: int = 0, **over: Any) -> Any:
+        """A client on one seat of ``run``'s server, leased on the first question.
+
+        ``run`` is a :class:`~ml_stack.serve.Run`: the same object a bench row is measured
+        from and `seat` elsewhere is given, so a page answer and a measurement of the
+        page's model are one lease and one way of asking. llama.cpp serves one shape per
+        port, and a page that spelled its lease out beside the bench's stopped the server
+        and loaded the weights again the first time either was edited.
+
+        ``over`` is `Run.over`'s: a knob for this seat, routed to the section that owns it.
+        """
+        if self.run is None:
+            raise RuntimeError("no run on this handler: set `run`, or override `seated`")
+        from ml_stack.serve.shape import seat
+
+        return seat(self.run.over(**over) if over else self.run, index=index)
 
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
         return None
@@ -328,14 +351,24 @@ class AskRoutes:
     def model_name(self) -> str:
         """What is answering, for a reader who has not asked anything yet -- the served
         model's name, as the subclass knows it (a lease, a config, a probe of the server).
-        Empty when it cannot say; every answer still carries the name the server reported."""
-        return ""
+        ``run``'s model when there is one; every answer carries the name the server
+        reported whether or not this can say."""
+        if self.run is None:
+            return ""
+        return str(self.run.model).rsplit("/", 1)[-1]
 
     def serving_url(self) -> str:
         """The answering server's base URL, when the subclass knows it; ``/ask/model`` then
         also says how much context each slot holds and how many slots there are, which is
-        what a peak in `spent` is measured against."""
-        return ""
+        what a peak in `spent` is measured against.
+
+        With a ``run``, the server `seat` is holding on that run's port -- so this answers
+        once a question has been asked and not before."""
+        if self.run is None:
+            return ""
+        from ml_stack.serve.shape import held
+
+        return held().get(self.run.port, "")
 
     def handle_model(self) -> dict[str, Any]:
         """``GET /ask/model``: ``{"model": name, "slot_context": n, "slots": n}`` -- the

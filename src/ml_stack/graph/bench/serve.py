@@ -20,7 +20,7 @@ from typing import Any
 # time, never bound here at import.
 from ml_stack.graph import bench
 from ml_stack.graph.bench.keep import read_back, save
-from ml_stack.graph.bench.measure import PER_QUESTION, finding
+from ml_stack.graph.bench.measure import finding
 from ml_stack.graph.bench.score import Row, _which
 from ml_stack.graph.bench.show import drafted
 
@@ -107,21 +107,32 @@ def smoked(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 EMBEDDED = "embedded"
 
 
-def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
-           label: str = "", draft: str = "", port: int = 8099, context: int = 32768,
-           parallel: int = 1, binary: str = "", kept: str | Path = "", shortlist: int = 0,
+def drafted_by(run: Any, head: str) -> Any:
+    """``run`` serving ``head``: a path or ``hf:`` reference, "" for no head at all, or
+    `EMBEDDED` for the head inside the weights -- the speculative type, no ``-md``.
+
+    The method is left to `Shape.lease`, which reads it off the head's own name, so an
+    EAGLE3 head is never served as draft-simple.
+    """
+    if head == EMBEDDED:
+        return run.over(draft="", spec_type="draft-mtp")
+    return run.over(draft=str(head or ""), spec_type="")
+
+
+def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
+           label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
-           terse: bool = False, ways: Sequence[Mapping[str, Any]] = (),
+           ways: Sequence[Mapping[str, Any]] = (),
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
-           spec_draft_max: int | None = None, cache_type: str = "",
-           serving: Mapping[str, Any] | None = None,
            trace: bool | None = None,
-           per_question: float = PER_QUESTION, reasoning_budget: int | None = None,
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
-           spec_type: str = "",
-           **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "") -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
+
+    ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the shape the
+    server is leased in, the ways it is asked, and the client it is asked with. It used to
+    be twenty keyword arguments unpacked here into three destinations, and `tight` went to
+    the client once and took an 87G load down with it.
 
     ``host`` is what the kept runs say measured them, when this machine's name is not the
     answer -- a peer running a fleet's job records the name the plan gave it. Empty, the
@@ -145,19 +156,17 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     shortlist is handed over first are questions about the asking and not about the
     serving -- so measuring four of them costs one load and not four. Only a change the
     server itself must be told about, a draft head or a context, needs putting it up
-    again. Each way is ``{"label": ..., "terse": ..., "shortlist": ...}`` plus anything a
-    client takes; a way without ``shortlist`` takes the ``shortlist`` given here.
+    again. Each way is ``{"label": ..., "shortlist": ...}`` plus any field of the run --
+    a way of asking, a sampler setting, a ceiling -- laid over it by `Run.over`, which is
+    what routes each name to the section that owns it.
 
     ``already(label)`` is the run a way is already kept as, when it is -- `sweep --resume`
     passes it -- and a way that has one is skipped before the model is loaded, so a sweep
     killed on its third model costs the third model to re-run and not the first two.
 
-    ``spec_draft_max`` is how many tokens the draft head guesses ahead, when one is served;
-    ``cache_type`` quantises the KV cache (``q8_0``), and every label gets ``-kv-q8_0`` on
-    its end, because a run with a quantised cache is another configuration and the label is
-    what the table shows. ``reasoning_budget`` is the same again: bound at start, on the
-    label as ``-rbN``, and it stops a thinking model's thinking where `n_predict` would
-    have cut its answer. ``per_question`` caps each question -- see `_ask_once`.
+    The label carries what the table has to show: ``-kv-q8_0`` for a quantised cache and
+    ``-rbN`` for a thinking budget, because each is another configuration. Each question is
+    capped at the run's own ``talking.timeout`` -- see `_ask_once`.
 
     **The load is preflighted first** -- shards present, architecture read by this build,
     weights plus an estimated KV cache under what this machine may use, every flag one the
@@ -166,15 +175,17 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     skipped, nothing loaded: a sweep of five must not end on the one that does not fit.
     """
     from ml_stack import hub
-    from ml_stack.client import Client
     from ml_stack.serve import preflight as checks
     from ml_stack.serve import serve
-    from ml_stack.serve.backend import ServerFailed, ServerSpec
+    from ml_stack.serve.backend import ServerSpec
     from ml_stack.serve.binary import find_binary
 
+    model = run.model
+    per_question = float(run.talking.timeout)
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-    suffix = ((f"-kv-{cache_type}" if cache_type else "")
-              + (f"-rb{reasoning_budget}" if reasoning_budget is not None else ""))
+    suffix = ((f"-kv-{run.shape.cache_type}" if run.shape.cache_type else "")
+              + (f"-rb{run.shape.reasoning_budget}"
+                 if run.shape.reasoning_budget is not None else ""))
 
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")
@@ -192,55 +203,42 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
         if not todo:
             return []
         every = todo
-    extra: dict[str, Any] = {"parallel": parallel}
-    if draft == EMBEDDED:
-        # the head is inside the weights (Qwen3.8-27B ships its nextn layers in the main
-        # GGUF): no -md, only the speculative type, and the draft length if asked
-        draft = ""
-        extra["spec_type"] = "draft-mtp"
-    if draft:
-        from ml_stack.hub import spec_for
-
-        extra["draft"] = draft
-        kind = spec_for(draft)
-        if kind:
-            extra["spec_type"] = kind
-    if spec_type:
-        extra["spec_type"] = spec_type
-    if (draft or extra.get("spec_type")) and spec_draft_max is not None:
-        extra["spec_draft_max"] = int(spec_draft_max)
-    if cache_type:
-        extra["cache_type_k"] = extra["cache_type_v"] = cache_type
-    if reasoning_budget is not None:
-        extra["reasoning_budget"] = int(reasoning_budget)
-    # the rest of the serving shape, by field name: mlock, flash_attn, mmproj, extra_args --
-    # what a run wants to vary about the server that no flag of its own names
-    for field_name, value in (serving or {}).items():
-        extra[field_name] = value
-    if str(extra.get("mmproj") or "").lower() == "auto":
+    if str(run.shape.mmproj or "").lower() == "auto":
         # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
         # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
         # file to load -- it picked the MTP head and died (2026-09-02)
         from ml_stack.serve.cli import alongside
 
         found = alongside(str(model), "auto", "mmproj-", best=True)
-        if found:
-            extra["mmproj"] = found
-        else:
-            extra.pop("mmproj", None)
+        if not found:
             print("no vision projector is shipped beside that model; serving without one")
+        run = run.over(mmproj=str(found or ""))
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
     # free accuracy-wise: the tokens are identical, so the cache is valid.
-    extra.setdefault("cache_reuse", 256)
-    extra.setdefault("warmup", False)
+    extra: dict[str, Any] = {**run.lease(), "cache_reuse": 256, "warmup": False}
 
     # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
     # none named, the one `find_binary` would; a name no build answers to gives the flag and
     # architecture checks no opinion rather than a wrong one. `room()` is what this machine
     # may wire for a model, not what happens to be free.
-    spec = ServerSpec(model=model, port=port, context=context, **extra)
-    build = str(binary or find_binary() or "llama-server")
+    spec = ServerSpec(model=model, **extra)
+    manager, build = None, str(binary or "")
+    if binary:
+        from ml_stack.serve.backend import LlamaServerBackend
+        from ml_stack.serve.manager import ServerManager
+
+        manager = ServerManager(LlamaServerBackend(binary=binary))
+    elif run.shape.build:
+        # a named build, because an architecture or a head newer than any release loads
+        # only on the build that has it; not found here, the default build serves and says so
+        try:
+            manager = run.shape.manager()
+            build = str(manager.backend.binary)
+        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
+            manager = None
+            print(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
+    build = build or str(find_binary() or "llama-server")
     report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
     if not report.ok:
         print(f"    preflight refused {name}{suffix}; not loaded:\n"
@@ -249,11 +247,8 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
                "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)}
 
-    if binary:
-        from ml_stack.serve.backend import LlamaServerBackend
-        from ml_stack.serve.manager import ServerManager
-
-        extra["manager"] = ServerManager(LlamaServerBackend(binary=binary))
+    if manager is not None:
+        extra["manager"] = manager
 
     rows: list[Row] = []
     began = time.time()
@@ -262,7 +257,7 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     # can be: `measure` carries it to `Watching`, which cannot go back before the load.
     before_load = bench.machine_memory()
     try:
-        with serve(model, port=port, context=context, timeout=serve_timeout, **extra) as server:
+        with serve(model, timeout=serve_timeout, **extra) as server:
             # `load_s` is the lease's own clock, process start to health; the stopwatch
             # here also holds an adopted server's nothing and a warm-up's something.
             loaded = time.time() - began
@@ -284,53 +279,25 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     asked = dict(way)
                     here = labelled(asked)
                     asked.pop("label", None)
-                    how = bool(asked.pop("terse", terse))
                     first = int(asked.pop("shortlist", shortlist) or 0)
                     if len(every) > 1 or smoking:
                         print(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
                     wants_card = bool(asked.pop("_card", False))
+                    # The way, laid over the run: `Run.over` puts each name where it
+                    # belongs -- an asking to `asking`, a sampler or a ceiling to
+                    # `talking` -- so nothing about the asking can reach the client. It
+                    # did once: `tight` went to `Client.__init__` and took an 87G load
+                    # down with it (measured 2026-09-02).
+                    this = run.over(**asked)
                     # the cap is the client's timeout too, so a call past it is cut off
                     # there and the connection closed, rather than waited on
-                    # what is about the asking, not the client -- popped before the client
-                    # is built: `tight` reached Client.__init__ and took an 87G load down
-                    # with it (measured 2026-09-02); `rich` would have too, on the first
-                    # real run
-                    richly = bool(asked.pop("rich", False))
-                    # tight is how everything asks now (Adam, 2026-09-02: "let's not
-                    # ever use plain then"); `loose` is the bench's control
-                    tightly = bool(asked.pop("tight", True))
-                    # how much one tool result may carry, in tokens: the asking again, and
-                    # `Client` would refuse it exactly as it refused `tight`
-                    reaching = asked.pop("reach", None)
-                    # The three ways of 2026-09-02, each the asking and not the client, and
-                    # each popped here for the same reason as `tight` before them: all the
-                    # lookups asked for in one turn, show kept to the kind the question
-                    # asked for, and the whole graph readable at a glance. Sent on only
-                    # when a way asked for one, so a run that asked for none reaches
-                    # `asking` with exactly the keywords it always had.
-                    # `single` and `few` join them on the same terms: the opposite of
-                    # batch (one entry to a read, more turns) and a three-tool offer, both
-                    # about the asking and neither a thing the client has ever heard of.
-                    ways_asked = {name: True
-                                  for name in ("batch", "kinds", "summary", "single", "few")
-                                  if bool(asked.pop(name, False))}
-                    # how many tool-calling turns a question may spend -- a number, like
-                    # `reach`, and popped for the same reason
-                    rounding = asked.pop("rounds", None)
-                    client = Client(server.base_url,
-                                    **{"timeout": per_question, **making, **asked})
+                    client = this.client(server.base_url)
                     if wants_card:
                         # what the model itself recommends, read from the GGUF it is serving
-                        client = Client(server.base_url,
-                                        **{"timeout": per_question, **making, **client.card})
-                    ask = bench.asking(graph, shortlist=first, store=store,
-                                       embed_url=embed_url,
-                                 embed_model=embed_model, terse=how,
-                                 rich=richly,
-                                 tight=tightly,
-                                 reach=int(reaching) if reaching else None,
-                                 rounds=int(rounding) if rounding else None,
-                                 **ways_asked)
+                        this = this.over(**client.card)
+                        client = this.client(server.base_url)
+                    ask = bench.asking(graph, run=this, shortlist=first, store=store,
+                                       embed_url=embed_url, embed_model=embed_model)
                     got = bench.measure(ask, asking_these, label=here, client=client,
                                         trace=trace,
                                         log=print, baseline=before_load,
@@ -342,14 +309,14 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
                     held = {**bench.footprint(server.base_url), "graph": _which(graph),
                             "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
                             "load_s": load_s, "warmup_s": warmup_s, "binary": build}
-                    if draft:
-                        held["draft_model"] = str(draft).rsplit("/", 1)[-1]
-                        if spec_draft_max is not None:
-                            held["spec_draft_max"] = int(spec_draft_max)
-                    if cache_type:
-                        held["cache_type"] = cache_type
-                    if reasoning_budget is not None:
-                        held["reasoning_budget"] = int(reasoning_budget)
+                    if run.shape.draft:
+                        held["draft_model"] = str(run.shape.draft).rsplit("/", 1)[-1]
+                        if run.shape.draft_n_max is not None:
+                            held["spec_draft_max"] = int(run.shape.draft_n_max)
+                    if run.shape.cache_type:
+                        held["cache_type"] = run.shape.cache_type
+                    if run.shape.reasoning_budget is not None:
+                        held["reasoning_budget"] = int(run.shape.reasoning_budget)
                     if host:
                         held["host"] = host
                     if kept:
@@ -377,15 +344,16 @@ def served(model: str, questions: Sequence[Mapping[str, Any]], graph: Mapping[st
     return rows
 
 
-def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
-           graph: Mapping[str, Any], *, port: int = 8099, context: int = 32768,
-           parallel: int = 1, binary: str = "", kept: str | Path = "",
+def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]],
+           graph: Mapping[str, Any], *, binary: str = "", kept: str | Path = "",
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
-           cache_type: str = "", per_question: float = PER_QUESTION,
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
-           **making: Any) -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "") -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
+
+    ``run`` is the configuration every head is measured against; each head is that run
+    with its own ``draft`` laid over it, so nothing but the head and its length differs
+    between two rows.
 
     ``smoke`` and ``host`` go to `served` as they are: the two questions each load is asked
     first, and the name the kept runs carry.
@@ -421,13 +389,11 @@ def drafts(model: str, heads: Sequence[str], questions: Sequence[Mapping[str, An
         for length in (lengths if head else [None]):
             tagged = f"{name}@n{length}" if length is not None else name
             print(f"\n--- draft: {tagged}")
-            out += bench.served(model, questions, graph, label=f"draft:{tagged}",
-                                draft=head,
-                          port=port, context=context, parallel=parallel, binary=binary,
+            out += bench.served(drafted_by(run, head).over(draft_n_max=length),
+                                questions, graph, label=f"draft:{tagged}", binary=binary,
                           kept=kept, store=store, embed_url=embed_url,
                           embed_model=embed_model, serve_timeout=serve_timeout,
-                          spec_draft_max=length, cache_type=cache_type,
-                          per_question=per_question, smoke=smoke, host=host, **making)
+                          smoke=smoke, host=host)
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given
         # only heads, the newest undrafted run of this model and size already kept. The

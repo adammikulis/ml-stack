@@ -36,12 +36,21 @@ from ml_stack.serve.ports import (
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
 from ml_stack.serve.profile import Profile, profile_for, profiles
-from ml_stack.serve.shape import Shape, draft_for, projector_for, seat
+from ml_stack.serve.shape import (
+    Asking,
+    Run,
+    Shape,
+    Talking,
+    draft_for,
+    projector_for,
+    seat,
+)
 
 __all__ = [
     "CACHE_ROOT",
     "DEFAULT_HOST",
     "STATE_FILE",
+    "Asking",
     "BinaryNotFound",
     "LlamaServerBackend",
     "ServerBackend",
@@ -49,8 +58,10 @@ __all__ = [
     "ServerInfo",
     "ServerManager",
     "Profile",
+    "Run",
     "ServerSpec",
     "Shape",
+    "Talking",
     "child_env",
     "draft_for",
     "find_binary",

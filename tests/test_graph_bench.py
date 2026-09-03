@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+from dataclasses import replace
 
 import pytest
 
@@ -2293,7 +2294,8 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
 
     calls = []
 
-    def fake_served(model, *a, **k):
+    def fake_served(run, *a, **k):
+        model = run.model
         calls.append(model)
         if "bad" in model:
             raise ServerFailed("llama-server did not become healthy (exited 1)")
@@ -2504,7 +2506,7 @@ def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatc
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        asked_tight.append(kw.get("tight"))
+        asked_tight.append(kw["run"].asking.tight)
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -2566,6 +2568,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     import ml_stack.client
     import ml_stack.serve
     from ml_stack.graph import bench
+    from ml_stack.serve import Run, Shape
 
     built = []
 
@@ -2596,8 +2599,8 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     _preflight_ok(monkeypatch)
     ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
             {"label": "reach", "reach": 8000}]
-    bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
-                 ways=ways, kept="")
+    bench.served(Run(shape=Shape(model="tiny.gguf")), [{"q": "who?", "expect": []}],
+                 {"nodes": [], "edges": []}, ways=ways, kept="")
     assert len(built) == 4, "one strict client per way, none refused"
 
 
@@ -2639,7 +2642,7 @@ def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeyp
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        asked_reach.append(kw.get("reach"))
+        asked_reach.append(kw["run"].asking.reach)
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -3498,6 +3501,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     import ml_stack.client
     import ml_stack.serve
     from ml_stack.graph import bench
+    from ml_stack.serve import Run, Shape
     from ml_stack.testing import FakeClient, FakeServe
 
     fake = FakeServe()
@@ -3508,17 +3512,21 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
-    bench.served("tiny.gguf", [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
-                 draft=bench.EMBEDDED, spec_draft_max=2, kept="", smoke=())
+    bare = Run(shape=Shape(model="tiny.gguf"))
+    bench.served(bench.drafted_by(bare, bench.EMBEDDED).over(draft_n_max=2),
+                 [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
+                 kept="", smoke=())
     spec = fake.leased[-1]
     assert spec.spec_type == "draft-mtp" and not spec.draft and spec.spec_draft_max == 2
 
     seen = []
-    monkeypatch.setattr(bench, "served", lambda model, *a, **k: seen.append((k.get("label"), k.get("draft"))) or [])
-    bench.drafts("tiny.gguf", ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
+    monkeypatch.setattr(bench, "served",
+                        lambda run, *a, **k: seen.append(
+                            (k.get("label"), run.shape.draft, run.shape.spec_type)) or [])
+    bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, n_max=[2, 8], kept="")
-    assert seen == [("draft:none", ""), ("draft:embedded-mtp@n2", "embedded"),
-                    ("draft:embedded-mtp@n8", "embedded")]
+    assert seen == [("draft:none", "", ""), ("draft:embedded-mtp@n2", "", "draft-mtp"),
+                    ("draft:embedded-mtp@n8", "", "draft-mtp")]
 
 
 def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
@@ -3910,7 +3918,8 @@ def test_the_three_askings_reach_the_serving_seam_and_never_the_client(tmp_path,
     takes = set(inspect.signature(real_asking).parameters)
 
     def watched(graph, **kw):
-        asked.append({k: v for k, v in kw.items() if k in ("batch", "kinds", "summary")})
+        way = kw["run"].asking
+        asked.append({k: True for k in ("batch", "kinds", "summary") if getattr(way, k)})
         return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -4020,7 +4029,9 @@ def test_single_few_and_rounds_reach_the_serving_seam_and_never_the_client(tmp_p
     takes = set(inspect.signature(real_asking).parameters)
 
     def watched(graph, **kw):
-        asked.append({k: v for k, v in kw.items() if k in ("single", "few", "rounds")})
+        way = kw["run"].asking
+        asked.append({k: getattr(way, k) for k in ("single", "few", "rounds")
+                      if getattr(way, k)})
         return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -4441,18 +4452,13 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     at that config (be sure to report it).' The profile fills every flag the sweep left
     unset; an explicit flag wins; --no-profile serves bare."""
     import ml_stack.graph.bench as bench
-    from ml_stack.serve import Shape
+    from ml_stack.serve.profile import record
 
-    class Found:
-        def shape(self, port, seats):
-            return Shape(model="tiny.gguf", port=port, seats=seats, seat_context=4096,
-                         cache_type="q8_0", build="", draft="mtp-tiny.gguf", draft_n_max=4,
-                         reasoning_budget=0, extra_args=("-ub", "2048"))
-
-        def asking(self):
-            return {"tight": True, "batch": True}
-
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    measured = record("tiny.gguf", seat_context=4096, cache_type="q8_0",
+                      draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4,
+                      reasoning_budget=0, extra_args=("-ub", "2048"), batch=True)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for",
+                        lambda m: replace(measured, served=str(m)))
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
     asked = tmp_path / "q.jsonl"
@@ -4460,7 +4466,7 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
                         "--kept", str(kept), "--questions", str(asked), "--serve-port", "1"]) == 0
     kw = seen["kwargs"][0]
-    assert kw.get("draft") == "mtp-tiny.gguf" and kw.get("spec_draft_max") == 4
+    assert kw.get("draft") == "/models/mtp-tiny.gguf" and kw.get("spec_draft_max") == 4
     assert kw.get("cache_type_k") == "q8_0" and kw.get("reasoning_budget") == 0
     assert kw.get("extra_args") == ("-ub", "2048")
     assert "measured shape" in capsys.readouterr().out

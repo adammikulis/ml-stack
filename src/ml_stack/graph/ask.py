@@ -1426,18 +1426,27 @@ _UNSAID = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch":
 def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
     """``given``, with a measured profile's ways filling in whatever nobody said.
 
+    ``profile`` is a `Profile`, a `Run`, an `Asking`, or a model name to look one up by.
+
     A keyword still at its default takes the record's; anything said outright is kept, so a
     caller overruling a measurement on purpose is not overruled back. A value typed out that
     happens to equal the default cannot be told from one not typed at all -- argparse cannot
     either -- and it does not matter: what it asked for is what it got.
     """
     from ml_stack.serve.profile import Profile, profile_for
+    from ml_stack.serve.shape import Asking, Run
 
-    found = profile if isinstance(profile, Profile) else profile_for(str(profile))
-    if found is None:
-        return given
+    if isinstance(profile, Run):
+        profile = profile.asking
+    if isinstance(profile, Asking):
+        ways = profile.converse()
+    else:
+        found = profile if isinstance(profile, Profile) else profile_for(str(profile))
+        if found is None:
+            return given
+        ways = found.asking()
     out = dict(given)
-    for name, value in found.asking().items():
+    for name, value in ways.items():
         if out.get(name) == _UNSAID.get(name):
             out[name] = value
     return out

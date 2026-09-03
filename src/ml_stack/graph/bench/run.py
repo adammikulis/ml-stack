@@ -933,40 +933,19 @@ def _run(args: Any) -> int:
             # the thinking budget, the raw flags, and the asking ways. Adam: "if a model
             # has a drafting head that speeds it up at some config, always use it at that
             # config (be sure to report it)". --no-profile serves it bare.
-            shaped = measured_shape(args, model, head, heads, n)
-            head = shaped.get("draft", head)
-            ways = _asked(args, parts)
-            for way in ways:
-                for flag, on in (shaped.get("asking") or {}).items():
-                    if on and flag in ("batch", "kinds", "summary", "tight", "rich",
-                                       "single", "few") \
-                            and not getattr(args, flag, False):
-                        way.setdefault(flag, True)
-                    elif flag == "rounds" and on and not int(getattr(args, "rounds", 0) or 0):
-                        # a number rather than a switch, so it is carried across rather
-                        # than turned on: the record measured this many turns
-                        way.setdefault("rounds", int(on))
+            shaped = swept(args, model, measured_shape(args, model, head, heads, n),
+                           context=total_context, port=args.serve_port,
+                           head=head if n < len(heads) else None)
             try:
-                bench.served(model, questions, graph, label=stem, draft=head,
-                       ways=ways,
-                       port=args.serve_port,
-                       context=total_context,
-                       parallel=getattr(args, "parallel", 1),
-                       binary=args.binary or shaped.get("binary"),
+                bench.served(shaped, questions, graph, label=stem,
+                       ways=_asked(args, parts),
+                       binary=args.binary or "",
                        kept=args.kept,
                        store=args.store or None, embed_url=args.embed_url,
-                       embed_model=args.embed_model, terse=getattr(args, "terse", False),
+                       embed_model=args.embed_model,
                        already=already,
-                       cache_type=getattr(args, "serve_kv", "") or shaped.get("cache_type", ""),
-                       per_question=args.per_question,
-                       reasoning_budget=(getattr(args, "reasoning_budget", None)
-                                         if getattr(args, "reasoning_budget", None) is not None
-                                         else shaped.get("reasoning_budget")),
-                       spec_draft_max=getattr(args, "n_max", None) or shaped.get("draft_n_max"),
-                       serving={**(shaped.get("serving") or {}), **serving_fields(args)},
                        trace=getattr(args, "trace", None),
-                       smoke=sample(everything, SMOKE) if smoking else (),
-                       **sampling_from(args))
+                       smoke=sample(everything, SMOKE) if smoking else ())
             except ServerFailed as why:
                 # A model that will not load -- a head the build cannot read, a tensor it
                 # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
@@ -1042,14 +1021,13 @@ def _run(args: Any) -> int:
         everything = read_questions(args.questions) if args.questions else QUESTIONS
         asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
         before = {r["key"] for r in bench._kept(args.kept)}
-        rows = drafts(bench.find_model(args.model), args.draft or [""], asked, invented(),
-                      port=args.port,
-                      context=args.context, parallel=args.parallel, binary=args.binary,
+        model = bench.find_model(args.model)
+        rows = drafts(swept(args, model, None, context=args.context, head=None,
+                            port=args.port),
+                      args.draft or [""], asked, invented(),
+                      binary=args.binary,
                       kept=args.kept, store=bench.prepared() or None,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
-                      cache_type=getattr(args, "serve_kv", "") or "",
-                      per_question=args.per_question,
-                      reasoning_budget=getattr(args, "reasoning_budget", None),
                       smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
         print()
         if getattr(args, "smoke", False):
@@ -1415,48 +1393,83 @@ def _last_line(log: Path) -> str:
     return next((ln for ln in reversed(lines) if ln.strip()), "")
 
 
-def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> dict[str, Any]:
-    """What the model's profile says to serve it with, for every flag this sweep left
-    unset -- and nothing when --no-profile or no record. Reports the shape it took."""
+def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> Any:
+    """The `Run` the model's profile measured best in, or None with --no-profile or no
+    record. Reports the shape it took.
+
+    The head is left out when ``--serve-draft`` named one for this model, since a flag
+    beats a record; everything else the record says is on the run, and the sweep's own
+    flags are laid over it by `Run.over` afterwards.
+    """
     if not getattr(args, "profile", True):
-        return {}
+        return None
     try:
         from ml_stack.serve.profile import profile_for
     except ImportError:
-        return {}
+        return None
     found = profile_for(str(model))
     if found is None:
-        return {}
-    shape = found.shape(port=int(getattr(args, "serve_port", 8099) or 8099),
-                        seats=int(getattr(args, "parallel", 1) or 1))
-    out: dict[str, Any] = {}
+        return None
+    run = found.run(port=int(getattr(args, "serve_port", 8099) or 8099),
+                    seats=int(getattr(args, "parallel", 1) or 1))
+    shape = run.shape
+    said: dict[str, Any] = {}
     if n >= len(heads) and shape.draft:
-        out["draft"] = str(shape.draft)
-    if shape.build and not getattr(args, "binary", None):
-        from ml_stack.serve.backend import LlamaServerBackend
-
-        try:
-            out["binary"] = str(LlamaServerBackend(build=shape.build).binary)
-        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
-            print(f"    the profile names build {shape.build!r}, not found here: {exc}")
+        said["draft"] = str(shape.draft)
+    if shape.build:
+        said["build"] = shape.build
     if shape.cache_type:
-        out["cache_type"] = shape.cache_type
-    if getattr(shape, "reasoning_budget", None) is not None:
-        out["reasoning_budget"] = int(shape.reasoning_budget)
-    if getattr(shape, "draft_n_max", None):
-        out["draft_n_max"] = int(shape.draft_n_max)
-    serving: dict[str, Any] = {}
-    if getattr(shape, "extra_args", None):
-        serving["extra_args"] = tuple(shape.extra_args)
-    if getattr(shape, "mmproj", None):
-        serving["mmproj"] = shape.mmproj
-    if serving:
-        out["serving"] = serving
-    out["asking"] = dict(found.asking() or {}) if hasattr(found, "asking") else {}
-    said = ", ".join(f"{k}={v}" for k, v in out.items() if k not in ("asking", "serving"))
-    print(f"    measured shape: {said}" + (f"; serving {serving}" if serving else "")
-          + (f"; asking {out['asking']}" if out["asking"] else ""))
-    return out
+        said["cache_type"] = shape.cache_type
+    if shape.reasoning_budget is not None:
+        said["reasoning_budget"] = int(shape.reasoning_budget)
+    if shape.draft_n_max:
+        said["draft_n_max"] = int(shape.draft_n_max)
+    serving = {k: v for k, v in (("extra_args", tuple(shape.extra_args)),
+                                 ("mmproj", shape.mmproj)) if v}
+    asking = run.converse()
+    print("    measured shape: " + ", ".join(f"{k}={v}" for k, v in said.items())
+          + (f"; serving {serving}" if serving else "")
+          + (f"; asking {asking}" if asking else ""))
+    return run
+
+
+def swept(args: Any, model: str, measured: Any, *, context: int, head: str | None,
+          port: int) -> Any:
+    """The `Run` one ``--serve``'d model is measured in: what a record measured, with this
+    sweep's own flags laid over it.
+
+    One object rather than twenty keyword arguments, and one place that lays a flag over a
+    record, so the lease `served` takes, the ways it asks with and the client it asks with
+    cannot say different things. ``context`` is the total across the slots, which is what
+    ``-c`` takes; a `Shape` holds it as every seat's share.
+
+    ``head`` is what ``--serve-draft`` named for this model -- ``""`` for the bare model it
+    asked for outright -- and None when it named nothing, which is where a record's own
+    head stands.
+    """
+    from ml_stack.serve.shape import Run, Shape
+
+    seats = max(1, int(getattr(args, "parallel", 1) or 1))
+    run = measured if measured is not None else Run(shape=Shape(model=str(model)))
+    run = run.over(model=str(model), port=int(port), seats=seats,
+                   seat_context=max(1, int(context) // seats),
+                   timeout=float(getattr(args, "per_question", PER_QUESTION)),
+                   terse=bool(getattr(args, "terse", False)),
+                   **sampling_from(args))
+    if head is not None:
+        # a head named on the command line beats the one a record measured, and its method
+        # is read off its own name rather than kept from the record's
+        run = bench.drafted_by(run, head)
+    if getattr(args, "serve_kv", ""):
+        run = run.over(cache_type=str(args.serve_kv))
+    if getattr(args, "reasoning_budget", None) is not None:
+        run = run.over(reasoning_budget=int(args.reasoning_budget))
+    length = getattr(args, "n_max", None)
+    if isinstance(length, int) and length:
+        # `drafts` takes a list of them, one served configuration each, put on its own arm
+        # there; a sweep takes one number for the whole run
+        run = run.over(draft_n_max=length)
+    return run.over(**serving_fields(args))
 
 
 def serving_fields(args: Any) -> dict[str, Any]:

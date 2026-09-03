@@ -76,9 +76,10 @@ class _Reply:
 class ScriptedModel:
     """A model that takes exactly what `Client` takes, calls look_up once, then answers.
 
-    Built the way `served` and `run` build the real one -- ``Client(base_url, **way)`` --
-    and bound against the real ``__init__``'s signature, so a keyword the client does not
-    take fails here, naming itself, rather than on the GPU. Keeps every message it was
+    Built the way `served` and `run` build the real one -- `Run.client`, the only place a
+    run becomes a client -- and bound against the real ``__init__``'s signature, so a
+    keyword the client does not take fails here, naming itself, rather than on the GPU.
+    Keeps every message it was
     shown in ``seen``; ``told`` is what look_up answered, as the model saw it. Has the
     ``card`` a ``--also card`` way reads and the ``sampling`` the run writes down.
     """

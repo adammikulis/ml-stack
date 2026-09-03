@@ -179,6 +179,7 @@ from ml_stack.graph.bench.report import (  # noqa: F401
 from ml_stack.graph.bench.serve import (
     EMBEDDED,  # noqa: F401
     SmokeFailed,
+    drafted_by,
     drafts,
     find_model,
     prefetch,
@@ -219,7 +220,7 @@ from ml_stack.paths import repo_root  # noqa: F401
 
 __all__ = ["Counting", "Estimate", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut",
            "Row", "SHORT", "SMOKE", "SmokeFailed", "baseline", "beyond_weights", "choices",
-           "composed", "drafted", "estimate", "export", "ranking", "ask_from", "asking",
+           "composed", "drafted", "drafted_by", "estimate", "export", "ranking", "ask_from", "asking",
            "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
            "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
            "report", "asked_as", "band", "bands", "by_shape", "held_up", "separated",
