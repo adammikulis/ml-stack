@@ -37,7 +37,9 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -284,6 +286,21 @@ def queue_status() -> str:
 
 _running: "subprocess.Popen[bytes] | None" = None
 
+FAST_DEATH_S = 1.0
+"""A step that exits non-zero within this many seconds measured nothing; its last stderr
+lines are printed beside its summary."""
+
+TAIL_LINES = 15
+
+
+def _forward_stderr(stream: Any, kept: "deque[str]") -> None:
+    """Copy ``stream`` to this process's stderr line by line, keeping the last few."""
+    for raw in iter(stream.readline, b""):
+        line = raw.decode("utf-8", "replace")
+        kept.append(line.rstrip("\n"))
+        sys.stderr.write(line)
+        sys.stderr.flush()
+
 
 def run_step(argv: Sequence[str]) -> int:
     """One `ml-stack-bench argv` as its own process, its output going where the queue's
@@ -291,17 +308,34 @@ def run_step(argv: Sequence[str]) -> int:
 
     Its own process, not a function call: that is what puts each step through the measuring
     lock, the self-check, the estimate and the smoke it already has, and what lets `stop`
-    take a step down without taking the queue's own interpreter with it.
+    take a step down without taking the queue's own interpreter with it. Its stderr is
+    read through a pipe and written on, so a step that dies within `FAST_DEATH_S` can
+    have its last lines printed under "died in Ns:".
     """
     global _running
     command = [sys.executable, "-m", "ml_stack.graph.bench", *argv]
     sys.stdout.flush()
-    _running = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+    began = time.monotonic()
+    _running = subprocess.Popen(command, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,
                                 env={**os.environ, "PYTHONUNBUFFERED": "1"})
+    kept: deque[str] = deque(maxlen=TAIL_LINES)
+    reader = None
+    stream = getattr(_running, "stderr", None)
+    if stream is not None:
+        reader = threading.Thread(target=_forward_stderr, args=(stream, kept), daemon=True)
+        reader.start()
     try:
-        return _running.wait()
+        code = _running.wait()
     finally:
         _running = None
+    if reader is not None:
+        reader.join(timeout=5.0)
+    seconds = time.monotonic() - began
+    if code != 0 and seconds < FAST_DEATH_S and kept:
+        print(f"died in {seconds:.1f}s:", flush=True)
+        for line in kept:
+            print(f"  {line}", flush=True)
+    return code
 
 
 def _stop_running(grace: float = 60.0) -> None:

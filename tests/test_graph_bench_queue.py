@@ -340,3 +340,50 @@ def test_the_shipped_example_reads_as_the_evening_it_replaces(monkeypatch):
     assert "--yes" not in steps[4].argv                      # the queue's --yes, given once
     assert "/Users/invented/.ml-stack/" in " ".join(steps[0].argv)   # ${HOME}, expanded
     assert steps[5].argv[1] == "--rank" and steps[6].argv[0] == "report"
+
+
+def _bench_swapped_for(monkeypatch, program: str):
+    """`run_step`'s `python -m ml_stack.graph.bench ...` replaced by `python -c program`,
+    with every other argument to Popen kept -- so the real pipe and reader are exercised."""
+    import subprocess
+    import sys
+
+    real = subprocess.Popen
+
+    def swapped(command, **kw):
+        assert command[:3] == [sys.executable, "-m", "ml_stack.graph.bench"]
+        return real([sys.executable, "-c", program], **kw)
+
+    monkeypatch.setattr(subprocess, "Popen", swapped)
+
+
+def test_a_step_that_dies_at_once_has_its_last_stderr_lines_in_the_queue_log(
+        monkeypatch, capsys):
+    """A step that fails before it has measured anything -- an import that is not there, a
+    flag the parser refuses -- says why beside its summary line, not only "exit 1"."""
+    _bench_swapped_for(monkeypatch, "import sys; "
+                       "sys.stderr.write('Traceback (most recent call last):\\n'); "
+                       "sys.stderr.write('ModuleNotFoundError: No module named "
+                       "ml_stack.nowhere\\n'); sys.exit(1)")
+    assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 1
+    out = capsys.readouterr().out
+    assert "died in 0." in out and "s:" in out
+    assert "ModuleNotFoundError: No module named ml_stack.nowhere" in out
+
+
+def test_a_step_that_ran_for_a_while_before_failing_is_not_called_a_fast_death(
+        monkeypatch, capsys):
+    monkeypatch.setattr(q, "FAST_DEATH_S", 0.05)
+    _bench_swapped_for(monkeypatch, "import sys, time; time.sleep(0.3); "
+                       "sys.stderr.write('later\\n'); sys.exit(1)")
+    assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 1
+    assert "died in" not in capsys.readouterr().out
+
+
+def test_a_steps_stderr_still_reaches_the_log_as_it_runs(monkeypatch, capsys):
+    _bench_swapped_for(monkeypatch, "import sys; sys.stderr.write('waiting for "
+                       "measuring.lock, held by pid 7\\n'); sys.exit(0)")
+    assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 0
+    got = capsys.readouterr()
+    assert "waiting for measuring.lock, held by pid 7" in got.err
+    assert "died in" not in got.out
