@@ -399,10 +399,12 @@ def _staged(root: str | None, rules: Shapes) -> list[str]:
 
 
 def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: Any,
-              rules: Shapes, why: list[tuple[str, int, str]] | None = None,
+              rules: Shapes, why: list[tuple[str, int, str]] | None = None, *,
+              kinds: frozenset[str] = frozenset({"PERSON"}), floor: float = FLOOR,
               ) -> Iterator[tuple[str, int, str]]:
     """Every refusal in one file as ``(path, line, why)``. What a rule cleared goes to
-    ``why`` in the same shape, when a list is given."""
+    ``why`` in the same shape, when a list is given. ``kinds`` are the recogniser's entity
+    types to report and ``floor`` the score under which a hit is ignored."""
     lines = blob.split("\n")
     for i, line in enumerate(lines, 1):
         for name in known:
@@ -434,9 +436,15 @@ def _findings(path: str, blob: str, known: set[str], allowed: set[str], engine: 
     if engine is None:
         return
     for hit in engine.analyze(text=blob, language="en"):
-        if hit.entity_type != "PERSON" or hit.score < FLOOR:
+        if hit.entity_type not in kinds or hit.score < floor:
             continue
         body = blob[hit.start:hit.end].strip().strip("’‘'\"`,.:; ")
+        if hit.entity_type != "PERSON":
+            if not body or body.casefold() in allowed or IDENTIFIER.search(body):
+                continue
+            kind = hit.entity_type.lower().replace("_", " ")
+            yield path, blob.count("\n", 0, hit.start) + 1, f"{body!r} reads as {kind}"
+            continue
         # one CamelCase token is a class, not a person
         if not body or " " not in body or body.casefold() in allowed or IDENTIFIER.search(body):
             continue

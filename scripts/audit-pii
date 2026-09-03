@@ -1,0 +1,30 @@
+#!/bin/sh
+# Every tracked file read for a person's details, reported and never blocked.
+#
+# The reader is `ml_stack.redact.audit`, the same one the pre-commit hook runs over the
+# index, asked here about every tracked file and every kind of detail: a person, a card
+# number, an IBAN, a passport -- and, with --all, places, dates and addresses too.
+#
+#   scripts/audit-pii                  this checkout
+#   scripts/audit-pii --root ../other  another one
+#   scripts/audit-pii --staged         what the hook would say, without a commit
+#
+# Configuration by environment variable, the hook's: NAMES_GRAPH, NAMES_SCRAPE,
+# NAMES_FIXTURES (or --fixtures PATH), NAMES_SHAPES, PYTHON (default: python3).
+# Where that Python has no ml-stack installed, the source tree beside this script is used.
+# The exit status is 1 when there is anything to look at.
+
+PY="${PYTHON:-python3}"
+
+exec "$PY" -c '
+import os, sys
+try:
+    from ml_stack.redact.audit import main
+except ImportError:
+    here = os.path.dirname(os.path.realpath(sys.argv[1]))
+    sys.path.insert(0, os.path.normpath(os.path.join(here, "..", "src")))
+    for name in [m for m in sys.modules if m == "ml_stack" or m.startswith("ml_stack.")]:
+        del sys.modules[name]
+    from ml_stack.redact.audit import main
+sys.exit(main(sys.argv[2:]))
+' "$0" "$@"
