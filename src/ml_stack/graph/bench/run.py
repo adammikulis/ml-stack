@@ -127,6 +127,12 @@ def _ways(args: Any) -> list[dict[str, Any]]:
     for way in out:
         if asked_reach:
             way.setdefault("reach", asked_reach)
+    for flag in ("batch", "kinds", "summary"):
+        # --batch / --kinds / --summary ride on every way, the way --reach does: the
+        # hundred-question run of "everything that held" is one way, not four
+        if getattr(args, flag, False):
+            for way in out:
+                way.setdefault(flag, True)
     return out
 
 
@@ -408,6 +414,11 @@ def _parser() -> argparse.ArgumentParser:
     sweep.add_argument("--serve-mmproj", default="", metavar="PATH_OR_AUTO",
                        help="a vision projector to load beside each --serve'd model, as the "
                             "page does; measures what sight costs a text question")
+    for flag, said in (("batch", "every read in one call, with the nudge when it is not"),
+                       ("kinds", "keep only the kind the question asked for"),
+                       ("summary", "offer the summarise tool for the broad questions")):
+        sweep.add_argument(f"--{flag}", action="store_true",
+                           help=f"{said} -- on every way this sweep asks, the way --reach is")
     sweep.add_argument("--n-max", type=int, default=None, metavar="N",
                        help="how far the served head guesses ahead (--spec-draft-n-max), the "
                             "length `drafts` found best -- 4 for Flash-Next")

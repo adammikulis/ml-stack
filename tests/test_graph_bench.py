@@ -3956,3 +3956,15 @@ def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_witho
     asking(TINY, terse=True, batch=True, summary=True)("who?", _Scripted())
     named = [s["function"]["name"] for s, _ in reached["tools"]]
     assert "summarise" in named, "the terse set is built here, so it is built with them too"
+
+
+def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypatch):
+    import ml_stack.graph.bench as bench
+    from ml_stack.graph.bench.run import _ways as ways
+
+    args = type("A", (), {"also": ["rich"], "terse": False, "batch": True, "kinds": True,
+                          "summary": False, "reach": 0, "temperature": None, "top_p": None,
+                          "top_k": None, "min_p": None})()
+    got = ways(args)
+    assert all(w.get("batch") is True and w.get("kinds") is True for w in got)
+    assert all("summary" not in w for w in got)
