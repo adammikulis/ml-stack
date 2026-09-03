@@ -904,6 +904,7 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
             for n in range(SHORT)]
     rows[0].unread, rows[0].unread_named = ["Otto Brayfield"], 1
     rows[1].unread, rows[1].unread_named = ["Pellard", "Otto Brayfield"], 2
+    rows[2].unread, rows[2].unread_named = ["Tam Quillon"], 1
     save(store, rows, held={"graph": invented_digest(), "model": "thing.gguf",
                             "finder": "words"})
     # a run kept before the count existed has rows without the key
@@ -919,7 +920,7 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     assert head.split().index("made") == head.split().index("prec") + 1, "beside the scores"
     by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("tried", "older"))}
     # made, then t/o (blank: nothing timed out), then the sampling
-    assert by_label["tried"].rstrip().endswith("100%     3       -"), "the total over the run"
+    assert by_label["tried"].rstrip().endswith("100%     4       -"), "the total over the run"
     assert by_label["older"].rstrip().endswith("100%" + " " * 13 + "-"), \
         "blank for a run from before, not 0"
 
@@ -928,8 +929,42 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     assert "made    Pellard, Otto Brayfield" in said and "never found or read" in said
 
     got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
-    assert {r["label"]: r["unread_named"] for r in got} == {"tried": 3}
-    assert "| made |" in ranking(runs(store)) and "| words | 3 |" in ranking(runs(store))
+    assert {r["label"]: r["unread_named"] for r in got} == {"tried": 4}
+    assert "| made |" in ranking(runs(store)) and "| words | 0.2 |" in ranking(runs(store)), \
+        "per question, so a short run's count compares with a full run's"
+
+
+def _column(said: str, model: str, name: str) -> str:
+    """What the ranking's ``name`` column says for ``model``."""
+    lines = said.splitlines()
+    head = [c.strip() for c in next(ln for ln in lines if ln.startswith("| model")).split("|")]
+    row = [c.strip() for c in next(ln for ln in lines if ln.startswith(f"| `{model}`")).split("|")]
+    return row[head.index(name)]
+
+
+def test_the_ranking_breaks_an_accuracy_tie_by_what_was_made_up():
+    """Two runs of one model, the same size and the same F1: the one whose answers named
+    fewer entries they never read is the more faithful, and its accuracy is the one ranked
+    -- however old. A run from before the count was kept has no say in the tie."""
+    from ml_stack.graph.bench import choices, invented_digest, ranking
+
+    def run(label, at, made, *, counted=True):
+        rows = [{"expected": ["a"], "shown": ["a"] if n < 12 else [], "seconds": 5.0,
+                 **({"unread_named": 1 if n < made else 0} if counted else {})}
+                for n in range(20)]
+        return {"label": label, "at": at, "rows": rows,
+                "server": {"model": "m.gguf", "graph": invented_digest()}}
+
+    faithful = run("faithful", "2026-08-01T00:00:00", 2)
+    fanciful = run("fanciful", "2026-09-01T00:00:00", 9)
+    chosen, _ = choices([faithful, fanciful])
+    assert chosen[0].accuracy is faithful, "the same size and F1: fewer made up, not newest"
+    assert _column(ranking([faithful, fanciful]), "m.gguf", "made") == "0.1", "2 over 20"
+
+    unknown = run("unknown", "2026-09-02T00:00:00", 0, counted=False)
+    chosen, _ = choices([unknown, fanciful])
+    assert chosen[0].accuracy is fanciful, "a count, however high, over no count"
+    assert _column(ranking([unknown]), "m.gguf", "made") == "-", "not counted is not none"
 
 
 # -- --also rich --------------------------------------------------------------------------

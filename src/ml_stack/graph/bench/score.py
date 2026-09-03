@@ -540,8 +540,9 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
     within ``noise``. Taking both from one run ranked a drafted model at its undrafted
     speed, or not at all when the drafted run was short.
 
-    Accuracy: the run with the most questions, the best F1 among those, the newest on a
-    full tie. Cost: the fastest per
+    Accuracy: the run with the most questions, the best F1 among those, the fewest entries
+    made up per question among those (`made_per_question`; a run that carries no count
+    loses the tie to any that does), the newest on a full tie. Cost: the fastest per
     question of the model's runs of at least `SHORT` questions whose F1 held up against the
     accuracy run's -- `held_up`: it did not fall, or the fall is inside what these questions
     can account for, the two 95% intervals still overlapping. Where a run carries no
@@ -576,7 +577,7 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
         # are configurations a person chooses between, and the newest was the card run,
         # which ranked E4B at 48% when plain had 49% (measured 2026-09-01); newest last
         accuracy = max(mine, key=lambda o: (derived(o)["questions"], derived(o)["right"],
-                                            str(o.get("at") or "")))
+                                            _faithful(o), str(o.get("at") or "")))
         top = derived(accuracy)["right"]
         here = [o for o in mine if host_of(o) == host_of(accuracy)]
         elsewhere = [o for o in mine if o not in here]
@@ -588,6 +589,13 @@ def choices(kept: Sequence[Mapping[str, Any]], *,
                           key=lambda pair: -pair[1])
         out.append(Choice(model, accuracy, cost, rejected, elsewhere))
     return sorted(out, key=lambda c: -derived(c.accuracy)["right"]), too_few
+
+
+def _faithful(one: Mapping[str, Any]) -> float:
+    """Minus the entries a run made up per question, so `max` prefers fewer; a run that
+    carries no count ranks below every run that does."""
+    made = derived(one).get("made_per_question")
+    return -float(made) if made is not None else -math.inf
 
 
 def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list[dict[str, Any]]:
@@ -612,6 +620,12 @@ def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list
                     "server": {"host": host_of(choice.accuracy)},
                     "derived": _with_rates(point)})
     return out
+
+
+def _made(one: Mapping[str, Any]) -> str:
+    """Entries made up per question, one decimal; "-" for a run from before the count."""
+    made = derived(one).get("made_per_question")
+    return "-" if made is None else f"{float(made):.1f}"
 
 
 def _build(binary: Any) -> str:
@@ -692,7 +706,7 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
             f"| {f'{kv / 2**30:.1f}G' if kv else '-'} "
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
             f"| {a.get('finder') or '-'} "
-            f"| {'-' if a.get('unread_named') is None else a['unread_named']} "
+            f"| {_made(choice.accuracy)} "
             + (f"| {a.get('host') or '-'} " if several else "")
             + f"| {source} |")
     refused = [(choice, run, fell) for choice in chosen for run, fell in choice.rejected]
