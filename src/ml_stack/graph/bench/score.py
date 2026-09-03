@@ -11,6 +11,7 @@ text.
 
 from __future__ import annotations
 
+import math
 import json
 import re
 import sys
@@ -308,18 +309,27 @@ def half_band(one: Mapping[str, Any], key: str = "right") -> float | None:
 
 def separated(first: Mapping[str, Any], second: Mapping[str, Any],
               key: str = "right") -> bool | None:
-    """Whether two runs differ by more than the questions can account for: True when their
-    95% intervals for ``key`` do not overlap, False when they do, None where either has no
-    interval and the fixed `NOISE` has to answer instead.
+    """Whether two runs differ by more than the questions can account for: True when the
+    difference between them has a 95% interval that excludes zero, False when it does not,
+    None where either has no interval and the fixed `NOISE` has to answer instead.
 
-    Not overlapping is the claim worth making. Overlapping is not evidence that two runs
-    are the same -- only that this many questions cannot tell them apart, which is why the
-    word everywhere is "not separated" and never "equal".
+    The difference's interval, not the overlap of the two: two intervals can overlap a
+    little and still be apart by more than the questions can account for, because the
+    difference's spread is the two spreads added in quadrature, not summed. Measured, the
+    day this changed: a hundred questions read 80% ±6 against 70% ±6, the intervals touched
+    at 74 and 76, and "overlapping" let a shape ten points worse be written into the
+    model's profile as one that held. Ten points over a hundred questions is a measurement.
+
+    Not separated is not evidence that two runs are the same -- only that this many
+    questions cannot tell them apart, which is why the word everywhere is "not separated"
+    and never "equal".
     """
     a, b = band(first, key), band(second, key)
     if a is None or b is None:
         return None
-    return a[1] < b[0] or b[1] < a[0]
+    mid_a, mid_b = (a[0] + a[1]) / 2, (b[0] + b[1]) / 2
+    half_a, half_b = (a[1] - a[0]) / 2, (b[1] - b[0]) / 2
+    return abs(mid_a - mid_b) > math.hypot(half_a, half_b)
 
 
 def derived(one: Mapping[str, Any]) -> dict[str, float]:

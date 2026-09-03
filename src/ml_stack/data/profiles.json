@@ -1,41 +1,5 @@
 [
   {
-    "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
-    "serve": {
-      "build": "unsloth",
-      "draft": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
-      "spec_type": "draft-mtp",
-      "spec_draft_max": 4,
-      "cache_type": "q8_0",
-      "reasoning_budget": 0,
-      "mmproj": "auto",
-      "extra_args": ["-ub", "2048", "--spec-draft-p-min", "0.5"],
-      "seat_context": 32768,
-      "parallel": 1
-    },
-    "ask": {
-      "tight": true,
-      "batch": true,
-      "kinds": true,
-      "summary": true,
-      "rich": false,
-      "terse": false,
-      "reach": null,
-      "sampling": {"temperature": 0.0}
-    },
-    "measured": {
-      "measured_at": "2026-09-02",
-      "label": "Qwen3.8-Flash--all-plain-kv-q8_0-rb0",
-      "questions": 10,
-      "right": 0.85,
-      "recall": 0.89,
-      "precision": 0.83,
-      "seconds_per_question": 26.0,
-      "host": "Mac",
-      "note": "the fork build and the shared MTP head at 4 are both required, not preferred: mainline will not load the head at all. -ub 2048 was worth 4.69x and --spec-draft-p-min 0.5 raised acceptance to 81%. Thinking off: at 100 questions with it on the answers cost 43.7 s each for 64% F1. The 100-question run of this shape stood at 70% F1 and was still going when the record was written; the 85% is the 10-question run."
-    }
-  },
-  {
     "model": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
     "serve": {
       "build": "",
@@ -46,65 +10,75 @@
       "reasoning_budget": null,
       "mmproj": "auto",
       "extra_args": [],
-      "seat_context": 32768,
-      "parallel": 1
+      "seat_context": 16384,
+      "parallel": 2
     },
     "ask": {
       "tight": true,
       "batch": false,
+      "single": false,
+      "few": false,
       "kinds": false,
       "summary": false,
       "rich": false,
       "terse": false,
       "reach": null,
-      "sampling": {"temperature": 0.0}
+      "rounds": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "measured": {
       "measured_at": "2026-09-02",
       "label": "gemma-4-E2B-it-plain-kv-q8_0",
       "questions": 100,
-      "right": 0.30,
-      "recall": 0.35,
-      "precision": 0.31,
-      "seconds_per_question": 1.5,
+      "right": 0.3023515037593985,
+      "recall": 0.35033333333333333,
+      "precision": 0.31335164835164836,
+      "seconds_per_question": 1.4718,
       "host": "Mac",
-      "note": "the cheapest thing measured that answers at all, at 1.5 s a question; the head at 2 was worth 2.74x. Thinking left on -- its card asks for temperature 1.0 and greedy still scored better."
+      "note": "set from the fastest row whose F1 held: `gemma-4-E2B-it-plain-kv-q8_0`, 100 question(s) at 30% F1, 1.5 s/question -- asked as the record already said: this run predates asking records"
     }
   },
   {
     "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
     "serve": {
       "build": "",
-      "draft": "mtp-gemma-4-E4B-it-Q4_0.gguf",
+      "draft": "mtp-gemma-4-E4B-it.gguf",
       "spec_type": "draft-mtp",
       "spec_draft_max": 2,
       "cache_type": "q8_0",
       "reasoning_budget": null,
       "mmproj": "auto",
       "extra_args": [],
-      "seat_context": 32768,
-      "parallel": 1
+      "seat_context": 16384,
+      "parallel": 2
     },
     "ask": {
       "tight": true,
       "batch": false,
+      "single": false,
+      "few": false,
       "kinds": false,
       "summary": false,
       "rich": false,
       "terse": false,
       "reach": null,
-      "sampling": {"temperature": 0.0}
+      "rounds": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "measured": {
       "measured_at": "2026-09-02",
       "label": "gemma-4-E4B-it-plain-kv-q8_0",
       "questions": 100,
-      "right": 0.40,
-      "recall": 0.43,
-      "precision": 0.46,
-      "seconds_per_question": 3.1,
+      "right": 0.4014613938692886,
+      "recall": 0.4296666666666667,
+      "precision": 0.4584923076923077,
+      "seconds_per_question": 3.1239999999999997,
       "host": "Mac",
-      "note": "the Q4_0 head at 2 was the only one that held its F1 and beat serving none, at 1.09x; at 4 and above every head was slower than none."
+      "note": "set from the fastest row whose F1 held: `gemma-4-E4B-it-plain-kv-q8_0`, 100 question(s) at 40% F1, 3.1 s/question -- asked as the record already said: this run predates asking records"
     }
   },
   {
@@ -118,29 +92,34 @@
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
-      "seat_context": 32768,
-      "parallel": 1
+      "seat_context": 16384,
+      "parallel": 2
     },
     "ask": {
       "tight": true,
       "batch": false,
+      "single": false,
+      "few": false,
       "kinds": false,
       "summary": false,
       "rich": false,
       "terse": false,
       "reach": null,
-      "sampling": {"temperature": 0.0}
+      "rounds": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "measured": {
       "measured_at": "2026-09-02",
       "label": "gpt-oss-120b-m-plain-kv-q8_0",
       "questions": 100,
-      "right": 0.60,
-      "recall": 0.58,
-      "precision": 0.66,
-      "seconds_per_question": 6.3,
+      "right": 0.5980990407052112,
+      "recall": 0.5828333333333333,
+      "precision": 0.6588153846153847,
+      "seconds_per_question": 6.334099999999999,
       "host": "Mac",
-      "note": "no head: the eagle3 head held its F1 and was still slower than none at 0.52x. Thinking on is not optional here -- off, the same shape scored 24%."
+      "note": "set from the fastest row whose F1 held: `gpt-oss-120b-m-plain-kv-q8_0`, 100 question(s) at 60% F1, 6.3 s/question -- asked as the record already said: this run predates asking records"
     }
   },
   {
@@ -154,29 +133,80 @@
       "reasoning_budget": null,
       "mmproj": "",
       "extra_args": [],
-      "seat_context": 32768,
-      "parallel": 1
+      "seat_context": 16384,
+      "parallel": 2
     },
     "ask": {
       "tight": true,
       "batch": false,
+      "single": false,
+      "few": false,
       "kinds": false,
       "summary": false,
       "rich": false,
       "terse": false,
       "reach": null,
-      "sampling": {"temperature": 0.0}
+      "rounds": null,
+      "sampling": {
+        "temperature": 0.0
+      }
     },
     "measured": {
       "measured_at": "2026-09-02",
       "label": "gpt-oss-20b-MX-plain-kv-q8_0",
       "questions": 100,
-      "right": 0.37,
-      "recall": 0.37,
-      "precision": 0.44,
-      "seconds_per_question": 3.7,
+      "right": 0.3848925090504038,
+      "recall": 0.3746666666666667,
+      "precision": 0.4404153846153846,
+      "seconds_per_question": 3.7483,
       "host": "Mac",
-      "note": "no head: the eagle3 head cost 0.77x and bought nothing. Memory was never measured for this file."
+      "note": "set from the fastest row whose F1 held: `gpt-oss-20b-MX-plain-kv-q8_0`, 100 question(s) at 38% F1, 3.7 s/question -- asked as the record already said: this run predates asking records"
+    }
+  },
+  {
+    "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "serve": {
+      "build": "unsloth",
+      "draft": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+      "spec_type": "draft-mtp",
+      "spec_draft_max": 4,
+      "cache_type": "q8_0",
+      "reasoning_budget": 0,
+      "mmproj": "auto",
+      "extra_args": [
+        "-ub",
+        "2048",
+        "--spec-draft-p-min",
+        "0.5"
+      ],
+      "seat_context": 16384,
+      "parallel": 2
+    },
+    "ask": {
+      "tight": true,
+      "batch": true,
+      "single": false,
+      "few": false,
+      "kinds": true,
+      "summary": true,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "rounds": null,
+      "sampling": {
+        "temperature": 0.0
+      }
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "Qwen3.8-Flash--all-plain-kv-q8_0-rb0",
+      "questions": 100,
+      "right": 0.8020062656641603,
+      "recall": 0.894,
+      "precision": 0.769448717948718,
+      "seconds_per_question": 26.718600000000002,
+      "host": "Mac",
+      "note": "set from the fastest row whose F1 held: `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`, 100 question(s) at 80% F1, 26.7 s/question -- asked as the record already said: this run predates asking records"
     }
   }
 ]

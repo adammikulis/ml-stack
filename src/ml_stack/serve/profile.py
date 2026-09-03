@@ -350,6 +350,12 @@ def _read(path: Path) -> list[Profile]:
     return out
 
 
+def records_in(path: Path) -> list[Profile]:
+    """The records one file holds -- the shipped file, this machine's, or one named by
+    `--profiles` -- so a writer can see what it is about to supersede."""
+    return _read(path)
+
+
 def profiles(*, package: Path | None = None, local: Path | None = None) -> list[Profile]:
     """Every measured shape: what ships, with this machine's own layered over it.
 

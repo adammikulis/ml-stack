@@ -330,7 +330,7 @@ def test_a_model_nothing_measured_changes_nothing_about_the_asking():
 
 # -- ml-stack-bench report --profile ------------------------------------------------------
 
-def keep_run(store, label: str, *, right: float = 0.8, n: int = 10,
+def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a record is never set from fewer
              seconds: float = 2.0, **held) -> str:
     """One run through the store the bench actually keeps runs in -- no JSON by hand.
 
@@ -376,7 +376,7 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
     assert one.seat_context == 32768 and one.parallel == 2, "65536 over two slots"
     assert (one.batch, one.kinds, one.summary, one.tight) == (True, True, True, True)
     assert one.sampling == {"temperature": 0.0}
-    assert one.questions == 10 and round(one.right, 2) == 0.8
+    assert one.questions == 20 and round(one.right, 2) == 0.8
     assert one.label == "thornfield--all-plain-batch-kinds-summary-kv-q8_0-rb0"
     assert one.label in one.note, "the record says which row set it"
     assert one.host == "ladybug"

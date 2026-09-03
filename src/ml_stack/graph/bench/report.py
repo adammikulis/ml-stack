@@ -40,6 +40,7 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.runs`, `bench.HOME`
 # -- so anything patchable is looked up there at call time, never bound here at import.
 from ml_stack.graph import bench
+from ml_stack.graph.bench.keep import SHORT
 from ml_stack.graph.bench.score import (
     NOISE,
     _head_of,
@@ -376,11 +377,18 @@ def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
     Compared only among a model's longest runs, for `across`'s reason: a score means
     nothing beside a score over a different number of questions. Ties -- two rows at the
     same seconds -- go to the higher F1, then to the later run.
+
+    Never from fewer than `SHORT` questions: the ranking refuses to rank a smoke, and a
+    record set from one would send every later serve of that model the shape a coin toss
+    chose (a two-question row once wrote a 27B's profile). Such a model gets no record,
+    and `main` says so.
     """
     pool = [one for one in mine if derived(one)]
     if not pool:
         return None
     floor = full_n or max(derived(one)["questions"] for one in pool)
+    if floor < SHORT:
+        return None
     pool = [one for one in pool if derived(one)["questions"] >= floor]
     if not pool:
         return None
@@ -447,7 +455,9 @@ def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
     settled by the seconds rather than by a hundredth of an F1. Both read only a model's
     longest runs, so a profile is never a shape chosen by a coin toss over two questions.
     """
-    from ml_stack.serve.profile import add
+    from dataclasses import replace
+
+    from ml_stack.serve.profile import WAYS, add, profile_for, records_in, writable_file
 
     grouped = by_model(kept)
     out = []
@@ -456,8 +466,29 @@ def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
         if one is None:
             continue
         made_one = profile_of(model, one)
+        if not asked_recorded(one):
+            # The run predates asking records, so its label is all `ways_of` could read,
+            # and a label says nothing about the globals the sweep rode on every way. The
+            # evening this was learned, the hundred-question row asked with batch, kinds
+            # and summary rewrote the record as asked with none of them, and the page
+            # served the 70% shape under the 80% number. What the record already says
+            # about the asking is measured too, and it is kept.
+            older = profile_for(model, records=records_in(path or writable_file()))
+            if older is not None:
+                asked = {way: getattr(older, way) for way in WAYS}
+                asked.update(reach=older.reach, rounds=older.rounds)
+                made_one = replace(made_one, **asked,
+                                   note=(made_one.note + " -- asked as the record already "
+                                         "said: this run predates asking records"))
         out.append((made_one, add(made_one, path=path)))
     return out
+
+
+def asked_recorded(one: Mapping[str, Any]) -> bool:
+    """Whether a run carries the asking record `asked_with` keeps -- the keywords
+    `converse` was handed -- rather than only a label to read words from."""
+    said = one.get("asking")
+    return isinstance(said, Mapping) and bool(said)
 
 
 # ---------------------------------------------------------------- rendering both ways
@@ -882,6 +913,12 @@ def main(args: Any) -> int:
             print(f"{one.model}: {one.label or '?'} "
                   f"({one.questions} q, {one.right * 100:.0f}% F1, "
                   f"{one.seconds_per_question:.1f} s/q) -> {where}")
+        profiled = {one.model for one, _where in written}
+        for model, mine in by_model(kept).items():
+            longest = max((derived(o)["questions"] for o in mine if derived(o)), default=0)
+            if model not in profiled and 0 < longest < SHORT:
+                print(f"{model}: not profiled -- its longest run is {int(longest)} question(s), "
+                      f"and a record is never set from fewer than {SHORT}", file=sys.stderr)
         return 0
 
     rooms: list[int] = []
