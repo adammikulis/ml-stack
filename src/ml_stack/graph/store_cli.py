@@ -3,6 +3,7 @@
     ml-stack-store check PATH          # every doc, node and edge by key and by scan
     ml-stack-store check PATH --fix    # and rewrite the docs a scan reads empty
     ml-stack-store docs PATH           # the documents, with their sizes
+    ml-stack-store doc PATH KEY        # one document, as JSON; --drop takes it out
     ml-stack-store tidy PATH --apply   # the hygiene pass over a whole store
     ml-stack-store tidy PATH --base-url URL --rejudge   # every held verdict asked again
     ml-stack-store tidy --gold --base-url URL --fail-under 0.8   # score the judge
@@ -15,6 +16,7 @@ is the question to ask before believing a document is gone; it exits 1 on any fi
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -60,6 +62,20 @@ def _docs(path: Path) -> int:
     return 0
 
 
+def _doc(path: Path, key: str, drop: bool) -> int:
+    missing = object()
+    with GraphStore(path, read_only=not drop) as store:
+        held = store.get_doc(key, missing)
+        if held is missing:
+            print(f"{path}: no doc {key!r}", file=sys.stderr)
+            return 1
+        print(json.dumps(held, indent=2, ensure_ascii=False))
+        if drop:
+            store.delete_doc(key)
+            print(f"dropped doc {key}")
+    return 0
+
+
 def _gold(gold: str, base_url: str, fail_under: float) -> int:
     from ml_stack.graph.tidy import judge_gold, load_gold
 
@@ -89,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="rewrite a doc a scan reads empty while a lookup by key reads it whole")
     docs = sub.add_parser("docs", help="list the documents with their sizes")
     docs.add_argument("path", type=Path, help="the store directory")
+    doc = sub.add_parser("doc", help="print one document as JSON")
+    doc.add_argument("path", type=Path, help="the store directory")
+    doc.add_argument("key", help="the document's key, as `docs` lists it")
+    doc.add_argument("--drop", action="store_true", help="and take it out of the store")
     hygiene = sub.add_parser(
         "tidy", help="the hygiene pass: merge duplicate nodes and edges, fold inverse pairs, "
                      "flag doubtful labels, report conflicts and orphans -- dry unless --apply")
@@ -125,6 +145,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "check":
             return _check(path, args.fix)
+        if args.command == "doc":
+            return _doc(path, args.key, args.drop)
         if args.command == "tidy":
             from ml_stack.graph.tidy import ModelJudge, tidy, written_from
 

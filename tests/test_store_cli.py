@@ -131,3 +131,22 @@ def test_tidy_rejudge_asks_a_served_judge_again_about_the_held_verdicts(tmp_path
         assert store.get_doc(DECISIONS)["pairs"]["concept:glimer-node|concept:glimmer-node"][
             "verdict"] == "same"
         assert [n["id"] for n in store.nodes()] == ["concept:glimmer-node"]
+
+
+def test_doc_prints_one_document_as_json_and_drop_takes_it_out(tmp_path, capsys):
+    meta = {"built_at": "2026-01-01T00:00:00", "books": ["The Sablon Lattice"]}
+    path = a_store(tmp_path, {"meta": meta, "stats": {"nodes": 2, "edges": 1}})
+    assert main(["doc", str(path), "meta"]) == 0
+    assert json.loads(capsys.readouterr().out) == meta
+
+    assert main(["doc", str(path), "nowhere"]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err == f"{path}: no doc 'nowhere'\n"
+
+    assert main(["doc", str(path), "meta", "--drop"]) == 0
+    out = capsys.readouterr().out
+    assert out.endswith("dropped doc meta\n") and json.loads(out[: -len("dropped doc meta\n")]) == meta
+    with GraphStore(path, read_only=True) as reader:
+        assert reader.doc_keys() == ["stats"]
+    assert main(["check", str(path)]) == 0, "the store still reads back whole after the drop"
+    assert main(["doc", str(path), "meta", "--drop"]) == 1
