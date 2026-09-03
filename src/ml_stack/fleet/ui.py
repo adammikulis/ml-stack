@@ -400,11 +400,11 @@ class UI:
         try:
             from ml_stack.graph.bench import HOME
             from ml_stack.graph.bench.keep import _kept
-            from ml_stack.graph.bench.score import NOISE, composed, derived, host_of
+            from ml_stack.graph.bench.score import COSTS, NOISE, composed, derived, host_of
             from ml_stack.graph.bench.show import AXES, pareto
         except ImportError as exc:                       # a device-tier install has no bench
             return {"error": f"the bench is not installed here: {exc}",
-                    "runs": [], "axes": {}, "store": ""}
+                    "runs": [], "axes": {}, "keys": {}, "store": ""}
         store = Path(HOME) / "runs.ladybug"
         kept = _kept(store)
         points = list(kept) + composed(kept)
@@ -425,7 +425,8 @@ class UI:
                 **{k: v for k, v in got.items()},
             })
         rows.sort(key=lambda r: -r.get("right", 0.0))
-        return {"runs": rows, "axes": dict(AXES), "store": str(store), "noise": NOISE}
+        return {"runs": rows, "axes": dict(AXES), "keys": dict(COSTS), "store": str(store),
+                "noise": NOISE}
 
     def telemetry(self, source: str = "") -> dict[str, Any]:
         """What has been answered: this daemon's own record, or another page's ``/metrics``.

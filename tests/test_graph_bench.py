@@ -307,6 +307,46 @@ def test_the_frontier_can_be_drawn_against_tokens_instead_of_time():
     assert on == ["thrifty"]             # same accuracy, nine times the tokens
 
 
+def test_the_frontier_compares_runs_per_question_and_not_by_their_totals(tmp_path, capsys):
+    """Twenty questions at 30 s each is 600 s; a hundred at 27 s each is 2700 s. On the
+    totals the short run is the cheaper; per question the long one is."""
+    from ml_stack.graph.bench import derived, pareto, plot, rates
+    from ml_stack.graph.bench.score import COSTS
+
+    def run(label, questions, each, tokens, *, counted=True):
+        rows = [{"expected": ["a"], "shown": ["a"] if n % 2 else [], "seconds": each,
+                 "processed_tokens": tokens, "completion_tokens": 0, "calls": 3,
+                 **({"unread_named": 1 if n == 0 else 0} if counted else {})}
+                for n in range(questions)]
+        return {"label": label, "rows": rows, "server": {"kv_and_run_bytes": 2**30}}
+
+    short, long = run("short", 20, 30.0, 300), run("long", 100, 27.0, 250)
+    got = derived(long)
+    assert got["seconds_per_question"] == pytest.approx(27.0)
+    assert got["tokens_per_question"] == pytest.approx(250.0)
+    assert got["calls_per_question"] == pytest.approx(3.0)
+    assert got["made_per_question"] == pytest.approx(0.01)
+    assert derived(run("older", 10, 1.0, 1, counted=False))["made_per_question"] is None, \
+        "a run from before the count is not one that made nothing up"
+
+    assert COSTS == {"seconds": "seconds_per_question", "paid_tokens": "tokens_per_question",
+                     "kv_bytes": "kv_bytes"}
+    assert [o["label"] for o in pareto([short, long], cost="seconds")] == ["long"]
+    assert [o["label"] for o in pareto([short, long], cost="paid_tokens")] == ["long"]
+    # what a conversation holds is not divided by how many were asked
+    assert {o["label"] for o in pareto([short, long], cost="kv_bytes")} == {"short", "long"}
+
+    rates([short, long])
+    said = capsys.readouterr().out
+    by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("short", "long"))}
+    assert "*" in by_label["long"] and "*" not in by_label["short"]
+    assert "per question" in said
+
+    drawn = pathlib.Path(plot([short, long], tmp_path / "f.html")).read_text()
+    assert "per question" in drawn.split("<svg")[0], "the title names the axis"
+    assert "27.0 s per question" in drawn and "30.0 s per question" in drawn
+
+
 def test_the_plot_is_self_contained_and_names_what_it_drew(tmp_path):
     """It has to open on a machine with no network and no packages."""
     from ml_stack.graph.bench import plot

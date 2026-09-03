@@ -17,6 +17,7 @@ from typing import Any
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack.graph import bench
 from ml_stack.graph.bench.score import (
+    COSTS,
     NOISE,
     _head_of,
     _hit,
@@ -716,20 +717,22 @@ def pareto(kept: Sequence[Mapping[str, Any]], *,
     on it is the best available at some budget, and choosing among them is choosing a budget
     rather than choosing a better run.
 
-    ``cost`` is any key `derived` produces: seconds, paid_tokens, kv_bytes.
+    ``cost`` is a name in `COSTS` -- seconds, paid_tokens, kv_bytes -- compared on the key
+    it maps to: per question for time and tokens, a total for memory.
     """
+    key = COSTS.get(cost, cost)
     scored = [(one, derived(one)) for one in kept]
-    scored = [(one, d) for one, d in scored if d and d.get(cost) is not None]
+    scored = [(one, d) for one, d in scored if d and d.get(key) is not None]
     front = []
     for one, mine in scored:
         beaten = any(
             other is not one
-            and theirs["right"] >= mine["right"] and theirs[cost] <= mine[cost]
-            and (theirs["right"] > mine["right"] or theirs[cost] < mine[cost])
+            and theirs["right"] >= mine["right"] and theirs[key] <= mine[key]
+            and (theirs["right"] > mine["right"] or theirs[key] < mine[key])
             for other, theirs in scored)
         if not beaten:
             front.append(one)
-    return sorted(front, key=lambda one: derived(one)[cost])
+    return sorted(front, key=lambda one: derived(one)[key])
 
 
 def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, Any]] = (),
@@ -844,14 +847,16 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
               f"{num('right_per_minute', '8.2f')} {num('right_per_1k', '10.4f')} "
               f"{num('right_per_gb', '7.3f')} {num('seconds_per_right', '7.1f')} "
               f"{num('tokens_per_right', '8.0f')}")
-    print(f"\n* on the frontier for accuracy against {cost}: nothing is both more accurate "
-          f"and cheaper.")
+    print(f"\n* on the frontier for accuracy against {AXES.get(cost, cost)}: nothing is "
+          f"both more accurate and cheaper.")
     print(f"= a model composed: accuracy from its largest run, cost from its fastest run "
           f"within {noise * 100:g} points of it, scaled to the same number of questions.")
 
 
-AXES = {"seconds": "wall clock (s)", "paid_tokens": "tokens paid for (read + written)",
+AXES = {"seconds": "wall clock per question (s)",
+        "paid_tokens": "tokens paid for per question (read + written)",
         "kv_bytes": "KV cache and runtime (GB)"}
+UNITS = {"seconds": "s", "paid_tokens": "tokens", "kv_bytes": "bytes"}
 
 
 def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
@@ -864,15 +869,17 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
     the trade is visible rather than inferred from a column of numbers. Each model's
     `composed` point is drawn as a ring beside its runs.
     """
+    key = COSTS.get(cost, cost)
     points = [(one, derived(one)) for one in list(kept) + composed(kept, noise=noise)]
-    points = [(one, d) for one, d in points if d and cost in d and d[cost] > 0]
+    points = [(one, d) for one, d in points if d and d.get(key) and d[key] > 0]
     if not points:
         raise ValueError("nothing to plot")
     front = {id(one) for one in pareto([one for one, _ in points], cost=cost)}
     several = len(hosts_of([one for one, _ in points])) > 1
+    each = f" {UNITS.get(cost, cost)}" + (" per question" if key != cost else "")
 
     wide, tall, pad = 900, 520, 70
-    costs = [d[cost] for _, d in points]
+    costs = [d[key] for _, d in points]
     lo, hi = 0.0, max(costs) * 1.08
     best = max(d["right"] for _, d in points)
     top = min(1.0, best * 1.15)
@@ -884,8 +891,8 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
         return tall - pad - (v / (top or 1)) * (tall - 2 * pad)
 
     marks, dots = [], []
-    for one, d in sorted(points, key=lambda kv: kv[1][cost]):
-        cx, cy = x(d[cost]), y(d["right"])
+    for one, d in sorted(points, key=lambda kv: kv[1][key]):
+        cx, cy = x(d[key]), y(d["right"])
         on = id(one) in front
         label = _shown(f"{one.get('label', '')}@{host_of(one) or '?'}" if several
                        else one.get("label", ""), 28)
@@ -897,7 +904,7 @@ def plot(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
         dots.append(
             f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{6 if on else 4.5}" '
             f'class="{kind}{" front" if on and kind == "composed" else ""}"><title>{label}\n'
-            f'{100 * d["right"]:.0f}% right, {d[cost]:.0f} {cost}\n'
+            f'{100 * d["right"]:.0f}% right, {d[key]:.1f}{each}\n'
             f'{d["questions"]:.0f} questions{note}</title></circle>')
         if on:
             marks.append((cx, cy))

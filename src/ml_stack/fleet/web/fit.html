@@ -252,7 +252,8 @@ const state = {
   cacheType: "", drafted: "either", on: new Set(), hot: null,
   zoom: null,             // [x0, x1] on panel B once someone has zoomed
   view: "fit",            // or "rates"
-  runs: null, axes: {}, cost: "seconds", showing: "both", hotRun: null, ratesError: "",
+  runs: null, axes: {}, keys: {}, cost: "seconds", showing: "both", hotRun: null,
+  ratesError: "",
   // the Telemetry view: what a /metrics body last said, where it came from, and whether
   // this page is re-reading it on a timer
   tele: null, teleFrom: "", teleNote: "", teleError: "", teleTimer: null, teleWatch: true,
@@ -731,6 +732,7 @@ async function loadRates() {
     if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
     state.runs = (got.runs || []).map((p, i) => ({ ...p, i, colour: COLOURS[i % COLOURS.length] }));
     state.axes = got.axes || {};
+    state.keys = got.keys || {};
     state.ratesError = got.error || "";
   } catch (e) {
     state.runs = [];
@@ -746,7 +748,9 @@ const saidCost = (p) => (state.cost === "kv_bytes"
   ? `${(p.kv_bytes / GB).toFixed(1)} GB`
   : state.cost === "paid_tokens" ? `${commas(p.paid_tokens)} tok` : `${p.seconds.toFixed(1)} s`);
 
-const costOf = (p) => (state.cost === "kv_bytes" ? p.kv_bytes / GB : p[state.cost] || 0);
+// the key the frontier was worked out on: per question for time and tokens, a total for memory
+const costOf = (p) => (state.cost === "kv_bytes" ? p.kv_bytes / GB
+                       : p[(state.keys || {})[state.cost] || state.cost] || 0);
 
 function panelRates(points, tip) {
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });

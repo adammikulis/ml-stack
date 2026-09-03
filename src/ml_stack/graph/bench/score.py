@@ -368,7 +368,11 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
                        "shown_per_question": shown, "wanted_per_question": wanted,
                        "seconds": seconds, "paid_tokens": paid, "calls": _total(rows, "calls"),
                        "kv_bytes": memory, "questions": float(len(rows)),
-                       "seconds_per_question": _total(rows, "seconds") / len(rows)})
+                       "seconds_per_question": _total(rows, "seconds") / len(rows),
+                       # None, not 0, for a run from before this was counted
+                       "made_per_question": (_total(rows, "unread_named") / len(rows)
+                                             if any("unread_named" in r for r in rows)
+                                             else None)})
     # ...and what the questions can and cannot tell apart. `<key>_lo`/`<key>_hi` rather
     # than a pair, so `derived` stays a flat mapping of numbers that `rates` and `_flat`
     # can read a key at a time. Absent for a run of one question -- see `bands`.
@@ -377,10 +381,22 @@ def derived(one: Mapping[str, Any]) -> dict[str, float]:
     return out
 
 
+# The cost `--cost` names, and the key of `derived` the frontier compares on. Time and
+# tokens are per question, so a short run and a full one compare; the memory a
+# conversation holds is a total, whatever was asked.
+COSTS = {"seconds": "seconds_per_question", "paid_tokens": "tokens_per_question",
+         "kv_bytes": "kv_bytes"}
+
+
 def _with_rates(out: dict[str, float]) -> dict[str, float]:
     """The rates, from the totals. Guarded: a run that took no time or paid nothing has
     nothing to divide by, and a zero score is a real answer rather than a missing one."""
     got, seconds, paid, memory = out["right"], out["seconds"], out["paid_tokens"], out["kv_bytes"]
+    questions = out.get("questions") or 0.0
+    if questions > 0:
+        out.setdefault("seconds_per_question", seconds / questions)
+        out["tokens_per_question"] = paid / questions
+        out["calls_per_question"] = out.get("calls", 0.0) / questions
     if seconds > 0:
         out["right_per_minute"] = got * 60.0 / seconds
     if paid > 0:
@@ -588,6 +604,7 @@ def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list
         point = {"right": a["right"], "recall": a["recall"], "precision": a["precision"],
                  "shown_per_question": a["shown_per_question"],
                  "wanted_per_question": a["wanted_per_question"], "questions": a["questions"],
+                 "made_per_question": a.get("made_per_question"),
                  "seconds": c["seconds"] * scale, "paid_tokens": c["paid_tokens"] * scale,
                  "calls": c["calls"] * scale, "kv_bytes": c["kv_bytes"]}
         out.append({"label": choice.model, "composed": True, "model": choice.model,

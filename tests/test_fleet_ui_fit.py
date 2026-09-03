@@ -405,6 +405,20 @@ class TestTheRatesRoute:
             # the most accurate run is on every frontier: nothing beats it on accuracy
             assert max(r["right"] for r in got["runs"]) == max(r["right"] for r in on)
 
+    def test_the_page_draws_the_key_the_frontier_was_worked_out_on(self, page, store):
+        """Per question for time and tokens, a total for memory: the same map the command
+        uses, sent with the axes so the point and its frontier mark agree."""
+        from ml_stack.graph.bench.score import COSTS
+
+        _, got, _ = page.call("/ui/rates.json")
+        assert got["keys"] == dict(COSTS)
+        assert got["keys"]["seconds"] == "seconds_per_question"
+        assert got["keys"]["kv_bytes"] == "kv_bytes"
+        assert "per question" in got["axes"]["seconds"]
+        for row in got["runs"]:
+            for cost, key in got["keys"].items():
+                assert row[key] > 0, f"{key} is missing, so the page cannot place the point"
+
     def test_a_model_composed_is_marked_as_one(self, page, store):
         """A square on the chart, not a circle: accuracy from a model's largest run and
         cost from its fastest that held it is not itself a run anybody made."""
