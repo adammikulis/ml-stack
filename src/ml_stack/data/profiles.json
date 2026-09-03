@@ -1,0 +1,182 @@
+[
+  {
+    "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "serve": {
+      "build": "unsloth",
+      "draft": "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf",
+      "spec_type": "draft-mtp",
+      "spec_draft_max": 4,
+      "cache_type": "q8_0",
+      "reasoning_budget": 0,
+      "mmproj": "auto",
+      "extra_args": ["-ub", "2048", "--spec-draft-p-min", "0.5"],
+      "seat_context": 32768,
+      "parallel": 1
+    },
+    "ask": {
+      "tight": true,
+      "batch": true,
+      "kinds": true,
+      "summary": true,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "sampling": {"temperature": 0.0}
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "Qwen3.8-Flash--all-plain-kv-q8_0-rb0",
+      "questions": 10,
+      "right": 0.85,
+      "recall": 0.89,
+      "precision": 0.83,
+      "seconds_per_question": 26.0,
+      "host": "Mac",
+      "note": "the fork build and the shared MTP head at 4 are both required, not preferred: mainline will not load the head at all. -ub 2048 was worth 4.69x and --spec-draft-p-min 0.5 raised acceptance to 81%. Thinking off: at 100 questions with it on the answers cost 43.7 s each for 64% F1. The 100-question run of this shape stood at 70% F1 and was still going when the record was written; the 85% is the 10-question run."
+    }
+  },
+  {
+    "model": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
+    "serve": {
+      "build": "",
+      "draft": "mtp-gemma-4-E2B-it.gguf",
+      "spec_type": "draft-mtp",
+      "spec_draft_max": 2,
+      "cache_type": "q8_0",
+      "reasoning_budget": null,
+      "mmproj": "auto",
+      "extra_args": [],
+      "seat_context": 32768,
+      "parallel": 1
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "sampling": {"temperature": 0.0}
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "gemma-4-E2B-it-plain-kv-q8_0",
+      "questions": 100,
+      "right": 0.30,
+      "recall": 0.35,
+      "precision": 0.31,
+      "seconds_per_question": 1.5,
+      "host": "Mac",
+      "note": "the cheapest thing measured that answers at all, at 1.5 s a question; the head at 2 was worth 2.74x. Thinking left on -- its card asks for temperature 1.0 and greedy still scored better."
+    }
+  },
+  {
+    "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+    "serve": {
+      "build": "",
+      "draft": "mtp-gemma-4-E4B-it-Q4_0.gguf",
+      "spec_type": "draft-mtp",
+      "spec_draft_max": 2,
+      "cache_type": "q8_0",
+      "reasoning_budget": null,
+      "mmproj": "auto",
+      "extra_args": [],
+      "seat_context": 32768,
+      "parallel": 1
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "sampling": {"temperature": 0.0}
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "gemma-4-E4B-it-plain-kv-q8_0",
+      "questions": 100,
+      "right": 0.40,
+      "recall": 0.43,
+      "precision": 0.46,
+      "seconds_per_question": 3.1,
+      "host": "Mac",
+      "note": "the Q4_0 head at 2 was the only one that held its F1 and beat serving none, at 1.09x; at 4 and above every head was slower than none."
+    }
+  },
+  {
+    "model": "gpt-oss-120b-mxfp4-00001-of-00003.gguf",
+    "serve": {
+      "build": "",
+      "draft": "",
+      "spec_type": "",
+      "spec_draft_max": null,
+      "cache_type": "q8_0",
+      "reasoning_budget": null,
+      "mmproj": "",
+      "extra_args": [],
+      "seat_context": 32768,
+      "parallel": 1
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "sampling": {"temperature": 0.0}
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "gpt-oss-120b-m-plain-kv-q8_0",
+      "questions": 100,
+      "right": 0.60,
+      "recall": 0.58,
+      "precision": 0.66,
+      "seconds_per_question": 6.3,
+      "host": "Mac",
+      "note": "no head: the eagle3 head held its F1 and was still slower than none at 0.52x. Thinking on is not optional here -- off, the same shape scored 24%."
+    }
+  },
+  {
+    "model": "gpt-oss-20b-MXFP4.gguf",
+    "serve": {
+      "build": "",
+      "draft": "",
+      "spec_type": "",
+      "spec_draft_max": null,
+      "cache_type": "q8_0",
+      "reasoning_budget": null,
+      "mmproj": "",
+      "extra_args": [],
+      "seat_context": 32768,
+      "parallel": 1
+    },
+    "ask": {
+      "tight": true,
+      "batch": false,
+      "kinds": false,
+      "summary": false,
+      "rich": false,
+      "terse": false,
+      "reach": null,
+      "sampling": {"temperature": 0.0}
+    },
+    "measured": {
+      "measured_at": "2026-09-02",
+      "label": "gpt-oss-20b-MX-plain-kv-q8_0",
+      "questions": 100,
+      "right": 0.37,
+      "recall": 0.37,
+      "precision": 0.44,
+      "seconds_per_question": 3.7,
+      "host": "Mac",
+      "note": "no head: the eagle3 head cost 0.77x and bought nothing. Memory was never measured for this file."
+    }
+  }
+]

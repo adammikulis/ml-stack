@@ -35,6 +35,7 @@ from ml_stack.serve.ports import (
     server_pids_on_port,
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
+from ml_stack.serve.profile import Profile, profile_for, profiles
 from ml_stack.serve.shape import Shape, draft_for, projector_for, seat
 
 __all__ = [
@@ -47,6 +48,7 @@ __all__ = [
     "ServerFailed",
     "ServerInfo",
     "ServerManager",
+    "Profile",
     "ServerSpec",
     "Shape",
     "child_env",
@@ -59,6 +61,8 @@ __all__ = [
     "model_matches",
     "pid_exists",
     "port_is_free",
+    "profile_for",
+    "profiles",
     "projector_for",
     "reclaim_port",
     "recorded_servers",

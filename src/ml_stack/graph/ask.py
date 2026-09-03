@@ -1272,6 +1272,31 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
 
 
+# What each way of asking is when nobody says: a profile fills in only what is still this.
+_UNSAID = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
+           "summary_tool": False}
+
+
+def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
+    """``given``, with a measured profile's ways filling in whatever nobody said.
+
+    A keyword still at its default takes the record's; anything said outright is kept, so a
+    caller overruling a measurement on purpose is not overruled back. A value typed out that
+    happens to equal the default cannot be told from one not typed at all -- argparse cannot
+    either -- and it does not matter: what it asked for is what it got.
+    """
+    from ml_stack.serve.profile import Profile, profile_for
+
+    found = profile if isinstance(profile, Profile) else profile_for(str(profile))
+    if found is None:
+        return given
+    out = dict(given)
+    for name, value in found.asking().items():
+        if out.get(name) == _UNSAID.get(name):
+            out[name] = value
+    return out
+
+
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
              rounds: int = ROUNDS, limit: int = LIT,
@@ -1280,7 +1305,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              opening: Sequence[str] = (), rich: bool = False,
              tight: bool = True, reach: int | None = None, summary: Any = None,
              recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
-             summary_tool: bool = False) -> Answer:
+             summary_tool: bool = False, profile: Any = None) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -1337,7 +1362,19 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``summary_tool`` offers `summarise`: the whole graph at a glance -- counts per kind, the
     most-mentioned entries of each kind, the busiest relations -- computed without a model,
     for the broad question ("what is this group about?") that no search reaches.
+
+    ``profile`` is a :class:`~ml_stack.serve.Profile` or a model name, and supplies those
+    ways from what that model *measured* best rather than from what a caller remembered:
+    Flash-Next wants batch, kinds and summary together and gemma-4 wants none of them, and
+    which is which is a number in a store, not a habit. It fills in only what this call
+    left unsaid -- see `_under`.
     """
+    if profile is not None:
+        said = _under(profile, {"rich": rich, "tight": tight, "reach": reach,
+                                "kinds": kinds, "batch": batch,
+                                "summary_tool": summary_tool})
+        rich, tight, reach = said["rich"], said["tight"], said["reach"]
+        kinds, batch, summary_tool = said["kinds"], said["batch"], said["summary_tool"]
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,

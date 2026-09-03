@@ -347,12 +347,74 @@ def resolve_model(named: str) -> str:
     return str(found) if found is not None else named
 
 
+def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, list[str]]:
+    """Fill every flag ``up`` was not given from this model's measured profile.
+
+    "Not given" is "still the parser's own default", which is the only thing argparse can
+    be asked afterwards -- so a flag typed out with the value it already had is not
+    distinguished from one left alone, and neither is a mistake: the value is the same.
+    Anything typed differently wins, because a person naming a flag is overruling a
+    measurement on purpose.
+
+    Returns the profile (or None) and one line per field it filled, so `up` can say what
+    it took rather than serving a shape nobody asked for in silence.
+    """
+    from ml_stack.serve.profile import profile_for, resolved
+
+    found = profile_for(model)
+    if found is None:
+        return None, []
+    # The head is recorded by file name -- that is what a kept run knows it as -- and
+    # llama-server needs a path. 'auto' is left alone: `cmd_up` answers it below, and it is
+    # the one resolution that has to know which binary will serve.
+    head = found.draft
+    if head and head.lower() != "auto":
+        head = resolved(model, head, "", build=found.build)[0]
+    # dest -> the value the profile would have, for the flags whose default `up` defines
+    wanted = {
+        "context": found.seat_context * max(1, found.parallel),
+        "parallel": max(1, found.parallel),
+        "build": found.build,
+        "draft": head,
+        "spec": found.spec_type,
+        "spec_n_max": found.spec_draft_max,
+        "kv": found.cache_type,
+        "mmproj": found.mmproj,
+        "reasoning_budget": found.reasoning_budget,
+    }
+    defaults = {"context": DEFAULT_CONTEXT, "parallel": DEFAULT_PARALLEL, "build": "",
+                "draft": "", "spec": "", "spec_n_max": None, "kv": "", "mmproj": "",
+                "reasoning_budget": None}
+    took: list[str] = []
+    for dest, value in wanted.items():
+        if value in (None, "", ()) or getattr(args, dest, None) != defaults[dest]:
+            continue
+        setattr(args, dest, value)
+        took.append(f"{dest} {value}")
+    if found.extra_args:
+        took.append(" ".join(found.extra_args))
+    return found, took
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import LlamaServerBackend, UnknownFlag
 
     model = resolve_model(str(args.model))
     if model != str(args.model):
         print(f"resolved {args.model} -> {model}", file=sys.stderr)
+
+    profile = None
+    if getattr(args, "profile", False):
+        profile, took = from_profile(args, model)
+        if profile is None:
+            print(f"no measured profile for {model.rsplit('/', 1)[-1]}; serving as asked "
+                  "-- `ml-stack-bench report --profile` writes one from the store",
+                  file=sys.stderr)
+        else:
+            print(f"profile {profile.model}: " + (", ".join(took) or "nothing left to fill"),
+                  file=sys.stderr)
+            if profile.note:
+                print(f"  {profile.note}", file=sys.stderr)
 
     chosen = str(getattr(args, "binary", "") or "")
     build_name = str(getattr(args, "build", "") or "")
@@ -405,6 +467,11 @@ def cmd_up(args: argparse.Namespace) -> int:
                       spec_draft_ngl=getattr(args, "draft_ngl", None),
                       lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
                       override_tensor=tuple(getattr(args, "on_cpu", []) or ()),
+                      reasoning_budget=getattr(args, "reasoning_budget", None),
+                      # llama-server's own flags, which only a profile carries: `up` has no
+                      # flag of its own for `-ub 2048`, and a measurement that found one
+                      # worth 4.69x has to be able to reach the server somehow
+                      extra_args=tuple(profile.extra_args) if profile is not None else (),
                       cpu_moe=bool(getattr(args, "cpu_moe", False)))
 
     if getattr(args, "preflight_only", False):
@@ -766,6 +833,39 @@ def cmd_memory(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_profile(args: argparse.Namespace) -> int:
+    """``ml-stack-serve profile [MODEL]`` -- the shape a model measured best in.
+
+    Reads the records and prints them; measures nothing, serves nothing. With no model,
+    every record there is, so "what has been worked out about anything" is one command.
+    Exit 1 when a model was named and nothing has measured it -- a script asking whether a
+    shape is known gets an answer it can branch on.
+    """
+    from ml_stack.serve.profile import profile_for, profiles, said
+
+    named = str(getattr(args, "model", "") or "")
+    every = profiles()
+    if named:
+        found = profile_for(named, records=every)
+        if found is None:
+            print(f"nothing measured for {named.rsplit('/', 1)[-1]}. "
+                  "`ml-stack-bench sweep` measures it and `ml-stack-bench report --profile` "
+                  "writes the record.", file=sys.stderr)
+            return 1
+        chosen = [found]
+    else:
+        chosen = every
+    if getattr(args, "json", False):
+        print(json.dumps([one.as_dict() for one in chosen], indent=2))
+        return 0
+    if not chosen:
+        print("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
+              "`ml-stack-bench report --profile` writes the record.")
+        return 0
+    print("\n\n".join(said(one) for one in chosen))
+    return 0
+
+
 def cmd_down(args: argparse.Namespace) -> int:
     records = recorded_servers(STATE_FILE)
     entry = records.get(args.port)
@@ -912,6 +1012,23 @@ def main(argv: list[str] | None = None) -> int:
                     help="a small model to guess ahead, which the large one checks in one "
                          "pass -- a path, an hf: reference, or 'auto' to use the draft head "
                          "shipped beside the weights (the mtp- file in a QAT repository)")
+    up.add_argument("--reasoning-budget", type=int, default=None, metavar="TOKENS",
+                    dest="reasoning_budget",
+                    help="how many tokens a turn may think for before it is made to answer; "
+                         "0 turns the thinking off. A ceiling on n_predict cuts the answer "
+                         "instead, which is the wrong end")
+    up.add_argument("--profile", action="store_true",
+                    help="fill every flag not given from this model's measured profile -- "
+                         "the build, head, cache, thinking and llama-server flags that "
+                         "answered best (`ml-stack-serve profile MODEL` prints it). A flag "
+                         "given wins over the record")
+
+    prof = sub.add_parser("profile", help="the shape a model measured best in: what to "
+                                          "serve it with, and how to ask it")
+    prof.add_argument("model", nargs="?", default="",
+                      help="a model file, path or hf: reference; every record with none")
+    prof.add_argument("--json", action="store_true",
+                      help="the records as JSON, exactly as they are kept")
 
     fit_p = sub.add_parser(
         "fit", help="how many people fit at a given context, from measured KV numbers")
@@ -1056,7 +1173,8 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "memory": cmd_memory,
-            "fit": cmd_fit, "build": build.cmd_build}[args.cmd](args)
+            "fit": cmd_fit, "profile": cmd_profile,
+            "build": build.cmd_build}[args.cmd](args)
 
 
 if __name__ == "__main__":

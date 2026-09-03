@@ -41,9 +41,10 @@ from ml_stack.graph.bench.score import (
 )
 from ml_stack.graph.bench.show import drafted, kv_short, made
 
-__all__ = ["ASKINGS", "Doc", "across", "answering", "asking_of", "by_model",
-           "cache_of", "fit_for", "fits_named", "head_of", "model_of", "recommended_head",
-           "report", "thinking_of"]
+__all__ = ["ASKINGS", "Doc", "WAYS", "across", "answering", "asking_of", "build_of",
+           "by_model", "cache_of", "fit_for", "fits_named", "head_of", "model_of",
+           "profile_of", "recommended_head", "report", "thinking_of", "ways_of",
+           "write_profiles"]
 
 
 # The words a sweep puts in a label for the way it asked (`bench.halves`, `bench._ways`).
@@ -194,6 +195,133 @@ def fit_for(model: str, fits: Sequence[Any]) -> Any | None:
         if held and (held in name or name in held):
             return one
     return None
+
+
+# ---------------------------------------------------------------- the record it all sets
+
+# Every word a label can carry about the asking, and what it means to `converse`. Wider
+# than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
+# on a way rather than naming one, and a profile has to carry them or a model measured with
+# all three would be served with none.
+WAYS = ("tight", "batch", "kinds", "summary", "rich", "terse", "reach")
+
+
+def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
+    """The asking a run records, as the fields of a profile.
+
+    A run kept since `asked_with` carries ``asking`` -- the keywords `converse` was actually
+    handed -- and that is taken as it is: it is the record, and reading a label instead
+    would be inferring what is already written down.
+
+    Older runs have only the label, so it is read by whole word, never by substring -- a
+    model called ``tightfit`` is not a ``tight`` asking. ``loose`` is the one word that
+    means the *absence* of a way: it is the control the ranking runs were measured with,
+    and it is how ``tight=False`` is said.
+    """
+    said = one.get("asking")
+    if isinstance(said, Mapping) and said:
+        out: dict[str, Any] = {"tight": bool(said.get("tight", True))}
+        for way in ("batch", "kinds", "summary", "rich", "terse"):
+            out[way] = bool(said.get(way, False))
+        if said.get("reach"):
+            out["reach"] = int(said["reach"])
+        return out
+    words = {w for w in _WORD.split(str(one.get("label") or "").lower()) if w}
+    out = {"tight": "loose" not in words}
+    for way in ("batch", "kinds", "summary", "rich", "terse"):
+        out[way] = way in words
+    if "reach" in words:
+        from ml_stack.graph.bench.run import REACH
+
+        # the label says a run reached; it does not say how far, and `--also reach` is the
+        # only thing that puts the word there, so its own figure is what was measured
+        out["reach"] = int(REACH)
+    return out
+
+
+def build_of(server: Mapping[str, Any]) -> str:
+    """The named llama.cpp build a run was served on, "" for the managed current one.
+
+    A run records the binary's path, because that is what it started; a profile records the
+    *name*, because that is what `ml-stack-serve up --build` takes. A head withheld from
+    mainline loads on one build and no other, so this is not decoration.
+    """
+    from ml_stack.serve.build import NAMED_DIR
+
+    binary = Path(str((server or {}).get("binary") or ""))
+    try:
+        named = binary.resolve().relative_to(Path(NAMED_DIR).resolve())
+    except (OSError, ValueError):
+        # not under the named builds: `current`, a hand-named binary, or a path that no
+        # longer exists -- none of which is a build name anything could be asked for
+        try:
+            named = binary.relative_to(Path(NAMED_DIR))
+        except ValueError:
+            return ""
+    return named.parts[0] if named.parts else ""
+
+
+def profile_of(model: str, one: Mapping[str, Any]) -> Any:
+    """The measured shape a run records, as a `ml_stack.serve.profile.Profile`.
+
+    One row sets one record, and the record says which row: a shape composed from the
+    accuracy of one run and the speed of another is a configuration nobody ever served.
+    Nothing is guessed -- a field the run does not carry is left at its default, and `add`
+    keeps whatever the older record knew about the two fields a kept run cannot see (the
+    extra llama-server flags and the vision projector).
+    """
+    from ml_stack.hub import spec_for
+    from ml_stack.serve.profile import record
+
+    server = one.get("server") or {}
+    got = derived(one)
+    head = str(server.get("draft_model") or server.get("draft") or "")
+    slots = int(server.get("slots") or 0) or 1
+    context = int(server.get("context") or 0)
+    asked = one.get("asking") if isinstance(one.get("asking"), Mapping) else {}
+    sampling = asked.get("sampling") or server.get("sampling")
+    return record(
+        model,
+        build=build_of(server),
+        draft=head,
+        spec_type=spec_for(head) if head else "",
+        spec_draft_max=(int(server["spec_draft_max"])
+                        if server.get("spec_draft_max") is not None else None),
+        cache_type=str(server.get("cache_type") or ""),
+        reasoning_budget=(int(server["reasoning_budget"])
+                          if server.get("reasoning_budget") is not None else None),
+        seat_context=(context // slots) if context else 32768,
+        parallel=slots,
+        sampling=dict(sampling) if isinstance(sampling, Mapping) else {},
+        measured_at=str(one.get("at") or "")[:10],
+        label=str(one.get("label") or ""),
+        questions=int(got.get("questions") or 0),
+        right=float(got.get("right") or 0.0),
+        recall=float(got.get("recall") or 0.0),
+        precision=float(got.get("precision") or 0.0),
+        seconds_per_question=float(per_question(one)),
+        host=host_of(one),
+        note=(f"set from the best row of the store: `{one.get('label') or '?'}`, "
+              f"{int(got.get('questions') or 0)} question(s) at "
+              f"{float(got.get('right') or 0.0) * 100:.0f}% F1"),
+        **ways_of(one))
+
+
+def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
+                   path: Path | None = None) -> list[tuple[Any, Path]]:
+    """Write one record per model, from the row `across` ranks it by. Returns what it wrote.
+
+    The ranking is where this belongs: "best" there is already the best F1 among a model's
+    *longest* runs, which is the only comparison that means anything, and a profile written
+    from anything looser would be a shape chosen by a coin toss over two questions.
+    """
+    from ml_stack.serve.profile import add
+
+    out = []
+    for model, one in across(kept, full_n=full_n):
+        made_one = profile_of(model, one)
+        out.append((made_one, add(made_one, path=path)))
+    return out
 
 
 # ---------------------------------------------------------------- rendering both ways
@@ -508,6 +636,22 @@ def main(args: Any) -> int:
         kept = [r for r in kept
                 if any(w in model_of(r).lower() or w in str(r.get("label") or "").lower()
                        for w in wanted)]
+
+    if getattr(args, "profile", False):
+        # the file the serve path and the asking path read, set from the store rather than
+        # by hand -- see `write_profiles`. Nothing is printed but what was written, because
+        # a record quietly rewritten is the one thing here nobody would notice
+        written = write_profiles(kept, full_n=int(getattr(args, "full_n", 0) or 0),
+                                 path=(Path(str(getattr(args, "profiles", "") or "")).expanduser()
+                                       if getattr(args, "profiles", "") else None))
+        if not written:
+            print("no model has a run to write a profile from", file=sys.stderr)
+            return 1
+        for one, where in written:
+            print(f"{one.model}: {one.label or '?'} "
+                  f"({one.questions} q, {one.right * 100:.0f}% F1, "
+                  f"{one.seconds_per_question:.1f} s/q) -> {where}")
+        return 0
 
     rooms: list[int] = []
     for said in (getattr(args, "room", None) or []):

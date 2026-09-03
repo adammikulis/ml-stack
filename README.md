@@ -581,8 +581,9 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends |
 | `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown; `--ui` puts the same two panels up as an interactive page on loopback (also the app's **Fit** view) |
-| `ml-stack-serve status\|up\|down\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
+| `ml-stack-serve status\|up\|down\|profile\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in and `up --profile` fills every flag not given from it; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
 | `ml-stack-bench prepare\|run\|sweep\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`) |
+| `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
@@ -717,6 +718,63 @@ of every held server; `held()` says which ports are up.
 A port already serving something else is refused, with the field that differs named —
 the model, the number of slots, or the context each slot gets. Adopting a server of the
 wrong shape hands back a lease that cannot do what was asked of it.
+
+### A model's measured shape
+
+The `Shape` above was typed out by hand, and every value in it came from a bench run
+somebody remembered. A **profile** is that shape written down instead: one record per model
+file of the serving and the asking that measured best, and the row of the store that set
+it. `ml_stack/data/profiles.json` ships them and `~/.ml-stack/profiles.json`
+(`$MLSTACK_PROFILES_FILE`) layers this machine's own over them, exactly as `fit.json` does.
+
+```
+ml-stack-serve profile
+ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+ml-stack-serve up model.gguf --profile
+ml-stack-bench report --profile
+```
+
+```
+Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+  serve with  --context 32768 --parallel 1 --build unsloth --draft mtp-…-shared-Q8_0.gguf
+              --spec draft-mtp --spec-n-max 4 --kv q8_0 --mmproj auto --reasoning-budget 0
+              and -ub 2048 --spec-draft-p-min 0.5 -- llama-server's own, passed by --profile
+  ask with    tight + batch + kinds + summary + greedy
+  measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
+```
+
+Because no two models want the same shape. Flash-Next answers well only on a fork build,
+with the shared MTP head at four, a q8_0 cache, its thinking off, `-ub 2048`,
+`--spec-draft-p-min 0.5` and three ways of asking at once; gemma-4 wants its thinking left
+on, a different head at two, and none of those flags. Written as defaults each would be
+wrong for the other. Written per model they are what they are — and each record names the
+row of the store that measured it, on which machine and on what date, so a person can tell
+a measurement from a habit.
+
+From Python, both ends read the same record:
+
+```python
+from ml_stack.serve import profile_for, seat
+from ml_stack.graph.ask import converse
+
+found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf")
+client = seat(found.shape(port=8080, seats=4), index=request_number, n_predict=16384)
+answer = converse(question, graph, client, profile=found)   # or profile="model.gguf"
+```
+
+`Profile.shape()` is a `Shape` — the same one object, filled from the measurement rather
+than from memory — and `converse(profile=...)` applies the ways that model measured best
+*under* anything the call said outright, so overruling one on purpose still works. A model
+matched only by family (the same weights at another quantisation) comes back with `note`
+saying so: a shape measured on Q4_K_XL is the right place to start for IQ4_XS and is not a
+measurement of it.
+
+Nothing writes a record by hand. `ml-stack-bench report --profile` takes each model's best
+row — the same ranking `show --rank` writes, best F1 among that model's longest runs — and
+writes the build, head, cache, thinking, context and asking it was served with, saying in
+the record which row it was. The two things a kept run cannot see (llama-server's own extra
+flags and the vision projector) are carried from the record already there rather than
+erased.
 
 **Every load preflights first.** Before a process starts, `LlamaServerBackend.start` checks
 that every shard of the GGUF is present and complete (an `hf:` reference is resolved through
@@ -1300,6 +1358,59 @@ SIGTERM -- never a name -- which the child takes as an exit, so a model it put u
 down with it. `sweep --resume` then skips every model and way already kept today with the
 same questions, context and slots, so the killed sweep costs the model it died on and not
 the ones before it.
+
+### An evening as a file: `ml-stack-bench queue`
+
+A night of measurements is not one command, it is nine — a fairness sample, a knob matrix
+smoked one knob at a time, the hundred-question runs, the extraction runs, then the ranking
+and the report. That was a zsh script in a scratch directory, rewritten nine times in one
+evening (2026-09-02), with `&&` between each smoke and the run it guarded and a `--yes`
+typed onto every long line; nothing could say what was running or what was left.
+`ml-stack-bench queue FILE` is that evening as a file:
+
+```
+# the restart: every improvement smoked, compared on ten, then the hundred
+set FX=hf:unsloth/Some-Model-GGUF/UD-Q4_K_XL/Some-Model-UD-Q4_K_XL.gguf
+set BEST=--serve ${FX} --serve-draft auto --serve-kv q8_0 --context 65536 --parallel 2
+
+smoke: sweep ${BEST} --label-suffix=-v2 --smoke
+then:  sweep ${BEST} --label-suffix=-v2 --sample 10
+sweep ${BEST} --label-suffix=-v2
+show --rank docs/model-ranking.md
+```
+
+```
+ml-stack-bench queue docs/examples/flash-next-restart.queue --dry-run
+ml-stack-bench queue docs/examples/flash-next-restart.queue --yes --detach
+ml-stack-bench status          # step 3/9, what is left, and what it has kept so far
+ml-stack-bench stop            # the queue, and the step inside it
+```
+
+One `ml-stack-bench` invocation per line, `#` comments, `${VAR}` from a `set` line or from
+the environment, and a `smoke:` whose failure skips the `then:` under it and says so — the
+`&&` kept, so a shape that will not load is never measured on a hundred questions while the
+rest of the evening still happens. Every line is checked against this parser as the file is
+read, so `--sampel` on the last line is refused before the first model loads rather than
+after the eighth measurement, and an unset `${FX}` is refused rather than expanded to
+nothing and measured as the default model for six hours.
+
+It is not a second scheduler. Each step is its own `ml-stack-bench` process, so it brings
+the measuring lock, the self-check, the estimate and the smoke it already has, and a step
+of a queue and a run started by hand still wait for each other; the queue holds no lock and
+is only the thing that waits. `--yes` and `--ceiling` are given once at the top and passed
+to every step that takes them (never to `show`), `--resume` skips every step whose label the
+runs store already holds since the queue started, `--detach` puts the whole evening in the
+background the way one run does — one log, named after the queue file — and `status` grows a
+`queue` block naming the step in flight, the tally so far and what is left. A step that
+fails on its own does not end the queue, and the exit code is 1 if any step failed. Every
+summary line is one shape, so the log can be read by eye or by `grep`:
+
+```
+=== 21:41:07 step 3/9: sweep --serve hf:unsloth/Some-Model-GGUF -- ok (612s)
+=== 21:41:07 step 4/9: sweep --serve hf:unsloth/Some-Model-GGUF -- skipped (0s): its smoke (step 3) failed
+```
+
+`docs/examples/flash-next-restart.queue` is the seventh of those nine scripts, as a file.
 
 `history` answers "how much GPU time did that day cost, and how much of it kept nothing"
 from the logs directory alone, one line per detached measurement, oldest first:

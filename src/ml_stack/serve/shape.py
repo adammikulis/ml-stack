@@ -54,11 +54,21 @@ class Shape:
     # needs is read from what it is called, so a head is never served as the wrong method.
     draft: str = ""
     draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
+    # Which method the head implements. "" reads it off the head's own name, which is right
+    # whenever the name says so; a profile that measured one says it outright, and a head
+    # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
+    # asked for this way.
+    spec_type: str = ""
     mmproj: str = ""                    # the vision projector, so the model can see
     reasoning_budget: int | None = None  # tokens a turn may think for; 0 turns it off
     # A named build from `ml-stack-serve build --name`, or "" for the managed master: an
     # architecture or a head newer than any release loads only on the build that has it.
     build: str = ""
+    # Anything else llama-server takes that no field here names -- `-ub 2048`,
+    # `--spec-draft-p-min 0.5`. Measured flags, not remembered ones: they are here because a
+    # profile carries what a measurement found, and a run that found `-ub 2048` worth 4.7x
+    # has nowhere else to put it.
+    extra_args: tuple[str, ...] = ()
 
     @property
     def context(self) -> int:
@@ -79,13 +89,20 @@ class Shape:
             from ml_stack.hub import spec_for
 
             out["draft"] = self.draft
-            out["spec_type"] = spec_for(self.draft)
+            out["spec_type"] = self.spec_type or spec_for(self.draft)
+            if self.draft_n_max is not None:
+                out["spec_draft_max"] = self.draft_n_max
+        elif self.spec_type:
+            # a head inside the weights: the method, no -md, and how far it guesses
+            out["spec_type"] = self.spec_type
             if self.draft_n_max is not None:
                 out["spec_draft_max"] = self.draft_n_max
         if self.mmproj:
             out["mmproj"] = self.mmproj
         if self.reasoning_budget is not None:
             out["reasoning_budget"] = self.reasoning_budget
+        if self.extra_args:
+            out["extra_args"] = tuple(self.extra_args)
         return out
 
     def manager(self) -> Any | None:
