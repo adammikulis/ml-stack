@@ -538,3 +538,22 @@ def test_the_schema_verbs_are_the_glossed_verbs_and_the_instructions_name_each()
     assert list(ingest.VERBS) == allowed
     for verb, gloss in ingest.VERBS.items():
         assert f"{verb} -- {gloss}" in ingest.INSTRUCTIONS
+
+
+def test_a_gold_triple_written_the_other_way_round_is_still_found():
+    """`charter created_by orlan vesk` says `orlan vesk authored charter`; the first gold run
+    counted that a miss and the predicate unsayable."""
+    said = {"from": "Charter of Velthorne", "rel": "created_by", "to": "Orlan Vesk"}
+    gold = {"subject": "orlan vesk", "predicate": "authored",
+            "object": "charter of velthorne",
+            "predicate_aliases": ["author_of", "wrote"]}
+    assert ingest._matches(said, gold)
+    assert not ingest._matches({**said, "rel": "adopted_by"}, gold), "only its own inverse"
+    assert not ingest._matches({"from": "Orlan Vesk", "rel": "created_by",
+                                "to": "Charter of Velthorne"}, gold), \
+        "created_by the right way round is the wrong fact"
+
+
+def test_every_inverse_names_a_verb_the_schema_has():
+    allowed = ingest.schema()["properties"]["relations"]["items"]["properties"]["rel"]["enum"]
+    assert set(ingest.INVERSES) <= set(allowed)

@@ -91,6 +91,26 @@ precision on the Slack graph -- a model told what a verb means uses it for that 
 nothing else -- so every verb here has one, and a verb without a gloss is not added."""
 
 
+INVERSES: dict[str, frozenset[str]] = {
+    "created_by": frozenset({"authored", "wrote", "author_of", "created", "built", "proposed",
+                             "discovered", "invented", "founded"}),
+    "adopted_by": frozenset({"adopted", "enacted", "ratified"}),
+    "has_part": frozenset({"part_of"}),
+    "part_of": frozenset({"has_part", "contains", "has"}),
+    "causes": frozenset({"caused_by"}),
+    "produces": frozenset({"produced_by", "made_by"}),
+    "precedes": frozenset({"follows", "after"}),
+    "requires": frozenset({"required_by", "enables"}),
+}
+"""What each verb says when the ends are swapped: `X created_by Y` is `Y authored X`.
+
+A gold set written by hand names facts in whichever direction the sentence did, and a
+closed vocabulary says each one in one direction only. Matching the flipped triple through
+this map is how the gate tells 'the vocabulary has no word for it' from 'it has the word,
+pointing the other way' -- the first gold run counted 'the author authored the charter'
+as unsayable when the model had said `charter created_by the author`, the same fact."""
+
+
 def _verbs_line() -> str:
     return "The verb phrases, and what each means: " + "; ".join(
         f"{verb} -- {gloss}" for verb, gloss in VERBS.items()) + ".\n"
@@ -108,7 +128,10 @@ INSTRUCTIONS = (
     "`aliases` are other names this same section uses for the same thing: a plural, an "
     "abbreviation, a symbol. Not synonyms you happen to know.\n"
     "A relation joins two concept names from your own `concepts` list, using one of the "
-    "verb phrases the schema allows and no other. State only what the section states.\n"
+    "verb phrases the schema allows and no other. State only what the section states. "
+    "Both ends are concept names -- never a clause or a phrase such as 'lights the "
+    "system'. When no verb says what the text says, leave the relation out: a relation "
+    "with the wrong verb is worse than none.\n"
     + _verbs_line() +
     "A caption is marked in the text as [Figure 2.9]. For each figure, `shows` is what "
     "the picture shows in one line, and `concepts` are only those the caption or the "
@@ -695,7 +718,8 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
         out.found += len(said)
         for triple in wanted:
             words = {str(triple.get("predicate") or ""), *_names(triple.get("predicate_aliases"))}
-            if vocabulary and not (words & vocabulary):
+            flipped = {verb for verb, other_way in INVERSES.items() if words & other_way}
+            if vocabulary and not ((words | flipped) & vocabulary):
                 out.unsayable.append({"passage": str(passage.get("passage_id") or ""),
                                       "predicate": str(triple.get("predicate") or "")})
         taken: set[int] = set()
@@ -722,12 +746,21 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
 
 
 def _matches(said: Mapping[str, Any], triple: Mapping[str, Any]) -> bool:
-    return (_same(str(said.get("from") or ""), str(triple.get("subject") or ""),
-                  _names(triple.get("subject_aliases")))
-            and _same(str(said.get("rel") or ""), str(triple.get("predicate") or ""),
+    """The extracted relation says the gold triple -- as written, or the other way round
+    through `INVERSES` (`charter created_by orlan vesk` says `orlan vesk authored charter`)."""
+    subject, subject_aliases = str(triple.get("subject") or ""), _names(triple.get("subject_aliases"))
+    obj, obj_aliases = str(triple.get("object") or ""), _names(triple.get("object_aliases"))
+    rel = str(said.get("rel") or "")
+    if (_same(str(said.get("from") or ""), subject, subject_aliases)
+            and _same(rel, str(triple.get("predicate") or ""),
                       _names(triple.get("predicate_aliases")))
-            and _same(str(said.get("to") or ""), str(triple.get("object") or ""),
-                      _names(triple.get("object_aliases"))))
+            and _same(str(said.get("to") or ""), obj, obj_aliases)):
+        return True
+    words = {str(triple.get("predicate") or ""), *_names(triple.get("predicate_aliases"))}
+    if not (words & INVERSES.get(rel, frozenset())):
+        return False
+    return (_same(str(said.get("from") or ""), obj, obj_aliases)
+            and _same(str(said.get("to") or ""), subject, subject_aliases))
 
 
 def _passage_unit(passage: Mapping[str, Any]) -> Any:
