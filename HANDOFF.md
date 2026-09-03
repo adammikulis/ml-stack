@@ -101,16 +101,15 @@ nothing (the extra turns went unused).
 ## Improvements queued 2026-09-03 afternoon (Adam: "knock them out")
 
 Lifecycle and safety
-- [ ] **One `Run`/lease object across the stack.** The bench, the ingest, the page and
-  `seat()` each build their own lease from the profile; one object carrying shape, asking
-  and client so a knob cannot leak or drift (`measure.asking()`'s kwarg list is the seam).
-- [ ] **The ingest onto `jobs`.** `ml_stack.jobs` (record/alive/wait/stop/status) now backs
-  the bench's detach and `ml-stack-bench wait`; the ingest still keeps its own
-  `ingesting.json`. Swap it: `jobs.record("ingest", pid=child.pid, argv=rest, log=str(log),
-  home=HOME / "jobs")` in `detach`, `jobs.alive` for `_recorded_alive`, `jobs.wait`,
-  `jobs.stop(..., wait=STOP_WAIT)` with the before/after-fold report layered on top; then
-  `ml-stack-jobs status` (a tiny CLI over `jobs.status`) shows every kind at once.
-  Training has no detach yet; when it gets one it records the same way.
+- [ ] **The ingest takes a `Run`.** `ml_stack.ingest.serving` still builds its own `Shape` from a
+  profile and its own client beside it (`profile_for(...).shape(port=, seats=)`), so an
+  ingest and a bench row over one model can lease two shapes and llama.cpp reloads the
+  weights. `Profile.run()` gives the whole thing -- shape, asking, client -- and
+  `bench.served`, `AskRoutes.seated` and `serve.seat` already take it.
+- [ ] **Training records its long runs as a job.** `ml-stack-train-run` has no detach and no
+  record; the bench and the ingest both keep theirs through `ml_stack.jobs`, so
+  `ml-stack-jobs status` lists everything but a training run. When training gets a detach it
+  records the same way (kind `train`).
 Extraction quality
 - [ ] **Reconcile on the way in, everywhere.** Adam: "the same dedupe mechanism should be
   used whenever the model is reading a new thing or learning something new and saving to
@@ -121,17 +120,9 @@ Extraction quality
   model as judge, the unit text as source). Still to wire: ai_ceo's pipeline merge
   (`merge.py`, with `data/aliases.json` as `written`), `graph.thread` when an answer's
   entities are kept, and the world simulator's emit.
-Tests and hygiene
-- [ ] **The ingest module split** into a package, one file per concern, same public names.
 
 ## Library
 
-- [ ] **A `Run` object instead of twenty keyword arguments.** `served()` forwards most of what
-  it takes and grew five more tonight (`serving`, `trace`, `reach`, the profile's fields);
-  what is about the serving, the asking and the client is implicit, which is how `tight`
-  leaked to `Client.__init__` once. Build one typed object from argv with three sections
-  (`Shape`, the asking record, the client) and pass it; `measure.asking()`'s kwarg list is
-  the seam to collapse.
 - [ ] **`ml-stack-models layout MODEL`**: the attention layout off the GGUF header in one
   paragraph -- which layers hold a cache, which are recurrent, sliding (window, pattern,
   `key_length_swa`), shared, plus compress ratios, indexers, experts, and any lookup-table

@@ -1,11 +1,10 @@
 """A record for a command that outlives the terminal that started it.
 
-The ingest keeps one of these by hand (``ingesting.json``, ``stop``, ``wait``); the bench
-keeps another (``measuring.json``, ``status``, ``tail``, ``stop``); training has none. Each
-reinvented the same three facts -- the pid, where its log is, and whether it is still alive
--- in its own file. This module is that record, once: one JSON file per *kind* of long
-command, so ``wait`` and ``stop`` never need a hand-written ``pgrep`` loop and a command that
-chains after another is always ``wait && next``.
+One JSON file per *kind* of long command -- ``bench``, ``ingest`` -- holding the pid, the
+argv, the log and when it started, so ``wait`` and ``stop`` never need a hand-written
+``pgrep`` loop and a command that chains after another is always ``wait && next``.
+``ml-stack-jobs status`` prints every kind at once. Training has no detach yet; when it gets
+one it records the same way.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -27,7 +27,8 @@ HOME = Path(os.environ.get("MLSTACK_JOBS_HOME") or "~/.ml-stack/jobs").expanduse
 STOP_WAIT = 60.0
 """How long `stop` waits for the pid to end before saying it is still going."""
 
-__all__ = ["Job", "record", "alive", "wait", "stop", "status", "HOME", "STOP_WAIT"]
+__all__ = ["Job", "record", "alive", "held", "wait", "stop", "status", "main",
+           "HOME", "STOP_WAIT"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,12 @@ def _wait_for(pid: int, seconds: float) -> bool:
             return False
         time.sleep(0.05)
     return True
+
+
+def held(kind: str, *, home: Path | None = None) -> dict[str, Any]:
+    """The record ``kind`` last wrote -- pid, argv, log, started -- or ``{}`` when there is
+    none. Says nothing about whether the pid is still running; `alive` does that."""
+    return _read(_path(kind, home))
 
 
 def alive(kind: str, *, home: Path | None = None) -> int:
@@ -190,3 +197,37 @@ def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> i
         if held.get("log"):
             say(f"  log: {held['log']}")
     return 0
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """``ml-stack-jobs``: what long commands this machine has recorded, and waiting on or
+    stopping one."""
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        prog="ml-stack-jobs", allow_abbrev=False,
+        description="The long commands this machine records -- a bench sweep, an ingest "
+                    "reading a shelf -- with the pid, the argv and the log of each. `status` "
+                    "lists them; `wait KIND` blocks until one has ended, so the next command "
+                    "is `wait && next`; `stop KIND` ends it.")
+    ap.add_argument("word", choices=("status", "wait", "stop"))
+    ap.add_argument("kind", nargs="?", default="", metavar="KIND",
+                    help="which job -- `bench`, `ingest`, whatever wrote the record; "
+                         "`status` names them all")
+    ap.add_argument("--home", default="", metavar="DIR",
+                    help=f"where the records are (default: {HOME})")
+    args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    home = Path(args.home).expanduser() if args.home else None
+    if args.word == "status":
+        return status(home=home)
+    if not args.kind:
+        print(f"error: {args.word} needs a KIND -- `ml-stack-jobs status` names them",
+              file=sys.stderr)
+        return 2
+    if args.word == "wait":
+        return wait(args.kind, home=home)
+    return stop(args.kind, home=home)
+
+
+if __name__ == "__main__":  # pragma: no cover - the entry point is `ml-stack-jobs`
+    raise SystemExit(main())

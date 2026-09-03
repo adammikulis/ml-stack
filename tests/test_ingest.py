@@ -17,7 +17,7 @@ import pytest
 from conftest import json_reply
 from test_sources_pdf import a_textbook
 
-from ml_stack import ingest
+from ml_stack import ingest, jobs
 from ml_stack.contracts import grammar_for
 
 pytest.importorskip("pymupdf")
@@ -641,19 +641,38 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
 
 
 def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, capsys):
-    import json as _json
     import subprocess
     import sys
 
     assert ingest.stop(home=tmp_path) == 1
     assert "no detached ingest" in capsys.readouterr().out
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
-    (tmp_path / "ingesting.json").write_text(_json.dumps({"pid": child.pid}))
+    jobs.record("ingest", pid=child.pid, home=tmp_path / "jobs")
     try:
         assert ingest.stop(home=tmp_path) == 0
         child.wait(timeout=10)          # stop waits for it, and reaps it if it is a child
-        assert not (tmp_path / "ingesting.json").exists()
+        assert not (tmp_path / "jobs" / "ingest.json").exists()
         assert "--resume" in capsys.readouterr().out
+    finally:
+        if child.poll() is None:
+            child.kill()
+
+
+def test_a_run_recorded_before_the_record_moved_into_jobs_is_still_stopped(tmp_path, capsys):
+    """An ``ingesting.json`` written by the code that kept its own record: `stop` adopts it
+    as this machine's ``ingest`` job and ends it."""
+    import json as _json
+    import subprocess
+    import sys
+
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    (tmp_path / "ingesting.json").write_text(_json.dumps({"pid": child.pid, "argv": []}))
+    try:
+        assert ingest.stop(home=tmp_path) == 0
+        child.wait(timeout=10)
+        assert "--resume" in capsys.readouterr().out
+        assert not (tmp_path / "ingesting.json").exists(), "the old record is taken over"
+        assert not (tmp_path / "jobs" / "ingest.json").exists()
     finally:
         if child.poll() is None:
             child.kill()
@@ -1096,8 +1115,8 @@ def test_stop_waits_for_the_run_and_says_the_fold_landed(tmp_path, capsys):
     ready = tmp_path / "ready"
     child = subprocess.Popen([sys.executable, "-c", folding,
                               str(ingest.Progress.beside(store)), str(ready)])
-    (tmp_path / "ingesting.json").write_text(json.dumps(
-        {"pid": child.pid, "argv": ["book.pdf", "--out", str(store)]}))
+    jobs.record("ingest", pid=child.pid, argv=["book.pdf", "--out", str(store)],
+                home=tmp_path / "jobs")
     try:
         _until(ready.is_file, "the run installed its stop handler")
         assert ingest.stop(home=tmp_path) == 0
@@ -1118,7 +1137,7 @@ def test_stop_says_so_when_the_run_will_not_end(tmp_path, capsys):
             "time.sleep(60)\n")
     ready = tmp_path / "ready"
     child = subprocess.Popen([sys.executable, "-c", deaf, str(ready)])
-    (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+    jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
     try:
         _until(ready.is_file, "the run is ignoring SIGTERM")
         assert ingest.stop(home=tmp_path, wait=1.0) == 1

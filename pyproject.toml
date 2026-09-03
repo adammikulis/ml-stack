@@ -108,6 +108,8 @@ ml-stack-store = "ml_stack.graph.store_cli:main"
 ml-stack-world = "ml_stack.world.cli:main"
 # a shelf of documents read section by section into one graph, with what each cost
 ml-stack-ingest = "ml_stack.ingest:main"
+# the long commands this machine has recorded: what is running, waiting on one, stopping it
+ml-stack-jobs = "ml_stack.jobs:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]

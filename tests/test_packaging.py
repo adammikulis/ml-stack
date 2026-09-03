@@ -68,9 +68,12 @@ def test_every_console_script_points_at_something_that_exists():
     assert scripts, "the package installs no commands"
     for name, target in scripts.items():
         module, _, attr = target.partition(":")
-        path = REPO / "src" / Path(*module.split(".")).with_suffix(".py")
-        assert path.exists(), f"{name} points at {module}, which is not a file"
-        assert f"def {attr}(" in path.read_text(), f"{module} has no {attr}()"
+        where = REPO / "src" / Path(*module.split("."))
+        path = where / "__init__.py" if where.is_dir() else where.with_suffix(".py")
+        assert path.exists(), f"{name} points at {module}, which is neither module nor package"
+        text = path.read_text()
+        held = f"def {attr}(" in text or f" {attr} as {attr}," in text
+        assert held, f"{module} has no {attr}()"
 
 
 # -- the release page ----------------------------------------------------

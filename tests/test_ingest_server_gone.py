@@ -1,7 +1,9 @@
 """When the model server goes away mid-shelf, the run stops -- it does not write two hundred
 failures in a minute, and none of them count against the units."""
 
-from ml_stack import ingest
+from pathlib import Path
+
+from ml_stack import ingest, jobs
 from tests.test_ingest import a_shelf
 
 
@@ -43,16 +45,46 @@ def test_the_run_stops_when_its_server_is_gone(tmp_path, server, monkeypatch, ca
     assert len(entries) == 1 and next(iter(entries.values()))["attempts"] == 0
 
 
+def test_detach_records_the_run_as_this_machines_ingest_job(tmp_path, monkeypatch, capsys):
+    """`detach` writes the pid, the argv and the log through `ml_stack.jobs`, and the same
+    record is what `stop`, `wait` and `ml-stack-jobs status` read."""
+    import subprocess
+    import sys
+
+    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    started = {}
+    popen = subprocess.Popen
+
+    def sleeping(command, **kw):
+        started["command"] = list(command)
+        started["child"] = held = popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        return held
+
+    monkeypatch.setattr(subprocess, "Popen", sleeping)
+    argv = ["book.pdf", "--out", str(tmp_path / "s"), "--detach"]
+    try:
+        assert ingest.main(argv) == 0
+        assert started["command"][1:3] == ["-m", "ml_stack.ingest"], "the module, not a shell"
+        assert "--detach" not in started["command"]
+        held = jobs.held("ingest", home=tmp_path / "jobs")
+        assert held["pid"] == started["child"].pid
+        assert held["argv"] == [a for a in argv if a != "--detach"]
+        assert held["log"].endswith(".log") and Path(held["log"]).is_file()
+        assert jobs.alive("ingest", home=tmp_path / "jobs") == started["child"].pid
+    finally:
+        started["child"].kill()
+        started["child"].wait()
+
+
 def test_a_second_detach_is_refused_while_the_recorded_run_is_still_ending(tmp_path, monkeypatch, capsys):
     """A run beside one still folding its way out adopted its server and lost it."""
-    import json
     import subprocess
     import sys
 
     monkeypatch.setattr(ingest, "HOME", tmp_path)
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
         assert ingest.main(["book.pdf", "--out", str(tmp_path / "s"), "--detach"]) == 2
         assert "still running or still folding" in capsys.readouterr().err
     finally:
@@ -61,7 +93,6 @@ def test_a_second_detach_is_refused_while_the_recorded_run_is_still_ending(tmp_p
 
 
 def test_stop_keeps_the_record_while_the_run_is_still_folding(tmp_path, capsys):
-    import json
     import subprocess
     import sys
 
@@ -72,11 +103,11 @@ def test_stop_keeps_the_record_while_the_run_is_still_folding(tmp_path, capsys):
                               "print('ready', flush=True); time.sleep(60)"], stdout=subprocess.PIPE)
     try:
         assert child.stdout.readline().strip() == b"ready", "the handler is in place"
-        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
         assert ingest.stop(home=tmp_path, wait=1.0) == 1
         out = capsys.readouterr().out
         assert "still being written" in out and "no new run starts beside it" in out
-        assert (tmp_path / "ingesting.json").exists(), "the record stays until it has ended"
+        assert (tmp_path / "jobs" / "ingest.json").exists(), "the record stays until it ends"
         assert ingest._recorded_alive(tmp_path) == child.pid
     finally:
         child.kill()
@@ -84,7 +115,6 @@ def test_stop_keeps_the_record_while_the_run_is_still_folding(tmp_path, capsys):
 
 
 def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, capsys):
-    import json
     import subprocess
     import sys
     import threading
@@ -92,7 +122,7 @@ def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, capsys):
     assert ingest.wait(home=tmp_path) == 0
     assert "no detached ingest is running" in capsys.readouterr().out
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(2)"])
-    (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+    jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
     done = []
     thread = threading.Thread(target=lambda: done.append(ingest.wait(home=tmp_path, every=1.0)))
     thread.start()
@@ -102,14 +132,13 @@ def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, capsys):
 
 
 def test_a_judged_tidy_refuses_beside_a_live_run(tmp_path, monkeypatch, capsys):
-    import json
     import subprocess
     import sys
 
     monkeypatch.setattr(ingest, "HOME", tmp_path)
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        (tmp_path / "ingesting.json").write_text(json.dumps({"pid": child.pid, "argv": []}))
+        jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
         assert ingest.main(["tidy", "--out", str(tmp_path / "s"), "--model", "x"]) == 2
         assert "wait` first" in capsys.readouterr().err
     finally:

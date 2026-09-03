@@ -695,6 +695,7 @@ model is in use, and returns the counts, including `messages_per_model_call`.
 | `ml-stack-bench prepare\|run\|sweep\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`) |
 | `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
 | `ml-stack-ingest DOCS --out STORE` | a shelf of documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per book with `entities.fold`, and written with the book, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, and `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate) |
+| `ml-stack-jobs status\|wait KIND\|stop KIND` | the long commands this machine has recorded -- a detached bench sweep, an ingest reading a shelf -- with the pid, the argv and the log of each: what is running, blocking until one has ended so the next command is `wait && next` rather than a `pgrep` loop written by hand, and ending one |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
@@ -923,16 +924,31 @@ from ml_stack.serve import profile_for, seat
 from ml_stack.graph.ask import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf")
-client = seat(found.shape(port=8080, seats=4), index=request_number, n_predict=16384)
-answer = converse(question, graph, client, profile=found)   # or profile="model.gguf"
+run = found.run(port=8080, seats=4, n_predict=16384)
+client = seat(run, index=request_number)
+answer = converse(question, graph, client, profile=run)     # or profile="model.gguf"
 ```
 
-`Profile.shape()` is a `Shape` — the same one object, filled from the measurement rather
-than from memory — and `converse(profile=...)` applies the ways that model measured best
-*under* anything the call said outright, so overruling one on purpose still works. A model
-matched only by family (the same weights at another quantisation) comes back with `note`
-saying so: a shape measured on Q4_K_XL is the right place to start for IQ4_XS and is not a
-measurement of it.
+`Profile.run()` is a **`Run`**: the whole configuration in one object, in three sections
+that different code reads. `run.shape` is the `Shape` the server is leased in, `run.asking`
+is an `Asking` — the ways `converse` is called with — and `run.talking` is a `Talking`, what
+the `Client` is built from. `run.lease()`, `run.converse()` and `run.client()` are the only
+places each becomes arguments, and `run.over(cache_type="f16", few=True, temperature=0.7)`
+lays a knob over it, routed to the section that owns it rather than to whichever call takes
+`**kwargs` next.
+
+Hand the same run to the bench (`bench.served(run, ...)`), to a page (`AskRoutes.run`, and
+`seated()` hands out a seat of it) and to `seat` and they lease one shape and ask one way by
+construction. Three places each building their own from the record is how a knob about the
+asking reached `Client.__init__` and took an 87G load down with it, and how two of them
+could lease one port two ways — which llama.cpp answers by stopping the server and loading
+the weights again.
+
+`converse(profile=...)` takes a `Run`, a `Profile` or a model name, and applies the ways
+that model measured best *under* anything the call said outright, so overruling one on
+purpose still works. A model matched only by family (the same weights at another
+quantisation) comes back with `note` saying so: a shape measured on Q4_K_XL is the right
+place to start for IQ4_XS and is not a measurement of it.
 
 Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model, **the
 fastest row whose F1 the questions could not tell apart from the best** — among that model's
