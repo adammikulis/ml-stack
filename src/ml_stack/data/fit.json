@@ -15,7 +15,13 @@
     "parallel": 2,
     "kv_layers": 15,
     "recurrent_layers": 0,
-    "swa_cells": 1024
+    "swa_cells": 1024,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
@@ -33,7 +39,13 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 0,
-    "swa_cells": 1024
+    "swa_cells": 1024,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
@@ -51,7 +63,13 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 0,
-    "swa_cells": 1024
+    "swa_cells": 1024,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "gpt-oss-120b-mxfp4-00001-of-00003.gguf",
@@ -69,7 +87,13 @@
     "parallel": 2,
     "kv_layers": 36,
     "recurrent_layers": 0,
-    "swa_cells": 768
+    "swa_cells": 768,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "gpt-oss-120b-mxfp4-00001-of-00003.gguf",
@@ -87,7 +111,13 @@
     "parallel": 2,
     "kv_layers": 36,
     "recurrent_layers": 0,
-    "swa_cells": 768
+    "swa_cells": 768,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
@@ -105,7 +135,13 @@
     "parallel": 2,
     "kv_layers": 16,
     "recurrent_layers": 64,
-    "swa_cells": 0
+    "swa_cells": 0,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-27B-UD-Q4_K_XL.gguf",
@@ -123,7 +159,13 @@
     "parallel": 2,
     "kv_layers": 16,
     "recurrent_layers": 64,
-    "swa_cells": 0
+    "swa_cells": 0,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
@@ -141,7 +183,13 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 48,
-    "swa_cells": 16384
+    "swa_cells": 16384,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
@@ -159,7 +207,13 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 48,
-    "swa_cells": 16384
+    "swa_cells": 16384,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-Flash-Next-UD-IQ4_XS-00001-of-00003.gguf",
@@ -177,7 +231,13 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 48,
-    "swa_cells": 16384
+    "swa_cells": 16384,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   },
   {
     "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
@@ -195,6 +255,36 @@
     "parallel": 2,
     "kv_layers": 24,
     "recurrent_layers": 48,
-    "swa_cells": 16384
+    "swa_cells": 16384,
+    "weights_gpu": 0,
+    "weights_cpu": 0,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
+  },
+  {
+    "model": "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
+    "weights": 111334654784,
+    "draft": 2786568256,
+    "room": 118111600640,
+    "per_token": 26112,
+    "per_seq": 632584929,
+    "compute": 545144176,
+    "cache_type": "q8_0",
+    "spec": "draft-mtp",
+    "build": "92cedc867",
+    "measured_at": "2026-09-03T02:14:18Z",
+    "context": 65536,
+    "parallel": 2,
+    "kv_layers": 24,
+    "recurrent_layers": 48,
+    "swa_cells": 32768,
+    "weights_gpu": 84623679815,
+    "weights_cpu": 29475565732,
+    "cpu_tensors": "",
+    "table_bytes": 0,
+    "weights_resident": 0,
+    "resident_after": 0
   }
 ]

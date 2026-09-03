@@ -27,12 +27,16 @@ measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is t
 - **Memory is not the file size.** The build is 103.7G on disk: ~77G of everything else (the
   experts are Q8_0 -- `blk.N.ffn_down_exps` is 0.8G a layer) plus the 26.8G table, which is
   mmapped and paged in row by row as n-grams are seen. Real Mem sat at ~90G through a day of
-  questions. Capacity planning starts from the GPU-mapped weights plus a measured resident
-  peak, never the file size (`ml-stack-serve fit --tensors`, `fit --measure`).
+  questions. Measured split in the serving shape (`fit`, q8_0 cache, 32k x 2, 2026-09-02
+  evening): 106.3G on disk with the head, 78.8G of it in GPU memory and 27.5G mapped on the
+  CPU -- the table -- so the GPU holds ~79G of weights and the resident peak over a hundred
+  questions was 99G. Capacity planning starts from the GPU-mapped weights plus a measured
+  resident peak, never the file size (`ml-stack-serve fit --tensors`, `fit --measure`).
 - **The cache is tiny**: 48K bytes a token on the 12 attention layers at f16 (26K at q8_0),
   plus a fixed ~257M a sequence for the recurrent state and sliding cells (~594M with the
   MTP head's own cache). At 32k a user costs 1.8G (f16) or ~1.4G (q8_0). Users at 32k on
-  110G: 12 at f16, 15 at q8_0, 30 at 16k a slot. (`fit`, 2026-09-02.)
+  110G: 12 at f16 when the whole file is counted; 22 at q8_0 once the table is counted on
+  the CPU side where it lives, 31 at 16k a slot. (`fit`, 2026-09-02.)
 - **Take a K-quant, not an IQ quant, on Metal**: UD-Q4_K_XL answered in 44 s a question at
   64% F1 where UD-IQ4_XS took 70 s at 54% -- the IQ lookup-table kernels are slow on Metal.
   (The table tensor itself is IQ4_NL in both builds; it is a gather, so that does not matter.)

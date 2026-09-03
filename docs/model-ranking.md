@@ -22,4 +22,4 @@ Runs whose F1 fell more than 5 points under their model's, so their cost was not
 
 - `Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf` rejected: `Qwen3.8-Flash--plain-kv-q8_0-rb0` F1 -11 pts (100 q, 25.4 s/question)
 
-*142 run(s) not ranked: fewer than 20 questions, which is a smoke run proving the path works rather than a measurement -- it supplies neither accuracy nor cost. 91 run(s) not ranked: not measured over the community that ships with this package.*
+*159 run(s) not ranked: fewer than 20 questions, which is a smoke run proving the path works rather than a measurement -- it supplies neither accuracy nor cost. 91 run(s) not ranked: not measured over the community that ships with this package.*
