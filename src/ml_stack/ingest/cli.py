@@ -287,6 +287,10 @@ def parser() -> argparse.ArgumentParser:
                          "reads one unit at a time and never splits the GPU (default: "
                          "%(default)s)")
     ap.add_argument("--serve-port", type=int, default=8099)
+    ap.add_argument("--no-queue", action="store_true",
+                    help="refuse at once when the bench is measuring, instead of waiting "
+                         "for it (the ingest and the bench take one lock, so one job is on "
+                         "the GPU at a time)")
     ap.add_argument("--cache", default="", metavar="DIR",
                     help="keep each extraction under this directory and do not ask twice "
                          "for the same section and schema")
@@ -318,10 +322,20 @@ def _parsed(rest: Sequence[str]) -> Any:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """``ml-stack-ingest``: a shelf of documents into one graph, or a gold set scored."""
-    from ml_stack import ingest
+    from ml_stack.lock import Busy
 
     rest = list(sys.argv[1:] if argv is None else argv)
     args = _parsed(rest)
+    try:
+        return _dispatch(args, rest)
+    except Busy as why:
+        print(f"error: {why}. The bench is measuring; wait for it, or leave out --no-queue "
+              f"to queue behind it.", file=sys.stderr)
+        return 3
+
+
+def _dispatch(args: Any, rest: list[str]) -> int:
+    from ml_stack import ingest
 
     if args.docs[:1] == ["stop"]:
         return stop()

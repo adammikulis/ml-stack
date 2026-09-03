@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 
 import pytest
 from conftest import json_reply
@@ -1270,3 +1271,69 @@ def test_a_reads_file_that_cannot_be_written_is_left_as_it_was(tmp_path):
 
     assert path.read_text() == before
     assert list(tmp_path.glob("*.part")) == [], "and no half-written file is left behind"
+
+
+def _gold_with_a_fake_model(tmp_path, monkeypatch):
+    """A `--gold --model` run whose server is a fake and whose scoring is a no-op."""
+    import contextlib
+
+    seen = {}
+
+    class Up:
+        base_url = "http://127.0.0.1:8099"
+
+    @contextlib.contextmanager
+    def fake_serve(model, manager=None, **lease):
+        seen["lease"] = lease
+        yield Up()
+
+    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: None)
+    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    monkeypatch.setattr("ml_stack.ingest.cli.gold_score",
+                        lambda *a, **k: ingest.Scored())
+    monkeypatch.setattr("ml_stack.ingest.cli.gold_lines", lambda scored: [])
+    (tmp_path / "g.json").write_text(
+        '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
+    return ["--gold", str(tmp_path / "g.json"), "--model", "x"], seen
+
+
+def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, monkeypatch,
+                                                                    capsys):
+    """One job on the GPU: the ingest waits on the same lock file the bench takes, says it
+    is waiting for the bench, and leases on its own port rather than beside whatever the
+    bench left there."""
+    import contextlib
+
+    import ml_stack.graph.bench as bench
+    import ml_stack.lock
+
+    taken = {}
+
+    @contextlib.contextmanager
+    def recording(what, *, wait=True, timeout=0.0, announce=print):
+        taken["path"], taken["wait"], taken["announce"] = Path(what), wait, announce
+        yield Path(what)
+
+    monkeypatch.setattr(ml_stack.lock, "only_one", recording)
+    argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
+    assert ingest.main(argv) == 0
+    assert taken["path"] == bench.HOME / "measuring.lock"
+    assert taken["wait"] is True
+    assert seen["lease"]["roam"] is False
+    taken["announce"]("waiting for measuring.lock, held by pid 7")
+    assert "waiting for the bench" in capsys.readouterr().out
+
+
+def test_no_queue_is_refused_at_once_while_the_bench_holds_the_lock(tmp_path, monkeypatch,
+                                                                    capsys):
+    import ml_stack.graph.bench as bench
+    from ml_stack.lock import only_one
+
+    argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
+    with only_one(bench.HOME / "measuring.lock", wait=False, announce=lambda *a: None):
+        assert ingest.main([*argv, "--no-queue"]) == 3
+    err = capsys.readouterr().err
+    assert "held by pid" in err and "--no-queue" in err
+    assert "lease" not in seen, "nothing was served"
+    assert ingest.main(argv) == 0, "and with the lock free the same run goes through"

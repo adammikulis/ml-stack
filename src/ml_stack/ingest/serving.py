@@ -10,11 +10,12 @@ from typing import Any
 __all__ = ["SERVE_EXTRA", "_alive", "_find_model", "_run", "_serving", "_serving_said"]
 
 
-SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False}
+SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False,
+                               "roam": False}
 """What `serve` takes that no `Shape` field names: how long the server is given to come up,
-how much of a prompt it may reuse from the last one, and that it is not warmed. The
-ingest's, not the profile's -- a measurement of how a model answers says nothing about
-them."""
+how much of a prompt it may reuse from the last one, that it is not warmed, and that it is
+served on the port asked for and no other. The ingest's, not the profile's -- a measurement
+of how a model answers says nothing about them."""
 
 
 def _sampling(args: Any) -> dict[str, Any]:
@@ -101,24 +102,31 @@ def _run(args: Any, *, resolve: bool = True,
 
 @contextmanager
 def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
-    """A client for the run: one lease, held throughout, in the model's measured shape.
+    """A client for the run: one lease, held throughout, in the model's measured shape,
+    under the bench's measuring lock so the two never share the GPU.
 
     The same branch the extract bench takes, and for the same reason: a model served bare
     when a profile measured it with a build, a head and a cache type is a different program
     from the one the measurement was about.
     """
+    from ml_stack.graph import bench
+    from ml_stack.lock import only_one
+
     run, _measured = _run(args, say=say)
-    if not getattr(args, "model", ""):
-        yield run.client(args.base_url)
-        return
+    with only_one(bench.HOME / "measuring.lock",
+                  wait=not getattr(args, "no_queue", False),
+                  announce=lambda line: say(f"waiting for the bench -- {line}")):
+        if not getattr(args, "model", ""):
+            yield run.client(args.base_url)
+            return
 
-    from ml_stack.serve.manager import serve
+        from ml_stack.serve.manager import serve
 
-    began = time.time()
-    with serve(run.model, manager=run.shape.manager(), **run.lease(),
-               **SERVE_EXTRA) as server:
-        say(f"    up in {time.time() - began:.0f}s")
-        yield run.client(server.base_url, index=0)
+        began = time.time()
+        with serve(run.model, manager=run.shape.manager(), **run.lease(),
+                   **SERVE_EXTRA) as server:
+            say(f"    up in {time.time() - began:.0f}s")
+            yield run.client(server.base_url, index=0)
 
 
 def _alive(client: Any) -> bool:
