@@ -54,7 +54,7 @@ HOME = Path(os.environ.get("MLSTACK_INGEST_HOME") or "~/.ml-stack/ingest").expan
 """Where a detached run's log and its record of itself live. Not the store: the store is
 the caller's, named by ``--out``."""
 
-PER_SECTION = 600.0     # a ceiling, not a budget: one long unit hit 300 and was lost
+PER_SECTION = 1200.0    # a ceiling, not a budget: a legitimate unit writes 6k tokens at ~30 tok/s on two workers
 WORKERS = 2
 """The most one section may take before it is recorded as timed out and the next is read."""
 
