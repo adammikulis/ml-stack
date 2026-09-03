@@ -121,6 +121,21 @@ Extraction quality
   (`merge.py`, with `data/aliases.json` as `written`), `graph.thread` when an answer's
   entities are kept, and the world simulator's emit.
 
+Store integrity
+- [ ] **The shelf store came back with 9,225 nodes whose id, attrs and data were empty
+  strings** after the judged pass (2026-09-03 15:16; `ml-stack-store check`: 34,597 edges
+  found by scan and not by their ends; numbers and labels intact, every string column
+  blank), on ladybug 0.18.2. The pass makes thousands of small writes -- drop, upsert,
+  set_attribute, one node at a time, each its own transaction. The damaged store is kept
+  at `~/.ml-stack/shelf.ladybug.corrupt-2026-09-03`; the store was rebuilt from the reads
+  (`ml-stack-ingest fold` into a fresh store, the decisions document put back from
+  `shelf.decisions-2026-09-03.json`, `check` clean) and the pass replayed on it with a
+  `check` after. If the check fails again the pass is the trigger: batch its writes in
+  one `store.transaction()` per step, and characterise on a scratch store with the
+  store's own API (thousands of drop/upsert pairs) before blaming ladybug. Either way,
+  `tidy` should run `check` at its end and refuse to report success over a store that
+  does not read back by id.
+
 ## Library
 
 - [ ] **`ml-stack-models layout MODEL`**: the attention layout off the GGUF header in one
