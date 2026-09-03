@@ -146,3 +146,19 @@ def test_an_added_node_gets_an_id_the_graph_can_address(tmp_path):
     with GraphStore(path) as reopened:
         joined = {(e["source"], e["rel"], e["target"]) for e in reopened.edges()}
     assert ("person:ada", "works_at", "org:quenlow-robotics") in joined
+
+
+def test_an_unset_attribute_lands_as_a_missing_key(tmp_path):
+    path = tmp_path / "g"
+    with a_store_holding(path) as store:
+        changes = proposals(
+            store,
+            call("unset_attribute", id="person:ada", name="role", reason="she left the role"),
+            call("unset_attribute", id="person:bea", name="role", reason="never had one"))
+        assert all(c.sound for c in changes)
+        out = apply(store, changes)
+    assert [c.op for c in out["applied"]] == ["unset_attribute"]
+    assert [c.target for c in out["skipped"]] == ["person:bea"]
+    with GraphStore(path) as reopened:
+        back = {n["id"]: n for n in reopened.nodes()}
+    assert back["person:ada"]["attrs"] == {}

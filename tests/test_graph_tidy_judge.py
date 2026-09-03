@@ -326,7 +326,7 @@ def test_a_suspect_label_is_renamed_dropped_or_kept_from_its_passages(tmp_path):
     nodes, edges = _ids(path)
     assert nodes["concept:clause"]["label"] == "glimmer node"
     assert "concept:number" not in nodes, "the pass's one removal beyond duplicates"
-    assert nodes["concept:generic"]["attrs"]["suspect"] == "", "kept, the flag cleared"
+    assert "suspect" not in nodes["concept:generic"]["attrs"], "kept, the flag cleared"
     assert ("concept:clause", "part_of", "concept:other") in edges, "renamed, not moved"
     assert "resolved 3 suspect label(s) (1 node(s) dropped)" in report.said()
 

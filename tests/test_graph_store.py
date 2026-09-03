@@ -670,3 +670,17 @@ def test_has_says_whether_a_node_is_in_the_store(tmp_path):
         assert store.has("person:nobody") is False
         store.drop(["person:ada"])
         assert store.has("person:ada") is False
+
+
+def test_unsetting_an_attribute_takes_the_key_out_rather_than_blanking_it(tmp_path):
+    path = tmp_path / "g"
+    with GraphStore(path) as store:
+        store.write(GRAPH)
+        assert store.unset_attribute("person:ada", "role") is True
+        assert store.unset_attribute("person:ada", "role") is False
+        assert store.unset_attribute("person:ada", "never_set") is False
+        assert store.unset_attribute("person:nobody", "role") is False
+    with GraphStore(path) as reopened:
+        ada = next(n for n in reopened.nodes() if n["id"] == "person:ada")
+    assert ada["attrs"] == {"member": True}
+    assert "role" not in ada["attrs"]

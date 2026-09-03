@@ -19,8 +19,8 @@ GRAPH = {
 }
 
 
-def call(name, **args):
-    return {"function": {"name": name, "arguments": json.dumps(args)}}
+def call(tool, /, **args):
+    return {"function": {"name": tool, "arguments": json.dumps(args)}}
 
 
 def gathered(*calls, graph=GRAPH):
@@ -34,8 +34,8 @@ def gathered(*calls, graph=GRAPH):
 def test_the_tools_describe_this_graphs_own_vocabulary():
     tools = tools_for(GRAPH)
     assert [t["function"]["name"] for t in tools] == [
-        "add_node", "add_edge", "rename", "set_attribute", "remove_node", "remove_edge",
-        "merge_nodes"]
+        "add_node", "add_edge", "rename", "set_attribute", "unset_attribute", "remove_node",
+        "remove_edge", "merge_nodes"]
     kinds = tools[0]["function"]["parameters"]["properties"]["kind"]["description"]
     assert "person, topic" in kinds
     rels = tools[1]["function"]["parameters"]["properties"]["rel"]["description"]
@@ -80,7 +80,7 @@ def test_folding_two_different_kinds_of_thing_is_refused():
 
 def test_a_change_with_no_reason_is_not_sound():
     out = gathered(call("rename", id="p:ada", label="Ada L", reason=""))
-    assert not out[0].sound and out[0].problems == ["no reason given"]
+    assert not out[0].sound and out[0].problems == ["no reason given for rename p:ada"]
 
 
 def test_a_tool_nobody_offered_is_ignored_and_bad_arguments_are_survived():
@@ -92,7 +92,7 @@ def test_a_tool_nobody_offered_is_ignored_and_bad_arguments_are_survived():
 
 def test_an_empty_graph_still_offers_the_tools():
     tools, gather = proposing({"nodes": [], "edges": []})
-    assert len(tools) == 7
+    assert len(tools) == 8
     out = gather([call("add_node", label="Ada", kind="person", reason="first entry")])
     assert out[0].sound
 
@@ -100,3 +100,23 @@ def test_an_empty_graph_still_offers_the_tools():
 def test_check_can_be_used_on_its_own():
     made = check(GRAPH, Change(op="add_node", value="Cyd Marek", name="person", reason="new"))
     assert made.sound
+
+
+def test_an_attribute_can_be_proposed_unset_without_a_value():
+    tools = tools_for(GRAPH)
+    unset = next(t["function"] for t in tools if t["function"]["name"] == "unset_attribute")
+    assert unset["parameters"]["required"] == ["id", "name", "reason"]
+    out = gathered(call("unset_attribute", id="p:ada", name="role", reason="she left the role"),
+                   call("unset_attribute", id="p:nobody", name="role", reason="gone"),
+                   call("unset_attribute", id="p:ada", name="", reason="gone"))
+    assert [c.sound for c in out] == [True, False, False]
+    assert out[0].describe().startswith("unset role of p:ada")
+    assert "is not in the graph" in out[1].problems[0]
+    assert "no attribute named" in out[2].problems[0]
+
+
+def test_a_change_with_no_reason_names_the_op_and_the_ids():
+    out = gathered(call("remove_edge", from_id="p:ada", to_id="t:compilers", rel="interested_in",
+                        reason=""))
+    assert not out[0].sound
+    assert out[0].problems == ["no reason given for remove_edge p:ada -interested_in-> t:compilers"]

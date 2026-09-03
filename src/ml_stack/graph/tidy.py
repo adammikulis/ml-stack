@@ -1169,8 +1169,8 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
             return
         node["label"] = name
         store.rename(node["id"], name)
-        store.set_attribute(node["id"], "suspect", "")
-        (node.setdefault("attrs", {}))["suspect"] = ""
+        store.unset_attribute(node["id"], "suspect")
+        (node.setdefault("attrs", {})).pop("suspect", None)
         note(f"suspect: {label!r} renamed to {name!r} -- {held.get('why', '')}")
     elif verdict == "drop":
         gone = [e for e in edges if node["id"] in (e["source"], e["target"])]
@@ -1180,8 +1180,8 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
         report.suspects_dropped += 1
         note(f"suspect: {label!r} dropped with {len(gone)} edge(s) -- {held.get('why', '') or why}")
     else:
-        store.set_attribute(node["id"], "suspect", "")
-        (node.setdefault("attrs", {}))["suspect"] = ""
+        store.unset_attribute(node["id"], "suspect")
+        (node.setdefault("attrs", {})).pop("suspect", None)
         note(f"suspect: {label!r} kept, the flag cleared -- {held.get('why', '') or why}")
 
 

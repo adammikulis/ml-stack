@@ -427,15 +427,31 @@ class GraphStore:
                            {"id": str(node_id), "label": str(label)})
         return True
 
-    def set_attribute(self, node_id: str, name: str, value: Any) -> bool:
-        """Set one attribute of a node, keeping the others. False when it is not in the store."""
+    def _attrs(self, node_id: str) -> dict[str, Any] | None:
+        """A node's attributes, or None when it is not in the store."""
         rows = self.query("MATCH (n:Node {id:$id}) RETURN n.attrs AS attrs", {"id": str(node_id)})
-        if not rows:
-            return False
-        attrs = _unjson(rows[0]["attrs"])
-        attrs[str(name)] = value
+        return _unjson(rows[0]["attrs"]) if rows else None
+
+    def _set_attrs(self, node_id: str, attrs: Mapping[str, Any]) -> None:
         self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.attrs = $attrs"),
                            {"id": str(node_id), "attrs": _json(attrs)})
+
+    def set_attribute(self, node_id: str, name: str, value: Any) -> bool:
+        """Set one attribute of a node, keeping the others. False when it is not in the store."""
+        attrs = self._attrs(node_id)
+        if attrs is None:
+            return False
+        attrs[str(name)] = value
+        self._set_attrs(node_id, attrs)
+        return True
+
+    def unset_attribute(self, node_id: str, name: str) -> bool:
+        """Take one attribute off a node. False when the node or the attribute is absent."""
+        attrs = self._attrs(node_id)
+        if attrs is None or str(name) not in attrs:
+            return False
+        del attrs[str(name)]
+        self._set_attrs(node_id, attrs)
         return True
 
     def remove_edge(self, source: str, target: str, rel: str) -> bool:

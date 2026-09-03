@@ -44,11 +44,24 @@ class Change:
         """Whether the graph would accept it. Not whether anybody should."""
         return not self.problems
 
+    def ids(self) -> str:
+        """The op and what it names, as one line: ``remove_edge a -rel-> b``."""
+        if self.op == "add_node":
+            what = self.value
+        elif self.op in ("add_edge", "remove_edge"):
+            what = f"{self.target} -{self.name}-> {self.other}"
+        elif self.op == "merge_nodes":
+            what = f"{self.other} into {self.target}"
+        else:
+            what = self.target
+        return f"{self.op} {what}".strip()
+
     def describe(self) -> str:
         parts = {"add_node": f"add {self.value or self.target}",
                  "add_edge": f"join {self.target} -{self.name}-> {self.other}",
                  "rename": f"rename {self.target} to {self.value}",
                  "set_attribute": f"set {self.name} of {self.target} to {self.value}",
+                 "unset_attribute": f"unset {self.name} of {self.target}",
                  "remove_node": f"remove {self.target}",
                  "remove_edge": f"unjoin {self.target} -{self.name}-> {self.other}",
                  "merge_nodes": f"fold {self.other} into {self.target}"}
@@ -90,6 +103,12 @@ def tools_for(graph: Mapping[str, Any]) -> list[dict[str, Any]]:
                 "id": {"type": "string"}, "name": {"type": "string"},
                 "value": {"type": "string"}, "reason": reason},
                 "required": ["id", "name", "value", "reason"]}}},
+        {"type": "function", "function": {
+            "name": "unset_attribute",
+            "description": "Propose taking one attribute off an entry.",
+            "parameters": {"type": "object", "properties": {
+                "id": {"type": "string"}, "name": {"type": "string"}, "reason": reason},
+                "required": ["id", "name", "reason"]}}},
         {"type": "function", "function": {
             "name": "remove_node", "description": "Propose taking an entry out of the graph.",
             "parameters": {"type": "object", "properties": {
@@ -144,7 +163,7 @@ def check(graph: Mapping[str, Any], change: Change) -> Change:
     elif change.op == "rename":
         if known(change.target, "the entry") and not change.value:
             say("no new name given")
-    elif change.op == "set_attribute":
+    elif change.op in ("set_attribute", "unset_attribute"):
         known(change.target, "the entry")
         if not change.name:
             say("no attribute named")
@@ -162,7 +181,7 @@ def check(graph: Mapping[str, Any], change: Change) -> Change:
     else:
         say(f"no such change: {change.op}")
     if not change.reason:
-        say("no reason given")
+        say(f"no reason given for {change.ids()}")
     return change
 
 
@@ -178,6 +197,8 @@ def _read(name: str, args: Mapping[str, Any]) -> Change:
     if name == "set_attribute":
         return Change(op=name, target=text("id"), name=text("name"), value=text("value"),
                       reason=text("reason"))
+    if name == "unset_attribute":
+        return Change(op=name, target=text("id"), name=text("name"), reason=text("reason"))
     if name == "remove_node":
         return Change(op=name, target=text("id"), reason=text("reason"))
     if name == "remove_edge":
@@ -229,6 +250,8 @@ def _land(store: Any, change: Change, ident: Callable[[Change], str]) -> bool:
         return store.rename(change.target, change.value)
     if change.op == "set_attribute":
         return store.set_attribute(change.target, change.name, change.value)
+    if change.op == "unset_attribute":
+        return store.unset_attribute(change.target, change.name)
     if change.op == "remove_node":
         return bool(store.drop([change.target]))
     if change.op == "remove_edge":
