@@ -56,6 +56,7 @@ the caller's, named by ``--out``."""
 
 PER_SECTION = 1200.0    # a ceiling, not a budget: a legitimate unit writes 6k tokens at ~30 tok/s on two workers
 WORKERS = 2
+GIVE_UP = 2             # failed attempts before --resume leaves a unit alone
 """The most one section may take before it is recorded as timed out and the next is read."""
 
 IMAGES_PER_SECTION = 4
@@ -576,17 +577,25 @@ class Progress:
         return held
 
     def done(self, slug: str, unit: str) -> bool:
-        """Finished and kept -- a unit that failed is written down, so `status` can say so,
-        and is not done: `--resume` reads it again."""
+        """Finished and kept, or given up on -- a unit that failed is written down, so
+        `status` can say so, and is read again by `--resume` until it has failed `GIVE_UP`
+        times; after that it is left, because one APBiology unit ran to the ceiling on four
+        resumes in a row at twelve minutes each."""
         entry = (self.state["books"].get(slug, {}).get("done") or {}).get(unit)
-        return isinstance(entry, dict) and not entry.get("error")
+        if not isinstance(entry, dict):
+            return False
+        if not entry.get("error"):
+            return True
+        return int(entry.get("attempts") or 1) >= GIVE_UP
 
     def note(self, slug: str, read: Read) -> None:
         """Write one finished unit down, at once: a run killed mid-book resumes from here."""
+        before = (self.book(slug)["done"].get(read.unit) or {})
+        attempts = int(before.get("attempts") or (1 if before else 0)) + 1
         self.book(slug)["done"][read.unit] = {
             "seconds": read.seconds, "concepts": read.concepts, "relations": read.relations,
             "figures": read.figures, "images": read.images, "error": read.error,
-            "at": time.strftime("%FT%T")}
+            "attempts": attempts, "at": time.strftime("%FT%T")}
         self.save()
 
     def save(self) -> None:
@@ -595,15 +604,17 @@ class Progress:
 
     def totals(self) -> dict[str, Any]:
         """Books, sections done of how many, seconds spent, and sections a minute."""
-        done = seconds = wanted = failed = 0
+        done = seconds = wanted = failed = given_up = 0
         for book in self.state["books"].values():
             entries = (book.get("done") or {}).values()
             done += len(entries)
             wanted += int(book.get("sections") or 0)
             seconds += sum(float(e.get("seconds") or 0.0) for e in entries)
             failed += sum(1 for e in entries if e.get("error"))
+            given_up += sum(1 for e in entries if e.get("error")
+                            and int(e.get("attempts") or 1) >= GIVE_UP)
         return {"books": len(self.state["books"]), "sections": done, "of": wanted,
-                "failed": failed, "seconds": round(seconds, 1),
+                "failed": failed, "given_up": given_up, "seconds": round(seconds, 1),
                 "per_section": round(seconds / done, 1) if done else 0.0,
                 "started": self.state.get("started", "")}
 
@@ -634,7 +645,9 @@ def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
     if totals["sections"]:
         say(f"  {totals['per_section']:.1f} s/section, {3600 / max(totals['per_section'], 1e-9):.0f}"
             f" sections/hour; {totals['seconds'] / 3600:.1f} h spent"
-            + (f", {totals['failed']} failed" if totals["failed"] else ""))
+            + (f", {totals['failed']} failed" if totals["failed"] else "")
+            + (f" ({totals['given_up']} given up after {GIVE_UP} tries; the reply each wrote "
+               f"is `raw` in the reads file)" if totals["given_up"] else ""))
     return 0
 
 
@@ -1144,6 +1157,7 @@ def _read_run(args: Any) -> int:
                     for call in row.calls:
                         spent.add(_call_of(call))
                     progress.note(slug, row)
+                    _keep_reads(args.out, slug, [reads_by_unit[unit.id]])
                     print(f"  ch {unit.chapter or '-':>3}  "
                           f"{unit.section or unit.section_title[:12]:<8}"
                           f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "

@@ -693,3 +693,18 @@ def test_n_max_lengthens_the_profiles_draft_for_the_shelf(monkeypatch, tmp_path)
     with contextlib.suppress(SystemExit):
         ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x", "--n-max", "12"])
     assert seen["lease"]["spec_draft_max"] == 12 and seen["lease"]["draft"] == "mtp.gguf"
+
+
+def test_a_unit_that_failed_twice_is_left_alone_and_status_says_so(tmp_path, capsys):
+    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
+    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=1)
+    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    bad = ingest.Read(unit="velthorne:1:1.1#0", seconds=700.0,
+                      error="ServerError: the reply was cut off (finish_reason=length)", **fields)
+    progress.note("velthorne", bad)
+    assert not progress.done("velthorne", bad.unit), "one failure: read it again"
+    progress.note("velthorne", bad)
+    assert progress.done("velthorne", bad.unit), "two: leave it"
+    assert progress.totals()["given_up"] == 1
+    ingest.status(tmp_path / "shelf")
+    assert "given up" in capsys.readouterr().out
