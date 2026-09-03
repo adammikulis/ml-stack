@@ -215,23 +215,38 @@ class ModelJudge:
         self.most_units = most_units
         self.asked = 0
         self.read = 0
+        self.failed = 0
+
+    def _ask(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """One model call, never fatal to the pass: a server that answers 500 for one
+        pair (a compute error mid-shelf, 2026-09-03) makes that pair `unsure` and marks
+        it ``failed`` so it is not written down as decided, and the pass goes on."""
+        try:
+            answer = self.client.extract(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - one pair's failure is that pair's
+            self.failed += 1
+            return {"verdict": "unsure", "keep": "", "why": f"the model failed: "
+                    f"{type(exc).__name__}: {str(exc)[:160]}", "failed": True}
+        return answer if isinstance(answer, dict) else {}
 
     def decide(self, one: Mapping[str, Any], other: Mapping[str, Any]) -> dict[str, Any]:
         """``{verdict, why, read: [unit ids the second look used]}``."""
         self.asked += 1
         text = self._question(one, other)
-        answer = self.client.extract(text, JUDGE_SCHEMA, instructions=JUDGE_INSTRUCTIONS,
+        answer = self._ask(text, JUDGE_SCHEMA, instructions=JUDGE_INSTRUCTIONS,
                                      tries=1, n_predict=1024)
         verdict = str((answer or {}).get("verdict") or "unsure")
         why = str((answer or {}).get("why") or "")
         used: list[str] = []
+        if (answer or {}).get("failed"):
+            return {"verdict": "unsure", "why": why, "read": used, "failed": True}
         if verdict == "unsure" and self.sources is not None:
             passages = self._passages(one) + self._passages(other)
             if passages:
                 self.read += 1
                 used = [unit for unit, _ in passages]
                 shown = "\n\n".join(f"[{unit}] {piece}" for unit, piece in passages)
-                answer = self.client.extract(
+                answer = self._ask(
                     text + "\n\n" + JUDGE_READ + "\n\n" + shown, JUDGE_SCHEMA,
                     instructions=JUDGE_INSTRUCTIONS, tries=1, n_predict=1024)
                 verdict = str((answer or {}).get("verdict") or "unsure")
@@ -257,7 +272,7 @@ class ModelJudge:
             used = list(dict.fromkeys(unit for unit, _ in passages))
             text += "\n\n" + CONFLICT_READ + "\n\n" + "\n\n".join(
                 f"[{unit}] {piece}" for unit, piece in passages)
-        answer = self.client.extract(text, conflict_schema(verbs),
+        answer = self._ask(text, conflict_schema(verbs),
                                      instructions=CONFLICT_INSTRUCTIONS, tries=1, n_predict=1024)
         verdict = str((answer or {}).get("verdict") or "unsure")
         if verdict not in {*CONFLICT_VERDICTS, *(f"keep {verb}" for verb in verbs)}:
@@ -270,7 +285,7 @@ class ModelJudge:
         self.asked += 1
         text = (f"The thing: {one.get('label')!r} ({one.get('kind')}), being merged with "
                 f"{other.get('label')!r}.\n\na. {a_said}\n\nb. {b_said}")
-        answer = self.client.extract(text, DEFINITION_SCHEMA,
+        answer = self._ask(text, DEFINITION_SCHEMA,
                                      instructions=DEFINITION_INSTRUCTIONS, tries=1, n_predict=1024)
         keep = str((answer or {}).get("keep") or "both")
         if keep not in ("a", "b", "both"):
@@ -288,7 +303,7 @@ class ModelJudge:
             used = list(dict.fromkeys(unit for unit, _ in passages))
             text += "\n\nPassages it was read from:\n\n" + "\n\n".join(
                 f"[{unit}] {piece}" for unit, piece in passages)
-        answer = self.client.extract(text, SUSPECT_SCHEMA, instructions=SUSPECT_INSTRUCTIONS,
+        answer = self._ask(text, SUSPECT_SCHEMA, instructions=SUSPECT_INSTRUCTIONS,
                                      tries=1, n_predict=1024)
         verdict = str((answer or {}).get("verdict") or "keep")
         if verdict not in SUSPECT_VERDICTS:
@@ -673,7 +688,8 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
                     held = {**held, "a": a["id"], "b": b["id"], "kind": kind,
                             "model": getattr(judge, "model", ""),
                             "when": _now()}
-                    _keep_decision(store, decisions, "pairs", key, held)
+                    if not held.get("failed"):
+                        _keep_decision(store, decisions, "pairs", key, held)
                 verdict = str((held or {}).get("verdict") or "unsure")
                 if verdict == "same":
                     heavier, lighter = ((a, b) if int(a.get("mentions") or 0)
@@ -1055,7 +1071,8 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
             held = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
             held = {**held, "ends": list(ends), "verbs": sorted((a_rel, b_rel)),
                     "model": getattr(judge, "model", ""), "when": _now()}
-            _keep_decision(store, decisions, "conflicts", key, held)
+            if not held.get("failed"):
+                _keep_decision(store, decisions, "conflicts", key, held)
         report.conflicts_judged += 1
         verdict = str(held.get("verdict") or "unsure")
         drop = b_rel if verdict == f"keep {a_rel}" else a_rel if verdict == f"keep {b_rel}" else ""
@@ -1097,7 +1114,8 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
         held = judge.decide_suspect(node, why)
         held = {**held, "label": node.get("label"), "flagged": why,
                 "model": getattr(judge, "model", ""), "when": _now()}
-        _keep_decision(store, decisions, "suspects", key, held)
+        if not held.get("failed"):
+            _keep_decision(store, decisions, "suspects", key, held)
     report.suspects_resolved += 1
     verdict = str(held.get("verdict") or "keep")
     label = str(node.get("label") or "")

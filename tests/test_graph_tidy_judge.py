@@ -448,3 +448,31 @@ def test_a_graph_that_keeps_its_pointers_elsewhere_says_where(tmp_path):
          "attrs": {}, "data": {"messages": ["m1"]}}
     got = judge.decide(a, b)
     assert got["verdict"] == "same" and set(got["read"]) == {"m1", "m2"}
+
+
+def test_a_failed_model_call_leaves_the_pair_unsure_and_undecided_and_the_pass_goes_on(tmp_path):
+    """One pair's compute error is that pair's, not the pass's -- and not a verdict."""
+    from ml_stack.client.http import ServerError
+
+    class Flaky(Scripted):
+        def extract(self, text, schema, **kw):
+            if "vaulf" in text:
+                raise ServerError("HTTP 500: compute error")
+            return super().extract(text, schema, **kw)
+
+    path = _store(tmp_path, [
+        _node("concept:glimmer-node", "glimmer node", mentions=4),
+        _node("concept:glimer-node", "glimer node", mentions=1),
+        _node("concept:vault", "vault", mentions=3),
+        _node("concept:vaulf", "vaulf", mentions=1),
+    ], [])
+    client = Flaky({("glimmer node", "glimer node"): "same"})
+    judge = ModelJudge(client)
+    report = tidy(path, judge=judge)
+    assert report.judged_same == 1 and judge.failed == 1
+    assert [tuple(sorted(p)) for p in report.possible] == [("vaulf", "vault")]
+    nodes, _ = _ids(path)
+    assert "concept:glimer-node" not in nodes, "the pass went on and applied what it could"
+    with GraphStore(path, read_only=True) as store:
+        pairs = store.get_doc(DECISIONS)["pairs"]
+    assert len(pairs) == 1 and "concept:vaulf" not in "".join(pairs), "a failure is not a verdict"
