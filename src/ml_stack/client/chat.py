@@ -388,6 +388,14 @@ class Client:
                 reject(raw, objections)
 
         if parsed is None:
+            if getattr(self, "_last_finish", None) == "length":
+                # not a model that cannot write JSON: a reply cut off mid-object, by the
+                # context the slot had or by n_predict. Say which knob rather than "not JSON"
+                raise ServerError(
+                    f"the reply was cut off (finish_reason=length) after {len(raw)} characters "
+                    f"and is not whole JSON: the slot's context or n_predict ended it -- serve "
+                    f"more context per seat, raise n_predict, or split the text: {raw[:120]!r}"
+                )
             raise ServerError(
                 f"the model returned something that is not JSON {tries} times: {raw[:200]!r}"
             )
@@ -436,6 +444,7 @@ class Client:
                 chat_template_kwargs=self.family.think_kwargs(think),
                 **extra,
             )
+            self._last_finish = reply.finish_reason
             return (reply.content or "").strip()
 
         def reject(raw: str, objections: list[str]) -> None:

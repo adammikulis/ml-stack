@@ -852,7 +852,11 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
 
     found = _find_model(args.model)
     seats = max(1, int(getattr(args, "workers", 1) or 1))
-    lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
+    # --context is per worker: a unit of 2,500 tokens, four figures through the projector,
+    # the instructions and a reply of several thousand tokens overran a 16k seat on the
+    # first night (finish_reason=length, JSON cut mid-object), so each seat gets the whole
+    # figure and the lease is that many times over
+    lease: dict[str, Any] = {"port": args.serve_port, "context": int(args.context) * seats,
                              "parallel": seats, "timeout": 900.0, "cache_reuse": 256,
                              "warmup": False}
     manager = None
@@ -864,7 +868,7 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
             shape = measured.shape(port=args.serve_port, seats=seats)
             lease = {**lease, **{k: v for k, v in shape.lease().items()
                                  if k not in ("port", "parallel")}}
-            lease["context"] = max(args.context, int(lease.get("context") or 0))
+            lease["context"] = max(int(args.context) * seats, int(lease.get("context") or 0))
             manager = shape.manager()
             say(f"    serving in its measured shape: {said(measured)}")
     if not args.images:
@@ -914,6 +918,32 @@ def detach(argv: Sequence[str]) -> Path:
         "pid": child.pid, "argv": list(rest), "log": str(log),
         "started": time.strftime("%FT%T")}, indent=1), encoding="utf-8")
     return log
+
+
+def stop(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+    """``ml-stack-ingest stop``: end the detached run this machine's record names.
+
+    The run writes each unit down as it finishes, so what is lost is the units in flight,
+    and the same command with ``--resume`` reads on from there.
+    """
+    import signal
+
+    record = (home or HOME) / "ingesting.json"
+    held = _read_json(record)
+    pid = int(held.get("pid") or 0) if isinstance(held, dict) else 0
+    if not pid:
+        say("no detached ingest is recorded on this machine")
+        return 1
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        say(f"the recorded ingest (pid {pid}) had already ended")
+        record.unlink(missing_ok=True)
+        return 1
+    say(f"stopped the detached ingest (pid {pid}); its units so far are kept, and the same "
+        f"command with --resume reads on")
+    record.unlink(missing_ok=True)
+    return 0
 
 
 # -- the command ---------------------------------------------------------------------------------
@@ -974,7 +1004,8 @@ def parser() -> argparse.ArgumentParser:
                     help="the answer's ceiling; a ceiling is not a budget, and a low one "
                          "truncates the extraction (default: %(default)s)")
     ap.add_argument("--context", type=int, default=32768, metavar="N",
-                    help="context for a --model that is served (default: %(default)s)")
+                    help="context per worker for a --model that is served, so the lease is "
+                         "this times --workers (default: %(default)s)")
     ap.add_argument("--serve-port", type=int, default=8099)
     ap.add_argument("--cache", default="", metavar="DIR",
                     help="keep each extraction under this directory and do not ask twice "
@@ -992,6 +1023,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     rest = list(sys.argv[1:] if argv is None else argv)
     args = parser().parse_args(rest)
 
+    if args.docs[:1] == ["stop"]:
+        return stop()
     if args.docs[:1] == ["status"]:
         if not args.out:
             print("error: status needs --out STORE", file=sys.stderr)

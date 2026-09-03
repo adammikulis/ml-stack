@@ -595,3 +595,54 @@ def test_the_book_fold_joins_a_plural_to_its_singular():
     assert "acids" not in labels and "acid" in labels
     sources = {e["source"] for e in graph["edges"]}
     assert "concept:acids" not in sources
+
+
+def test_context_is_per_worker_so_the_lease_is_that_many_times_over(monkeypatch, tmp_path):
+    """Four figures, 2,500 tokens of text and a long reply overran a 16k seat on the first
+    shelf night; each worker's seat gets the whole --context."""
+    from ml_stack.serve import Shape
+
+    seen = {}
+
+    class Found:
+        def shape(self, port, seats):
+            return Shape(model="x.gguf", port=port, seats=seats, seat_context=16384)
+
+        def said(self):
+            return "measured"
+
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
+    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+
+    def fake_serve(model, manager=None, **lease):
+        seen["lease"] = lease
+        raise SystemExit(0)
+
+    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    (tmp_path / "g.json").write_text(
+        '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
+    import contextlib
+    with contextlib.suppress(SystemExit):
+        ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x",
+                     "--workers", "2", "--context", "32768"])
+    assert seen["lease"]["context"] == 65536 and seen["lease"]["parallel"] == 2
+
+
+def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, capsys):
+    import json as _json
+    import subprocess
+    import sys
+
+    assert ingest.stop(home=tmp_path) == 1
+    assert "no detached ingest" in capsys.readouterr().out
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    (tmp_path / "ingesting.json").write_text(_json.dumps({"pid": child.pid}))
+    try:
+        assert ingest.stop(home=tmp_path) == 0
+        assert child.wait(timeout=10) != 0
+        assert not (tmp_path / "ingesting.json").exists()
+        assert "--resume" in capsys.readouterr().out
+    finally:
+        if child.poll() is None:
+            child.kill()
