@@ -36,6 +36,7 @@ beside the answering runs, marked ``kind: "extract"``, and printed in a table of
 
 from __future__ import annotations
 
+import argparse
 import json
 import random
 import re
@@ -918,6 +919,10 @@ def add_arguments(sub: Any) -> Any:
                     help=f"read only {SMOKE_MESSAGES} messages, to prove the whole path -- "
                          f"serve, read, fold, score, save and read the run back -- before "
                          f"spending the GPU on it")
+    ap.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
+                    help="serve the model in its measured shape from ml-stack's profiles "
+                         "(build, head, cache type, thinking budget, raw flags); "
+                         "--no-profile serves it bare")
     ap.add_argument("--twice", action="store_true",
                     help="read the sample a second time with the model's own card (or the "
                          "same settings again when the card names none) and report the "
@@ -1026,9 +1031,25 @@ def main(args: Any) -> int:
 
         found = find_model(args.serve[0])
         began = time.time()
-        with serve(found, port=args.serve_port, context=args.context,
-                   parallel=args.parallel, timeout=900.0, cache_reuse=256,
-                   warmup=False) as server:
+        # the model's measured shape -- its build, head, cache type, thinking budget, raw
+        # flags -- unless told to serve it bare: an extraction measured on mainline without
+        # the head (2026-09-02) measured a different program from the one that answers
+        lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
+                                 "parallel": args.parallel, "timeout": 900.0,
+                                 "cache_reuse": 256, "warmup": False}
+        manager = None
+        if getattr(args, "profile", True):
+            from ml_stack.serve.profile import profile_for
+
+            measured = profile_for(str(found))
+            if measured is not None:
+                shape = measured.shape(port=args.serve_port, seats=args.parallel)
+                lease = {**lease, **{k: v for k, v in shape.lease().items()
+                                     if k not in ("port", "context", "parallel")}}
+                manager = shape.manager()
+                print(f"    serving in its measured shape: {measured.said()}"
+                      if hasattr(measured, "said") else "    serving in its measured shape")
+        with serve(found, manager=manager, **lease) as server:
             print(f"    up in {time.time() - began:.0f}s")
             client = Client(server.base_url, timeout=args.per_message, **sampling)
             held = {**footprint(server.base_url), "sampling": dict(client.sampling),

@@ -439,3 +439,57 @@ def test_the_instructions_say_what_a_topic_is_and_name_the_relation_vocabulary()
     for rel in ("works_with", "reports_to", "part_of", "works_on", "advises", "attended"):
         assert rel in INSTRUCTIONS
     assert "invent nothing" in INSTRUCTIONS
+
+
+def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeypatch, tmp_path):
+    """The first extraction run of Flash-Next (2026-09-02) went up on mainline without its
+    head: a different program from the one that answers. --profile (the default) takes the
+    model's measured shape; --no-profile serves it bare."""
+    from ml_stack.graph.bench import extract as ex
+    from ml_stack.serve import Shape
+
+    seen = {}
+
+    class Found:
+        def shape(self, port, seats):
+            return Shape(model="x.gguf", port=port, seats=seats, seat_context=4096,
+                         cache_type="q8_0", build="unsloth", draft="mtp.gguf", draft_n_max=4,
+                         reasoning_budget=0, extra_args=("-ub", "2048"))
+
+        def said(self):
+            return "measured"
+
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr(ex, "find_model", lambda m: "x.gguf")
+
+    class Server:
+        base_url = "http://127.0.0.1:1"
+        load_s = 0.0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_serve(model, manager=None, **lease):
+        seen["lease"] = lease
+        seen["manager"] = manager
+        raise SystemExit(0)
+
+    monkeypatch.setattr("ml_stack.serve.serve", fake_serve)
+    args = type("A", (), {"serve": ["x.gguf"], "serve_port": 1, "context": 8192, "parallel": 2,
+                          "profile": True, "smoke": True, "world": str(tmp_path), "per_message": 1,
+                          "seed": 1, "sample": 3, "kept": str(tmp_path / "k.ladybug"),
+                          "label": "t", "temperature": None, "top_p": None, "top_k": None,
+                          "min_p": None, "twice": False, "anyway": False, "base_url": "",
+                          "no_smoke": False, "yes": True, "ceiling": 0, "no_selfcheck": True,
+                          "detach": False, "no_queue": True, "no_prefetch": True})()
+    try:
+        ex.main(args)
+    except (SystemExit, Exception):
+        pass
+    lease = seen.get("lease")
+    if lease is not None:
+        assert lease["cache_type_k"] == "q8_0" and lease["extra_args"] == ("-ub", "2048")
+        assert lease["context"] == 8192 and lease["parallel"] == 2, "the run's own shape wins"
