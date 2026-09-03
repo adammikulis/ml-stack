@@ -3,6 +3,8 @@ failures in a minute, and none of them count against the units."""
 
 from pathlib import Path
 
+import pytest
+
 from ml_stack import ingest, jobs
 from tests.test_ingest import a_shelf
 
@@ -144,3 +146,76 @@ def test_a_judged_tidy_refuses_beside_a_live_run(tmp_path, monkeypatch, capsys):
     finally:
         child.kill()
         child.wait()
+
+
+def _leased(monkeypatch):
+    """A fake `serve` that records whether its lease was released, on a bare `--model`."""
+    import contextlib
+
+    released = []
+
+    class Up:
+        base_url = "http://127.0.0.1:8099"
+
+    @contextlib.contextmanager
+    def fake_serve(model, manager=None, **lease):
+        try:
+            yield Up()
+        finally:
+            released.append(True)
+
+    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: None)
+    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    return released
+
+
+def _terminated(*a, **k):
+    """What a SIGTERM does mid-call: the handler in place is invoked, not the signal
+    delivered, so a handler that is still the default fails the test rather than pytest."""
+    import signal
+
+    handler = signal.getsignal(signal.SIGTERM)
+    assert callable(handler), "SIGTERM is not turned into Stopped here"
+    handler(signal.SIGTERM, None)
+
+
+def _gold(tmp_path):
+    gold = tmp_path / "g.json"
+    gold.write_text('{"passages": [{"passage_id": "p", "text": "Vault currents flow.", '
+                    '"triples": []}]}')
+    return ["--gold", str(gold), "--model", "x"]
+
+
+def _ask(tmp_path, monkeypatch):
+    (tmp_path / "s").mkdir()
+    monkeypatch.setattr("ml_stack.ingest.cli.graph_of",
+                        lambda out: {"nodes": [{"id": "concept:glimmer-node"}], "edges": []})
+    return ["ask", "--out", str(tmp_path / "s"), "--model", "x", "what flows?"]
+
+
+def _tidy(tmp_path, monkeypatch):
+    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    monkeypatch.setattr(ingest, "_judge", lambda *a, **k: None)
+    return ["tidy", "--out", str(tmp_path / "s"), "--model", "x"]
+
+
+@pytest.mark.parametrize("path", ["gold", "ask", "tidy"])
+def test_a_sigterm_mid_run_releases_the_lease_on_every_path(tmp_path, monkeypatch, capsys,
+                                                             path):
+    """`tidy --model`, `ask` and `--gold` each hold a lease the way a read does; a stop
+    reaching any of them takes the server down with it rather than leaving it up under
+    nobody."""
+    released = _leased(monkeypatch)
+    if path == "gold":
+        argv = _gold(tmp_path)
+        monkeypatch.setattr("ml_stack.ingest.cli.gold_score", _terminated)
+    elif path == "ask":
+        argv = _ask(tmp_path, monkeypatch)
+        monkeypatch.setattr(ingest, "ask", _terminated)
+    else:
+        argv = _tidy(tmp_path, monkeypatch)
+        monkeypatch.setattr("ml_stack.graph.tidy.tidy", _terminated)
+    assert ingest.main(argv) == 1
+    assert released == [True], "the lease was not released"
+    assert "stopped" in capsys.readouterr().out

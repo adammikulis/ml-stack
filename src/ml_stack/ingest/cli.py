@@ -20,7 +20,7 @@ from ml_stack.ingest.fold import fold
 from ml_stack.ingest.gold import gold_lines, gold_score, read_gold
 from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at, status
 from ml_stack.ingest.reads import _read_json
-from ml_stack.ingest.run import _read_run
+from ml_stack.ingest.run import Stopped, _read_run, _stopping
 from ml_stack.ingest.shelf import shelf, show
 
 __all__ = ["HOME", "STOP_WAIT", "detach", "main", "parser", "retry", "stop", "wait"]
@@ -357,10 +357,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                     print(f"error: a detached ingest (pid {alive}) is still reading; "
                           f"`ml-stack-ingest wait` first, then tidy", file=sys.stderr)
                     return 2
-                with ingest._serving(args) as client:
-                    judge = ingest._judge(client, args.out, model=args.model)
-                    report = hygiene(args.out, written=written_from(args.written),
-                                     judge=judge, log=print)
+                try:
+                    with _stopping(), ingest._serving(args) as client:
+                        judge = ingest._judge(client, args.out, model=args.model)
+                        report = hygiene(args.out, written=written_from(args.written),
+                                         judge=judge, log=print)
+                except Stopped:
+                    print("stopped before the tidy finished; the store is as it was")
+                    return 1
                 return 0 if report.sound else 1
             report = hygiene(args.out, dry_run=not args.apply,
                              written=written_from(args.written), log=print)
@@ -409,13 +413,17 @@ def _ask_run(args: Any) -> int:
     # the asking comes from the same profile the serving does, so a model measured with
     # one way of asking is not served in its shape and asked in somebody else's
     measured = ingest._find_model(args.model) if args.model else None
-    with ingest._serving(args) as client:
-        if not args.gold:
-            ingest.ask(graph, question, client, profile=measured)
-            return 0
-        asked = read_asked(args.gold)
-        print(f"asking {len(asked)} question(s) from {args.gold}")
-        rows = score_asked(graph, client, asked, log=print, profile=measured)
+    try:
+        with _stopping(), ingest._serving(args) as client:
+            if not args.gold:
+                ingest.ask(graph, question, client, profile=measured)
+                return 0
+            asked = read_asked(args.gold)
+            print(f"asking {len(asked)} question(s) from {args.gold}")
+            rows = score_asked(graph, client, asked, log=print, profile=measured)
+    except Stopped:
+        print("stopped before the answer was finished")
+        return 1
     for line in asked_lines(rows):
         print(line)
     f1 = asked_f1(rows)
@@ -430,8 +438,13 @@ def _gold_run(args: Any) -> int:
 
     passages = read_gold(args.gold)
     print(f"gold: {len(passages)} passages from {args.gold}")
-    with ingest._serving(args) as client:
-        scored = gold_score(client, passages, schema(), per_section=args.per_section, log=print)
+    try:
+        with _stopping(), ingest._serving(args) as client:
+            scored = gold_score(client, passages, schema(), per_section=args.per_section,
+                                log=print)
+    except Stopped:
+        print("stopped before the gold set was scored")
+        return 1
     for line in gold_lines(scored):
         print(line)
     if args.fail_under is not None and scored.f1 < args.fail_under:
