@@ -47,7 +47,7 @@ gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
 # an embedded property graph: one directory on disk, native Cypher, no server
 # 0.20.2 returned nothing from a fresh store's scans on Linux (CI, 2026-09-02); measured on 0.18
-store = ["ladybug>=0.18,<0.19"]
+store = ["ladybug>=0.19,<0.20"]
 # a browser that remembers who you are; needs `playwright install chromium` too
 scrape = ["playwright>=1.40"]
 # searching the web beside the graph: ddgs is keyless and rate-limited, SearXNG is not
