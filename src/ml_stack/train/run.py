@@ -7,15 +7,27 @@ uses unless ``--yes``; the adapter is checkpointed instead of the frozen base; a
 source, and preflights the file the serve path would load. Every run that writes anything
 writes a ``manifest.json`` naming its training data by hash and example count -- a
 fine-tune whose data cannot be identified afterwards cannot be reproduced or believed.
+
+A fine-tune is hours, so ``--detach`` re-runs the command in its own session with a log
+under `HOME` and records it through `ml_stack.jobs` as the ``train`` job -- the same record
+the bench and the ingest keep, so `ml-stack-jobs status` sees a training run too, and the
+words ``wait``, ``stop`` and ``status`` read it back. One at a time: a second ``--detach``
+beside a run still going is refused, because the two would share one GPU.
 """
 
 from __future__ import annotations
 
 import json
+import os
+import platform
+import subprocess
 import sys
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack import jobs
 from ml_stack.train.recipes import build, known, validate
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import warmup_cosine
@@ -23,6 +35,78 @@ from ml_stack.train.trainer import Trainer
 
 ADAPTER_DIR = "adapter"
 MERGED_DIR = "merged"
+
+HOME = Path(os.environ.get("MLSTACK_TRAIN_HOME") or "~/.ml-stack/train").expanduser()
+"""Where a detached run's log and its record of itself live. Not the checkpoints: those are
+the caller's, named by ``--out``."""
+
+KIND = "train"
+"""The kind of job a detached run is recorded as, in `ml_stack.jobs`."""
+
+WORDS = ("wait", "stop", "status")
+"""What the command does instead of training, when one is written where the flags go."""
+
+_WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
+
+
+def _home() -> Path:
+    """Where a detached run's log and its record of itself live. Read at call time, so a
+    test points `HOME` into ``tmp_path`` and never touches a real ``~/.ml-stack``."""
+    return Path(HOME)
+
+
+def _jobs_home(home: Path | None = None) -> Path:
+    """The `ml_stack.jobs` record directory under a training home."""
+    return Path(home) / "jobs" if home is not None else _home() / "jobs"
+
+
+def detach(argv: Sequence[str]) -> Path:
+    """Run ``ml-stack-train-run argv`` in the background, owned by no terminal; return the
+    log it writes into.
+
+    A fine-tune is hours. A child of a shell -- `nohup`, `&`, a redirect into a scratch
+    directory -- dies with the shell, or with the agent that opened it, so the command
+    re-runs itself in a new session with its output in a log under ``HOME/logs`` and gives
+    the shell back at once. The pid, the argv and the log are recorded through
+    `ml_stack.jobs`, which refuses a second one beside a run still going.
+    """
+    rest = [a for a in argv if a != "--detach"]
+    logs = _home() / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    started = time.strftime("%FT%T")
+    log = logs / f"train-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    command = [sys.executable, "-m", "ml_stack.train.run", *rest]
+    extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
+                             if platform.system() == "Windows" else {"start_new_session": True})
+    with log.open("ab") as out:
+        out.write(f"argv: {' '.join(rest)}\nstarted: {started}\n".encode())
+        out.flush()
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
+                                 stderr=subprocess.STDOUT,
+                                 env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
+    jobs.record(KIND, pid=child.pid, argv=rest, log=str(log), started=started,
+                home=_jobs_home())
+    return log
+
+
+def wait(*, say: Callable[[str], None] = print, home: Path | None = None,
+         every: float = 60.0) -> int:
+    """``ml-stack-train-run wait``: block until the detached run this machine records has
+    ended, saying so every minute -- so what follows it is `wait && next` rather than a
+    loop written by hand."""
+    return jobs.wait(KIND, say=say, every=every, home=_jobs_home(home))
+
+
+def stop(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+    """``ml-stack-train-run stop``: end the detached run. Whatever it checkpointed stays
+    where ``--out`` put it."""
+    return jobs.stop(KIND, say=say, home=_jobs_home(home))
+
+
+def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+    """``ml-stack-train-run status``: what this machine records -- the training run and any
+    other long command, the same lines `ml-stack-jobs status` prints."""
+    return jobs.status(say=say, home=_jobs_home(home))
 
 
 def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, dict[str, Any]]:
@@ -197,7 +281,22 @@ def _finish_lora(built: Any, config: dict[str, Any], data: Path, out: Path, *, r
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    ap = argparse.ArgumentParser(prog="ml-stack-train-run")
+    rest = list(sys.argv[1:] if argv is None else argv)
+    # The words come before the parser, not through it: --recipe, --data and --out are
+    # required to train, and `stop` is asked exactly when there is no recipe to name.
+    if rest[:1] == ["wait"]:
+        return wait()
+    if rest[:1] == ["stop"]:
+        return stop()
+    if rest[:1] == ["status"]:
+        return status()
+
+    ap = argparse.ArgumentParser(
+        prog="ml-stack-train-run", formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Instead of the flags, one of these words:\n"
+               "  status   what long runs this machine records -- pid, argv, log\n"
+               "  wait     block until the detached training run has ended\n"
+               "  stop     end the detached training run\n")
     ap.add_argument("--recipe", required=True, choices=known())
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
@@ -209,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dry-run", action="store_true",
                     help="20 steps, no checkpoint: does this config work at all, and what "
                          "does a step really cost")
+    ap.add_argument("--detach", action="store_true",
+                    help=f"run this in the background, owned by nobody's terminal, with "
+                         f"its output in a log under {_home() / 'logs'}; "
+                         f"`ml-stack-train-run status|wait|stop` follow it")
     lora = ap.add_argument_group(
         "lora", "train an adapter instead of every weight -- what makes an 8B base "
                 "trainable on one machine. Needs peft: pip install 'ml-stack[train-lora]'")
@@ -227,7 +330,21 @@ def main(argv: list[str] | None = None) -> int:
     lora.add_argument("--ceiling", type=float, default=None, metavar="MINUTES",
                       help="refuse a run estimated to take longer than this (default 30)")
     lora.add_argument("--yes", action="store_true", help="run past the ceiling")
-    a = ap.parse_args(argv)
+    a = ap.parse_args(rest)
+
+    if a.detach:
+        running = jobs.alive(KIND, home=_jobs_home())
+        if running:
+            # one training run at a time: two fine-tunes on one machine share one GPU, and
+            # what that costs is both of them, slower, with neither measurement believable
+            print(f"error: a training run (pid {running}) is still going; "
+                  f"`ml-stack-train-run wait` blocks until it has ended, `stop` ends it",
+                  file=sys.stderr)
+            return 2
+        log = detach(rest)
+        print(f"detached; the log is {log}")
+        print("  ml-stack-train-run status")
+        return 0
 
     config: dict[str, Any] = {}
     if a.config:

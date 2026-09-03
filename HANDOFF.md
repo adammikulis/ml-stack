@@ -100,16 +100,6 @@ nothing (the extra turns went unused).
 
 ## Improvements queued 2026-09-03 afternoon (Adam: "knock them out")
 
-Lifecycle and safety
-- [ ] **The ingest takes a `Run`.** `ml_stack.ingest.serving` still builds its own `Shape` from a
-  profile and its own client beside it (`profile_for(...).shape(port=, seats=)`), so an
-  ingest and a bench row over one model can lease two shapes and llama.cpp reloads the
-  weights. `Profile.run()` gives the whole thing -- shape, asking, client -- and
-  `bench.served`, `AskRoutes.seated` and `serve.seat` already take it.
-- [ ] **Training records its long runs as a job.** `ml-stack-train-run` has no detach and no
-  record; the bench and the ingest both keep theirs through `ml_stack.jobs`, so
-  `ml-stack-jobs status` lists everything but a training run. When training gets a detach it
-  records the same way (kind `train`).
 Extraction quality
 - [ ] **Reconcile on the way in, everywhere.** Adam: "the same dedupe mechanism should be
   used whenever the model is reading a new thing or learning something new and saving to

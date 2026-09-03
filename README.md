@@ -359,6 +359,15 @@ the managed llama.cpp checkout the served binary was built from, quantises, and 
 the file before anyone waits on a load; `manifest.json` records the training data's hash and
 example count, so what a fine-tune learned from can be identified afterwards.
 
+A real fine-tune is hours, and a run started with `&` or `nohup` dies with the shell that
+started it, so `--detach` re-runs the command in its own session with its output in a log
+under `~/.ml-stack/train/logs` and hands the shell straight back. The pid, the argv and the
+log are recorded as the `train` job the same way the bench and the ingest record theirs, so
+`ml-stack-train-run status` says what is running, `wait` blocks until it has ended — the
+next command is `wait && next` rather than a loop written by hand — and `stop` ends it. One
+at a time: a second `--detach` beside a run still going is refused, because the two would
+share one GPU and neither measurement would be worth having.
+
 `docs/research/tool-caller-finetune.md` is the plan this is the first half of — what to
 train, on whose traces, what it would cost, and what is unmeasured.
 

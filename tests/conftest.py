@@ -109,6 +109,7 @@ _HOMED = (
     ("ml_stack.graph.bench", "HOME", "bench"),
     ("ml_stack.graph.bench.extract", "HOME", "bench"),   # bound at import, not looked up
     ("ml_stack.mcp", "MCP_HOME", "mcp"),
+    ("ml_stack.train.run", "HOME", "train"),   # where a detached fine-tune records itself
 )
 
 #: Environment a developer's shell may carry that would otherwise steer a test.

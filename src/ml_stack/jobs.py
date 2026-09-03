@@ -1,10 +1,9 @@
 """A record for a command that outlives the terminal that started it.
 
-One JSON file per *kind* of long command -- ``bench``, ``ingest`` -- holding the pid, the
-argv, the log and when it started, so ``wait`` and ``stop`` never need a hand-written
-``pgrep`` loop and a command that chains after another is always ``wait && next``.
-``ml-stack-jobs status`` prints every kind at once. Training has no detach yet; when it gets
-one it records the same way.
+One JSON file per *kind* of long command -- ``bench``, ``ingest``, ``train`` -- holding the
+pid, the argv, the log and when it started, so ``wait`` and ``stop`` never need a
+hand-written ``pgrep`` loop and a command that chains after another is always
+``wait && next``. ``ml-stack-jobs status`` prints every kind under one home at once.
 """
 
 from __future__ import annotations
