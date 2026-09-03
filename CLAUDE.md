@@ -70,6 +70,17 @@ is going away.
 An empty HANDOFF.md is a good state. Delete the file rather than leaving headings with
 nothing under them.
 
+## What belongs here, and what belongs to the app that drives it
+
+The divider, in one line: anything true of any graph, model or scrape is this library's,
+with a test and a command; a line that names one community, its vocabulary, or where its
+data lives belongs to the app (`~/ai_ceo` is the first). So an app should hold only
+wrappers and one-line switches -- a script that calls one of ours with its own arguments,
+an environment variable that flips one of our parameters, a lambda that says where its
+graph keeps its pointers, its copy and kinds handed to our page. When an app needs more
+than that, the missing piece is a command or a parameter here. (Adam, 2026-09-03: "that's
+a great divider line, write that down".)
+
 ## Worktrees
 
 Every agent works in its own worktree on its own branch. That means the main session as
