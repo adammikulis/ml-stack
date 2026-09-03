@@ -878,6 +878,16 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
             say(f"    serving in its measured shape: {said(measured)}")
     if not args.images:
         lease.pop("mmproj", None)
+    if getattr(args, "n_max", None) is not None:
+        # Extraction copies definitions out of the page: the head's guesses were accepted
+        # 97% of the time on a biology chapter against ~75% answering questions, so the
+        # length that measured best for answering is not the length for this. Measured
+        # here, per workload, with the same command that reads the shelf.
+        if not lease.get("draft"):
+            say("--n-max: no draft head is being served, so there is no draft to lengthen")
+        else:
+            lease["spec_draft_max"] = int(args.n_max)
+            say(f"    draft length {args.n_max} over the profile's")
     began = time.time()
     with serve(found, manager=manager, **lease) as server:
         say(f"    up in {time.time() - began:.0f}s")
@@ -996,6 +1006,10 @@ def parser() -> argparse.ArgumentParser:
                          "any book")
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
                     help="exit 1 when --gold scores below this F1 (0-1)")
+    ap.add_argument("--n-max", type=int, default=None, metavar="N",
+                    help="tokens the draft head guesses ahead each step, over the profile's "
+                         "measured length -- extraction accepts far more of them than "
+                         "answering does, so measure it here (default: the profile's)")
     ap.add_argument("--workers", type=int, default=WORKERS, metavar="N",
                     help="units read at once, each on its own slot of the served model "
                          "(default: %(default)s). Decoding one sequence leaves most of the "

@@ -663,3 +663,33 @@ def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
     row = ingest.extract_unit(client, a_unit(), ingest.schema())
     assert row.error.startswith("ServerError: the reply was cut off")
     assert row.raw == half
+
+
+def test_n_max_lengthens_the_profiles_draft_for_the_shelf(monkeypatch, tmp_path):
+    from ml_stack.serve import Shape
+
+    seen = {}
+
+    class Found:
+        def shape(self, port, seats):
+            return Shape(model="x.gguf", port=port, seats=seats, seat_context=16384,
+                         draft="mtp.gguf", draft_n_max=4)
+
+        def said(self):
+            return "measured"
+
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
+    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+
+    def fake_serve(model, manager=None, **lease):
+        seen["lease"] = lease
+        raise SystemExit(0)
+
+    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    (tmp_path / "g.json").write_text(
+        '{"passages": [{"passage_id": "p", "text": "Vault currents flow.", "triples": []}]}')
+    import contextlib
+    with contextlib.suppress(SystemExit):
+        ingest.main(["--gold", str(tmp_path / "g.json"), "--model", "x", "--n-max", "12"])
+    assert seen["lease"]["spec_draft_max"] == 12 and seen["lease"]["draft"] == "mtp.gguf"
