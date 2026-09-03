@@ -11,9 +11,18 @@ records and arranges them:
 
 1. **Answering, per model** -- one table per model file, a row per way it was asked;
 2. **Across models** -- the best row of each, which is what `show --rank` writes;
-3. **Draft heads** -- the `drafts` summary and its recommendation, per model;
-4. **Memory** -- the fit records, at this machine's room and at each ``--room``;
-5. **What to serve** -- one line per model composing 1, 3 and 4.
+3. **Extraction** -- one row per `extract` run, newest first, with the topology and the
+   conformance under it; printed only when the window holds one;
+4. **Draft heads** -- the `drafts` summary and its recommendation, per model;
+5. **Memory** -- the fit records, at this machine's room and at each ``--room``;
+6. **What to serve** -- one line per model composing 1, 4 and 5.
+
+Extraction is here because the day it was left out is the day the document could not hold
+the cause-then-fix record it exists for: a model read topics at 19% precision and relations
+at 0% F1 with 26% invented ids, the extraction instructions were given the topic and the
+relation vocabulary, and the same model read 67% / 62% / 7% after. That is a measurement, a
+cause we controlled and a re-measurement, and it lived only in a terminal because the report
+filtered the runs out before it read them.
 
 A part that was never measured says "not measured". Nothing here guesses: a report that
 filled a gap with a plausible number would be read as a measurement, and the whole point of
@@ -40,12 +49,13 @@ from ml_stack.graph.bench.score import (
     hosts_of,
     per_question,
 )
-from ml_stack.graph.bench.show import drafted, kv_short, made
+from ml_stack.graph.bench.show import _gb, drafted, kv_short, made
 
-__all__ = ["ASKINGS", "Doc", "WAYS", "across", "answering", "asking_of", "build_of",
-           "by_model", "cache_of", "fit_for", "fits_named", "head_of", "measured_best",
-           "model_of", "profile_of", "recommended_head", "report", "thinking_of", "ways_of",
-           "write_profiles"]
+__all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
+           "best_extractor", "build_of", "by_model", "cache_of", "extract_model_of",
+           "extractions", "fit_for", "fits_named", "head_of", "measured_best", "model_of",
+           "profile_of", "read_messages", "recommended_head", "report", "thinking_of",
+           "ways_of", "write_profiles"]
 
 
 # The words a sweep puts in a label for the way it asked (`bench.halves`, `bench._ways`).
@@ -158,6 +168,92 @@ def across(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0
         out.append((model, max(pool, key=lambda o: (derived(o)["right"],
                                                     str(o.get("at") or "")))))
     return sorted(out, key=lambda pair: -derived(pair[1])["right"])
+
+
+# ---------------------------------------------------------------- the extraction runs
+
+# How many messages an extraction run reads before its scores are read as a measurement,
+# and `min_n`'s opposite number for the other half of the bench. `extract.SMOKE_MESSAGES`
+# is three, and three messages fix every coverage to a third: a run that missed one thing
+# reads 67%, which is not a rate but an arithmetic accident of how few it was asked.
+MIN_MESSAGES = 10
+
+
+def extract_model_of(one: Mapping[str, Any]) -> str:
+    """The model an extraction run read with, "?" for a run that names none.
+
+    Its own top-level ``model`` first, because that is where `extract.save` writes it --
+    already the file's basename with the ``.gguf`` off -- and the server record only after.
+    An answering run keeps the same fact under ``server.model`` and `model_of` reads it
+    there; the two are separate functions rather than one that guesses, since a run that
+    named neither would otherwise be grouped under whatever the other kind happened to say.
+    """
+    return str(one.get("model") or (one.get("server") or {}).get("model") or "?")
+
+
+def read_messages(one: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """The rows of an extraction run whose gold is exact -- the messages its scores were
+    measured over.
+
+    `extract.measure` scores the template-written messages and puts the model-written ones
+    in ``lower_bound``, and `extract.table` counts the run's messages the same way. So does
+    this: a run's `s/msg` counted over rows its coverage was not measured over is two
+    numbers over two different sets printed as one row.
+    """
+    return [r for r in (one.get("rows") or ()) if r.get("exact", True)]
+
+
+def _scores(one: Mapping[str, Any], key: str) -> Mapping[str, Any]:
+    return (one.get("scores") or {}).get(key) or {}
+
+
+def extractions(kept: Sequence[Mapping[str, Any]], *, min_msgs: int = MIN_MESSAGES
+                ) -> tuple[list[Mapping[str, Any]], int]:
+    """The extraction runs among ``kept``, newest first, and how many were too short.
+
+    Newest first rather than best first, unlike `answering`: an extraction run is read as a
+    record of what changed -- an instruction rewritten, a vocabulary defined -- and the
+    order that shows a change is the order it happened in, latest at the top. Which model
+    read best is a separate sentence, `best_extractor`, so the ordering never has to carry
+    two jobs at once.
+
+    A run of three messages is a smoke run proving the path works, for `answering`'s reason
+    exactly: it is counted here and footnoted rather than tabled beside a full one.
+
+    The key breaks a tie, not the order the store gave them back: `bench.runs` returns runs
+    sorted by key, and a key begins with the label, so two runs kept inside the same second
+    would be ordered by whatever they were called. The key's own tail is the run's stamp
+    and the suffix `save` adds when one second held two, which is the only record of which
+    came second.
+    """
+    from ml_stack.graph.bench.extract import only
+
+    mine = only(kept)
+    long_enough = [one for one in mine if len(read_messages(one)) >= min_msgs]
+    long_enough.sort(key=lambda one: (str(one.get("at") or ""), str(one.get("key") or "")),
+                     reverse=True)
+    return long_enough, len(mine) - len(long_enough)
+
+
+def best_extractor(rows: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    """The run that read a graph out of messages best: the highest relation F1 among those
+    that read the most messages. None for nothing to read.
+
+    By relations rather than by nodes because naming the right people and joining none of
+    them is the failure this half of the bench exists to catch -- a model can list every
+    name in a message and state no relation at all, and its node F1 will not say so.
+
+    Among the longest runs only, for `across`'s reason: a coverage over ten messages and one
+    over forty are not the same measurement, and sorting them against each other rewards
+    whichever was asked less. Ties go to the later run, which is the one measured against
+    whatever changed last.
+    """
+    if not rows:
+        return None
+    floor = max(len(read_messages(one)) for one in rows)
+    pool = [one for one in rows if len(read_messages(one)) >= floor]
+    return max(pool, key=lambda one: (float(_scores(one, "relations").get("f1") or 0.0),
+                                      str(one.get("at") or "")))
 
 
 def recommended_head(mine: Sequence[Mapping[str, Any]],
@@ -451,24 +547,33 @@ class Doc:
 def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
            elsewhere: Sequence[tuple[str, Sequence[Any]]] = (), at: int = 32768,
            min_n: int = 6, full_n: int = 0, md: bool = True, noise: float = NOISE,
-           room: str = "", store: str = "") -> str:
+           room: str = "", store: str = "",
+           extracted: Sequence[Mapping[str, Any]] = (),
+           min_msgs: int = MIN_MESSAGES) -> str:
     """Every measurement there is, as one document. See the module docstring for the parts.
 
     ``fits` are the memory records for this machine, ``elsewhere`` the same records asked
     about another room -- ``[(name, fits), ...]``, one per ``--room``. ``at`` is the
     per-user context the "how many fit" column answers at.
+
+    ``kept`` is the answering runs and ``extracted`` the extraction runs, narrowed by the
+    same window: they are kept in one store and are two different measurements, and mixing
+    them cost an "Extraction" section that never printed. An empty ``extracted`` prints no
+    such section -- a heading over nothing reads as a model that scored nothing.
     """
     doc = Doc(md)
     doc.head(1, "What has been measured")
-    if not kept:
+    if not kept and not extracted:
         doc.para("Nothing kept yet. `ml-stack-bench run LABEL` measures one asking; "
                  "`ml-stack-bench sweep` measures every model every way.")
         _memory(doc, fits, elsewhere, at=at, room=room)
         return doc.text()
 
-    spans = sorted(str(one.get("at") or "") for one in kept if one.get("at"))
-    machines = sorted(hosts_of(kept))
+    everything = [*kept, *extracted]
+    spans = sorted(str(one.get("at") or "") for one in everything if one.get("at"))
+    machines = sorted(hosts_of(everything))
     doc.para(f"{len(kept)} run(s)"
+             + (f" and {len(extracted)} extraction run(s)" if extracted else "")
              + (f" from `{store}`" if store else "")
              + (f", {spans[0]} to {spans[-1]}" if spans else "")
              + (f", on {', '.join(machines)}" if machines else "")
@@ -478,6 +583,8 @@ def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
     tables = answering(kept, min_n=min_n)
     _answering(doc, tables, min_n=min_n)
     _across(doc, kept, full_n=full_n)
+    if extracted:
+        _extraction(doc, extracted, min_msgs=min_msgs)
     _drafts(doc, kept, noise=noise)
     _memory(doc, fits, elsewhere, at=at, room=room)
     _serving(doc, kept, tables, fits=fits, at=at, noise=noise)
@@ -543,6 +650,79 @@ def _across(doc: Doc, kept: Sequence[Mapping[str, Any]], *, full_n: int) -> None
           *((host_of(one) or "-",) if several else ()))
          for model, one in ranked],
         best=0)
+
+
+def _extraction(doc: Doc, extracted: Sequence[Mapping[str, Any]], *, min_msgs: int) -> None:
+    from ml_stack.graph.bench.extract import detail
+    from ml_stack.hub import pretty_name
+
+    rows, short = extractions(extracted, min_msgs=min_msgs)
+    doc.head(2, "Extraction")
+    doc.para("One row per `ml-stack-bench extract` run -- reading a graph *out of* "
+             "messages rather than answering questions about one -- newest first, so a "
+             "row reads against the row under it. Coverage and precision stay separate "
+             "columns because they are fixed by opposite changes to the asking: a model "
+             "that misses half the relations and one that invents twice as many can share "
+             "an F1. `invented` is the share of extracted people and organisations naming "
+             "nothing in the world -- the hallucination rate, and the number that moved "
+             "most when the instructions were given the vocabulary to use.")
+    if not rows:
+        doc.para(f"Nothing read at {min_msgs} message(s) or more.")
+    else:
+        best = best_extractor(rows)
+        doc.table(
+            ("run", "model", "msgs", "s/msg", "tok/msg", "n-F1", "r-F1", "top-prec",
+             "rel-cov", "rel-prec", "invented", "resident"),
+            [_extraction_row(one, doc=doc, pretty=pretty_name) for one in rows],
+            best=next((n for n, one in enumerate(rows) if one is best), -1))
+        for one in rows:
+            said = [line for line in detail(one.get("scores") or {})
+                    if line.startswith(("topology:", "conformance:"))]
+            if said:
+                label = str(one.get("label") or "?")
+                doc.bullet(f"{f'`{label}`' if doc.md else label} — " + "; ".join(said))
+        doc.lines.append("")
+        if best is not None:
+            rel = _scores(best, "relations")
+            name = pretty_name(extract_model_of(best))
+            doc.para(
+                f"Best at relations: {f'**{name}**' if doc.md else name} at "
+                f"{_pct(rel.get('f1'))} relation F1 over {len(read_messages(best))} "
+                f"message(s) (`{best.get('label') or '?'}`), read among the runs that read "
+                "the most messages -- a coverage over ten messages and one over forty are "
+                "not the same measurement, and ranking them together would name whichever "
+                "model was asked less.")
+    if short:
+        doc.note(f"{short} smoke and short extraction run(s) left out: fewer than "
+                 f"{min_msgs} messages read, which proves the path works rather than how "
+                 f"well it reads.")
+
+
+def _extraction_row(one: Mapping[str, Any], *, doc: Doc, pretty: Any) -> tuple[str, ...]:
+    """One run's cells. Nothing is derived that the run does not carry: a rate the scores
+    left out prints "-" rather than being recomputed from counts that may have been scored
+    against a different gold."""
+    rows = read_messages(one)
+    n = len(rows)
+    seconds = sum(float(r.get("seconds") or 0) for r in rows)
+    tokens = sum(int(r.get("prompt_tokens") or 0) + int(r.get("completion_tokens") or 0)
+                 for r in rows)
+    nodes, rel = _scores(one, "nodes"), _scores(one, "relations")
+    topics = (_scores(one, "by_kind") or {}).get("topics") or {}
+    made_up = _scores(one, "invented")
+    label, model = str(one.get("label") or "?"), pretty(extract_model_of(one))
+    return (label,
+            f"`{model}`" if doc.md else model,
+            f"{n}",
+            f"{(seconds / n if n else 0):.1f}",
+            f"{(tokens / n if n else 0):.0f}",
+            _pct(nodes.get("f1")),
+            _pct(rel.get("f1")),
+            _pct(topics.get("precision")),
+            _pct(rel.get("coverage")),
+            _pct(rel.get("precision")),
+            _pct(made_up.get("rate")),
+            _gb((one.get("server") or {}).get("resident_bytes")))
 
 
 def _drafts(doc: Doc, kept: Sequence[Mapping[str, Any]], *, noise: float) -> None:
@@ -667,15 +847,26 @@ def main(args: Any) -> int:
     store = str(getattr(args, "kept", "") or "")
     everything = bench.runs(store) if store and Path(store).expanduser().exists() else []
     # an extraction run is kept in the same store and is not an answering run: it has no
-    # question to score, and `extract`'s own table is where it belongs
+    # question to score and no F1 to rank, so the two are narrowed apart and tabled apart.
+    # They used to be *dropped* here instead, which is why the document could say nothing
+    # about extraction at all
     kept = [r for r in everything if r.get("kind") != bench_extract.KIND]
-    kept = newest(kept, last=int(getattr(args, "last", 0) or 0),
-                  since=str(getattr(args, "since", "") or ""))
+    extracted = bench_extract.only(everything)
+    # the window is applied to each kind on its own: `--last 3` means the three newest of
+    # each, not three rows shared out between them, where a busy afternoon of answering
+    # runs would silently empty the extraction table
+    last, since = (int(getattr(args, "last", 0) or 0),
+                   str(getattr(args, "since", "") or ""))
+    kept = newest(kept, last=last, since=since)
+    extracted = newest(extracted, last=last, since=since)
     wanted = [str(w).lower() for w in (getattr(args, "model", None) or [])]
     if wanted:
         kept = [r for r in kept
                 if any(w in model_of(r).lower() or w in str(r.get("label") or "").lower()
                        for w in wanted)]
+        extracted = [r for r in extracted
+                     if any(w in extract_model_of(r).lower()
+                            or w in str(r.get("label") or "").lower() for w in wanted)]
 
     if getattr(args, "profile", False):
         # the file the serve path and the asking path read, set from the store rather than
@@ -714,7 +905,9 @@ def main(args: Any) -> int:
                   full_n=int(getattr(args, "full_n", 0) or 0),
                   md=not bool(getattr(args, "text", False)),
                   noise=float(getattr(args, "noise", NOISE * 100) or 0) / 100,
-                  room=fit_mod._human(here) if here else "", store=store)
+                  room=fit_mod._human(here) if here else "", store=store,
+                  extracted=extracted,
+                  min_msgs=int(getattr(args, "min_msgs", MIN_MESSAGES) or MIN_MESSAGES))
 
     where = str(getattr(args, "md", "") or "")
     if not where:
