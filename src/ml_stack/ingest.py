@@ -39,8 +39,14 @@ questions today. `Shelf` is how an application reads one::
         store.nodes(kind="concept")
 
 ``ml-stack-ingest fold --out STORE`` does the same fold from the shelf into the store on
-demand, ``show`` prints what a book holds, and ``stop`` ends a detached run after folding
-what it has read.
+demand, ``show`` prints what a book holds, ``shelf`` prints what the books hold together --
+the concepts more than one of them names and the relations joining their vocabularies, see
+`Shelf.shared` -- and ``stop`` ends a detached run after folding what it has read.
+
+*A shelf is asked questions the way any graph is.* ``ml-stack-ingest ask --out STORE
+"question"`` puts the store's graph through `ml_stack.graph.ask.converse` with the model
+served in its measured shape, and ``ask --gold FILE`` scores a set of questions against the
+entries each answer should have selected, using the bench's own scorer.
 
 Nothing here is about any one book: it reads a PDF, it asks a model, it writes a graph.
 """
@@ -49,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import platform
 import re
@@ -61,10 +68,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-__all__ = ["FOLD_EVERY", "HOME", "INSTRUCTIONS", "PER_SECTION", "VERBS", "Book", "Progress",
-           "Scored", "Shelf", "Stopped", "build", "detach", "extract_unit", "fold", "fold_book",
-           "fold_into", "gold_score", "main", "read_gold", "schema", "show", "status",
-           "unit_of", "units_of", "write"]
+__all__ = ["FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS", "PER_SECTION", "VERBS",
+           "Book", "Progress", "Scored", "Shelf", "Stopped", "ask", "asked_lines", "build",
+           "detach", "extract_unit", "fold", "fold_book", "fold_into", "gold_score",
+           "graph_of", "main", "read_asked", "read_gold", "schema", "score_asked", "shelf",
+           "show", "status", "unit_of", "units_of", "write"]
 
 HOME = Path(os.environ.get("MLSTACK_INGEST_HOME") or "~/.ml-stack/ingest").expanduser()
 """Where a detached run's log and its record of itself live. Not the store: the store is
@@ -83,7 +91,18 @@ other: measured over invented units, 400 units of a 12-word vocabulary folded an
 the square of the vocabulary rather than with the units, so the interval is a real cost and
 not a formality. A chapter's end folds once this many units have gone by since the last
 fold; a chapter longer than twice this folds inside itself; the end of a book and a stop
-always fold."""
+always fold. What the last fold actually took widens it -- see `FOLD_SECONDS`."""
+
+FOLD_SECONDS = 20.0
+"""The most a fold may take before the run waits longer between folds.
+
+`fold_book` folds every name against every other, so it grows with the square of the
+vocabulary while the write grows with the units. Measured over invented units of a
+vocabulary as wide as the book (`tests/test_ingest_shelf.py`, an M-series laptop): 300
+units and 300 concepts, 0.25 s to fold and 3.3 s to fold and write; 1,000 units and 1,000
+concepts, 2.9 s and 11.8 s; 3,000 units and 3,000 concepts, 28.5 s and 82.2 s. A book of
+thousands of nodes therefore costs a minute or more at every chapter end, so
+`_fold_interval` reads as many units again between folds as the last fold ran over this."""
 
 IMAGES_PER_SECTION = 4
 """How many of a section's figures are shown to the model at once. A section of a biology
@@ -211,6 +230,7 @@ class Read:
     figures: int = 0
     images: int = 0
     timed_out: bool = False
+    retried: bool = False    # read a second time, the server having reset inside the first
     error: str = ""
     raw: str = ""            # what the model wrote when it failed, whole, for reading later
     run: str = ""            # the run node that read it -- model, build, head, hashes, when
@@ -728,12 +748,15 @@ class Progress:
             "attempts": attempts, "at": time.strftime("%FT%T")}
         self.save()
 
-    def folded(self, slug: str, *, units: int, nodes: int, edges: int) -> None:
-        """Write down that the book is in the store as of ``units`` units read."""
+    def folded(self, slug: str, *, units: int, nodes: int, edges: int,
+               seconds: float = 0.0) -> None:
+        """Write down that the book is in the store as of ``units`` units read, and what
+        the fold cost -- `_fold_interval` reads the seconds back to space the next ones."""
         held = self.book(slug)
         held["folded_at"] = int(units)
         held["folded_nodes"] = int(nodes)
         held["folded_edges"] = int(edges)
+        held["folded_seconds"] = round(float(seconds), 2)
         held["folded"] = time.strftime("%FT%T")
         self.save()
 
@@ -791,6 +814,8 @@ def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
     say(f"{out}: {totals['sections']} of {totals['of']} sections in {totals['books']} book(s), "
         f"started {totals['started']}")
     left = 0.0
+    read = Shelf(out)
+    per_book = {b.slug: b for b in read.books()}
     for slug, book in sorted(progress.state["books"].items()):
         entries = book.get("done") or {}
         spent = sum(float(e.get("seconds") or 0.0) for e in entries.values())
@@ -802,11 +827,17 @@ def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
         say(f"  {slug:<28} {len(entries):>4} / {book.get('sections') or '?':<5} "
             f"{spent / 60:6.1f} min" + (f"  {broke} failed" if broke else "")
             + (f"  ~{_for_long(remaining)} left" if remaining else ""))
+        held = per_book.get(slug)
+        if held is not None and held.units:
+            say(f"      cost: {held.prompt_tokens:,} read + {held.completion_tokens:,} written "
+                f"token(s) over {held.units} unit(s); {held.per_unit:.1f} s/unit, "
+                f"{held.tokens_per_unit:,} tokens/unit")
         folded = int(book.get("folded_at") or 0)
         if folded:
             say(f"      in store: {int(book.get('folded_nodes') or 0)} nodes, "
                 f"{int(book.get('folded_edges') or 0)} edges, "
-                f"folded at unit {folded} of {wanted or '?'}")
+                f"folded at unit {folded} of {wanted or '?'}"
+                + (f", in {book['folded_seconds']:.1f}s" if book.get("folded_seconds") else ""))
         elif _book_in_store(out, slug):
             say("      in store: folded by an earlier run (units unknown)")
         else:
@@ -820,6 +851,13 @@ def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
             + (f", {totals['failed']} failed" if totals["failed"] else "")
             + (f" ({totals['given_up']} given up after {GIVE_UP} tries; the reply each wrote "
                f"is `raw` in the reads file)" if totals["given_up"] else ""))
+    units = sum(b.units for b in per_book.values())
+    if units:
+        prompt = sum(b.prompt_tokens for b in per_book.values())
+        written = sum(b.completion_tokens for b in per_book.values())
+        seconds = sum(b.seconds for b in per_book.values())
+        say(f"  shelf: {prompt:,} read + {written:,} written token(s) over {units} unit(s); "
+            f"{seconds / units:.1f} s/unit, {round((prompt + written) / units):,} tokens/unit")
     return 0
 
 
@@ -829,6 +867,21 @@ def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
 def reads_path(out: str | Path, slug: str) -> Path:
     """Where one book's extractions are kept, beside the store."""
     return Path(str(Path(out).expanduser()) + f".{slug}.reads.json")
+
+
+def tokens_of(reads: Iterable[Mapping[str, Any]]) -> tuple[int, int]:
+    """``(read, written)`` tokens over some reads, from the `Call` each one kept.
+
+    A row from before the calls were kept, or one whose extraction never reached the
+    server, counts nothing rather than being left out of the total.
+    """
+    prompt = completion = 0
+    for row in reads:
+        for call in row.get("calls") or ():
+            if isinstance(call, Mapping):
+                prompt += int(call.get("prompt_tokens") or 0)
+                completion += int(call.get("completion_tokens") or 0)
+    return prompt, completion
 
 
 @dataclass
@@ -844,9 +897,12 @@ class Book:
     given_up: int = 0
     wanted: int = 0          # units the book has
     seconds: float = 0.0
+    prompt_tokens: int = 0   # what the model was shown, over every call of every unit
+    completion_tokens: int = 0
     folded_at: int = 0       # units read when the store was last written
     folded_nodes: int = 0
     folded_edges: int = 0
+    folded_seconds: float = 0.0
 
     @property
     def partial(self) -> bool:
@@ -856,6 +912,15 @@ class Book:
     @property
     def per_unit(self) -> float:
         return round(self.seconds / self.units, 1) if self.units else 0.0
+
+    @property
+    def tokens(self) -> int:
+        """Read and written together."""
+        return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def tokens_per_unit(self) -> int:
+        return round(self.tokens / self.units) if self.units else 0
 
     @property
     def left(self) -> float:
@@ -881,6 +946,7 @@ class Shelf:
         for slug in sorted(set(self.progress.state["books"]) | set(self._slugs())):
             held = self.progress.state["books"].get(slug) or {}
             rows = self.reads(slug)
+            prompt, completion = tokens_of(rows)
             done = (held.get("done") or {}).values()
             out.append(Book(
                 slug=slug, title=str(held.get("title") or ""), path=str(held.get("path") or ""),
@@ -890,9 +956,11 @@ class Shelf:
                              and int(e.get("attempts") or 1) >= GIVE_UP),
                 wanted=int(held.get("sections") or 0),
                 seconds=round(sum(float(r.get("seconds") or 0.0) for r in rows), 1),
+                prompt_tokens=prompt, completion_tokens=completion,
                 folded_at=int(held.get("folded_at") or 0),
                 folded_nodes=int(held.get("folded_nodes") or 0),
-                folded_edges=int(held.get("folded_edges") or 0)))
+                folded_edges=int(held.get("folded_edges") or 0),
+                folded_seconds=float(held.get("folded_seconds") or 0.0)))
         return out
 
     def book(self, slug: str) -> Book | None:
@@ -929,6 +997,78 @@ class Shelf:
 
         return GraphStore(self.out, read_only=True, **kw)
 
+    def shared(self, store: Any = None) -> dict[str, Any]:
+        """What the books on this shelf hold, and what they hold in common.
+
+        ``books`` is one entry per book -- units read, and the nodes and edges the store
+        holds for it. ``shared`` is every concept two or more books were read into, most
+        shared first, each naming them. ``between`` is every edge whose two ends were read
+        from different books -- one book's vocabulary joined to another's. ``decisions``
+        counts the pairs a judge has settled in the store's `graph.tidy` document.
+
+        A book's node is one a ``read_from`` edge joins to ``book:<slug>``; a book's edge
+        is one whose provenance names a unit of that book. Without a ``store`` one is
+        opened read-only on the shelf.
+        """
+        if store is None:
+            with self.store() as held:
+                return self.shared(held)
+        nodes = list(store.nodes())
+        edges = list(store.edges())
+        labels = {str(n["id"]): str(n.get("label") or "") for n in nodes}
+        mentions = {str(n["id"]): int(n.get("mentions") or 0) for n in nodes}
+        books_of: dict[str, set[str]] = {}
+        for edge in edges:
+            target = str(edge.get("target") or "")
+            if edge.get("rel") == "read_from" and target.startswith("book:"):
+                books_of.setdefault(str(edge.get("source") or ""),
+                                    set()).add(target[len("book:"):])
+        known = {b.slug: b for b in self.books()}
+        slugs = sorted(set(known) | {str(n["id"])[len("book:"):] for n in nodes
+                                     if str(n.get("id") or "").startswith("book:")})
+        node_counts = {slug: 0 for slug in slugs}
+        for held_books in books_of.values():
+            for slug in held_books:
+                node_counts[slug] = node_counts.get(slug, 0) + 1
+        edge_counts = {slug: 0 for slug in slugs}
+        for edge in edges:
+            if edge.get("rel") == "read_from":
+                continue
+            for slug in {str(u).split(":", 1)[0] for u in (edge.get("provenance") or ())}:
+                if slug in edge_counts:
+                    edge_counts[slug] += 1
+        books = []
+        for slug in slugs:
+            held = known.get(slug)
+            books.append({"book": slug,
+                          "title": (held.title if held else "") or labels.get(f"book:{slug}", "")
+                                   or slug,
+                          "units": held.units if held else 0,
+                          "read": held.read if held else 0,
+                          "wanted": held.wanted if held else 0,
+                          "nodes": node_counts.get(slug, 0),
+                          "edges": edge_counts.get(slug, 0)})
+        shared = [{"id": node_id, "label": labels.get(node_id, node_id),
+                   "mentions": mentions.get(node_id, 0), "books": sorted(held_books)}
+                  for node_id, held_books in books_of.items() if len(held_books) > 1]
+        shared.sort(key=lambda r: (-len(r["books"]), -r["mentions"], r["label"]))
+        between = []
+        for edge in edges:
+            if edge.get("rel") == "read_from":
+                continue
+            source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
+            here, there = books_of.get(source) or set(), books_of.get(target) or set()
+            if not (here and there) or here & there:
+                continue
+            between.append({"source": source, "source_label": labels.get(source, source),
+                            "rel": str(edge.get("rel") or ""), "target": target,
+                            "target_label": labels.get(target, target),
+                            "weight": int(edge.get("weight") or 0),
+                            "books": [sorted(here), sorted(there)]})
+        between.sort(key=lambda r: (-r["weight"], r["source_label"], r["target_label"]))
+        return {"books": books, "shared": shared, "between": between,
+                "decisions": _decisions_in(store)}
+
 
 def _unit_docs(rows: Iterable[Mapping[str, Any]], slug: str) -> dict[str, Any]:
     """The ``ingest:unit:`` document for each read: its provenance, what it said, what it cost."""
@@ -954,8 +1094,9 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
               log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Fold one book's reads so far and upsert them into the store.
 
-    Returns the counts: units read, nodes, edges, folds, whether the book is partial, and
-    ``new_nodes``/``new_edges`` -- what the store lacked before this fold. Idempotent:
+    Returns the counts: units read, nodes, edges, folds, ``seconds`` -- what the fold and
+    the write took -- whether the book is partial, and ``new_nodes``/``new_edges``, what the
+    store lacked before this fold. Idempotent:
     folding twice with nothing read in between adds nothing. ``dry_run`` computes all of
     that and writes nothing; ``rebuild`` drops the book's own nodes and edges first and is
     the only way anything leaves the store.
@@ -965,6 +1106,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     held = shelf.progress.state["books"].get(slug) or {}
     name = title or str(held.get("title") or "") or slug
     units = {**units_of(rows), **dict(units_by_id or {})}
+    began = time.time()
     graph = fold_book(rows, units, book_title=name, log=log)
     new_nodes, new_edges = _missing_from(out, graph)
     folds = len(graph["folds"].get("concepts") or ()) + len(graph["folds"].get("relations") or ())
@@ -973,15 +1115,18 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
            "read": sum(1 for r in rows if not r.get("error")),
            "wanted": wanted, "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
            "new_nodes": new_nodes, "new_edges": new_edges,
-           "folds": folds, "partial": wanted > len(rows)}
+           "folds": folds, "partial": wanted > len(rows),
+           "seconds": round(time.time() - began, 2)}
     if dry_run:
         return got
     docs = _unit_docs(rows, slug)
     counts = write(out, graph, book=slug, title=name, docs=docs, replace=rebuild,
                    keep_units=set(units) if rebuild else None)
+    got["seconds"] = round(time.time() - began, 2)
     record = progress if progress is not None else shelf.progress
     record.book(slug, title=name)
-    record.folded(slug, units=len(rows), nodes=counts["nodes"], edges=counts["edges"])
+    record.folded(slug, units=len(rows), nodes=counts["nodes"], edges=counts["edges"],
+                  seconds=got["seconds"])
     return got
 
 
@@ -998,6 +1143,21 @@ def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
     edges = sum(1 for e in graph.get("edges") or ()
                 if (e["source"], e["rel"], e["target"]) not in have_edges)
     return nodes, edges
+
+
+def _decisions_in(store: Any) -> dict[str, int]:
+    """How many name pairs a judge has settled in the store, and how each went."""
+    from ml_stack.graph.tidy import DECISIONS
+
+    held = store.get_doc(DECISIONS) if hasattr(store, "get_doc") else None
+    pairs = (held or {}).get("pairs") if isinstance(held, Mapping) else None
+    pairs = pairs if isinstance(pairs, Mapping) else {}
+    out = {"pairs": len(pairs), "same": 0, "different": 0, "unsure": 0}
+    for one in pairs.values():
+        verdict = str((one or {}).get("verdict") or "unsure") if isinstance(one, Mapping) \
+            else "unsure"
+        out[verdict if verdict in out else "unsure"] += 1
+    return out
 
 
 def write_run(out: str | Path, record: Mapping[str, Any]) -> str:
@@ -1225,6 +1385,50 @@ def show(out: str | Path, *, book: str = "", most: int = 5,
     return 0
 
 
+def shelf(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print) -> int:
+    """``ml-stack-ingest shelf --out STORE``: the whole shelf at a glance, in plain text.
+
+    Per book, how much of it is read and what the store holds for it; the concepts more
+    than one book was read into; the relations joining one book's vocabulary to another's;
+    and how many name pairs the hygiene pass has judged. `Shelf.shared` is the same as data.
+    """
+    where = Path(out).expanduser()
+    if not where.exists():
+        say(f"no store at {out}")
+        return 1
+    held = Shelf(out)
+    got = held.shared()
+    if not got["books"]:
+        say(f"nothing on the shelf at {out}")
+        return 1
+    nodes = sum(b["nodes"] for b in got["books"])
+    edges = sum(b["edges"] for b in got["books"])
+    say(f"{out}: {len(got['books'])} book(s), {nodes} node(s), {edges} edge(s)")
+    for book in got["books"]:
+        say(f"  {book['book']:<28} {book['read']:>4} / {book['wanted'] or '?':<5} units read"
+            f"   {book['nodes']:>5} nodes {book['edges']:>5} edges   {book['title']}")
+    shared = got["shared"]
+    say(f"  concepts in more than one book ({len(shared)})"
+        + ("" if shared else ": none -- the books name nothing in common yet"))
+    for one in shared[:most]:
+        say(f"    {one['label']:<32} {len(one['books'])} books: {', '.join(one['books'])}")
+    if len(shared) > most:
+        say(f"    ... and {len(shared) - most} more")
+    between = got["between"]
+    say(f"  relations between books ({len(between)})"
+        + ("" if between else ": none -- no relation joins one book's names to another's"))
+    for one in between[:most]:
+        say(f"    {one['source_label']} --{one['rel']}--> {one['target_label']}   "
+            f"({', '.join(one['books'][0])} -> {', '.join(one['books'][1])})")
+    if len(between) > most:
+        say(f"    ... and {len(between) - most} more")
+    judged = got["decisions"]
+    say(f"  judged: {judged['pairs']} pair(s) -- {judged['same']} the same name, "
+        f"{judged['different']} a spelling apart, {judged['unsure']} unsure"
+        if judged["pairs"] else "  judged: nothing -- the hygiene pass has settled no pair")
+    return 0
+
+
 def _run_said(out: str | Path, run_id: str) -> str:
     """One run node as a person reads it: the model and when."""
     from ml_stack.graph.store import GraphStore
@@ -1442,6 +1646,139 @@ def gold_lines(scored: Scored, *, most: int = 20) -> list[str]:
     return out
 
 
+# -- asking the shelf ---------------------------------------------------------------------------
+
+
+def graph_of(out: str | Path) -> dict[str, Any]:
+    """The store's graph in the shape `graph.ask` takes: ``{"nodes": [...], "edges": [...]}``.
+
+    The hidden nodes -- the run each unit was read by -- and the edges that touch them are
+    left out, as `graph.page.shown` leaves them out of a page: they are the record of the
+    reading, not the thing being asked about.
+    """
+    from ml_stack.graph.page import shown
+    from ml_stack.graph.store import GraphStore
+
+    with GraphStore(out, read_only=True) as store:
+        return shown({"nodes": store.nodes(), "edges": store.edges()})
+
+
+def spent_line(spent: Any) -> str:
+    """What one answer cost, as one line."""
+    return (f"Spent: {spent.calls} call(s) in {spent.seconds:.1f}s, "
+            f"{spent.prompt_tokens} prompt token(s) ({spent.cached_tokens} cached) and "
+            f"{spent.completion_tokens} completion; {spent.tool_calls} tool call(s)"
+            + (f"; {spent.model}" if spent.model else ""))
+
+
+def ask(graph: Mapping[str, Any], question: str, client: Any, *,
+        say: Callable[[str], None] = print, **asking: Any) -> Any:
+    """One question of a shelf's graph, through `graph.ask.converse`; the answer, printed.
+
+    ``asking`` goes to `converse` -- ``profile`` above all, so a model is asked the way it
+    measured best. Returns the `Answer`.
+    """
+    from ml_stack.graph.ask import converse
+
+    answer = converse(question, graph, client, **asking)
+    say(answer.content or "(no answer)")
+    say("  tools: " + (answer.why or "none called"))
+    if answer.show or answer.ids:
+        say("  about: " + ", ".join(answer.show or answer.ids))
+    say("  " + spent_line(answer.spent))
+    return answer
+
+
+def read_asked(path: str | Path) -> list[dict[str, Any]]:
+    """A gold set of questions: ``[{"question", "expected": [ids or labels]}]``.
+
+    A list, or ``{"questions": [...]}``. Each entry may carry a ``label`` for the report.
+    ``expected`` names nodes by id or by the label the book gave them, because a person
+    writing a gold set for a textbook knows "vault current" and not
+    ``concept:vault-current``; `score_asked` resolves a label against the graph.
+    """
+    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    asked = held.get("questions") if isinstance(held, Mapping) else held
+    if not isinstance(asked, list) or not asked:
+        raise ValueError(f"{path}: no questions")
+    return [dict(one) for one in asked if isinstance(one, Mapping)]
+
+
+def _ids_for(graph: Mapping[str, Any], wanted: Iterable[Any]) -> list[str]:
+    """Those node ids, each label among them resolved to the id of the node it names."""
+    ids = {str(n["id"]) for n in graph.get("nodes") or ()}
+    by_label: dict[str, str] = {}
+    for node in graph.get("nodes") or ():
+        by_label.setdefault(" ".join(str(node.get("label") or "").split()).casefold(),
+                            str(node["id"]))
+    out = []
+    for name in wanted:
+        text = str(name)
+        out.append(text if text in ids
+                   else by_label.get(" ".join(text.split()).casefold(), text))
+    return out
+
+
+def score_asked(graph: Mapping[str, Any], client: Any, asked: Sequence[Mapping[str, Any]], *,
+                log: Callable[[str], None] | None = None, **asking: Any) -> list[Any]:
+    """Every question through `converse`, scored as the bench scores one: a `Row` each.
+
+    Recall and precision are over the ids the answer selected against the ids the set
+    expected, by `graph.bench.score` and not by a second scorer of this command's own -- a
+    number measured two ways is two numbers.
+    """
+    from ml_stack.graph.bench.score import Row
+
+    rows: list[Any] = []
+    for index, one in enumerate(asked, start=1):
+        question = str(one.get("question") or "")
+        began = time.time()
+        answer = ask(graph, question, client, say=lambda _: None, **asking)
+        row = Row(label=str(one.get("label") or f"q{index}"), question=question,
+                  seconds=round(time.time() - began, 2), calls=answer.spent.calls,
+                  prompt_tokens=answer.spent.prompt_tokens,
+                  completion_tokens=answer.spent.completion_tokens,
+                  steps=answer.why, answer_chars=len(answer.content),
+                  shown=list(answer.show or answer.ids),
+                  expected=_ids_for(graph, one.get("expected") or ()))
+        rows.append(row)
+        if log:
+            log(f"  {row.seconds:5.1f}s  recall {row.recall:.0%}  precision {row.precision:.0%}"
+                f"  F1 {row.hit:.0%}  {row.label}")
+    return rows
+
+
+def asked_lines(rows: Sequence[Any], *, most: int = 20) -> list[str]:
+    """The score over a set of questions, and what each answer missed or added."""
+    scored = [r for r in rows if r.expected]
+    if not scored:
+        return [f"asked: {len(rows)} question(s), none of them expecting anything"]
+    recall = sum(r.recall for r in scored) / len(scored)
+    precision = sum(r.precision for r in scored) / len(scored)
+    f1 = sum(r.hit for r in scored) / len(scored)
+    seconds = sum(r.seconds for r in rows)
+    out = [f"asked: {len(scored)} question(s) -- recall {recall:.0%}, "
+           f"precision {precision:.0%}, F1 {f1:.0%} ({seconds:.0f}s, "
+           f"{sum(r.calls for r in rows)} calls)"]
+    for row in scored[:most]:
+        missed = [i for i in row.expected if i not in set(row.shown)]
+        extra = [i for i in row.shown if i not in set(row.expected)]
+        if not (missed or extra):
+            continue
+        out.append(f"  {row.label}: F1 {row.hit:.0%}"
+                   + (f"; missed {', '.join(missed)}" if missed else "")
+                   + (f"; also showed {', '.join(extra)}" if extra else ""))
+    if len(scored) > most:
+        out.append(f"  ... and {len(scored) - most} more")
+    return out
+
+
+def asked_f1(rows: Sequence[Any]) -> float:
+    """The mean F1 over the questions that expected something; 0 when none did."""
+    scored = [r for r in rows if r.expected]
+    return sum(r.hit for r in scored) / len(scored) if scored else 0.0
+
+
 # -- serving the model, once, for the whole run -------------------------------------------------
 
 
@@ -1505,6 +1842,21 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
         say(f"    up in {time.time() - began:.0f}s")
         yield Client(server.base_url, timeout=args.per_section, n_predict=args.n_predict,
                      **sampling)
+
+
+def read_unit(client: Any, unit: Any, shape: Mapping[str, Any], **asking: Any) -> Read:
+    """One unit, read a second time when the server reset inside the first read.
+
+    `ServerUnreachable` from a server that still answers is a connection dropped mid
+    request, not a server that has gone: the unit is read once more, and whatever the
+    second read says is what is written down. A server that does not answer is not retried
+    -- that is the dead-server path, and the run stops on it.
+    """
+    row = extract_unit(client, unit, shape, **asking)
+    if row.error.startswith("ServerUnreachable") and _alive(client):
+        row = extract_unit(client, unit, shape, **asking)
+        row.retried = True
+    return row
 
 
 def _alive(client: Any) -> bool:
@@ -1741,7 +2093,7 @@ def _stopping() -> Any:
 # -- the command ---------------------------------------------------------------------------------
 
 
-_WORDS = ("status", "show", "fold", "retry", "tidy")
+_WORDS = ("status", "show", "shelf", "ask", "fold", "retry", "tidy")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -1753,16 +2105,21 @@ def parser() -> argparse.ArgumentParser:
                     "`ml-stack-ingest BOOK.pdf ... --out STORE`.",
         epilog="Instead of documents, one of these words:\n"
                "  status   how far the run into --out has got, what failed, what is in the\n"
-               "           store, and how long the rest will take\n"
+               "           store, what it cost per unit, and how long the rest will take\n"
                "  show     what was read: concepts, relations and the folds each book made\n"
+               "  shelf    the whole shelf: per book what the store holds, the concepts more\n"
+               "           than one book names, and the relations between their vocabularies\n"
+               "  ask      ask the store a question with a model -- `ask --out STORE \"...\"` --\n"
+               "           or score a set of questions with --gold FILE\n"
                "  fold     fold every book that has reads -- part-read ones too -- into the\n"
                "           store, replacing what the store held for it\n"
                "  retry    let the units given up on be read again by the next --resume\n"
                "  stop     end the detached run, after it has folded what it has read\n"
                "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
-                    help="the PDFs to read; or one of `status`, `show`, `fold`, `retry`, "
-                         "`stop` (see below), which does that and stops")
+                    help="the PDFs to read; or one of `status`, `show`, `shelf`, `ask`, "
+                         "`fold`, `retry`, `stop` (see below), which does that and stops. "
+                         "`ask` takes the question after it")
     ap.add_argument("--out", default="", metavar="STORE",
                     help="the GraphStore to write into; one store holds a whole shelf. "
                          "Required to read anything; --gold writes nothing and needs none")
@@ -1782,7 +2139,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--sample", type=int, default=0, metavar="N",
                     help="read only the first N sections of each book -- a smoke of the "
                          "whole path before a shelf is spent on it; with `show`, how many "
-                         "concepts and relations to print per book (default 5)")
+                         "concepts and relations to print per book (default 5); with "
+                         "`shelf`, how many shared concepts and cross-book relations "
+                         "(default 10)")
     ap.add_argument("--apply", action="store_true",
                     help="with tidy: write the merges, folds and flags; without it, say what "
                          "would be done")
@@ -1812,9 +2171,11 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--gold", default="", metavar="FILE",
                     help="score the extraction against a gold set of passages with known "
                          "triples -- recall, precision and the misses -- instead of reading "
-                         "any book")
+                         "any book. With `ask`, a set of questions with the entries each "
+                         "answer should select: {\"question\", \"expected\": [ids or labels]}")
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
-                    help="exit 1 when --gold scores below this F1 (0-1)")
+                    help="exit 1 when --gold scores below this F1 (0-1), reading a gold set "
+                         "or asking one")
     ap.add_argument("--n-max", type=int, default=None, metavar="N",
                     help="tokens the draft head guesses ahead each step, over the profile's "
                          "measured length -- extraction accepts far more of them than "
@@ -1843,10 +2204,28 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def _parsed(rest: Sequence[str]) -> Any:
+    """The arguments, with a word written after an option still a word.
+
+    ``ask --out STORE "the question"`` puts a positional after an option, and argparse
+    cannot gather a ``nargs="*"`` positional across one -- it reads the question as an
+    argument it does not recognise. Words it could not place join ``docs``; an option it
+    could not place is still an error, so an abbreviated or misspelled flag is refused
+    rather than read as a document.
+    """
+    ap = parser()
+    args, extra = ap.parse_known_args(list(rest))
+    misplaced = [word for word in extra if word.startswith("-")]
+    if misplaced:
+        ap.error("unrecognized arguments: " + " ".join(misplaced))
+    args.docs = [*args.docs, *[word for word in extra if not word.startswith("-")]]
+    return args
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """``ml-stack-ingest``: a shelf of documents into one graph, or a gold set scored."""
     rest = list(sys.argv[1:] if argv is None else argv)
-    args = parser().parse_args(rest)
+    args = _parsed(rest)
 
     if args.docs[:1] == ["stop"]:
         return stop()
@@ -1861,6 +2240,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             return fold(args.out, book=args.book, rebuild=args.rebuild, dry_run=args.dry_run)
         if word == "show":
             return show(args.out, book=args.book, most=args.sample or 5)
+        if word == "shelf":
+            return shelf(args.out, most=args.sample or 10)
+        if word == "ask":
+            return _ask_run(args)
         if word == "retry":
             return retry(args.out)
         if word == "tidy":
@@ -1912,6 +2295,38 @@ def main(argv: Sequence[str] | None = None) -> int:
     return _read_run(args)
 
 
+def _ask_run(args: Any) -> int:
+    question = " ".join(str(d) for d in args.docs[1:]).strip()
+    if not question and not args.gold:
+        print("error: ask needs a question, or --gold FILE", file=sys.stderr)
+        return 2
+    if not Path(args.out).expanduser().exists():
+        print(f"error: no store at {args.out}", file=sys.stderr)
+        return 2
+    graph = graph_of(args.out)
+    if not graph["nodes"]:
+        print(f"error: nothing in {args.out} to ask about", file=sys.stderr)
+        return 2
+    print(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
+    # the asking comes from the same profile the serving does, so a model measured with
+    # one way of asking is not served in its shape and asked in somebody else's
+    measured = _find_model(args.model) if args.model else None
+    with _serving(args) as client:
+        if not args.gold:
+            ask(graph, question, client, profile=measured)
+            return 0
+        asked = read_asked(args.gold)
+        print(f"asking {len(asked)} question(s) from {args.gold}")
+        rows = score_asked(graph, client, asked, log=print, profile=measured)
+    for line in asked_lines(rows):
+        print(line)
+    f1 = asked_f1(rows)
+    if args.fail_under is not None and f1 < args.fail_under:
+        print(f"error: F1 {f1:.2f} is under {args.fail_under:.2f}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def _gold_run(args: Any) -> int:
     passages = read_gold(args.gold)
     print(f"gold: {len(passages)} passages from {args.gold}")
@@ -1936,12 +2351,19 @@ def _read_run(args: Any) -> int:
     code = 0
     stopped = False
 
+    folded_seconds = 0.0
+
     def keep(slug: str, title: str, rows: Sequence[Mapping[str, Any]],
              units_by_id: Mapping[str, Any]) -> dict[str, Any]:
+        nonlocal folded_seconds
         got = fold_into(args.out, slug, title=title, reads=rows, units_by_id=units_by_id,
                         progress=progress)
-        print(f"  folded {slug} at unit {got['units']}: {got['nodes']} nodes, "
-              f"{got['edges']} edges" + (" (partial)" if got["partial"] else ""))
+        folded_seconds = float(got["seconds"])
+        print(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
+              f"{got['nodes']} nodes, {got['edges']} edges"
+              + (" (partial)" if got["partial"] else "")
+              + (f"; the next fold is {_fold_interval(folded_seconds)} unit(s) away"
+                 if _fold_interval(folded_seconds) != FOLD_EVERY else ""))
         return got
 
     try:
@@ -1973,6 +2395,8 @@ def _read_run(args: Any) -> int:
                       + f" -- read in {time.time() - began:.0f}s")
 
                 units_by_id = {unit.id: unit for unit in wanted}
+                folded_seconds = float(
+                    (progress.state["books"].get(slug) or {}).get("folded_seconds") or 0.0)
                 held_reads = _read_json(reads_path(args.out, slug))
                 held_reads = held_reads if isinstance(held_reads, dict) else {}
                 reads_by_unit: dict[str, dict[str, Any]] = {}
@@ -1990,9 +2414,9 @@ def _read_run(args: Any) -> int:
                 since = 0
                 try:
                     for index, unit in enumerate(to_read):
-                        row = extract_unit(client, unit, shape, images=args.images,
-                                           per_section=args.per_section,
-                                           cache_dir=args.cache or None)
+                        row = read_unit(client, unit, shape, images=args.images,
+                                        per_section=args.per_section,
+                                        cache_dir=args.cache or None)
                         row.run = run_id
                         reads_by_unit[unit.id] = asdict(row)
                         for call in row.calls:
@@ -2014,10 +2438,12 @@ def _read_run(args: Any) -> int:
                               f"{unit.section or unit.section_title[:12]:<8}"
                               f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
                               f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                              + (" (read again after a reset)" if row.retried else "")
                               + (f"  {row.error}" if row.error else ""))
                         ahead = to_read[index + 1] if index + 1 < len(to_read) else None
                         if ahead is not None and _time_to_fold(
-                                since, ahead.chapter != unit.chapter):
+                                since, ahead.chapter != unit.chapter,
+                                seconds=folded_seconds):
                             keep(slug, document.title, _rows(wanted, reads_by_unit), units_by_id)
                             since = 0
                 except Stopped:
@@ -2051,9 +2477,31 @@ def _read_run(args: Any) -> int:
     return code
 
 
-def _time_to_fold(since: int, boundary: bool) -> bool:
-    """Whether the book in flight should be folded into the store now."""
-    return since >= (FOLD_EVERY if boundary else 2 * FOLD_EVERY)
+def _fold_interval(seconds: float, *, every: int | None = None,
+                   most: float | None = None) -> int:
+    """Units to read between folds, given what the last fold of this book took.
+
+    A fold under ``most`` seconds is paid at every chapter end. One over it is paid once
+    for every ``most`` seconds it ran to: a fold of a minute is worth waiting three
+    chapters for, and a book of nine thousand nodes is not folded for minutes at every
+    chapter end. Nothing measured makes it longer, so the first fold of a book is
+    `FOLD_EVERY` as it always was.
+    """
+    # read off the module rather than bound as defaults: a caller that moves either moves it
+    every = FOLD_EVERY if every is None else int(every)
+    most = FOLD_SECONDS if most is None else float(most)
+    if seconds <= most or most <= 0:
+        return int(every)
+    return int(every) * math.ceil(seconds / most)
+
+
+def _time_to_fold(since: int, boundary: bool, *, seconds: float = 0.0) -> bool:
+    """Whether the book in flight should be folded into the store now.
+
+    ``seconds`` is what the last fold of this book took -- see `_fold_interval`.
+    """
+    every = _fold_interval(seconds)
+    return since >= (every if boundary else 2 * every)
 
 
 def _rows(wanted: Iterable[Any], reads_by_unit: Mapping[str, Any]) -> list[dict[str, Any]]:

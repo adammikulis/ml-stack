@@ -145,6 +145,10 @@ JOINED = 12
 JOINED_HITS = 8
 SAID = 2
 SAID_CHARS = 220
+# How much of an entry's own definition `look_at` reads out. A definition a document was
+# read into is cut to 400 characters where it is built, so this cuts nothing that a
+# document put there.
+DEFINED_CHARS = 400
 LIT = 25
 # How many entries list_kind reads out of one kind. Enough for every organisation a
 # community of a few hundred people works for; a kind bigger than that is read most
@@ -1040,6 +1044,19 @@ def _said_lines(node: Mapping[str, Any], messages: Mapping[str, Any], *, most: i
     return out
 
 
+def _defined(node: Mapping[str, Any], *, chars: int = DEFINED_CHARS,
+             indent: str = "    ") -> list[str]:
+    """An entry's own definition, when the graph holds one.
+
+    A graph read out of documents holds what a thing *is* in ``attrs.definition``, which is
+    the only thing there is to answer from; one read out of a conversation holds what was
+    said instead. `look_around` already reads out every attribute an entry has; this is
+    that one, for `look_at`.
+    """
+    text = " ".join(str((node.get("attrs") or {}).get("definition") or "").split())
+    return [f'{indent}defined: "{text[:chars]}"'] if text else []
+
+
 def look_at(graph: Mapping[str, Any], ids: Sequence[str], *,
             budget: int | None = None) -> str:
     """What the graph holds on those entries, as text a model can answer from.
@@ -1068,7 +1085,7 @@ def look_at(graph: Mapping[str, Any], ids: Sequence[str], *,
                 line += f", {attrs[key]}"
         if joined:
             line += ": " + "; ".join(joined[:JOINED])
-        lines = [line, *_said_lines(node, messages, most=SAID)]
+        lines = [line, *_defined(node), *_said_lines(node, messages, most=SAID)]
         blocks.append((int(node.get("mentions") or 0), str(node_id), "\n".join(lines)))
     return _packed(blocks, budget)
 
