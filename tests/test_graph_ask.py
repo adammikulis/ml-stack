@@ -2083,3 +2083,113 @@ def test_a_broad_question_routes_to_the_summary_only_where_it_is_offered():
     assert "summarise" not in TOOL_PROMPTS, \
         "TOOL_PROMPTS is read as 'every tool the model has'; the summary is offered on ask"
     assert prompts_for("summarise") == SUMMARY_PROMPTS
+
+
+# -- ids constrained to what the graph holds ---------------------------------------------
+
+class _Recording(ScriptedModel):
+    """A scripted model that also keeps the keywords each chat was given."""
+
+    def __init__(self, script=None, **kw):
+        super().__init__(script, **kw)
+        self.given = []
+
+    def chat(self, messages, *, tools=None, **extra):
+        self.given.append({"tools": [s["function"]["name"] for s in (tools or [])], **extra})
+        if self.script and isinstance(self.script[0], Reply):
+            self.seen.append(list(messages))
+            return self.script.pop(0)     # a reply as the server sent it, tools or not
+        return super().chat(messages, tools=tools, **extra)
+
+
+def _format_of(given):
+    return (given.get("response_format") or {}).get("json_schema", {}).get("schema")
+
+
+def test_ids_are_constrained_on_a_turn_that_offers_a_tool_taking_them_and_not_otherwise():
+    from ml_stack.graph.ask import _schema
+
+    model = _Recording([call("look_up", text="Ada Lovelace"),
+                        call("look_at", ids=["person:ada"])])
+    converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    first = model.given[0]
+    assert "look_at" in first["tools"]
+    schema = _format_of(first)
+    assert schema is not None, "a turn offering look_at answers under the schema"
+    known = sorted(n["id"] for n in GRAPH["nodes"])
+    pinned = {c["properties"]["name"]["const"]: c["properties"]["arguments"]
+              for c in schema["anyOf"] if "name" in c["properties"]}
+    assert sorted(pinned["look_at"]["properties"]["ids"]["items"]["enum"]) == known
+    assert sorted(pinned["show"]["properties"]["ids"]["items"]["enum"]) == known
+    assert "person:ghost" not in pinned["look_at"]["properties"]["ids"]["items"]["enum"]
+    assert "constrain" not in first, "nothing but the format reaches the client"
+    # the system prompt says what the JSON is
+    assert '{"answer"' in model.seen[0][0]["content"]
+
+    # only list_kind on offer: nothing takes an id, so nothing is constrained
+    listed = _Recording([call("list_kind", kind="org")])
+    offer = [(schema, fn) for schema, fn in tools_for(GRAPH)
+             if schema["function"]["name"] == "list_kind"]
+    converse("which orgs?", GRAPH, listed, tools=offer, constrain_ids=True)
+    assert listed.given[0]["tools"] == ["list_kind"]
+    assert "response_format" not in listed.given[0]
+
+    # off by default, everywhere
+    plain = _Recording([call("look_at", ids=["person:ada"])])
+    converse("who is Ada?", GRAPH, plain)
+    assert all("response_format" not in g for g in plain.given)
+    assert '{"answer"' not in plain.seen[0][0]["content"]
+    assert _schema("look_at")["function"]["parameters"]["properties"]["ids"]["items"] == {
+        "type": "string"}, "the shared schemas were not written on"
+
+
+def test_a_constrained_reply_is_read_as_the_tool_call_or_the_answer_it_holds():
+    model = _Recording([
+        Reply(content=json.dumps({"name": "look_at", "arguments": {"ids": ["person:ada"]}})),
+        Reply(content=json.dumps({"answer": "Ada is an analyst in Turin."})),
+        Reply(content=json.dumps({"name": "show", "arguments": {"ids": ["person:ada"]}})),
+    ])
+    out = converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    assert out.read == ["person:ada"]
+    assert out.steps[0] == "read 1 entry"
+    assert out.content == "Ada is an analyst in Turin."
+    assert out.show == ["person:ada"]
+    # what it called went into the history as a tool call, not as JSON prose
+    assistant = [m for turn in model.seen for m in turn if m.get("role") == "assistant"]
+    assert assistant[0]["tool_calls"][0]["function"]["name"] == "look_at"
+    assert assistant[0]["content"] == ""
+
+
+def test_the_show_nudge_is_constrained_too():
+    model = _Recording([call("look_up", text="Ada Lovelace"),
+                        call("look_at", ids=["person:ada"]),
+                        call("show", ids=["person:ada"])])
+    converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    nudged = [g for g in model.given if g["tools"] == ["show"]]
+    assert nudged, "the answer was asked what it is about"
+    assert all(_format_of(g) is not None for g in nudged)
+
+
+def test_over_the_cap_nothing_is_constrained_and_the_steps_say_so():
+    from ml_stack.graph.grammar import CAP
+
+    crowd = {"nodes": [*GRAPH["nodes"],
+                       *({"id": f"person:p{n}", "kind": "person", "label": f"P {n}",
+                          "mentions": 1, "attrs": {}, "messages": []} for n in range(CAP))],
+             "edges": GRAPH["edges"], "messages": GRAPH["messages"]}
+    model = _Recording([call("look_at", ids=["person:ada"])])
+    out = converse("who is Ada?", crowd, model, constrain_ids=True)
+    assert all("response_format" not in g for g in model.given)
+    assert any("not constrained" in s for s in out.steps)
+    assert '{"answer"' not in model.seen[0][0]["content"]
+
+
+def test_constrain_ids_is_a_way_a_profile_fills_in(monkeypatch):
+    from ml_stack.serve.shape import Asking
+
+    assert Asking(constrain_ids=True).converse() == {"tight": True, "constrain_ids": True}
+    assert "constrain_ids" not in Asking().converse()
+    assert Asking(constrain_ids=True).said()["constrain_ids"] is True
+    model = _Recording([call("look_at", ids=["person:ada"])])
+    converse("who is Ada?", GRAPH, model, profile=Asking(constrain_ids=True))
+    assert _format_of(model.given[0]) is not None

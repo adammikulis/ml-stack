@@ -23,11 +23,12 @@ import json
 import re
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from ml_stack.client.spent import Spent
 from ml_stack.client.tokens import estimate_tokens
+from ml_stack.graph.grammar import CAP, call_from, call_schema, response_format
 from ml_stack.graph.search import MATCHED_BY_RANK
 
 SYSTEM = (
@@ -49,6 +50,14 @@ SYSTEM = (
     "Everything you say comes from what the tools returned. Say plainly when the graph does not "
     "answer the question, and never invent an entry the tools did not show you."
 )
+
+# What a turn answered under a schema is told, on a copy of the system prompt: the two
+# shapes the grammar allows, so the model reaches for the right one rather than being
+# steered into it token by token.
+CONSTRAINED_SYSTEM_SENTENCE = (
+    'When you are asked to reply as JSON, reply with one object: {"name": "<tool>", '
+    '"arguments": {...}} calls one tool, and {"answer": "..."} is your answer, written out '
+    'in full inside it.')
 
 # How many tool calls a question may spend. Five was enough to look two names up and read
 # them; it is not enough to staff a project, which means looking up each skill, reading the
@@ -1420,7 +1429,8 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
 
 # What each way of asking is when nobody says: a profile fills in only what is still this.
 _UNSAID = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
-           "summary_tool": False, "single": False, "few": False, "rounds": ROUNDS}
+           "summary_tool": False, "single": False, "few": False, "rounds": ROUNDS,
+           "constrain_ids": False}
 
 
 def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
@@ -1461,7 +1471,8 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              tight: bool = True, reach: int | None = None, summary: Any = None,
              recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
              single: bool = False, few: bool = False,
-             summary_tool: bool = False, profile: Any = None) -> Answer:
+             summary_tool: bool = False, profile: Any = None,
+             constrain_ids: bool = False) -> Answer:
     """One question, answered with the graph in hand.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
@@ -1539,6 +1550,13 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     question may spend before it must answer. `few` and `single` both want more of them and
     `batch` wants fewer, which is the whole reason they are measured together.
 
+    ``constrain_ids`` makes every turn that offers a tool taking an id -- `look_at`,
+    `look_around`, `show`, `path_between` -- answer under a schema (`graph.grammar`) in
+    which those ids can only be ones the graph holds: the request carries it as
+    ``response_format``, the reply is one JSON object, a tool call or an answer, and it is
+    read back into the same tool calls and prose the loop always handled. A graph with more
+    than `grammar.CAP` entries is asked as before, and a step says so.
+
     ``profile`` is a :class:`~ml_stack.serve.Profile` or a model name, and supplies those
     ways from what that model *measured* best rather than from what a caller remembered:
     Flash-Next wants batch, kinds and summary together and gemma-4 wants none of them, and
@@ -1551,15 +1569,17 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
         said = _under(profile, {"rich": rich, "tight": tight, "reach": reach,
                                 "kinds": kinds, "batch": batch,
                                 "summary_tool": summary_tool, "single": single,
-                                "few": few, "rounds": rounds})
+                                "few": few, "rounds": rounds,
+                                "constrain_ids": constrain_ids})
         rich, tight, reach = said["rich"], said["tight"], said["reach"]
         kinds, batch, summary_tool = said["kinds"], said["batch"], said["summary_tool"]
         single, few, rounds = said["single"], said["few"], int(said["rounds"])
+        constrain_ids = bool(said["constrain_ids"])
     return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
                      recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
-                     summary_tool=summary_tool)
+                     summary_tool=summary_tool, constrain_ids=constrain_ids)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -1572,7 +1592,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     tight: bool = True, reach: int | None = None, summary: Any = None,
                     recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
                     single: bool = False, few: bool = False,
-                    summary_tool: bool = False) -> Answer:
+                    summary_tool: bool = False, constrain_ids: bool = False) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -1586,7 +1606,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
                      opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
                      recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
-                     summary_tool=summary_tool)
+                     summary_tool=summary_tool, constrain_ids=constrain_ids)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -1724,7 +1744,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
               rich: bool = False, tight: bool = True, reach: int | None = None,
               summary: Any = None, recalled: Sequence[Any] = (), kinds: bool = False,
               batch: bool = False, single: bool = False, few: bool = False,
-              summary_tool: bool = False) -> Answer:
+              summary_tool: bool = False, constrain_ids: bool = False) -> Answer:
     given = tools is not None
     if tools is None:
         tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach,
@@ -1777,12 +1797,17 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         # the prompt names `path_between` in its second sentence, and this offer has no
         # such tool: swapped for what to do instead, never left to be reached for
         system = system.replace(PATH_CLAUSE, FEW_PATH_CLAUSE) + "\n\n" + FEW_SYSTEM_SENTENCE
+    out = Answer()
+    if constrain_ids and len(known) > CAP:
+        out.steps.append(f"ids not constrained: {len(known)} entries, over the cap of {CAP}")
+        constrain_ids = False
+    if constrain_ids:
+        system = system + "\n\n" + CONSTRAINED_SYSTEM_SENTENCE
     lit = [str(h) for h in held if str(h) in known]
     if lit:
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
         system = (system + "\n\nCurrently highlighted: "
                   + ", ".join(f"{label[h]} ({h})" for h in lit))
-    out = Answer()
 
     def note(into: list[str], ids: Sequence[str]) -> None:
         for one in ids:
@@ -1851,14 +1876,37 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     searching = set(SEARCHING)
     quiet = [x for x in schemas if str((x.get("function") or {}).get("name")) not in searching]
 
+    ids_known = sorted(known)
+
+    def under(offer: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+        """The response_format a turn offering ``offer`` answers under, if it is constrained."""
+        if not constrain_ids or not offer:
+            return None
+        schema = call_schema(offer, ids_known)
+        return response_format(schema) if schema is not None else None
+
+    def read_back(reply: Any) -> Any:
+        """A constrained reply's JSON as the tool call or the prose it holds."""
+        if not constrain_ids or (getattr(reply, "tool_calls", None) or []):
+            return reply
+        calls, answer = call_from(getattr(reply, "content", "") or "")
+        if calls:
+            return replace(reply, content="", tool_calls=calls)
+        if answer is not None:
+            return replace(reply, content=answer)
+        return reply
+
     def step(with_tools: bool) -> Any:
         offer = schemas if with_tools else quiet
         kw: dict[str, Any] = {"tools": offer} if offer else {}
+        form = under(offer)
+        if form is not None:
+            kw["response_format"] = form
         sent = time.monotonic()
         if emit is None:
             reply = client.chat(messages, think=False, **kw)
             out.spent.note(reply, time.monotonic() - sent)
-            return reply
+            return read_back(reply)
         streamed = {"thinking": False, "answer": False}
 
         def on_delta(kind: str, text: str) -> None:
@@ -1868,8 +1916,14 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             streamed[name] = True
             emit({"event": name, "text": text})
 
-        reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
+        # a constrained turn is JSON as it streams and prose only once read back, so it
+        # arrives whole
+        if form is None:
+            reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
+        else:
+            reply = client.chat(messages, think=False, **kw)
         out.spent.note(reply, time.monotonic() - sent)
+        reply = read_back(reply)
         if not streamed["thinking"]:
             trace = (getattr(reply, "thinking", "") or "").strip()
             if trace:
@@ -2162,7 +2216,10 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         messages.append({"role": "assistant", "content": out.content})
         messages.append({"role": "user", "content": TIGHT_NUDGE if tight else SHOW_NUDGE})
         offer = _schema("show", _tight(TOOLS)) if tight else _schema("show")
-        last = client.chat(messages, think=False, tools=[offer])
+        form = under([offer])
+        last = client.chat(messages, think=False, tools=[offer],
+                           **({"response_format": form} if form is not None else {}))
+        last = read_back(last)
         for call in (getattr(last, "tool_calls", None) or []):
             fn = call.get("function") or {}
             if (fn.get("name") or "") != "show":
