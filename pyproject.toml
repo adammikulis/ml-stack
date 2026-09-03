@@ -61,6 +61,8 @@ vision = ["numpy>=1.24", "pillow>=10.0"]
 # font it was set in (which is how a heading is found in a PDF with no outline) and
 # the embedded images
 pdf = ["pymupdf>=1.24"]
+# `ml-stack-bench animate`: a comparison of builds as an animated graphic
+viz = ["manim>=0.19"]
 # `ml-stack-serve fit --plot` draws two panels to a png/svg. Only this needs it: the bench's
 # own --plot writes hand-built SVG with no library, so it opens on a machine with no packages
 plot = ["matplotlib>=3.7"]

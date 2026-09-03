@@ -246,3 +246,6 @@ Glimmer Node
 Iris Bellweathers
 Orlan Vesks
 Ada L
+Liberation Sans
+DejaVu Sans
+Helvetica
