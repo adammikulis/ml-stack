@@ -96,27 +96,72 @@ def _ended(proc, within: float = 10.0) -> bool:
     return proc.poll() is not None
 
 
-def test_a_lease_stops_the_orphan_on_its_port_before_starting(tmp_path):
-    """A record whose leasing process has gone while its server runs on: the lease stops
-    that server, says so, and starts its own rather than adopting it."""
+def _serving(model: str, n_ctx: int = 4096, slots: int = 1):
+    """A handler answering /health, /v1/models and /props the way llama-server does."""
+    from tests.conftest import json_reply
+
+    def handle(method, path, body):
+        if path.startswith("/props"):
+            return json_reply({"model_path": f"/models/{model}", "total_slots": slots,
+                               "default_generation_settings": {"n_ctx": n_ctx}})
+        return json_reply({"data": [{"id": model}]})
+
+    return handle
+
+
+def _orphan_record(state, port: int, pid: int, model: str = "fine.gguf") -> None:
+    state.write_text(json.dumps({str(port): {
+        "port": port, "pid": pid, "owner_pid": 999_999_998, "backend": "fake",
+        "model": model}}))
+
+
+def test_a_lease_stops_an_orphan_of_another_shape_before_starting(tmp_path, server):
+    """A record whose leasing process has gone while its server runs on, serving a shape
+    the lease cannot use: the lease stops that server, says so, and starts its own."""
     import os
 
     state = tmp_path / "servers.json"
-    port = free_port()
+    instance = server(_serving("other-8B-Q4_K_M.gguf"))
     orphan = _sleeper()
     try:
-        state.write_text(json.dumps({str(port): {
-            "port": port, "pid": orphan.pid, "owner_pid": 999_999_998, "backend": "fake",
-            "model": "fine.gguf"}}))
+        _orphan_record(state, instance.port, orphan.pid, model="other-8B-Q4_K_M.gguf")
         said = []
         manager = ServerManager(backend=_Backend(), state_file=state)
-        info = manager.lease(ServerSpec(model="fine.gguf", port=port), roam=False,
+        info = manager.lease(ServerSpec(model="fine.gguf", port=instance.port), roam=False,
                              timeout=1.0, say=said.append)
         assert _ended(orphan), "the orphaned server is still running"
         assert said and "orphaned" in said[0] and str(orphan.pid) in said[0]
+        assert "stopping" in said[0] and "model:" in said[0]
         assert info.pid == 4242 and not info.adopted
-        after = json.loads(state.read_text())[str(port)]
+        after = json.loads(state.read_text())[str(instance.port)]
         assert after["pid"] == 4242 and after["owner_pid"] == os.getpid()
+    finally:
+        if orphan.poll() is None:
+            orphan.kill()
+        orphan.wait()
+
+
+def test_a_lease_adopts_an_orphan_of_the_same_shape_and_takes_it_over(tmp_path, server):
+    """The page server restarts, the process that leased the 90 GB model goes with it,
+    and the new one asks for the same shape on the same port: it is adopted, not
+    reloaded, and the record's owner becomes the new leaser."""
+    import os
+
+    state = tmp_path / "servers.json"
+    instance = server(_serving("fine.gguf"))
+    orphan = _sleeper()
+    try:
+        _orphan_record(state, instance.port, orphan.pid)
+        said = []
+        manager = ServerManager(backend=_Backend(), state_file=state)
+        info = manager.lease(ServerSpec(model="fine.gguf", port=instance.port), roam=False,
+                             timeout=1.0, say=said.append)
+        assert orphan.poll() is None, "the matching server is kept, not reloaded"
+        assert info.adopted and info.pid == orphan.pid
+        assert said and "adopted" in said[0] and "orphaned" in said[0]
+        after = json.loads(state.read_text())[str(instance.port)]
+        assert after["pid"] == orphan.pid and after["owner_pid"] == os.getpid(), \
+            "ownership transferred to this process"
     finally:
         if orphan.poll() is None:
             orphan.kill()

@@ -179,8 +179,10 @@ class ServerManager:
               say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
 
-        A server on the port whose record names a leasing process that has gone is
-        stopped first, and ``say`` (else ``self.say``, else the log) is told.
+        A server on the port whose record names a leasing process that has gone is an
+        orphan: one serving the shape asked for is adopted and its record made this
+        process's; one serving another shape is stopped before a server is started.
+        Either way ``say`` (else ``self.say``, else the log) is told.
 
         When the port is busy with something else and this machine has the memory to hold
         both, it is served beside it on a free port rather than refused: a small model does
@@ -207,18 +209,25 @@ class ServerManager:
                     "warmup_request": warmup_request}
 
         with self._port_lock(spec.port):
-            self._stop_orphan(spec.port, say=say or self.say or logger.info)
+            told = say or self.say or logger.info
+            entry = self._load().get(str(spec.port))
+            stray = entry if isinstance(entry, dict) and orphaned(entry) else None
             try:
                 adopted = self.adopt(spec)
-            except ServerFailed:
-                if not roam or not port_is_free(spec.port):
-                    elsewhere = (self._beside(spec, timeout=resolved_timeout, **starting)
-                                if roam else None)
-                    if elsewhere is not None:
-                        return elsewhere
-                raise
-            if adopted is not None:
-                return adopted
+            except ServerFailed as why:
+                if stray is None:
+                    if not roam or not port_is_free(spec.port):
+                        elsewhere = (self._beside(spec, timeout=resolved_timeout, **starting)
+                                    if roam else None)
+                        if elsewhere is not None:
+                            return elsewhere
+                    raise
+                self._stop_orphan(spec.port, stray, say=told, why=str(why))
+            else:
+                if adopted is not None:
+                    if stray is not None:
+                        self._take_over(spec.port, stray, say=told)
+                    return adopted
 
             try:
                 info = self.backend.start(spec, lease=self._pending(spec),
@@ -232,14 +241,20 @@ class ServerManager:
             self._record(spec, info)
             return info
 
-    def _stop_orphan(self, port: int, *, say: Callable[[str], None]) -> None:
-        """Stop the server recorded on ``port`` when the process that leased it has gone."""
-        entry = self._load().get(str(port))
-        if not isinstance(entry, dict) or not orphaned(entry):
-            return
+    def _stop_orphan(self, port: int, entry: dict, *, say: Callable[[str], None],
+                     why: str) -> None:
+        """Stop the orphaned server recorded on ``port`` and drop its record."""
         say(f"port {port}: stopping the orphaned server (pid {entry['pid']}) the process "
-            f"that leased it (pid {entry['owner_pid']}) left behind")
+            f"that leased it (pid {entry['owner_pid']}) left behind -- {why}")
         kill_process_tree(int(entry["pid"]))
+        self._save()
+
+    def _take_over(self, port: int, entry: dict, *, say: Callable[[str], None]) -> None:
+        """Record the orphaned server on ``port`` as held by this process."""
+        say(f"port {port}: adopted the orphaned server (pid {entry['pid']}) the process "
+            f"that leased it (pid {entry['owner_pid']}) left behind; this process holds it "
+            "now")
+        self._mine[str(port)] = {**entry, "owner_pid": os.getpid()}
         self._save()
 
     def _beside(self, spec: ServerSpec, *, timeout: float, **starting: Any) -> ServerInfo | None:

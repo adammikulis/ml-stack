@@ -178,6 +178,31 @@ class TestUp:
         assert "context: asked for 8192 per slot, serving 4096" in err
         assert is_healthy(instance.base_url), "the refusal must not have stopped it"
 
+    def test_up_adopts_a_matching_orphan_and_records_it_as_its_own(self, server, state,
+                                                                    capsys):
+        """After `up` has adopted it, the orphan is on the record under the server's own
+        pid -- the way `up` records a server it started -- so `status` no longer calls
+        it orphaned and `down` stops it."""
+        instance = server(serving())
+        orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        try:
+            record(state, instance.port, pid=orphan.pid, owner_pid=999_999_998)
+            assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
+            got = capsys.readouterr()
+            assert f"adopted {instance.base_url}" in got.out
+            assert "orphaned" in got.err
+            assert orphan.poll() is None, "the matching server is kept"
+            left = json.loads(state.read_text())[str(instance.port)]
+            assert left["pid"] == orphan.pid and left["owner_pid"] == orphan.pid
+
+            assert cli.main(["status", "--port", str(instance.port)]) == 0
+            out = capsys.readouterr().out
+            assert "orphaned" not in out and "started by 'ml-stack-serve up'" in out
+        finally:
+            if orphan.poll() is None:
+                orphan.kill()
+            orphan.wait()
+
     def test_it_refuses_a_different_model_on_a_busy_port(self, server, state, capsys):
         instance = server(serving())
         code = cli.main(["up", "other-8B-Q4_K_M.gguf", "--port", str(instance.port)])

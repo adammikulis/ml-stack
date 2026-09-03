@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import os
 import platform
 import subprocess
 import pathlib
@@ -530,7 +531,10 @@ def cmd_up(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    if not info.adopted:
+    held = recorded_servers(STATE_FILE).get(info.port) or {}
+    if not info.adopted or held.get("owner_pid") == os.getpid():
+        # a server this process started, or an orphan it took over: on the record under
+        # the server's own pid once this command has exited
         manager.detach(info)
 
     told = announce(args, spec)
