@@ -1,0 +1,32 @@
+# The restart of 2026-09-02, as a queue file rather than the seventh zsh script of the
+# evening: every improvement smoked, compared on ten questions, then the hundred with
+# everything that held -- traces on throughout.
+#
+# Run it with:   ml-stack-bench queue docs/examples/flash-next-restart.queue --detach --yes
+# Read it first: ml-stack-bench queue docs/examples/flash-next-restart.queue --dry-run
+#
+# Two things the shell script did that a queue file does not: `ml-stack-serve down --port
+# 8080` before it (free the GPU by hand, once) and the page rebuilt after it. A queue runs
+# `ml-stack-bench` lines and nothing else, on purpose -- what it queues is measurement.
+
+set FX=hf:unsloth/Qwen3.8-Flash-Next-GGUF/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+set BIN=${HOME}/.ml-stack/llama.cpp/named/unsloth/llama-server
+set SHAPE=--serve-kv q8_0 --context 65536 --parallel 2 --per-question 300
+set KNOBS=--serve-arg=-ub --serve-arg=2048 --serve-arg=--spec-draft-p-min --serve-arg=0.5 --serve-mmproj auto
+set BEST=--serve ${FX} --binary ${BIN} --serve-draft auto --n-max 4 --reasoning-budget 0 ${SHAPE} ${KNOBS} --trace
+
+# Every way of asking, one at a time, on one load: smoked first, then ten questions
+smoke: sweep ${BEST} --plain-only --also batch --also kinds --also summary --also rich --label-suffix=-v2 --smoke
+then:  sweep ${BEST} --plain-only --also batch --also kinds --also summary --also rich --label-suffix=-v2 --sample 10
+
+# Then all three together, which is what the hundred-question run will use
+smoke: sweep ${BEST} --plain-only --batch --kinds --summary --label-suffix=-all --smoke
+then:  sweep ${BEST} --plain-only --batch --kinds --summary --label-suffix=-all --sample 10
+
+# The hundred questions, in the shape that held. Over any sane ceiling: the queue's --yes
+# is the go-ahead, so it is given once at the top instead of typed onto every long line.
+sweep ${BEST} --plain-only --batch --kinds --summary --label-suffix=-all
+
+# The conclusions, written down where they are read from
+show --rank docs/model-ranking.md
+report --since 2026-09-02T09 --md docs/report-2026-09-02.md

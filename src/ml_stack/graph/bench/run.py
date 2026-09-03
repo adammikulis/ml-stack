@@ -643,6 +643,15 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--open", action="store_true",
                         help="with --md, open the file with whatever this desktop opens "
                              "files with")
+    report.add_argument("--profile", action="store_true",
+                        help="write each model's measured shape into profiles.json -- the "
+                             "build, head, cache, thinking and asking of its best row -- so "
+                             "`ml-stack-serve up --profile` and `converse(profile=...)` "
+                             "serve and ask what was measured. Writes that and nothing else")
+    report.add_argument("--profiles", default="", metavar="FILE",
+                        help="with --profile, write the records here instead of the shipped "
+                             "profiles.json (or this machine's own, when the package cannot "
+                             "be written to)")
 
     gone = sub.add_parser("forget", allow_abbrev=False,
                           help="delete kept runs: the empty ones, or every run of one label")
@@ -667,6 +676,38 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("stop", allow_abbrev=False,
                    help="end the detached measurement: SIGTERM to its pid, so it takes down "
                         "any server it put up, then wait up to a minute. Never by name")
+
+    # The positional is `label` rather than `file` on purpose: `_named_in` reads it, so a
+    # detached queue's log is named after the queue file instead of "bench".
+    queued = sub.add_parser("queue", allow_abbrev=False,
+                            help="run an evening of measurements from a file: one "
+                                 "ml-stack-bench line per step, smoke:/then: pairs, "
+                                 "set VAR= and ${VAR}, one at a time through the "
+                                 "measuring lock")
+    queued.add_argument("label", metavar="FILE",
+                        help="the queue file: one `ml-stack-bench` invocation per line, "
+                             "`#` comments, `set NAME=VALUE` with ${NAME} (the environment "
+                             "when nothing sets it), and a `smoke:` line whose failure "
+                             "skips the `then:` under it. See docs/examples/")
+    queued.add_argument("--dry-run", action="store_true",
+                        help="print the steps as they would be run -- expanded, each one "
+                             "checked against this parser, with the label --resume would "
+                             "match -- and run none of them")
+    queued.add_argument("--resume", action="store_true",
+                        help="skip every step whose label the runs store already holds "
+                             "since this queue's start, so a queue stopped half-way does "
+                             "not measure the first half again")
+    queued.add_argument("--yes", action="store_true",
+                        help="the go-ahead, passed to every step that takes one, so a run "
+                             "over its ceiling is not refused into a log nobody is watching")
+    queued.add_argument("--ceiling", type=float, default=0.0, metavar="MINUTES",
+                        help="pass this ceiling to every step that does not name its own "
+                             "(default: each step's own)")
+    queued.add_argument("--detach", action="store_true",
+                        help="run the whole queue in the background the way a measurement "
+                             f"detaches: a log under {bench.HOME / 'logs'}, `status` for "
+                             "the step it is on and what is left, `tail -f` for the log, "
+                             "`stop` to end the queue and the step inside it")
 
     from ml_stack.graph.bench.history import add_arguments as remembering
 
@@ -724,6 +765,25 @@ def _run(args: Any) -> int:
     if args.cmd == "stop":
         print(stop())
         return 0
+    if args.cmd == "queue":
+        # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
+        # the measuring lock itself, so a step of a queue and a run started by hand still
+        # wait for each other.
+        from ml_stack.graph.bench.queue import QueueError, run_queue
+
+        if args.detach:
+            log = detach(getattr(args, "_argv", None) or sys.argv[1:])
+            print(f"the queue is running in the background; log: {log}\n"
+                  f"  ml-stack-bench status   -- the step it is on, and what is left\n"
+                  f"  ml-stack-bench tail -f  -- follow the log\n"
+                  f"  ml-stack-bench stop     -- end the queue and the step inside it")
+            return 0
+        try:
+            return run_queue(args.label, dry_run=args.dry_run, resume=args.resume,
+                             yes=args.yes, ceiling=args.ceiling)
+        except QueueError as why:
+            print(f"error: {why}", file=sys.stderr)
+            return 2
     if args.cmd == "forget":
         if not args.empty and not args.label:
             print("error: say what to forget: --empty, or a label", file=sys.stderr)
@@ -1345,6 +1405,9 @@ def status(*, results: bool = True) -> str:
     text = _status_line()
     serving = serving_lines()
     text += "\nserving:\n" + "\n".join(serving) if serving else "\nserving: nothing"
+    from ml_stack.graph.bench.queue import queue_status
+
+    text += ("\n" + queued) if (queued := queue_status()) else ""
     if results:
         held = measuring()
         try:
