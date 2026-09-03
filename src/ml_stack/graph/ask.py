@@ -64,16 +64,20 @@ CONSTRAINED_SYSTEM_SENTENCE = (
 # people behind them, and then saying which of them the answer is about. Measured against a
 # real graph: every staffing question spent all five on searching and never reached `show`.
 ROUNDS = 10
-# How many times a model may ask for something it has already asked for before the tools are
-# taken away. Two is a stumble; three is a loop, and a loop always ends in no answer at all.
+# How many times a model may ask for something it has already asked for before the searching
+# is ended. Two is a stumble; three is a loop, and a loop always ends in no answer at all.
 REPEATS = 2
 
-# The tools that look for something, and so are taken away on the last turn; what is left
+# The tools that look for something, and so are refused on the last turn; what still runs
 # then is the tools that act (show, and whatever a caller adds -- a change request, say).
 # The web tools are searches too: a model that may still search will search instead of
-# answering, which is the failure the last turn exists to end.
+# answering, which is the failure the last turn exists to end. Refused, never taken away:
+# the tools block is rendered before every message, so a turn offering a different list
+# loses the prompt cache from the first byte and re-reads the whole conversation.
 SEARCHING = frozenset({"look_up", "look_at", "look_around", "path_between", "list_kind",
                        "summarise", "web_search", "web_read", "web_look"})
+# What the last turn is told as the user, and what a search called on it is answered with.
+OVER = "The searching is over. Answer now with what you have."
 # Openings that mean the model is planning rather than answering. gpt-oss puts its analysis
 # in a channel of its own, but when a turn spends its whole budget deciding what to do the
 # reply that comes back IS the analysis — not empty, so nothing caught it, and the reader
@@ -1868,13 +1872,15 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     messages.append({"role": "user", "content": question})
     out.spent.part("question", question)
 
-    # The tools that go looking. Taking these away is how a turn is made to stop searching
-    # and answer; taking away *every* tool is how it was also made unable to act. A message
-    # asking for an entry to be changed came in, the search went round in circles, the loop
-    # stopped — and the one call left had no `request_change` to reach for, so a member's
-    # request became "the model did not finish an answer". Stop the searching, not the rest.
+    # The tools that go looking. A call to one of them on the last turn is refused, not run;
+    # the tools that act -- show, a caller's change request -- run on any turn. The list
+    # offered never changes within a question: the chat template renders the tools block
+    # before the first message, so a turn offering fewer tools loses llama.cpp's prompt
+    # cache from the start and re-reads everything the question accumulated. Measured on
+    # the real graph, 2026-09-03: the last call of every question read ~3.2k tokens with
+    # nothing cached, twice what its tool results came to, and the page answered in 49 s
+    # where the bench answered in 27 s.
     searching = set(SEARCHING)
-    quiet = [x for x in schemas if str((x.get("function") or {}).get("name")) not in searching]
 
     ids_known = sorted(known)
 
@@ -1896,14 +1902,18 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             return replace(reply, content=answer)
         return reply
 
-    def step(with_tools: bool) -> Any:
-        offer = schemas if with_tools else quiet
+    def step(*, spoken: bool = True) -> Any:
+        """One model turn over ``messages``, offered the same tools as every other.
+
+        ``spoken`` streams the reply to ``emit``; off, the reply comes back unannounced.
+        """
+        offer = schemas
         kw: dict[str, Any] = {"tools": offer} if offer else {}
         form = under(offer)
         if form is not None:
             kw["response_format"] = form
         sent = time.monotonic()
-        if emit is None:
+        if emit is None or not spoken:
             reply = client.chat(messages, think=False, **kw)
             out.spent.note(reply, time.monotonic() - sent)
             return read_back(reply)
@@ -1943,8 +1953,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     spent_on: set[tuple[str, str]] = set()
     repeats = 0
     reply = None
-    def dispatch(reply: Any) -> bool:
-        """Run whatever the reply asked for. False when it asked for nothing."""
+    def dispatch(reply: Any, *, searching_over: bool = False) -> bool:
+        """Run whatever the reply asked for. False when it asked for nothing.
+
+        With ``searching_over`` a call to a searching tool is refused instead of run: its
+        tool message says so, and the tools that act still run.
+        """
         nonlocal spent, repeats
         calls = getattr(reply, "tool_calls", None) or []
         if not calls:
@@ -1952,8 +1966,11 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         spent = True
         # One round, however many calls it carried. A reply may ask for several at once --
         # llama-server returns them in one message -- and every one of them is run below,
-        # in order, each answered with a tool message of its own.
-        out.rounds += 1
+        # in order, each answered with a tool message of its own. A reply refused whole
+        # spent nothing and is no round.
+        if not (searching_over and all((c.get("function") or {}).get("name") in searching
+                                       for c in calls)):
+            out.rounds += 1
         messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": calls})
         for call in calls:
             fn = call.get("function") or {}
@@ -1968,6 +1985,9 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             again = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
             if do is None:
                 result: Any = {"error": f"no such tool: {name}"}
+            elif searching_over and name in searching:
+                result = {"refused": OVER}
+                out.steps.append(f"refused {name}: the searching is over")
             elif again in spent_on:
                 # Asking the same thing twice is how a budget disappears: measured against a
                 # real graph, one question spent six of its ten rounds looking up one word,
@@ -2076,7 +2096,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             # going in circles: the loop ends here and the answer is asked for below
             out.steps.append("stopped searching in circles")
             break
-        reply = step(True)
+        reply = step()
         if not dispatch(reply):
             answered = True          # it stopped calling tools, so this reply is the answer
             break
@@ -2104,14 +2124,24 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
         if out.show and not _searched(reply):
             out.steps.append("said what to light, so the searching stopped")
             break
+
+    def settle(reply: Any) -> Any:
+        """The last turn's reply, after what it asked for: a search is refused once and
+        the tools that act are run; the reply that follows is returned."""
+        if dispatch(reply, searching_over=True):
+            reply = step()
+            if not _searched(reply) and dispatch(reply, searching_over=True):
+                reply = step()
+        return reply
+
     if spent and not answered:
-        # The searching is over, one way or another. What is left on the table are the tools
-        # that act — saying what to light, asking for the graph to be changed — and they are
-        # run, not ignored: a member's request arrived on exactly this turn and was dropped
+        # The searching is over, one way or another, and the turn is told so. The tools
+        # that act — saying what to light, asking for the graph to be changed — are run,
+        # not ignored: a member's request arrived on exactly this turn and was dropped
         # because nothing here executed it.
-        reply = step(False)
-        if dispatch(reply):
-            reply = step(False)
+        messages.append({"role": "user", "content": OVER})
+        out.spent.part("question", OVER)
+        reply = settle(step())
     # a thinking model can stop calling tools and still say nothing, and it can run out of
     # rounds the same way. Either silence gets one plain instruction to answer; one that
     # only ever searched also gets the top finds read to it first
@@ -2130,7 +2160,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             nudge = ("What the graph holds on what you found:\n" + str(material)
                      + "\n\n" + nudge)
         messages.append({"role": "user", "content": nudge})
-        reply = step(False)
+        reply = step()
     out.content = (getattr(reply, "content", "") or "").strip()
     if out.content:
         out.content, meant = spoken_show(out.content)
@@ -2160,7 +2190,7 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
                              "Write the answer your notes were working towards, in plain "
                              "prose for someone who cannot see them. Do not narrate what you "
                              "looked up."})
-            reply = client.chat(messages, think=False)
+            reply = step(spoken=False)
             said = (getattr(reply, "content", "") or "").strip()
             out.content = "" if is_working(said) else without_notes(said)
             if out.content and emit is not None:
@@ -2197,9 +2227,9 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
             # page appends what arrives; without being told to start over it would show the
             # two answers run together
             emit({"event": "restart", "why": "answered without searching"})
-        reply = step(True)
+        reply = step()
         if dispatch(reply):
-            reply = step(False)
+            reply = settle(step())
         said = (getattr(reply, "content", "") or "").strip()
         if said:
             # whatever it said last is what the reader is looking at, so it is the answer
@@ -2211,15 +2241,12 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     # What the answer is about is the one thing only the model knows, and a turn that spends
     # its budget searching never reaches `show` on its own — measured against a real graph,
     # not one staffing question in six did. So it is asked outright, once, with the answer it
-    # just wrote in front of it and nothing else to call.
+    # just wrote in front of it; the tools offered are the same as on every other call, and
+    # only a `show` it calls is read.
     if out.content and not out.show and (out.read or out.found or out.path):
         messages.append({"role": "assistant", "content": out.content})
         messages.append({"role": "user", "content": TIGHT_NUDGE if tight else SHOW_NUDGE})
-        offer = _schema("show", _tight(TOOLS)) if tight else _schema("show")
-        form = under([offer])
-        last = client.chat(messages, think=False, tools=[offer],
-                           **({"response_format": form} if form is not None else {}))
-        last = read_back(last)
+        last = step(spoken=False)
         for call in (getattr(last, "tool_calls", None) or []):
             fn = call.get("function") or {}
             if (fn.get("name") or "") != "show":

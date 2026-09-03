@@ -124,14 +124,142 @@ def test_a_question_needing_no_tools_still_answers():
 
 def test_running_out_of_rounds_still_answers():
     """The last reply of an exhausted loop is a tool call; the question still deserves words."""
-    asking = [call("look_up", text="Ada Lovelace")] * 4
+    asking = [call("look_up", text="Ada Lovelace")] * 3
     model = ScriptedModel(asking)
     out = converse("who?", GRAPH, model, rounds=2)
     assert out.content == "Ada and Bea both work on compilers."
     assert out.ids == ["person:ada"]
-    # the last call offers no way to keep searching, which is what let it answer
-    # two rounds of tools, the ask that follows, and the ask for what to light
-    assert len(model.seen) == 4
+    # two rounds of tools, the search refused on the final turn, the answer, and the ask
+    # for what to light
+    assert len(model.seen) == 5
+    assert "refused look_up: the searching is over" in out.steps
+
+
+def _names(tools):
+    return tuple(str((t.get("function") or {}).get("name")) for t in (tools or []))
+
+
+def _show_of(tools):
+    return next(t for t in tools if t["function"]["name"] == "show")
+
+
+def _told_to_stop(messages):
+    from ml_stack.graph.ask import OVER
+
+    return any(m.get("role") == "user" and m.get("content") == OVER for m in messages)
+
+
+class Recording:
+    """Wraps a model, keeping the tool names and the system message of every call."""
+
+    def __init__(self, model):
+        self.model = model
+        self.tools: list[tuple[str, ...]] = []
+        self.systems: list[str] = []
+
+    def chat(self, messages, tools=None, **kw):
+        self.tools.append(_names(tools))
+        first = messages[0] if messages else {}
+        self.systems.append(str(first.get("content")) if first.get("role") == "system" else "")
+        return self.model.chat(messages, tools=tools, **kw)
+
+
+def _same_prefix(recording, *, calls):
+    assert len(recording.tools) == calls, f"{len(recording.tools)} calls, not {calls}"
+    assert len(set(recording.tools)) == 1, f"the tools changed between calls: {recording.tools}"
+    assert "look_up" in recording.tools[0] and "show" in recording.tools[0]
+    assert len(set(recording.systems)) == 1, "the system message changed between calls"
+
+
+def test_every_call_in_a_question_offers_the_same_tools_and_the_same_system_message():
+    """A prompt cache holds from the first byte that differs, and the tools block comes
+    before every message; so no call in a question -- the final turn, the ask for what to
+    light, the ask for the answer the notes were working towards, the one sent back to
+    search -- offers a different tool list, and none changes the system message.
+    Mutation: offer only the acting tools on the final turn, or only `show` when asking
+    what to light."""
+    # ran out of rounds: two searches, the refused one, the answer, the ask for what to light
+    over = Recording(ScriptedModel([call("look_up", text="Ada"), call("look_up", text="Bea"),
+                                    call("look_up", text="compilers")]))
+    out = converse("who?", GRAPH, over, rounds=2)
+    assert out.content == ScriptedModel.ANSWER
+    _same_prefix(over, calls=5)
+
+    # answered in prose without saying what to light: the search, the answer, the ask
+    asked = Recording(ScriptedModel([call("look_at", ids=["person:ada"])]))
+    out = converse("who?", GRAPH, asked)
+    assert out.content == ScriptedModel.ANSWER
+    _same_prefix(asked, calls=3)
+
+    # answered with its notes: the search, the notes, the ask for the answer, what to light
+    class Planning:
+        def __init__(self):
+            self.asked = 0
+
+        def chat(self, messages, tools=None, **_):
+            self.asked += 1
+            if self.asked == 1:
+                return Reply(content="", tool_calls=[{"id": "c1", "function": {
+                    "name": "look_at", "arguments": json.dumps({"ids": ["person:ada"]})}}])
+            if self.asked == 2:
+                return Reply(content="We need to answer: who works on compilers. Need to check.")
+            return Reply(content="Ada Lovelace has spent years on compilers.")
+
+    noted = Recording(Planning())
+    out = converse("who?", GRAPH, noted)
+    assert out.content == "Ada Lovelace has spent years on compilers."
+    _same_prefix(noted, calls=4)
+
+    # answered without searching and sent back to look: the answer, the second one
+    memory = Recording(ScriptedModel([]))
+    converse("who?", GRAPH, memory)
+    _same_prefix(memory, calls=2)
+
+
+def test_the_final_turn_is_told_the_searching_is_over_and_refuses_a_search_once():
+    """A search called after being told is not run: its tool message says the searching is
+    over, and the turn after that is the answer. One refusal; a model that searches again
+    after it gets the plain nudge that already exists."""
+    from ml_stack.graph.ask import OVER
+
+    seen: list[list[dict]] = []
+
+    class Deaf:
+        """Searches until refused, then answers."""
+
+        def chat(self, messages, tools=None, **_):
+            seen.append(list(messages))
+            refused = any(m.get("role") == "tool" and "refused" in str(m.get("content"))
+                          for m in messages)
+            if not refused:
+                return Reply(content="", tool_calls=[{"id": "x", "function": {
+                    "name": "look_at", "arguments": '{"ids": ["person:bea"]}'}}])
+            return Reply(content="Ada works on compilers.")
+
+    out = converse("who?", GRAPH, Deaf(), rounds=1)
+    assert out.content == "Ada works on compilers."
+    assert out.steps.count("refused look_at: the searching is over") == 1
+    assert out.read == ["person:bea"], "the refused call read nothing"
+    # what the model saw: told as the user, then refused as the tool it called
+    told = [m for m in seen[-1] if m.get("role") == "user" and m.get("content") == OVER]
+    assert len(told) == 1
+    refusal = [m for m in seen[-1] if m.get("role") == "tool" and "refused" in str(m["content"])]
+    assert len(refusal) == 1 and OVER in refusal[0]["content"]
+    assert seen[-1].index(told[0]) < seen[-1].index(refusal[0])
+
+    class Stubborn:
+        """Never stops searching; the plain nudge is the only thing it answers."""
+
+        def chat(self, messages, tools=None, **_):
+            if any("plain words" in str(m.get("content")) for m in messages
+                   if m.get("role") == "user"):
+                return Reply(content="Nothing more to find.")
+            return Reply(content="", tool_calls=[{"id": "x", "function": {
+                "name": "look_up", "arguments": '{"text": "Ada"}'}}])
+
+    out = converse("who?", GRAPH, Stubborn(), rounds=1)
+    assert out.content == "Nothing more to find."
+    assert out.steps.count("refused look_up: the searching is over") == 1
 
 
 def test_held_entries_are_named_to_the_model_by_label_and_id():
@@ -170,16 +298,14 @@ def test_a_model_that_goes_quiet_is_told_to_answer():
             self.silences = 1
 
         def chat(self, messages, tools=None, **kw):
-            # the answering turn is the one with no way left to search
-            searching = {"look_up", "look_at", "path_between"}
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-            if not (offered & searching) and self.silences:
+            # the answering turn is the one told the searching is over
+            if _told_to_stop(messages) and self.silences:
                 self.silences -= 1
                 self.seen.append(list(messages))
                 return Reply(content="")
             return super().chat(messages, tools=tools, **kw)
 
-    model = Quiet([("look_up", {"text": "compilers"})] * 5)
+    model = Quiet([("look_up", {"text": "compilers"})] * 3)
     out = converse("who works on compilers?", GRAPH, model, rounds=5)
     assert out.content
     assert any("plain words" in m["content"] for said in model.seen for m in said)
@@ -486,7 +612,7 @@ def test_a_finder_is_batched_the_same_way():
 
 
 def test_a_tool_call_written_out_as_prose_is_cut_and_believed():
-    """The last turn has no tools, so a model that wanted `show` writes the call instead.
+    """A model that wanted `show` on the last turn may write the call out instead of calling it.
 
     Measured on the live graph: a good answer arrived with
     `show({"ids":[...]})` welded to the end of it, printed to the reader as part of the
@@ -536,11 +662,14 @@ def test_a_turn_that_stops_searching_can_still_act():
     Measured against a real model: "I moved to Denver, please fix my entry" went round in
     circles looking the place up, the loop stopped it — and the one call left had nothing to
     reach for, so a member's request to change their own entry came back as "the model did
-    not finish an answer". Stopping the searching must not stop the acting.
+    not finish an answer". Stopping the searching must not stop the acting -- and the final
+    turn offers the same tools as every other, so the acting tool is there beside the
+    searches it may no longer call.
     """
     import json as _json
 
     raised = []
+    offered: list[tuple[str, ...]] = []
 
     def record(args):
         raised.append(str(args.get("text") or ""))
@@ -556,12 +685,15 @@ def test_a_turn_that_stops_searching_can_still_act():
         """Searches until it is stopped, then asks for the change it came to ask for."""
 
         def chat(self, messages, tools=None, **_):
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-            if "look_up" in offered:
+            offered.append(_names(tools))
+            if any(m.get("role") == "tool" and m.get("name") == "request_change"
+                   for m in messages):
+                return Reply(content="Recorded.")
+            if not _told_to_stop(messages):
                 return Reply(content="", tool_calls=[{"id": "c", "function": {
                     "name": "look_up", "arguments": _json.dumps({"text": "Denver"})}}])
-            assert "request_change" in offered, f"nothing left to act with: {offered}"
-            return Reply(content="Recorded.", tool_calls=[{"id": "c", "function": {
+            assert "request_change" in offered[-1], f"nothing left to act with: {offered[-1]}"
+            return Reply(content="", tool_calls=[{"id": "c", "function": {
                 "name": "request_change",
                 "arguments": _json.dumps({"text": "I moved to Denver"})}}])
 
@@ -569,6 +701,9 @@ def test_a_turn_that_stops_searching_can_still_act():
                    tools=[*tools_for(GRAPH), change], rounds=2)
     assert raised == ["I moved to Denver"], "the request never reached the tool"
     assert "did not finish an answer" not in out.content
+    assert out.content == "Recorded."
+    assert len(set(offered)) == 1, f"the tools changed between calls: {offered}"
+    assert {"look_up", "request_change", "show"} <= set(offered[-1])
 
 
 def test_an_answer_built_on_nothing_is_sent_back_to_search():
@@ -585,10 +720,10 @@ def test_an_answer_built_on_nothing_is_sent_back_to_search():
 
         def chat(self, messages, tools=None, **_):
             self.turns += 1
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
             if self.turns == 1:
                 return Reply(content="Probably somebody in engineering.")
-            if "look_up" in offered:
+            if not any(m.get("role") == "tool" and "refused" in str(m.get("content"))
+                       for m in messages):
                 return Reply(content="", tool_calls=[{"id": "c1", "function": {
                     "name": "look_up", "arguments": '{"text": "compilers"}'}}])
             return Reply(content="Ada works on compilers.")
@@ -598,6 +733,10 @@ def test_an_answer_built_on_nothing_is_sent_back_to_search():
     assert "topic:compilers" in out.found                    # it went and looked
     assert out.content == "Ada works on compilers."           # and the second answer stands
     assert "answered without looking, so it was sent to look" in out.steps
+    # one chance to look: the second search is refused, and that is what got the answer
+    assert "refused look_up: the searching is over" in out.steps
+    # the blurt, the search, the refused one, the answer, the ask for what to light
+    assert model.turns == 5
 
 
 def test_a_model_that_will_not_search_keeps_the_answer_it_gave():
@@ -740,8 +879,7 @@ def test_going_in_circles_costs_a_handful_of_calls_and_stops():
 
         def chat(self, messages, tools=None, **_):
             self.calls += 1
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-            if "look_up" in offered:
+            if not _told_to_stop(messages):
                 return Reply(content="", tool_calls=[{"id": "x", "function": {
                     "name": "look_up", "arguments": '{"text": "compilers"}'}}])
             return Reply(content="Nothing more to find.")
@@ -800,24 +938,28 @@ def test_a_model_that_lists_a_kind_gets_the_entries_read_back():
     assert "answered without looking, so it was sent to look" not in out.steps
 
 
-def test_listing_a_kind_is_a_search_and_is_taken_away_on_the_final_turn():
-    """The final turn is for answering; a tool that goes looking is not offered on it."""
-    offered_by_call: list[set[str]] = []
+def test_listing_a_kind_is_a_search_and_is_refused_on_the_final_turn():
+    """The final turn is for answering; a tool that goes looking is still offered on it, so
+    the prompt reads the same, and a call to it is refused rather than run."""
+    offered_by_call: list[tuple[str, ...]] = []
 
     class Lister:
         def chat(self, messages, tools=None, **_):
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-            offered_by_call.append(offered)
-            if "list_kind" in offered:
+            offered_by_call.append(_names(tools))
+            refused = any(m.get("role") == "tool" and "refused" in str(m.get("content"))
+                          for m in messages)
+            if not refused:
                 return Reply(content="", tool_calls=[{"id": "x", "function": {
                     "name": "list_kind", "arguments": '{"kind": "org"}'}}])
             return Reply(content="Pellard Foundry is the only company here.")
 
     out = converse("which companies?", GRAPH, Lister(), rounds=2)
     assert out.content == "Pellard Foundry is the only company here."
+    assert out.listed == ["org:pellard"]
     assert "list_kind" in offered_by_call[0]
-    assert "list_kind" not in offered_by_call[2], "the answering turn still offered a search"
-    assert "show" in offered_by_call[2], "the tool that acts was taken away with the searches"
+    assert len(set(offered_by_call)) == 1, "the answering turn offered a different list"
+    assert "show" in offered_by_call[-1], "the tool that acts went away with the searches"
+    assert "refused list_kind: the searching is over" in out.steps
 
 
 def test_show_is_found_by_name_after_the_tools_were_reordered():
@@ -828,26 +970,25 @@ def test_show_is_found_by_name_after_the_tools_were_reordered():
     assert TOOLS[3]["function"]["name"] != "show", "the reorder this test exists for"
     assert _schema("show")["function"]["name"] == "show"
     assert _schema("show", TERSE)["function"]["name"] == "show"
-    offered_last: list[set[str]] = []
+    offered_last: list[tuple[str, ...]] = []
 
     class Reader:
-        """Reads once, answers in words, and shows only when show is all it is offered --
-        which is the closing nudge, and nowhere else."""
+        """Reads once, answers in words, and shows when asked to say what to light -- the
+        closing nudge, which offers the same tools as every other call."""
 
         def chat(self, messages, tools=None, **_):
-            offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
-            offered_last.append(offered)
+            offered_last.append(_names(tools))
             if len(offered_last) == 1:
                 return Reply(content="", tool_calls=[{"id": "a", "function": {
                     "name": "look_at", "arguments": '{"ids": ["person:ada"]}'}}])
-            if offered == {"show"}:
+            if str(messages[-1].get("content") or "").startswith("Now call show once"):
                 return Reply(content="", tool_calls=[{"id": "b", "function": {
                     "name": "show", "arguments": '{"ids": ["person:ada"]}'}}])
             return Reply(content="Ada works on compilers.")
 
     out = converse("who?", GRAPH, Reader())
     assert len(offered_last) == 3, "one read, one answer, one nudge to say what to light"
-    assert offered_last[-1] == {"show"}
+    assert len(set(offered_last)) == 1 and "show" in offered_last[-1]
     assert out.show == ["person:ada"]
 
 
@@ -1003,8 +1144,8 @@ def test_bytes_anywhere_else_in_a_tool_result_never_reach_the_encoder():
 
 def test_the_web_tools_are_searches_and_go_away_with_the_others():
     """`web_search`, `web_read` and `web_look` look for something, so the last turn -- the one
-    that exists to end the searching -- must not offer them either. Measured before this: the
-    quiet turn offered {'request_change', 'show', 'web_read', 'web_search'}.
+    that exists to end the searching -- refuses them with the rest. Measured before this: the
+    last turn ran 'web_search' and 'web_read' while refusing 'look_up'.
     Mutation: drop the web names from SEARCHING."""
     from ml_stack.graph.ask import SEARCHING
 
@@ -1201,7 +1342,7 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
         "Now call show once with the ids of the entries your answer is about — everyone and "
         "everything you named in it, including any you named from a quote. Nothing you "
         "opened and did not write about.")
-    assert loose.offered[-1][0]["function"]["description"] \
+    assert _show_of(loose.offered[-1])["function"]["description"] \
         == TOOLS[-1]["function"]["description"]
 
     # and the default, asked nothing at all, is the tight asking: the tight system prompt,
@@ -1211,7 +1352,7 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
     assert model.seen[0][0]["content"] == (
         SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE)
     assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
-    assert model.offered[-1][0]["function"]["description"] == TIGHT_SHOW
+    assert _show_of(model.offered[-1])["function"]["description"] == TIGHT_SHOW
 
 
 def test_tight_changes_what_show_says_on_a_copy_of_every_set():
@@ -1248,9 +1389,9 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     assert TIGHT_NUDGE.startswith("Now call show once with only the entries that answer the")
     assert "which-of-a-kind" in TIGHT_NUDGE and "chain" in TIGHT_NUDGE
     assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
-    assert model.offered[-1] == [next(s for s, _ in tools_for(GRAPH, tight=True)
-                                      if s["function"]["name"] == "show")]
-    assert model.offered[-1][0]["function"]["description"] == TIGHT_SHOW
+    assert model.offered[-1] == [s for s, _ in tools_for(GRAPH, tight=True)], \
+        "the nudge offers the same tools as every other call"
+    assert _show_of(model.offered[-1])["function"]["description"] == TIGHT_SHOW
     # a caller's own tools are told too: the terse set handed in -- built loose, as a
     # caller assembling its own set has it -- gets the terse tight show
     handed = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
@@ -1630,9 +1771,9 @@ def test_converse_offers_look_around_and_a_reach_reaches_its_result():
                            on_event=lambda e: None, reach=8000).read == ["topic:ceramics"]
 
 
-def test_look_around_is_a_search_and_goes_away_on_the_last_turn():
+def test_look_around_is_a_search_and_is_refused_on_the_last_turn():
     """A model that may still look around will look around instead of answering, which is
-    the failure the last turn exists to end."""
+    the failure the last turn exists to end: the call is refused, not run."""
     from ml_stack.graph.ask import SEARCHING, TOOLS
 
     assert "look_around" in SEARCHING
@@ -1640,9 +1781,12 @@ def test_look_around_is_a_search_and_goes_away_on_the_last_turn():
     assert "look_around" in named
     model = SayingModel([call("look_around", ids=["topic:ceramics"]),
                          call("look_around", ids=["person:wren"])], "Hollis Fen teaches it.")
-    converse("who?", AROUND_GRAPH, model, rounds=1)
-    assert not any("look_around" in {t["function"]["name"] for t in offered}
-                   for offered in model.offered[1:]), "taken away with the other searches"
+    out = converse("who?", AROUND_GRAPH, model, rounds=1)
+    assert out.content == "Hollis Fen teaches it."
+    assert "refused look_around: the searching is over" in out.steps
+    assert out.read == ["topic:ceramics"], "the refused call read nothing"
+    assert len({_names(offered) for offered in model.offered}) == 1, \
+        "offered the same tools on every call, the refusing one included"
 
 
 def test_a_neighbour_only_ever_seen_inside_a_neighbourhood_may_still_be_lit():
@@ -2161,13 +2305,15 @@ def test_a_constrained_reply_is_read_as_the_tool_call_or_the_answer_it_holds():
 
 
 def test_the_show_nudge_is_constrained_too():
+    from ml_stack.graph.ask import TIGHT_NUDGE
+
     model = _Recording([call("look_up", text="Ada Lovelace"),
-                        call("look_at", ids=["person:ada"]),
-                        call("show", ids=["person:ada"])])
+                        call("look_at", ids=["person:ada"])])
     converse("who is Ada?", GRAPH, model, constrain_ids=True)
-    nudged = [g for g in model.given if g["tools"] == ["show"]]
-    assert nudged, "the answer was asked what it is about"
-    assert all(_format_of(g) is not None for g in nudged)
+    assert model.seen[-1][-1]["content"] == TIGHT_NUDGE, "the answer was asked what it is about"
+    assert len(model.given) == 4
+    assert len({tuple(g["tools"]) for g in model.given}) == 1, "the same tools on every call"
+    assert all(_format_of(g) is not None for g in model.given)
 
 
 def test_over_the_cap_nothing_is_constrained_and_the_steps_say_so():
