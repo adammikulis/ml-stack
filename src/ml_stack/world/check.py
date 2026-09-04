@@ -86,7 +86,7 @@ def _names_first(label: str) -> re.Pattern[str]:
 
 def _windows(label: str, longest: int = 4) -> set[str]:
     """Every run of two to ``longest`` consecutive words of the label, casefolded."""
-    words = label.casefold().split()
+    words = [w.casefold() for w in WORD.findall(label)]
     return {" ".join(words[i:i + n]) for n in range(2, longest + 1)
             for i in range(len(words) - n + 1)}
 
@@ -212,7 +212,7 @@ def consistency(corpus: Sequence[str | Path], where: str | Path, *,
     windows: set[str] = set()
     for label, _ in labels.values():
         windows |= _windows(label)
-    truth_words = {w.casefold() for label, _ in labels.values() for w in label.split()}
+    truth_words = {w.casefold() for label, _ in labels.values() for w in WORD.findall(label)}
     seen: dict[str, str] = {}
     for where_, m in said:
         for found_ in PAIR.finditer(m.text):

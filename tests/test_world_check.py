@@ -20,6 +20,7 @@ from ml_stack.world.cli import main, read_messages
 from ml_stack.world.emit import mbox, slack_export, teams
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import run
+from ml_stack.world.story import ARCS
 
 DOMAIN = "example.test"
 
@@ -93,6 +94,16 @@ def test_every_outcome_edge_is_named_at_both_ends_in_its_thread(tmp_path):
         first = messages[edge["attrs"]["said_in"]]
         text = "\n".join(threads[first.thread or first.id])
         assert named(edge["source"], text) and named(edge["target"], text), edge
+
+
+@pytest.mark.parametrize("kind", sorted(ARCS))
+@pytest.mark.parametrize("seed", range(4))
+def test_every_kind_of_world_reads_back_consistent_at_four_seeds(tmp_path, kind, seed):
+    _, talk = _world(tmp_path, kind, seed)
+    report = check.consistency(_corpus(tmp_path, talk), talk, domain=DOMAIN)
+    assert report.misses == []
+    assert report.counts["spoken"] == report.counts["spoken_found"] > 0
+    assert report.counts["asserted"] == report.counts["asserted_found"] > 0
 
 
 def test_a_message_doctored_to_name_a_stranger_fails_consistency(tmp_path):
