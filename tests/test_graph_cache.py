@@ -166,7 +166,7 @@ def test_an_answer_can_be_made_to_go_stale_by_age(store):
     assert recall(store, key, kind=Answer) is not None       # no age limit: it stands
     assert recall(store, key, kind=Answer, older_than=3600) is not None
     time.sleep(1.05)
-    assert recall(store, key, kind=Answer, older_than=1) is None
+    assert recall(store, key, kind=Answer, older_than=0.5) is None
 
 
 def test_a_store_that_will_not_answer_is_a_miss_not_a_crash():
