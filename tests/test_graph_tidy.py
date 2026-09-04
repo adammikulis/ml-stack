@@ -108,6 +108,26 @@ def test_an_inverse_pair_folds_to_the_canonical_direction(tmp_path):
     assert canonical_direction("part_of") == ("part_of", False)
 
 
+def test_the_pass_recounts_the_stats_document_after_its_writes(tmp_path):
+    path = tmp_path / "g.ladybug"
+    with GraphStore(path) as store:
+        store.write({"nodes": [_node("concept:cell", "cell"), _node("concept:nucleus", "nucleus")],
+                     "edges": [_edge("concept:nucleus", "part_of", "concept:cell", 2),
+                               _edge("concept:cell", "has_part", "concept:nucleus", 1)],
+                     "stats": {"nodes": 2, "edges": 2, "built_at": "2026-08-31T10:00:00"}})
+    dry = tidy(path)
+    with GraphStore(path, read_only=True) as store:
+        assert dry.inverses_folded == 1 and store.get_doc("stats")["edges"] == 2
+    report = tidy(path, dry_run=False)
+    assert report.inverses_folded == 1
+    with GraphStore(path, read_only=True) as store:
+        counted = store.counts()
+        assert counted["edges"] == 1
+        assert store.get_doc("stats") == {"nodes": 2, "edges": 1,
+                                          "built_at": "2026-08-31T10:00:00"}
+        assert store.get_doc("stats")["edges"] == counted["edges"]
+
+
 def test_suspect_labels_are_flagged_not_removed_and_hidden_nodes_are_left_alone(tmp_path):
     path = _store(tmp_path, [
         _node("concept:clause", "that aims to observe, explore, and investigate"),

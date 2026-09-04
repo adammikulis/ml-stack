@@ -578,8 +578,11 @@ class GraphStore:
         return {key: self.get_doc(key, {}) for key in self.doc_keys()}
 
     def read(self) -> dict[str, Any]:
-        """The graph in the shape it went in as, whole."""
-        return {**self.docs(), "nodes": self.nodes(), "edges": self.edges()}
+        """The graph in the shape it went in as, whole; a ``stats`` document counts what is read."""
+        out = {**self.docs(), "nodes": self.nodes(), "edges": self.edges()}
+        if isinstance(out.get("stats"), dict):
+            out["stats"] = {**out["stats"], "nodes": len(out["nodes"]), "edges": len(out["edges"])}
+        return out
 
     # -- checking itself
 

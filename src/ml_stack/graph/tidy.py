@@ -833,6 +833,8 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if report.orphans:
         note(f"orphans: {len(report.orphans)} node(s) with no relation, e.g. "
              + ", ".join(_label(nodes, n) for n in report.orphans[:5]))
+    if not dry_run:
+        _recount(store)
     if not dry_run and hasattr(store, "check"):
         # 2026-09-03: a store engine blanked other nodes' strings on a delete, and the
         # pass reported success over a store that no longer read back by id. Never again:
@@ -840,6 +842,19 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         report.findings = list(store.check())
     note(report.said())
     return report
+
+
+def _recount(store: Any) -> None:
+    """The ``stats`` document's ``nodes`` and ``edges`` from what the store counts."""
+    if not all(hasattr(store, name) for name in ("get_doc", "put_doc", "counts")):
+        return
+    held = store.get_doc("stats", None)
+    if not isinstance(held, dict):
+        return
+    counted = store.counts()
+    fresh = {**held, "nodes": counted["nodes"], "edges": counted["edges"]}
+    if fresh != held:
+        store.put_doc("stats", fresh)
 
 
 def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,

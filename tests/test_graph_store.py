@@ -127,6 +127,19 @@ def test_what_is_about_the_graph_is_kept_with_it(tmp_path):
     assert {n["id"] for n in back["nodes"]} == {n["id"] for n in GRAPH["nodes"]}
 
 
+def test_read_counts_the_nodes_and_edges_it_hands_back(tmp_path):
+    graph = {**GRAPH, "stats": {"nodes": 5, "edges": 3, "built_at": "2026-08-31T10:00:00"}}
+    with GraphStore(tmp_path / "g") as store:
+        store.write(graph)
+        assert store.remove_edge("person:ada", "interested_in", "topic:compilers")
+    with GraphStore(tmp_path / "g", read_only=True) as reopened:
+        back = reopened.read()
+        assert reopened.get_doc("stats")["edges"] == 3
+    assert back["stats"] == {"nodes": 5, "edges": len(back["edges"]),
+                             "built_at": "2026-08-31T10:00:00"}
+    assert len(back["edges"]) == 2
+
+
 def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     """The real thing this exists for: a rebuild that goes wrong is not the end of the graph."""
     from ml_stack.graph.store import count_store, roll_back, snapshot
