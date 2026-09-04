@@ -15,6 +15,11 @@ Every predicate is written either way: one with a counterpart under that verb, o
 as it stands, its edges carrying ``extension``. ``core_only`` writes the first and leaves
 the second. What each predicate became is counted by name and kept in the store as
 ``ingest:predicates:<source>``.
+
+`VAGUE` is the part of an open vocabulary that is not a vocabulary. ``related_to``,
+``describes``, ``supports`` and their kind say the two things were named near one another
+and nothing about how they stand; an edge under one carries ``vague`` as well as
+``extension``, so a question put to the graph can leave them out.
 """
 
 from __future__ import annotations
@@ -33,8 +38,8 @@ from typing import Any
 from ml_stack.ingest.reads import Read, _keep_reads, _slug
 from ml_stack.sources.pdf import Unit
 
-__all__ = ["CONFIDENCE", "KINDS", "RELATIONS", "Imported", "bring", "imported",
-           "lines", "named", "verb_for"]
+__all__ = ["CONFIDENCE", "KINDS", "RELATIONS", "VAGUE", "Imported", "bring", "imported",
+           "lines", "named", "vague", "verb_for"]
 
 
 CONFIDENCE = ("low", "medium", "high")
@@ -232,6 +237,28 @@ RELATIONS: dict[str, tuple[str, bool] | None] = {
 the table names and has no counterpart for."""
 
 
+VAGUE = frozenset({
+    "related_to", "relates_to", "associated_with", "describes", "described_by",
+    "supports", "supported_by", "involves", "involved_in", "affects", "affected_by",
+    "is_affected_by", "influences", "determines", "determined_by", "provides",
+    "provided_by", "performs", "experiences", "interacts_with", "connects_to",
+    "sensitive_to", "underlies", "applies", "applies_to", "acts_as", "acts_on",
+    "functions_as", "exhibits", "has_property", "has_characteristic", "has_function",
+    "has_measurement", "has_feature", "has_shape", "indicates", "reflects", "covers",
+    "lists", "explains", "means", "measures", "quantifies", "assesses", "evaluates",
+    "identifies", "classifies", "compares", "characterizes", "demonstrates", "shows",
+    "summarizes", "records", "outlines", "states", "correlates_with", "equals", "lacks",
+    "excludes", "same_as", "synonym_of", "also_known_as", "is", "are", "has", "can_be",
+    "may_be", "or", "and",
+})
+"""Predicates that say the two things were named together and not how they stand.
+
+An edge under one of these carries ``vague``. Counted over the anatomy pair: 3,861 of its
+21,922 relations under 92 predicates -- ``supports`` 615, ``related_to`` 608, ``describes``
+601. They are not wrong, they are unspecific, and a graph asked a question cannot use
+them."""
+
+
 def _word(predicate: str) -> str:
     """One predicate as the table keys it."""
     return "_".join(str(predicate or "").casefold().replace("-", " ").replace("_", " ").split())
@@ -251,6 +278,11 @@ def _keys(predicate: str) -> Iterator[str]:
 def named(predicate: str) -> bool:
     """Whether `RELATIONS` names this predicate at all."""
     return any(key in RELATIONS for key in _keys(predicate))
+
+
+def vague(predicate: str) -> bool:
+    """Whether this predicate says only that the two things were named together."""
+    return any(key in VAGUE for key in _keys(predicate))
 
 
 def verb_for(predicate: str) -> tuple[str, bool] | None:
@@ -278,6 +310,7 @@ class Imported:
     table: list[tuple[str, str, bool, int]] = field(default_factory=list)
     extensions: Counter = field(default_factory=Counter)     # written as they stand
     unnamed: Counter = field(default_factory=Counter)        # and not in the table at all
+    vague: Counter = field(default_factory=Counter)          # and `VAGUE` names them
     left: Counter = field(default_factory=Counter)           # core_only left these
     dropped: Counter = field(default_factory=Counter)
     models: list[str] = field(default_factory=list)
@@ -288,6 +321,11 @@ class Imported:
     def core(self) -> int:
         """Relations written under one of the eighteen."""
         return self.relations - sum(self.extensions.values())
+
+    @property
+    def specific(self) -> int:
+        """Relations written as they stand that say something a graph can be asked."""
+        return sum(self.extensions.values()) - sum(self.vague.values())
 
 
 def _json(text: str, where: str, column: str) -> Any:
@@ -432,7 +470,7 @@ def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
             got.dropped["a relation whose ends the nodes file does not hold"] += 1
             continue
         word = _word(row["predicate"])
-        found = verb_for(word)
+        found, said = verb_for(word), {}
         if found is None:
             if not named(word):
                 got.unnamed[word] += 1
@@ -441,11 +479,15 @@ def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
                 continue
             got.extensions[word] += 1
             found = (word, False)
+            if vague(word):
+                got.vague[word] += 1
+                said = {"vague": True}
         verb, flipped = found
         unit = unit_for(row, where)
         one, other = (target, source) if flipped else (source, target)
         held = per_unit.setdefault(unit.id, {"concepts": [], "relations": []})
-        held["relations"].append({"from": one["name"], "rel": verb, "to": other["name"]})
+        held["relations"].append({"from": one["name"], "rel": verb, "to": other["name"],
+                                  **said})
         # the unit a relation was read from names both its ends
         held["concepts"].extend([source, target])
         got.relations += 1
@@ -519,16 +561,24 @@ def lines(got: Imported, *, most: int = 12) -> list[str]:
         out.append(f"    ... and {len(core) - most} more, "
                    f"{sum(c for *_, c in core[most:])} relation(s)")
     kept = sum(got.extensions.values())
-    out.append(f"  written as they stand ({len(got.extensions)} predicate(s), {kept} "
-               f"relation(s)) -- every edge of one carries `extension`"
-               + (f"; the table names {len(got.extensions) - len(got.unnamed)} of them and "
-                  f"has no counterpart for it" if got.unnamed else ""))
-    for word, count in got.extensions.most_common(most):
+    specific = {w: c for w, c in got.extensions.items() if w not in got.vague}
+    out.append(f"  written as they stand ({len(specific)} predicate(s), {got.specific} "
+               f"relation(s)) -- every edge of one carries `extension`")
+    for word, count in Counter(specific).most_common(most):
         out.append(f"    {word:<28} {count:>6}"
                    + ("   (the table does not name it)" if word in got.unnamed else ""))
-    if len(got.extensions) > most:
-        out.append(f"    ... and {len(got.extensions) - most} more, "
-                   f"{kept - sum(c for _, c in got.extensions.most_common(most))} relation(s)")
+    if len(specific) > most:
+        out.append(f"    ... and {len(specific) - most} more, "
+                   f"{got.specific - sum(c for _, c in Counter(specific).most_common(most))} "
+                   f"relation(s)")
+    said = sum(got.vague.values())
+    out.append(f"  vague ({len(got.vague)} predicate(s), {said} relation(s)) -- they say the "
+               f"two were named together, not how they stand; their edges carry `vague`")
+    for word, count in got.vague.most_common(most):
+        out.append(f"    {word:<28} {count:>6}")
+    if len(got.vague) > most:
+        out.append(f"    ... and {len(got.vague) - most} more, "
+                   f"{said - sum(c for _, c in got.vague.most_common(most))} relation(s)")
     if got.left:
         out.append(f"  left by --core-only ({len(got.left)} predicate(s), "
                    f"{sum(got.left.values())} relation(s))")
@@ -616,6 +666,7 @@ def _keep_predicates(out: str | Path, got: Imported) -> None:
             "core": {word: {"verb": verb, "flipped": flipped, "relations": count}
                      for word, verb, flipped, count in got.table if verb in core},
             "extensions": dict(got.extensions.most_common()),
+            "vague": dict(got.vague.most_common()),
             "unnamed": dict(got.unnamed.most_common()),
             "left": dict(got.left.most_common())})
 

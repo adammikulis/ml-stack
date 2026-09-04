@@ -137,10 +137,11 @@ class Sources:
         ``sources`` is one entry per source -- units read, and the nodes and edges the
         store holds for it. ``shared`` is every concept two or more sources were read
         into, most shared first, each naming them. ``between`` is every edge whose two
-        ends were read from different sources -- one source's vocabulary joined to
-        another's. ``merged`` is `between_sources`, and ``logged`` whether the store holds
-        the merges document those come from at all. ``decisions`` counts the pairs a judge
-        has settled in the store's `graph.tidy` document.
+        ends are known to different sets of sources -- one source's vocabulary reaching
+        into another's. An edge the same sources hold both ends of is inside a vocabulary
+        they share, not between them. ``merged`` is `between_sources`, and ``logged``
+        whether the store holds the merges document those come from at all. ``decisions``
+        counts the pairs a judge has settled in the store's `graph.tidy` document.
 
         A source's node is one a ``read_from`` edge joins to ``source:<slug>``; a source's
         edge is one whose provenance names a unit of that source. Without a ``store`` one
@@ -194,7 +195,7 @@ class Sources:
                 continue
             source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
             here, there = sources_of.get(source) or set(), sources_of.get(target) or set()
-            if not (here and there) or here & there:
+            if not (here and there) or here == there:
                 continue
             between.append({"source": source, "source_label": labels.get(source, source),
                             "rel": str(edge.get("rel") or ""), "target": target,

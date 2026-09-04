@@ -135,11 +135,13 @@ from ml_stack.ingest.imports import (
     CONFIDENCE as CONFIDENCE,
     KINDS as KINDS,
     RELATIONS as RELATIONS,
+    VAGUE as VAGUE,
     Imported as Imported,
     bring as bring,
     imported as imported,
     lines as import_lines,
     named as named,
+    vague as vague,
     verb_for as verb_for,
     _pair as _pair,
     _titled as _titled,
@@ -213,9 +215,10 @@ from ml_stack.ingest.sources import (
 )
 
 __all__ = ["CONFIDENCE", "CORE", "FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS",
-           "KINDS", "PER_SECTION", "RELATIONS", "VERBS",
+           "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
            "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "ask",
            "asked_lines", "bring", "build", "detach", "extract_unit", "fold", "fold_into",
            "fold_source", "gold_score", "graph_of", "import_lines", "imported", "main",
            "migrate", "read_asked", "read_gold", "sayable", "schema", "score_asked", "show",
-           "sources", "status", "unit_of", "units_of", "verb_for", "vocabulary", "write"]
+           "sources", "status", "unit_of", "units_of", "vague", "verb_for", "vocabulary",
+           "write"]

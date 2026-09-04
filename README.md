@@ -1988,7 +1988,15 @@ and object swapped where the natural reading is the inverse: `includes` is `has_
 round. Every other predicate comes in as it stands, its edges carrying `extension`, so a
 reader and a query can tell a verb this library set from a verb the extractor chose;
 `--core-only` takes the first kind alone. What each predicate became is counted by name,
-printed, and kept in the store as `ingest:predicates:<source>`. `--dry-run` prints all of it
+printed, and kept in the store as `ingest:predicates:<source>`.
+
+A third of what an open vocabulary writes is not a vocabulary. `related_to`, `describes`,
+`supports` and their kind say the two things were named near one another and nothing about
+how they stand -- 3,861 of the anatomy textbook's 21,922 relations, under 92 predicates.
+Those edges carry `vague` as well as `extension` (`ingest.VAGUE` names them), so a question
+put to the graph, or a count of what a set of sources knows, can leave them out without
+also leaving out the `has_ir_absorption_at` kind of edge, which says something real this
+library has no verb for. `--dry-run` prints all of it
 and writes nothing; `--confidence` takes rows at a level and above, `--no-provisional`
 leaves the ones the extractor left provisional, and `--slug` names the source.
 

@@ -16,7 +16,9 @@ __all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "plurals", "writ
 
 
 CORE = frozenset(VERBS) | {"illustrates", "read_from"}
-"""The verbs this library sets itself. An edge with any other verb carries ``extension``."""
+"""The verbs this library sets itself. An edge with any other verb carries ``extension``,
+and ``vague`` too when the extraction marked its verb as naming an association rather than
+a relation."""
 
 
 def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
@@ -83,6 +85,8 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
                                       "weight": 0, "provenance": []})
         if rel not in CORE:
             held["extension"] = True
+            if relation.get("vague"):
+                held["vague"] = True
         held["weight"] += 1
         if where["unit"] not in held["provenance"]:
             held["provenance"].append(where["unit"])
@@ -164,6 +168,7 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
     for edge in edges.values():
         if edge["rel"] in CORE:
             edge.pop("extension", None)
+            edge.pop("vague", None)
         else:
             edge["extension"] = True
 

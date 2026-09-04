@@ -82,9 +82,9 @@ def test_a_concept_two_sources_name_is_listed_with_the_sources_that_name_it(tmp_
     assert got["shared"][0]["sources"] == [FIELD_GUIDE, OPEN_TEXTS]
 
 
-def test_an_edge_whose_ends_came_from_different_sources_is_a_relation_between_them(tmp_path):
-    """What the hygiene pass leaves when it joins one source's name to another's: an edge
-    with a concept of each source at its ends."""
+def test_an_edge_known_to_different_sources_is_a_relation_between_them(tmp_path):
+    """One source's vocabulary reaching into another's: an edge whose ends are not held by
+    the same sources, whether or not one of them is shared."""
     from ml_stack.graph.store import GraphStore
 
     store = two_sources(tmp_path)
@@ -94,11 +94,35 @@ def test_an_edge_whose_ends_came_from_different_sources_is_a_relation_between_th
 
     got = ingest.Sources(store).shared()
 
-    assert len(got["between"]) == 1
-    one = got["between"][0]
-    assert one["source"] == "concept:spore-bloom" and one["target"] == "concept:charge"
-    assert one["rel"] == "requires"
-    assert one["sources"] == [[FIELD_GUIDE], [OPEN_TEXTS]]
+    joins = {(one["source"], one["rel"], one["target"]): one["sources"]
+             for one in got["between"]}
+    # each source's own name at one end, the other source's at the other
+    assert joins[("concept:spore-bloom", "requires", "concept:charge")] == [[FIELD_GUIDE],
+                                                                           [OPEN_TEXTS]]
+    # one source's own name reaching into the name both sources have -- the shape a set of
+    # sources about the same subject is almost entirely made of
+    assert joins[("concept:spore-bloom", "part_of", "concept:vault")] == \
+        [[FIELD_GUIDE], [FIELD_GUIDE, OPEN_TEXTS]]
+    assert joins[("concept:seam-wall", "part_of", "concept:vault")] == \
+        [[OPEN_TEXTS], [FIELD_GUIDE, OPEN_TEXTS]]
+
+
+def test_an_edge_both_sources_hold_each_end_of_is_not_between_them(tmp_path):
+    """Inside the vocabulary the two sources share, not a reach from one into the other."""
+    from ml_stack.graph.store import GraphStore
+
+    store = two_sources(tmp_path)
+    with GraphStore(store) as held:
+        held.write({"nodes": [], "edges": [
+            {"source": "concept:spore-bloom", "rel": "read_from",
+             "target": f"source:{OPEN_TEXTS}", "weight": 1},
+            {"source": "concept:spore-bloom", "rel": "requires",
+             "target": "concept:vault", "weight": 2}]})
+
+    got = ingest.Sources(store).shared()
+
+    assert ("concept:spore-bloom", "requires", "concept:vault") not in {
+        (one["source"], one["rel"], one["target"]) for one in got["between"]}
 
 
 def test_the_pairs_the_hygiene_pass_judged_are_counted(tmp_path):
@@ -395,7 +419,10 @@ def test_the_sources_command_prints_the_sources_the_shared_concepts_and_the_judg
     assert (f"between sources (0): no log of the names the sources share; "
             f"ml-stack-ingest fold --out {store} re-folds each source from its reads and "
             f"writes one") in said_out
-    assert "relations between sources (0)" in said_out
+    # each source's own name reaching into the one they both have
+    assert "relations between sources (3)" in said_out
+    assert (f"spore bloom --part_of--> vault   ({FIELD_GUIDE} -> {FIELD_GUIDE}, "
+            f"{OPEN_TEXTS})") in said_out
     assert "judged: nothing" in said_out
 
 
