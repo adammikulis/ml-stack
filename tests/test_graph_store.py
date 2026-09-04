@@ -752,6 +752,12 @@ def test_a_json_value_that_is_not_an_object_is_refused_by_name():
         _unjson('"role"')
     with pytest.raises(ValueError, match="an int, not an object"):
         _unjson("7")
+    with pytest.raises(ValueError, match="not JSON: '\\{\"a\": '"):
+        _unjson('{"a": ')
+    with pytest.raises(ValueError, match="not JSON: 'analyst'"):
+        _unjson("analyst")
+    with pytest.raises(ValueError, match="an int, not an object"):
+        _unjson(7)
 
 
 def test_a_node_whose_attrs_hold_a_list_is_refused_when_read(tmp_path):
@@ -760,3 +766,23 @@ def test_a_node_whose_attrs_hold_a_list_is_refused_when_read(tmp_path):
         store.query("MATCH (n:Node {id:'person:ada'}) SET n.attrs = '[\"analyst\"]' /* by hand */")
         with pytest.raises(ValueError, match="person:ada.*attrs.*a list, not an object"):
             store.nodes()
+
+
+def test_a_node_whose_attrs_are_not_json_is_refused_when_read_and_named_by_check(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write(GRAPH)
+        store.query("MATCH (n:Node {id:'person:ada'}) SET n.attrs = '{\"role\": ' /* by hand */")
+        with pytest.raises(ValueError, match="node person:ada: attrs: not JSON: '\\{\"role\": '"):
+            store.nodes()
+        with pytest.raises(ValueError, match="node person:ada: attrs: not JSON"):
+            store.set_attribute("person:ada", "role", "engineer")
+        assert store.check() == ["node person:ada: attrs: not JSON: '{\"role\": '"]
+
+
+def test_a_document_that_is_not_json_is_refused_by_key_and_named_by_check(tmp_path):
+    with GraphStore(tmp_path / "g") as store:
+        store.write({**GRAPH, "stats": {"nodes": 5}})
+        store.query("MATCH (d:Doc {key:'stats'}) SET d.value = 'five' /* by hand */")
+        with pytest.raises(ValueError, match="doc stats: not JSON: 'five'"):
+            store.get_doc("stats")
+        assert store.check() == ["doc stats: not JSON: 'five'"]

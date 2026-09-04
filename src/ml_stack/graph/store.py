@@ -119,13 +119,21 @@ def _blame(value: Any, path: str = "value", seen: frozenset[int] = frozenset()) 
 
 
 def _unjson(raw: Any) -> dict[str, Any]:
-    """A JSON column as a dict. None, "" and null read as {}; any other non-object raises."""
+    """A JSON column as a dict. None, "" and null read as {}; anything else that is not an
+    object, or is not JSON at all, raises ValueError."""
     if isinstance(raw, dict):
         return raw
-    try:
-        out = json.loads(raw or "{}")
-    except (TypeError, ValueError):
+    if raw is None or raw == "":
         return {}
+    if isinstance(raw, (bytes, bytearray)):
+        raw = raw.decode("utf-8", "replace")
+    if isinstance(raw, str):
+        try:
+            out = json.loads(raw)
+        except ValueError:
+            raise ValueError(f"not JSON: {raw[:40]!r}") from None
+    else:
+        out = raw
     if out is None:
         return {}
     if not isinstance(out, dict):
@@ -140,6 +148,15 @@ def _column(raw: Any, what: str) -> dict[str, Any]:
         return _unjson(raw)
     except ValueError as exc:
         raise ValueError(f"{what}: {exc}") from None
+
+
+def _refused(raw: Any, what: str) -> list[str]:
+    """One line naming the record and column when it does not hold a JSON object; else none."""
+    try:
+        _column(raw, what)
+    except ValueError as exc:
+        return [str(exc)]
+    return []
 
 
 _MISSING = object()
@@ -454,7 +471,7 @@ class GraphStore:
     def _attrs(self, node_id: str) -> dict[str, Any] | None:
         """A node's attributes, or None when it is not in the store."""
         rows = self.query("MATCH (n:Node {id:$id}) RETURN n.attrs AS attrs", {"id": str(node_id)})
-        return _unjson(rows[0]["attrs"]) if rows else None
+        return _column(rows[0]["attrs"], f"node {node_id}: attrs") if rows else None
 
     def _set_attrs(self, node_id: str, attrs: Mapping[str, Any]) -> None:
         self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.attrs = $attrs"),
@@ -530,7 +547,7 @@ class GraphStore:
 
     def get_doc(self, key: str, default: Any = None) -> Any:
         rows = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value", {"key": str(key)})
-        return _unjson(rows[0]["value"]) if rows else default
+        return _column(rows[0]["value"], f"doc {key}") if rows else default
 
     def delete_doc(self, key: str) -> bool:
         """Take one document out. False when there was none under that key."""
@@ -591,6 +608,8 @@ class GraphStore:
             elif not by_key:
                 found.append(f"doc {row['key']}: empty by key and by scan; "
                              "nothing left to restore it from")
+            else:
+                found.extend(_refused(by_key, f"doc {row['key']}"))
         found.extend(self._counted("docs", "MATCH (d:Doc) RETURN count(d) AS c", len(docs)))
 
         nodes = self.query("MATCH (n:Node) RETURN n.id AS id, n.kind AS kind, n.label AS label, "
@@ -602,6 +621,8 @@ class GraphStore:
             elif by_id[0] != row:
                 found.append(f"node {row['id']}: scan and id disagree on "
                              f"{_differences(by_id[0], row, 'id', 'scan')}")
+            for column in ("attrs", "data"):
+                found.extend(_refused(row[column], f"node {row['id']}: {column}"))
         found.extend(self._counted("nodes", "MATCH (n:Node) RETURN count(n) AS c", len(nodes)))
 
         edges = self.query("MATCH (a:Node)-[e:Edge]->(b:Node) RETURN a.id AS source, e.rel AS rel, "
@@ -620,6 +641,7 @@ class GraphStore:
             if keyed[0] != expected:
                 found.append(f"{name}: scan and lookup disagree on "
                              f"{_differences(keyed[0], expected, 'lookup', 'scan')}")
+            found.extend(_refused(row["data"], f"{name}: data"))
         found.extend(self._counted("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c",
                                    len(edges)))
         found.extend(self._counted("edges, walked backwards",
@@ -808,7 +830,8 @@ class GraphStore:
         if not rows:
             return None
         row = rows[0]
-        return {**row, "meta": _unjson(row["meta"]), "bytes": bytes(row["bytes"] or b"")}
+        return {**row, "meta": _column(row["meta"], f"asset {asset_id}: meta"),
+                "bytes": bytes(row["bytes"] or b"")}
 
     def assets_of(self, node_id: str) -> list[str]:
         return [r["id"] for r in self.query(
