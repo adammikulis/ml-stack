@@ -548,3 +548,144 @@ def test_rejudge_asks_every_held_verdict_again_and_rewrites_the_document(tmp_pat
     assert held["conflicts"][key]["verdict"] == "keep regulates"
     assert held["suspects"]["concept:number"]["verdict"] == "drop"
     assert report.sound
+
+
+# -- a verdict already bought is applied again with no model
+
+def test_a_recorded_suspect_verdict_is_applied_again_with_no_judge(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:number", "42"),
+        _node("concept:other", "vault current", mentions=3),
+    ], [_edge("concept:number", "part_of", "concept:other")])
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    assert tidy(path, judge=ModelJudge(client)).suspects_dropped == 1
+    with GraphStore(path) as store:            # a rebuild from the reads puts it back
+        store.write({"nodes": [_node("concept:number", "42")],
+                     "edges": [_edge("concept:number", "part_of", "concept:other")]})
+    assert "concept:number" in _ids(path)[0]
+
+    asked = len(client.calls)
+    report = tidy(path, dry_run=False)
+
+    assert len(client.calls) == asked, "no model was asked anything"
+    assert report.suspects_dropped == 1 and report.replayed == 1
+    assert "concept:number" not in _ids(path)[0], "the verdict the store bought still holds"
+    assert "replayed 1 verdict(s) the store already held" in report.said()
+
+
+def test_a_recorded_conflict_verdict_is_applied_again_with_no_judge(tmp_path):
+    path = _two_verbs(tmp_path)
+    client = Scripted(conflicts={("causes", "regulates"): "keep regulates"})
+    assert tidy(path, judge=ModelJudge(client)).conflict_edges_dropped == 1
+    with GraphStore(path) as store:
+        store.write({"nodes": [], "edges": [
+            _edge("concept:vault-current", "causes", "concept:thrum-coil", 2)]})
+    assert ("concept:vault-current", "causes", "concept:thrum-coil") in _ids(path)[1]
+
+    asked = len(client.calls)
+    report = tidy(path, dry_run=False)
+
+    assert len(client.calls) == asked, "no model was asked anything"
+    assert report.conflict_edges_dropped == 1 and report.replayed == 1
+    edges = _ids(path)[1]
+    assert ("concept:vault-current", "causes", "concept:thrum-coil") not in edges
+    assert ("concept:vault-current", "regulates", "concept:thrum-coil") in edges
+
+
+def test_a_dry_run_says_what_it_would_replay_and_writes_nothing(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:number", "42"),
+        _node("concept:other", "vault current", mentions=3),
+    ], [_edge("concept:number", "part_of", "concept:other")])
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    tidy(path, judge=ModelJudge(client))
+    with GraphStore(path) as store:
+        store.write({"nodes": [_node("concept:number", "42")], "edges": []})
+
+    report = tidy(path)
+
+    assert report.dry_run and report.suspects_dropped == 1 and report.replayed == 1
+    assert "concept:number" in _ids(path)[0], "a dry run writes nothing"
+
+
+def test_a_verdict_naming_a_node_the_store_no_longer_has_is_counted_and_kept(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:number", "42"),
+        _node("concept:other", "vault current", mentions=3),
+    ], [_edge("concept:number", "part_of", "concept:other")])
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    tidy(path, judge=ModelJudge(client))
+
+    report = tidy(path, dry_run=False)
+
+    assert report.stale == 1 and report.replayed == 0
+    assert "1 held verdict(s) name a node the store no longer has" in report.said()
+    with GraphStore(path, read_only=True) as store:
+        held = store.get_doc(DECISIONS)["suspects"]
+    assert held["concept:number"]["verdict"] == "drop", "the verdict is kept, not dropped"
+
+
+def test_material_no_verdict_covers_is_left_unjudged(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:number", "42"),
+        _node("concept:other", "vault current", mentions=3),
+    ], [_edge("concept:number", "part_of", "concept:other")])
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    tidy(path, judge=ModelJudge(client))
+    with GraphStore(path) as store:            # the rebuild brings back the judged label
+        store.write({"nodes": [_node("concept:number", "42"),   # and a new one nobody judged
+                               _node("concept:fresh", "that carries the hum onward")],
+                     "edges": [_edge("concept:fresh", "part_of", "concept:other")]})
+
+    report = tidy(path, dry_run=False)
+
+    assert report.suspects_dropped == 1 and report.replayed == 1
+    nodes = _ids(path)[0]
+    assert "concept:number" not in nodes
+    assert nodes["concept:fresh"]["attrs"]["suspect"], "flagged for a judge, not dropped"
+    assert report.flagged == 1 and "flagged 1 label(s)" in report.said()
+
+
+def test_a_verdict_is_found_again_when_the_rebuild_gave_the_node_another_id(tmp_path):
+    path = _store(tmp_path, [
+        _node("concept:number", "42"),
+        _node("concept:other", "vault current", mentions=3),
+    ], [_edge("concept:number", "part_of", "concept:other")])
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    tidy(path, judge=ModelJudge(client))
+    with GraphStore(path) as store:            # the same label under an id nobody judged
+        store.write({"nodes": [_node("concept:table-42", "42")], "edges": []})
+
+    report = tidy(path, dry_run=False)
+
+    assert report.replayed == 1 and report.suspects_dropped == 1
+    assert "concept:table-42" not in _ids(path)[0], "matched by the label the verdict recorded"
+
+
+def test_a_re_fold_from_the_reads_keeps_what_the_hygiene_pass_settled(tmp_path):
+    from tests.test_ingest import a_part_read_source, a_read, said
+
+    store = a_part_read_source(tmp_path, rows=[
+        a_read("velthorne-open-texts:1:1.1", extracted=said(
+            "vault", "seam wall", "42",
+            relations=[("vault", "has_part", "seam wall"),
+                       ("seam wall", "part_of", "vault"),
+                       ("42", "part_of", "vault")]))])
+    assert ingest.fold(store, say=lambda _: None) == 0
+    client = Scripted(suspects={("'42'",): {"verdict": "drop", "why": "a table number"}})
+    assert tidy(store, judge=ModelJudge(client)).suspects_dropped == 1
+    settled = _ids(store)
+    assert "concept:42" not in settled[0]
+    assert ("concept:vault", "has_part", "concept:seam-wall") not in settled[1]
+
+    asked = len(client.calls)
+    said_lines = []
+    assert ingest.fold(store, say=said_lines.append) == 0
+
+    assert len(client.calls) == asked, "the re-fold asked no model anything"
+    nodes, edges = _ids(store)
+    assert "concept:42" not in nodes, "the label the judge dropped stays dropped"
+    assert ("concept:vault", "has_part", "concept:seam-wall") not in edges, \
+        "the duplicate half of the inverse pair stays folded"
+    assert ("concept:seam-wall", "part_of", "concept:vault") in edges, "the fact is still there"
+    assert any("kept: " in line and "replayed 1 verdict(s)" in line for line in said_lines)

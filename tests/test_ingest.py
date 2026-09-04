@@ -876,9 +876,11 @@ def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tm
 
     assert ingest.main(["fold", "--out", str(store)]) == 0
     line = capsys.readouterr().out.strip()
-    assert line.count("\n") == 1 and line.endswith("reads back whole"), "one line for what it did, and the check"
+    assert line.count("\n") == 2 and line.endswith("reads back whole"), \
+        "a line for what it did, one for what the hygiene pass kept, and the check"
     assert "Velthorne Open Texts" in line and "2 of 4 units read" in line
     assert "partial" in line
+    assert "kept: merged 0 node(s)" in line, "nothing was settled, so nothing is replayed"
     assert in_store(store) >= {"source:velthorne-open-texts", "concept:vault",
                                "concept:seam-wall"}
 

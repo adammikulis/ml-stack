@@ -478,7 +478,13 @@ def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: b
 
     A source part-read is written as far as it has been read, so a run that will take days
     is answerable today. ``--dry-run`` says what each fold would add and writes nothing;
-    ``--rebuild`` drops each source's own nodes and edges first -- the only removal there is.
+    ``--rebuild`` drops each source's own nodes and edges first.
+
+    Every source folded, the hygiene pass runs over the store with no model: the verdicts
+    it already holds are applied again, and the duplicate half of an inverse pair goes.
+    What the fold rebuilt from the reads that no verdict covers is left as it is, and the
+    line says how many verdicts were replayed, how many name a node the store no longer
+    has, and what is left unjudged.
     """
     from ml_stack.ingest.sources import Sources
 
@@ -500,7 +506,9 @@ def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: b
             + ("  -- partial" if got["partial"] else ""))
     if not dry_run:
         from ml_stack.graph.store import GraphStore
+        from ml_stack.graph.tidy import tidy
 
+        say("kept: " + tidy(out, dry_run=False).said())
         with GraphStore(out, read_only=True) as store:
             findings = store.check()
         if findings:
