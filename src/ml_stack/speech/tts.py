@@ -170,6 +170,9 @@ class SystemTTS:
 
     name = "system"
 
+    #: "" once this machine has been heard to speak, the reason it cannot otherwise.
+    _spoke: str | None = None
+
     def __init__(self, *, voice: str | None = None) -> None:
         self.voice = voice
 
@@ -181,8 +184,18 @@ class SystemTTS:
         return None
 
     def probe(self) -> ProviderHealth:
+        """Whether this machine speaks -- asked by saying something, once, and kept."""
         if self._command() is None:
             return ProviderHealth.missing("no system speech binary (say / espeak-ng)")
+        if SystemTTS._spoke is None:
+            try:
+                self.synthesize("a")
+            except Exception as why:  # noqa: BLE001 - any failure means it cannot speak
+                SystemTTS._spoke = str(why) or "system TTS produced no audio"
+            else:
+                SystemTTS._spoke = ""
+        if SystemTTS._spoke:
+            return ProviderHealth.missing(SystemTTS._spoke)
         return ProviderHealth.ok("system")
 
     def start(self) -> None:
@@ -204,7 +217,10 @@ class SystemTTS:
             out = Path(workdir) / "speech.wav"
             argv = list(command)
             if command[0].endswith("say"):
-                argv += ["-o", str(out), "--data-format=LEI16@22050"]
+                # --data-format alone is refused ("fmt?"): say picks the container from
+                # the name, and a .wav name needs the format said outright.
+                argv += ["-o", str(out), "--file-format=WAVE",
+                         "--data-format=LEI16@22050"]
                 if chosen := (voice or self.voice):
                     argv += ["-v", chosen]
                 argv.append(text)
@@ -220,6 +236,10 @@ class SystemTTS:
                     f"system TTS produced no audio (exit {result.returncode})"
                 )
             pcm, info = wav.decode(out.read_bytes())
+            if not pcm:
+                raise ProviderError(
+                    f"system TTS wrote {out.stat().st_size} byte(s) holding no audio; "
+                    f"`{command[0]}` runs but this machine speaks nothing")
 
         return Speech(
             pcm=pcm,
