@@ -227,9 +227,14 @@ def add_arguments(sub: Any) -> Any:
     one = sub.add_parser("compare", allow_abbrev=False,
                          help="several configurations as one document: the graph bench, "
                               "the speed grid, the memory and the standard sets per label")
-    one.add_argument("--labels", required=True, metavar="A,B,C",
+    one.add_argument("labels_given", nargs="*", metavar="LABEL",
                      help="the graph runs' labels, newest of each; a speed run matches by "
                           "the same label, or its stem with -speed on the end")
+    one.add_argument("--labels", default="", metavar="A,B,C",
+                     help="the same labels, comma-separated")
+    one.add_argument("--last", nargs="?", const=3, type=int, default=0, metavar="N",
+                     help="the N newest labels the store holds graph runs under "
+                          "(default 3 when given bare), newest first")
     one.add_argument("--standard", action="append", default=[], metavar="FILE.json",
                      help="a standard-set result written by ml-stack-bench standard, "
                           "matched to a label by its own; repeatable")
@@ -246,12 +251,27 @@ def add_arguments(sub: Any) -> Any:
     return one
 
 
+def newest_labels(kept: Sequence[Mapping[str, Any]], n: int) -> list[str]:
+    """The ``n`` labels most recently kept graph runs under, newest first."""
+    seen: dict[str, str] = {}
+    for one in kept:
+        if str(one.get("kind") or "") or not any(r.get("expected")
+                                                 for r in (one.get("rows") or [])):
+            continue
+        label = str(one.get("label") or "")
+        seen[label] = max(seen.get(label, ""), str(one.get("at") or ""))
+    return sorted(seen, key=lambda label: seen[label], reverse=True)[:max(0, n)]
+
+
 def main(args: Any) -> int:
-    labels = [w.strip() for w in str(args.labels or "").split(",") if w.strip()]
-    if not labels:
-        print("error: --labels wants at least one label", file=sys.stderr)
-        return 2
     kept = bench._kept(args.kept)
+    labels = [*(getattr(args, "labels_given", None) or []),
+              *[w.strip() for w in str(args.labels or "").split(",") if w.strip()]]
+    if getattr(args, "last", 0):
+        labels += [label for label in newest_labels(kept, int(args.last)) if label not in labels]
+    if not labels:
+        print("error: name at least one label, or pass --last", file=sys.stderr)
+        return 2
     try:
         standards = read_standards(args.standard or [])
     except (OSError, ValueError) as why:

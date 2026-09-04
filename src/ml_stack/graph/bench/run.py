@@ -798,12 +798,50 @@ def _parser() -> argparse.ArgumentParser:
     from ml_stack.graph.bench.history import add_arguments as remembering
 
     comparing(sub)
+    handed_over(sub)
 
     remembering(sub.add_parser("history", allow_abbrev=False,
                                help="every measurement the logs remember: when, how long, "
                                     "how it ended, the estimate beside the actual, and the "
                                     "runs it kept"))
     return ap
+
+
+# The subcommands whose module has a `main(argv)` of its own: `ml-stack-bench NAME ARGS`
+# hands ARGS to it as they were typed. `standard` takes the measuring lock itself, so
+# neither is a MEASURING command here, and neither goes through this parser's lock.
+HANDED_OVER = ("standard", "animate")
+
+
+def handed_over(sub: Any) -> None:
+    """The ``standard`` and ``animate`` subcommands, each with the flags its own parser
+    takes, so `--help` and the README's flags are held to them here too."""
+    from ml_stack.graph.bench import standard
+
+    sub.add_parser("standard", allow_abbrev=False, parents=[standard._parser()],
+                   conflict_handler="resolve",
+                   help="the standard sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through "
+                        "lm-evaluation-harness against a chat endpoint, one JSON per "
+                        "configuration; takes the measuring lock itself")
+    drawn = sub.add_parser("animate", allow_abbrev=False,
+                           help="a comparison document as an animated graphic, with manim")
+    drawn.add_argument("comparison", help="the comparison document (JSON)")
+    drawn.add_argument("--out", required=True, help="the .mp4 to write")
+    drawn.add_argument("--png", help="also write the last frame as a still")
+    drawn.add_argument("--quality", choices=("l", "m", "h"), default="h",
+                       help="l 480p15, m 720p30, h 1080p60 (default h)")
+    drawn.add_argument("--seconds", type=float, default=50,
+                       help="the length of the whole cut (default 50)")
+    drawn.add_argument("--only", help="comma-separated scene keys to render alone")
+    drawn.add_argument("--work", help="where manim keeps its partial renders")
+    drawn.add_argument("--dry-run", action="store_true",
+                       help="print the scene plan and write nothing")
+
+
+def _after(argv: Sequence[str], cmd: str) -> list[str]:
+    """The words after ``cmd`` on ``argv``: what a handed-over module's main is given."""
+    words = list(argv)
+    return words[words.index(cmd) + 1:] if cmd in words else []
 
 
 def _main(argv: list[str] | None = None) -> int:
@@ -845,6 +883,9 @@ def _run(args: Any) -> int:
         from ml_stack.graph.bench.history import run as remembered
 
         return remembered(args)
+    if args.cmd in HANDED_OVER:
+        module = importlib.import_module(f"ml_stack.graph.bench.{args.cmd}")
+        return int(module.main(_after(list(getattr(args, "_argv", None) or []), args.cmd)))
     if args.cmd == "speed":
         from ml_stack.graph.bench.speed import main as speeding
 
@@ -1758,8 +1799,8 @@ def main(argv: list[str] | None = None) -> int:
 
     # every subcommand there is, so a *value* that happens to read like one -- `report
     # --model run` -- is not mistaken for the command and sent through the lock
-    known = {*MEASURING, "show", "report", "prepare", "forget", "status", "tail", "stop",
-             "wait", "history", "compare"}
+    known = {*MEASURING, *HANDED_OVER, "show", "report", "prepare", "forget", "status",
+             "tail", "stop", "wait", "history", "compare"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

@@ -72,7 +72,7 @@ def test_only_the_measuring_subcommands_take_it():
     way to hang."""
     from ml_stack.graph.bench import MEASURING
 
-    assert set(MEASURING) == {"run", "sweep", "drafts", "concurrent", "extract"}
+    assert set(MEASURING) == {"run", "sweep", "drafts", "concurrent", "extract", "speed"}
     assert "show" not in MEASURING and "prepare" not in MEASURING
 
 

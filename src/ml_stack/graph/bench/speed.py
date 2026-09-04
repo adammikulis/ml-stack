@@ -245,6 +245,8 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
                          help="how fast a served model reads and writes: prefill and decode "
                               "tokens per second and the time to the first token, by "
                               "prompt size and by how many ask at once")
+    one.add_argument("model", nargs="?", default="",
+                     help="a model to put up and measure, the same as --serve MODEL")
     one.add_argument("--on", action="append", metavar="NAME=URL", default=[],
                      help="a server somebody else started, e.g. flash=http://127.0.0.1:8080 "
                           "or flash-ollama=ollama://127.0.0.1:11434/model; repeatable")
@@ -265,7 +267,8 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
                      help="appended to every label this measures")
     one.add_argument("--prompts", default=",".join(str(p) for p in PROMPTS), metavar="N,N",
                      help="prompt sizes in tokens (default: %(default)s)")
-    one.add_argument("--streams", default=",".join(str(s) for s in STREAMS), metavar="N,N",
+    one.add_argument("--streams", "--users", default=",".join(str(s) for s in STREAMS),
+                     metavar="N,N",
                      help="how many ask at once, per cell (default: %(default)s)")
     one.add_argument("--generate", type=int, default=GENERATE, metavar="N",
                      help="tokens each request writes (default: %(default)s)")
@@ -430,6 +433,8 @@ def main(args: Any) -> int:
             print(f"error: {why}", file=sys.stderr)
             return 2
         named.append((name, url))
+    if getattr(args, "model", ""):
+        args.serve = [args.model, *list(args.serve or [])]
     if not named and not args.serve:
         print("error: nothing to measure; pass --on NAME=URL for a server that is already "
               "up, or --serve MODEL to put one up", file=sys.stderr)
