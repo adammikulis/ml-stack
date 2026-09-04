@@ -390,7 +390,9 @@ def _outcome(world: World, arc: Mapping[str, Any], said_in: str, day: int) -> di
         if len(who) < 2:
             return None
         source, target = who[0], who[1]
-    elif kind in ("joined", "moved_to"):
+    elif kind == "joined":
+        source, target = who[0], str(arc.get("group") or arc.get("to") or "")
+    elif kind == "moved_to":
         source, target = who[0], str(arc.get("to") or arc.get("group") or "")
     else:
         source, target = who[0], str(arc.get("subject") or "")
@@ -592,10 +594,10 @@ _GENERIC: tuple[str, ...] = (
 )
 
 _CLOSERS: dict[str, tuple[str, ...]] = {
-    "decision": ("Decision: we go with {other}'s plan for {project}. Writing it down.",
-                 "Settled -- {project} as discussed, {other} owns it.",
-                 "OK, that is the call on {project}. Thanks all.",
-                 "Let us lock it: {project}, {place}, next week."),
+    "decision": ("Decision: we go with {first}'s plan for {project}. Writing it down.",
+                 "Settled -- {project} as discussed, {first} owns it.",
+                 "{first} made the call on {project}. Thanks all.",
+                 "Let us lock it: {first} takes {project}, {place}, next week."),
     "moved_to": ("Done: {first} is now with {group2}. Welcome across.",
                  "Move confirmed -- {first} to {group2} from Monday.",
                  "{first}'s move to {group2} is official. Thanks {group}."),
@@ -603,7 +605,7 @@ _CLOSERS: dict[str, tuple[str, ...]] = {
                        "Good -- {first} and {second}, you are a pair now.",
                        "Great, so {first} and {second} take it from here."),
     "joined": ("Official: {first} is in {group}. Welcome!",
-               "{first} is one of us now. Glad to have you.",
+               "{first} is one of us in {group} now. Glad to have you.",
                "That is {first} fully onboarded in {group}."),
     "": ("Thanks, all.", "Sorted, then.", "Good -- talk tomorrow.",
          "Leaving it there for today.", "Cheers {other}.", "That answers it."),
@@ -695,7 +697,9 @@ def template_writer(rng: random.Random) -> Writer:
         for template, sentence in candidates:
             if flavours and rng.random() < 0.35:
                 head, tail = rng.choice(flavours)
-                sentence = (head + sentence[0].lower() + sentence[1:] if head else sentence) + tail
+                if head and not template.startswith("{"):
+                    sentence = head + sentence[0].lower() + sentence[1:]
+                sentence += tail
             if sentence not in seen:
                 return said(template, sentence)
         template, base = candidates[0]

@@ -81,7 +81,7 @@ def _given(label: str) -> str:
 
 
 def _names_first(label: str) -> re.Pattern[str]:
-    return re.compile(rf"(?<![\w'’-]){re.escape(_given(label))}(?![\w'’-])")
+    return re.compile(rf"(?<![\w'’-]){re.escape(_given(label))}(?:['’]s)?(?![\w'’-])")
 
 
 def _windows(label: str, longest: int = 4) -> set[str]:
@@ -150,13 +150,11 @@ def consistency(corpus: Sequence[str | Path], where: str | Path, *,
     report.misses.extend(strangers.values())
 
     # every outcome an arc wrote back was said in a message the corpus holds, in a thread
-    # that names both ends or is spoken in by them
+    # that names both ends
     by_id = {m.id: m for _, m in said}
     threads: dict[str, list[str]] = {}
-    speakers: dict[str, set[str]] = {}
     for _, m in said:
         threads.setdefault(m.thread or m.id, []).append(m.text)
-        speakers.setdefault(m.thread or m.id, set()).add(m.sender)
 
     def names(end: str, text: str) -> bool:
         label, kind = labels.get(end, (end, ""))
@@ -180,8 +178,7 @@ def consistency(corpus: Sequence[str | Path], where: str | Path, *,
             continue
         root = first.thread or first.id
         thread = "\n".join(threads.get(root, ()))
-        # a message carries its author's name, so whoever speaks in the thread is named in it
-        if all(names(end, thread) or end in speakers.get(root, ()) for end in (a, b)):
+        if all(names(end, thread) for end in (a, b)):
             report.counts["spoken_found"] += 1
         else:
             report.misses.append(f"{rel} {name_of(a)} -> {name_of(b)} (said in {said_in}) is "

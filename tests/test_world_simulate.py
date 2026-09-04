@@ -238,8 +238,8 @@ def test_an_arcs_end_writes_a_typed_edge_that_names_the_message_it_was_said_in()
     # the last day's thread closes the arc, and the closing message is the one named
     last = {m.id: m for m in messages}[new[1]["attrs"]["said_in"]]
     assert last.attrs["day"] == 1 and last.attrs["arc"] == "arc:0:new_hire"
-    # and the truth shows up in what people say: the closer names the group joined
-    assert "Customer Support" in last.text or "Pell" in last.text
+    # and the truth shows up in what people say: the closer names who joined and the group
+    assert "Customer Support" in last.text and "Pell" in last.text
 
 
 # -- the model writer --------------------------------------------------------------------------

@@ -70,6 +70,31 @@ def test_a_made_world_reads_back_consistent_with_its_truth(tmp_path):
     assert report.counts["spoken"] == report.counts["spoken_found"]
 
 
+def test_every_outcome_edge_is_named_at_both_ends_in_its_thread(tmp_path):
+    from ml_stack.world.story import OUTCOMES
+
+    _, talk = _world(tmp_path)
+    graph = json.loads((talk / "graph.json").read_text(encoding="utf-8"))
+    nodes = {n["id"]: n for n in graph["nodes"]}
+    messages = {m.id: m for m in read_messages(talk / "messages.jsonl")}
+    threads: dict[str, list[str]] = {}
+    for m in messages.values():
+        threads.setdefault(m.thread or m.id, []).append(m.text)
+
+    def named(end: str, text: str) -> bool:
+        label = nodes[end]["label"]
+        if nodes[end].get("kind") == "person":
+            return bool(check._names_first(label).search(text))
+        return label in text
+
+    outcomes = [e for e in graph["edges"] if e.get("rel") in OUTCOMES]
+    assert outcomes
+    for edge in outcomes:
+        first = messages[edge["attrs"]["said_in"]]
+        text = "\n".join(threads[first.thread or first.id])
+        assert named(edge["source"], text) and named(edge["target"], text), edge
+
+
 def test_a_message_doctored_to_name_a_stranger_fails_consistency(tmp_path):
     _, talk = _world(tmp_path)
     corpus = _corpus(tmp_path, talk)
