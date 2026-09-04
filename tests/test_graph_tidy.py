@@ -233,3 +233,26 @@ def test_the_pass_checks_the_store_after_its_writes_and_refuses_success_over_an_
     assert store_cli.main(["tidy", str(again), "--apply"]) == 1
     assert "NOT SOUND" in capsys.readouterr().out
     assert tidy(again).sound, "a dry run writes nothing and checks nothing"
+
+
+def test_the_pass_reports_the_soundness_a_fresh_reader_finds(tmp_path):
+    from ml_stack.graph.tidy import _recheck
+
+    path = _store(tmp_path, [
+        _node("concept:acid", "acid", mentions=5),
+        _node("concept:acids", "acids", mentions=2),
+        _node("concept:base", "base", mentions=3),
+    ], [_edge("concept:acids", "contrasts_with", "concept:base")])
+    report = tidy(path, dry_run=False)
+    assert report.sound and report.merged_nodes == 1
+    with GraphStore(path, read_only=True) as store:
+        assert store.check() == []
+
+    report.findings = ["edges: count says 25612, scan returned 25513"]
+    report.lines.append(report.said())
+    assert "NOT SOUND" in report.lines[-1]
+
+    _recheck(path, report, None)
+
+    assert report.findings == [], "what the store on disk says, not what the writer's handle did"
+    assert "NOT SOUND" not in report.lines[-1]

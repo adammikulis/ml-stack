@@ -9,6 +9,14 @@ losing something good to something broken. This is the other pass, the dedupe: r
 person asks, dry by default, and what it merges it merges with everything kept on the
 survivor.
 
+A verdict is bought once. Every one is written to ``tidy:decisions`` and every merge to
+``tidy:merges``, and this pass applies what it finds there whether or not it has a judge,
+so a store rebuilt from its reads (``ml-stack-ingest fold``, which ends by running this
+pass with no model) keeps what was already settled. A verdict is matched by node id and,
+where the id is gone, by the labels and kind it recorded; one whose subject the store no
+longer holds is counted and left in the document. What the rebuild brought back that no
+verdict covers stays as it is: a close spelling nobody judged is reported, not merged.
+
 What it does, in order:
 
 1. **Duplicate nodes**, within a kind and across every source. Two names are the same thing
@@ -420,6 +428,8 @@ class Report:
     suspects_resolved: int = 0
     suspects_dropped: int = 0
     rejudged: int = 0
+    replayed: int = 0      # verdicts the store already held, applied without asking again
+    stale: int = 0         # verdicts naming a node the store no longer holds
     conflicts: list[tuple[str, str, str, str]] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
     self_loops: list[tuple[str, str]] = field(default_factory=list)
@@ -464,6 +474,10 @@ class Report:
                 f"({self.conflict_edges_dropped} edge(s) dropped) and "
                 f"{self.definitions_judged} definition(s); resolved {self.suspects_resolved} "
                 f"suspect label(s) ({self.suspects_dropped} node(s) dropped)"
+                + (f"; replayed {self.replayed} verdict(s) the store already held"
+                   if self.replayed else "")
+                + (f"; {self.stale} held verdict(s) name a node the store no longer has"
+                   if self.stale else "")
                 + (f"; asked the judge again about {self.rejudged} held verdict(s)"
                    if self.rejudged else ""))
 
@@ -649,8 +663,11 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         dry_run = False
     if isinstance(store, (str, Path)):
         with GraphStore(store, read_only=dry_run) as opened:
-            return tidy(opened, dry_run=dry_run, established=established, written=written,
-                        judge=judge, log=log, rejudge=rejudge)
+            report = tidy(opened, dry_run=dry_run, established=established, written=written,
+                          judge=judge, log=log, rejudge=rejudge)
+        if not dry_run:
+            _recheck(store, report, log)
+        return report
     report = Report(dry_run=dry_run)
     say = log or (lambda _line: None)
 
@@ -663,6 +680,10 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     decisions = _decisions(store)
     merges = _merges(store)
     rejudge = bool(rejudge and judge is not None)
+    report.stale = _stale(decisions, nodes)
+    if report.stale:
+        note(f"{report.stale} held verdict(s) name a node the store no longer has, and are "
+             "left in the decisions document")
 
     # 1. duplicate nodes, within a kind
     by_kind: dict[str, list[dict[str, Any]]] = {}
@@ -705,9 +726,13 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
                 a, b = by_label[one], by_label[other]
                 key = _pair_key(a["id"], b["id"])
                 held = _held(decisions, "pairs", key, rejudge=rejudge, report=report)
+                if held is None and not rejudge:
+                    held = _pair_remembered(decisions, one, other, kind)
+                report.replayed += int(held is not None)
                 if held is None and judge is not None:
                     held = judge.decide(a, b)
                     held = {**held, "a": a["id"], "b": b["id"], "kind": kind,
+                            "a_label": one, "b_label": other,
                             "model": getattr(judge, "model", ""),
                             "when": _now()}
                     if not held.get("failed"):
@@ -795,9 +820,11 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         why = suspect(str(node.get("label") or ""))
         if not why:
             continue
-        if judge is not None:
+        remembered = _suspect_verdict(decisions, node, rejudge=rejudge, report=report)
+        if judge is not None or remembered is not None:
             _resolve_suspect(store, nodes, edges, node, why, judge=judge, decisions=decisions,
-                             report=report, note=note, rejudge=rejudge, merges=merges)
+                             report=report, note=note, merges=merges, held=remembered,
+                             dry_run=dry_run)
         elif not (node.get("attrs") or {}).get("suspect"):
             report.flagged += 1
             note(f"suspect: {node['label']!r} -- {why}")
@@ -821,10 +848,10 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         rels = sorted(group)
         if len(rels) < 2:
             continue
-        if judge is not None and a in nodes and b in nodes:
+        if a in nodes and b in nodes:
             rels = _resolve_conflict(store, nodes, edges, (a, b), group, rels, judge=judge,
                                      decisions=decisions, report=report, note=note,
-                                     rejudge=rejudge)
+                                     rejudge=rejudge, dry_run=dry_run)
         if len(rels) > 1:
             report.conflicts.append((a, b, rels[0], rels[1]))
             note(f"conflict: {_label(nodes, a)} and {_label(nodes, b)} are joined by "
@@ -844,6 +871,27 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         report.findings = list(store.check())
     note(report.said())
     return report
+
+
+def _recheck(path: str | Path, report: Report, log: Callable[[str], None] | None) -> None:
+    """The store's own check again, on a fresh handle, and the report's last line with it.
+
+    A handle that has just dropped nodes and upserted thousands of edges reads its own edge
+    count stale: over the shelf the writer's count said 25,612 against a scan of 25,513 and
+    a reopen agreed with the scan. What a pass leaves is what the next reader finds, so
+    that is what is asked.
+    """
+    from ml_stack.graph.store import GraphStore
+
+    was = list(report.findings)
+    with GraphStore(path, read_only=True) as reader:
+        report.findings = list(reader.check())
+    if report.findings == was:
+        return
+    if report.lines:
+        report.lines[-1] = report.said()
+    if log is not None:
+        log(report.said())
 
 
 def _recount(store: Any) -> None:
@@ -970,6 +1018,8 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
                     verdict = str(answer.get("verdict") or "unsure")
                     _keep_decision(store, decisions, "pairs", pair,
                                    {**answer, "a": node_id, "b": str(other["id"]), "kind": kind,
+                                    "a_label": str(node.get("label") or ""),
+                                    "b_label": str(other.get("label") or ""),
                                     "model": getattr(judge, "model", ""), "when": _now(),
                                     "absorbed": True})
                 if verdict == "same":
@@ -1157,11 +1207,78 @@ def _conflict_key(ends: tuple[str, str], one: str, other: str) -> str:
     return "|".join(ends) + "::" + "|".join(sorted((one, other)))
 
 
+def _suspect_verdict(decisions: dict[str, dict[str, Any]], node: Mapping[str, Any], *,
+                     rejudge: bool, report: Report) -> dict[str, Any] | None:
+    """The verdict the store holds for one doubtful label, by id or by the label itself.
+
+    A rebuild from the reads can give a node an id the verdict was not written against,
+    so the label and kind the verdict recorded stand in for it.
+    """
+    held = _held(decisions, "suspects", str(node.get("id") or ""), rejudge=rejudge,
+                 report=report)
+    if held is not None or rejudge:
+        return held
+    label, kind = str(node.get("label") or ""), str(node.get("kind") or "")
+    for one in (decisions.get("suspects") or {}).values():
+        if str((one or {}).get("label") or "") == label \
+                and str((one or {}).get("kind") or kind) == kind:
+            return dict(one)
+    return None
+
+
+def _pair_remembered(decisions: dict[str, dict[str, Any]], one: str, other: str,
+                     kind: str) -> dict[str, Any] | None:
+    """One name-pair verdict found by the two labels it recorded rather than by node id."""
+    want = {one, other}
+    for held in (decisions.get("pairs") or {}).values():
+        held = held or {}
+        if {str(held.get("a_label") or ""), str(held.get("b_label") or "")} == want \
+                and str(held.get("kind") or kind) == kind:
+            return dict(held)
+    return None
+
+
+def _conflict_remembered(decisions: dict[str, dict[str, Any]], labels: set[str],
+                         verbs: list[str]) -> dict[str, Any] | None:
+    """One conflict verdict found by the two labels it recorded rather than by node id."""
+    for one in (decisions.get("conflicts") or {}).values():
+        if list((one or {}).get("verbs") or ()) == verbs \
+                and set((one or {}).get("labels") or ()) == labels:
+            return dict(one)
+    return None
+
+
+def _stale(decisions: dict[str, dict[str, Any]], nodes: Mapping[str, Mapping[str, Any]]) -> int:
+    """Verdicts naming a node the store does not hold, by id and by recorded label."""
+    labels = {str(n.get("label") or "") for n in nodes.values()}
+
+    def gone(node_id: Any, label: Any) -> bool:
+        return str(node_id or "") not in nodes and str(label or "") not in labels
+
+    out = 0
+    for one in (decisions.get("pairs") or {}).values():
+        one = one or {}
+        out += int(gone(one.get("a"), one.get("a_label"))
+                   or gone(one.get("b"), one.get("b_label")))
+    for one in (decisions.get("conflicts") or {}).values():
+        ends = list((one or {}).get("ends") or ("", ""))
+        said = list((one or {}).get("labels") or ("", ""))
+        out += int(any(gone(end, name) for end, name in zip(ends, said + ["", ""])))
+    for key, one in (decisions.get("suspects") or {}).items():
+        out += int(gone(key, (one or {}).get("label")))
+    return out
+
+
 def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
                       ends: tuple[str, str], group: dict[str, dict[str, Any]], rels: list[str],
                       *, judge: Any, decisions: dict[str, dict[str, Any]], report: Report,
-                      note: Callable[[str], None], rejudge: bool = False) -> list[str]:
-    """The verbs left between two nodes after the judge has been asked about each pair."""
+                      note: Callable[[str], None], rejudge: bool = False,
+                      dry_run: bool = False) -> list[str]:
+    """The verbs left between two nodes after each pair is settled.
+
+    A verdict the store holds is applied whether or not there is a judge; a pair with no
+    verdict and no judge is left for the conflict report.
+    """
     one, other = nodes[ends[0]], nodes[ends[1]]
     left = list(rels)
     at = 0
@@ -1169,13 +1286,23 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
         a_rel, b_rel = left[at], left[at + 1]
         key = _conflict_key(ends, a_rel, b_rel)
         held = _held(decisions, "conflicts", key, rejudge=rejudge, report=report)
+        if held is None and not rejudge:
+            held = _conflict_remembered(
+                decisions, {str(one.get("label") or ""), str(other.get("label") or "")},
+                sorted((a_rel, b_rel)))
+        replayed = held is not None
         if held is None:
+            if judge is None:
+                at += 1
+                continue
             held = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
             held = {**held, "ends": list(ends), "verbs": sorted((a_rel, b_rel)),
+                    "labels": [str(one.get("label") or ""), str(other.get("label") or "")],
                     "model": getattr(judge, "model", ""), "when": _now()}
             if not held.get("failed"):
                 _keep_decision(store, decisions, "conflicts", key, held)
         report.conflicts_judged += 1
+        report.replayed += int(replayed)
         verdict = str(held.get("verdict") or "unsure")
         drop = b_rel if verdict == f"keep {a_rel}" else a_rel if verdict == f"keep {b_rel}" else ""
         if not drop:
@@ -1184,7 +1311,7 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
             at += 1
             continue
         kept_rel = a_rel if drop == b_rel else b_rel
-        _drop_edge(store, edges, group[kept_rel], group.pop(drop))
+        _drop_edge(store, edges, group[kept_rel], group.pop(drop), dry_run=dry_run)
         left.remove(drop)
         report.conflict_edges_dropped += 1
         note(f"conflict judged: {one['label']!r} and {other['label']!r} keep {kept_rel}; "
@@ -1193,12 +1320,13 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
 
 
 def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
-               gone: dict[str, Any]) -> None:
+               gone: dict[str, Any], *, dry_run: bool = False) -> None:
     """``gone`` out of the store and the working list, its weight and provenance into ``keep``."""
     keep["weight"] = int(keep.get("weight") or 0) + int(gone.get("weight") or 0)
     keep["provenance"] = _union(keep.get("provenance"), gone.get("provenance"))
-    store.remove_edge(gone["source"], gone["rel"], gone["target"])
-    store.upsert_edge(keep)
+    if not dry_run:
+        store.remove_edge(gone["source"], gone["rel"], gone["target"])
+        store.upsert_edge(keep)
     for at, edge in enumerate(edges):
         if edge is gone:
             edges.pop(at)
@@ -1208,18 +1336,22 @@ def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
 def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
                      node: dict[str, Any], why: str, *, judge: Any,
                      decisions: dict[str, dict[str, Any]], report: Report,
-                     note: Callable[[str], None], rejudge: bool = False,
-                     merges: list[dict[str, Any]] | None = None) -> None:
-    """One doubtful label put to the judge: renamed, dropped, or kept with the flag cleared."""
-    key = node["id"]
-    held = _held(decisions, "suspects", key, rejudge=rejudge, report=report)
+                     note: Callable[[str], None], merges: list[dict[str, Any]] | None = None,
+                     held: Mapping[str, Any] | None = None, dry_run: bool = False) -> None:
+    """One doubtful label renamed, dropped, or kept with the flag cleared.
+
+    ``held`` is the verdict the store already carries for this label; without one the
+    judge is asked and its answer written down.
+    """
+    replayed = held is not None
     if held is None:
         held = judge.decide_suspect(node, why)
-        held = {**held, "label": node.get("label"), "flagged": why,
+        held = {**held, "label": node.get("label"), "kind": node.get("kind"), "flagged": why,
                 "model": getattr(judge, "model", ""), "when": _now()}
         if not held.get("failed"):
-            _keep_decision(store, decisions, "suspects", key, held)
+            _keep_decision(store, decisions, "suspects", node["id"], held)
     report.suspects_resolved += 1
+    report.replayed += int(replayed)
     verdict = str(held.get("verdict") or "keep")
     label = str(node.get("label") or "")
     name = str(held.get("name") or "").strip()
@@ -1228,7 +1360,7 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
                      if n["id"] != node["id"] and str(n.get("label") or "") == name
                      and n.get("kind") == node.get("kind")), None)
         if into is not None:
-            moved = _merge(store, nodes, edges, into["id"], node["id"], dry_run=False,
+            moved = _merge(store, nodes, edges, into["id"], node["id"], dry_run=dry_run,
                            judge=judge, decisions=decisions, report=report, note=note,
                            merges=merges)
             report.merged_nodes += 1
@@ -1237,19 +1369,22 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
                  f"({moved} edge(s) moved)")
             return
         node["label"] = name
-        store.rename(node["id"], name)
-        store.unset_attribute(node["id"], "suspect")
+        if not dry_run:
+            store.rename(node["id"], name)
+            store.unset_attribute(node["id"], "suspect")
         (node.setdefault("attrs", {})).pop("suspect", None)
         note(f"suspect: {label!r} renamed to {name!r} -- {held.get('why', '')}")
     elif verdict == "drop":
         gone = [e for e in edges if node["id"] in (e["source"], e["target"])]
-        store.drop([node["id"]])
+        if not dry_run:
+            store.drop([node["id"]])
         nodes.pop(node["id"], None)
         edges[:] = [e for e in edges if node["id"] not in (e["source"], e["target"])]
         report.suspects_dropped += 1
         note(f"suspect: {label!r} dropped with {len(gone)} edge(s) -- {held.get('why', '') or why}")
     else:
-        store.unset_attribute(node["id"], "suspect")
+        if not dry_run:
+            store.unset_attribute(node["id"], "suspect")
         (node.setdefault("attrs", {})).pop("suspect", None)
         note(f"suspect: {label!r} kept, the flag cleared -- {held.get('why', '') or why}")
 
@@ -1269,6 +1404,16 @@ def _better_definition(one: str, other: str) -> tuple[str, str]:
     if _is_fragment(one) != _is_fragment(other):
         return (other, one) if _is_fragment(one) else (one, other)
     return (one, other) if len(one) >= len(other) else (other, one)
+
+
+def _definition_remembered(decisions: dict[str, dict[str, Any]] | None, a_said: str,
+                           b_said: str) -> dict[str, Any] | None:
+    """The verdict the store holds about which of two definitions is the definition."""
+    for held in ((decisions or {}).get("definitions") or {}).values():
+        held = held or {}
+        if {str(held.get("a") or ""), str(held.get("b") or "")} == {a_said, b_said}:
+            return dict(held)
+    return None
 
 
 def _substantially(one: str, other: str) -> bool:
@@ -1291,7 +1436,14 @@ def _merge_definitions(kept: Mapping[str, Any], gone: Mapping[str, Any],
     if a_said and b_said:
         better, spare = _better_definition(a_said, b_said)
         differ = _substantially(a_said, b_said)
-        if judge is not None and differ:
+        remembered = _definition_remembered(decisions, a_said, b_said)
+        if judge is None and remembered is not None:
+            pick = str(remembered.get("keep") or "both")
+            if pick in ("a", "b"):
+                better, spare = ((a_said, b_said) if pick == "a" else (b_said, a_said))
+            if report is not None:
+                report.replayed += 1
+        elif judge is not None and differ:
             answer = judge.decide_definition(kept, gone, a_said, b_said)
             pick = str((answer or {}).get("keep") or "both")
             if pick == "a":
