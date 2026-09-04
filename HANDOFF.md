@@ -22,9 +22,7 @@ ten questions, unconfirmed.
   `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
   provenance and the run that read each, after the judged pass (362 merges, 1,489 inverse
   pairs, 622 conflicts judged with 282 edges dropped, 186 definitions, 113 suspects),
-  `ml-stack-store check` clean. Reads beside the store are the truth (`ml-stack-ingest
-  fold` rebuilds; two damaged stores from the 0.18 delete bug are kept beside it as
-  `shelf.ladybug.corrupt-*`). Whether the other nine books -- about four days of GPU at 86
+  `ml-stack-store check` clean. Reads beside the store are the truth (`ml-stack-ingest fold` rebuilds). Whether the other nine books -- about four days of GPU at 86
   s a unit, one slot -- are worth it is Adam's call; the command is `ml-stack-ingest
   ~/Documents/Textbooks/<book>.pdf --out ~/.ml-stack/shelf.ladybug --model <flash-next>
   --images --resume --serve-port 8080`, one book at a time, and it tidies itself at the
