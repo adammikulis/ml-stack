@@ -261,8 +261,7 @@ class SpeakingModel:
 
     def chat(self, messages, tools=None, **_):
         self.seen.append([dict(m) for m in messages])
-        offered = [str((t.get("function") or {}).get("name")) for t in (tools or [])]
-        if offered == ["show"]:
+        if str(messages[-1].get("content") or "").startswith("Now call show once"):
             return Reply(tool_calls=[{"id": "c1", "function": {
                 "name": "show", "arguments": json.dumps({"ids": ["project:lantern"]})}}])
         self.answers += 1
