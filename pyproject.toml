@@ -88,8 +88,9 @@ Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 # enumerate these writes the command again by hand, which is how searching the Hub, timing a
 # question set and picking a free port each got done twice before becoming commands.
 #
-# The one people double-click: starts the daemon and opens the browser on it.
-ml-stack = "ml_stack.fleet.launch:main"
+# `ml-stack <command>` runs any `ml-stack-<command>` below; bare, it starts the daemon and
+# opens the browser on it (`ml_stack.fleet.launch`).
+ml-stack = "ml_stack.cli:main"
 ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"

@@ -105,6 +105,20 @@ def test_every_command_answers_help(command, capsys):
     assert "usage:" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("command", sorted(c for c in SCRIPTS if c.startswith("ml-stack-")))
+def test_the_umbrella_hands_back_the_same_help(command, capsys):
+    """``ml-stack do --help`` is ``ml-stack-do --help``; ``ml-stack train run`` joins the words."""
+    words = command[len("ml-stack-"):].split("-")
+    with pytest.raises(SystemExit) as left:
+        _main_of(command)(["--help"])
+    assert left.value.code == 0
+    direct = capsys.readouterr().out
+    with pytest.raises(SystemExit) as left:
+        _main_of("ml-stack")([*words, "--help"])
+    assert left.value.code == 0
+    assert capsys.readouterr().out == direct
+
+
 @pytest.mark.parametrize(("command", "path"), SUBCOMMANDS,
                          ids=[f"{c} {p}" for c, p in SUBCOMMANDS])
 def test_every_subcommand_answers_help(command, path, capsys):
