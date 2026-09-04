@@ -179,6 +179,25 @@ def on_a_fresh_loop(coro):
     return done[0]
 
 
+def on_a_fresh_thread(fn, *args, **kw):
+    """Call ``fn(*args, **kw)`` on a thread with no event loop set and return its result."""
+    done: list[object] = []
+    raised: list[BaseException] = []
+
+    def go() -> None:
+        try:
+            done.append(fn(*args, **kw))
+        except BaseException as exc:  # re-raised in the calling thread below
+            raised.append(exc)
+
+    worker = threading.Thread(target=go, name="fresh-thread")
+    worker.start()
+    worker.join()
+    if raised:
+        raise raised[0]
+    return done[0]
+
+
 # -- a real server on a real socket, in a thread ----------------------------------------
 
 @contextlib.contextmanager

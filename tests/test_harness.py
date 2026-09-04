@@ -7,6 +7,7 @@ import types
 
 import pytest
 
+from conftest import on_a_fresh_thread
 from ml_stack import harness
 
 
@@ -55,7 +56,7 @@ def fake_sdk(monkeypatch):
 
 def test_ask_runs_one_task_and_says_what_it_spent(fake_sdk):
     agent = harness.Harness("http://127.0.0.1:8899", "kestrel-8B", options={"max_turns": 3})
-    answer = agent.ask("what is this?", allowed_tools=["Read"])
+    answer = on_a_fresh_thread(agent.ask, "what is this?", allowed_tools=["Read"])
     assert answer.text == "Reading.\nIt is a lattice." and not answer.is_error
     assert answer.spent.input_tokens == 120 and answer.spent.cache_read_tokens == 100
     assert answer.spent.turns == 2 and "2 turn(s)" in answer.spent.said()
@@ -87,8 +88,8 @@ def test_session_leases_the_measured_shape_and_the_command_prints_the_answer(fak
                         lambda m: record("kestrel-8B-UD-Q4_K_XL.gguf", cache_type="q8_0"))
     monkeypatch.setattr("ml_stack.graph.bench.serve.find_model", lambda m: "/m/kestrel-8B-UD-Q4_K_XL.gguf")
     monkeypatch.setattr(harness, "alias_of", lambda url, model: "kestrel-8B")
-    assert harness.main(["what is this?", "--model", "kestrel", "--port", "8899",
-                         "--allow", "Read", "--max-turns", "2"]) == 0
+    assert on_a_fresh_thread(harness.main, ["what is this?", "--model", "kestrel", "--port", "8899",
+                                            "--allow", "Read", "--max-turns", "2"]) == 0
     out = capsys.readouterr().out
     assert "It is a lattice." in out and "spent: 2 turn(s)" in out
     assert seen["lease"]["port"] == 8899 and seen["lease"]["cache_type_k"] == "q8_0"
