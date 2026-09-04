@@ -88,9 +88,10 @@ ten questions, unconfirmed.
   may be the indexer key cache (one head of `indexer.key_length` 128 per attention layer)
   or the MTP head; `ml-stack-serve fit` at two contexts on Flash-Next says which, and the
   note and `preflight._kv_estimate_bytes` follow the measurement.
-- [ ] **Watch ggml-org/llama.cpp#27836.** When the qwen4exp MTP graph merges, `ml-stack-serve
-  build` and `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance
-  on an M3 Max against the fork's 73–79%. Then the profile's build field can go.
+- [ ] **Watch ggml-org/llama.cpp#27836** (open, last touched 2026-09-02, checked
+  2026-09-04). When the qwen4exp MTP graph merges, `ml-stack-serve build` and
+  `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance on an
+  M3 Max against the fork's 73–79%. Then the profile's build field can go.
 
 ## Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
@@ -156,13 +157,14 @@ time with the page's server down for the Ollama half.
 
 ## Store integrity
 
-- [ ] **Two ladybug reports to file upstream, with Adam's go-ahead.** 0.18.x: a single
-  `DETACH DELETE` in a ~10k-node store blanks other nodes' string columns (reproduction:
-  `tests/test_graph_store_scale.py`). 0.20.2: the cached-physical-plan fast path
-  re-executes a parameterized MERGE against a table rewritten since and segfaults, and
-  the text index returns a node once per version written (reproduction: the store's
-  `_written` docstring; two lines). ml-stack is on 0.20.2 with the per-write guard and
-  the pin `>=0.19,<0.21`; the probes gate any bump.
+- [ ] **Two ladybug faults are worked around here and stay here.** Adam, 2026-09-04: no
+  upstreaming to public repositories. 0.18.x: a single `DETACH DELETE` in a ~10k-node
+  store blanks other nodes' string columns (reproduction: `tests/test_graph_store_scale.py`).
+  0.20.2: the cached-physical-plan fast path re-executes a parameterized MERGE against a
+  table rewritten since and segfaults, and the text index returns a node once per version
+  written (reproduction: the store's `_written` docstring; two lines). ml-stack is on
+  0.20.2 with the per-write guard and the pin `>=0.19,<0.21`; the probes gate any bump,
+  which is the whole of what is left to do about them.
 
 ## Measuring across the fleet
 
