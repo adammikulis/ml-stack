@@ -1,8 +1,8 @@
-"""A nodes/edges CSV pair another extractor wrote, brought onto the shelf as one book.
+"""A nodes/edges CSV pair another extractor wrote, brought onto the sources as one source.
 
 The pair here is written by the test, in the shape the material has: the same columns, the
 same JSON in `source_context` and `source_metadata`, the same open predicate vocabulary.
-Every book, concept, predicate and file name is invented.
+Every source, concept, predicate and file name is invented.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def a_pair(tmp_path, nodes, edges, *, name="extraction"):
     return where
 
 
-def a_small_book(tmp_path, **over):
+def a_small_source(tmp_path, **over):
     """Three concepts and the relations between them, as the other extractor wrote them."""
     nodes = [a_node("N:1", "glimmer node", category="Structure",
                     definition="The smallest part of a lattice that holds a charge.",
@@ -132,7 +132,7 @@ def _files(where):
 
 
 def test_a_predicate_outside_the_core_verbs_is_written_as_it_stands(tmp_path):
-    got = ingest.imported(*_files(a_small_book(tmp_path)))
+    got = ingest.imported(*_files(a_small_source(tmp_path)))
     verbs = sorted(r["rel"] for row in got.rows for r in row["extracted"]["relations"])
     assert verbs == ["has_part", "part_of", "related_to", "shelters"]
     # both are counted by name: one the table names and has no counterpart for, one it
@@ -146,7 +146,7 @@ def test_a_predicate_outside_the_core_verbs_is_written_as_it_stands(tmp_path):
 
 
 def test_core_only_leaves_the_predicates_outside_those_verbs(tmp_path):
-    got = ingest.imported(*_files(a_small_book(tmp_path)), core_only=True)
+    got = ingest.imported(*_files(a_small_source(tmp_path)), core_only=True)
     verbs = sorted(r["rel"] for row in got.rows for r in row["extracted"]["relations"])
     assert verbs == ["has_part", "part_of"]
     assert got.extensions == {} and got.left == {"shelters": 1, "related_to": 1}
@@ -191,76 +191,76 @@ def test_a_malformed_row_is_refused_by_name(tmp_path):
         ingest.imported(*_files(where))
 
 
-# -- onto the shelf -------------------------------------------------------------------------
+# -- into the store -------------------------------------------------------------------------
 
 
-def test_the_imported_book_is_on_the_shelf_beside_a_read_one(tmp_path, capsys):
-    store = tmp_path / "shelf.ladybug"
-    where = a_small_book(tmp_path)
+def test_the_imported_source_sits_beside_a_read_one(tmp_path, capsys):
+    store = tmp_path / "sources.ladybug"
+    where = a_small_source(tmp_path)
     assert ingest.bring(store, [str(where)]) == 0
-    shelf = ingest.Shelf(store)
-    book = shelf.book("velthorne-open-texts")
-    assert book is not None and book.title == "Velthorne Open Texts"
-    assert book.units == 1 and book.read == 1 and not book.partial
-    # every unit is written down as done, so `status` counts the book whole
-    assert shelf.progress.done("velthorne-open-texts", "velthorne-open-texts:1:1.1")
-    with shelf.store() as held:
+    sources = ingest.Sources(store)
+    source = sources.source("velthorne-open-texts")
+    assert source is not None and source.title == "Velthorne Open Texts"
+    assert source.units == 1 and source.read == 1 and not source.partial
+    # every unit is written down as done, so `status` counts the source whole
+    assert sources.progress.done("velthorne-open-texts", "velthorne-open-texts:1:1.1")
+    with sources.store() as held:
         ids = {n["id"] for n in held.nodes()}
         kinds = {n["id"]: n["kind"] for n in held.nodes()}
         edges = {(e["source"], e["rel"], e["target"]) for e in held.edges()}
         node = next(n for n in held.nodes() if n["id"] == "concept:glimmer-node")
-    assert "book:velthorne-open-texts" in ids
+    assert "source:velthorne-open-texts" in ids
     assert kinds["concept:glimmer-node"] == "structure"
     assert kinds["concept:vault-current"] == "process"
-    assert ("concept:glimmer-node", "read_from", "book:velthorne-open-texts") in edges
+    assert ("concept:glimmer-node", "read_from", "source:velthorne-open-texts") in edges
     assert ("concept:glimmer-node", "part_of", "concept:vault") in edges
     assert node["attrs"]["definition"].startswith("The smallest part")
     assert node["attrs"]["aliases"] == ["node"]
-    assert shelf.shared()["books"][0]["book"] == "velthorne-open-texts"
+    assert sources.shared()["sources"][0]["source"] == "velthorne-open-texts"
 
 
 def test_an_extension_verb_is_marked_on_its_edge_and_a_core_one_is_not(tmp_path):
-    store = tmp_path / "shelf.ladybug"
-    assert ingest.bring(store, [str(a_small_book(tmp_path))]) == 0
-    with ingest.Shelf(store).store() as held:
+    store = tmp_path / "sources.ladybug"
+    assert ingest.bring(store, [str(a_small_source(tmp_path))]) == 0
+    with ingest.Sources(store).store() as held:
         marked = {(e["source"], e["rel"], e["target"]): bool(e.get("extension"))
                   for e in held.edges()}
         predicates = held.get_doc("ingest:predicates:velthorne-open-texts")
     assert marked[("concept:glimmer-node", "part_of", "concept:vault")] is False
     assert marked[("concept:vault", "shelters", "concept:glimmer-node")] is True
     assert marked[("concept:vault-current", "related_to", "concept:glimmer-node")] is True
-    assert marked[("concept:vault", "read_from", "book:velthorne-open-texts")] is False
+    assert marked[("concept:vault", "read_from", "source:velthorne-open-texts")] is False
     assert predicates["core"]["includes"] == {"verb": "has_part", "flipped": False,
                                               "relations": 1}
     assert predicates["extensions"] == {"related_to": 1, "shelters": 1}
     assert predicates["unnamed"] == {"shelters": 1}
 
 
-def test_the_provenance_points_at_units_the_way_a_read_book_does(tmp_path):
-    store = tmp_path / "shelf.ladybug"
-    assert ingest.bring(store, [str(a_small_book(tmp_path))]) == 0
-    with ingest.Shelf(store).store() as held:
+def test_the_provenance_points_at_units_the_way_a_read_source_does(tmp_path):
+    store = tmp_path / "sources.ladybug"
+    assert ingest.bring(store, [str(a_small_source(tmp_path))]) == 0
+    with ingest.Sources(store).store() as held:
         node = next(n for n in held.nodes() if n["id"] == "concept:vault")
         where = ingest.located(held, node)
         origin = ingest.origin(held, node)
     assert node["provenance"] == ["velthorne-open-texts:1:1.1"]
-    assert where == [{"unit": "velthorne-open-texts:1:1.1", "book": "velthorne-open-texts",
+    assert where == [{"unit": "velthorne-open-texts:1:1.1", "source": "velthorne-open-texts",
                       "title": "Glimmer Nodes", "chapter": "1", "section": "1.1",
                       "pages": [2, 3]}]
     assert origin[0]["model"] == "quill:8b" and origin[0]["started"] == "2026-01-14T01:19:52"
 
 
 def test_a_dry_run_says_what_it_would_write_and_writes_nothing(tmp_path, capsys):
-    store = tmp_path / "shelf.ladybug"
-    assert ingest.bring(store, [str(a_small_book(tmp_path))], dry_run=True) == 0
+    store = tmp_path / "sources.ladybug"
+    assert ingest.bring(store, [str(a_small_source(tmp_path))], dry_run=True) == 0
     said = capsys.readouterr().out
     assert "part_of" in said and "shelters" in said and "related_to" in said
     assert "nothing written" in said
     assert not store.exists()
-    assert not list(tmp_path.glob("shelf.ladybug*"))
+    assert not list(tmp_path.glob("sources.ladybug*"))
 
 
-def test_two_units_of_one_book_become_two_units_on_the_shelf(tmp_path):
+def test_two_units_of_one_source_become_two_units_in_the_store(tmp_path):
     nodes = [a_node("N:1", "vault"),
              a_node("N:2", "spore bloom",
                     **_provenance(chapter=2, section="2.1", pages=(6, 7),
@@ -268,9 +268,9 @@ def test_two_units_of_one_book_become_two_units_on_the_shelf(tmp_path):
     edges = [an_edge("E:1", "N:2", "part_of", "N:1",
                      **_provenance(chapter=2, section="2.1", pages=(6, 7),
                                    section_title="Spore Blooms"))]
-    store = tmp_path / "shelf.ladybug"
+    store = tmp_path / "sources.ladybug"
     assert ingest.bring(store, [str(a_pair(tmp_path, nodes, edges))]) == 0
-    with ingest.Shelf(store).store() as held:
+    with ingest.Sources(store).store() as held:
         bloom = next(n for n in held.nodes() if n["id"] == "concept:spore-bloom")
         vault = next(n for n in held.nodes() if n["id"] == "concept:vault")
     assert bloom["provenance"] == ["velthorne-open-texts:2:2.1"]
@@ -279,20 +279,20 @@ def test_two_units_of_one_book_become_two_units_on_the_shelf(tmp_path):
                                            "velthorne-open-texts:2:2.1"]
 
 
-def test_the_slug_names_the_book_and_can_be_given(tmp_path):
-    store = tmp_path / "shelf.ladybug"
-    assert ingest.bring(store, [str(a_small_book(tmp_path))], slug="lattice-studies") == 0
-    assert {b.slug for b in ingest.Shelf(store).books()} == {"lattice-studies"}
+def test_the_slug_names_the_source_and_can_be_given(tmp_path):
+    store = tmp_path / "sources.ladybug"
+    assert ingest.bring(store, [str(a_small_source(tmp_path))], slug="lattice-studies") == 0
+    assert {b.slug for b in ingest.Sources(store).sources()} == {"lattice-studies"}
 
 
 def test_the_command_takes_a_directory_or_the_two_files(tmp_path, capsys):
-    store = tmp_path / "shelf.ladybug"
-    nodes, edges = _files(a_small_book(tmp_path))
+    store = tmp_path / "sources.ladybug"
+    nodes, edges = _files(a_small_source(tmp_path))
     assert ingest.main(["import", str(nodes), str(edges), "--out", str(store),
                         "--dry-run"]) == 0
     assert "velthorne-open-texts" in capsys.readouterr().out
     assert ingest.main(["import", str(tmp_path / "extraction"), "--out", str(store)]) == 0
-    assert ingest.Shelf(store).book("velthorne-open-texts") is not None
+    assert ingest.Sources(store).source("velthorne-open-texts") is not None
     assert ingest.main(["import", str(nodes), "--out", str(store)]) == 2
     assert "nodes.csv and edges.csv" in capsys.readouterr().out
     assert ingest.main(["import", str(tmp_path / "extraction")]) == 2

@@ -15,7 +15,7 @@ What it does, in order:
    when they differ only by case, spacing, hyphens or underscores, or when one is the
    other's plural; the heavier name survives. A name `entities.close` calls one letter off
    another is *reported* as a possible duplicate and not merged: that rule is right for a
-   community's typos and wrong for a textbook, where the dry run over a biology shelf
+   community's typos and wrong for a textbook, where the dry run over a biology text
    would have folded "Natrium" into "atrium", "Isobutene" into "isobutane" and
    "Triacylglycerol" into "Diacylglycerol". Those go to the **judge** when one is given
    (`ModelJudge`: a model asked whether the two are one thing, from what it knows first,
@@ -25,7 +25,7 @@ What it does, in order:
    written down so the pair is never asked again; only what the model cannot settle after
    reading stays for a person, who hands the decision back as ``written`` (``{name: the
    name it is}``), applied whatever the weights. Every verdict is kept in the store
-   (``tidy:decisions``) with its reason, the model, and the units it read. Figures, books
+   (``tidy:decisions``) with its reason, the model, and the units it read. Figures, sources
    and runs are never folded. A merge
    moves every edge to the survivor (an edge the survivor already had takes the sum of the
    weights and the union of the provenance), sums mentions, unions provenance, and keeps
@@ -112,7 +112,7 @@ JUDGE_SCHEMA: dict[str, Any] = {
 }
 
 JUDGE_INSTRUCTIONS = (
-    "Two names from a knowledge graph built from textbooks may be one thing spelled two "
+    "Two names from a knowledge graph built from documents may be one thing spelled two "
     "ways, or two different things a letter apart. Say which. `same` only when the two "
     "names denote the very same thing (a typo, a variant spelling, a hyphenation, a "
     "capitalisation, a synonym the field treats as identical). `different` when they name "
@@ -123,7 +123,8 @@ JUDGE_INSTRUCTIONS = (
 )
 
 JUDGE_READ = (
-    "You said you were unsure. Here are passages from the books where each name was read. "
+    "You said you were unsure. Here are passages from the sources where each name was "
+    "read. "
     "Decide from them: `same` or `different`; `unsure` only if the passages do not settle it."
 )
 
@@ -218,7 +219,7 @@ class ModelJudge:
 
     def _ask(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         """One model call, never fatal to the pass: a server that answers 500 for one
-        pair (a compute error mid-shelf, 2026-09-03) makes that pair `unsure` and marks
+        pair (a compute error mid-run, 2026-09-03) makes that pair `unsure` and marks
         it ``failed`` so it is not written down as decided, and the pass goes on."""
         try:
             answer = self.client.extract(*args, **kwargs)
@@ -320,7 +321,7 @@ class ModelJudge:
         for unit in units:
             try:
                 text = self.sources(str(unit))
-            except Exception:  # noqa: BLE001 - a book that cannot be re-read is skipped
+            except Exception:  # noqa: BLE001 - a source that cannot be re-read is skipped
                 continue
             for node in held:
                 for piece in excerpts(text, str(node.get("label") or ""),
@@ -370,7 +371,7 @@ class ModelJudge:
         for unit in list(self.pointers(node))[: self.most_units]:
             try:
                 text = self.sources(str(unit))
-            except Exception:  # noqa: BLE001 - a book that cannot be re-read is skipped, said in why
+            except Exception:  # noqa: BLE001 - a source that cannot be re-read is skipped
                 continue
             for piece in excerpts(text, label, chars=self.excerpt_chars, most=2):
                 out.append((str(unit), piece))
@@ -620,7 +621,7 @@ def canonical_direction(rel: str) -> tuple[str, bool]:
     return rel, False
 
 
-_NEVER_FOLDED = frozenset({"figure", "book", "run", "unit"})
+_NEVER_FOLDED = frozenset({"figure", "run", "source", "unit"})
 
 
 def same_name(label: str) -> str:
@@ -829,7 +830,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             note(f"conflict: {_label(nodes, a)} and {_label(nodes, b)} are joined by "
                  + " and ".join(rels))
     for node_id, node in nodes.items():
-        if node_id not in touched and str(node.get("kind") or "") not in ("book", "figure"):
+        if node_id not in touched and str(node.get("kind") or "") not in ("figure", "source"):
             report.orphans.append(node_id)
     if report.orphans:
         note(f"orphans: {len(report.orphans)} node(s) with no relation, e.g. "

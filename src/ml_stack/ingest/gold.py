@@ -208,12 +208,12 @@ def _passage_unit(passage: Mapping[str, Any]) -> Any:
     """A gold passage dressed as a `Unit`, so it goes through the run's own extraction.
 
     Scoring a path other than the one that runs is scoring nothing: the prompt, the schema,
-    the sampling and the parsing are all the ones the shelf will be read with.
+    the sampling and the parsing are all the ones a run will read with.
     """
     from ml_stack.sources.pdf import Unit
 
     source = str(passage.get("source") or "gold")
-    return Unit(book=_slug(source), book_title=source, chapter="", chapter_title="",
+    return Unit(source=_slug(source), book_title=source, chapter="", chapter_title="",
                 section="", section_title=str(passage.get("passage_id") or "passage"),
                 first_page=0, last_page=0, text=str(passage.get("text") or ""))
 

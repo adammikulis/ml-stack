@@ -296,9 +296,9 @@ class TestChattingThroughTheInterface:
         threading.Thread(target=blob.serve_forever, daemon=True).start()
 
         ui, cookie = bare
-        shelf = tmp_path / "bare" / "models"
-        shelf.mkdir(parents=True, exist_ok=True)
-        ui.ui.models = Models([shelf], shelf)
+        models_dir = tmp_path / "bare" / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        ui.ui.models = Models([models_dir], models_dir)
         ui.ui.downloads = Downloads(ui.ui.models)
         try:
             began = clock.monotonic()
@@ -329,16 +329,16 @@ class TestChattingThroughTheInterface:
             blob.shutdown()
 
         assert saw_partial, "the screen could never show how far along it was"
-        assert (shelf / "big.gguf").read_bytes() == payload
+        assert (models_dir / "big.gguf").read_bytes() == payload
 
     def test_a_model_already_here_answers_at_once(self, bare, tmp_path):
         from ml_stack.fleet.models import Downloads, Models
 
         ui, cookie = bare
-        shelf = tmp_path / "bare" / "models"
-        shelf.mkdir(parents=True, exist_ok=True)
-        (shelf / "here.gguf").write_bytes(b"x" * (2 * 1024 * 1024))
-        ui.ui.models = Models([shelf], shelf)
+        models_dir = tmp_path / "bare" / "models"
+        models_dir.mkdir(parents=True, exist_ok=True)
+        (models_dir / "here.gguf").write_bytes(b"x" * (2 * 1024 * 1024))
+        ui.ui.models = Models([models_dir], models_dir)
         ui.ui.downloads = Downloads(ui.ui.models)
 
         status, body, _ = ui.call("/ui/models", method="POST", cookie=cookie,

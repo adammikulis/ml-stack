@@ -129,7 +129,7 @@ def test_status_lists_every_kind_recorded_under_home(tmp_path, capsys):
         ended.wait(timeout=10)
         jobs.record("bench", pid=live.pid, argv=["sweep", "--serve", "tiny"],
                     log="bench.log", home=tmp_path)
-        jobs.record("ingest", pid=ended.pid, argv=["book.pdf"], log="ingest.log",
+        jobs.record("ingest", pid=ended.pid, argv=["notes.pdf"], log="ingest.log",
                     home=tmp_path, refuse_if_alive=False)
         assert jobs.status(home=tmp_path) == 0
         said = capsys.readouterr().out

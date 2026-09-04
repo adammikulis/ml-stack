@@ -65,7 +65,7 @@ def reclaim_port(port: int, *, recorded_pids: list[int] | None = None) -> bool:
     Only a recorded pid, never whatever llama-server happens to hold the port. The day
     this was learned (2026-09-03): a test started a fake server on the default port with
     the real backend, the port was busy, and the old "unrecorded server" branch killed the
-    Flash-Next that had been reading a textbook shelf for twelve hours -- mid-request, from
+    Flash-Next that had been reading textbooks for twelve hours -- mid-request, from
     a process that had never leased it. A server another process started is that
     process's to stop; here it is reported as held by something that is not ours, and the
     caller refuses to kill it (the same rule the bash guard enforces on shells:

@@ -57,7 +57,7 @@ def _run(args: Any, *, resolve: bool = True,
     found = str(ingest._find_model(model)) if model else ""
     port = int(getattr(args, "serve_port", 8080) or 8080)
     # One slot, one unit at a time. Adam: "we shouldn't be handling parallel requests while
-    # extracting. In fact, we should never be splitting the GPU like that" -- and the shelf
+    # extracting. In fact, we should never be splitting the GPU like that" -- and the run
     # measured it: one worker read a unit in 86 s, two workers sharing the model averaged
     # 140 s each, slower in aggregate as well as apiece.
     seats = 1
@@ -91,7 +91,7 @@ def _run(args: Any, *, resolve: bool = True,
         # Extraction copies definitions out of the page: the head's guesses were accepted
         # 97% of the time on a biology chapter against ~75% answering questions, so the
         # length that measured best for answering is not the length for this. Measured
-        # here, per workload, with the same command that reads the shelf.
+        # here, per workload, with the same command that reads the sources.
         if not (run.shape.draft or run.shape.spec_type):
             say("--n-max: no draft head is being served, so there is no draft to lengthen")
         else:

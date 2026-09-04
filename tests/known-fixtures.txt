@@ -238,7 +238,7 @@ Marisol Quen
 Orlan Vesk
 Charter of Velthorne
 
-# the second invented book the shelf tests read beside the first, and its section
+# the second invented book the sources tests read beside the first, and its section
 Ambleford Field Guide
 Spore Blooms
 Seam Wall

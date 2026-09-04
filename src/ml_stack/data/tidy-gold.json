@@ -91,10 +91,10 @@
     {
       "class": "different",
       "verdict": "different",
-      "a": {"label": "kestrel-8B", "kind": "concept", "mentions": 5, "definition": "the eight-billion-weight reader used on the shelf", "provenance": ["gold:kestrel-8b"]},
+      "a": {"label": "kestrel-8B", "kind": "concept", "mentions": 5, "definition": "the eight-billion-weight reader used on the run", "provenance": ["gold:kestrel-8b"]},
       "b": {"label": "kestrel-8C", "kind": "concept", "mentions": 3, "definition": "a later reader of the same size with a different vocabulary", "provenance": ["gold:kestrel-8c"]},
       "passages": {
-        "gold:kestrel-8b": "The kestrel-8B reader was measured over the whole shelf.",
+        "gold:kestrel-8b": "The kestrel-8B reader was measured over the whole run.",
         "gold:kestrel-8c": "kestrel-8C is the same size as kestrel-8B but carries a different vocabulary and is scored apart from it."
       }
     },

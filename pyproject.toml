@@ -113,7 +113,7 @@ ml-stack-store = "ml_stack.graph.store_cli:main"
 # an invented organised group -- company, community, university, open-source, nonprofit --
 # as a graph with people who could talk, and questions about it with known answers
 ml-stack-world = "ml_stack.world.cli:main"
-# a shelf of documents read section by section into one graph, with what each cost
+# documents read section by section into one graph, with what each cost
 ml-stack-ingest = "ml_stack.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"

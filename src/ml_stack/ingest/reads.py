@@ -1,4 +1,4 @@
-"""What one book's reads are kept as: a `Read` per unit, the units their provenance
+"""What one source's reads are kept as: a `Read` per unit, the units their provenance
 names, and the files beside the store they are written into."""
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ class Read:
     """One unit, extracted once, and everything it cost."""
 
     unit: str
-    book: str
+    source: str
     chapter: str
     section: str
     title: str
@@ -47,7 +47,7 @@ class _Unit:
     """A unit as its reads file remembers it: the provenance `build` needs, and no PDF."""
 
     id: str
-    book: str
+    source: str
     chapter: str
     section: str
     section_title: str
@@ -56,19 +56,19 @@ class _Unit:
 
     @property
     def where(self) -> dict[str, Any]:
-        return {"book": self.book, "chapter": self.chapter, "section": self.section,
+        return {"source": self.source, "chapter": self.chapter, "section": self.section,
                 "page": self.first_page, "pages": [self.first_page, self.last_page],
                 "unit": self.id}
 
 
 def unit_of(read: Mapping[str, Any]) -> _Unit:
-    """One row of a reads file as something `build` and `fold_book` can take.
+    """One row of a reads file as something `build` and `fold_source` can take.
 
     The unit id is the one on the row rather than one recomputed, so a section split into
     parts keeps the id its provenance already names.
     """
     pages = list(read.get("pages") or ())
-    return _Unit(id=str(read.get("unit") or ""), book=str(read.get("book") or ""),
+    return _Unit(id=str(read.get("unit") or ""), source=str(read.get("source") or ""),
                  chapter=str(read.get("chapter") or ""), section=str(read.get("section") or ""),
                  section_title=str(read.get("title") or ""),
                  first_page=int(pages[0]) if pages else 0,
@@ -76,7 +76,8 @@ def unit_of(read: Mapping[str, Any]) -> _Unit:
 
 
 def units_of(reads: Iterable[Mapping[str, Any]]) -> dict[str, _Unit]:
-    """``{unit id: unit}`` for a book's reads -- what `fold_book` wants, from the shelf alone."""
+    """``{unit id: unit}`` for one source's reads -- what `fold_source` wants, from the
+    reads files alone."""
     out: dict[str, _Unit] = {}
     for read in reads:
         unit = unit_of(read)
@@ -86,7 +87,7 @@ def units_of(reads: Iterable[Mapping[str, Any]]) -> dict[str, _Unit]:
 
 
 def reads_path(out: str | Path, slug: str) -> Path:
-    """Where one book's extractions are kept, beside the store."""
+    """Where one source's extractions are kept, beside the store."""
     return Path(str(Path(out).expanduser()) + f".{slug}.reads.json")
 
 

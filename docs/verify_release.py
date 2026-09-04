@@ -491,10 +491,10 @@ def _():
     from ml_stack.fleet.daemon import load_or_create_token
 
     key = join_cluster(WORDS, path=TMP / "models.key")
-    shelf = TMP / "haver"
-    shelf.mkdir(parents=True, exist_ok=True)
+    where = TMP / "haver"
+    where.mkdir(parents=True, exist_ok=True)
     payload = os.urandom(3 * 1024 * 1024)
-    (shelf / "tiny-test.gguf").write_bytes(payload)
+    (where / "tiny-test.gguf").write_bytes(payload)
 
     root = TMP / "haver-daemon"
     files = root / "files"
@@ -503,7 +503,7 @@ def _():
     port = free_port()
     httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(
         runner, files, load_or_create_token(root, key), "haver",
-        models=Models([shelf], shelf), cluster_key_path=TMP / "models.key"))
+        models=Models([where], where), cluster_key_path=TMP / "models.key"))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
         want = TMP / "wanter"

@@ -1,4 +1,4 @@
-"""A shelf asked questions: the store's graph through `graph.ask`, and a set of
+"""A store asked questions: its graph through `graph.ask`, and a set of
 questions scored the way the bench scores one."""
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def spent_line(spent: Any) -> str:
 
 def ask(graph: Mapping[str, Any], question: str, client: Any, *,
         say: Callable[[str], None] = print, **asking: Any) -> Any:
-    """One question of a shelf's graph, through `graph.ask.converse`; the answer, printed.
+    """One question of a store's graph, through `graph.ask.converse`; the answer, printed.
 
     ``asking`` goes to `converse` -- ``profile`` above all, so a model is asked the way it
     measured best. Returns the `Answer`.
@@ -57,7 +57,7 @@ def read_asked(path: str | Path) -> list[dict[str, Any]]:
     """A gold set of questions: ``[{"question", "expected": [ids or labels]}]``.
 
     A list, or ``{"questions": [...]}``. Each entry may carry a ``label`` for the report.
-    ``expected`` names nodes by id or by the label the book gave them, because a person
+    ``expected`` names nodes by id or by the label the source gave them, because a person
     writing a gold set for a textbook knows "vault current" and not
     ``concept:vault-current``; `score_asked` resolves a label against the graph.
     """

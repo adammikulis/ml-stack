@@ -66,7 +66,7 @@ def test_a_plural_and_a_spelling_merge_into_the_heavier_name_with_everything_kep
 
 
 def test_case_spacing_and_hyphens_are_one_name_and_a_letter_apart_is_not(tmp_path):
-    """A biology shelf's dry run would have folded 'Natrium' into 'atrium' and 'Isobutene'
+    """A biology sources's dry run would have folded 'Natrium' into 'atrium' and 'Isobutene'
     into 'isobutane' by spelling; 'T-cell', 't cell' and 'T_cell' are one name."""
     path = _store(tmp_path, [_node("concept:t-cell", "T-cell", mentions=5),
                              _node("concept:t-cell-2", "t cell", mentions=2),
@@ -81,12 +81,12 @@ def test_case_spacing_and_hyphens_are_one_name_and_a_letter_apart_is_not(tmp_pat
     assert ("Natrium", "atrium") in report.possible or ("atrium", "Natrium") in report.possible
 
 
-def test_figures_books_and_runs_are_never_folded(tmp_path):
+def test_figures_sources_and_runs_are_never_folded(tmp_path):
     path = _store(tmp_path, [
         _node("figure:u1:1", "Figure 1.1", kind="figure"),
         _node("figure:u2:1", "Figure 10.4", kind="figure"),
-        _node("book:a", "Lattice Studies", kind="book"),
-        _node("book:b", "Lattice Studies", kind="book"),
+        _node("source:a", "Lattice Studies", kind="source"),
+        _node("source:b", "Lattice Studies", kind="source"),
     ], [])
     report = tidy(path, dry_run=False)
     assert report.merged_nodes == 0 and report.possible == []

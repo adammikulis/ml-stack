@@ -1,4 +1,4 @@
-"""Asking a shelf a question, and scoring a set of them.
+"""Asking a sources a question, and scoring a set of them.
 
 The model is `ml_stack.testing.ScriptedModel` -- the tool loop's own fake, which answers
 with the calls it was told to and then with words. No port is opened and no model is served.
@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from test_ingest import a_part_read_book, a_read, said
+from test_ingest import a_part_read_source, a_read, said
 
 from ml_stack import ingest
 from ml_stack.testing import ScriptedModel
@@ -21,14 +21,14 @@ OPEN_TEXTS = "velthorne-open-texts"
 
 
 def a_store(tmp_path):
-    """One book folded into a store, and a hidden run node beside it."""
+    """One source folded into a store, and a hidden run node beside it."""
     rows = [a_read(f"{OPEN_TEXTS}:1:1.1",
                    extracted=said("vault", "vault current",
                                   relations=[("vault current", "part_of", "vault")])),
             a_read(f"{OPEN_TEXTS}:1:1.2", section="1.2", pages=(4, 5),
                    extracted=said("seam wall", "vault",
                                   relations=[("seam wall", "part_of", "vault")]))]
-    store = a_part_read_book(tmp_path, rows=rows)
+    store = a_part_read_source(tmp_path, rows=rows)
     ingest.fold(store, say=lambda _: None)
     ingest.write_run(store, {"id": "run:20260903T090000", "model": "a-model",
                              "started": "2026-09-03T09:00:00"})
@@ -73,12 +73,12 @@ def test_the_store_reads_out_as_nodes_and_edges_with_the_run_left_out(tmp_path):
     graph = ingest.graph_of(store)
 
     ids = {n["id"] for n in graph["nodes"]}
-    assert {"book:velthorne-open-texts", "concept:vault", "concept:vault-current"} <= ids
+    assert {"source:velthorne-open-texts", "concept:vault", "concept:vault-current"} <= ids
     assert not [i for i in ids if i.startswith("run:")], "the run is the record, not the graph"
     assert all(e["source"] in ids and e["target"] in ids for e in graph["edges"])
 
 
-def test_a_concept_is_read_out_with_the_definition_the_book_gave_it(tmp_path):
+def test_a_concept_is_read_out_with_the_definition_the_source_gave_it(tmp_path):
     """`look_at` is where a model gets the facts it answers from, and a concept's facts are
     its definition."""
     from ml_stack.graph.ask import look_at
@@ -108,7 +108,7 @@ def test_a_question_is_answered_with_the_tools_it_called_and_what_it_spent(tmp_p
     assert answer.show == ["concept:vault-current"]
 
 
-def test_the_model_is_told_what_the_book_said_rather_than_being_asked_from_nothing(tmp_path):
+def test_the_model_is_told_what_the_source_said_rather_than_being_asked_from_nothing(tmp_path):
     graph = ingest.graph_of(a_store(tmp_path))
     model = found_then_shown("concept:vault-current")
 

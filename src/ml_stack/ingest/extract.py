@@ -178,7 +178,7 @@ def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bo
     section is read. ``think=False`` -- reading a page is a reading, not a reasoning, and
     the thinking channel is where a ceiling gets spent.
     """
-    row = Read(unit=unit.id, book=unit.book, chapter=unit.chapter, section=unit.section,
+    row = Read(unit=unit.id, source=unit.source, chapter=unit.chapter, section=unit.section,
                title=unit.section_title, pages=[unit.first_page, unit.last_page])
     turns, shown = prompt_for(unit, images=images)
     row.images = shown
@@ -189,9 +189,9 @@ def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bo
                                 cache_dir=cache_dir,
                                 cache_extra=f"document/{unit.id}/{int(images)}")
         row.extracted = got if isinstance(got, dict) else {}
-    except Exception as exc:  # noqa: BLE001 - one bad section does not end a shelf
+    except Exception as exc:  # noqa: BLE001 - one bad section does not end a run
         row.error = f"{type(exc).__name__}: {exc}"[:200]
-        # a unit that ran to the ceiling twice on the first shelf night left nothing to read
+        # a unit that ran to the ceiling twice on the first night left nothing to read
         # but 120 characters; the whole reply is kept beside the unit, so the next person
         # can see whether it looped or rambled without spending ten minutes of GPU again
         row.raw = str(getattr(exc, "body", "") or "")

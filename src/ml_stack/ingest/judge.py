@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.ingest.extract import INSTRUCTIONS, WITH_IMAGES, schema
-from ml_stack.ingest.shelf import Shelf
+from ml_stack.ingest.sources import Sources
 
 __all__ = ["located", "origin", "run_record", "sources_for", "write_run"]
 
@@ -64,14 +64,15 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
 
 
 def located(store: Any, thing: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Where a node or edge was read: ``[{book, title, chapter, section, pages, unit}]``,
+    """Where a node or edge was read: ``[{source, title, chapter, section, pages, unit}]``,
     one per unit in its provenance, resolved through the unit documents -- the pointers
     turned back into pages. A unit the store no longer holds comes back as its id alone."""
     out = []
     for unit_id in thing.get("provenance") or ():
         doc = store.get_doc(f"ingest:unit:{unit_id}") or {}
         where = doc.get("where") or {}
-        out.append({"unit": unit_id, "book": str(doc.get("book") or where.get("book") or ""),
+        out.append({"unit": unit_id,
+                    "source": str(doc.get("source") or where.get("source") or ""),
                     "title": str(doc.get("title") or ""),
                     "chapter": str(where.get("chapter") or ""),
                     "section": str(where.get("section") or ""),
@@ -107,27 +108,27 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
     """``unit id -> the text it was read from``, for the judge's second look.
 
     ``texts`` are units already in memory (the run has them); anything else is found by
-    reading the book again from the path the progress file recorded -- once per book, and
-    kept for the rest of the pass. Adam: "allow it to go back over the source material
-    if needed".
+    reading the document again from the path the progress file recorded -- once per
+    source, and kept for the rest of the pass. Adam: "allow it to go back over the source
+    material if needed".
     """
     from ml_stack.sources import pdf
 
-    shelf = Shelf(out)
+    view = Sources(out)
     known: dict[str, str] = dict(texts or {})
-    read_books: set[str] = set()
+    read: set[str] = set()
 
     def text_of(unit_id: str) -> str:
         if unit_id in known:
             return known[unit_id]
         slug = unit_id.split(":", 1)[0]
-        if slug in read_books:
+        if slug in read:
             return ""
-        read_books.add(slug)
-        book = shelf.book(slug)
-        if book is None or not book.path or not Path(book.path).expanduser().is_file():
+        read.add(slug)
+        held = view.source(slug)
+        if held is None or not held.path or not Path(held.path).expanduser().is_file():
             return ""
-        document = pdf.read(book.path)
+        document = pdf.read(held.path)
         for unit in pdf.units(document, keep_questions=True):
             known.setdefault(unit.id, unit.text)
         return known.get(unit_id, "")
@@ -137,7 +138,7 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
 
 def _judge(client: Any, out: str | Path, *, model: str = "",
            texts: Mapping[str, str] | None = None) -> Any:
-    """The pass's judge over this shelf: the run's model, and the books to re-read."""
+    """The pass's judge over this store: the run's model, and the sources to re-read."""
     from ml_stack.graph.tidy import ModelJudge
 
     return ModelJudge(client, sources=sources_for(out, texts=texts), model=model)

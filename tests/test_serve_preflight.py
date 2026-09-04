@@ -332,7 +332,7 @@ class TestHfReference:
 
     def test_a_shard_missing_from_this_machine_is_named(self, tmp_path, monkeypatch):
         """`ServerSpec.hf_parts` keeps only the final path segment of an `hf:` reference
-        (the same thing `-hf-file` is given), so the shelf and the reference are both
+        (the same thing `-hf-file` is given), so the file and the reference are both
         flat filenames here -- a directory-per-quantisation repository is a separate,
         pre-existing limitation of that parsing, not of this check."""
         import ml_stack.hub as hub_module

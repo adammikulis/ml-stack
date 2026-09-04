@@ -709,9 +709,9 @@ command.
 | `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
 | `ml-stack-claude MODEL [-- claude args]` | Claude Code on a model this machine serves, in its measured shape: the lease is taken, every model variable names the served alias, telemetry and betas a local server lacks are off, and the server goes when claude exits |
 | `ml-stack-agent "task" --model MODEL` | one agentic task through the Claude Agent SDK (the `claude` extra) on the same lease; prints what it said and what it spent. `ml_stack.harness.session()` is the same for a program |
-| `ml-stack-ingest DOCS --out STORE` | a shelf of documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per book with `entities.fold`, and written with the book, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, and `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate) |
+| `ml-stack-ingest DOCS --out STORE` | documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per source with `entities.fold`, and written with the source, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, and `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate) |
 | `ml-stack-store check\|docs\|doc\|tidy` | what a graph store holds and whether it agrees with itself: `check` reads every document, node and edge by key and by scan and prints each disagreement (`--fix` rewrites a document a scan reads empty), `docs` lists the documents with their sizes, `doc PATH KEY` prints one as JSON (`--drop` takes it out), and `tidy` runs the hygiene pass -- duplicates merged, inverses folded, doubtful labels flagged, conflicts and orphans reported -- dry unless `--apply`; `--base-url URL` has a served model judge the names a spelling apart, the verbs in conflict and the doubtful labels from their passages, every verdict written to the store, `--rejudge` asks about every held verdict again, and `--gold` scores the judge against pairs whose answers are known |
-| `ml-stack-jobs status\|wait KIND\|stop KIND` | the long commands this machine has recorded -- a detached bench sweep, an ingest reading a shelf -- with the pid, the argv and the log of each: what is running, blocking until one has ended so the next command is `wait && next` rather than a `pgrep` loop written by hand, and ending one |
+| `ml-stack-jobs status\|wait KIND\|stop KIND` | the long commands this machine has recorded -- a detached bench sweep, an ingest reading documents -- with the pid, the argv and the log of each: what is running, blocking until one has ended so the next command is `wait && next` rather than a `pgrep` loop written by hand, and ending one |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
 | `ml-stack-train-tools` | a project's tool schemas → synthetic conversations → a fine-tuned caller → a GGUF, in one command; `--dry-run` prints the plan with counts, `--only` runs one stage, `--ask` has a served model write more questions; `from-bench` builds the same data out of the traces a bench run kept |
@@ -1920,13 +1920,14 @@ The unit that survives being read alone is a **section**: the book itself decide
 idea, it names itself, and it carries its own figures.
 
 ```sh
-ml-stack-ingest textbook.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --chapter 2
-ml-stack-ingest ~/books/*.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next --resume --detach
-ml-stack-ingest status --out ./shelf.ladybug     # how far, what failed, how long is left
-ml-stack-ingest show   --out ./shelf.ladybug     # what each book was read as
-ml-stack-ingest fold   --out ./shelf.ladybug     # every book so far into the store
-ml-stack-ingest import ./extraction --out ./shelf.ladybug --dry-run   # a pair somebody else extracted
-ml-stack-ingest stop                             # end the run, after it folds what it read
+ml-stack-ingest textbook.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --chapter 2
+ml-stack-ingest ~/texts/*.pdf --out ./sources.ladybug --model Qwen3.8-Flash-Next --resume --detach
+ml-stack-ingest status  --out ./sources.ladybug     # how far, what failed, how long is left
+ml-stack-ingest show    --out ./sources.ladybug     # what each source was read as
+ml-stack-ingest sources --out ./sources.ladybug     # what every source holds together
+ml-stack-ingest fold    --out ./sources.ladybug     # every source so far into the store
+ml-stack-ingest import ./extraction --out ./sources.ladybug --dry-run   # a pair somebody else extracted
+ml-stack-ingest stop                              # end the run, after it folds what it read
 ```
 
 `ml_stack.sources.pdf` does the reading. `read(path)` gives a `Document` of `Chapter`s of
@@ -1948,36 +1949,36 @@ renamed by whoever downloaded it says nothing.
 `contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
 *in the book's words or empty*, relations from a closed vocabulary of eighteen glossed verb phrases,
 what each figure shows and which concepts it illustrates, and the key terms -- and the
-extractions are folded into one graph per book with `entities.fold`, so `has_part` and
-`haspart` are one relationship and a plural folds into the spelling the book uses more. Nodes
-and edges go into one `GraphStore`, every one of them *pointing at* the units it was read
-from -- `provenance` is unit ids and nothing else, the unit document holds the book,
+extractions are folded into one graph per source with `entities.fold`, so `has_part` and
+`haspart` are one relationship and a plural folds into the spelling the source uses more.
+Nodes and edges go into one `GraphStore`, every one of them *pointing at* the units it was
+read from -- `provenance` is unit ids and nothing else, the unit document holds the source,
 chapter, section and pages, and points in turn at the hidden `run` node that read it: the
 model, its build and head, sampling, the schema and instructions hashes, the version, the
 host, when. `located()` and `origin()` walk the pointers back to a page and a model, so a
 claim in a knowledge graph always has a page and a model behind it, without a string
-copied onto every node. Each extraction's `ml_stack.telemetry.Call` is kept, so "the shelf
-took nine hours" breaks down into which book, which section and how much of it was prompt.
+copied onto every node. Each extraction's `ml_stack.telemetry.Call` is kept, so "the run
+took nine hours" breaks down into which source, which section and how much of it was prompt.
 
 The model is served the way the bench serves one: `--model` takes a lease for the whole run
 in the shape its profile measured (`--no-profile` serves it bare), or `--base-url` uses a
 server that is already up. `--images` hands the model each section's rendered figures as
 pictures rather than only their captions -- the `_images` convention `graph.ask` uses -- and
 without a projector the captions are all it gets, which it says rather than pretending
-otherwise. A shelf is hours, so `--detach` runs it in its own session with a log under
+otherwise. A run is hours, so `--detach` runs it in its own session with a log under
 `~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,
-`--resume` skips those, and `status` says how many sections of how many books are done, at
+`--resume` skips those, and `status` says how many sections of how many sources are done, at
 what rate, what is in the store, and how long the rest will take.
 
-### A book somebody else already extracted
+### A graph somebody else already extracted
 
 `ml-stack-ingest import DIR --out STORE` takes a `nodes.csv`/`edges.csv` pair another
-extractor wrote and puts it on the shelf as one book. The pair becomes this library's own
+extractor wrote and puts it in the store as one source. The pair becomes this library's own
 reads -- one per section, in the document schema's shape -- and goes in through the same
-fold a read book does, so it has the same node and edge shape, the same `book:<slug>` and
-`read_from` edges, the same `<book>:<chapter>:<section>` unit ids behind every claim, and
-`shelf`, `show`, `tidy` and `ask` work over it unchanged. The model and run id on the rows
-become a `run` node the units point at, so `origin()` still says which model said this.
+fold a read source does, so it has the same node and edge shape, the same `source:<slug>`
+and `read_from` edges, the same `<source>:<chapter>:<section>` unit ids behind every claim,
+and `sources`, `show`, `tidy` and `ask` work over it unchanged. The model and run id on the
+rows become a `run` node the units point at, so `origin()` still says which model said this.
 
 The two vocabularies are joined by a table. This library sets eighteen verbs itself; an
 extractor free to choose its own writes thousands -- one anatomy textbook carries 2,110
@@ -1987,21 +1988,21 @@ and object swapped where the natural reading is the inverse: `includes` is `has_
 round. Every other predicate comes in as it stands, its edges carrying `extension`, so a
 reader and a query can tell a verb this library set from a verb the extractor chose;
 `--core-only` takes the first kind alone. What each predicate became is counted by name,
-printed, and kept in the store as `ingest:predicates:<book>`. `--dry-run` prints all of it
+printed, and kept in the store as `ingest:predicates:<source>`. `--dry-run` prints all of it
 and writes nothing; `--confidence` takes rows at a level and above, `--no-provisional`
-leaves the ones the extractor left provisional, and `--slug` names the book.
+leaves the ones the extractor left provisional, and `--slug` names the source.
 
-### A book is readable before it is finished
+### A source is readable before it is finished
 
-A shelf of a few thousand sections is days at eighty-odd seconds a section, and a book that
-is only in the store once it is finished is a book nobody can ask about until then. Each
-unit's extraction lands in `<store>.<slug>.reads.json` the moment it comes back, and the
-book so far is folded and written into the store as the run goes -- at a chapter's end once
+A few thousand sections is days at eighty-odd seconds a section, and a source that is only
+in the store once it is finished is one nobody can ask about until then. Each unit's
+extraction lands in `<store>.<slug>.reads.json` the moment it comes back, and the source so
+far is folded and written into the store as the run goes -- at a chapter's end once
 twenty-five sections have gone by since the last fold, and inside a chapter longer than
-fifty. Writing a book is an upsert and nothing more -- a node the store lacks is added, one
-it has takes the fold's mentions, aliases, definition and provenance, an edge likewise, and
-nothing is merged or removed: a knowledge graph is updated by adding to it. Joining
-duplicates is a separate pass (`ml_stack.graph.tidy`), and `fold --rebuild` -- the book's
+fifty. Writing a source is an upsert and nothing more -- a node the store lacks is added,
+one it has takes the fold's mentions, aliases, definition and provenance, an edge likewise,
+and nothing is merged or removed: a knowledge graph is updated by adding to it. Joining
+duplicates is a separate pass (`ml_stack.graph.tidy`), and `fold --rebuild` -- the source's
 own nodes and edges out, then the full fold from its reads -- is the one path that removes
 anything, for after a fix that changed what a read means. `fold --dry-run` says what a fold
 would add and writes nothing.
@@ -2011,24 +2012,27 @@ comparing every concept name against every other, so it grows with the square of
 vocabulary: 400 invented sections of a twelve-word vocabulary fold and write in 3.8 s, and
 300 sections of a 2,700-word one take 44 s to fold and 9 s to write.
 
-`ml-stack-ingest fold --out STORE [--book SLUG]` does the same from the shelf on demand, and
-is idempotent. `show` prints what each book was read as -- concepts with their kind and
-definition, relations with their verb and the page behind them, the spellings and plurals
-the fold joined, how many figures -- and says which books are partial. `stop` ends a
-detached run: it raises inside the section being read, folds the book so far, and exits, and
-the command waits for it and says whether the fold landed.
+`ml-stack-ingest fold --out STORE [--source SLUG]` does the same from the reads on demand,
+and is idempotent. `show` prints what each source was read as -- concepts with their kind
+and definition, relations with their verb and the page behind them, the spellings and
+plurals the fold joined, how many figures -- and says which sources are partial. `sources`
+prints them together: what the store holds for each, the concepts more than one of them
+names, the names `tidy` joined across sources, and the relations joining one source's
+vocabulary to another's. `stop` ends a detached run: it raises inside the section being
+read, folds the source so far, and exits, and the command waits for it and says whether the
+fold landed.
 
-`Shelf` is the same thing for an application:
+`Sources` is the same thing for an application:
 
 ```python
-from ml_stack.ingest import Shelf
+from ml_stack.ingest import Sources
 
-shelf = Shelf("./shelf.ladybug")
-for book in shelf.books():
-    print(book.slug, book.read, "of", book.wanted, "partial" if book.partial else "")
+view = Sources("./sources.ladybug")
+for one in view.sources():
+    print(one.slug, one.read, "of", one.wanted, "partial" if one.partial else "")
 
-graph = shelf.graph("velthorne-open-texts")   # folded from the reads: no store, no PDF
-with shelf.store() as store:                  # read-only, beside the running writer
+graph = view.graph("velthorne-open-texts")   # folded from the reads: no store, no PDF
+with view.store() as store:                  # read-only, beside the running writer
     store.nodes(kind="concept")
 ```
 
@@ -2044,7 +2048,7 @@ ml-stack-ingest --gold tests/fixtures/extraction-gold.json --model Qwen3.8-Flash
 
 `--gold FILE` is the measurement, not an opinion. The file holds passages with the triples
 they state -- `{"subject", "predicate", "object"}` and, for each, the other names a right
-answer may use -- and every passage goes through *the same* extraction the shelf is read
+answer may use -- and every passage goes through *the same* extraction a source is read
 with: the same prompt, the same schema, the same sampling. Subjects and objects are matched
 through their aliases and `entities.close`, predicates through theirs, and what comes back is
 recall, precision, F1 and every triple that was missed or invented, listed. Aliases are the

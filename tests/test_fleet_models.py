@@ -434,9 +434,9 @@ class TestDraftModels:
 
         from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
 
-        shelf = tmp_path / "shelf"
-        payload = a_model(shelf, name="pair.draft.gguf", mb=2).read_bytes()
-        a_model(shelf, name="pair.gguf", mb=2)
+        theirs = tmp_path / "theirs"
+        payload = a_model(theirs, name="pair.draft.gguf", mb=2).read_bytes()
+        a_model(theirs, name="pair.gguf", mb=2)
         root = tmp_path / "traind"
         (root / "files").mkdir(parents=True)
         key = b"a-cluster-key-they-both-know"
@@ -446,7 +446,7 @@ class TestDraftModels:
         httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
             make_handler(runner, root / "files", token,
-                         models=Models([shelf], shelf),
+                         models=Models([theirs], theirs),
                          cluster_key_path=tmp_path / "their.key"))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
 
@@ -858,19 +858,19 @@ class TestOverHTTP:
         root = tmp_path / "traind"
         files = root / "files"
         files.mkdir(parents=True)
-        shelf = tmp_path / "shelf"
-        a_model(shelf)
+        theirs = tmp_path / "theirs"
+        a_model(theirs)
         token = load_or_create_token(root)
         runner = JobRunner(root)
         port = free_port()
         httpd = ThreadingHTTPServer(
             ("127.0.0.1", port),
             make_handler(runner, files, token,
-                         models=Models([shelf], shelf),
+                         models=Models([theirs], theirs),
                          cluster_key_path=tmp_path / "cluster.key"))
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         try:
-            yield Peer(f"http://127.0.0.1:{port}", token), shelf
+            yield Peer(f"http://127.0.0.1:{port}", token), theirs
         finally:
             runner.shutdown()
             httpd.shutdown()
@@ -883,10 +883,10 @@ class TestOverHTTP:
         assert "path" not in rows[0]
 
     def test_a_peer_asks_a_machine_for_a_model_it_already_has(self, served):
-        peer, shelf = served
+        peer, theirs = served
         got = peer.get_model("qwen3")
         assert got["name"] == "qwen3-4b-q4.gguf"
-        assert got["size"] == (shelf / "qwen3-4b-q4.gguf").stat().st_size
+        assert got["size"] == (theirs / "qwen3-4b-q4.gguf").stat().st_size
 
     def test_asking_for_one_nobody_has_is_refused_not_crashed(self, served):
         from ml_stack.fleet.remote import PeerError

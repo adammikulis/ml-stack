@@ -166,7 +166,7 @@ class Unit:
     into the document to say where a concept came from.
     """
 
-    book: str                      # the document's slug
+    source: str                    # the document's slug
     book_title: str
     chapter: str
     chapter_title: str
@@ -187,8 +187,8 @@ class Unit:
 
     @property
     def id(self) -> str:
-        """A name for this unit that is the same on every run over the same book."""
-        stem = f"{self.book}:{self.chapter or '0'}:{self.section or _slug(self.section_title)}"
+        """A name for this unit that is the same on every run over the same source."""
+        stem = f"{self.source}:{self.chapter or '0'}:{self.section or _slug(self.section_title)}"
         if self.seen > 1:
             stem += f"~{self.seen}"
         return stem if self.parts == 1 else f"{stem}#{self.part}"
@@ -196,7 +196,7 @@ class Unit:
     @property
     def where(self) -> dict[str, Any]:
         """The provenance every node and edge read out of this unit carries."""
-        return {"book": self.book, "chapter": self.chapter, "section": self.section or "",
+        return {"source": self.source, "chapter": self.chapter, "section": self.section or "",
                 "page": self.first_page, "pages": [self.first_page, self.last_page],
                 "unit": self.id}
 
@@ -773,7 +773,7 @@ def units(document: Document, *, max_tokens: int = MAX_TOKENS,
             parts.append(held)
         for index, part in enumerate(parts, start=1):
             out.append(Unit(
-                book=document.slug, book_title=document.title,
+                source=document.slug, book_title=document.title,
                 chapter=section.chapter, chapter_title=section.chapter_title,
                 section=section.number, section_title=section.title,
                 first_page=section.first_page, last_page=section.last_page,

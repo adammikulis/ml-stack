@@ -369,7 +369,7 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     """No test writes into ~/.cache/ml_stack or reaches a real model server's port.
 
     2026-09-03: a test started a fake server on the default port through the real backend;
-    the port was busy with the Flash-Next that had been reading a textbook shelf for twelve
+    the port was busy with the Flash-Next that had been reading textbooks for twelve
     hours, the backend reclaimed the port by killing it, and its log under the real cache
     directory was truncated. The backend no longer kills a server it did not record; this
     keeps the cache and logs in tmp_path as well, so a test that reaches them fails here.
@@ -411,7 +411,7 @@ def _no_real_ports(request):
     """No test binds a privileged or 8080-8099 port, or connects to one on loopback.
 
     2026-09-03: a test started a fake server on the default port through the real
-    backend and killed the real Flash-Next that had been reading a textbook shelf for
+    backend and killed the real Flash-Next that had been reading textbooks for
     twelve hours. Port 0 (ephemeral) stays allowed -- ``threaded_server`` and the
     ``server`` fixture above both bind it. A test with a genuine reason to touch a real
     port opts out with ``@pytest.mark.real_port``.

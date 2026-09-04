@@ -1,8 +1,8 @@
-"""A nodes/edges CSV pair from another extractor, brought onto the shelf as one book.
+"""A nodes/edges CSV pair from another extractor, brought into a store as one source.
 
 The pair is turned into this library's own reads -- one per section, in the document
-schema's shape -- and folded in by `ingest.fold_into`, so an imported book is the same
-thing on the shelf as a read one: the same node and edge shape, the same unit ids in its
+schema's shape -- and folded in by `ingest.fold_into`, so an imported source is the same
+thing in the store as a read one: the same node and edge shape, the same unit ids in its
 provenance, the same commands over it.
 
 `RELATIONS` is the table between the two vocabularies. This library sets eighteen verbs
@@ -14,7 +14,7 @@ other way round), or onto nothing where the predicate has no counterpart among t
 Every predicate is written either way: one with a counterpart under that verb, one without
 as it stands, its edges carrying ``extension``. ``core_only`` writes the first and leaves
 the second. What each predicate became is counted by name and kept in the store as
-``ingest:predicates:<book>``.
+``ingest:predicates:<source>``.
 """
 
 from __future__ import annotations
@@ -239,7 +239,7 @@ def _word(predicate: str) -> str:
 
 def _keys(predicate: str) -> Iterator[str]:
     """The table keys one predicate is looked up under: as written, then with the third
-    person 's' put on or taken off the verb it starts with -- a book writes both
+    person 's' put on or taken off the verb it starts with -- a source writes both
     ``include`` and ``includes``, both ``contribute_to`` and ``contributes_to``."""
     word = _word(predicate)
     yield word
@@ -333,7 +333,7 @@ def _provisional(row: Mapping[str, str], where: str) -> bool:
 
 
 def _where_of(row: Mapping[str, str], slug: str, where: str) -> Unit:
-    """The unit one row was read from, in the shape a read book's units have."""
+    """The unit one row was read from, in the shape a read source's units have."""
     context = _json(row.get("source_context", ""), where, "source_context") or {}
     context = context if isinstance(context, Mapping) else {}
     meta = _json(row.get("source_metadata", ""), where, "source_metadata") or {}
@@ -347,14 +347,14 @@ def _where_of(row: Mapping[str, str], slug: str, where: str) -> Unit:
         locator = str(row.get("source_locator") or "").strip()
         title = locator or "untitled"
     pages = [int(meta.get("page_start") or 0), int(meta.get("page_end") or 0)]
-    return Unit(book=slug, book_title="", chapter=chapter,
+    return Unit(source=slug, book_title="", chapter=chapter,
                 chapter_title=str(context.get("chapter_title") or "").strip(),
                 section=section, section_title=title or "untitled",
                 first_page=min(pages), last_page=max(pages), text="")
 
 
 def _titled(uri: str) -> tuple[str, str]:
-    """``(slug, title)`` from the file a book was read out of."""
+    """``(slug, title)`` from the file a source was read out of."""
     stem = Path(str(uri or "").strip()).name
     stem = stem[: -len(Path(stem).suffix)] if Path(stem).suffix else stem
     title = " ".join(stem.replace("_", " ").replace("-", " ").split()) or "untitled"
@@ -364,7 +364,7 @@ def _titled(uri: str) -> tuple[str, str]:
 def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
              confidence: str = "medium", provisional: bool = True,
              core_only: bool = False) -> Imported:
-    """One nodes/edges CSV pair as a book's reads, and what the predicate table did to it.
+    """One nodes/edges CSV pair as a source's reads, and what the predicate table did to it.
 
     Every row under ``confidence`` is left, and every provisional row when ``provisional``
     is false. A predicate `RELATIONS` maps onto one of the eighteen is written as that verb;
@@ -476,7 +476,8 @@ def _a_read(unit: Unit, held: Mapping[str, list]) -> dict[str, Any]:
         if concept.get("definition") and not kept.get("definition"):
             kept["definition"] = concept["definition"]
     relations = list(held.get("relations") or ())
-    row = Read(unit=unit.id, book=unit.book, chapter=unit.chapter, section=unit.section,
+    row = Read(unit=unit.id, source=unit.source, chapter=unit.chapter,
+               section=unit.section,
                title=unit.section_title, pages=[unit.first_page, unit.last_page],
                concepts=len(concepts), relations=len(relations),
                extracted={"concepts": list(concepts.values()), "relations": relations,
@@ -550,10 +551,10 @@ def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: 
           provisional: bool = True, core_only: bool = False, dry_run: bool = False,
           say: Callable[[str], None] = print) -> int:
     """``ml-stack-ingest import NODES.csv EDGES.csv --out STORE``: a pair another extractor
-    wrote, onto this shelf as one book.
+    wrote, into this store as one source.
 
     A directory holding ``nodes.csv`` and ``edges.csv`` may be named instead of the two
-    files. ``--dry-run`` says what would be written -- the book, its units, the predicates
+    files. ``--dry-run`` says what would be written -- the source, its units, the predicates
     onto this library's verbs and the ones written as they stand -- and writes nothing.
     """
     from ml_stack.ingest.fold import fold_into
@@ -577,11 +578,12 @@ def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: 
     for line in lines(got):
         say(line)
     if dry_run:
-        say(f"  nothing written -- book:{got.slug} would be {len(got.rows)} unit(s) "
+        say(f"  nothing written -- source:{got.slug} would be {len(got.rows)} unit(s) "
             f"into {out}")
         return 0
     progress = Progress(Progress.beside(out))
-    held = progress.book(got.slug, title=got.title, path=got.path, sections=len(got.rows))
+    held = progress.source(got.slug, title=got.title, path=got.path,
+                           sections=len(got.rows))
     when = got.written_at or time.strftime("%FT%T")
     for row in got.rows:
         held["done"][str(row["unit"])] = {
@@ -604,13 +606,13 @@ def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: 
 
 
 def _keep_predicates(out: str | Path, got: Imported) -> None:
-    """What each of this book's predicates became, in the store beside it."""
+    """What each of this source's predicates became, in the store beside it."""
     from ml_stack.graph.store import GraphStore
 
     core = _core()
     with GraphStore(out) as store:
         store.put_doc(f"ingest:predicates:{got.slug}", {
-            "book": got.slug,
+            "source": got.slug,
             "core": {word: {"verb": verb, "flipped": flipped, "relations": count}
                      for word, verb, flipped, count in got.table if verb in core},
             "extensions": dict(got.extensions.most_common()),

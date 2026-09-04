@@ -18,10 +18,11 @@ from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, sco
 from ml_stack.ingest.extract import PER_SECTION, schema
 from ml_stack.ingest.fold import fold
 from ml_stack.ingest.gold import gold_lines, gold_score, read_gold
+from ml_stack.ingest.migrate import migrate
 from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at, status
 from ml_stack.ingest.reads import _read_json
 from ml_stack.ingest.run import Stopped, _read_run, _stopping
-from ml_stack.ingest.shelf import shelf, show
+from ml_stack.ingest.sources import show, sources
 
 __all__ = ["HOME", "STOP_WAIT", "detach", "main", "parser", "retry", "stop", "wait"]
 
@@ -37,7 +38,7 @@ _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DET
 KIND = "ingest"
 """The kind of job a detached run is recorded as, in `ml_stack.jobs`."""
 
-STOP_WAIT = 900.0       # a fold over a 7,000-node book took minutes on the way out
+STOP_WAIT = 900.0       # a fold over a 7,000-node source took minutes on the way out
 
 
 def _home() -> Path:
@@ -69,7 +70,8 @@ def _adopt(home: Path | None = None) -> None:
 def detach(argv: Sequence[str]) -> Path:
     """Run ``ml-stack-ingest argv`` in the background, owned by no terminal; return its log.
 
-    A shelf of textbooks is hours. A child of a shell -- `nohup`, `&`, a redirect into a
+    A run over a directory of documents is hours. A child of a shell -- `nohup`, `&`, a
+    redirect into a
     scratch directory -- dies with the shell, or with the agent that opened it, so the
     command re-runs itself in a new session with its output in a log under ``HOME/logs``
     and gives the shell back at once. The pid is recorded through `ml_stack.jobs`, which
@@ -103,8 +105,8 @@ def retry(out: str | Path, *, say: Callable[[str], None] = print) -> int:
         return 1
     progress = Progress(where)
     freed = 0
-    for book in progress.state["books"].values():
-        for entry in (book.get("done") or {}).values():
+    for one in progress.state["sources"].values():
+        for entry in (one.get("done") or {}).values():
             if entry.get("error") and int(entry.get("attempts") or 1) >= GIVE_UP:
                 entry["attempts"] = 0
                 freed += 1
@@ -117,8 +119,8 @@ def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
          wait: float = STOP_WAIT) -> int:
     """``ml-stack-ingest stop``: end the detached run and wait for its last fold to land.
 
-    The run folds the book it is on before it exits -- minutes, for a book of thousands of
-    nodes -- so this waits up to ``wait`` seconds for the process to go, saying so every
+    The run folds the source it is on before it exits -- minutes, for a source of thousands
+    of nodes -- so this waits up to ``wait`` seconds for the process to go, saying so every
     half minute, and then says whether the store moved. The record is kept while the run
     is still ending, so `detach` refuses to start another beside it. Whatever was read is
     kept either way, and the same command with ``--resume`` reads on.
@@ -187,7 +189,7 @@ def _out_of(argv: Iterable[str]) -> str:
     return ""
 
 
-_WORDS = ("status", "show", "shelf", "ask", "fold", "import", "retry", "tidy")
+_WORDS = ("status", "show", "sources", "ask", "fold", "import", "retry", "tidy", "migrate")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -196,29 +198,33 @@ def parser() -> argparse.ArgumentParser:
         prog="ml-stack-ingest", allow_abbrev=False,
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="Read documents into a knowledge graph, section by section: "
-                    "`ml-stack-ingest BOOK.pdf ... --out STORE`.",
+                    "`ml-stack-ingest DOC.pdf ... --out STORE`.",
         epilog="Instead of documents, one of these words:\n"
                "  status   how far the run into --out has got, what failed, what is in the\n"
                "           store, what it cost per unit, and how long the rest will take\n"
-               "  show     what was read: concepts, relations and the folds each book made\n"
-               "  shelf    the whole shelf: per book what the store holds, the concepts more\n"
-               "           than one book names, the names tidy joined across books, and the\n"
-               "           relations between their vocabularies\n"
+               "  show     what was read: concepts, relations and the folds each source made\n"
+               "  sources  every source in the store: what the store holds for each, the\n"
+               "           concepts more than one source names, the names tidy joined across\n"
+               "           sources, and the relations between their vocabularies\n"
                "  ask      ask the store a question with a model -- `ask --out STORE \"...\"` --\n"
                "           or score a set of questions with --gold FILE\n"
-               "  fold     fold every book that has reads -- part-read ones too -- into the\n"
+               "  fold     fold every source that has reads -- part-read ones too -- into the\n"
                "           store, replacing what the store held for it\n"
-               "  import   a nodes/edges CSV pair another extractor wrote, onto this shelf\n"
-               "           as one book -- `import DIR --out STORE`, or the two files\n"
+               "  import   a nodes/edges CSV pair another extractor wrote, into this store\n"
+               "           as one source -- `import DIR --out STORE`, or the two files\n"
                "  retry    let the units given up on be read again by the next --resume\n"
+               "  migrate  bring a store written before sources were called sources up to\n"
+               "           date: `book:` node ids, their edges, the unit documents, the\n"
+               "           progress file and the reads files\n"
                "  stop     end the detached run, after it has folded what it has read\n"
                "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
-                    help="the PDFs to read; or one of `status`, `show`, `shelf`, `ask`, "
-                         "`fold`, `import`, `retry`, `stop` (see below), which does that and "
-                         "stops. `ask` takes the question after it, `import` the CSV pair")
+                    help="the PDFs to read; or one of `status`, `show`, `sources`, `ask`, "
+                         "`fold`, `import`, `retry`, `migrate`, `stop` (see below), which "
+                         "does that and stops. `ask` takes the question after it, `import` "
+                         "the CSV pair")
     ap.add_argument("--out", default="", metavar="STORE",
-                    help="the GraphStore to write into; one store holds a whole shelf. "
+                    help="the GraphStore to write into; one store holds every source. "
                          "Required to read anything; --gold writes nothing and needs none")
     ap.add_argument("--model", default="", metavar="M",
                     help="a model to put up, read with and take down: a name, a path or an "
@@ -234,29 +240,29 @@ def parser() -> argparse.ArgumentParser:
                          "captions; needs a served projector, and without one the captions "
                          "are all it gets")
     ap.add_argument("--sample", type=int, default=0, metavar="N",
-                    help="read only the first N sections of each book -- a smoke of the "
-                         "whole path before a shelf is spent on it; with `show`, how many "
-                         "concepts and relations to print per book (default 5); with "
-                         "`shelf`, how many shared concepts and cross-book relations "
+                    help="read only the first N sections of each document -- a smoke of "
+                         "the whole path before a night is spent on it; with `show`, how "
+                         "many concepts and relations to print per source (default 5); with "
+                         "`sources`, how many shared concepts and cross-source relations "
                          "(default 10)")
     ap.add_argument("--apply", action="store_true",
                     help="with tidy: write the merges, folds and flags; without it, say what "
                          "would be done")
     ap.add_argument("--no-tidy", action="store_true",
-                    help="do not run the hygiene pass over the store at the end of each book "
-                         "(it runs by default, with this run's model judging the names a "
-                         "spelling apart and re-reading the book where it must)")
+                    help="do not run the hygiene pass over the store at the end of each "
+                         "source (it runs by default, with this run's model judging the "
+                         "names a spelling apart and re-reading the source where it must)")
     ap.add_argument("--written", default="", metavar="FILE",
                     help="with tidy: a JSON object {name: the name it is} -- the possible "
                          "duplicates a person settled")
     ap.add_argument("--rebuild", action="store_true",
-                    help="with fold: drop each book's own nodes and edges first and write the "
-                         "full fold from its reads -- the only way anything leaves the store, "
-                         "for after a fix that changed what a read means")
+                    help="with fold: drop each source's own nodes and edges first and write "
+                         "the full fold from its reads -- the only way anything leaves the "
+                         "store, for after a fix that changed what a read means")
     ap.add_argument("--dry-run", action="store_true",
                     help="with fold or import: say what would be written, and write nothing")
     ap.add_argument("--slug", default="", metavar="SLUG",
-                    help="with import: name the book this; by default the file it was read "
+                    help="with import: name the source this; by default the file it was read "
                          "out of names it")
     ap.add_argument("--confidence", default="medium", choices=("low", "medium", "high"),
                     metavar="LEVEL",
@@ -269,10 +275,10 @@ def parser() -> argparse.ArgumentParser:
                     help="with import: write only the predicates that map onto the verbs "
                          "this library sets, and leave the rest; without it every predicate "
                          "comes in, the ones outside those verbs marked as extensions")
-    ap.add_argument("--book", default="", metavar="SLUG",
-                    help="with `show` or `fold`, only this book")
+    ap.add_argument("--source", default="", metavar="SLUG",
+                    help="with `show` or `fold`, only this source")
     ap.add_argument("--chapter", default="", metavar="N",
-                    help="read only this chapter of each book")
+                    help="read only this chapter of each document")
     ap.add_argument("--resume", action="store_true",
                     help="skip the sections the progress file beside --out already records "
                          "as done")
@@ -282,7 +288,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--gold", default="", metavar="FILE",
                     help="score the extraction against a gold set of passages with known "
                          "triples -- recall, precision and the misses -- instead of reading "
-                         "any book. With `ask`, a set of questions with the entries each "
+                         "anything. With `ask`, a set of questions with the entries each "
                          "answer should select: {\"question\", \"expected\": [ids or labels]}")
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
                     help="exit 1 when --gold scores below this F1 (0-1), reading a gold set "
@@ -338,7 +344,7 @@ def _parsed(rest: Sequence[str]) -> Any:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """``ml-stack-ingest``: a shelf of documents into one graph, or a gold set scored."""
+    """``ml-stack-ingest``: documents into one graph, or a gold set scored."""
     from ml_stack.lock import Busy
 
     rest = list(sys.argv[1:] if argv is None else argv)
@@ -364,28 +370,31 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             print(f"error: {word} needs --out STORE", file=sys.stderr)
             return 2
         if word == "fold":
-            return fold(args.out, book=args.book, rebuild=args.rebuild, dry_run=args.dry_run)
+            return fold(args.out, source=args.source, rebuild=args.rebuild,
+                        dry_run=args.dry_run)
         if word == "import":
             return ingest.bring(args.out, args.docs[1:], slug=args.slug,
                                 confidence=args.confidence, provisional=args.provisional,
                                 core_only=args.core_only, dry_run=args.dry_run)
         if word == "show":
-            return show(args.out, book=args.book, most=args.sample or 5)
-        if word == "shelf":
-            return shelf(args.out, most=args.sample or 10)
+            return show(args.out, source=args.source, most=args.sample or 5)
+        if word == "sources":
+            return sources(args.out, most=args.sample or 10)
         if word == "ask":
             return _ask_run(args)
         if word == "retry":
             return retry(args.out)
+        if word == "migrate":
+            return migrate(args.out)
         if word == "tidy":
-            # the hygiene pass is graph.tidy's -- a shelf, a Slack community, any store --
-            # and lives beside the fold here only so the shelf's commands are in one place
+            # the hygiene pass is graph.tidy's -- a book, a Slack community, any store --
+            # and lives beside the fold here only so the ingest commands are in one place
             from ml_stack.graph.tidy import tidy as hygiene
             from ml_stack.graph.tidy import written_from
 
             if args.model or args.base_url != parser().get_default("base_url"):
                 # automated: the model judges the names a spelling apart, re-reading the
-                # books where it must, and the pass applies what it decides -- after the
+                # sources where it must, and the pass applies what it decides -- after the
                 # run that is reading, never beside it (one job on the GPU)
                 alive = _recorded_alive()
                 if alive:

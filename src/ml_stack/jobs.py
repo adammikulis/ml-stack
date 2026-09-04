@@ -206,7 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack-jobs", allow_abbrev=False,
         description="The long commands this machine records -- a bench sweep, an ingest "
-                    "reading a shelf -- with the pid, the argv and the log of each. `status` "
+                    "reading documents -- with the pid, the argv and the log of each. `status` "
                     "lists them; `wait KIND` blocks until one has ended, so the next command "
                     "is `wait && next`; `stop KIND` ends it.")
     ap.add_argument("word", choices=("status", "wait", "stop"))

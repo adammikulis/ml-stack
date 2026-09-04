@@ -1,5 +1,5 @@
-"""The read run: every unit of every book through the model, folded into the store as
-it goes, tidied at the end of each book, and stoppable."""
+"""The read run: every unit of every source through the model, folded into the store as
+it goes, tidied at the end of each source, and stoppable."""
 
 from __future__ import annotations
 
@@ -22,24 +22,24 @@ __all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit"]
 
 
 FOLD_EVERY = 25
-"""Units read between folds of a book into the store.
+"""Units read between folds of a source into the store.
 
 A fold costs what `entities.fold_names` costs, which is every concept name against every
 other: measured over invented units, 400 units of a 12-word vocabulary folded and wrote in
 3.8 s, and 300 units of a 2,700-word one took 44 s to fold and 9 s to write. It grows with
 the square of the vocabulary rather than with the units, so the interval is a real cost and
 not a formality. A chapter's end folds once this many units have gone by since the last
-fold; a chapter longer than twice this folds inside itself; the end of a book and a stop
+fold; a chapter longer than twice this folds inside itself; the end of a source and a stop
 always fold. What the last fold actually took widens it -- see `FOLD_SECONDS`."""
 
 FOLD_SECONDS = 20.0
 """The most a fold may take before the run waits longer between folds.
 
-`fold_book` folds every name against every other, so it grows with the square of the
+`fold_source` folds every name against every other, so it grows with the square of the
 vocabulary while the write grows with the units. Measured over invented units of a
-vocabulary as wide as the book (`tests/test_ingest_shelf.py`, an M-series laptop): 300
+vocabulary as wide as the source (`tests/test_ingest_sources.py`, an M-series laptop): 300
 units and 300 concepts, 0.25 s to fold and 3.3 s to fold and write; 1,000 units and 1,000
-concepts, 2.9 s and 11.8 s; 3,000 units and 3,000 concepts, 28.5 s and 82.2 s. A book of
+concepts, 2.9 s and 11.8 s; 3,000 units and 3,000 concepts, 28.5 s and 82.2 s. A source of
 thousands of nodes therefore costs a minute or more at every chapter end, so
 `_fold_interval` reads as many units again between folds as the last fold ran over this."""
 
@@ -137,8 +137,8 @@ def _read_run(args: Any) -> int:
                 if args.sample:
                     wanted = wanted[:args.sample]
                 slug = document.slug
-                progress.book(slug, title=document.title, path=str(where),
-                              sections=len(wanted))
+                progress.source(slug, title=document.title, path=str(where),
+                                sections=len(wanted))
                 banks = pdf.question_banks(document, **({"max_tokens": args.max_tokens}
                                                         if args.max_tokens else {}))
                 print(f"{document.title}: {len(document.chapters)} chapter(s), "
@@ -149,7 +149,7 @@ def _read_run(args: Any) -> int:
 
                 units_by_id = {unit.id: unit for unit in wanted}
                 folded_seconds = float(
-                    (progress.state["books"].get(slug) or {}).get("folded_seconds") or 0.0)
+                    (progress.state["sources"].get(slug) or {}).get("folded_seconds") or 0.0)
                 held_reads = _read_json(reads_path(args.out, slug))
                 held_reads = held_reads if isinstance(held_reads, dict) else {}
                 reads_by_unit: dict[str, dict[str, Any]] = {}
@@ -161,9 +161,9 @@ def _read_run(args: Any) -> int:
                     to_read.append(unit)
 
                 # one at a time, on the one slot: each unit is written down the moment it
-                # finishes, so a run killed mid-book loses at most the unit in flight, and
-                # the book is folded into the store as it goes, so a shelf that will take
-                # days can be asked questions today
+                # finishes, so a run killed mid-source loses at most the unit in flight,
+                # and the source is folded into the store as it goes, so a run that will
+                # take days can be asked questions today
                 since = 0
                 try:
                     for index, unit in enumerate(to_read):
@@ -220,7 +220,7 @@ def _read_run(args: Any) -> int:
         stopped = True
 
     totals = progress.totals()
-    print(f"\n{totals['sections']} section(s) of {totals['books']} book(s) in "
+    print(f"\n{totals['sections']} section(s) of {totals['sources']} source(s) in "
           f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "
           f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
           + (f"; {totals['failed']} failed" if totals["failed"] else ""))
@@ -232,12 +232,12 @@ def _read_run(args: Any) -> int:
 
 def _fold_interval(seconds: float, *, every: int | None = None,
                    most: float | None = None) -> int:
-    """Units to read between folds, given what the last fold of this book took.
+    """Units to read between folds, given what the last fold of this source took.
 
     A fold under ``most`` seconds is paid at every chapter end. One over it is paid once
     for every ``most`` seconds it ran to: a fold of a minute is worth waiting three
-    chapters for, and a book of nine thousand nodes is not folded for minutes at every
-    chapter end. Nothing measured makes it longer, so the first fold of a book is
+    chapters for, and a source of nine thousand nodes is not folded for minutes at every
+    chapter end. Nothing measured makes it longer, so the first fold of a source is
     `FOLD_EVERY` as it always was.
     """
     # read off the package rather than bound as defaults: a caller that moves either moves it
@@ -251,16 +251,16 @@ def _fold_interval(seconds: float, *, every: int | None = None,
 
 
 def _time_to_fold(since: int, boundary: bool, *, seconds: float = 0.0) -> bool:
-    """Whether the book in flight should be folded into the store now.
+    """Whether the source in flight should be folded into the store now.
 
-    ``seconds`` is what the last fold of this book took -- see `_fold_interval`.
+    ``seconds`` is what the last fold of this source took -- see `_fold_interval`.
     """
     every = _fold_interval(seconds)
     return since >= (every if boundary else 2 * every)
 
 
 def _rows(wanted: Iterable[Any], reads_by_unit: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """A book's reads so far, in the order the book has them."""
+    """One source's reads so far, in the order the source has them."""
     return [reads_by_unit[unit.id] for unit in wanted if unit.id in reads_by_unit]
 
 

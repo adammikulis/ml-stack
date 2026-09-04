@@ -13,9 +13,9 @@ records and arranges them:
 2. **Across models** -- the best row of each, which is what `show --rank` writes;
 3. **Extraction** -- one row per `extract` run, newest first, with the topology and the
    conformance under it; printed only when the window holds one;
-4. **Ingest** -- one row per book on a ``--shelf``: how much of it is read, what is in the
-   store as of the last fold, what it cost, and the run(s) that read it; printed only when
-   a shelf is given and finds something;
+4. **Ingest** -- one row per source in a ``--sources`` store: how much of it is read, what
+   is in the store as of the last fold, what it cost, and the run(s) that read it; printed
+   only when such a store is given and finds something;
 5. **Draft heads** -- the `drafts` summary and its recommendation, per model;
 6. **Memory** -- the fit records, at this machine's room and at each ``--room``;
 7. **What to serve** -- one line per model composing 1, 5 and 6.
@@ -595,7 +595,7 @@ def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
            room: str = "", store: str = "",
            extracted: Sequence[Mapping[str, Any]] = (),
            min_msgs: int = MIN_MESSAGES,
-           shelves: Sequence[str] = ()) -> str:
+           ingested: Sequence[str] = ()) -> str:
     """Every measurement there is, as one document. See the module docstring for the parts.
 
     ``fits` are the memory records for this machine, ``elsewhere`` the same records asked
@@ -607,17 +607,17 @@ def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
     them cost an "Extraction" section that never printed. An empty ``extracted`` prints no
     such section -- a heading over nothing reads as a model that scored nothing.
 
-    ``shelves`` names the stores a ``--shelf`` pointed at -- an ``ml_stack.ingest`` run,
-    not a bench run, so it is read straight off the shelf's own files rather than out of
-    ``kept``. A shelf that names no book prints no section, for the same reason.
+    ``ingested`` names the stores a ``--sources`` pointed at -- an ``ml_stack.ingest`` run,
+    not a bench run, so it is read straight off that store's own files rather than out of
+    ``kept``. A store that names no source prints no section, for the same reason.
     """
     doc = Doc(md)
     doc.head(1, "What has been measured")
     if not kept and not extracted:
         doc.para("Nothing kept yet. `ml-stack-bench run LABEL` measures one asking; "
                  "`ml-stack-bench sweep` measures every model every way.")
-        if shelves:
-            _ingest(doc, shelves)
+        if ingested:
+            _ingest(doc, ingested)
         _memory(doc, fits, elsewhere, at=at, room=room)
         return doc.text()
 
@@ -637,8 +637,8 @@ def report(kept: Sequence[Mapping[str, Any]], *, fits: Sequence[Any] = (),
     _across(doc, kept, full_n=full_n)
     if extracted:
         _extraction(doc, extracted, min_msgs=min_msgs)
-    if shelves:
-        _ingest(doc, shelves)
+    if ingested:
+        _ingest(doc, ingested)
     _drafts(doc, kept, noise=noise)
     _memory(doc, fits, elsewhere, at=at, room=room)
     _serving(doc, kept, tables, fits=fits, at=at, noise=noise)
@@ -779,29 +779,29 @@ def _extraction_row(one: Mapping[str, Any], *, doc: Doc, pretty: Any) -> tuple[s
             _gb((one.get("server") or {}).get("resident_bytes")))
 
 
-# ---------------------------------------------------------------- the ingest shelves
+# ---------------------------------------------------------------- the ingested sources
 
-def _run_nodes(shelf: Any) -> dict[str, Mapping[str, Any]]:
-    """``{run id: its attrs}`` off the shelf's store -- the hidden ``run`` nodes
-    ``ml_stack.ingest.write_run`` hangs units on. Empty for a shelf with no store yet."""
-    if not shelf.out.exists():
+def _run_nodes(view: Any) -> dict[str, Mapping[str, Any]]:
+    """``{run id: its attrs}`` off the store -- the hidden ``run`` nodes
+    ``ml_stack.ingest.write_run`` hangs units on. Empty where there is no store yet."""
+    if not view.out.exists():
         return {}
     try:
-        with shelf.store() as store:
+        with view.store() as store:
             return {str(node["id"]): node.get("attrs") or {} for node in store.nodes(kind="run")}
     except Exception:
         return {}
 
 
-def _decisions_count(shelf: Any) -> int | None:
+def _decisions_count(view: Any) -> int | None:
     """How many name pairs the store's hygiene pass has judged, or None for no such
-    document -- a shelf never tidied says so rather than showing a 0 it never measured."""
+    document -- a store never tidied says so rather than showing a 0 it never measured."""
     from ml_stack.graph.tidy import DECISIONS
 
-    if not shelf.out.exists():
+    if not view.out.exists():
         return None
     try:
-        with shelf.store() as store:
+        with view.store() as store:
             held = store.get_doc(DECISIONS)
     except Exception:
         return None
@@ -810,7 +810,7 @@ def _decisions_count(shelf: Any) -> int | None:
 
 
 def _runs_said(run_nodes: Mapping[str, Mapping[str, Any]], run_ids: Sequence[str]) -> str:
-    """The run(s) that read a book: model, serving and when, off the run node each names.
+    """The run(s) that read a source: model, serving and when, off the run node each names.
     A run id the store holds no node for -- a unit read before the fold caught up with it
     -- prints the bare id rather than nothing."""
     said = []
@@ -824,79 +824,79 @@ def _runs_said(run_nodes: Mapping[str, Mapping[str, Any]], run_ids: Sequence[str
     return "; ".join(said) if said else "-"
 
 
-def _ingest_row(shelf: Any, book: Any, run_nodes: Mapping[str, Mapping[str, Any]]
+def _ingest_row(view: Any, one: Any, run_nodes: Mapping[str, Mapping[str, Any]]
                ) -> tuple[tuple[str, ...], dict[str, float]]:
-    """One book's row, and what it adds to the shelf's total line.
+    """One source's row, and what it adds to the store's total line.
 
     Tokens are summed from the calls each read made -- ``read.calls``, telemetry the model
     server itself reported -- never estimated from a rate: a unit whose reply carried no
-    usage counts as zero rather than the shelf's average.
+    usage counts as zero rather than the store's average.
     """
-    rows = shelf.reads(book.slug)
+    rows = view.reads(one.slug)
     calls = [call for row in rows for call in (row.get("calls") or ())]
     prompt = sum(int(c.get("prompt_tokens") or 0) for c in calls)
     completion = sum(int(c.get("completion_tokens") or 0) for c in calls)
     run_ids = sorted({str(r.get("run") or "") for r in rows if r.get("run")})
-    row = (book.title or book.slug,
-           f"{book.read}/{book.wanted or '?'}",
-           str(book.failed),
-           str(book.given_up),
-           str(book.folded_nodes),
-           str(book.folded_edges),
-           f"{book.seconds:.0f}",
-           f"{book.per_unit:.1f}",
+    row = (one.title or one.slug,
+           f"{one.read}/{one.wanted or '?'}",
+           str(one.failed),
+           str(one.given_up),
+           str(one.folded_nodes),
+           str(one.folded_edges),
+           f"{one.seconds:.0f}",
+           f"{one.per_unit:.1f}",
            str(prompt),
            str(completion),
-           f"{((prompt + completion) / book.units if book.units else 0):.0f}",
+           f"{((prompt + completion) / one.units if one.units else 0):.0f}",
            _runs_said(run_nodes, run_ids))
-    totals = {"read": book.read, "wanted": book.wanted, "failed": book.failed,
-             "given_up": book.given_up, "units": book.units, "seconds": book.seconds,
+    totals = {"read": one.read, "wanted": one.wanted, "failed": one.failed,
+             "given_up": one.given_up, "units": one.units, "seconds": one.seconds,
              "prompt": prompt, "completion": completion}
     return row, totals
 
 
-def _ingest_shelf(doc: Doc, where: str, shelf: Any, books: Sequence[Any]) -> None:
+def _ingest_store(doc: Doc, where: str, view: Any, listed: Sequence[Any]) -> None:
     doc.head(3, f"`{where}`" if doc.md else where)
-    run_nodes = _run_nodes(shelf)
+    run_nodes = _run_nodes(view)
     rows, totalled = [], []
-    for book in sorted(books, key=lambda b: (b.title or b.slug).lower()):
-        row, totals = _ingest_row(shelf, book, run_nodes)
+    for one in sorted(listed, key=lambda s: (s.title or s.slug).lower()):
+        row, totals = _ingest_row(view, one, run_nodes)
         rows.append(row)
         totalled.append(totals)
-    doc.table(("book", "read", "failed", "given up", "nodes", "edges", "seconds", "s/unit",
+    doc.table(("source", "read", "failed", "given up", "nodes", "edges", "seconds", "s/unit",
               "prompt tok", "completion tok", "tok/unit", "run(s)"), rows)
     total = {key: sum(t[key] for t in totalled)
             for key in ("read", "wanted", "failed", "given_up", "units", "seconds",
                         "prompt", "completion")}
     tokens = total["prompt"] + total["completion"]
-    line = (f"{len(books)} book(s), {total['read']}/{total['wanted'] or '?'} unit(s) read, "
+    line = (f"{len(listed)} source(s), {total['read']}/{total['wanted'] or '?'} unit(s) read, "
            f"{total['failed']} failed ({total['given_up']} given up), "
            f"{total['seconds']:.0f}s "
            f"({(total['seconds'] / total['units'] if total['units'] else 0):.1f} s/unit), "
            f"{total['prompt']} prompt and {total['completion']} completion token(s) "
            f"({(tokens / total['units'] if total['units'] else 0):.0f} tok/unit).")
-    decisions = _decisions_count(shelf)
+    decisions = _decisions_count(view)
     if decisions is not None:
         line += f" {decisions} pair(s) of names judged for merge."
     doc.para(line)
 
 
-def _ingest(doc: Doc, shelves: Sequence[str]) -> None:
-    from ml_stack.ingest import Shelf
+def _ingest(doc: Doc, ingested: Sequence[str]) -> None:
+    from ml_stack.ingest import Sources
 
-    named = [(where, Shelf(where)) for where in shelves]
-    named = [(where, shelf, shelf.books()) for where, shelf in named]
+    named = [(where, Sources(where)) for where in ingested]
+    named = [(where, view, view.sources()) for where, view in named]
     named = [one for one in named if one[2]]
     if not named:
         return
     doc.head(2, "Ingest")
-    doc.para("One row per book on a `--shelf`, from `ml_stack.ingest` rather than from a "
-             "bench run: how many of its units are read, what is in the store as of the "
-             "last fold, what reading it cost, and the run(s) -- model, serving, when -- "
-             "that read it. `tok/unit` is summed from every call's own usage, never "
+    doc.para("One row per source in a `--sources` store, from `ml_stack.ingest` rather than "
+             "from a bench run: how many of its units are read, what is in the store as of "
+             "the last fold, what reading it cost, and the run(s) -- model, serving, when "
+             "-- that read it. `tok/unit` is summed from every call's own usage, never "
              "estimated from a rate.")
-    for where, shelf, books in named:
-        _ingest_shelf(doc, where, shelf, books)
+    for where, view, listed in named:
+        _ingest_store(doc, where, view, listed)
 
 
 def _drafts(doc: Doc, kept: Sequence[Mapping[str, Any]], *, noise: float) -> None:
@@ -1086,7 +1086,7 @@ def main(args: Any) -> int:
                   md=not bool(getattr(args, "text", False)),
                   noise=float(getattr(args, "noise", NOISE * 100) or 0) / 100,
                   room=fit_mod._human(here) if here else "", store=store,
-                  extracted=extracted, shelves=list(getattr(args, "shelf", None) or ()),
+                  extracted=extracted, ingested=list(getattr(args, "sources", None) or ()),
                   min_msgs=int(getattr(args, "min_msgs", MIN_MESSAGES) or MIN_MESSAGES))
 
     where = str(getattr(args, "md", "") or "")

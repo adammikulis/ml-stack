@@ -194,7 +194,7 @@ def test_a_short_section_is_one_unit_and_says_where_it_came_from(tmp_path):
     assert [u.parts for u in units] == [1, 1]
     first = units[0]
     assert first.id == "lattice:1:1.1"
-    assert first.where == {"book": "lattice", "chapter": "1", "section": "1.1",
+    assert first.where == {"source": "lattice", "chapter": "1", "section": "1.1",
                            "page": 2, "pages": [2, 3], "unit": "lattice:1:1.1"}
 
 

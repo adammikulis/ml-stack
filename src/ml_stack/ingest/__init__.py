@@ -1,12 +1,12 @@
-"""Documents into a graph: a shelf of textbooks read section by section into one store.
+"""Documents into a graph: every source read section by section into one store.
 
-`ml_stack.sources.pdf` turns a book into units an extractor can take. This is the other
-half: each unit through `Client.extract` against `contracts/extraction-document.schema.json`,
-the extractions folded into one graph per book (`ml_stack.entities.fold`, so a relation the
-model spelled two ways is one edge), and nodes, edges and the raw extractions written into a
-`GraphStore`. Every node and edge carries where it was read from -- book, chapter, section,
-page -- because a claim in a knowledge graph with no page behind it is a claim nobody can
-check.
+`ml_stack.sources` turns a PDF, a mailbox, a Slack export or a table into units an
+extractor can take. This is the other half: each unit through `Client.extract` against
+``contracts/extraction-document.schema.json``, the extractions folded into one graph per
+source (`ml_stack.entities.fold`, so a relation the model spelled two ways is one edge),
+and nodes, edges and the raw extractions written into a `GraphStore`. Every node and edge
+carries where it was read from -- source, chapter, section, page -- because a claim in a
+knowledge graph with no page behind it is a claim nobody can check.
 
 Three things here are not obvious and all three were paid for elsewhere in this repo:
 
@@ -14,53 +14,55 @@ Three things here are not obvious and all three were paid for elsewhere in this 
 records every unit that finished; `--resume` skips those, `--detach` re-runs the command in
 its own session with a log under ``~/.ml-stack/ingest/logs`` (a child of a shell dies with
 the shell, and a ranking sweep was killed that way thirty minutes in), and
-``ml-stack-ingest status`` says how many sections of how many books are done and at what
+``ml-stack-ingest status`` says how many sections of how many sources are done and at what
 rate.
 
 *What it cost is on record, per section.* Each extraction keeps a `ml_stack.telemetry.Call`
-and the run keeps their `Spent`, so "the ten books took nine hours" can be broken down
-into which book, which section, and how much of it was prompt.
+and the run keeps their `Spent`, so "the ten sources took nine hours" can be broken down
+into which source, which section, and how much of it was prompt.
 
 *Whether it does a good job is measured, not asserted.* ``--gold FILE`` runs a set of
 passages with known triples through the same extraction and scores recall and precision,
 matching subjects and objects through their aliases and `entities.close` and predicates
 through theirs, and lists what was missed. ``--fail-under`` makes that a gate.
 
-*A half-read book is readable.* Each unit's extraction lands in
-``<store>.<slug>.reads.json`` as it finishes, and the book so far is folded into the store
-as the run goes -- see `FOLD_EVERY` -- so a shelf that will take days can be asked
-questions today. `Shelf` is how an application reads one::
+*A half-read source is readable.* Each unit's extraction lands in
+``<store>.<slug>.reads.json`` as it finishes, and the source so far is folded into the
+store as the run goes -- see `FOLD_EVERY` -- so a run that will take days can be asked
+questions today. `Sources` is how an application reads one::
 
-    shelf = Shelf("./shelf.ladybug")
-    for book in shelf.books():
-        print(book.slug, book.units, "of", book.wanted, "partial" if book.partial else "")
-    graph = shelf.graph("velthorne-open-texts")     # folded from the reads, no store needed
-    with shelf.store() as store:                    # read-only, beside the running writer
+    view = Sources("./sources.ladybug")
+    for one in view.sources():
+        print(one.slug, one.units, "of", one.wanted, "partial" if one.partial else "")
+    graph = view.graph("velthorne-open-texts")     # folded from the reads, no store needed
+    with view.store() as store:                    # read-only, beside the running writer
         store.nodes(kind="concept")
 
-*A book somebody else already extracted is free.* ``ml-stack-ingest import DIR --out
+*A graph somebody else already extracted is free.* ``ml-stack-ingest import DIR --out
 STORE`` takes a nodes/edges CSV pair another extractor wrote, maps its predicates onto the
 verbs this library sets and writes the rest as they stand, marked ``extension``, and folds
-the result in as one book -- so it sits beside the read ones and every command works over
+the result in as one source -- so it sits beside the read ones and every command works over
 it. ``--dry-run`` says what it would write, predicate by predicate.
 
-``ml-stack-ingest fold --out STORE`` does the same fold from the shelf into the store on
-demand, ``show`` prints what a book holds, ``shelf`` prints what the books hold together --
-the concepts more than one of them names and the relations joining their vocabularies, see
-`Shelf.shared` -- and ``stop`` ends a detached run after folding what it has read.
+``ml-stack-ingest fold --out STORE`` does the same fold from the reads into the store on
+demand, ``show`` prints what one source holds, ``sources`` prints what they hold together
+-- the concepts more than one of them names and the relations joining their vocabularies,
+see `Sources.shared` -- and ``stop`` ends a detached run after folding what it has read.
 
-*A shelf is asked questions the way any graph is.* ``ml-stack-ingest ask --out STORE
+*A store is asked questions the way any graph is.* ``ml-stack-ingest ask --out STORE
 "question"`` puts the store's graph through `ml_stack.graph.ask.converse` with the model
 served in its measured shape, and ``ask --gold FILE`` scores a set of questions against the
 entries each answer should have selected, using the bench's own scorer.
 
-Nothing here is about any one book: it reads a PDF, it asks a model, it writes a graph.
+Nothing here is about any one source: it reads a document, it asks a model, it writes a
+graph.
 
 The modules: `reads` (a unit's `Read`, and the files beside the store), `extract` (one
 section through the model), `fold` (extractions into a graph, and into the store),
-`progress` (how far a run has got), `shelf` (what has been read), `judge` (the run record
+`progress` (how far a run has got), `sources` (what has been read), `migrate` (a store
+written before the rename, brought up to date), `judge` (the run record
 and the judge a fold hands close spellings to), `gold` (the extraction scored), `ask` (the
-shelf asked questions), `serving` (the model a run reads with), `run` (the read run) and
+store asked questions), `serving` (the model a run reads with), `run` (the read run) and
 `cli` (the command). Everything a caller needs is re-exported here.
 """
 
@@ -106,12 +108,12 @@ from ml_stack.ingest.fold import (
     CORE as CORE,
     build as build,
     fold as fold,
-    fold_book as fold_book,
+    fold_source as fold_source,
     fold_into as fold_into,
     plurals as plurals,
     write as write,
     _apply as _apply,
-    _drop_book as _drop_book,
+    _drop_source as _drop_source,
     _missing_from as _missing_from,
     _texts_of as _texts_of,
     _unit_docs as _unit_docs,
@@ -151,11 +153,21 @@ from ml_stack.ingest.judge import (
     write_run as write_run,
     _judge as _judge,
 )
+from ml_stack.ingest.migrate import (
+    NEW_PREFIX as NEW_PREFIX,
+    OLD_PREFIX as OLD_PREFIX,
+    migrate as migrate,
+    pending as pending,
+    reads_beside as reads_beside,
+    _rewrite as _rewrite,
+    _rewrite_progress as _rewrite_progress,
+    _rewrite_reads as _rewrite_reads,
+)
 from ml_stack.ingest.progress import (
     GIVE_UP as GIVE_UP,
     Progress as Progress,
     status as status,
-    _book_in_store as _book_in_store,
+    _source_in_store as _source_in_store,
     _folded_at as _folded_at,
     _for_long as _for_long,
 )
@@ -190,21 +202,20 @@ from ml_stack.ingest.serving import (
     _serving as _serving,
     _serving_said as _serving_said,
 )
-from ml_stack.ingest.shelf import (
-    Book as Book,
-    Shelf as Shelf,
-    shelf as shelf,
+from ml_stack.ingest.sources import (
+    Source as Source,
+    Sources as Sources,
     show as show,
+    sources as sources,
     _decisions_in as _decisions_in,
     _label as _label,
     _run_said as _run_said,
 )
 
-__all__ = ["CONFIDENCE", "CORE", "FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS", "KINDS",
-           "PER_SECTION", "RELATIONS", "VERBS",
-           "Book", "Imported", "Progress", "Scored", "Shelf", "Stopped", "ask", "asked_lines",
-           "bring", "build",
-           "detach", "extract_unit", "fold", "fold_book", "fold_into", "gold_score",
-           "graph_of", "import_lines", "imported", "main", "read_asked", "read_gold",
-           "sayable", "schema", "score_asked", "shelf", "verb_for", "vocabulary",
-           "show", "status", "unit_of", "units_of", "write"]
+__all__ = ["CONFIDENCE", "CORE", "FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS",
+           "KINDS", "PER_SECTION", "RELATIONS", "VERBS",
+           "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "ask",
+           "asked_lines", "bring", "build", "detach", "extract_unit", "fold", "fold_into",
+           "fold_source", "gold_score", "graph_of", "import_lines", "imported", "main",
+           "migrate", "read_asked", "read_gold", "sayable", "schema", "score_asked", "show",
+           "sources", "status", "unit_of", "units_of", "verb_for", "vocabulary", "write"]

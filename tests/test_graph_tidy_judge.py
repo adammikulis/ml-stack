@@ -111,19 +111,20 @@ def test_excerpts_window_around_every_mention_and_fall_back_to_the_start():
     assert excerpts("Only prose here.", "absent", chars=8) == ["Only pro"]
 
 
-def test_sources_come_from_memory_first_and_the_book_second(tmp_path):
-    from tests.test_ingest import a_part_read_book
+def test_sources_come_from_memory_first_and_the_source_second(tmp_path):
+    from tests.test_ingest import a_part_read_source
 
-    store = a_part_read_book(tmp_path)
+    store = a_part_read_source(tmp_path)
     text_of = ingest.sources_for(store, texts={"velthorne-open-texts:1:1.1": "in memory"})
     assert text_of("velthorne-open-texts:1:1.1") == "in memory"
     assert text_of("velthorne-open-texts:9:9.9") == "", "no PDF at the recorded path: nothing"
 
 
-def test_the_run_tidies_each_book_on_the_way_out_with_its_own_model(tmp_path, server, monkeypatch, capsys):
-    from tests.test_ingest import a_shelf
+def test_the_run_tidies_each_source_on_the_way_out_with_its_own_model(
+        tmp_path, server, monkeypatch, capsys):
+    from tests.test_ingest import a_reading
 
-    book, instance, _ = a_shelf(tmp_path, server)
+    source, instance, _ = a_reading(tmp_path, server)
     seen = {}
 
     class Judge:
@@ -134,11 +135,11 @@ def test_the_run_tidies_each_book_on_the_way_out_with_its_own_model(tmp_path, se
             return {"verdict": "different", "why": "scripted", "read": []}
 
     monkeypatch.setattr(ingest, "_judge", lambda client, out, **kw: Judge())
-    store = tmp_path / "shelf.ladybug"
-    assert ingest.main([book, "--out", str(store), "--base-url", instance.base_url]) == 0
+    store = tmp_path / "sources.ladybug"
+    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url]) == 0
     out = capsys.readouterr().out
     assert "tidied:" in out
-    assert ingest.main([book, "--out", str(store), "--base-url", instance.base_url,
+    assert ingest.main([source, "--out", str(store), "--base-url", instance.base_url,
                         "--resume", "--no-tidy"]) == 0
     assert "tidied:" not in capsys.readouterr().out
 

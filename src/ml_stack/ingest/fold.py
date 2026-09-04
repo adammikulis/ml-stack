@@ -1,4 +1,4 @@
-"""Extractions into a graph: one section built into nodes and edges, a book folded
+"""Extractions into a graph: one section built into nodes and edges, a source folded
 out of its sections, and the fold reconciled into the store."""
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from ml_stack.ingest.extract import VERBS
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
 
-__all__ = ["CORE", "build", "fold", "fold_book", "fold_into", "plurals", "write"]
+__all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "plurals", "write"]
 
 
 CORE = frozenset(VERBS) | {"illustrates", "read_from"}
@@ -24,10 +24,10 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
     """One extraction as ``(nodes by id, edges by triple)``, every one pointing at where it came from.
 
     Names are the ids: two sections that both name the same concept are one node whose
-    provenance lists both, which is the whole reason to read a book section by section
+    provenance lists both, which is the whole reason to read a source section by section
     rather than a page at a time. Provenance is pointers and nothing else -- unit ids --
     because Adam: "provenance should always be pointers to the textbook". The unit
-    document holds the book, chapter, section and pages, and points at the run that read
+    document holds the source, chapter, section and pages, and points at the run that read
     it; `located()` and `origin()` follow the pointers back.
     """
     where = unit.where
@@ -112,10 +112,10 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
     return nodes, edges
 
 
-def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any], *,
-              book_title: str = "", log: Callable[[str], None] | None = None
-              ) -> dict[str, Any]:
-    """Every section of one book, folded into one graph.
+def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any], *,
+                book_title: str = "", log: Callable[[str], None] | None = None
+                ) -> dict[str, Any]:
+    """Every section of one source, folded into one graph.
 
     A read that carries an `error` contributes nothing: what a failed extraction left is
     kept for reading, not for believing.
@@ -124,8 +124,8 @@ def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any]
     `entities.fold_edges`, which is what stops ``has_part`` and ``haspart`` being two
     relationships. The *names* are folded by `entities.fold_names` over how often each was
     said, which is what stops "mitochondrion" and "mitochondria" being two concepts -- and
-    which refuses to fold two names a book keeps using, because at that point they are two
-    things the book distinguishes and merging them would be a decision nobody made.
+    which refuses to fold two names a source keeps using, because at that point they are
+    two things the source distinguishes and merging them would be a decision nobody made.
     """
     from ml_stack.entities.fold import fold_edges, fold_names
 
@@ -170,7 +170,7 @@ def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any]
     weight = {node["label"]: int(node["mentions"]) for node in nodes.values()
               if node["kind"] != "figure"}
     canonical, name_folds = fold_names(weight, plurals(weight), log=log, label="concepts",
-                                       settles="both spellings stay, and the book is right")
+                                       settles="both spellings stay, and the source is right")
     moved = {f"concept:{_slug(name)}": f"concept:{_slug(into)}"
              for name, into in canonical.items() if into != name}
     if moved:
@@ -245,77 +245,77 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
     return out_nodes, out_edges
 
 
-def write(out: str | Path, graph: Mapping[str, Any], *, book: str, title: str,
+def write(out: str | Path, graph: Mapping[str, Any], *, source: str, title: str,
           docs: Mapping[str, Any] | None = None, replace: bool = False,
           keep_units: Iterable[str] | None = None,
           shares: Mapping[str, int] | None = None) -> dict[str, int]:
-    """One book's graph and its raw extractions into the store, and read back before returning.
+    """One source's graph and its raw extractions into the store, read back before returning.
 
-    The book itself is a node, so a store holding a shelf can still be asked what came out
-    of which book; every concept hangs off it by ``read_from``.
+    The source itself is a node, so a store holding many can still be asked what came out
+    of which; every concept hangs off it by ``read_from``.
 
     An upsert, and nothing more. Adam: "if the book already exists, it should append new
     nodes/connect new edges. additive." A node the store lacks is added; one it has keeps
-    what other books gave it and takes this book's part afresh: ``shares`` is this book's
-    mentions per node (the fold's own count, before `absorb` rewrote its ids), kept in the
-    ``ingest:shares:<book>`` document so the next fold can replace it; provenance is the
-    other books' units and this fold's; aliases union; a definition the fold lacks stays.
-    An edge takes the fold's weight and provenance; nothing is merged and nothing is
-    removed -- joining names is the hygiene pass's job (`ml_stack.graph.tidy`). Folding
-    twice with nothing read in between changes nothing.
+    what other sources gave it and takes this source's part afresh: ``shares`` is this
+    source's mentions per node (the fold's own count, before `absorb` rewrote its ids),
+    kept in the ``ingest:shares:<source>`` document so the next fold can replace it;
+    provenance is the other sources' units and this fold's; aliases union; a definition the
+    fold lacks stays. An edge takes the fold's weight and provenance; nothing is merged and
+    nothing is removed -- joining names is the hygiene pass's job (`ml_stack.graph.tidy`).
+    Folding twice with nothing read in between changes nothing.
 
-    ``replace`` is `fold --rebuild`: the book's own nodes and edges out first, then the
+    ``replace`` is `fold --rebuild`: the source's own nodes and edges out first, then the
     full fold from its reads -- the one path that removes anything, for after a fix that
-    changed what a read means. ``keep_units`` names the units the book now has: any
-    ``ingest:unit:`` document of this book outside it goes with the nodes.
+    changed what a read means. ``keep_units`` names the units the source now has: any
+    ``ingest:unit:`` document of this source outside it goes with the nodes.
     """
     from ml_stack.graph.store import GraphStore
 
-    book_id = f"book:{book}"
-    nodes = [{"id": book_id, "kind": "book", "label": title or book, "mentions": 1,
-              "attrs": {"book": book}}, *graph.get("nodes", ())]
+    source_id = f"source:{source}"
+    nodes = [{"id": source_id, "kind": "source", "label": title or source, "mentions": 1,
+              "attrs": {"source": source}}, *graph.get("nodes", ())]
     edges = [*graph.get("edges", ()),
-             *({"source": node["id"], "rel": "read_from", "target": book_id, "weight": 1}
+             *({"source": node["id"], "rel": "read_from", "target": source_id, "weight": 1}
                for node in graph.get("nodes", ()))]
     if shares is None:
         shares = {str(n["id"]): int(n.get("mentions") or 0) for n in graph.get("nodes", ())}
     with GraphStore(out) as store:
         if replace:
-            _drop_book(store, book, keep_units=keep_units)
-        previous = store.get_doc(f"ingest:shares:{book}")
+            _drop_source(store, source, keep_units=keep_units)
+        previous = store.get_doc(f"ingest:shares:{source}")
         if isinstance(previous, Mapping):
             previous = dict(previous)
         else:
-            # a book folded before the shares were kept, or one never folded at all
-            previous = None if store.get_doc(f"ingest:folds:{book}") is not None else {}
+            # a source folded before the shares were kept, or one never folded at all
+            previous = None if store.get_doc(f"ingest:folds:{source}") is not None else {}
         held = {str(n["id"]): n for n in store.nodes()}
-        nodes = [_joined(node, held.get(str(node["id"])), book, shares, previous)
+        nodes = [_joined(node, held.get(str(node["id"])), source, shares, previous)
                  for node in nodes]
         counts = store.write({"nodes": nodes, "edges": edges})
         for key, value in (docs or {}).items():
             store.put_doc(key, value)
-        store.put_doc(f"ingest:folds:{book}", dict(graph.get("folds") or {}))
-        store.put_doc(f"ingest:shares:{book}", dict(shares))
-        back = store.query("MATCH (n:Node {id: $id}) RETURN n.id AS id", {"id": book_id})
+        store.put_doc(f"ingest:folds:{source}", dict(graph.get("folds") or {}))
+        store.put_doc(f"ingest:shares:{source}", dict(shares))
+        back = store.query("MATCH (n:Node {id: $id}) RETURN n.id AS id", {"id": source_id})
     if not back:
-        raise RuntimeError(f"{book_id} was written to {out} and did not come back")
+        raise RuntimeError(f"{source_id} was written to {out} and did not come back")
     return counts
 
 
-def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, book: str,
+def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, source: str,
             shares: Mapping[str, int], previous: Mapping[str, int] | None) -> dict[str, Any]:
-    """``node`` as the store will hold it: what other books gave ``existing`` kept, and this
-    book's part -- mentions, units, aliases, definition -- taken from the fold.
+    """``node`` as the store will hold it: what other sources gave ``existing`` kept, and
+    this source's part -- mentions, units, aliases, definition -- taken from the fold.
 
-    ``previous`` is this book's share the last time it was written; None when the book was
-    folded before the shares were kept, and then its share is what the store counts."""
+    ``previous`` is this source's share the last time it was written; None when the source
+    was folded before the shares were kept, and then its share is what the store counts."""
     node_id = str(node["id"])
-    if existing is None or node.get("kind") == "book":
+    if existing is None or node.get("kind") == "source":
         return dict(node)
     share = int(shares.get(node_id, node.get("mentions") or 0))
     before = int(existing.get("mentions") or 0)
     was = int(previous.get(node_id, 0)) if previous is not None else min(before, share)
-    prefix = f"{book}:"
+    prefix = f"{source}:"
     other = [u for u in existing.get("provenance") or () if not str(u).startswith(prefix)]
     mine = [u for u in node.get("provenance") or () if str(u).startswith(prefix)]
     attrs = dict(existing.get("attrs") or {})
@@ -331,34 +331,34 @@ def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, book: s
             "provenance": list(dict.fromkeys([*other, *mine]))}
 
 
-def _drop_book(store: Any, book: str, *, keep_units: Iterable[str] | None = None) -> int:
-    """Everything the store holds for one book, out: nodes read only from it, and its edges.
+def _drop_source(store: Any, source: str, *, keep_units: Iterable[str] | None = None) -> int:
+    """Everything the store holds for one source, out: nodes read only from it, and its edges.
 
-    A node is this book's when a ``read_from`` edge joins it to ``book:<slug>``; one that
-    also reads from another book stays, and only the edges this book put on it go. The book
-    node itself stays and is written again.
+    A node is this source's when a ``read_from`` edge joins it to ``source:<slug>``; one
+    that also reads from another source stays, and only the edges this source put on it go.
+    The source node itself stays and is written again.
     """
-    book_id = f"book:{book}"
+    source_id = f"source:{source}"
     if keep_units is not None:
-        # every unit id starts with the book's slug, so the stale documents are a prefix
+        # every unit id starts with the source's slug, so the stale documents are a prefix
         # away and no document has to be read to find them
-        held, prefix = {f"ingest:unit:{u}" for u in keep_units}, f"ingest:unit:{book}:"
+        held, prefix = {f"ingest:unit:{u}" for u in keep_units}, f"ingest:unit:{source}:"
         for key in store.doc_keys():
             if key.startswith(prefix) and key not in held:
                 store.delete_doc(key)
     read_from = store.edges("read_from")
-    mine = {e["source"] for e in read_from if e["target"] == book_id}
+    mine = {e["source"] for e in read_from if e["target"] == source_id}
     if not mine:
         return 0
-    shared = {e["source"] for e in read_from if e["target"] != book_id}
+    shared = {e["source"] for e in read_from if e["target"] != source_id}
     gone = store.drop(sorted(mine - shared), force=True)
-    prefix = f"{book}:"
+    prefix = f"{source}:"
     for edge in store.edges():
-        if edge["rel"] == "read_from" and edge["target"] == book_id:
+        if edge["rel"] == "read_from" and edge["target"] == source_id:
             store.remove_edge(edge["source"], edge["rel"], edge["target"])
         elif any(str(u).startswith(prefix) for u in (edge.get("provenance") or ())):
-            # this book's edge, by its pointers; an edge two books both stated keeps
-            # the other book's pointer and goes when that book is rebuilt
+            # this source's edge, by its pointers; an edge two sources both stated keeps
+            # the other source's pointer and goes when that source is rebuilt
             store.remove_edge(edge["source"], edge["rel"], edge["target"])
     return gone
 
@@ -371,7 +371,8 @@ def _unit_docs(rows: Iterable[Mapping[str, Any]], slug: str) -> dict[str, Any]:
         if not unit.id:
             continue
         out[f"ingest:unit:{unit.id}"] = {
-            "unit": unit.id, "book": slug, "where": unit.where, "title": unit.section_title,
+            "unit": unit.id, "source": slug, "where": unit.where,
+            "title": unit.section_title,
             "chapter_title": str(row.get("chapter_title") or ""),
             "run": str(row.get("run") or ""),
             "extracted": row.get("extracted") or {}, "calls": list(row.get("calls") or ()),
@@ -385,7 +386,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
               progress: Progress | None = None, rebuild: bool = False,
               dry_run: bool = False, judge: Any = None,
               log: Callable[[str], None] | None = None) -> dict[str, Any]:
-    """Fold one book's reads so far, reconcile it against the store, and upsert it.
+    """Fold one source's reads so far, reconcile it against the store, and upsert it.
 
     Before the upsert the fold goes through `graph.tidy.absorb`: a name the store already
     holds under case, spacing or plural lands on that node, and a close spelling goes to
@@ -395,25 +396,25 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     result says how many names landed on existing nodes and how the judge ruled.
 
     Returns the counts: units read, nodes, edges, folds, ``seconds`` -- what the fold and
-    the write took -- whether the book is partial, and ``new_nodes``/``new_edges``, what the
-    store lacked before this fold. Idempotent:
+    the write took -- whether the source is partial, and ``new_nodes``/``new_edges``, what
+    the store lacked before this fold. Idempotent:
     folding twice with nothing read in between adds nothing. ``dry_run`` computes all of
-    that and writes nothing; ``rebuild`` drops the book's own nodes and edges first and is
+    that and writes nothing; ``rebuild`` drops the source's own nodes and edges first and is
     the only way anything leaves the store.
     """
-    from ml_stack.ingest.shelf import Shelf
+    from ml_stack.ingest.sources import Sources
 
-    shelf = Shelf(out)
-    rows = list(reads) if reads is not None else shelf.reads(slug)
-    held = shelf.progress.state["books"].get(slug) or {}
+    view = Sources(out)
+    rows = list(reads) if reads is not None else view.reads(slug)
+    held = view.progress.state["sources"].get(slug) or {}
     name = title or str(held.get("title") or "") or slug
     units = {**units_of(rows), **dict(units_by_id or {})}
     began = time.time()
-    graph = fold_book(rows, units, book_title=name, log=log)
+    graph = fold_source(rows, units, book_title=name, log=log)
     new_nodes, new_edges = _missing_from(out, graph)
     folds = len(graph["folds"].get("concepts") or ()) + len(graph["folds"].get("relations") or ())
     wanted = int(held.get("sections") or 0)
-    got = {"book": slug, "title": name, "units": len(rows),
+    got = {"source": slug, "title": name, "units": len(rows),
            "read": sum(1 for r in rows if not r.get("error")),
            "wanted": wanted, "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
            "new_nodes": new_nodes, "new_edges": new_edges,
@@ -436,11 +437,11 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
                            "judged_different": taken.judged_different,
                            "possible": taken.left_possible}
     docs = _unit_docs(rows, slug)
-    counts = write(out, graph, book=slug, title=name, docs=docs, replace=rebuild,
+    counts = write(out, graph, source=slug, title=name, docs=docs, replace=rebuild,
                    keep_units=set(units) if rebuild else None, shares=shares)
     got["seconds"] = round(time.time() - began, 2)
-    record = progress if progress is not None else shelf.progress
-    record.book(slug, title=name)
+    record = progress if progress is not None else view.progress
+    record.source(slug, title=name)
     record.folded(slug, units=len(rows), nodes=counts["nodes"], edges=counts["edges"],
                   seconds=got["seconds"])
     return got
@@ -448,7 +449,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
 
 def _texts_of(units: Mapping[str, Any]) -> Callable[[str], str] | None:
     """The unit text the judge may read, when the units in hand carry it (a run's do; a
-    fold from the reads file alone does not, and then the judge reads the book again
+    fold from the reads file alone does not, and then the judge reads the document again
     through `sources_for`)."""
     held = {uid: str(getattr(u, "text", "") or "") for uid, u in units.items()}
     if not any(held.values()):
@@ -471,24 +472,25 @@ def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
     return nodes, edges
 
 
-def fold(out: str | Path, *, book: str = "", rebuild: bool = False, dry_run: bool = False,
+def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: bool = False,
          say: Callable[[str], None] = print) -> int:
-    """``ml-stack-ingest fold --out STORE``: every book that has reads, upserted into the store.
+    """``ml-stack-ingest fold --out STORE``: every source that has reads, upserted into the store.
 
-    A book part-read is written as far as it has been read, so a shelf that will take days
+    A source part-read is written as far as it has been read, so a run that will take days
     is answerable today. ``--dry-run`` says what each fold would add and writes nothing;
-    ``--rebuild`` drops each book's own nodes and edges first -- the only removal there is.
+    ``--rebuild`` drops each source's own nodes and edges first -- the only removal there is.
     """
-    from ml_stack.ingest.shelf import Shelf
+    from ml_stack.ingest.sources import Sources
 
-    shelf = Shelf(out)
-    wanted = [b for b in shelf.books() if b.units and (not book or b.slug == book)]
+    view = Sources(out)
+    wanted = [s for s in view.sources() if s.units and (not source or s.slug == source)]
     if not wanted:
         say(f"nothing to fold into {out}"
-            + (f": no reads for {book}" if book else f": no {Path(out).name}.*.reads.json"))
+            + (f": no reads for {source}" if source
+               else f": no {Path(out).name}.*.reads.json"))
         return 1
     for held in wanted:
-        got = fold_into(out, held.slug, title=held.title, progress=shelf.progress,
+        got = fold_into(out, held.slug, title=held.title, progress=view.progress,
                         rebuild=rebuild, dry_run=dry_run)
         what = ("would add" if dry_run else "rebuilt with" if rebuild else "added")
         say(f"{got['title']}: {got['read']} of {got['wanted'] or '?'} units read, "

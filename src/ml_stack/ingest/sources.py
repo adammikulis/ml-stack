@@ -1,4 +1,4 @@
-"""A store's reads as they land: every book, its graph so far, what the books share,
+"""A store's reads as they land: every source, its graph so far, what the sources share,
 and the two commands that print it."""
 
 from __future__ import annotations
@@ -8,16 +8,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ml_stack.ingest.fold import fold_book
+from ml_stack.ingest.fold import fold_source
 from ml_stack.ingest.progress import GIVE_UP, Progress
 from ml_stack.ingest.reads import _read_json, reads_path, tokens_of, units_of
 
-__all__ = ["Book", "Shelf", "shelf", "show"]
+__all__ = ["Source", "Sources", "show", "sources"]
 
 
 @dataclass
-class Book:
-    """One book on a shelf: how much of it is read, and how much of that is in the store."""
+class Source:
+    """One source in a store: how much of it is read, and how much of that is in the store."""
 
     slug: str
     title: str = ""
@@ -26,7 +26,7 @@ class Book:
     read: int = 0            # rows an extraction came back for -- what folds
     failed: int = 0
     given_up: int = 0
-    wanted: int = 0          # units the book has
+    wanted: int = 0          # units the source has
     seconds: float = 0.0
     prompt_tokens: int = 0   # what the model was shown, over every call of every unit
     completion_tokens: int = 0
@@ -55,31 +55,31 @@ class Book:
 
     @property
     def left(self) -> float:
-        """Seconds of reading still to do, at this book's own measured rate."""
+        """Seconds of reading still to do, at this source's own measured rate."""
         return max(self.wanted - self.units, 0) * self.per_unit
 
 
-class Shelf:
-    """A store's reads as they land: every book, its graph so far, and the store itself.
+class Sources:
+    """A store's reads as they land: every source, its graph so far, and the store itself.
 
-    Nothing here needs the run to have finished, or the PDFs to still be where they were
-    read from: `books` and `reads` come from the files beside the store, `graph` folds
-    those in memory, and `store` opens the store read-only beside the writer.
+    Nothing here needs the run to have finished, or the documents to still be where they
+    were read from: `sources` and `reads` come from the files beside the store, `graph`
+    folds those in memory, and `store` opens the store read-only beside the writer.
     """
 
     def __init__(self, out: str | Path) -> None:
         self.out = Path(out).expanduser()
         self.progress = Progress(Progress.beside(self.out))
 
-    def books(self) -> list[Book]:
-        """Every book with reads or progress, by slug."""
+    def sources(self) -> list[Source]:
+        """Every source with reads or progress, by slug."""
         out = []
-        for slug in sorted(set(self.progress.state["books"]) | set(self._slugs())):
-            held = self.progress.state["books"].get(slug) or {}
+        for slug in sorted(set(self.progress.state["sources"]) | set(self._slugs())):
+            held = self.progress.state["sources"].get(slug) or {}
             rows = self.reads(slug)
             prompt, completion = tokens_of(rows)
             done = (held.get("done") or {}).values()
-            out.append(Book(
+            out.append(Source(
                 slug=slug, title=str(held.get("title") or ""), path=str(held.get("path") or ""),
                 units=len(rows), read=sum(1 for r in rows if not r.get("error")),
                 failed=sum(1 for r in rows if r.get("error")),
@@ -94,9 +94,9 @@ class Shelf:
                 folded_seconds=float(held.get("folded_seconds") or 0.0)))
         return out
 
-    def book(self, slug: str) -> Book | None:
-        """One book by slug, or None."""
-        return next((b for b in self.books() if b.slug == slug), None)
+    def source(self, slug: str) -> Source | None:
+        """One source by slug, or None."""
+        return next((s for s in self.sources() if s.slug == slug), None)
 
     def _slugs(self) -> list[str]:
         head, tail = self.out.name + ".", ".reads.json"
@@ -107,7 +107,7 @@ class Shelf:
 
 
     def reads(self, slug: str) -> list[dict[str, Any]]:
-        """One book's extractions so far, in the order they were read."""
+        """One source's extractions so far, in the order they were read."""
         held = _read_json(reads_path(self.out, slug))
         if not isinstance(held, dict):
             return []
@@ -116,34 +116,35 @@ class Shelf:
 
 
     def graph(self, slug: str, *, log: Callable[[str], None] | None = None) -> dict[str, Any]:
-        """The book folded from its reads so far -- nodes, edges and the folds it made.
+        """The source folded from its reads so far -- nodes, edges and the folds it made.
 
-        No store and no PDF: the provenance each unit needs is on the row it wrote.
+        No store and no document: the provenance each unit needs is on the row it wrote.
         """
         rows = self.reads(slug)
-        held = self.progress.state["books"].get(slug) or {}
-        return fold_book(rows, units_of(rows), book_title=str(held.get("title") or ""), log=log)
+        held = self.progress.state["sources"].get(slug) or {}
+        return fold_source(rows, units_of(rows), book_title=str(held.get("title") or ""),
+                           log=log)
 
     def store(self, **kw: Any) -> Any:
-        """A read-only `GraphStore` on the shelf, openable while the run is writing to it."""
+        """A read-only `GraphStore` on these sources, openable while the run is writing."""
         from ml_stack.graph.store import GraphStore
 
         return GraphStore(self.out, read_only=True, **kw)
 
     def shared(self, store: Any = None) -> dict[str, Any]:
-        """What the books on this shelf hold, and what they hold in common.
+        """What the sources in this store hold, and what they hold in common.
 
-        ``books`` is one entry per book -- units read, and the nodes and edges the store
-        holds for it. ``shared`` is every concept two or more books were read into, most
-        shared first, each naming them. ``between`` is every edge whose two ends were read
-        from different books -- one book's vocabulary joined to another's. ``merged`` is
-        `between_books`, and ``logged`` whether the store holds the merges document those
-        come from at all. ``decisions`` counts the pairs a judge has settled in the store's
-        `graph.tidy` document.
+        ``sources`` is one entry per source -- units read, and the nodes and edges the
+        store holds for it. ``shared`` is every concept two or more sources were read
+        into, most shared first, each naming them. ``between`` is every edge whose two
+        ends were read from different sources -- one source's vocabulary joined to
+        another's. ``merged`` is `between_sources`, and ``logged`` whether the store holds
+        the merges document those come from at all. ``decisions`` counts the pairs a judge
+        has settled in the store's `graph.tidy` document.
 
-        A book's node is one a ``read_from`` edge joins to ``book:<slug>``; a book's edge
-        is one whose provenance names a unit of that book. Without a ``store`` one is
-        opened read-only on the shelf.
+        A source's node is one a ``read_from`` edge joins to ``source:<slug>``; a source's
+        edge is one whose provenance names a unit of that source. Without a ``store`` one
+        is opened read-only.
         """
         if store is None:
             with self.store() as held:
@@ -152,18 +153,18 @@ class Shelf:
         edges = list(store.edges())
         labels = {str(n["id"]): str(n.get("label") or "") for n in nodes}
         mentions = {str(n["id"]): int(n.get("mentions") or 0) for n in nodes}
-        books_of: dict[str, set[str]] = {}
+        sources_of: dict[str, set[str]] = {}
         for edge in edges:
             target = str(edge.get("target") or "")
-            if edge.get("rel") == "read_from" and target.startswith("book:"):
-                books_of.setdefault(str(edge.get("source") or ""),
-                                    set()).add(target[len("book:"):])
-        known = {b.slug: b for b in self.books()}
-        slugs = sorted(set(known) | {str(n["id"])[len("book:"):] for n in nodes
-                                     if str(n.get("id") or "").startswith("book:")})
+            if edge.get("rel") == "read_from" and target.startswith("source:"):
+                sources_of.setdefault(str(edge.get("source") or ""),
+                                      set()).add(target[len("source:"):])
+        known = {s.slug: s for s in self.sources()}
+        slugs = sorted(set(known) | {str(n["id"])[len("source:"):] for n in nodes
+                                     if str(n.get("id") or "").startswith("source:")})
         node_counts = {slug: 0 for slug in slugs}
-        for held_books in books_of.values():
-            for slug in held_books:
+        for held_sources in sources_of.values():
+            for slug in held_sources:
                 node_counts[slug] = node_counts.get(slug, 0) + 1
         edge_counts = {slug: 0 for slug in slugs}
         for edge in edges:
@@ -172,51 +173,51 @@ class Shelf:
             for slug in {str(u).split(":", 1)[0] for u in (edge.get("provenance") or ())}:
                 if slug in edge_counts:
                     edge_counts[slug] += 1
-        books = []
+        listed = []
         for slug in slugs:
             held = known.get(slug)
-            books.append({"book": slug,
-                          "title": (held.title if held else "") or labels.get(f"book:{slug}", "")
-                                   or slug,
-                          "units": held.units if held else 0,
-                          "read": held.read if held else 0,
-                          "wanted": held.wanted if held else 0,
-                          "nodes": node_counts.get(slug, 0),
-                          "edges": edge_counts.get(slug, 0)})
+            listed.append({"source": slug,
+                           "title": (held.title if held else "")
+                                    or labels.get(f"source:{slug}", "") or slug,
+                           "units": held.units if held else 0,
+                           "read": held.read if held else 0,
+                           "wanted": held.wanted if held else 0,
+                           "nodes": node_counts.get(slug, 0),
+                           "edges": edge_counts.get(slug, 0)})
         shared = [{"id": node_id, "label": labels.get(node_id, node_id),
-                   "mentions": mentions.get(node_id, 0), "books": sorted(held_books)}
-                  for node_id, held_books in books_of.items() if len(held_books) > 1]
-        shared.sort(key=lambda r: (-len(r["books"]), -r["mentions"], r["label"]))
+                   "mentions": mentions.get(node_id, 0), "sources": sorted(held_sources)}
+                  for node_id, held_sources in sources_of.items() if len(held_sources) > 1]
+        shared.sort(key=lambda r: (-len(r["sources"]), -r["mentions"], r["label"]))
         between = []
         for edge in edges:
             if edge.get("rel") == "read_from":
                 continue
             source, target = str(edge.get("source") or ""), str(edge.get("target") or "")
-            here, there = books_of.get(source) or set(), books_of.get(target) or set()
+            here, there = sources_of.get(source) or set(), sources_of.get(target) or set()
             if not (here and there) or here & there:
                 continue
             between.append({"source": source, "source_label": labels.get(source, source),
                             "rel": str(edge.get("rel") or ""), "target": target,
                             "target_label": labels.get(target, target),
                             "weight": int(edge.get("weight") or 0),
-                            "books": [sorted(here), sorted(there)]})
+                            "sources": [sorted(here), sorted(there)]})
         between.sort(key=lambda r: (-r["weight"], r["source_label"], r["target_label"]))
-        return {"books": books, "shared": shared, "between": between,
-                "merged": self.between_books(store), "logged": _logged(store),
+        return {"sources": listed, "shared": shared, "between": between,
+                "merged": self.between_sources(store), "logged": _logged(store),
                 "decisions": _decisions_in(store)}
 
-    def between_books(self, store: Any = None) -> list[dict[str, Any]]:
-        """Every name the hygiene pass joined across two books, heaviest first.
+    def between_sources(self, store: Any = None) -> list[dict[str, Any]]:
+        """Every name the hygiene pass joined across two sources, heaviest first.
 
         One entry per merge in the store's `graph.tidy` merges document whose two names
-        were read from different books: ``a_label`` and ``a_book`` for the name kept,
-        ``b_label`` and ``b_book`` for the name folded into it, ``kind``, and ``weight`` --
-        the joined node's mentions (the units both were read from, when the store holds no
-        count) plus the edges the merge moved.
+        were read from different sources: ``a_label`` and ``a_source`` for the name kept,
+        ``b_label`` and ``b_source`` for the name folded into it, ``kind``, and ``weight``
+        -- the joined node's mentions (the units both were read from, when the store holds
+        no count) plus the edges the merge moved.
         """
         if store is None:
             with self.store() as held:
-                return self.between_books(held)
+                return self.between_sources(held)
         from ml_stack.graph.tidy import MERGES
 
         held = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
@@ -234,9 +235,10 @@ class Shelf:
                 continue
             kept = str(one.get("kept") or "")
             out.append({"a_label": str(one.get("kept_label") or kept),
-                        "a_book": ", ".join(sorted(here)),
+                        "a_source": ", ".join(sorted(here)),
                         "b_label": str(one.get("gone_label") or one.get("gone") or ""),
-                        "b_book": ", ".join(sorted(there)), "kind": str(one.get("kind") or ""),
+                        "b_source": ", ".join(sorted(there)),
+                        "kind": str(one.get("kind") or ""),
                         "weight": (mentions.get(kept) or len(kept_from) + len(gone_from))
                                   + int(one.get("edges_moved") or 0)})
         out.sort(key=lambda r: (-r["weight"], r["a_label"], r["b_label"]))
@@ -265,20 +267,20 @@ def _decisions_in(store: Any) -> dict[str, int]:
     return out
 
 
-def show(out: str | Path, *, book: str = "", most: int = 5,
+def show(out: str | Path, *, source: str = "", most: int = 5,
          say: Callable[[str], None] = print) -> int:
-    """``ml-stack-ingest show --out STORE``: what each book was read as, in plain text.
+    """``ml-stack-ingest show --out STORE``: what each source was read as, in plain text.
 
     A sample of concepts with their kind and definition, a sample of relations with the
-    verb and the page they were read on, the folds the book made, and how many figures.
+    verb and the page they were read on, the folds the source made, and how many figures.
     """
-    shelf = Shelf(out)
-    books = [b for b in shelf.books() if b.units and (not book or b.slug == book)]
-    if not books:
-        say(f"nothing read into {out}" + (f" for {book}" if book else ""))
+    view = Sources(out)
+    listed = [s for s in view.sources() if s.units and (not source or s.slug == source)]
+    if not listed:
+        say(f"nothing read into {out}" + (f" for {source}" if source else ""))
         return 1
-    for held in books:
-        graph = shelf.graph(held.slug)
+    for held in listed:
+        graph = view.graph(held.slug)
         concepts = [n for n in graph["nodes"] if n["kind"] != "figure"]
         figures = len(graph["nodes"]) - len(concepts)
         say(f"\n{held.title or held.slug} ({held.slug}): {held.read} of "
@@ -288,13 +290,14 @@ def show(out: str | Path, *, book: str = "", most: int = 5,
             f"{figures} figure(s)")
         say("  concepts")
         for node in concepts[:most]:
-            definition = node["attrs"].get("definition") or "(the book does not define it here)"
+            definition = node["attrs"].get("definition") \
+                or "(the source does not define it here)"
             say(f"    {node['label']} [{node['kind']}] -- {definition}")
         if len(concepts) > most:
             say(f"    ... and {len(concepts) - most} more")
         relations = [e for e in graph["edges"] if e["rel"] != "illustrates"]
-        units = units_of(shelf.reads(held.slug))
-        runs = sorted({str(r.get("run") or "") for r in shelf.reads(held.slug)})
+        units = units_of(view.reads(held.slug))
+        runs = sorted({str(r.get("run") or "") for r in view.reads(held.slug)})
         say("  read by " + (", ".join(_run_said(out, r) for r in runs if r) or "an earlier run"))
         say("  relations")
         for edge in relations[:most]:
@@ -314,54 +317,55 @@ def show(out: str | Path, *, book: str = "", most: int = 5,
     return 0
 
 
-def shelf(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print) -> int:
-    """``ml-stack-ingest shelf --out STORE``: the whole shelf at a glance, in plain text.
+def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print) -> int:
+    """``ml-stack-ingest sources --out STORE``: every source at a glance, in plain text.
 
-    Per book, how much of it is read and what the store holds for it; the concepts more
-    than one book was read into; the names the hygiene pass joined across books, with a
-    weight; the relations joining one book's vocabulary to another's; and how many name
-    pairs the hygiene pass has judged. `Shelf.shared` is the same as data.
+    Per source, how much of it is read and what the store holds for it; the concepts more
+    than one source was read into; the names the hygiene pass joined across sources, with
+    a weight; the relations joining one source's vocabulary to another's; and how many
+    name pairs the hygiene pass has judged. `Sources.shared` is the same as data.
     """
     where = Path(out).expanduser()
     if not where.exists():
         say(f"no store at {out}")
         return 1
-    held = Shelf(out)
+    held = Sources(out)
     got = held.shared()
-    if not got["books"]:
-        say(f"nothing on the shelf at {out}")
+    if not got["sources"]:
+        say(f"nothing read into {out}")
         return 1
-    nodes = sum(b["nodes"] for b in got["books"])
-    edges = sum(b["edges"] for b in got["books"])
-    say(f"{out}: {len(got['books'])} book(s), {nodes} node(s), {edges} edge(s)")
-    for book in got["books"]:
-        say(f"  {book['book']:<28} {book['read']:>4} / {book['wanted'] or '?':<5} units read"
-            f"   {book['nodes']:>5} nodes {book['edges']:>5} edges   {book['title']}")
+    nodes = sum(s["nodes"] for s in got["sources"])
+    edges = sum(s["edges"] for s in got["sources"])
+    say(f"{out}: {len(got['sources'])} source(s), {nodes} node(s), {edges} edge(s)")
+    for one in got["sources"]:
+        say(f"  {one['source']:<28} {one['read']:>4} / {one['wanted'] or '?':<5} units read"
+            f"   {one['nodes']:>5} nodes {one['edges']:>5} edges   {one['title']}")
     shared = got["shared"]
-    say(f"  concepts in more than one book ({len(shared)})"
-        + ("" if shared else ": none -- the books name nothing in common yet"))
+    say(f"  concepts in more than one source ({len(shared)})"
+        + ("" if shared else ": none -- the sources name nothing in common yet"))
     for one in shared[:most]:
-        say(f"    {one['label']:<32} {len(one['books'])} books: {', '.join(one['books'])}")
+        say(f"    {one['label']:<32} {len(one['sources'])} sources: "
+            f"{', '.join(one['sources'])}")
     if len(shared) > most:
         say(f"    ... and {len(shared) - most} more")
     merged = got["merged"]
-    say(f"  between books ({len(merged)})"
+    say(f"  between sources ({len(merged)})"
         + ("" if merged else
-           f": no concept merged across books yet; ml-stack-ingest tidy --out {out}"
+           f": no concept merged across sources yet; ml-stack-ingest tidy --out {out}"
            if got.get("logged") else
-           f": no log of the names the books share; ml-stack-ingest fold --out {out} "
-           f"re-folds each book from its reads and writes one"))
+           f": no log of the names the sources share; ml-stack-ingest fold --out {out} "
+           f"re-folds each source from its reads and writes one"))
     for one in merged[:most]:
-        say(f"    {one['a_label']} ({one['a_book']}) = {one['b_label']} ({one['b_book']})  "
-            f"{one['kind']}  {one['weight']}")
+        say(f"    {one['a_label']} ({one['a_source']}) = {one['b_label']} "
+            f"({one['b_source']})  {one['kind']}  {one['weight']}")
     if len(merged) > most:
         say(f"    ... and {len(merged) - most} more")
     between = got["between"]
-    say(f"  relations between books ({len(between)})"
-        + ("" if between else ": none -- no relation joins one book's names to another's"))
+    say(f"  relations between sources ({len(between)})"
+        + ("" if between else ": none -- no relation joins one source's names to another's"))
     for one in between[:most]:
         say(f"    {one['source_label']} --{one['rel']}--> {one['target_label']}   "
-            f"({', '.join(one['books'][0])} -> {', '.join(one['books'][1])})")
+            f"({', '.join(one['sources'][0])} -> {', '.join(one['sources'][1])})")
     if len(between) > most:
         say(f"    ... and {len(between) - most} more")
     judged = got["decisions"]

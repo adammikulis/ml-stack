@@ -17,12 +17,12 @@ def test_status_lists_what_is_recorded_under_the_home_it_is_given(tmp_path, caps
 
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
-        jobs.record("ingest", pid=child.pid, argv=["book.pdf", "--out", "shelf"],
+        jobs.record("ingest", pid=child.pid, argv=["notes.pdf", "--out", "store"],
                     log="ingest.log", home=tmp_path)
         assert jobs.main(["status", "--home", str(tmp_path)]) == 0
         said = capsys.readouterr().out
         assert f"ingest: running (pid {child.pid})" in said
-        assert "book.pdf --out shelf" in said and "ingest.log" in said
+        assert "notes.pdf --out store" in said and "ingest.log" in said
     finally:
         child.kill()
         child.wait(timeout=10)

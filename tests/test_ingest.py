@@ -2,7 +2,7 @@
 
 The model is a real HTTP server answering scripted JSON -- the same discipline as the rest
 of the client tests, and the reason the extraction path is exercised rather than described.
-Every passage, concept and book here is invented; the gold fixture copies the *shape* of a
+Every passage, concept and source here is invented; the gold fixture copies the *shape* of a
 gold set (passages with triples and aliases) and none of its words.
 """
 
@@ -68,7 +68,7 @@ def a_model(server, script):
 def a_unit(**over):
     from ml_stack.sources.pdf import Unit
 
-    fields = {"book": "lattice", "book_title": "Lattice Studies", "chapter": "1",
+    fields = {"source": "lattice", "book_title": "Lattice Studies", "chapter": "1",
               "chapter_title": "The Glimmer Cascade", "section": "1.1",
               "section_title": "Glimmer Nodes", "first_page": 2, "last_page": 3,
               "text": "Glimmer nodes sit inside vaults."}
@@ -125,7 +125,7 @@ def test_an_extraction_becomes_nodes_and_edges_that_say_where_they_came_from():
     assert node["attrs"]["aliases"] == ["node", "glimmer nodes"]
     assert node["attrs"]["defined_in"] == "lattice:1:1.1", "a pointer, resolved by located()"
     assert node["provenance"] == ["lattice:1:1.1"]
-    assert not {"chapter", "section", "page", "book"} & set(node["attrs"]), "pointers only"
+    assert not {"chapter", "section", "page", "source"} & set(node["attrs"]), "pointers only"
 
     assert ("concept:glimmer-node", "part_of", "concept:vault") in edges
     edge = edges[("concept:glimmer-node", "part_of", "concept:vault")]
@@ -162,7 +162,7 @@ def test_two_sections_naming_the_same_concept_make_one_node_with_both_behind_it(
              {"unit": second.id, "extracted": dict(EMPTY, concepts=[
                  {"name": "vault", "kind": "structure", "aliases": [],
                   "definition": "A shell that holds many nodes."}])}]
-    graph = ingest.fold_book(reads, {first.id: first, second.id: second})
+    graph = ingest.fold_source(reads, {first.id: first, second.id: second})
 
     vault = next(n for n in graph["nodes"] if n["id"] == "concept:vault")
     assert vault["mentions"] == 4, "named in the relations and the figure of one, and again"
@@ -179,7 +179,7 @@ def test_one_relationship_spelled_twice_is_one_edge():
         {"unit": second.id, "extracted": dict(EMPTY, relations=[
             {"from": "glimmer node", "rel": "partof", "to": "vault"}])},
     ]
-    graph = ingest.fold_book(reads, {first.id: first, second.id: second})
+    graph = ingest.fold_source(reads, {first.id: first, second.id: second})
 
     joined = [e for e in graph["edges"] if e["source"] == "concept:glimmer-node"]
     assert len(joined) == 1 and joined[0]["rel"] == "part_of" and joined[0]["weight"] == 2
@@ -187,7 +187,7 @@ def test_one_relationship_spelled_twice_is_one_edge():
     assert graph["folds"]["relations"], "a fold is on record, not silent"
 
 
-def test_a_plural_and_its_singular_fold_into_the_name_the_book_uses_more():
+def test_a_plural_and_its_singular_fold_into_the_name_the_source_uses_more():
     first, second = a_unit(), a_unit(section="1.2", first_page=4, last_page=5)
     reads = [
         {"unit": first.id, "extracted": dict(EMPTY, relations=[
@@ -196,7 +196,7 @@ def test_a_plural_and_its_singular_fold_into_the_name_the_book_uses_more():
         {"unit": second.id, "extracted": dict(EMPTY, relations=[
             {"from": "glimmer nodes", "rel": "part_of", "to": "vault"}])},
     ]
-    graph = ingest.fold_book(reads, {first.id: first, second.id: second})
+    graph = ingest.fold_source(reads, {first.id: first, second.id: second})
 
     ids = {n["id"] for n in graph["nodes"]}
     assert "concept:glimmer-node" in ids and "concept:glimmer-nodes" not in ids
@@ -207,23 +207,23 @@ def test_a_plural_and_its_singular_fold_into_the_name_the_book_uses_more():
 # -- writing a store -------------------------------------------------------------------------------
 
 
-def test_a_book_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
+def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
     pytest.importorskip("ladybug")
     from ml_stack.graph.store import GraphStore
 
     unit = a_unit()
-    graph = ingest.fold_book([{"unit": unit.id, "extracted": LATTICE}], {unit.id: unit})
-    counts = ingest.write(tmp_path / "shelf.ladybug", graph, book="lattice",
+    graph = ingest.fold_source([{"unit": unit.id, "extracted": LATTICE}], {unit.id: unit})
+    counts = ingest.write(tmp_path / "sources.ladybug", graph, source="lattice",
                           title="Lattice Studies",
                           docs={"ingest:unit:lattice:1:1.1": {"extracted": LATTICE}})
 
     assert counts["nodes"] == len(graph["nodes"]) + 1
-    with GraphStore(tmp_path / "shelf.ladybug", read_only=True) as store:
+    with GraphStore(tmp_path / "sources.ladybug", read_only=True) as store:
         labels = {n["id"]: n["label"] for n in store.nodes()}
-        assert labels["book:lattice"] == "Lattice Studies"
+        assert labels["source:lattice"] == "Lattice Studies"
         assert labels["concept:glimmer-node"] == "glimmer node"
         read_from = [e for e in store.edges("read_from")]
-        assert {e["target"] for e in read_from} == {"book:lattice"}
+        assert {e["target"] for e in read_from} == {"source:lattice"}
         assert store.get_doc("ingest:unit:lattice:1:1.1")["extracted"] == LATTICE
 
 
@@ -346,46 +346,46 @@ def test_matching_forgives_a_plural_and_an_alias_but_not_a_different_concept():
 # -- the whole command ----------------------------------------------------------------------------
 
 
-def a_shelf(tmp_path, server, script=lambda prompt: LATTICE):
+def a_reading(tmp_path, server, script=lambda prompt: LATTICE):
     instance, asked = a_model(server, script)
-    book = a_textbook(tmp_path / "lattice.pdf")
-    return book, instance, asked
+    source = a_textbook(tmp_path / "lattice.pdf")
+    return source, instance, asked
 
 
 def run(argv):
     return ingest.main(argv)
 
 
-def test_a_book_is_read_section_by_section_into_a_store(tmp_path, server, capsys):
+def test_a_source_is_read_section_by_section_into_a_store(tmp_path, server, capsys):
     pytest.importorskip("ladybug")
-    book, instance, asked = a_shelf(tmp_path, server)
-    store = tmp_path / "shelf.ladybug"
+    source, instance, asked = a_reading(tmp_path, server)
+    store = tmp_path / "sources.ladybug"
 
-    assert run([book, "--out", str(store), "--base-url", instance.base_url]) == 0
+    assert run([source, "--out", str(store), "--base-url", instance.base_url]) == 0
     said = capsys.readouterr().out
     assert len(asked) == 2, "one call per section"
-    assert "2 section(s) of 1 book(s)" in said
-    done = ingest.Progress(ingest.Progress.beside(store)).state["books"]["lattice"]["done"]
+    assert "2 section(s) of 1 source(s)" in said
+    done = ingest.Progress(ingest.Progress.beside(store)).state["sources"]["lattice"]["done"]
     assert set(done) == {"lattice:1:1.1", "lattice:2:2.1"}
 
     from ml_stack.graph.store import GraphStore
     with GraphStore(store, read_only=True) as held:
-        assert {n["id"] for n in held.nodes()} >= {"book:lattice", "concept:glimmer-node"}
+        assert {n["id"] for n in held.nodes()} >= {"source:lattice", "concept:glimmer-node"}
 
 
 def test_resume_skips_what_is_already_done_and_asks_the_model_nothing_more(tmp_path, server):
     pytest.importorskip("ladybug")
-    book, instance, asked = a_shelf(tmp_path, server)
-    store = tmp_path / "shelf.ladybug"
+    source, instance, asked = a_reading(tmp_path, server)
+    store = tmp_path / "sources.ladybug"
 
-    run([book, "--out", str(store), "--base-url", instance.base_url])
+    run([source, "--out", str(store), "--base-url", instance.base_url])
     assert len(asked) == 2
 
-    run([book, "--out", str(store), "--base-url", instance.base_url, "--resume"])
+    run([source, "--out", str(store), "--base-url", instance.base_url, "--resume"])
     assert len(asked) == 2, "a section already read is not read again"
 
-    run([book, "--out", str(store), "--base-url", instance.base_url])
-    assert len(asked) == 4, "without --resume the whole book is read again"
+    run([source, "--out", str(store), "--base-url", instance.base_url])
+    assert len(asked) == 4, "without --resume the whole source is read again"
 
 
 def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
@@ -394,45 +394,45 @@ def test_resume_still_folds_what_an_earlier_run_extracted(tmp_path, server):
     pytest.importorskip("ladybug")
     from ml_stack.graph.store import GraphStore
 
-    book, instance, _ = a_shelf(tmp_path, server)
-    store = tmp_path / "shelf.ladybug"
-    run([book, "--out", str(store), "--base-url", instance.base_url])
+    source, instance, _ = a_reading(tmp_path, server)
+    store = tmp_path / "sources.ladybug"
+    run([source, "--out", str(store), "--base-url", instance.base_url])
     with GraphStore(store, read_only=True) as held:
         first = {n["id"] for n in held.nodes()}
 
-    run([book, "--out", str(store), "--base-url", instance.base_url, "--resume"])
+    run([source, "--out", str(store), "--base-url", instance.base_url, "--resume"])
     with GraphStore(store, read_only=True) as held:
-        # every run leaves its own hidden run node; the book's nodes are the same
+        # every run leaves its own hidden run node; the source's nodes are the same
         assert ({n["id"] for n in held.nodes() if not n["id"].startswith("run:")}
                 == {i for i in first if not i.startswith("run:")})
 
 
 def test_sample_reads_only_the_first_sections(tmp_path, server):
     pytest.importorskip("ladybug")
-    book, instance, asked = a_shelf(tmp_path, server)
-    run([book, "--out", str(tmp_path / "shelf.ladybug"), "--base-url", instance.base_url,
+    source, instance, asked = a_reading(tmp_path, server)
+    run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--sample", "1"])
     assert len(asked) == 1
 
 
 def test_a_chapter_reads_only_that_chapter(tmp_path, server):
     pytest.importorskip("ladybug")
-    book, instance, asked = a_shelf(tmp_path, server)
-    run([book, "--out", str(tmp_path / "shelf.ladybug"), "--base-url", instance.base_url,
+    source, instance, asked = a_reading(tmp_path, server)
+    run([source, "--out", str(tmp_path / "sources.ladybug"), "--base-url", instance.base_url,
          "--chapter", "2"])
     assert len(asked) == 1
 
 
-def test_status_reports_the_books_the_sections_and_the_rate(tmp_path, server, capsys):
+def test_status_reports_the_sources_the_sections_and_the_rate(tmp_path, server, capsys):
     pytest.importorskip("ladybug")
-    book, instance, _ = a_shelf(tmp_path, server)
-    store = tmp_path / "shelf.ladybug"
-    run([book, "--out", str(store), "--base-url", instance.base_url])
+    source, instance, _ = a_reading(tmp_path, server)
+    store = tmp_path / "sources.ladybug"
+    run([source, "--out", str(store), "--base-url", instance.base_url])
     capsys.readouterr()
 
     assert run(["status", "--out", str(store)]) == 0
     said = capsys.readouterr().out
-    assert "2 of 2 sections in 1 book(s)" in said
+    assert "2 of 2 sections in 1 source(s)" in said
     assert "lattice" in said and "s/section" in said
 
 
@@ -447,9 +447,9 @@ def test_a_failed_section_is_recorded_and_the_next_one_is_still_read(tmp_path, s
     def script(prompt):
         return LATTICE if "1.1" in prompt else "not json at all"
 
-    book, instance, asked = a_shelf(tmp_path, server, script)
-    store = tmp_path / "shelf.ladybug"
-    assert run([book, "--out", str(store), "--base-url", instance.base_url]) == 0
+    source, instance, asked = a_reading(tmp_path, server, script)
+    store = tmp_path / "sources.ladybug"
+    assert run([source, "--out", str(store), "--base-url", instance.base_url]) == 0
     assert len(asked) == 2, "the section after the failure was still read"
     assert "1 failed" in capsys.readouterr().out
 
@@ -483,7 +483,7 @@ def test_naming_no_document_and_no_gold_is_an_error(tmp_path, capsys):
 
 
 def test_reading_a_document_without_a_store_to_write_it_into_is_an_error(tmp_path, capsys):
-    assert run([str(tmp_path / "book.pdf")]) == 2
+    assert run([str(tmp_path / "source.pdf")]) == 2
     assert "needs --out STORE" in capsys.readouterr().err
 
 
@@ -494,14 +494,14 @@ def test_status_without_a_store_is_an_error(capsys):
 
 def test_a_document_that_is_not_there_is_said_and_the_run_still_ends(tmp_path, server, capsys):
     instance, _ = a_model(server, lambda prompt: LATTICE)
-    assert run([str(tmp_path / "missing.pdf"), "--out", str(tmp_path / "shelf.ladybug"),
+    assert run([str(tmp_path / "missing.pdf"), "--out", str(tmp_path / "sources.ladybug"),
                 "--base-url", instance.base_url]) == 2
     assert "no such document" in capsys.readouterr().err
 
 
 def test_the_parser_refuses_an_abbreviated_flag_rather_than_guessing():
     with pytest.raises(SystemExit):
-        ingest.parser().parse_args(["book.pdf", "--out", "s", "--resu"])
+        ingest.parser().parse_args(["source.pdf", "--out", "s", "--resu"])
 
 
 def test_the_images_go_to_the_model_as_pictures_only_when_asked_for(tmp_path):
@@ -569,11 +569,11 @@ def test_every_inverse_names_a_verb_the_schema_has():
 
 
 def test_a_unit_that_failed_is_not_done_so_resume_reads_it_again(tmp_path):
-    """Chapter 2 of a biology book lost one unit to a timeout, and --resume would have
+    """Chapter 2 of a biology source lost one unit to a timeout, and --resume would have
     skipped it forever: written down is not the same as finished."""
-    progress = ingest.Progress(tmp_path / "shelf.progress.json")
-    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=2)
-    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    progress = ingest.Progress(tmp_path / "sources.progress.json")
+    progress.source("velthorne", title="Velthorne", path="v.pdf", sections=2)
+    fields = {"source": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
     progress.note("velthorne", ingest.Read(unit="velthorne:1:1.1#0", seconds=1.0, concepts=3,
                                            relations=2, **fields))
     progress.note("velthorne", ingest.Read(unit="velthorne:1:1.1#1", seconds=300.0,
@@ -589,8 +589,8 @@ def test_plurals_fold_into_their_singular_and_nothing_else_does():
     assert got == {"acids": "acid", "hydrogen ions": "hydrogen ion", "bases": "base"}
 
 
-def test_the_book_fold_joins_a_plural_to_its_singular():
-    """acid and acids, each with its own edges, are one concept in the folded book."""
+def test_the_source_fold_joins_a_plural_to_its_singular():
+    """acid and acids, each with its own edges, are one concept in the folded source."""
     unit = a_unit()
     reads = [{"unit": unit.id, "extracted": {
         "concepts": [{"name": "acid", "kind": "substance", "definition": "", "aliases": []},
@@ -599,7 +599,7 @@ def test_the_book_fold_joins_a_plural_to_its_singular():
         "relations": [{"from": "acid", "rel": "contrasts_with", "to": "base"},
                       {"from": "acids", "rel": "produces", "to": "base"}],
         "figures": [], "key_terms": []}}]
-    graph = ingest.fold_book(reads, {unit.id: unit}, book_title="Velthorne")
+    graph = ingest.fold_source(reads, {unit.id: unit}, book_title="Velthorne")
     labels = {n["label"] for n in graph["nodes"] if n["kind"] != "figure"}
     assert "acids" not in labels and "acid" in labels
     sources = {e["source"] for e in graph["edges"]}
@@ -640,7 +640,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
     assert seen["seats"] == 1 and seen["lease"]["parallel"] == 1
     assert seen["lease"]["context"] == 32768
     with pytest.raises(SystemExit):
-        ingest.parser().parse_args(["book.pdf", "--out", "s", "--workers", "2"])
+        ingest.parser().parse_args(["source.pdf", "--out", "s", "--workers", "2"])
 
 
 def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monkeypatch,
@@ -670,7 +670,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
 
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
     args = ingest.parser().parse_args(
-        ["--out", str(tmp_path / "shelf"), "--model", "kestrel", "--context", "40000",
+        ["--out", str(tmp_path / "sources"), "--model", "kestrel", "--context", "40000",
          "--per-section", "120", "--n-predict", "999", "--top-k", "20"])
 
     with ingest._serving(args, say=lambda line: None) as client:
@@ -747,7 +747,7 @@ def test_a_failed_unit_keeps_the_whole_reply_for_reading_later(monkeypatch):
     assert row.raw == half
 
 
-def test_n_max_lengthens_the_profiles_draft_for_the_shelf(monkeypatch, tmp_path):
+def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
     from ml_stack.serve import Run, Shape
 
     seen = {}
@@ -778,9 +778,9 @@ def test_n_max_lengthens_the_profiles_draft_for_the_shelf(monkeypatch, tmp_path)
 
 
 def test_a_unit_that_failed_twice_is_left_alone_and_status_says_so(tmp_path, capsys):
-    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
-    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=1)
-    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "sources"))
+    progress.source("velthorne", title="Velthorne", path="v.pdf", sections=1)
+    fields = {"source": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
     bad = ingest.Read(unit="velthorne:1:1.1#0", seconds=700.0,
                       error="ServerError: the reply was cut off (finish_reason=length)", **fields)
     progress.note("velthorne", bad)
@@ -788,7 +788,7 @@ def test_a_unit_that_failed_twice_is_left_alone_and_status_says_so(tmp_path, cap
     progress.note("velthorne", bad)
     assert progress.done("velthorne", bad.unit), "two: leave it"
     assert progress.totals()["given_up"] == 1
-    ingest.status(tmp_path / "shelf")
+    ingest.status(tmp_path / "sources")
     assert "given up" in capsys.readouterr().out
 
 
@@ -803,21 +803,21 @@ def test_the_schema_caps_every_list_so_a_greedy_decode_cannot_circle():
 
 
 def test_retry_frees_the_units_given_up_on(tmp_path, capsys):
-    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
-    progress.book("velthorne", title="Velthorne", path="v.pdf", sections=1)
-    fields = {"book": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
+    progress = ingest.Progress(ingest.Progress.beside(tmp_path / "sources"))
+    progress.source("velthorne", title="Velthorne", path="v.pdf", sections=1)
+    fields = {"source": "velthorne", "chapter": "1", "section": "1.1", "title": "Vault Currents"}
     bad = ingest.Read(unit="velthorne:1:1.1#0", seconds=700.0, error="cut off", **fields)
     progress.note("velthorne", bad)
     progress.note("velthorne", bad)
     assert progress.done("velthorne", bad.unit)
-    assert ingest.retry(tmp_path / "shelf") == 0
+    assert ingest.retry(tmp_path / "sources") == 0
     assert "1 unit(s)" in capsys.readouterr().out
-    again = ingest.Progress(ingest.Progress.beside(tmp_path / "shelf"))
+    again = ingest.Progress(ingest.Progress.beside(tmp_path / "sources"))
     assert not again.done("velthorne", bad.unit)
     assert ingest.main(["retry"]) == 2, "retry needs --out"
 
 
-# -- a book folded while it is still being read -------------------------------------------
+# -- a source folded while it is still being read -------------------------------------------
 
 
 def _until(ready, what, seconds=30.0):
@@ -828,10 +828,10 @@ def _until(ready, what, seconds=30.0):
         time.sleep(0.02)
 
 
-def a_read(unit, *, book="velthorne-open-texts", chapter="1", section="1.1",
+def a_read(unit, *, source="velthorne-open-texts", chapter="1", section="1.1",
            title="Vault Currents", pages=(2, 3), extracted=None, error=""):
     """One row of a reads file, in the shape the run writes it."""
-    return {"unit": unit, "book": book, "chapter": chapter, "section": section,
+    return {"unit": unit, "source": source, "chapter": chapter, "section": section,
             "title": title, "pages": list(pages), "seconds": 86.0, "concepts": 0,
             "relations": 0, "figures": 0, "images": 0, "timed_out": False, "error": error,
             "raw": "", "calls": [], "extracted": dict(extracted or {})}
@@ -845,19 +845,19 @@ def said(*names, relations=(), figures=(), key_terms=()):
             "figures": list(figures), "key_terms": list(key_terms)}
 
 
-def a_part_read_book(tmp_path, *, slug="velthorne-open-texts", rows=None,
+def a_part_read_source(tmp_path, *, slug="velthorne-open-texts", rows=None,
                      title="Velthorne Open Texts", sections=4, store=None):
-    """A reads file and a progress file beside a store, as a half-read book leaves them."""
-    where = store or (tmp_path / "shelf.ladybug")
+    """A reads file and a progress file beside a store, as a half-read source leaves them."""
+    where = store or (tmp_path / "sources.ladybug")
     rows = rows if rows is not None else [
-        a_read(f"{slug}:1:1.1", book=slug,
+        a_read(f"{slug}:1:1.1", source=slug,
                extracted=said("vault", "charge", relations=[("vault", "produces", "charge")])),
-        a_read(f"{slug}:1:1.2", book=slug, section="1.2", pages=(4, 5),
+        a_read(f"{slug}:1:1.2", source=slug, section="1.2", pages=(4, 5),
                extracted=said("vault", "seam wall",
                               relations=[("seam wall", "part_of", "vault")]))]
     ingest._write_json(ingest.reads_path(where, slug), {r["unit"]: r for r in rows})
     progress = ingest.Progress(ingest.Progress.beside(where))
-    held = progress.book(slug, title=title, path=f"{slug}.pdf", sections=sections)
+    held = progress.source(slug, title=title, path=f"{slug}.pdf", sections=sections)
     for row in rows:
         held["done"][row["unit"]] = {"seconds": row["seconds"], "error": row["error"],
                                      "attempts": 1}
@@ -866,47 +866,47 @@ def a_part_read_book(tmp_path, *, slug="velthorne-open-texts", rows=None,
 
 
 def in_store(where):
-    with ingest.Shelf(where).store() as held:
+    with ingest.Sources(where).store() as held:
         return {n["id"] for n in held.nodes()}
 
 
-def test_fold_writes_a_part_read_book_into_the_store_and_says_it_is_partial(tmp_path, capsys):
+def test_fold_writes_a_part_read_source_into_the_store_and_says_it_is_partial(tmp_path, capsys):
     pytest.importorskip("ladybug")
-    store = a_part_read_book(tmp_path)
+    store = a_part_read_source(tmp_path)
 
     assert ingest.main(["fold", "--out", str(store)]) == 0
     line = capsys.readouterr().out.strip()
     assert line.count("\n") == 1 and line.endswith("reads back whole"), "one line for what it did, and the check"
     assert "Velthorne Open Texts" in line and "2 of 4 units read" in line
     assert "partial" in line
-    assert in_store(store) >= {"book:velthorne-open-texts", "concept:vault",
+    assert in_store(store) >= {"source:velthorne-open-texts", "concept:vault",
                                "concept:seam-wall"}
 
 
 def test_fold_twice_leaves_the_store_exactly_as_it_was(tmp_path):
     pytest.importorskip("ladybug")
-    store = a_part_read_book(tmp_path)
+    store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
-    with ingest.Shelf(store).store() as held:
+    with ingest.Sources(store).store() as held:
         first = (held.nodes(), held.edges())
 
     ingest.fold(store, say=lambda _: None)
-    with ingest.Shelf(store).store() as held:
+    with ingest.Sources(store).store() as held:
         assert (held.nodes(), held.edges()) == first
 
 
-def test_a_second_fold_adds_to_the_book_and_only_rebuild_takes_anything_out(tmp_path):
-    """Adam: "if the book already exists, it should append new nodes/connect new edges.
+def test_a_second_fold_adds_to_the_source_and_only_rebuild_takes_anything_out(tmp_path):
+    """Adam: "if the source already exists, it should append new nodes/connect new edges.
     additive." A section re-read into something else adds what it now says; what the
     first fold wrote stays until a person asks for a rebuild."""
     pytest.importorskip("ladybug")
     slug = "velthorne-open-texts"
-    store = a_part_read_book(tmp_path)
+    store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
     assert "concept:seam-wall" in in_store(store)
 
     ingest._write_json(ingest.reads_path(store, slug), {
-        f"{slug}:1:1.1": a_read(f"{slug}:1:1.1", book=slug,
+        f"{slug}:1:1.1": a_read(f"{slug}:1:1.1", source=slug,
                                 extracted=said("vault", "flux ring",
                                                relations=[("vault", "produces", "flux ring")]))})
     ingest.fold(store, say=lambda _: None)
@@ -914,7 +914,7 @@ def test_a_second_fold_adds_to_the_book_and_only_rebuild_takes_anything_out(tmp_
     held = in_store(store)
     assert "concept:flux-ring" in held, "added"
     assert {"concept:seam-wall", "concept:charge"} <= held, "and nothing taken out"
-    with ingest.Shelf(store).store() as store_handle:
+    with ingest.Sources(store).store() as store_handle:
         rels = {(e["source"], e["rel"], e["target"]) for e in store_handle.edges()}
     assert ("concept:vault", "produces", "concept:charge") in rels
     assert ("concept:vault", "produces", "concept:flux-ring") in rels
@@ -925,30 +925,30 @@ def test_a_second_fold_adds_to_the_book_and_only_rebuild_takes_anything_out(tmp_
         and "concept:charge" not in held, "a rebuild is the full fold from the reads, alone"
 
 
-def test_a_concept_two_books_name_survives_one_of_them_being_rebuilt(tmp_path):
+def test_a_concept_two_sources_name_survives_one_of_them_being_rebuilt(tmp_path):
     pytest.importorskip("ladybug")
-    store = tmp_path / "shelf.ladybug"
-    a_part_read_book(tmp_path, store=store)
-    a_part_read_book(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
-                     sections=2, rows=[a_read("lattice-studies:1:1.1", book="lattice-studies",
+    store = tmp_path / "sources.ladybug"
+    a_part_read_source(tmp_path, store=store)
+    a_part_read_source(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
+                     sections=2, rows=[a_read("lattice-studies:1:1.1", source="lattice-studies",
                                               extracted=said("vault", "glimmer node",
                                                              relations=[("glimmer node",
                                                                          "part_of", "vault")]))])
     ingest.fold(store, say=lambda _: None)
-    assert {"book:velthorne-open-texts", "book:lattice-studies"} <= in_store(store)
+    assert {"source:velthorne-open-texts", "source:lattice-studies"} <= in_store(store)
 
     ingest._write_json(ingest.reads_path(store, "velthorne-open-texts"), {
         "velthorne-open-texts:1:1.1": a_read("velthorne-open-texts:1:1.1",
                                              extracted=said("flux ring"))})
-    ingest.fold(store, book="velthorne-open-texts", rebuild=True, say=lambda _: None)
+    ingest.fold(store, source="velthorne-open-texts", rebuild=True, say=lambda _: None)
 
     held = in_store(store)
-    assert "concept:vault" in held, "the other book still names it"
+    assert "concept:vault" in held, "the other source still names it"
     assert "concept:glimmer-node" in held
-    with ingest.Shelf(store).store() as handle:
-        books = {(e["source"], e["target"]) for e in handle.edges("read_from")}
-    assert ("concept:vault", "book:lattice-studies") in books
-    assert ("concept:vault", "book:velthorne-open-texts") not in books
+    with ingest.Sources(store).store() as handle:
+        sources = {(e["source"], e["target"]) for e in handle.edges("read_from")}
+    assert ("concept:vault", "source:lattice-studies") in sources
+    assert ("concept:vault", "source:velthorne-open-texts") not in sources
 
 
 def test_a_unit_that_failed_contributes_nothing_to_the_fold(tmp_path):
@@ -957,8 +957,8 @@ def test_a_unit_that_failed_contributes_nothing_to_the_fold(tmp_path):
     rows = [a_read(f"{slug}:1:1.1", extracted=said("vault")),
             a_read(f"{slug}:1:1.2", section="1.2", error="ServerError: the reply was cut off",
                    extracted=said("half a concept"))]
-    store = a_part_read_book(tmp_path, rows=rows)
-    graph = ingest.Shelf(store).graph(slug)
+    store = a_part_read_source(tmp_path, rows=rows)
+    graph = ingest.Sources(store).graph(slug)
     assert {n["id"] for n in graph["nodes"]} == {"concept:vault"}
 
 
@@ -968,27 +968,27 @@ def test_fold_on_a_store_nothing_was_read_into_says_so(tmp_path, capsys):
     assert ingest.main(["fold"]) == 2
 
 
-# -- the shelf, as an application reads it ----------------------------------------------------
+# -- the sources, as an application reads it ----------------------------------------------------
 
 
-def test_the_shelf_names_every_book_and_how_much_of_it_is_read(tmp_path):
-    store = a_part_read_book(tmp_path)
-    a_part_read_book(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
-                     sections=1, rows=[a_read("lattice-studies:1:1.1", book="lattice-studies",
+def test_the_sources_view_names_every_one_and_how_much_of_it_is_read(tmp_path):
+    store = a_part_read_source(tmp_path)
+    a_part_read_source(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
+                     sections=1, rows=[a_read("lattice-studies:1:1.1", source="lattice-studies",
                                               extracted=said("glimmer node"))])
-    books = {b.slug: b for b in ingest.Shelf(store).books()}
+    sources = {b.slug: b for b in ingest.Sources(store).sources()}
 
-    assert set(books) == {"velthorne-open-texts", "lattice-studies"}
-    partial = books["velthorne-open-texts"]
+    assert set(sources) == {"velthorne-open-texts", "lattice-studies"}
+    partial = sources["velthorne-open-texts"]
     assert (partial.units, partial.read, partial.wanted) == (2, 2, 4)
     assert partial.partial and partial.title == "Velthorne Open Texts"
-    assert not books["lattice-studies"].partial
+    assert not sources["lattice-studies"].partial
     assert partial.per_unit == 86.0 and partial.left == 2 * 86.0
 
 
-def test_the_shelf_folds_a_part_read_book_with_no_store_and_no_pdf(tmp_path):
-    store = a_part_read_book(tmp_path)
-    graph = ingest.Shelf(store).graph("velthorne-open-texts")
+def test_a_part_read_source_folds_with_no_store_and_no_pdf(tmp_path):
+    store = a_part_read_source(tmp_path)
+    graph = ingest.Sources(store).graph("velthorne-open-texts")
 
     assert {n["id"] for n in graph["nodes"]} == {"concept:vault", "concept:charge",
                                                  "concept:seam-wall"}
@@ -1005,21 +1005,21 @@ def test_a_unit_read_in_parts_keeps_the_id_its_provenance_names(tmp_path):
     row = a_read("velthorne-open-texts:1:1.1#2", pages=(6, 7))
     unit = ingest.unit_of(row)
     assert unit.id == "velthorne-open-texts:1:1.1#2"
-    assert unit.where == {"book": "velthorne-open-texts", "chapter": "1", "section": "1.1",
+    assert unit.where == {"source": "velthorne-open-texts", "chapter": "1", "section": "1.1",
                           "page": 6, "pages": [6, 7],
                           "unit": "velthorne-open-texts:1:1.1#2"}
 
 
-def test_the_shelf_opens_the_store_read_only_while_a_writer_has_it_open(tmp_path):
-    """An application reads a shelf the run is still writing into."""
+def test_the_sources_view_opens_the_store_read_only_while_a_writer_has_it_open(tmp_path):
+    """An application reads a sources the run is still writing into."""
     pytest.importorskip("ladybug")
     from ml_stack.graph.store import GraphStore
 
-    store = a_part_read_book(tmp_path)
+    store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)
     with GraphStore(store) as writer:
         writer.upsert_node({"id": "concept:ward", "kind": "concept", "label": "ward"})
-        with ingest.Shelf(store).store() as reader:
+        with ingest.Sources(store).store() as reader:
             assert reader.read_only
             assert "concept:vault" in {n["id"] for n in reader.nodes()}
 
@@ -1029,10 +1029,10 @@ def test_the_shelf_opens_the_store_read_only_while_a_writer_has_it_open(tmp_path
 
 def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, server,
                                                                     monkeypatch):
-    """The whole point: a shelf that takes days is answerable while it is being read."""
+    """The whole point: a sources that takes days is answerable while it is being read."""
     pytest.importorskip("ladybug")
     monkeypatch.setattr(ingest, "FOLD_EVERY", 1)
-    store = tmp_path / "shelf.ladybug"
+    store = tmp_path / "sources.ladybug"
     seen: list[set] = []
 
     def script(prompt):
@@ -1040,20 +1040,20 @@ def test_the_store_holds_the_first_chapter_before_the_second_is_read(tmp_path, s
             seen.append(in_store(store))
         return LATTICE
 
-    book, instance, _ = a_shelf(tmp_path, server, script)
-    assert run([book, "--out", str(store), "--base-url", instance.base_url]) == 0
+    source, instance, _ = a_reading(tmp_path, server, script)
+    assert run([source, "--out", str(store), "--base-url", instance.base_url]) == 0
     assert seen and "concept:glimmer-node" in seen[0], \
         "chapter 1 was in the store before chapter 2 was asked for"
     assert "figure:lattice:2:2.1:1" not in seen[0], "and chapter 2 was not"
 
 
-def test_the_progress_file_records_how_far_each_book_is_folded(tmp_path, server):
+def test_the_progress_file_records_how_far_each_source_is_folded(tmp_path, server):
     pytest.importorskip("ladybug")
-    book, instance, _ = a_shelf(tmp_path, server)
-    store = tmp_path / "shelf.ladybug"
-    run([book, "--out", str(store), "--base-url", instance.base_url])
+    source, instance, _ = a_reading(tmp_path, server)
+    store = tmp_path / "sources.ladybug"
+    run([source, "--out", str(store), "--base-url", instance.base_url])
 
-    held = json.loads(ingest.Progress.beside(store).read_text())["books"]["lattice"]
+    held = json.loads(ingest.Progress.beside(store).read_text())["sources"]["lattice"]
     assert held["folded_at"] == 2 and held["folded_nodes"] > 0 and held["folded_edges"] > 0
     assert held["sections"] == 2, "and no existing key was renamed"
     assert set(held["done"]) == {"lattice:1:1.1", "lattice:2:2.1"}
@@ -1066,7 +1066,7 @@ def test_a_chapter_ends_a_fold_and_a_long_chapter_folds_inside_itself():
     assert ingest._time_to_fold(2 * ingest.FOLD_EVERY, False)
 
 
-def test_folding_a_few_hundred_units_of_one_book_costs_a_second_or_two(tmp_path):
+def test_folding_a_few_hundred_units_of_one_source_costs_a_second_or_two(tmp_path):
     """What the interval is chosen from. The fold itself is `entities.fold_names`, which
     grows with the square of the vocabulary; the write grows with the units."""
     pytest.importorskip("ladybug")
@@ -1080,7 +1080,7 @@ def test_folding_a_few_hundred_units_of_one_book_costs_a_second_or_two(tmp_path)
                            section=f"{chapter}.{n % 15 + 1}", pages=(n * 2, n * 2 + 1),
                            extracted=said(*picks, relations=[
                                (picks[i], "part_of", picks[i + 1]) for i in range(4)])))
-    store = a_part_read_book(tmp_path, rows=rows, sections=515)
+    store = a_part_read_source(tmp_path, rows=rows, sections=515)
 
     began = time.time()
     got = ingest.fold_into(store, slug)
@@ -1094,7 +1094,7 @@ def test_folding_a_few_hundred_units_of_one_book_costs_a_second_or_two(tmp_path)
 
 
 def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
-    """SIGTERM mid-book: the unit in flight is lost, the units before it are in the store."""
+    """SIGTERM mid-source: the unit in flight is lost, the units before it are in the store."""
     pytest.importorskip("ladybug")
     import subprocess
     import threading
@@ -1102,8 +1102,8 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
 
     from conftest import REPO, threaded_server
 
-    store = tmp_path / "shelf.ladybug"
-    book = a_textbook(tmp_path / "lattice.pdf")
+    store = tmp_path / "sources.ladybug"
+    source = a_textbook(tmp_path / "lattice.pdf")
     second = threading.Event()
     asked: list[bytes] = []
 
@@ -1128,7 +1128,7 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
 
     with threaded_server(Model) as url:
         child = subprocess.Popen(
-            [sys.executable, "-m", "ml_stack.ingest", book, "--out", str(store),
+            [sys.executable, "-m", "ml_stack.ingest", source, "--out", str(store),
              "--base-url", url],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             env={**os.environ, "PYTHONPATH": str(REPO / "src"), "PYTHONUNBUFFERED": "1"})
@@ -1143,22 +1143,22 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     assert child.returncode == 0, out
     assert "stopped:" in out and "--resume" in out
     assert "concept:glimmer-node" in in_store(store), "the first unit is in the store"
-    assert ingest.Shelf(store).book("lattice").folded_at == 1
+    assert ingest.Sources(store).source("lattice").folded_at == 1
 
 
 def test_stop_waits_for_the_run_and_says_the_fold_landed(tmp_path, capsys):
     import subprocess
 
-    store = tmp_path / "shelf.ladybug"
-    a_part_read_book(tmp_path, slug="lattice-studies", title="Lattice Studies", store=store,
-                     sections=4, rows=[a_read("lattice-studies:1:1.1", book="lattice-studies",
+    store = tmp_path / "sources.ladybug"
+    a_part_read_source(tmp_path, slug="lattice-studies", title="Lattice Studies", store=store,
+                     sections=4, rows=[a_read("lattice-studies:1:1.1", source="lattice-studies",
                                               extracted=said("vault"))])
     folding = (
         "import json, pathlib, signal, sys, time\n"
         "p, ready = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])\n"
         "def landed(*a):\n"
         "    held = json.loads(p.read_text())\n"
-        "    held['books']['lattice-studies']['folded_at'] = 1\n"
+        "    held['sources']['lattice-studies']['folded_at'] = 1\n"
         "    p.write_text(json.dumps(held))\n"
         "    sys.exit(0)\n"
         "signal.signal(signal.SIGTERM, landed)\n"
@@ -1167,7 +1167,7 @@ def test_stop_waits_for_the_run_and_says_the_fold_landed(tmp_path, capsys):
     ready = tmp_path / "ready"
     child = subprocess.Popen([sys.executable, "-c", folding,
                               str(ingest.Progress.beside(store)), str(ready)])
-    jobs.record("ingest", pid=child.pid, argv=["book.pdf", "--out", str(store)],
+    jobs.record("ingest", pid=child.pid, argv=["source.pdf", "--out", str(store)],
                 home=tmp_path / "jobs")
     try:
         _until(ready.is_file, "the run installed its stop handler")
@@ -1202,7 +1202,7 @@ def test_stop_says_so_when_the_run_will_not_end(tmp_path, capsys):
 # -- what was read ------------------------------------------------------------------------------
 
 
-def test_show_prints_the_concepts_the_relations_and_the_folds_of_each_book(tmp_path, capsys):
+def test_show_prints_the_concepts_the_relations_and_the_folds_of_each_source(tmp_path, capsys):
     slug = "velthorne-open-texts"
     rows = [a_read(f"{slug}:1:1.1", extracted={
         "concepts": [{"name": "vault", "kind": "structure", "aliases": [],
@@ -1214,7 +1214,7 @@ def test_show_prints_the_concepts_the_relations_and_the_folds_of_each_book(tmp_p
         "figures": [{"label": "Figure 1.1", "caption": "A vault in cross-section.",
                      "shows": "One vault.", "concepts": ["vault"]}],
         "key_terms": []})]
-    store = a_part_read_book(tmp_path, rows=rows)
+    store = a_part_read_source(tmp_path, rows=rows)
 
     assert ingest.main(["show", "--out", str(store)]) == 0
     out = capsys.readouterr().out
@@ -1226,14 +1226,14 @@ def test_show_prints_the_concepts_the_relations_and_the_folds_of_each_book(tmp_p
     assert "names joined: vaults -> vault" in out
 
 
-def test_show_takes_one_book_and_a_sample_size(tmp_path, capsys):
+def test_show_takes_one_source_and_a_sample_size(tmp_path, capsys):
     slug = "velthorne-open-texts"
-    store = a_part_read_book(tmp_path)
-    a_part_read_book(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
-                     sections=1, rows=[a_read("lattice-studies:1:1.1", book="lattice-studies",
+    store = a_part_read_source(tmp_path)
+    a_part_read_source(tmp_path, store=store, slug="lattice-studies", title="Lattice Studies",
+                     sections=1, rows=[a_read("lattice-studies:1:1.1", source="lattice-studies",
                                               extracted=said("glimmer node"))])
 
-    assert ingest.main(["show", "--out", str(store), "--book", slug, "--sample", "1"]) == 0
+    assert ingest.main(["show", "--out", str(store), "--source", slug, "--sample", "1"]) == 0
     out = capsys.readouterr().out
     assert "Lattice Studies" not in out
     assert "... and 2 more" in out and "... and 1 more" in out
@@ -1245,11 +1245,11 @@ def test_show_on_a_store_nothing_was_read_into_says_so(tmp_path, capsys):
 
 
 def test_status_says_what_is_in_the_store_and_how_long_the_rest_will_take(tmp_path, capsys):
-    store = a_part_read_book(tmp_path, sections=6)
+    store = a_part_read_source(tmp_path, sections=6)
     assert ingest.status(store) == 0
     out = capsys.readouterr().out
     assert "in store: nothing folded yet" in out
-    assert "~6 min left" in out, "four units at the 86 s each this book measured"
+    assert "~6 min left" in out, "four units at the 86 s each this source measured"
 
     pytest.importorskip("ladybug")
     ingest.fold(store, say=lambda _: None)
@@ -1264,7 +1264,7 @@ def test_status_says_what_is_in_the_store_and_how_long_the_rest_will_take(tmp_pa
 
 def test_a_reads_file_that_cannot_be_written_is_left_as_it_was(tmp_path):
     """A rename is what makes a kill mid-write survivable; a write in place is not."""
-    path = tmp_path / "shelf.velthorne-open-texts.reads.json"
+    path = tmp_path / "sources.velthorne-open-texts.reads.json"
     ingest._write_json(path, {"velthorne-open-texts:1:1.1": {"unit": "1.1"}})
     before = path.read_text()
 

@@ -215,13 +215,13 @@ def test_a_bench_subcommand_not_in_mcp_is_registered_once_and_calls_the_cli(monk
 
 
 def test_models_on_disk_lists_the_weights_with_the_head_and_projector_beside_them(tmp_path):
-    shelf = tmp_path / "models"
-    (shelf / "UD-Q4_K_XL").mkdir(parents=True)
-    weights = [shelf / "UD-Q4_K_XL" / f"Qwen3.8-Flash-Next-UD-Q4_K_XL-0000{i}-of-00004.gguf"
+    models_dir = tmp_path / "models"
+    (models_dir / "UD-Q4_K_XL").mkdir(parents=True)
+    weights = [models_dir / "UD-Q4_K_XL" / f"Qwen3.8-Flash-Next-UD-Q4_K_XL-0000{i}-of-00004.gguf"
                for i in (1, 2, 3, 4)]
-    head = shelf / "UD-Q4_K_XL" / "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
-    proj = shelf / "UD-Q4_K_XL" / "mmproj-F16.gguf"
-    other = shelf / "quince-2b.gguf"
+    head = models_dir / "UD-Q4_K_XL" / "mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf"
+    proj = models_dir / "UD-Q4_K_XL" / "mmproj-F16.gguf"
+    other = models_dir / "quince-2b.gguf"
     for p in (*weights, head, proj, other):
         p.write_bytes(b"gguf")
     found = do.models_on_disk("qwen3.8-flash-next", files=[*weights, head, proj, other])
@@ -276,7 +276,7 @@ PROMPT = ("benchmark qwen3.8-flash-next with llama.cpp (both with draft head and
           "head) and with ollama, make some animations")
 
 
-def shelf(tmp_path: Path) -> list[Path]:
+def model_files(tmp_path: Path) -> list[Path]:
     where = tmp_path / "models" / "UD-Q4_K_XL"
     where.mkdir(parents=True)
     files = [where / "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf",
@@ -349,7 +349,7 @@ ACCEPTANCE = [
 def test_the_acceptance_prompt_looks_up_both_backends_confirms_asks_twice_more_plans_then_runs(
         tmp_path):
     seen: list = []
-    tools = tools_over(seen, files=shelf(tmp_path), fetch=ollama_fake)
+    tools = tools_over(seen, files=model_files(tmp_path), fetch=ollama_fake)
     got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\ny\n", task=PROMPT,
                                       tools=tools, seen=seen)
     names = [c[0] for c in got.calls]
@@ -375,7 +375,7 @@ def test_the_acceptance_prompt_looks_up_both_backends_confirms_asks_twice_more_p
 def test_with_yes_the_models_are_still_looked_up_and_confirmed_but_nobody_is_asked_go(
         tmp_path):
     seen: list = []
-    tools = tools_over(seen, files=shelf(tmp_path), fetch=ollama_fake)
+    tools = tools_over(seen, files=model_files(tmp_path), fetch=ollama_fake)
     got, model, seen, printed = drive(list(ACCEPTANCE), "1\n1\n1\n", task=PROMPT,
                                       tools=tools, seen=seen, yes=True)
     names = [c[0] for c in got.calls]
