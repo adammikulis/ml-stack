@@ -660,7 +660,10 @@ def client_for(args: argparse.Namespace) -> Any:
     measured = profile_for(found)
     if measured is not None:
         print(f"serving in its measured shape: {said(measured)}")
-        run = measured.run(port=args.port, seats=1, model=found, n_predict=args.n_predict,
+        # the record's own seats, not one: a server already up in the measured shape (the
+        # page's, say) is adopted, where a one-seat lease on the same port would be a
+        # mismatch and reload the weights
+        run = measured.run(port=args.port, model=found, n_predict=args.n_predict,
                            timeout=args.timeout)
     else:
         run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
