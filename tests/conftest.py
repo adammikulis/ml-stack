@@ -226,6 +226,7 @@ LLAMA_SERVER_HELP = (
     "-c,    --ctx-size N                     size of the prompt context\n"
     "-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM\n"
     "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
+    "-np,   --parallel N                     number of server slots\n"
     "       --host HOST                      ip address to listen on\n"
     "       --port PORT                      port to listen on\n"
     "       --jinja                          use jinja template for chat\n"

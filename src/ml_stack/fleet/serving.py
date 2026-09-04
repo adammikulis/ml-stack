@@ -112,9 +112,15 @@ class Started:
 
 def start_model(root: Path | str, model_path: Path | str, *, name: str | None = None,
                 context: int = 8192, parallel: int = 1, manager: Any = None,
-                serving: Serving | None = None, port: int | None = None) -> Started:
+                serving: Serving | None = None, port: int | None = None,
+                escalate: bool = False) -> Started:
     """Run ``model_path`` on this machine with ``parallel`` seats of ``context`` tokens.
-    Registers the port when given a ``Serving``."""
+    Registers the port when given a ``Serving``.
+
+    ``escalate=True`` grows a server already up on ``port`` with fewer seats than
+    ``parallel`` asks for, rather than refusing -- see
+    :meth:`~ml_stack.serve.ServerManager.escalate`.
+    """
     from ml_stack.serve import (
         LlamaServerBackend, ServerManager, ServerSpec, free_port)
 
@@ -134,7 +140,8 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
         # -md is what this build calls --spec-draft-model.
         extra = ("-md", str(draft), "-ngld", "99")
     lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
-                                     parallel=parallel, extra_args=extra))
+                                     parallel=parallel, extra_args=extra),
+                          escalate=escalate)
     served = None
     if serving is not None:
         served = serving.register(port, [name or Path(model_path).name], slots=parallel)
@@ -184,15 +191,20 @@ class Hosting:
                 f"this machine has {_human(room)}")
 
     def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
-              parallel: int = 1, room: int = 0) -> Served:
-        """Serve ``model_path`` here, or raise `NoRoom`."""
+              parallel: int = 1, room: int = 0, escalate: bool = True) -> Served:
+        """Serve ``model_path`` here, or raise `NoRoom`.
+
+        ``escalate`` (on by default: a pool is exactly the place more than one
+        conversation is expected) grows a server already up with fewer seats than
+        ``parallel`` asks for rather than refusing.
+        """
         name = name or Path(model_path).name
         why = self.fits_in(name, context=int(context), parallel=int(parallel), room=int(room))
         if why:
             raise NoRoom(f"{name} does not fit: {why}")
         started = start_model(self.root, model_path, name=name, context=int(context),
                               parallel=int(parallel), manager=self.manager,
-                              serving=self.serving)
+                              serving=self.serving, escalate=escalate)
         self.manager = started.manager
         self.leases[started.port] = started.lease
         return started.served or Served(port=started.port, models=[name],

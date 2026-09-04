@@ -445,9 +445,13 @@ def parse_load_log(text: str) -> Measured:
             base, *sliding = kv
             kv_bytes, cells = _mib(base.group(1)), int(base.group(2))
             kv_layers, seqs = int(base.group(3)), int(base.group(4))
+            # llama-kv-cache.cpp prints "n_seq_max/n_stream" -- one stream is one shared
+            # buffer sized for every sequence; more than one is a separate full-size copy
+            # per sequence, and kv_bytes is already the sum over every stream.
+            streams = max(1, int(base.group(5)))
             type_k, type_v = base.group(6), base.group(8)
             cache_type = type_k if type_k == type_v else f"{type_k}/{type_v}"
-            per_token = kv_bytes // cells if cells else 0
+            per_token = kv_bytes // (cells * streams) if cells else 0
             for other in sliding:
                 swa_bytes += _mib(other.group(1))
                 swa_cells = max(swa_cells, int(other.group(2)))

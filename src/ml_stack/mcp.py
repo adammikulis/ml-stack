@@ -163,10 +163,13 @@ def serve_status(port: int = 8080) -> list[dict[str, Any]]:
 
 
 def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
-             draft: str = "", mmproj: str = "", extra: list[str] = []) -> dict[str, Any]:
+             draft: str = "", mmproj: str = "", extra: list[str] = [],
+             escalate: bool = False) -> dict[str, Any]:
     """Put ``model`` (a path or ``hf:owner/repo/file.gguf``) up on ``port`` with
     ``ml-stack-serve up``, detached; returns the log and pid, and ``serve_status`` says
-    when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``."""
+    when it is answering. ``draft`` and ``mmproj`` take a path or ``auto``. ``escalate``
+    grows a server already up on ``port`` with fewer than ``parallel`` seats rather than
+    refusing, keeping every live conversation."""
     argv = ["up", model, "--port", str(port), "--parallel", str(parallel)]
     if context:
         argv += ["--context", str(context)]
@@ -174,6 +177,8 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
         argv += ["--draft", draft]
     if mmproj:
         argv += ["--mmproj", mmproj]
+    if escalate:
+        argv += ["--escalate"]
     argv += list(extra or [])
     return detached("ml_stack.serve.cli", argv, name=f"serve-{Path(model).name}")
 
@@ -183,6 +188,14 @@ def serve_down(port: int = 8080) -> dict[str, Any]:
     from ml_stack.serve.cli import main as serve_main
 
     return _captured(lambda: serve_main(["down", "--port", str(port)]))
+
+
+def serve_escalate(port: int = 8080, add: int = 1) -> dict[str, Any]:
+    """Grow the seats the server on ``port`` holds by ``add``, keeping every live
+    conversation (``ml-stack-serve escalate``), detached; ``serve_status`` says when the
+    relaunch has finished."""
+    return detached("ml_stack.serve.cli", ["escalate", "--port", str(port), "--add",
+                                           str(add)], name=f"escalate-{port}")
 
 
 def models_find(words: str, limit: int = 12, gguf_only: bool = True) -> list[dict[str, Any]]:
@@ -318,6 +331,8 @@ TOOLS: list[Tool] = [
          serve_status),
     Tool("serve_up", "Put a model up on a port, detached; returns the log and pid.", serve_up),
     Tool("serve_down", "Stop the server this machine started on a port.", serve_down),
+    Tool("serve_escalate", "Grow the seats a running server holds, keeping every live "
+                          "conversation.", serve_escalate),
     Tool("models_find", "Search the Hub for a model, the trusted publishers first.",
          models_find),
     Tool("models_files", "The files in one Hub repository, with the hf: reference for each.",

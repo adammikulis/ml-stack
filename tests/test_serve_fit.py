@@ -167,6 +167,21 @@ class TestParsingALoadLog:
         assert got.model_file == "thornfield-8B-Q4_K_M.gguf"
         assert got.build == "a1b2c3d"
 
+    def test_a_cache_with_no_shared_stream_is_divided_by_every_stream_it_cost(self):
+        """`n_seq_max/n_stream` -- one stream is one shared buffer sized for every
+        sequence; more than one is a separate full-size copy per sequence, and the size
+        llama.cpp prints is already summed over every stream it made. Two streams of
+        1024 MiB each print as 2048 MiB total; the per-token cost is still 1024 MiB over
+        32768 cells, not double that.
+
+        Mutation: divide by cells alone and this reads 64 KiB, twice the real cost.
+        """
+        two_streams = DENSE_LOG.replace(
+            "size =  1024.00 MiB ( 32768 cells,  32 layers,  2/1 seqs)",
+            "size =  2048.00 MiB ( 32768 cells,  32 layers,  2/2 seqs)")
+        got = parse_load_log(two_streams)
+        assert got.per_token == 1024 * MIB // 32768 == 32768
+
     def test_a_recurrent_state_is_charged_per_sequence_and_not_per_token(self):
         """The recurrent cache does not grow with the context -- 24 MiB for two sequences
         is 12 MiB each however long they get, which is the whole reason the architecture

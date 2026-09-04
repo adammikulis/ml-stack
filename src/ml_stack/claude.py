@@ -135,7 +135,10 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = pr
         say("serving bare: no measured shape for this model")
     began = time.time()
     with serve(run.model, manager=run.shape.manager(), **run.lease(), timeout=900.0,
-               cache_reuse=256, warmup=False) as server:
+               cache_reuse=256, warmup=False, escalate=True,
+               on_event=lambda e: say(f"  {e.get('event')}: "
+                                      + ", ".join(f"{k}={v}" for k, v in e.items()
+                                                  if k != "event"))) as server:
         alias = alias_of(server.base_url, found)
         env = environment(server.base_url, alias, offline=not args.online)
         say(f"claude on {server.base_url} as {alias!r}, up in {time.time() - began:.0f}s; "

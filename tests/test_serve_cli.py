@@ -570,6 +570,7 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
                       "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
                       "-np,   --parallel N                     number of server slots\n"
                       "       --jinja                          use jinja template\n"
+                      "-np,   --parallel N                     number of server slots\n"
                       "--spec-draft-n-max N                    tokens to draft (default: 3)\n"
                       "--draft, --draft-max N                  the argument has been removed\n"
                       "HELP\nfi\nexit 0\n")
@@ -592,7 +593,8 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     code = cli.main(["up", str(gguf), "--binary", str(binary), "--port", str(free_port())])
     err = capsys.readouterr().err
     assert code == 2
-    assert err.strip() == "this llama-server has no --draft-max; it has --spec-draft-n-max"
+    assert err.strip().splitlines()[-1] == (
+        "this llama-server has no --draft-max; it has --spec-draft-n-max")
 
 
 class TestPreflightOnly:

@@ -16,9 +16,9 @@ from pathlib import Path
 import pytest
 from ml_stack import mcp as server
 
-EXPECTED = {"serve_status", "serve_up", "serve_down", "models_find", "models_files",
-            "models_fetch", "bench_run", "bench_status", "bench_history", "bench_show",
-            "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor"}
+EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
+            "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
+            "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor"}
 
 
 def rpc(ident, method, **params):

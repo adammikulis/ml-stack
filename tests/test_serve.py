@@ -124,6 +124,21 @@ class TestStartGuards:
             # Still listening: we refused rather than reclaiming.
             assert held.fileno() != -1
 
+    def test_the_slot_save_path_is_made_rather_than_left_for_the_server_to_refuse(
+            self, fake_binary, gguf, tmp_path):
+        """llama-server's whole complaint about a missing --slot-save-path directory is
+        'not a directory', at the end of a load -- not a directory it will create.
+
+        Mutation: stop making the directory, and this exits 1 instead of coming up.
+        """
+        save_path = tmp_path / "slots"
+        assert not save_path.exists()
+        backend = LlamaServerBackend(binary=fake_binary)
+        with pytest.raises(ServerFailed):
+            leased(backend, ServerSpec(model=gguf, slot_save_path=save_path),
+                  timeout=1.0, preflight=False)
+        assert save_path.is_dir()
+
 
 class TestPorts:
     def test_free_port_is_actually_free(self):

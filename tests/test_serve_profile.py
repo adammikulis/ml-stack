@@ -310,7 +310,7 @@ def leases(monkeypatch, tmp_path):
         def __init__(self, backend=None, state_file=None):
             self.backend = backend
 
-        def lease(self, spec, timeout=None):
+        def lease(self, spec, timeout=None, **kw):
             seen.append(spec)
             return SimpleNamespace(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                    pid=None, adopted=True)

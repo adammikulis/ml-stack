@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 LOG_DIR = CACHE_ROOT / "logs"
 
+# Where a slot's KV cache is saved when a lease asks to escalate seats without one named.
+DEFAULT_SLOT_SAVE_PATH = CACHE_ROOT / "slots"
+
 
 class ServerFailed(RuntimeError):
     """The server never became healthy. Carries whatever it managed to say."""
@@ -616,8 +619,20 @@ class LlamaServerBackend(ServerBackend):
                 raise PreflightFailed(report.said())
 
         LOG_DIR.mkdir(parents=True, exist_ok=True)
+        if spec.slot_save_path:
+            # llama-server refuses to start rather than create this itself: "not a
+            # directory" is its whole complaint.
+            Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
         log_path = LOG_DIR / f"llama-server-{spec.port}.log"
         logger.info("starting: %s", " ".join(argv))
+
+        extra_env = {}
+        if spec.slot_save_path:
+            # A slot's own prompt text is otherwise unreadable -- to_json() only fills
+            # "prompt"/"generated" when slots_debug is set, and that is env-only, read
+            # once at startup. Without it, escalate()'s summariser has a token count and
+            # nothing to summarise.
+            extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
         started_at = time.monotonic()
         log_handle = log_path.open("wb")
@@ -625,7 +640,7 @@ class LlamaServerBackend(ServerBackend):
             argv,
             stdout=log_handle,
             stderr=subprocess.STDOUT,
-            env=child_env(self.binary),
+            env=child_env(self.binary, extra_env or None),
         )
 
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"

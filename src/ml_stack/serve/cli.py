@@ -18,6 +18,7 @@ from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.serve import build
 from ml_stack.serve.backend import (
+    DEFAULT_SLOT_SAVE_PATH,
     LlamaServerBackend,
     ServerFailed,
     ServerInfo,
@@ -467,6 +468,31 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     return found, took
 
 
+_EVENT_LINES = {
+    "loading": lambda e: f"loading {e.get('model', '')} ({e.get('seats', 1)} seat(s))",
+    "ready": lambda e: (
+        f"ready in {e['load_s']:.1f}s" if e.get("load_s") is not None else "ready"),
+    "escalating": lambda e: (
+        f"escalating {e.get('from_seats')} -> {e.get('to_seats')} seat(s) by "
+        f"{e.get('mode')} -- {e.get('reason', '')}"),
+    "saving": lambda e: f"saving slot {e.get('slot')} ({e.get('tokens', 0):,} tokens)",
+    "summarizing": lambda e: f"summarising slot {e.get('slot')} ({e.get('tokens', 0):,} tokens)",
+    "summarized": lambda e: (
+        f"summarised slot {e.get('slot')} to {e.get('tokens', 0):,} words: "
+        f"{e.get('summary', '')}"),
+    "stopping": lambda e: "stopping the old server",
+    "restoring": lambda e: f"restoring slot {e.get('slot')} ({e.get('mode', 'cache')})",
+    "done": lambda e: f"now serving {e.get('seats')} seat(s)",
+}
+
+
+def _print_event(event: dict) -> None:
+    """One line per step, as it happens -- ``ml-stack-serve up``'s and ``escalate``'s own
+    progress, in the words ``ServerManager`` already emits them in."""
+    said = _EVENT_LINES.get(str(event.get("event")))
+    print(said(event) if said else str(event.get("event")), file=sys.stderr)
+
+
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import LlamaServerBackend, UnknownFlag
 
@@ -569,7 +595,9 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     manager.say = lambda line: print(line, file=sys.stderr)
     try:
-        info = manager.lease(spec, timeout=args.timeout)
+        info = manager.lease(spec, timeout=args.timeout,
+                             escalate=bool(getattr(args, "escalate", False)),
+                             on_event=_print_event)
     except UnknownFlag as exc:
         # Refused before the load, not at the end of it: the build was asked what it
         # accepts and the answer is printed one flag per line, with the nearest it has.
@@ -1052,6 +1080,48 @@ def cmd_down(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_escalate(args: argparse.Namespace) -> int:
+    """``ml-stack-serve escalate`` -- grow a running server's seats in place, keeping
+    every live conversation."""
+    manager = ServerManager(state_file=STATE_FILE)
+    base_url = f"http://{DEFAULT_HOST}:{args.port}"
+    if not is_healthy(base_url, timeout=PROBE_TIMEOUT):
+        print(f"error: nothing is answering on port {args.port} to escalate", file=sys.stderr)
+        return 2
+    params = serving_params(base_url)
+    if params is None or not params.model or params.n_ctx is None or params.total_slots is None:
+        print(f"error: port {args.port} does not say enough about its own shape to "
+              "escalate -- is /props answering, with --slots enabled?", file=sys.stderr)
+        return 2
+
+    save_path = str(getattr(args, "slot_save_path", "") or "") or str(DEFAULT_SLOT_SAVE_PATH)
+    current = ServerSpec(model=params.model, port=args.port,
+                         context=int(params.n_ctx) * int(params.total_slots),
+                         parallel=int(params.total_slots), slot_save_path=save_path)
+    room = None
+    asked_room = str(getattr(args, "room", "") or "")
+    if asked_room:
+        from ml_stack.serve.fit import parse_room
+
+        try:
+            room = parse_room(asked_room)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    try:
+        info = manager.escalate(current, add_seats=max(1, int(args.add)), room=room,
+                                timeout=args.timeout, on_event=_print_event)
+    except ServerFailed as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.json:
+        print(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid}))
+        return 0
+    print(f"port {args.port}: now at {info.base_url}" + (f" (pid {info.pid})" if info.pid else ""))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack-serve",
@@ -1087,6 +1157,10 @@ def main(argv: list[str] | None = None) -> int:
                          "conversations on this server pay for it too")
     up.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
                     help=f"slots to serve at once (default: {DEFAULT_PARALLEL})")
+    up.add_argument("--escalate", action="store_true",
+                    help="when a server is already up with fewer slots than --parallel "
+                         "asks for, grow (or split, or summarise and split) it rather "
+                         "than refusing -- keeps every live conversation")
     up.add_argument("--timeout", type=float, default=None,
                     help="seconds to wait for it to load (default: scales with the "
                          f"weights on disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)")
@@ -1297,6 +1371,26 @@ def main(argv: list[str] | None = None) -> int:
     down.add_argument("--root", default=DEFAULT_ROOT,
                       help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})")
 
+    escalate = sub.add_parser(
+        "escalate", help="grow the seats a running server holds, keeping every live "
+                         "conversation")
+    escalate.add_argument("--port", type=int, default=DEFAULT_PORT,
+                          help=f"port of the server to grow (default: {DEFAULT_PORT})")
+    escalate.add_argument("--add", type=int, default=1, metavar="N",
+                          help="how many more seats to ask for (default: 1)")
+    escalate.add_argument("--slot-save-path", default="", metavar="PATH",
+                          help="where the running server saves slots, if it was not "
+                               "started through 'up --escalate' (default: this manager's "
+                               "own)")
+    escalate.add_argument("--timeout", type=float, default=None,
+                          help="seconds to wait for the relaunch to load (default: "
+                               "scales with the weights on disk)")
+    escalate.add_argument("--room", default="", metavar="SIZE",
+                          help="judge the grow-vs-split decision against this much room "
+                               "(e.g. 24G) instead of what this machine actually has")
+    escalate.add_argument("--json", action="store_true",
+                          help="print one JSON object instead of the human lines")
+
     build_p = sub.add_parser(
         "build", help="build llama-server from llama.cpp's own master (or download the "
                       "newest release), and switch to it once it is verified")
@@ -1346,8 +1440,8 @@ def main(argv: list[str] | None = None) -> int:
                               "repo -- builds nothing")
 
     args = ap.parse_args(argv)
-    return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "memory": cmd_memory,
-            "fit": cmd_fit, "profile": cmd_profile,
+    return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "escalate": cmd_escalate,
+            "memory": cmd_memory, "fit": cmd_fit, "profile": cmd_profile,
             "build": build.cmd_build}[args.cmd](args)
 
 
