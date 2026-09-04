@@ -425,6 +425,7 @@ class Report:
     lines: list[str] = field(default_factory=list)
     # what `absorb` did to an incoming graph, and the graph with its ids rewritten
     graph: dict[str, Any] = field(default_factory=dict)
+    mapping: dict[str, str] = field(default_factory=dict)   # incoming id -> the store's
     mapped_same_name: int = 0
     mapped_plural: int = 0
     left_possible: int = 0
@@ -873,7 +874,8 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
     spelling goes to ``judge``, with the incoming node's own passage (``attrs.passage``, or
     ``sources`` over its provenance) beside the existing node's: ``same`` rewrites it onto
     the existing node, ``different`` is written to ``tidy:decisions`` and the node stays new,
-    ``unsure`` stays new and is reported. Nothing in the store is written but that document.
+    ``unsure`` stays new and is reported. Every name landed on an existing node is written
+    to `MERGES`. Nothing else in the store is written; a read-only store gets neither.
     """
     from ml_stack.graph.store import GraphStore
 
@@ -902,6 +904,8 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
             by_length.setdefault(kind, {}).setdefault(len(key), []).append(key)
 
     decisions = _decisions(store)
+    merges = _merges(store)
+    landed: dict[str, dict[str, Any]] = {}
     carried: dict[str, str] = {}
     original = getattr(judge, "sources", None)
     if judge is not None:
@@ -936,6 +940,7 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
                         break
             if found is not None:
                 mapping[node_id] = str(found["id"])
+                landed[node_id] = dict(found)
                 if how == "the same name":
                     report.mapped_same_name += 1
                 else:
@@ -968,6 +973,7 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
                                     "absorbed": True})
                 if verdict == "same":
                     mapping[node_id] = str(other["id"])
+                    landed[node_id] = dict(other)
                     report.judged_same += 1
                     note(f"absorb: {node.get('label')!r} judged the same as "
                          f"{other['label']!r} -- {answer.get('why', '')}")
@@ -997,7 +1003,10 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
         else:
             out[final] = node
     edged: dict[tuple[str, str, str], dict[str, Any]] = {}
+    rewired: dict[str, int] = {}
     for edge in (graph.get("edges") or ()):
+        for end in {str(edge.get("source") or ""), str(edge.get("target") or "")} & landed.keys():
+            rewired[end] = rewired.get(end, 0) + 1
         source = mapping.get(str(edge.get("source") or ""), str(edge.get("source") or ""))
         target = mapping.get(str(edge.get("target") or ""), str(edge.get("target") or ""))
         rel = str(edge.get("rel") or "")
@@ -1011,6 +1020,15 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
         edged[(source, rel, target)] = merged
     report.graph = {**{k: v for k, v in graph.items() if k not in ("nodes", "edges")},
                     "nodes": list(out.values()), "edges": list(edged.values())}
+    report.mapping = dict(mapping)
+    by_incoming = {str(n.get("id") or ""): n for n in incoming}
+    _keep_merges(store, merges, [
+        {"kept": str(found["id"]), "kept_label": str(found.get("label") or ""),
+         "gone": node_id, "gone_label": str(by_incoming[node_id].get("label") or ""),
+         "kind": str(found.get("kind") or ""), "edges_moved": rewired.get(node_id, 0),
+         "kept_from": list(found.get("provenance") or ()),
+         "gone_from": list(by_incoming[node_id].get("provenance") or ()), "at": _now()}
+        for node_id, found in landed.items()])
     note(report.absorbed())
     return report
 
@@ -1089,11 +1107,24 @@ def _merges(store: Any) -> list[dict[str, Any]]:
 
 
 def _keep_merge(store: Any, merges: list[dict[str, Any]], entry: Mapping[str, Any]) -> None:
-    """One merge into the store's merges document, at once; a (kept, gone) pair already
-    there is not written twice."""
-    if any(m.get("kept") == entry["kept"] and m.get("gone") == entry["gone"] for m in merges):
+    """One merge into the store's merges document, at once."""
+    _keep_merges(store, merges, [entry])
+
+
+def _keep_merges(store: Any, merges: list[dict[str, Any]],
+                 entries: Iterable[Mapping[str, Any]]) -> None:
+    """``entries`` into the store's merges document in one write; a (kept, gone) pair
+    already there is not written twice, and a read-only store is not written."""
+    held = {(m.get("kept"), m.get("gone")) for m in merges}
+    new = []
+    for entry in entries:
+        pair = (entry["kept"], entry["gone"])
+        if pair not in held:
+            held.add(pair)
+            new.append(dict(entry))
+    if not new:
         return
-    merges.append(dict(entry))
+    merges.extend(new)
     if not hasattr(store, "put_doc") or getattr(store, "read_only", False):
         return
     store.put_doc(MERGES, {"merges": merges, "hidden": True})

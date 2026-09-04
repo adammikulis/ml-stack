@@ -124,7 +124,126 @@ def test_a_store_no_pass_has_judged_counts_no_pairs(tmp_path):
     assert ingest.Shelf(store).shared()["decisions"]["pairs"] == 0
 
 
-# -- a name joined across books --------------------------------------------------------------
+# -- a name joined across books on the way in ----------------------------------------------
+
+
+def a_shelf_folded_in_turn(tmp_path):
+    """One book folded, then a second whose unit names the first book's `seam wall` in the
+    plural: the fold lands `seam walls` on the node the store already holds."""
+    store = a_part_read_book(tmp_path)
+    assert ingest.main(["fold", "--out", str(store)]) == 0
+    rows = [a_read(f"{FIELD_GUIDE}:1:1.1", book=FIELD_GUIDE, title="Spore Blooms",
+                   extracted=said("spore bloom", "seam walls",
+                                  relations=[("spore bloom", "part_of", "seam walls")]))]
+    a_part_read_book(tmp_path, slug=FIELD_GUIDE, rows=rows, title="Ambleford Field Guide",
+                     sections=6, store=store)
+    return store
+
+
+def test_the_fold_writes_each_name_it_lands_on_an_existing_node_with_the_units_of_both(
+        tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES
+
+    store = a_shelf_folded_in_turn(tmp_path)
+    assert ingest.main(["fold", "--out", str(store)]) == 0
+
+    with GraphStore(store, read_only=True) as held:
+        merges = held.get_doc(MERGES)["merges"]
+        assert "concept:seam-walls" not in {n["id"] for n in held.nodes()}
+    assert len(merges) == 1
+    one = merges[0]
+    assert (one["kept"], one["kept_label"]) == ("concept:seam-wall", "seam wall")
+    assert (one["gone"], one["gone_label"]) == ("concept:seam-walls", "seam walls")
+    assert one["kind"] == "structure"
+    assert one["edges_moved"] == 1, "the relation; the edge to its book is written after"
+    assert one["kept_from"] == [f"{OPEN_TEXTS}:1:1.2"]
+    assert one["gone_from"] == [f"{FIELD_GUIDE}:1:1.1"]
+    assert one["at"]
+
+
+def test_a_fold_repeated_writes_the_landing_once(tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES
+
+    store = a_shelf_folded_in_turn(tmp_path)
+    ingest.main(["fold", "--out", str(store)])
+    ingest.main(["fold", "--out", str(store)])
+
+    with GraphStore(store, read_only=True) as held:
+        assert len(held.get_doc(MERGES)["merges"]) == 1
+
+
+def test_a_name_the_fold_landed_across_two_books_is_between_them_and_the_command_prints_it(
+        tmp_path, capsys):
+    store = a_shelf_folded_in_turn(tmp_path)
+    ingest.main(["fold", "--out", str(store)])
+
+    assert ingest.Shelf(store).between_books() == [
+        {"a_label": "seam wall", "a_book": OPEN_TEXTS, "b_label": "seam walls",
+         "b_book": FIELD_GUIDE, "kind": "structure", "weight": 5}], \
+        "the joined node's four mentions, two from each book, and the one edge rewired"
+    assert ingest.main(["shelf", "--out", str(store)]) == 0
+    said_out = capsys.readouterr().out
+    assert "between books (1)" in said_out
+    assert f"seam wall ({OPEN_TEXTS}) = seam walls ({FIELD_GUIDE})  structure  5" in said_out
+
+
+def test_a_book_folded_again_keeps_what_the_other_book_gave_a_shared_node(tmp_path):
+    """The fold of every book runs in slug order, so the first book is folded again after
+    the second landed on its node: the node keeps both books' units, mentions and names."""
+    from ml_stack.graph.store import GraphStore
+
+    store = a_shelf_folded_in_turn(tmp_path)
+    ingest.main(["fold", "--out", str(store)])
+    ingest.fold_into(store, OPEN_TEXTS)
+    ingest.fold_into(store, OPEN_TEXTS)
+
+    with GraphStore(store, read_only=True) as held:
+        wall = next(n for n in held.nodes() if n["id"] == "concept:seam-wall")
+    assert wall["mentions"] == 4
+    assert wall["provenance"] == [f"{FIELD_GUIDE}:1:1.1", f"{OPEN_TEXTS}:1:1.2"]
+    assert wall["attrs"]["aliases"] == ["seam walls"]
+    assert ingest.Shelf(store).between_books()[0]["weight"] == 5
+
+
+def test_a_book_read_further_grows_its_own_share_of_a_shared_node(tmp_path):
+    from ml_stack.graph.store import GraphStore
+
+    store = a_shelf_folded_in_turn(tmp_path)
+    ingest.main(["fold", "--out", str(store)])
+    rows = ingest.Shelf(store).reads(OPEN_TEXTS)
+    rows.append(a_read(f"{OPEN_TEXTS}:2:2.1", chapter="2", section="2.1", pages=(8, 9),
+                       extracted=said("seam wall")))
+    ingest._write_json(ingest.reads_path(store, OPEN_TEXTS), {r["unit"]: r for r in rows})
+    ingest.fold_into(store, OPEN_TEXTS)
+
+    with GraphStore(store, read_only=True) as held:
+        wall = next(n for n in held.nodes() if n["id"] == "concept:seam-wall")
+    assert wall["mentions"] == 5, "two from the field guide, three of its own"
+    assert wall["provenance"] == [f"{FIELD_GUIDE}:1:1.1", f"{OPEN_TEXTS}:1:1.2",
+                                  f"{OPEN_TEXTS}:2:2.1"]
+
+
+def test_a_fold_in_memory_a_dry_fold_and_a_read_only_absorb_write_no_landing(tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES, absorb
+
+    store = a_shelf_folded_in_turn(tmp_path)
+    shelf = ingest.Shelf(store)
+
+    graph = shelf.graph(FIELD_GUIDE)
+    assert {n["id"] for n in graph["nodes"]} >= {"concept:seam-walls"}
+    got = ingest.fold_into(store, FIELD_GUIDE, dry_run=True)
+    assert got["nodes"] == 2
+    assert absorb(store, graph).mapped_plural == 1
+
+    with GraphStore(store, read_only=True) as held:
+        assert held.get_doc(MERGES) is None
+        assert "concept:seam-walls" not in {n["id"] for n in held.nodes()}
+
+
+# -- a name joined across books by the hygiene pass ------------------------------------------
 
 
 WRITTEN = {"seam wal": "seam wall"}

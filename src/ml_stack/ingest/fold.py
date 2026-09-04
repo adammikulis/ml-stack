@@ -235,16 +235,20 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
 
 def write(out: str | Path, graph: Mapping[str, Any], *, book: str, title: str,
           docs: Mapping[str, Any] | None = None, replace: bool = False,
-          keep_units: Iterable[str] | None = None) -> dict[str, int]:
+          keep_units: Iterable[str] | None = None,
+          shares: Mapping[str, int] | None = None) -> dict[str, int]:
     """One book's graph and its raw extractions into the store, and read back before returning.
 
     The book itself is a node, so a store holding a shelf can still be asked what came out
     of which book; every concept hangs off it by ``read_from``.
 
     An upsert, and nothing more. Adam: "if the book already exists, it should append new
-    nodes/connect new edges. additive." A node the store lacks is added; one it has takes
-    the fold's mentions, aliases, definition and provenance (the fold is over every read
-    so far, so those only grow); an edge likewise; nothing is merged and nothing is
+    nodes/connect new edges. additive." A node the store lacks is added; one it has keeps
+    what other books gave it and takes this book's part afresh: ``shares`` is this book's
+    mentions per node (the fold's own count, before `absorb` rewrote its ids), kept in the
+    ``ingest:shares:<book>`` document so the next fold can replace it; provenance is the
+    other books' units and this fold's; aliases union; a definition the fold lacks stays.
+    An edge takes the fold's weight and provenance; nothing is merged and nothing is
     removed -- joining names is the hygiene pass's job (`ml_stack.graph.tidy`). Folding
     twice with nothing read in between changes nothing.
 
@@ -261,17 +265,58 @@ def write(out: str | Path, graph: Mapping[str, Any], *, book: str, title: str,
     edges = [*graph.get("edges", ()),
              *({"source": node["id"], "rel": "read_from", "target": book_id, "weight": 1}
                for node in graph.get("nodes", ()))]
+    if shares is None:
+        shares = {str(n["id"]): int(n.get("mentions") or 0) for n in graph.get("nodes", ())}
     with GraphStore(out) as store:
         if replace:
             _drop_book(store, book, keep_units=keep_units)
+        previous = store.get_doc(f"ingest:shares:{book}")
+        if isinstance(previous, Mapping):
+            previous = dict(previous)
+        else:
+            # a book folded before the shares were kept, or one never folded at all
+            previous = None if store.get_doc(f"ingest:folds:{book}") is not None else {}
+        held = {str(n["id"]): n for n in store.nodes()}
+        nodes = [_joined(node, held.get(str(node["id"])), book, shares, previous)
+                 for node in nodes]
         counts = store.write({"nodes": nodes, "edges": edges})
         for key, value in (docs or {}).items():
             store.put_doc(key, value)
         store.put_doc(f"ingest:folds:{book}", dict(graph.get("folds") or {}))
+        store.put_doc(f"ingest:shares:{book}", dict(shares))
         back = store.query("MATCH (n:Node {id: $id}) RETURN n.id AS id", {"id": book_id})
     if not back:
         raise RuntimeError(f"{book_id} was written to {out} and did not come back")
     return counts
+
+
+def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, book: str,
+            shares: Mapping[str, int], previous: Mapping[str, int] | None) -> dict[str, Any]:
+    """``node`` as the store will hold it: what other books gave ``existing`` kept, and this
+    book's part -- mentions, units, aliases, definition -- taken from the fold.
+
+    ``previous`` is this book's share the last time it was written; None when the book was
+    folded before the shares were kept, and then its share is what the store counts."""
+    node_id = str(node["id"])
+    if existing is None or node.get("kind") == "book":
+        return dict(node)
+    share = int(shares.get(node_id, node.get("mentions") or 0))
+    before = int(existing.get("mentions") or 0)
+    was = int(previous.get(node_id, 0)) if previous is not None else min(before, share)
+    prefix = f"{book}:"
+    other = [u for u in existing.get("provenance") or () if not str(u).startswith(prefix)]
+    mine = [u for u in node.get("provenance") or () if str(u).startswith(prefix)]
+    attrs = dict(existing.get("attrs") or {})
+    for key, value in (node.get("attrs") or {}).items():
+        if key != "aliases" and (value or key not in attrs):
+            attrs[key] = value
+    aliases = list((existing.get("attrs") or {}).get("aliases") or [])
+    for alias in (node.get("attrs") or {}).get("aliases") or ():
+        if alias and alias != node.get("label") and alias not in aliases:
+            aliases.append(alias)
+    attrs["aliases"] = aliases
+    return {**node, "mentions": max(before - was, 0) + share, "attrs": attrs,
+            "provenance": list(dict.fromkeys([*other, *mine]))}
 
 
 def _drop_book(store: Any, book: str, *, keep_units: Iterable[str] | None = None) -> int:
@@ -364,6 +409,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
            "seconds": round(time.time() - began, 2)}
     if dry_run:
         return got
+    shares = {str(n["id"]): int(n.get("mentions") or 0) for n in graph["nodes"]}
     if not rebuild and Path(out).expanduser().exists():
         from ml_stack.graph.store import GraphStore
         from ml_stack.graph.tidy import absorb
@@ -371,13 +417,15 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
         with GraphStore(out) as store:
             taken = absorb(store, graph, judge=judge, sources=_texts_of(units), log=log)
         graph = taken.graph
+        for gone, kept in taken.mapping.items():
+            shares[kept] = shares.get(kept, 0) + shares.pop(gone, 0)
         got["absorbed"] = {"same_name": taken.mapped_same_name, "plural": taken.mapped_plural,
                            "judged_same": taken.judged_same,
                            "judged_different": taken.judged_different,
                            "possible": taken.left_possible}
     docs = _unit_docs(rows, slug)
     counts = write(out, graph, book=slug, title=name, docs=docs, replace=rebuild,
-                   keep_units=set(units) if rebuild else None)
+                   keep_units=set(units) if rebuild else None, shares=shares)
     got["seconds"] = round(time.time() - began, 2)
     record = progress if progress is not None else shelf.progress
     record.book(slug, title=name)
