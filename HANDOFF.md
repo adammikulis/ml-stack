@@ -65,6 +65,19 @@ ten questions, unconfirmed.
   --sample 20` against the kept plain runs: precision up, recall held. A profile records
   `constrain_ids` and the answer cache keys on it, so `report --profile` can set it.
 - [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
+- [ ] **Is a unified cache slower than one slot?** (Adam, 2026-09-04: "still serve one by
+  default, but we need to test down the line whether unified cache is slower".) Every
+  command now serves one seat, so this decides whether more seats cost speed as well as
+  room. A unified cache holds every sequence in one pool and masks out the tokens
+  belonging to the others, so attention may pay over the whole pool even when one
+  conversation is live -- if it does, four slots is slower than one at a single stream,
+  not merely wastier. Measure on a small model, since the shape is what is under test and
+  not the model: serve `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf` on a scratch port four ways --
+  one slot and four slots, each with `--kv-unified` and without -- at the same total
+  cache, and run `ml-stack-bench speed` at one stream against each. Generation tokens a
+  second is the number; prompt reading is the second one to watch. Minutes, and it wants a
+  quiet machine. The page ran four unified slots all through 2026-09-04, so a difference
+  here also says what that cost.
 - [ ] **The stable prefix: reading fell, calls rose; measure again on a quiet machine.**
   Nine sampled questions on the page's Flash-Next against `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
   (kept as `flashprefix-plain`): the last call of a question reads ~50 tokens with the whole
