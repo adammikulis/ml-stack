@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -349,7 +349,10 @@ class GraphStore:
         paid anyway.
         """
         self._writes = getattr(self, "_writes", 0) + 1
-        return f"{cypher} /* w{self._writes} */"
+        text = f"{cypher} /* w{self._writes} */"
+        self._forget(getattr(self, "_wrote", ""))
+        self._wrote = text
+        return text
 
     def _asked(self, cypher: str) -> str:
         """A word-index query's text, made unique for this execution.
@@ -359,7 +362,32 @@ class GraphStore:
         a label was rewritten it answers for the label it first saw.
         """
         self._asks = getattr(self, "_asks", 0) + 1
-        return f"{cypher} /* q{self._asks} */"
+        text = f"{cypher} /* q{self._asks} */"
+        self._forget(getattr(self, "_askedtext", ""))
+        self._askedtext = text
+        return text
+
+    def _forget(self, cypher: str) -> None:
+        """Drop the connection's cached plan for one statement, and close what it held.
+
+        ladybug keeps a prepared statement per statement text for the life of the
+        connection, and `_written`/`_asked` give every one its own text: 12,000 edge
+        upserts reached 18 GB resident and then a buffer-manager allocation failure, and
+        stay at 247 MB over 26,000 when each is dropped as the next is made (2026-09-04).
+        """
+        cache = getattr(self._conn, "_pybind_implicit_prepared_cache", None)
+        if not cypher or not isinstance(cache, dict):
+            return
+        lock = getattr(self._conn, "_prepared_cache_lock", None)
+        with lock if lock is not None else nullcontext():
+            for key in [k for k in cache if isinstance(k, tuple) and k[:1] == (cypher,)]:
+                held = cache.pop(key, None)
+                close = getattr(held, "close", None)
+                if callable(close):
+                    try:
+                        close()
+                    except Exception:  # noqa: BLE001 - a statement closed twice is closed
+                        pass
 
     @contextmanager
     def transaction(self):
