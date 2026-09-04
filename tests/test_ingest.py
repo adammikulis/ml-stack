@@ -820,7 +820,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     from ml_stack.serve.profile import Profile
 
     measured = Profile(model="kestrel-8B-UD-Q4_K_XL.gguf", seat_context=16384, parallel=4,
-                       cache_type="q8_0", sampling={"temperature": 0.0})
+                       cache_type="q8_0", sampling={"temperature": 1.0})
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
                         lambda m: replace(measured, served=str(m)))
     monkeypatch.setattr(ingest, "_find_model", lambda m: "kestrel-8B-UD-Q4_K_XL.gguf")
@@ -843,7 +843,8 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
         assert client.base_url == "http://127.0.0.1:8099"
         assert client.n_predict == 999 and client.timeout == 120.0
         assert client.slot == 0, "one seat, and it is sat in"
-        assert client.asked_temperature == 0.0, "the profile measured it"
+        assert client.asked_temperature == 0.1, "extraction's own default, not the " \
+            "profile's answering temperature"
         assert client.asked_top_k == 20, "and the command line laid its own over"
 
     assert seen["model"] == "kestrel-8B-UD-Q4_K_XL.gguf"
@@ -856,6 +857,32 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
 
     said = ingest._serving_said(args)
     assert "context 65536, parallel 1" in said and "kestrel-8B" in said
+
+
+def test_extraction_defaults_to_a_whisker_of_temperature_over_greedy():
+    """No flag given: extraction's own default, not the server's, not a profile's."""
+    args = ingest.parser().parse_args(["--out", "s"])
+    assert ingest._sampling(args) == {"temperature": 0.1}
+
+
+def test_a_temperature_flag_replaces_the_default_by_name_alone():
+    args = ingest.parser().parse_args(["--out", "s", "--temperature", "1.0"])
+    assert ingest._sampling(args) == {"temperature": 1.0}
+
+
+def test_temperature_zero_also_zeroes_top_p_top_k_and_min_p():
+    """Full greedy takes the rest of the surface with it, so nothing left at a server's own
+    default -- top_p 0.95, top_k 20, whatever -- can reintroduce sampling."""
+    args = ingest.parser().parse_args(["--out", "s", "--temperature", "0"])
+    assert ingest._sampling(args) == {"temperature": 0.0, "top_k": 1, "top_p": 1.0,
+                                      "min_p": 0.0}
+
+
+def test_temperature_zero_keeps_a_knob_given_explicitly():
+    args = ingest.parser().parse_args(
+        ["--out", "s", "--temperature", "0", "--top-p", "0.9"])
+    assert ingest._sampling(args) == {"temperature": 0.0, "top_p": 0.9, "top_k": 1,
+                                      "min_p": 0.0}
 
 
 def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, capsys):

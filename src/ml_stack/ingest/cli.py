@@ -321,7 +321,8 @@ def parser() -> argparse.ArgumentParser:
                     help="keep each extraction under this directory and do not ask twice "
                          "for the same section and schema")
     ap.add_argument("--temperature", type=float, default=None,
-                    help="override the sampling temperature")
+                    help="override the sampling temperature (default: 0.1, extraction's "
+                         "own; 0 also zeroes top-p, top-k and min-p, unless given here too)")
     ap.add_argument("--top-p", type=float, default=None, help="override top_p")
     ap.add_argument("--top-k", type=int, default=None, help="override top_k")
     ap.add_argument("--min-p", type=float, default=None, help="override min_p")

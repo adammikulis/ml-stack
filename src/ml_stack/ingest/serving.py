@@ -7,7 +7,8 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
 
-__all__ = ["SERVE_EXTRA", "_alive", "_find_model", "_run", "_serving", "_serving_said"]
+__all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_find_model", "_run", "_sampling",
+           "_serving", "_serving_said"]
 
 
 SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False,
@@ -18,14 +19,31 @@ served on the port asked for and no other. The ingest's, not the profile's -- a 
 of how a model answers says nothing about them."""
 
 
+EXTRACT_SAMPLING: dict[str, Any] = {"temperature": 0.1}
+"""Extraction's own default sampling, independent of whatever a profile measured for
+answering: a whisker of temperature over full greedy, so a decode that would otherwise
+repeat forever has an escape a zero temperature does not -- on a workload whose grammar
+already closes every list at a `maxItems` cap. Chosen on reasoning, not a finished
+measurement: `HANDOFF.md` carries the comparison still owed against temperature 0 and 1.0."""
+
+
 def _sampling(args: Any) -> dict[str, Any]:
-    """The sampler settings named on the command line, and only those."""
-    return {name: value for name, value in
-            (("temperature", getattr(args, "temperature", None)),
-             ("top_p", getattr(args, "top_p", None)),
-             ("top_k", getattr(args, "top_k", None)),
-             ("min_p", getattr(args, "min_p", None)))
-            if value is not None}
+    """Extraction's sampling: :data:`EXTRACT_SAMPLING`, with a flag on the command line
+    replacing one setting by name -- and ``--temperature 0`` taking `top_k`, `top_p` and
+    `min_p` with it, so nothing left at a server's own default can reintroduce sampling
+    under an explicit greedy choice."""
+    out = dict(EXTRACT_SAMPLING)
+    for name, value in (("temperature", getattr(args, "temperature", None)),
+                        ("top_p", getattr(args, "top_p", None)),
+                        ("top_k", getattr(args, "top_k", None)),
+                        ("min_p", getattr(args, "min_p", None))):
+        if value is not None:
+            out[name] = value
+    if out.get("temperature") == 0:
+        out.setdefault("top_k", 1)
+        out.setdefault("top_p", 1.0)
+        out.setdefault("min_p", 0.0)
+    return out
 
 
 def _said(measured: Any) -> str:

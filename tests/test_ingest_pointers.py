@@ -120,6 +120,8 @@ def test_run_record_names_what_the_run_read_with(monkeypatch):
     assert record["model"].startswith("kestrel") and record["serving"] == "one slot, q8_0"
     assert len(record["schema_sha"]) == 16 and len(record["instructions_sha"]) == 16
     assert record["id"].startswith("run:") and record["images"] is True
+    assert record["sampling"] == {"temperature": 0.1}, \
+        "the resolved default, not just what a flag named"
 
 
 def test_a_second_sources_names_land_on_the_first_sources_nodes_on_the_way_in(tmp_path):

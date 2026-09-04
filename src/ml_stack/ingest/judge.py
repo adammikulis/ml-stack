@@ -44,6 +44,7 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
         return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
     core_only = bool(getattr(args, "core_only", False))
+    from ml_stack.ingest.serving import _sampling
 
     try:
         version = metadata.version("ml-stack")
@@ -54,11 +55,7 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
             "model": model or str(getattr(args, "model", "") or ""),
             "serving": serving, "images": bool(getattr(args, "images", False)),
             "n_max": getattr(args, "n_max", None),
-            "sampling": {k: v for k, v in (("temperature", getattr(args, "temperature", None)),
-                                           ("top_p", getattr(args, "top_p", None)),
-                                           ("top_k", getattr(args, "top_k", None)),
-                                           ("min_p", getattr(args, "min_p", None)))
-                         if v is not None},
+            "sampling": _sampling(args),
             "core_only": core_only,
             "schema_sha": sha(json.dumps(schema(core_only=core_only), sort_keys=True)),
             "instructions_sha": sha(instructions(core_only=core_only) + WITH_IMAGES),

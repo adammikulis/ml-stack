@@ -205,9 +205,11 @@ from ml_stack.ingest.run import (
     _time_to_fold as _time_to_fold,
 )
 from ml_stack.ingest.serving import (
+    EXTRACT_SAMPLING as EXTRACT_SAMPLING,
     _alive as _alive,
     _find_model as _find_model,
     _run as _run,
+    _sampling as _sampling,
     _serving as _serving,
     _serving_said as _serving_said,
 )
