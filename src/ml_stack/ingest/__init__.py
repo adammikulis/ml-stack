@@ -38,6 +38,12 @@ questions today. `Shelf` is how an application reads one::
     with shelf.store() as store:                    # read-only, beside the running writer
         store.nodes(kind="concept")
 
+*A book somebody else already extracted is free.* ``ml-stack-ingest import DIR --out
+STORE`` takes a nodes/edges CSV pair another extractor wrote, maps its predicates onto the
+verbs this library sets and writes the rest as they stand, marked ``extension``, and folds
+the result in as one book -- so it sits beside the read ones and every command works over
+it. ``--dry-run`` says what it would write, predicate by predicate.
+
 ``ml-stack-ingest fold --out STORE`` does the same fold from the shelf into the store on
 demand, ``show`` prints what a book holds, ``shelf`` prints what the books hold together --
 the concepts more than one of them names and the relations joining their vocabularies, see
@@ -97,6 +103,7 @@ from ml_stack.ingest.extract import (
     _Recording as _Recording,
 )
 from ml_stack.ingest.fold import (
+    CORE as CORE,
     build as build,
     fold as fold,
     fold_book as fold_book,
@@ -121,6 +128,20 @@ from ml_stack.ingest.gold import (
     _names as _names,
     _passage_unit as _passage_unit,
     _same as _same,
+)
+from ml_stack.ingest.imports import (
+    CONFIDENCE as CONFIDENCE,
+    KINDS as KINDS,
+    RELATIONS as RELATIONS,
+    Imported as Imported,
+    bring as bring,
+    imported as imported,
+    lines as import_lines,
+    named as named,
+    verb_for as verb_for,
+    _pair as _pair,
+    _titled as _titled,
+    _where_of as _where_of,
 )
 from ml_stack.ingest.judge import (
     located as located,
@@ -179,9 +200,11 @@ from ml_stack.ingest.shelf import (
     _run_said as _run_said,
 )
 
-__all__ = ["FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS", "PER_SECTION", "VERBS",
-           "Book", "Progress", "Scored", "Shelf", "Stopped", "ask", "asked_lines", "build",
+__all__ = ["CONFIDENCE", "CORE", "FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS", "KINDS",
+           "PER_SECTION", "RELATIONS", "VERBS",
+           "Book", "Imported", "Progress", "Scored", "Shelf", "Stopped", "ask", "asked_lines",
+           "bring", "build",
            "detach", "extract_unit", "fold", "fold_book", "fold_into", "gold_score",
-           "graph_of", "main", "read_asked", "read_gold", "sayable", "schema", "score_asked",
-           "shelf", "vocabulary",
+           "graph_of", "import_lines", "imported", "main", "read_asked", "read_gold",
+           "sayable", "schema", "score_asked", "shelf", "verb_for", "vocabulary",
            "show", "status", "unit_of", "units_of", "write"]

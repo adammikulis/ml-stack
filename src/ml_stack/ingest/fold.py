@@ -8,10 +8,15 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.ingest.extract import VERBS
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
 
-__all__ = ["build", "fold", "fold_book", "fold_into", "plurals", "write"]
+__all__ = ["CORE", "build", "fold", "fold_book", "fold_into", "plurals", "write"]
+
+
+CORE = frozenset(VERBS) | {"illustrates", "read_from"}
+"""The verbs this library sets itself. An edge with any other verb carries ``extension``."""
 
 
 def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
@@ -76,6 +81,8 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
         key = (source, rel, target)
         held = edges.setdefault(key, {"source": source, "rel": rel, "target": target,
                                       "weight": 0, "provenance": []})
+        if rel not in CORE:
+            held["extension"] = True
         held["weight"] += 1
         if where["unit"] not in held["provenance"]:
             held["provenance"].append(where["unit"])
@@ -154,6 +161,11 @@ def fold_book(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any]
     edges, relation_folds = fold_edges(
         edges, log=log, label="relations", provenance="provenance",
         settles="the schema's vocabulary settles which is right")
+    for edge in edges.values():
+        if edge["rel"] in CORE:
+            edge.pop("extension", None)
+        else:
+            edge["extension"] = True
 
     weight = {node["label"]: int(node["mentions"]) for node in nodes.values()
               if node["kind"] != "figure"}

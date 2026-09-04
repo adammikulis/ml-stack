@@ -187,7 +187,7 @@ def _out_of(argv: Iterable[str]) -> str:
     return ""
 
 
-_WORDS = ("status", "show", "shelf", "ask", "fold", "retry", "tidy")
+_WORDS = ("status", "show", "shelf", "ask", "fold", "import", "retry", "tidy")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -208,13 +208,15 @@ def parser() -> argparse.ArgumentParser:
                "           or score a set of questions with --gold FILE\n"
                "  fold     fold every book that has reads -- part-read ones too -- into the\n"
                "           store, replacing what the store held for it\n"
+               "  import   a nodes/edges CSV pair another extractor wrote, onto this shelf\n"
+               "           as one book -- `import DIR --out STORE`, or the two files\n"
                "  retry    let the units given up on be read again by the next --resume\n"
                "  stop     end the detached run, after it has folded what it has read\n"
                "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
                     help="the PDFs to read; or one of `status`, `show`, `shelf`, `ask`, "
-                         "`fold`, `retry`, `stop` (see below), which does that and stops. "
-                         "`ask` takes the question after it")
+                         "`fold`, `import`, `retry`, `stop` (see below), which does that and "
+                         "stops. `ask` takes the question after it, `import` the CSV pair")
     ap.add_argument("--out", default="", metavar="STORE",
                     help="the GraphStore to write into; one store holds a whole shelf. "
                          "Required to read anything; --gold writes nothing and needs none")
@@ -252,7 +254,21 @@ def parser() -> argparse.ArgumentParser:
                          "full fold from its reads -- the only way anything leaves the store, "
                          "for after a fix that changed what a read means")
     ap.add_argument("--dry-run", action="store_true",
-                    help="with fold: say what each fold would add and write nothing")
+                    help="with fold or import: say what would be written, and write nothing")
+    ap.add_argument("--slug", default="", metavar="SLUG",
+                    help="with import: name the book this; by default the file it was read "
+                         "out of names it")
+    ap.add_argument("--confidence", default="medium", choices=("low", "medium", "high"),
+                    metavar="LEVEL",
+                    help="with import: take rows at this confidence and above -- low, "
+                         "medium or high (default: %(default)s)")
+    ap.add_argument("--provisional", action=argparse.BooleanOptionalAction, default=True,
+                    help="with import: take rows their extractor left provisional "
+                         "(default); --no-provisional leaves them")
+    ap.add_argument("--core-only", action="store_true",
+                    help="with import: write only the predicates that map onto the verbs "
+                         "this library sets, and leave the rest; without it every predicate "
+                         "comes in, the ones outside those verbs marked as extensions")
     ap.add_argument("--book", default="", metavar="SLUG",
                     help="with `show` or `fold`, only this book")
     ap.add_argument("--chapter", default="", metavar="N",
@@ -349,6 +365,10 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             return 2
         if word == "fold":
             return fold(args.out, book=args.book, rebuild=args.rebuild, dry_run=args.dry_run)
+        if word == "import":
+            return ingest.bring(args.out, args.docs[1:], slug=args.slug,
+                                confidence=args.confidence, provisional=args.provisional,
+                                core_only=args.core_only, dry_run=args.dry_run)
         if word == "show":
             return show(args.out, book=args.book, most=args.sample or 5)
         if word == "shelf":
