@@ -502,6 +502,10 @@ def _gold_run(args: Any) -> int:
         return 1
     for line in gold_lines(scored):
         print(line)
+    if scored.errors:
+        print(f"error: {len(scored.errors)} passage(s) did not reach the model; the F1 above "
+              f"is not a score", file=sys.stderr)
+        return 1
     if args.fail_under is not None and scored.f1 < args.fail_under:
         print(f"error: F1 {scored.f1:.2f} is under {args.fail_under:g}", file=sys.stderr)
         return 1

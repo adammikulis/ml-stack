@@ -89,6 +89,44 @@ def test_a_reading_that_says_exactly_the_gold_scores_one_on_both_rates(server, p
     assert scored.misses == [] and scored.spurious == [] and scored.unsayable == []
 
 
+def test_a_server_error_mid_run_is_recorded_as_an_error_not_folded_into_the_rates(server, passages):
+    failed = passages[0]["passage_id"]
+
+    def script(prompt):
+        passage = _passage_for(prompt, passages)
+        if passage["passage_id"] == failed:
+            raise ConnectionError("cannot reach it (Connection refused)")
+        return dict(EMPTY, relations=[_as_said(t) for t in passage["triples"]])
+
+    scored, _ = _score(server, passages, script)
+
+    assert len(scored.errors) == 1
+    assert scored.errors[0]["passage"] == failed
+    assert "Connection refused" in scored.errors[0]["error"]
+    wanted_after_failure = sum(len(p["triples"]) for p in passages if p["passage_id"] != failed)
+    assert scored.matched == scored.found == wanted_after_failure, \
+        "the failed passage's triples are missing data, not a miss the model made"
+
+
+def test_a_gold_gate_fails_on_a_server_error_even_when_the_rest_would_pass(server, passages,
+                                                                           tmp_path, capsys):
+    failed = passages[-1]["passage_id"]
+
+    def script(prompt):
+        passage = _passage_for(prompt, passages)
+        if passage["passage_id"] == failed:
+            raise ConnectionError("cannot reach it (Connection refused)")
+        return dict(EMPTY, relations=[_as_said(t) for t in passage["triples"]])
+
+    instance, _ = a_model(server, script)
+    code = ingest.main(["--gold", str(GOLD), "--base-url", instance.base_url,
+                        "--fail-under", "0.1"])
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert "did not reach the model" in err
+
+
 def test_one_triple_the_passage_does_not_state_costs_precision_and_not_recall(server, passages):
     extra = {"from": "the reader", "rel": "member_of", "to": "the audience"}
 

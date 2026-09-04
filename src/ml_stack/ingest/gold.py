@@ -62,6 +62,8 @@ class Scored:
     unsayable: list[dict[str, str]] = field(default_factory=list)
     # The verbs outside the core vocabulary the run wrote, and how often each.
     coined: dict[str, int] = field(default_factory=dict)
+    # Passages whose call failed: missing data, not a model that said nothing.
+    errors: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def recall(self) -> float:
@@ -163,6 +165,9 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
         began = time.time()
         row = ingest.extract_unit(client, unit, shape, per_section=per_section)
         out.seconds += time.time() - began
+        if row.error:
+            out.errors.append({"passage": str(passage.get("passage_id") or ""),
+                               "error": row.error})
         said = [r for r in (row.extracted.get("relations") or ()) if isinstance(r, Mapping)]
         wanted = [t for t in (passage.get("triples") or ()) if isinstance(t, Mapping)]
         out.wanted += len(wanted)
@@ -240,6 +245,10 @@ def gold_lines(scored: Scored, *, most: int = 20) -> list[str]:
     out = [f"gold: {scored.matched} of {scored.wanted} triples over {scored.passages} passages "
            f"-- recall {scored.recall:.0%}, precision {scored.precision:.0%}, "
            f"F1 {scored.f1:.0%} ({scored.seconds:.0f}s)"]
+    if scored.errors:
+        out.append(f"  {len(scored.errors)} passage(s) did not reach the model -- the rates "
+                   f"above are not a score, they are missing data counted as misses:")
+        out += [f"    {e['passage']}: {e['error']}" for e in scored.errors]
     if scored.misses:
         out.append(f"  missed ({len(scored.misses)}):")
         out += [f"    {m['passage']}: {m['triple']}" for m in scored.misses[:most]]
