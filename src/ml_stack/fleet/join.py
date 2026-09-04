@@ -683,7 +683,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
                  self_name=str((me or {}).get("name") or ""))
     shapes, fits = _measurements()
-    placement = place(args.users, args.context, rows, shapes, fits)
+    placement = place(args.users, args.context, rows, shapes, fits,
+                      prefer=args.prefer)
     applied: list[dict[str, Any]] = []
     if args.apply and placement.rows:
         applied = apply_plan(placement, rows, cluster_key_path=args.cluster_key,
@@ -707,6 +708,8 @@ def cmd_leave(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from .plan import PREFERENCES
+
     ap = argparse.ArgumentParser(
         prog="ml-stack-fleet",
         description="Make this machine a peer in one command, and see what the fleet sees.")
@@ -753,6 +756,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="how many conversations at once, across the fleet")
     plan_p.add_argument("--context", type=int, default=16384,
                         help="tokens each conversation gets (default: 16384)")
+    plan_p.add_argument("--prefer", choices=sorted(PREFERENCES), default="quality",
+                        help="what each peer serves: 'quality' the best measured model "
+                             "that fits there (default), 'seats' the model that seats "
+                             "the most users there")
     plan_p.add_argument("--apply", action="store_true",
                         help="serve the plan: each peer runs its model with its seats")
     plan_p.add_argument("--timeout", type=float, default=2.0,

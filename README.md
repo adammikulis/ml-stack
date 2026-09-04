@@ -764,15 +764,27 @@ PEER             MODEL                                            SEATS  CONTEXT
 studio           Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf    31    16384   109.9G   110.0G
 larch            gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf                   5    16384     5.7G    24.0G
 36 of 36 user(s) seated at 16384 tokens each
+--prefer quality: the best measured model that fits each peer
 ```
 
 Models are taken in the order `docs/model-ranking.md` ranks them, and each goes to every
 peer with room for its loaded weights and at least one seat's cache at `--context`, taking
 as many seats as fit or as are still wanted; so the best model reaches the most users, and
-a smaller machine serves a smaller model to the rest. A peer serves one model. A user who
-gets no seat is counted, with every peer's reason. `--apply` serves the plan: each placed
-peer's daemon runs its model with those seats (`POST /serve`), and what each is serving
-afterwards is printed. `--json` is the same as data.
+a smaller machine serves a smaller model to the rest. A peer serves one model.
+
+`--prefer seats` reads the other way: each peer, roomiest first, serves whichever model
+seats the most of the users still waiting, and a tie goes to the better-ranked model. A
+machine with room for the best model at one seat and a smaller one at six gives six people
+a smaller model:
+
+```
+ml-stack-fleet plan --users 36 --context 16384 --prefer seats
+```
+
+A user who gets no seat is counted, with every peer's reason; so is a model with no memory
+measurement and a memory measurement for a model nobody has scored. `--apply` serves the
+plan: each placed peer's daemon runs its model with those seats (`POST /serve`), and what
+each is serving afterwards is printed. `--json` is the same as data.
 
 ### Following main
 

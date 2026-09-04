@@ -34,6 +34,8 @@ BIG = "quince-70b-Q4_K_M.gguf"
 MID = "larch-9b-Q4_K_M.gguf"
 SMALL = "quince-2b-Q4_K_M.gguf"
 SHINY = "thornfell-1b-Q4_K_M.gguf"
+UNRANKED = "quince-27b-Q4_K_M.gguf"
+UNMEASURED = "larch-20b-MXFP4.gguf"
 
 PROFILES = [
     Profile(model=MID, questions=100, right=0.5, seconds_per_question=3.0),
@@ -49,11 +51,16 @@ FITS = [
         per_seq=0),
     Fit(model=SMALL, weights_gpu=2 * G, compute=G // 2, per_token=64 * 1024, per_seq=0),
     Fit(model=SHINY, weights_gpu=1 * G, compute=G // 4, per_token=64 * 1024, per_seq=0),
+    # a memory record no profile names
+    Fit(model=UNRANKED, weights_gpu=16 * G, compute=G, per_token=128 * 1024, per_seq=0),
 ]
 
 ROOMY = Room("roomy", 96 * G)
 SMALLER = Room("small", 24 * G)
 TINY = Room("tiny", 8 * G)
+MIDSIZE = Room("midsize", 57 * G)
+FLEETS = [[TINY], [SMALLER], [ROOMY], [MIDSIZE], [MIDSIZE, SMALLER],
+          [TINY, SMALLER, ROOMY], [MIDSIZE, ROOMY, TINY]]
 
 
 class TestRanking:
@@ -124,10 +131,11 @@ class TestPlacing:
         assert [(r.peer, r.seats) for r in short.rows] == [("roomy", 5)]
         assert short.rows[0].context == 4096
 
-    def test_a_peer_with_no_room_figure_is_named(self):
+    def test_a_peer_with_no_room_figure_is_named_once(self):
         got = place(1, 16384, [Room("blank", 0)], PROFILES, FITS)
         assert got.rows == [] and got.unplaced == 1
-        assert ("blank", BIG, "room unknown") in got.why
+        assert [w for w in got.why if w[2] == "room unknown"] == [("blank", "*",
+                                                                  "room unknown")]
 
     def test_a_model_with_no_memory_record_is_named(self):
         got = place(1, 16384, [ROOMY], [Profile(model="nothing-3b.gguf", questions=50,
@@ -140,6 +148,53 @@ class TestPlacing:
         assert d["seated"] == 5 and d["unplaced"] == 0
         assert d["rows"][0]["peer"] == "roomy" and d["rows"][0]["seats"] == 3
         assert {"peer": "small", "model": BIG, "reason": "room 24.0G < 41.0G loaded"} in d["why"]
+
+
+class TestPreference:
+    """`--prefer quality` gives a peer the best model that fits; `--prefer seats` the
+    model that seats the most of the users still waiting."""
+
+    def test_quality_seats_one_on_a_peer_where_a_smaller_model_seats_three(self):
+        got = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality")
+        assert [(r.peer, r.model, r.seats) for r in got.rows] == [("midsize", BIG, 1)]
+        assert got.unplaced == 2 and got.prefer == "quality"
+
+    def test_seats_takes_the_smaller_model_and_everyone_sits(self):
+        got = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="seats")
+        assert [(r.peer, r.model, r.seats) for r in got.rows] == [("midsize", MID, 3)]
+        assert got.unplaced == 0 and got.prefer == "seats"
+
+    def test_quality_is_what_no_preference_asks_for(self):
+        assert place(3, 16384, [MIDSIZE], PROFILES, FITS).as_dict() == place(
+            3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality").as_dict()
+
+    def test_seats_takes_the_better_model_when_both_seat_everyone(self):
+        got = place(2, 16384, [ROOMY], PROFILES, FITS, prefer="seats")
+        assert [(r.model, r.seats) for r in got.rows] == [(BIG, 2)]
+
+    def test_seats_never_seats_fewer_people_than_quality(self):
+        for fleet in FLEETS:
+            for users in (1, 2, 3, 5, 7, 10, 20):
+                good = place(users, 16384, fleet, PROFILES, FITS, prefer="quality")
+                many = place(users, 16384, fleet, PROFILES, FITS, prefer="seats")
+                assert many.seated >= good.seated, (fleet, users)
+                assert many.seated + many.unplaced == users
+
+    def test_a_half_measured_model_is_named_once_for_the_fleet_either_way(self):
+        profiles = [*PROFILES, Profile(model=UNMEASURED, questions=100, right=0.7)]
+        for want in ("quality", "seats"):
+            got = place(9, 16384, [MIDSIZE, SMALLER, TINY], profiles, FITS, prefer=want)
+            assert [w for w in got.why if w[2] == "no memory measurement"] == [
+                ("*", UNMEASURED, "no memory measurement")]
+            assert [w for w in got.why if w[2] == "not ranked"] == [
+                ("*", UNRANKED, "not ranked")]
+
+    def test_the_table_and_the_data_name_the_preference(self):
+        good = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="quality")
+        many = place(3, 16384, [MIDSIZE], PROFILES, FITS, prefer="seats")
+        assert "--prefer quality: the best measured model that fits each peer" in table(good)
+        assert "--prefer seats: the model that seats the most users on each peer" in table(many)
+        assert good.as_dict()["prefer"] == "quality" and many.as_dict()["prefer"] == "seats"
 
 
 # -- the command --------------------------------------------------------------------
@@ -202,6 +257,31 @@ class TestCommand:
         assert "3 of 4 user(s) seated at 16384 tokens each" in out
         assert "1 user(s) without a seat" in out
         assert f"small: {BIG}: room 24.0G < 41.0G loaded" in out
+
+    def test_the_preference_reaches_the_planner_and_the_table(
+            self, key, udp, daemons, measured, monkeypatch, capsys):
+        raw = load_cluster_key(key)
+        port = _free_tcp()
+        daemons.append(FakeDaemon(port, raw, udp, name="midsize", device=_device(57 * G)))
+        monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
+        argv = ["--cluster-key", str(key), "--port", str(port), "plan", "--users", "3",
+                "--context", "16384", "--timeout", "1"]
+        assert main([*argv, "--json"]) == 1
+        good = json.loads(capsys.readouterr().out)
+        assert main([*argv, "--prefer", "seats", "--json"]) == 0
+        many = json.loads(capsys.readouterr().out)
+        assert good["prefer"] == "quality"
+        assert [(r["peer"], r["model"], r["seats"]) for r in good["rows"]] == [
+            ("midsize", BIG, 1)]
+        assert good["unplaced"] == 2
+        assert many["prefer"] == "seats"
+        assert [(r["peer"], r["model"], r["seats"]) for r in many["rows"]] == [
+            ("midsize", MID, 3)]
+        assert many["unplaced"] == 0
+        main([*argv, "--prefer", "seats"])
+        out = capsys.readouterr().out
+        assert "--prefer seats: the model that seats the most users on each peer" in out
+        assert "3 of 3 user(s) seated at 16384 tokens each" in out
 
     def test_in_no_cluster_it_says_join(self, tmp_path, capsys):
         assert main(["--cluster-key", str(tmp_path / "none.key"), "plan", "--users", "1"]) == 1

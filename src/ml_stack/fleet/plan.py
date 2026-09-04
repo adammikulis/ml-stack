@@ -8,10 +8,17 @@ from typing import Any, Callable, Sequence
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, family_of, quant_of
 
-__all__ = ["Placement", "Room", "Row", "fit_for", "place", "ranked", "room_of", "table"]
+__all__ = ["PREFERENCES", "Placement", "Room", "Row", "fit_for", "place", "ranked",
+           "room_of", "table"]
 
 RANKED_AFTER = 20
 """A profile with fewer questions than this ranks after every one with more."""
+
+PREFERENCES = {
+    "quality": "the best measured model that fits each peer",
+    "seats": "the model that seats the most users on each peer",
+}
+"""What each ``--prefer`` choice gives a peer."""
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,7 @@ class Placement:
 
     users: int
     context: int
+    prefer: str = "quality"
     rows: list[Row] = field(default_factory=list)
     unplaced: int = 0
     why: list[tuple[str, str, str]] = field(default_factory=list)
@@ -111,67 +119,117 @@ class Placement:
         return sum(r.seats for r in self.rows)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"users": self.users, "context": self.context, "seated": self.seated,
-                "unplaced": self.unplaced, "rows": [asdict(r) for r in self.rows],
+        return {"users": self.users, "context": self.context, "prefer": self.prefer,
+                "seated": self.seated, "unplaced": self.unplaced,
+                "rows": [asdict(r) for r in self.rows],
                 "why": [{"peer": p, "model": m, "reason": r} for p, m, r in self.why]}
 
 
+def _note(out: Placement, peer: str, model: str, reason: str) -> None:
+    if (peer, model, reason) not in out.why:
+        out.why.append((peer, model, reason))
+
+
+def _seats_on(peer: Room, fit: Fit, context: int, left: int) -> tuple[int, int, str]:
+    """Seats for at most ``left`` users on ``peer``, the bytes that uses, and the reason
+    when there are none."""
+    from ml_stack.hub import _human
+
+    here = fit.at_room(peer.room)
+    loaded, each = here.line(context)
+    if loaded > peer.room:
+        return 0, 0, f"room {_human(peer.room)} < {_human(loaded)} loaded"
+    seats = min(left, here.free() // each) if each > 0 else left
+    if seats < 1:
+        return 0, 0, (f"room {_human(peer.room)} < {_human(loaded + each)} "
+                      f"for one seat at {context}")
+    return seats, loaded + seats * each, ""
+
+
 def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Profile],
-          fits: Sequence[Fit], *, log: Callable[[str], None] | None = None) -> Placement:
+          fits: Sequence[Fit], *, log: Callable[[str], None] | None = None,
+          prefer: str = "quality") -> Placement:
     """Seats for ``users`` at ``context`` tokens each across ``peers``.
 
-    Models are taken best first (`ranked`); each goes on every peer with room for its
-    loaded size and at least one seat, roomiest peer first, taking as many seats as fit
-    or as are still wanted. A peer serves one model. Stops when every user has a seat;
-    ``unplaced`` is how many did not get one.
+    With ``prefer="quality"`` models are taken best first (`ranked`); each goes on every
+    peer with room for its loaded size and at least one seat, roomiest peer first, taking
+    as many seats as fit or as are still wanted. With ``prefer="seats"`` peers are taken
+    roomiest first and each serves whichever model seats the most of the users still
+    waiting, ties going to the better-ranked one. A peer serves one model. Stops when
+    every user has a seat; ``unplaced`` is how many did not get one.
     """
     from ml_stack.hub import _human
 
     say = log or (lambda line: None)
-    out = Placement(users=int(users), context=int(context))
+    want = prefer if prefer in PREFERENCES else "quality"
+    out = Placement(users=int(users), context=int(context), prefer=want)
     left = max(0, int(users))
     open_peers = sorted((room_of(p) for p in peers), key=lambda r: -r.room)
-    say(f"planning {left} user(s) at {context} tokens over {len(open_peers)} peer(s):")
+    say(f"planning {left} user(s) at {context} tokens over {len(open_peers)} peer(s), "
+        f"{PREFERENCES[want]}:")
     if not open_peers:
         out.why.append(("*", "*", "no peer answered"))
         out.unplaced = left
         say(f"  {left} user(s) without a seat: no peer answered")
         return out
+
+    candidates: list[tuple[Profile, Fit]] = []
     for profile in ranked(profiles):
-        if left <= 0:
-            break
         spec = profile.spec_type if profile.draft else ""
         fit = fit_for(profile.model, fits, cache_type=profile.cache_type, spec=spec)
         if fit is None:
-            out.why.append(("*", profile.model, "no memory measurement"))
+            _note(out, "*", profile.model, "no memory measurement")
             say(f"  {profile.model:<48} no memory measurement")
             continue
+        candidates.append((profile, fit))
+    ranked_names = {_plain(f.model) for _, f in candidates}
+    for fit in fits:
+        if _plain(fit.model) not in ranked_names:
+            _note(out, "*", fit.model, "not ranked")
+            say(f"  {fit.model:<48} not ranked")
+
+    def seat(peer: Room, profile: Profile, seats: int, used: int) -> None:
+        nonlocal left
+        out.rows.append(Row(peer=peer.name, model=profile.model, seats=seats,
+                            context=int(context), used=used, room=peer.room,
+                            base_url=peer.base_url))
+        say(f"  {profile.model:<48} -> {peer.name}: {seats} seat(s), "
+            f"{_human(used)} of {_human(peer.room)}")
+        left -= seats
+        open_peers.remove(peer)
+
+    if want == "seats":
         for peer in list(open_peers):
             if left <= 0:
                 break
             if peer.room <= 0:
-                out.why.append((peer.name, profile.model, "room unknown"))
+                _note(out, peer.name, "*", "room unknown")
                 continue
-            here = fit.at_room(peer.room)
-            loaded, each = here.line(context)
-            if loaded > peer.room:
-                out.why.append((peer.name, profile.model,
-                                f"room {_human(peer.room)} < {_human(loaded)} loaded"))
-                continue
-            seats = min(left, here.free() // each) if each > 0 else left
-            if seats < 1:
-                out.why.append((peer.name, profile.model,
-                                f"room {_human(peer.room)} < {_human(loaded + each)} "
-                                f"for one seat at {context}"))
-                continue
-            used = loaded + seats * each
-            out.rows.append(Row(peer=peer.name, model=profile.model, seats=seats,
-                                context=int(context), used=used, room=peer.room,
-                                base_url=peer.base_url))
-            say(f"  {profile.model:<48} -> {peer.name}: {seats} seat(s), "
-                f"{_human(used)} of {_human(peer.room)}")
-            left -= seats
-            open_peers.remove(peer)
+            best: tuple[int, int, Profile] | None = None
+            for profile, fit in candidates:
+                seats, used, why = _seats_on(peer, fit, context, left)
+                if seats < 1:
+                    _note(out, peer.name, profile.model, why)
+                    continue
+                if best is None or seats > best[0]:
+                    best = (seats, used, profile)
+            if best is not None:
+                seat(peer, best[2], best[0], best[1])
+    else:
+        for profile, fit in candidates:
+            if left <= 0:
+                break
+            for peer in list(open_peers):
+                if left <= 0:
+                    break
+                if peer.room <= 0:
+                    _note(out, peer.name, "*", "room unknown")
+                    continue
+                seats, used, why = _seats_on(peer, fit, context, left)
+                if seats < 1:
+                    _note(out, peer.name, profile.model, why)
+                    continue
+                seat(peer, profile, seats, used)
     out.unplaced = left
     if left:
         say(f"  {left} user(s) without a seat")
@@ -190,6 +248,8 @@ def table(placement: Placement) -> str:
         lines.append("nobody seated")
     lines.append(f"{placement.seated} of {placement.users} user(s) seated at "
                  f"{placement.context} tokens each")
+    lines.append(f"--prefer {placement.prefer}: "
+                 f"{PREFERENCES.get(placement.prefer, PREFERENCES['quality'])}")
     if placement.unplaced:
         lines.append(f"{placement.unplaced} user(s) without a seat:")
         for peer, model, reason in placement.why:
