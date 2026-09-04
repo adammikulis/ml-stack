@@ -365,7 +365,8 @@ def test_a_book_is_read_section_by_section_into_a_store(tmp_path, server, capsys
     said = capsys.readouterr().out
     assert len(asked) == 2, "one call per section"
     assert "2 section(s) of 1 book(s)" in said
-    assert "1.1" in said and "1.2" not in said
+    done = ingest.Progress(ingest.Progress.beside(store)).state["books"]["lattice"]["done"]
+    assert set(done) == {"lattice:1:1.1", "lattice:2:2.1"}
 
     from ml_stack.graph.store import GraphStore
     with GraphStore(store, read_only=True) as held:
