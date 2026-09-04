@@ -182,6 +182,26 @@ def test_every_offered_tool_carries_a_worked_example():
         assert "Example" in text and "->" in text, schema["function"]["name"]
 
 
+def test_every_bench_example_parses_as_the_bench_command_line(capsys):
+    import ast
+    import re
+
+    from ml_stack.graph.bench.run import _parser
+
+    found = []
+    for name, pairs in do.EXAMPLES.items():
+        for _asked, said in pairs:
+            for sub, args in re.findall(r"bench_(\w+)\(args=(\[[^\]]*\])\)", said):
+                found.append((name, sub, ast.literal_eval(args)))
+    assert found, "the examples name bench subcommands with their arguments"
+    for name, sub, args in found:
+        try:
+            _parser().parse_args([sub, *args])
+        except SystemExit:
+            pytest.fail(f"{name}: `ml-stack-bench {sub} {' '.join(args)}` -- "
+                        + capsys.readouterr().err.strip().splitlines()[-1])
+
+
 def test_a_bench_subcommand_not_in_mcp_is_registered_once_and_calls_the_cli(monkeypatch):
     ran = []
     monkeypatch.setattr(do, "bench_cli", lambda sub, args, detach: ran.append((sub, args, detach))

@@ -158,9 +158,13 @@ EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
                        'video", "a clip per panel"]), then bench_animate(args=["compare.json", '
                        '"--out", "compare.mp4"])')),
     "bench_standard": (("run the standard sets on quince",
-                        'bench_standard(args=["quince-2b.gguf", "--sample", "10"])'),
+                        'bench_standard(args=["--url", '
+                        '"http://127.0.0.1:8080/v1/chat/completions", "--model", '
+                        '"quince-2b.gguf", "--limit", "10"])'),
                        ("standard sets for flash-next, detached",
-                        'bench_standard(args=["Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"]) then '
+                        'bench_standard(args=["--url", '
+                        '"http://127.0.0.1:8080/v1/chat/completions", "--model", '
+                        '"Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"]) then '
                         'jobs_wait(kind="bench")')),
     "bench_speed": (("how fast is it at 1, 2, 4 users?",
                      'bench_speed(args=["quince-2b.gguf", "--users", "1,2,4"])'),
