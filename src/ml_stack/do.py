@@ -627,6 +627,24 @@ def run(task: str, client: Any, *,
 
 
 # -- the command ------------------------------------------------------------------------
+def best_on_disk() -> tuple[Any, str] | None:
+    """The model that measured best among those whose weights are on this machine: the
+    profile with the highest F1 over at least twenty questions whose file `find_model`
+    can put a path to. What `ml-stack-do` serves when nobody named one. None when no
+    measured model is here."""
+    from pathlib import Path
+
+    from ml_stack.graph.bench.serve import find_model
+    from ml_stack.serve.profile import profiles
+
+    ranked = sorted((p for p in profiles() if p.questions >= 20), key=lambda p: -p.right)
+    for record in ranked:
+        path = find_model(record.model)
+        if path != record.model and Path(path).exists():
+            return record, path
+    return None
+
+
 def client_for(args: argparse.Namespace) -> Any:
     """A client on the served model: ``--url`` for one already up, ``--model`` leased in
     its measured shape on one seat."""
@@ -698,7 +716,16 @@ def main(argv: Sequence[str] | None = None, *, stdin: TextIO | None = None,
         stdout.write(f"\n{len(tools) + len(OWN)} tools offered\n")
         return 0
     if not args.model and not args.url:
-        parser().error("one of --model or --url is needed to reach a model")
+        # a task without a model gets the best one measured that is on this disk, said out
+        # loud, so `ml-stack-do "task"` alone serves what the ranking chose (Adam, 2026-09-03:
+        # "can I just run ml-stack-do and it handles the rest?")
+        best = best_on_disk()
+        if best is None:
+            parser().error("one of --model or --url is needed to reach a model: no measured "
+                           "model is on this disk (ml-stack-serve profile lists them)")
+        record, args.model = best
+        stdout.write(f"no --model given: {record.model}, the best measured on this machine "
+                     f"({record.right:.0%} F1 over {record.questions} questions)\n")
     client = client_for(args)
     messages: list[dict[str, Any]] = [{"role": "system", "content": system_for(args.yes)}]
     if args.task:

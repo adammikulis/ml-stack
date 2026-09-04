@@ -443,3 +443,42 @@ def test_model_and_url_are_one_or_the_other(capsys):
     with pytest.raises(SystemExit) as left:
         do.main(["look", "--model", "quince-2b.gguf", "--url", "http://127.0.0.1:1"])
     assert left.value.code == 2
+
+
+def test_a_task_with_no_model_serves_the_best_measured_one_on_this_disk(monkeypatch, tmp_path, capsys):
+    """`ml-stack-do "task"` alone: the profile with the highest F1 whose weights are here,
+    said out loud; a better-measured model that is not on disk is passed over."""
+    from ml_stack import do
+    from ml_stack.serve.profile import Profile
+
+    here = tmp_path / "quince-2b.gguf"
+    here.write_bytes(b"gguf")
+    records = [Profile(model="glimmer-9b.gguf", questions=100, right=0.9),
+               Profile(model="quince-2b.gguf", questions=100, right=0.4),
+               Profile(model="ember-1b.gguf", questions=2, right=0.99)]
+    monkeypatch.setattr("ml_stack.serve.profile.profiles", lambda **_: records)
+    monkeypatch.setattr("ml_stack.graph.bench.serve.find_model",
+                        lambda name: str(here) if name == "quince-2b.gguf" else name)
+    chosen = do.best_on_disk()
+    assert chosen is not None and chosen[0].model == "quince-2b.gguf" and chosen[1] == str(here)
+
+    seen = {}
+
+    def fake_client(args):
+        seen["model"] = args.model
+        raise SystemExit(0)
+
+    monkeypatch.setattr(do, "client_for", fake_client)
+    with pytest.raises(SystemExit):
+        do.main(["look"])
+    assert seen["model"] == str(here)
+    assert "no --model given: quince-2b.gguf, the best measured on this machine (40% F1 over 100 questions)" in capsys.readouterr().out
+
+
+def test_a_task_with_no_model_and_nothing_measured_on_disk_still_asks_for_one(monkeypatch):
+    from ml_stack import do
+
+    monkeypatch.setattr("ml_stack.serve.profile.profiles", lambda **_: [])
+    with pytest.raises(SystemExit) as told:
+        do.main(["look"])
+    assert told.value.code == 2
