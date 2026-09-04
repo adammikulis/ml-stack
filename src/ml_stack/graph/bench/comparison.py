@@ -67,7 +67,11 @@ def _speed_runs(kept: Sequence[Mapping[str, Any]], label: str) -> list[Mapping[s
 
 
 def _newest(runs: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
-    return max(runs, key=lambda one: str(one.get("at") or "")) if runs else None
+    """The newest by ``at``, the later in the store on a tie -- two runs kept inside one
+    second are ordered by their keys."""
+    if not runs:
+        return None
+    return max(enumerate(runs), key=lambda pair: (str(pair[1].get("at") or ""), pair[0]))[1]
 
 
 def _standard_for(standards: Sequence[Mapping[str, Any]], label: str) -> dict[str, Any] | None:
