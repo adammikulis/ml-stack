@@ -170,11 +170,21 @@ time with the page's server down for the Ollama half.
   needs `constrain_ids` so a profile can record it, and `graph.cache`'s fingerprint should
   include it (a cached answer is returned regardless of the flag today).
 - [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
-- [ ] **`ml-stack-do` against a served model.** `ml-stack-do "benchmark qwen3.8-flash-next
+- [ ] **One seat by default, everywhere one conversation is served.** Adam, 2026-09-03:
+  "don't default to two slots. default to the least needed for the situation. i'd rather
+  have 1 large kv, especially for a coding agent." Done for `ml-stack-do`, `ml-stack-claude`
+  and the harness (`Profile.alone()`: one seat holding the whole measured cache; a server
+  already up with the same weights is used as it stands, `manager.already_up`). Left: a
+  profile's `parallel` still reads as a serving recommendation in `ml-stack-serve up
+  --profile` and `serve profile`'s "serve with --parallel 2" line -- say "measured at" there
+  and serve one seat unless `--parallel` is given; and the Slack page's own `Config` keeps
+  two seats on purpose (a run plus a reader), which is Adam's to keep or drop.
+- [ ] **`ml-stack-do` against a served model.** Driven once bare (2026-09-03): with no
+  `--model` it chose Flash-Next from the profiles, used the page's server as it stood,
+  called `serve_status` and answered. The acceptance prompt below is still untried. `ml-stack-do "benchmark qwen3.8-flash-next
   with llama.cpp (both with draft head and no draft head) and with ollama, make some
-  animations" --url http://127.0.0.1:8080`: it must look both backends up, ask to confirm
-  the files, ask the bench kind and the animation, plan, then act. Tested on a scripted
-  model only. `bench_standard/speed/compare/animate` tools follow the CLI and error until
+  animations"`: it must look both backends up, ask to confirm the files, ask the bench
+  kind and the animation, plan, then act. Tested on a scripted model only. `bench_standard/speed/compare/animate` tools follow the CLI and error until
   the subcommands land.
 - [ ] **First real `ml-stack-claude` and `ml-stack-agent`.** Built and tested against fakes
   only. `ml-stack-claude <flash-next> -- --print "say hello"`; one `ml-stack-agent "read
