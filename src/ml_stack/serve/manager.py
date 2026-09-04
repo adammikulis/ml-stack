@@ -78,13 +78,13 @@ def weight_of(model: str | Path) -> int:
 
 
 def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
-    """This process's servers, merged over records other *live* processes left."""
+    """This process's servers, merged over every other record whose owner or server is alive."""
     merged = {
         key: entry
         for key, entry in on_disk.items()
         if isinstance(entry, dict)
         and entry.get("owner_pid") != owner_pid
-        and pid_exists(entry.get("owner_pid"))
+        and (pid_exists(entry.get("owner_pid")) or pid_exists(entry.get("pid")))
     }
     merged.update(mine)
     return merged

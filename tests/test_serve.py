@@ -33,6 +33,7 @@ from ml_stack.serve import (
     shape_mismatch,
     tail,
 )
+from ml_stack.serve.manager import orphaned
 from tests.conftest import leased
 
 
@@ -183,9 +184,28 @@ class TestMergeState:
         # Both prior entries were owned by *this* pid, so they are ours to replace.
         assert set(merged) == {"8082"}
 
-    def test_a_dead_owners_record_is_dropped(self):
-        on_disk = {"8080": {"port": 8080, "owner_pid": 999_999_998, "pid": 1}}
+    def test_a_dead_owners_record_is_kept_while_its_server_lives(self):
+        orphan = {"port": 8080, "owner_pid": 999_999_998, "pid": os.getpid()}
+        assert merge_state({"8080": orphan}, {}, os.getpid()) == {"8080": orphan}
+
+    def test_a_record_whose_owner_and_server_are_both_dead_is_dropped(self):
+        on_disk = {"8080": {"port": 8080, "owner_pid": 999_999_998, "pid": 999_999_997}}
         assert merge_state(on_disk, {}, os.getpid()) == {}
+
+    def test_a_malformed_entry_is_dropped(self):
+        on_disk = {"8080": "gone", "8081": {"port": 8081, "owner_pid": None, "pid": None}}
+        assert merge_state(on_disk, {}, os.getpid()) == {}
+
+    def test_an_orphan_on_disk_survives_another_managers_save(self, tmp_path):
+        state = tmp_path / "servers.json"
+        orphan = {"port": 8080, "owner_pid": 999_999_998, "pid": os.getpid(),
+                  "base_url": "http://127.0.0.1:8080", "backend": "llama"}
+        state.write_text(json.dumps({"8080": orphan}), encoding="utf-8")
+        manager = ServerManager(state_file=state)
+        manager._mine["8081"] = {"port": 8081, "owner_pid": os.getpid(), "pid": os.getpid()}
+        manager._save()
+        records = recorded_servers(state)
+        assert set(records) == {8080, 8081} and orphaned(records[8080])
 
     def test_my_own_entries_win(self):
         pid = os.getpid()
