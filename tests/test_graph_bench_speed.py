@@ -56,6 +56,9 @@ class _Llama:
             wrote = 1 if kw.get("n_predict") == 1 else 256
             if wrote > 1:
                 time.sleep(0.05)          # long enough for the streams to overlap
+            if kw.get("on_delta") is not None:
+                kw["on_delta"]("content", "a ")
+                kw["on_delta"]("content", "summary")
             self.calls.append({"prompt_n": n, "kw": dict(kw)})
             timings = {"prompt_n": n, "cache_n": 0, "prompt_ms": n / self.prefill_tps * 1000,
                        "predicted_n": wrote, "predicted_ms": wrote / self.decode_tps * 1000}
@@ -147,7 +150,9 @@ def test_a_cell_sends_its_streams_together_and_reads_the_rates_off_the_replies()
     assert got["prefill_tps_per_stream"] == pytest.approx(1000.0, rel=0.05)
     assert got["decode_tps"] == pytest.approx(160.0, rel=0.05), "summed for throughput"
     assert got["decode_tps_per_stream"] == pytest.approx(40.0, rel=0.05)
-    assert got["ttft_s"] == pytest.approx(0.524, rel=0.05) and got["ttft_from"] == "prompt_ms"
+    assert got["ttft_from"] == "stream" and 0.04 < got["ttft_s"] < 1.0, \
+        "the clock to the first streamed piece, and the record says so"
+    assert all(c["kw"].get("on_delta") is not None for c in client.calls[-4:]), "streamed"
     assert got["draft_tokens"] == 4 * 256 and got["draft_taken"] == 4 * int(256 * 0.8)
     assert got["errors"] == 0 and len(got["requests"]) == 4
     assert got["prompt_measured"] == pytest.approx(512, rel=0.05)
@@ -157,10 +162,24 @@ def test_a_cell_sends_its_streams_together_and_reads_the_rates_off_the_replies()
 
 
 def test_a_cell_on_a_program_with_no_cache_or_draft_figure_says_none_not_zero():
-    got = cell(_Ollama(), tokens=256, streams=2, generate=256, seed=2)
+    client = _Ollama()
+    got = cell(client, tokens=256, streams=2, generate=256, seed=2)
     assert got["prefill_tps"] is not None and got["decode_tps"] == pytest.approx(60.0, rel=0.05)
     assert got["cached_tokens"] is None and got["draft_tokens"] is None
     assert got["draft_taken"] is None
+    assert got["ttft_from"] == "prompt_ms" and got["ttft_s"] == pytest.approx(
+        got["requests"][0]["prompt_ms"] / 1000.0)
+    assert all("on_delta" not in c for c in client.calls), "the Ollama api is not streamed"
+
+
+def test_a_reply_that_streamed_nothing_takes_the_server_prompt_clock():
+    class Whole(_Llama):
+        def chat(self, messages, **kw):
+            kw.pop("on_delta", None)
+            return super().chat(messages, **kw)
+
+    got = cell(Whole(prefill_tps=1000.0), tokens=512, streams=1, generate=256, seed=1)
+    assert got["ttft_from"] == "prompt_ms" and got["ttft_s"] == pytest.approx(0.524, rel=0.05)
 
 
 def test_a_cell_on_a_program_that_reports_nothing_keeps_the_wall_and_nothing_else():

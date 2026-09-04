@@ -5,7 +5,8 @@ One cell per (prompt size, streams): ``streams`` identical-length requests sent 
 greedy, thinking off, each writing ``--generate`` tokens. Per cell: ``prefill_tps`` (what
 the server read over the time it took, per stream and over all of them), ``decode_tps``
 (what it wrote, per stream and summed for throughput), ``ttft_s`` (the time to the first
-token, from the server's own prompt clock and marked so), the wall, and the same memory
+streamed token, or the server's own prompt clock where nothing streams, marked so), the
+wall, and the same memory
 and `served_by` record every run carries. Kept in the store as a run of kind ``speed``
 (`KIND`), one row per cell; `speed_table` prints them, one table per label.
 
@@ -113,12 +114,25 @@ def calibrated(client: Any, tokens: int, *, seed: int = 0, tries: int = TRIES,
 
 
 def _one(client: Any, text: str, *, generate: int) -> dict[str, Any]:
-    """One request through the client, with its timings and wall clock."""
+    """One request through the client, with its timings, wall clock and first token.
+
+    Streamed on every api but Ollama's, so ``ttft_s`` is the clock to the first piece
+    that arrived (``ttft_from`` "stream"); Ollama's, and a reply that streamed nothing,
+    take the server's prompt clock instead ("prompt_ms")."""
     began = time.time()
+    started = time.perf_counter()
+    first: list[float] = []
     error = ""
     reply = None
+
+    def arrived(_kind: str, _text: str) -> None:
+        if not first:
+            first.append(time.perf_counter() - started)
+
+    streamed = getattr(client, "api", "") != "ollama"
     try:
-        reply = client.chat([{"role": "user", "content": text}], think=False)
+        reply = client.chat([{"role": "user", "content": text}], think=False,
+                            **({"on_delta": arrived} if streamed else {}))
     except Exception as exc:  # noqa: BLE001 - a failed request is a result of the cell
         error = f"{type(exc).__name__}: {exc}"[:200]
     wall = time.time() - began
@@ -132,6 +146,12 @@ def _one(client: Any, text: str, *, generate: int) -> dict[str, Any]:
     for key in ("prompt_ms", "predicted_ms", "prompt_n", "cache_n", "predicted_n",
                 "draft_n", "draft_n_accepted"):
         out[key] = timings.get(key)
+    if first:
+        out["ttft_s"], out["ttft_from"] = round(first[0], 4), "stream"
+    elif out["prompt_ms"] is not None:
+        out["ttft_s"], out["ttft_from"] = out["prompt_ms"] / 1000.0, "prompt_ms"
+    else:
+        out["ttft_s"], out["ttft_from"] = None, None
     return out
 
 
@@ -170,7 +190,9 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0
     wall = time.time() - began
     prefill_each = [_rate(r["prompt_n"], r["prompt_ms"]) for r in got]
     decode_each = [_rate(r["predicted_n"], r["predicted_ms"]) for r in got]
-    ttft_each = [r["prompt_ms"] / 1000.0 if r["prompt_ms"] is not None else None for r in got]
+    ttft_each = [r["ttft_s"] for r in got]
+    clocks = {r["ttft_from"] for r in got if r["ttft_from"]}
+    ttft_from = "stream" if "stream" in clocks else ("prompt_ms" if clocks else None)
     out: dict[str, Any] = {
         "prompt_tokens": int(tokens),
         "prompt_measured": _mean([m for m in measured]),
@@ -188,10 +210,10 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0
         "prefill_tps_per_stream": _mean(prefill_each),
         "decode_tps": _sum(decode_each),
         "decode_tps_per_stream": _mean(decode_each),
-        # the first token, from the server's own prompt clock: nothing here streams, so
-        # what is known is how long the prompt took to read, and the record says so
+        # the first token: the clock to the first streamed piece, or the server's own
+        # prompt clock where nothing streamed, and the record says which
         "ttft_s": _mean(ttft_each),
-        "ttft_from": "prompt_ms" if any(t is not None for t in ttft_each) else None,
+        "ttft_from": ttft_from,
         "draft_tokens": _sum([r["draft_n"] for r in got]),
         "draft_taken": _sum([r["draft_n_accepted"] for r in got]),
         "errors": sum(1 for r in got if r["error"]),
@@ -489,5 +511,6 @@ def speed_table(kept: Sequence[Mapping[str, Any]]) -> None:
                   f"{_f(c.get('wall_s'), '.1f', 's'):>7} {accept:>6} "
                   f"{int(c.get('errors') or 0):>6}")
         print("  prefill and decode in tokens/s over the cell; /stream is one stream's "
-              "decode; * ttft is the server's prompt clock, not a streamed first token")
+              "decode; ttft is the clock to the first streamed token, * the server's "
+              "prompt clock instead")
         print()

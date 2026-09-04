@@ -693,12 +693,16 @@ def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
     adapter: Family | None = pinned
     inline = families.inline_splitter()
     unread: dict[str, list[str]] = {}
+    tail: dict[str, Any] = {}
 
     for chunk in chunks:
         if not isinstance(chunk, dict):
             continue
         if isinstance(chunk.get("model"), str) and not model:
             model = chunk["model"]
+        for key in ("timings", "usage"):
+            if isinstance(chunk.get(key), dict):
+                tail[key] = chunk[key]
         if adapter is None:
             adapter = families.for_model_id(model) if model else families.GENERIC
 
@@ -745,6 +749,7 @@ def gather_stream(chunks: Any, on_delta: Callable[[str, str], None],
     assembled: dict[str, Any] = {"choices": [{"message": message, "finish_reason": finish}]}
     if model:
         assembled["model"] = model
+    assembled.update(tail)
     return assembled
 
 

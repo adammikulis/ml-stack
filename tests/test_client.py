@@ -164,21 +164,28 @@ def _sse(chunks):
     return ("".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n").encode()
 
 
+TIMINGS = {"prompt_n": 12, "prompt_ms": 30.5, "predicted_n": 4, "predicted_ms": 80.0}
+USAGE = {"prompt_tokens": 12, "completion_tokens": 4, "total_tokens": 16}
+
+
 def _stream_of(model, deltas, finish="stop"):
-    """Deltas as chunks carrying the served model id, the last one finishing."""
+    """Deltas as chunks carrying the served model id, the last one finishing and carrying
+    the timings and usage the way llama-server's last chunk does."""
     out = []
     for index, delta in enumerate(deltas):
         chunk = {"model": model,
                  "choices": [{"index": 0, "delta": delta, "finish_reason": None}]}
         if index == len(deltas) - 1:
             chunk["choices"][0]["finish_reason"] = finish
+            chunk["timings"], chunk["usage"] = TIMINGS, USAGE
         out.append(chunk)
     return out
 
 
 def _both_ways(server, model, payload, deltas, *, family=None, finish="stop"):
     """The same reply fetched whole and streamed. Returns ``(whole, streamed, seen)``."""
-    whole_server = server(lambda m, p, b: json_reply(payload))
+    whole_server = server(lambda m, p, b: json_reply({**payload, "timings": TIMINGS,
+                                                       "usage": USAGE}))
     whole = Client(whole_server.base_url, family=family).chat([{"role": "user", "content": "x"}])
 
     body = _sse(_stream_of(model, deltas, finish=finish))
@@ -194,6 +201,8 @@ def _same(whole, streamed):
     assert whole.thinking == streamed.thinking
     assert whole.tool_calls == streamed.tool_calls
     assert whole.finish_reason == streamed.finish_reason
+    assert whole.raw.get("timings") == streamed.raw.get("timings") == TIMINGS
+    assert whole.raw.get("usage") == streamed.raw.get("usage") == USAGE
 
 
 class TestFamilies:
