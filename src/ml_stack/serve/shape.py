@@ -89,6 +89,10 @@ class Shape:
     # profile carries what a measurement found, and a run that found `-ub 2048` worth 4.7x
     # has nowhere else to put it.
     extra_args: tuple[str, ...] = ()
+    # What decided `seat_context` for a lone seat -- the model's trained context, the
+    # longest this machine's room holds, or the measured shape -- said outright rather
+    # than left for a caller to work out from the number alone. "" when seats > 1.
+    note: str = ""
 
     @property
     def context(self) -> int:

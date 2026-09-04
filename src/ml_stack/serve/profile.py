@@ -125,9 +125,12 @@ class Profile:
               model: str = "", resolve: bool = True) -> Any:
         """The :class:`~ml_stack.serve.Shape` this model measured best in.
 
-        One seat holding the whole measured cache, unless ``seats`` asks for more, in which
-        case each of those seats gets what one measured seat got. The record's own
-        ``parallel`` is how the bench measured, not how to serve. ``model`` overrides the
+        One seat alone (no ``seats``, or ``seats=1``) gets the model's own trained context
+        length when this machine's room holds it, the longest context that room does hold
+        when it does not, and the measured shape's whole cache -- ``seat_context *
+        parallel``, the record's own -- only when neither can be computed.
+        :attr:`~ml_stack.serve.Shape.note` says which. ``seats`` above one each get what
+        one measured seat got, from the record's own ``parallel``. ``model`` overrides the
         reference served, which otherwise is what :func:`profile_for` was asked about, and
         the record's own file name failing that.
 
@@ -143,13 +146,14 @@ class Profile:
         if resolve:
             draft, seeing = resolved(served, draft, seeing, build=self.build)
         taken = max(1, int(seats or 1))
-        each = whole_context(self) if taken == 1 else self.seat_context
+        each, note = (_alone_context(self, served) if taken == 1
+                     else (self.seat_context, ""))
         return Shape(model=served, port=port, seats=taken,
                      seat_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
                      spec_type=self.spec_type, mmproj=seeing,
                      reasoning_budget=self.reasoning_budget, build=self.build,
-                     extra_args=tuple(self.extra_args))
+                     extra_args=tuple(self.extra_args), note=note)
 
     def asked(self) -> Any:
         """The ways this record measured, as an :class:`~ml_stack.serve.Asking`: every one
@@ -462,6 +466,79 @@ def record(model: str, **fields: Any) -> Profile:
 def whole_context(profile: Profile) -> int:
     """The cache the record measured, summed across its seats: one seat's worth."""
     return profile.seat_context * max(1, profile.parallel)
+
+
+def _model_path(served: str) -> Path | None:
+    """Where ``served`` already sits on this machine, or None. Never fetches it: a bare
+    name or an ``hf:`` reference is looked up in the Hub cache by its file name alone."""
+    from ml_stack.hub import located
+
+    text = str(served or "")
+    candidate = Path(text).expanduser()
+    if candidate.is_file():
+        return candidate
+    return located(text.rsplit("/", 1)[-1])
+
+
+def _trained_context(served: str) -> int:
+    """The context length a model's own GGUF header names, or 0 when the file is not on
+    this machine or the header does not say."""
+    path = _model_path(served)
+    if path is None:
+        return 0
+    from ml_stack.serve.layout import layout
+
+    try:
+        return int(layout(path).context_length)
+    except Exception:  # noqa: BLE001 - a header that cannot be read names no context
+        return 0
+
+
+def _fit_for(profile: Profile, *, room: int) -> Any | None:
+    """The measured :class:`~ml_stack.serve.fit.Fit` for this profile's own model, cache
+    type and speculation, asked about ``room``. None when nothing measured this model."""
+    from ml_stack.serve.fit import records as fit_records
+
+    name = _plain(profile.model)
+    want_cache = profile.cache_type or "f16"
+    every = [f for f in fit_records(room=room) if _plain(f.model) == name]
+    matched = [f for f in every if f.cache_type == want_cache and f.spec == profile.spec_type]
+    if matched:
+        return matched[0]
+    same_cache = [f for f in every if f.cache_type == want_cache]
+    return same_cache[0] if same_cache else (every[0] if every else None)
+
+
+def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
+    """What one seat gets when it is alone, and which of three ways decided it.
+
+    The model's trained context length when a measured :class:`Fit` for this shape says
+    this machine's room holds it; the longest context that room does hold when it does
+    not; the record's own measured shape -- :func:`whole_context` -- when the trained
+    context or a fit record cannot be had at all.
+    """
+    from ml_stack import hub
+
+    fallback = whole_context(profile)
+    trained = _trained_context(served)
+    if not trained:
+        return fallback, (f"no trained context read off the model's header; served the "
+                          f"measured shape, {fallback:,} tokens")
+    room = hub.room()
+    fit = _fit_for(profile, room=room) if room else None
+    if fit is None:
+        return fallback, (f"no fit record for this shape; served the measured shape, "
+                          f"{fallback:,} tokens")
+    if fit.cost(trained) <= fit.free():
+        return trained, (f"the model's trained context, {trained:,} tokens, fits this "
+                         f"machine's room")
+    longest = fit.longest(1)
+    if longest > 0:
+        return longest, (f"the model's trained context, {trained:,} tokens, does not fit "
+                         f"this machine's room; served the longest that does, "
+                         f"{longest:,} tokens")
+    return fallback, (f"nothing fits this machine's room beyond the measured shape; "
+                      f"served it, {fallback:,} tokens")
 
 
 def _flags(profile: Profile) -> str:

@@ -675,8 +675,8 @@ def client_for(args: argparse.Namespace) -> Any:
     if measured is not None:
         run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
                              timeout=args.timeout)
-        print(f"serving alone in its measured shape, one seat of {run.shape.seat_context} "
-              f"tokens: {said(measured)}")
+        print(f"serving alone, one seat of {run.shape.seat_context} tokens "
+              f"({run.shape.note}): {said(measured)}")
     else:
         run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
                               reasoning_budget=0))

@@ -425,7 +425,8 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     # One seat holds the whole measured cache unless --parallel was given, in which case
     # each of those seats gets what one measured seat got.
     seats = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
-    context = found.shape(seats=seats, resolve=False).context
+    shape = found.shape(seats=seats, resolve=False)
+    context = shape.context
     # The head is recorded by file name -- that is what a kept run knows it as -- and
     # llama-server needs a path. 'auto' is left alone: `cmd_up` answers it below, and it is
     # the one resolution that has to know which binary will serve.
@@ -455,6 +456,8 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
         took.append(f"{dest} {value}")
     if found.extra_args:
         took.append(" ".join(found.extra_args))
+    if shape.note:
+        took.append(shape.note)
     return found, took
 
 

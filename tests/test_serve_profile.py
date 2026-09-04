@@ -20,7 +20,10 @@ from ml_stack.client import Reply
 from ml_stack.graph.ask import _under, converse
 from ml_stack.serve import cli as serve_cli
 from ml_stack.serve import profile as prof
+from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, add, profile_for, profiles, record, said
+
+from conftest import write_gguf
 
 MODEL = "thornfield-8B-UD-Q4_K_XL.gguf"
 OTHER = "alderpost-2B-Q4_K_M.gguf"
@@ -28,14 +31,21 @@ HEAD = "mtp-thornfield-8B-Q8_0.gguf"
 
 
 @pytest.fixture(autouse=True)
-def _profiles_in_tmp(tmp_path, monkeypatch):
-    """The shipped file and this machine's own, both inside ``tmp_path`` and both empty."""
+def _profiles_in_tmp(tmp_path, monkeypatch, fit_files):
+    """The shipped file and this machine's own, both inside ``tmp_path`` and both empty.
+
+    The fit half is emptied the same way, and `hub.located` is held to nothing found, so a
+    lone seat's trained-context lookup cannot read this machine's real fit records or Hub
+    cache -- a test that wants either points them at its own fixtures instead.
+    """
     shipped = tmp_path / "ssot" / "profiles.json"
     shipped.parent.mkdir(parents=True, exist_ok=True)
     shipped.write_text("[]\n", encoding="utf-8")
     monkeypatch.setattr(prof, "package_file", lambda: shipped)
     monkeypatch.setenv("MLSTACK_PROFILES_FILE", str(tmp_path / "local" / "profiles.json"))
     monkeypatch.setattr(prof, "writable_file", lambda: shipped)
+    fit_files()
+    monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
     return shipped
 
 
@@ -158,6 +168,81 @@ def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_mod
 
     monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
     assert measured().shape(resolve=True).draft == "", "a head not on this machine is not served"
+
+
+# -- one seat, alone: the model's own trained context, capped by what fits ---------------
+
+TRAINED = 262144
+
+
+def _model_file(tmp_path, name: str, context_length: int = TRAINED) -> Path:
+    """A real, minimal GGUF whose header names ``context_length`` and nothing else a
+    layout read needs."""
+    return write_gguf(tmp_path / name, {"general.architecture": "testarch",
+                                        "testarch.context_length": context_length,
+                                        "testarch.block_count": 0})
+
+
+def test_one_seat_alone_gets_the_trained_context_when_it_fits(tmp_path, fit_files):
+    path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
+    fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
+                   per_seq=1000)], room=30_000_000)
+    solo = record(path.name, seat_context=32768, parallel=2)
+
+    shape = solo.alone(model=str(path), resolve=False).shape
+
+    assert shape.seat_context == TRAINED
+    assert "trained context" in shape.note and f"{TRAINED:,}" in shape.note
+
+
+def test_one_seat_alone_gets_the_longest_that_fits_when_trained_does_not(tmp_path, fit_files):
+    path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
+    fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
+                   per_seq=1000)], room=5_000_000)
+    solo = record(path.name, seat_context=32768, parallel=2)
+
+    shape = solo.alone(model=str(path), resolve=False).shape
+
+    assert shape.seat_context == 49_990, "(free 5,000,000 - per_seq 1,000) // per_token 100"
+    assert shape.seat_context < TRAINED
+    assert "does not fit" in shape.note and "49,990" in shape.note
+
+
+def test_one_seat_alone_falls_back_to_the_measured_shape_with_no_fit_record(tmp_path):
+    path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
+    solo = record(path.name, seat_context=32768, parallel=2)
+
+    shape = solo.alone(model=str(path), resolve=False).shape
+
+    assert shape.seat_context == 65536, "seat_context 32768 * parallel 2: today's fallback"
+    assert "no fit record" in shape.note
+
+
+def test_one_seat_alone_falls_back_to_the_measured_shape_with_no_layout_data(
+        tmp_path, fit_files):
+    # a model file this test never wrote: nothing to read a trained context off
+    missing = tmp_path / "duskfield-12B-Q4_K_M.gguf"
+    fit_files([Fit(model=missing.name, cache_type="f16", spec="", per_token=100,
+                   per_seq=1000)], room=30_000_000)
+    solo = record(missing.name, seat_context=32768, parallel=2)
+
+    shape = solo.alone(model=str(missing), resolve=False).shape
+
+    assert shape.seat_context == 65536
+    assert "no trained context" in shape.note
+
+
+def test_more_than_one_seat_still_gets_the_profiles_own_seat_context(tmp_path, fit_files):
+    path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
+    fit_files([Fit(model=path.name, cache_type="f16", spec="", per_token=100,
+                   per_seq=1000)], room=30_000_000)
+    solo = record(path.name, seat_context=32768, parallel=2)
+
+    shape = solo.shape(model=str(path), seats=4, resolve=False)
+
+    assert (shape.seats, shape.seat_context) == (4, 32768), \
+        "trained-context sizing is the lone seat's; a crowd keeps the profile's own"
+    assert shape.note == ""
 
 
 def test_the_asking_is_what_converse_takes_and_nothing_it_does_not():
