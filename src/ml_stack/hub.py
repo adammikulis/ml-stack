@@ -767,7 +767,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         prog="ml-stack-models",
         description="Find a model that is newer than anything you remember, and serve it.")
-    sub = ap.add_subparsers(dest="cmd", required=True, metavar="{find,files,card,fetch}")
+    sub = ap.add_subparsers(dest="cmd", required=True,
+                            metavar="{find,files,card,fetch,layout}")
 
     look = sub.add_parser("find", help="repositories matching some words")
     look.add_argument("words", nargs="+", help="e.g. gemma-4 E4B")
@@ -793,8 +794,32 @@ def main(argv: list[str] | None = None) -> int:
     got.add_argument("refs", nargs="+", metavar="REF",
                      help="hf:owner/repo/file.gguf, one or more")
 
+    shape = sub.add_parser("layout", help="the attention layout off a GGUF header: which "
+                                          "layers hold a full cache, slide, recur or share "
+                                          "it, plus experts, indexers and lookup tables")
+    shape.add_argument("model", help="a path, an hf: reference already fetched, or a file "
+                                     "name copied from `files`")
+    shape.add_argument("--json", action="store_true", help="the same as JSON")
+
     args = ap.parse_args(argv)
     try:
+        if args.cmd == "layout":
+            import struct
+
+            from ml_stack.serve.cli import resolve_model
+            from ml_stack.serve.layout import layout, render
+
+            named = resolve_model(args.model)
+            if named.startswith("hf:"):
+                named = str(fetch(named))
+            try:
+                shape = layout(named)
+            except (OSError, ValueError, struct.error) as exc:
+                print(f"error: cannot read {args.model}: {exc}", file=sys.stderr)
+                return 2
+            print(shape.to_json() if args.json else render(shape))
+            return 0
+
         if args.cmd == "find":
             prefer = tuple(p.strip().lower() for p in args.prefer.split(",") if p.strip())
             found = find(" ".join(args.words), prefer=prefer, gguf=not args.all,

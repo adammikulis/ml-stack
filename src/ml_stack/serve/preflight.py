@@ -403,10 +403,12 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
       says the last eighteen read the cache the layers before them wrote.
 
     It is still an estimate, and still only the fallback: the compute buffers are not in the
-    header at all, a recurrent layer's per-sequence state is not either, and
-    `attention.compress_ratios` (Qwen3.8-Flash-Next again) shrinks even the layers counted
-    here. `ml-stack-serve fit` is the measured answer; this is what there is before anybody
-    has measured one.
+    header at all, a recurrent layer's per-sequence state is not either, and the indexer
+    key cache of a sparse-attention layer (Qwen3.8-Flash-Next: one head of
+    `attention.indexer.key_length` per attention layer) is not counted.
+    `attention.compress_ratios` is the block size that indexer scores; the cache itself
+    spans the whole context (`llama_memory_hybrid_idx`). `ml-stack-serve fit` is the
+    measured answer; this is what there is before anybody has measured one.
     """
     try:
         arch = str(meta.get("general.architecture") or "")

@@ -215,26 +215,36 @@ LLAMA_SERVER_HELP = (
 
 def write_gguf(path: Path, metadata: dict, *, tensor_count: int = 0) -> Path:
     """A real, minimal GGUF v3 file: magic, version, counts, one key/value pair per
-    metadata item -- ints as uint32, floats as float32, strings as strings -- and no
-    tensors, because nothing under test reads them.
+    metadata item -- ints as uint32, floats as float32, strings as strings, a list as an
+    array of its first element's kind -- and no tensors, because nothing under test reads
+    them.
 
     It refuses a type it cannot write rather than coercing one: a copy that silently
     stringified everything let a test assert on a field the real reader would never
     have parsed.
     """
 
-    def kv(name: str, value: object) -> bytes:
-        head = struct.pack("<Q", len(name.encode())) + name.encode()
+    def one(value: object) -> tuple[int, bytes]:
         if isinstance(value, bool):
-            return head + struct.pack("<I", 7) + struct.pack("<?", value)
+            return 7, struct.pack("<?", value)
         if isinstance(value, int):
-            return head + struct.pack("<I", 4) + struct.pack("<I", value)
+            return 4, struct.pack("<I", value)
         if isinstance(value, float):
-            return head + struct.pack("<I", 6) + struct.pack("<f", value)
+            return 6, struct.pack("<f", value)
         if isinstance(value, str):
             encoded = value.encode()
-            return head + struct.pack("<I", 8) + struct.pack("<Q", len(encoded)) + encoded
+            return 8, struct.pack("<Q", len(encoded)) + encoded
+        if isinstance(value, (list, tuple)) and value:
+            kinds = {one(v)[0] for v in value}
+            if len(kinds) != 1:
+                raise TypeError(f"an array holds one kind, not {sorted(kinds)}")
+            body = b"".join(one(v)[1] for v in value)
+            return 9, struct.pack("<I", kinds.pop()) + struct.pack("<Q", len(value)) + body
         raise TypeError(f"unsupported metadata type: {type(value)}")
+
+    def kv(name: str, value: object) -> bytes:
+        kind, body = one(value)
+        return struct.pack("<Q", len(name.encode())) + name.encode() + struct.pack("<I", kind) + body
 
     body = (b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", tensor_count)
             + struct.pack("<Q", len(metadata)))
