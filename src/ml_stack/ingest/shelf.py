@@ -136,8 +136,9 @@ class Shelf:
         ``books`` is one entry per book -- units read, and the nodes and edges the store
         holds for it. ``shared`` is every concept two or more books were read into, most
         shared first, each naming them. ``between`` is every edge whose two ends were read
-        from different books -- one book's vocabulary joined to another's. ``decisions``
-        counts the pairs a judge has settled in the store's `graph.tidy` document.
+        from different books -- one book's vocabulary joined to another's. ``merged`` is
+        `between_books`. ``decisions`` counts the pairs a judge has settled in the store's
+        `graph.tidy` document.
 
         A book's node is one a ``read_from`` edge joins to ``book:<slug>``; a book's edge
         is one whose provenance names a unit of that book. Without a ``store`` one is
@@ -200,7 +201,44 @@ class Shelf:
                             "books": [sorted(here), sorted(there)]})
         between.sort(key=lambda r: (-r["weight"], r["source_label"], r["target_label"]))
         return {"books": books, "shared": shared, "between": between,
-                "decisions": _decisions_in(store)}
+                "merged": self.between_books(store), "decisions": _decisions_in(store)}
+
+    def between_books(self, store: Any = None) -> list[dict[str, Any]]:
+        """Every name the hygiene pass joined across two books, heaviest first.
+
+        One entry per merge in the store's `graph.tidy` merges document whose two names
+        were read from different books: ``a_label`` and ``a_book`` for the name kept,
+        ``b_label`` and ``b_book`` for the name folded into it, ``kind``, and ``weight`` --
+        the joined node's mentions (the units both were read from, when the store holds no
+        count) plus the edges the merge moved.
+        """
+        if store is None:
+            with self.store() as held:
+                return self.between_books(held)
+        from ml_stack.graph.tidy import MERGES
+
+        held = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
+        held = held.get("merges") if isinstance(held, Mapping) else held
+        mentions = {str(n["id"]): int(n.get("mentions") or 0) for n in store.nodes()}
+        out = []
+        for one in held if isinstance(held, list) else ():
+            if not isinstance(one, Mapping):
+                continue
+            kept_from = list(one.get("kept_from") or ())
+            gone_from = list(one.get("gone_from") or ())
+            here = {str(u).split(":", 1)[0] for u in kept_from}
+            there = {str(u).split(":", 1)[0] for u in gone_from}
+            if not (here and there) or here & there:
+                continue
+            kept = str(one.get("kept") or "")
+            out.append({"a_label": str(one.get("kept_label") or kept),
+                        "a_book": ", ".join(sorted(here)),
+                        "b_label": str(one.get("gone_label") or one.get("gone") or ""),
+                        "b_book": ", ".join(sorted(there)), "kind": str(one.get("kind") or ""),
+                        "weight": (mentions.get(kept) or len(kept_from) + len(gone_from))
+                                  + int(one.get("edges_moved") or 0)})
+        out.sort(key=lambda r: (-r["weight"], r["a_label"], r["b_label"]))
+        return out
 
 
 def _decisions_in(store: Any) -> dict[str, int]:
@@ -271,8 +309,9 @@ def shelf(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print
     """``ml-stack-ingest shelf --out STORE``: the whole shelf at a glance, in plain text.
 
     Per book, how much of it is read and what the store holds for it; the concepts more
-    than one book was read into; the relations joining one book's vocabulary to another's;
-    and how many name pairs the hygiene pass has judged. `Shelf.shared` is the same as data.
+    than one book was read into; the names the hygiene pass joined across books, with a
+    weight; the relations joining one book's vocabulary to another's; and how many name
+    pairs the hygiene pass has judged. `Shelf.shared` is the same as data.
     """
     where = Path(out).expanduser()
     if not where.exists():
@@ -296,6 +335,15 @@ def shelf(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print
         say(f"    {one['label']:<32} {len(one['books'])} books: {', '.join(one['books'])}")
     if len(shared) > most:
         say(f"    ... and {len(shared) - most} more")
+    merged = got["merged"]
+    say(f"  between books ({len(merged)})"
+        + ("" if merged else f": no concept merged across books yet; "
+                             f"ml-stack-ingest tidy --out {out}"))
+    for one in merged[:most]:
+        say(f"    {one['a_label']} ({one['a_book']}) = {one['b_label']} ({one['b_book']})  "
+            f"{one['kind']}  {one['weight']}")
+    if len(merged) > most:
+        say(f"    ... and {len(merged) - most} more")
     between = got["between"]
     say(f"  relations between books ({len(between)})"
         + ("" if between else ": none -- no relation joins one book's names to another's"))

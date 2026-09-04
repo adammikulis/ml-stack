@@ -42,6 +42,19 @@ def a_shelf_of_two(tmp_path):
     return store
 
 
+def a_shelf_spelled_apart(tmp_path):
+    """Two books folded into one store, one spelling `seam wal` what the other spells
+    `seam wall`: a letter apart, so the fold leaves them two nodes for the hygiene pass."""
+    store = a_part_read_book(tmp_path)
+    rows = [a_read(f"{FIELD_GUIDE}:1:1.1", book=FIELD_GUIDE, title="Spore Blooms",
+                   extracted=said("spore bloom", "seam wal",
+                                  relations=[("spore bloom", "part_of", "seam wal")]))]
+    a_part_read_book(tmp_path, slug=FIELD_GUIDE, rows=rows, title="Ambleford Field Guide",
+                     sections=6, store=store)
+    assert ingest.fold(store, say=lambda _: None) == 0
+    return store
+
+
 # -- the shelf at a glance -----------------------------------------------------------------
 
 
@@ -111,6 +124,115 @@ def test_a_store_no_pass_has_judged_counts_no_pairs(tmp_path):
     assert ingest.Shelf(store).shared()["decisions"]["pairs"] == 0
 
 
+# -- a name joined across books --------------------------------------------------------------
+
+
+WRITTEN = {"seam wal": "seam wall"}
+"""What a person hands the hygiene pass about the two spellings."""
+
+
+def test_tidy_writes_each_merge_it_makes_to_the_store_with_the_units_both_names_came_from(
+        tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES, tidy
+
+    store = a_shelf_spelled_apart(tmp_path)
+    assert tidy(store, dry_run=False, written=WRITTEN).merged_nodes == 1
+
+    with GraphStore(store, read_only=True) as held:
+        merges = held.get_doc(MERGES)["merges"]
+        assert "concept:seam-wal" not in {n["id"] for n in held.nodes()}
+    assert len(merges) == 1
+    one = merges[0]
+    assert (one["kept"], one["kept_label"]) == ("concept:seam-wall", "seam wall")
+    assert (one["gone"], one["gone_label"]) == ("concept:seam-wal", "seam wal")
+    assert one["kind"] == "structure"
+    assert one["edges_moved"] == 2, "the relation, and the read_from edge to its book"
+    assert one["kept_from"] == [f"{OPEN_TEXTS}:1:1.2"]
+    assert one["gone_from"] == [f"{FIELD_GUIDE}:1:1.1"]
+    assert one["at"]
+
+
+def test_a_dry_tidy_writes_no_merge(tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES, tidy
+
+    store = a_shelf_spelled_apart(tmp_path)
+    assert tidy(store, written=WRITTEN).merged_nodes == 1
+
+    with GraphStore(store, read_only=True) as held:
+        assert held.get_doc(MERGES) is None
+
+
+def test_a_merge_is_written_once_however_often_tidy_runs(tmp_path):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES, tidy
+
+    store = a_shelf_spelled_apart(tmp_path)
+    tidy(store, dry_run=False, written=WRITTEN)
+    with GraphStore(store) as held:
+        held.write({"nodes": [{"id": "concept:seam-wal", "kind": "concept",
+                               "label": "seam wal", "mentions": 1,
+                               "attrs": {}, "provenance": [f"{FIELD_GUIDE}:2:2.1"]}],
+                    "edges": []})
+    tidy(store, dry_run=False, written=WRITTEN)
+
+    with GraphStore(store, read_only=True) as held:
+        merges = held.get_doc(MERGES)["merges"]
+    assert [(m["kept"], m["gone"]) for m in merges] == [("concept:seam-wall",
+                                                          "concept:seam-wal")]
+
+
+def test_a_name_merged_across_two_books_is_between_them_with_a_weight(tmp_path):
+    from ml_stack.graph.tidy import tidy
+
+    store = a_shelf_spelled_apart(tmp_path)
+    tidy(store, dry_run=False, written=WRITTEN)
+
+    got = ingest.Shelf(store).shared()
+
+    assert got["merged"] == ingest.Shelf(store).between_books()
+    assert got["merged"] == [{"a_label": "seam wall", "a_book": OPEN_TEXTS,
+                              "b_label": "seam wal", "b_book": FIELD_GUIDE,
+                              "kind": "structure", "weight": 6}], \
+        "the joined node's four mentions, two from each book, and the two edges moved"
+
+
+def test_a_name_merged_within_one_book_is_not_between_books(tmp_path):
+    from ml_stack.graph.tidy import tidy
+
+    from ml_stack.graph.store import GraphStore
+
+    store = a_part_read_book(tmp_path)
+    ingest.fold(store, say=lambda _: None)
+    with GraphStore(store) as held:
+        held.write({"nodes": [{"id": "concept:seam-wal", "kind": "structure",
+                               "label": "seam wal", "mentions": 1, "attrs": {},
+                               "provenance": [f"{OPEN_TEXTS}:1:1.1"]}],
+                    "edges": [{"source": "concept:seam-wal", "rel": "read_from",
+                               "target": f"book:{OPEN_TEXTS}", "weight": 1}]})
+    assert tidy(store, dry_run=False, written=WRITTEN).merged_nodes == 1
+
+    assert ingest.Shelf(store).between_books() == []
+
+
+def test_a_shelf_never_tidied_has_nothing_between_books(tmp_path):
+    assert ingest.Shelf(a_shelf_spelled_apart(tmp_path)).between_books() == []
+
+
+def test_the_shelf_command_prints_the_names_joined_across_books(tmp_path, capsys):
+    from ml_stack.graph.tidy import tidy
+
+    store = a_shelf_spelled_apart(tmp_path)
+    tidy(store, dry_run=False, written=WRITTEN)
+
+    assert ingest.main(["shelf", "--out", str(store)]) == 0
+
+    said_out = capsys.readouterr().out
+    assert "between books (1)" in said_out
+    assert f"seam wall ({OPEN_TEXTS}) = seam wal ({FIELD_GUIDE})  structure  6" in said_out
+
+
 def test_the_shelf_command_prints_the_books_the_shared_concepts_and_the_judged_pairs(
         tmp_path, capsys):
     store = a_shelf_of_two(tmp_path)
@@ -122,6 +244,8 @@ def test_the_shelf_command_prints_the_books_the_shared_concepts_and_the_judged_p
     assert OPEN_TEXTS in said_out and "Ambleford Field Guide" in said_out
     assert "concepts in more than one book (1)" in said_out
     assert "vault" in said_out and f"{FIELD_GUIDE}, {OPEN_TEXTS}" in said_out
+    assert (f"between books (0): no concept merged across books yet; "
+            f"ml-stack-ingest tidy --out {store}") in said_out
     assert "relations between books (0)" in said_out
     assert "judged: nothing" in said_out
 

@@ -98,6 +98,7 @@ _GENERIC = frozenset({"thing", "things", "process", "form of science", "form", "
 
 VERDICTS = ("same", "different", "unsure")
 DECISIONS = "tidy:decisions"      # the store document every judged pair is written to
+MERGES = "tidy:merges"            # the store document every merge is written to
 _SECTIONS = ("pairs", "conflicts", "definitions", "suspects")
 
 JUDGE_SCHEMA: dict[str, Any] = {
@@ -658,6 +659,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     nodes = {n["id"]: n for n in store.nodes() if not _hidden(n)}
     edges = [e for e in store.edges() if e["source"] in nodes and e["target"] in nodes]
     decisions = _decisions(store)
+    merges = _merges(store)
     rejudge = bool(rejudge and judge is not None)
 
     # 1. duplicate nodes, within a kind
@@ -740,7 +742,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             continue
         gone_label, gone_kind = nodes[remove]["label"], nodes[remove]["kind"]
         moved = _merge(store, nodes, edges, keep, remove, dry_run=dry_run, judge=judge,
-                       decisions=decisions, report=report, note=note)
+                       decisions=decisions, report=report, note=note, merges=merges)
         report.merged_nodes += 1
         report.merged_edges += moved
         note(f"merge: {gone_label!r} -> {nodes[keep]['label']!r} "
@@ -793,7 +795,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
             continue
         if judge is not None:
             _resolve_suspect(store, nodes, edges, node, why, judge=judge, decisions=decisions,
-                             report=report, note=note, rejudge=rejudge)
+                             report=report, note=note, rejudge=rejudge, merges=merges)
         elif not (node.get("attrs") or {}).get("suspect"):
             report.flagged += 1
             note(f"suspect: {node['label']!r} -- {why}")
@@ -1064,6 +1066,24 @@ def _decisions(store: Any) -> dict[str, dict[str, Any]]:
             for name in _SECTIONS}
 
 
+def _merges(store: Any) -> list[dict[str, Any]]:
+    """Every merge the store remembers, oldest first."""
+    held = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
+    held = held.get("merges") if isinstance(held, dict) else held
+    return [dict(m) for m in held if isinstance(m, Mapping)] if isinstance(held, list) else []
+
+
+def _keep_merge(store: Any, merges: list[dict[str, Any]], entry: Mapping[str, Any]) -> None:
+    """One merge into the store's merges document, at once; a (kept, gone) pair already
+    there is not written twice."""
+    if any(m.get("kept") == entry["kept"] and m.get("gone") == entry["gone"] for m in merges):
+        return
+    merges.append(dict(entry))
+    if not hasattr(store, "put_doc") or getattr(store, "read_only", False):
+        return
+    store.put_doc(MERGES, {"merges": merges, "hidden": True})
+
+
 def _held(decisions: dict[str, dict[str, Any]], section: str, key: str, *, rejudge: bool,
           report: Report) -> dict[str, Any] | None:
     """The verdict the store remembers under ``key``; None when there is none, or when it
@@ -1141,7 +1161,8 @@ def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
 def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
                      node: dict[str, Any], why: str, *, judge: Any,
                      decisions: dict[str, dict[str, Any]], report: Report,
-                     note: Callable[[str], None], rejudge: bool = False) -> None:
+                     note: Callable[[str], None], rejudge: bool = False,
+                     merges: list[dict[str, Any]] | None = None) -> None:
     """One doubtful label put to the judge: renamed, dropped, or kept with the flag cleared."""
     key = node["id"]
     held = _held(decisions, "suspects", key, rejudge=rejudge, report=report)
@@ -1161,7 +1182,8 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
                      and n.get("kind") == node.get("kind")), None)
         if into is not None:
             moved = _merge(store, nodes, edges, into["id"], node["id"], dry_run=False,
-                           judge=judge, decisions=decisions, report=report, note=note)
+                           judge=judge, decisions=decisions, report=report, note=note,
+                           merges=merges)
             report.merged_nodes += 1
             report.merged_edges += moved
             note(f"suspect: {label!r} is {name!r}, which is already a node -- merged into it "
@@ -1251,10 +1273,17 @@ def _merge_definitions(kept: Mapping[str, Any], gone: Mapping[str, Any],
 def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, Any]],
            keep: str, remove: str, *, dry_run: bool, judge: Any = None,
            decisions: dict[str, dict[str, Any]] | None = None, report: Report | None = None,
-           note: Callable[[str], None] | None = None) -> int:
+           note: Callable[[str], None] | None = None,
+           merges: list[dict[str, Any]] | None = None) -> int:
     """``remove`` into ``keep`` with everything kept: edges moved (summed where the
-    survivor had the same one), mentions summed, provenance unioned, the name an alias."""
+    survivor had the same one), mentions summed, provenance unioned, the name an alias,
+    and the merge written to ``merges`` and the store's `MERGES` document."""
     kept, gone = nodes[keep], nodes[remove]
+    entry = {"kept": keep, "kept_label": str(kept.get("label") or ""),
+             "gone": remove, "gone_label": str(gone.get("label") or ""),
+             "kind": str(kept.get("kind") or ""), "edges_moved": 0,
+             "kept_from": list(kept.get("provenance") or ()),
+             "gone_from": list(gone.get("provenance") or ()), "at": _now()}
     moved = 0
     by_triple = {(e["source"], e["rel"], e["target"]): e for e in edges}
     for edge in [e for e in edges if remove in (e["source"], e["target"])]:
@@ -1294,6 +1323,8 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
     if not dry_run:
         store.upsert_node(kept)
         store.drop([remove])
+        if merges is not None:
+            _keep_merge(store, merges, {**entry, "edges_moved": moved})
     edges[:] = list(by_triple.values())
     nodes.pop(remove, None)
     return moved
