@@ -15,6 +15,7 @@ in ``SIGNAL`` rather than people alone. Exit 1 when there is anything to look at
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -28,13 +29,12 @@ from ml_stack.redact.hook import DEFAULT_FIXTURES, FLOOR, from_database, permitt
 __all__ = ["Finding", "NOISY", "SIGNAL", "audit", "main", "tracked"]
 
 # email addresses and phone numbers are the hook's own patterns, not the recogniser's
-SIGNAL = frozenset({"PERSON", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "US_PASSPORT",
-                    "US_DRIVER_LICENSE", "CRYPTO", "MEDICAL_LICENSE"})
+SIGNAL = frozenset({"PERSON", "CREDIT_CARD", "IBAN_CODE", "US_SSN", "US_PASSPORT", "CRYPTO",
+                    "MEDICAL_LICENSE"})
+# a driver licence is a letter and some digits, which is also h2, M1 and x00
 NOISY = frozenset({"URL", "LOCATION", "DATE_TIME", "NRP", "UK_NHS", "IP_ADDRESS",
-                   "US_BANK_NUMBER"})
+                   "US_BANK_NUMBER", "US_DRIVER_LICENSE"})
 SKIP_SUFFIXES = (".json", ".jsonl", ".ipynb", ".svg")
-USAGE = "usage: ml-stack-audit [--root DIR] [--tracked|--staged] [--all] [--floor F] " \
-        "[--fixtures PATH] [--json]"
 
 
 @dataclass(frozen=True)
@@ -78,54 +78,52 @@ def audit(root: str, *, env: Mapping[str, str] | None = None, kinds: frozenset[s
     return list(dict.fromkeys(found))
 
 
-def _parse(argv: list[str]) -> dict[str, Any]:
-    opts: dict[str, Any] = {"root": None, "staged": False, "all": False, "floor": FLOOR,
-                            "fixtures": None, "json": False}
-    it = iter(argv)
-    for arg in it:
-        if arg == "--root":
-            opts["root"] = next(it)
-        elif arg == "--staged":
-            opts["staged"] = True
-        elif arg == "--tracked":
-            opts["staged"] = False
-        elif arg == "--all":
-            opts["all"] = True
-        elif arg == "--floor":
-            opts["floor"] = float(next(it))
-        elif arg == "--fixtures":
-            opts["fixtures"] = next(it)
-        elif arg == "--json":
-            opts["json"] = True
-        else:
-            raise ValueError(arg)
-    return opts
+def _parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="ml-stack-audit",
+        description="Every tracked file of a repository read for a person's details, "
+                    "reported and never blocked. Exit status 1 when there is anything to "
+                    "look at.")
+    p.add_argument("--root", metavar="DIR",
+                   help="the checkout to read (default: the repository around the working "
+                        "directory)")
+    which = p.add_mutually_exclusive_group()
+    which.add_argument("--tracked", action="store_true",
+                       help="every file git tracks, as it is in the working tree (the default)")
+    which.add_argument("--staged", action="store_true",
+                       help="the index: the pre-commit hook's own check, without a commit")
+    p.add_argument("--all", action="store_true",
+                   help="the noisy kinds too: places, dates, URLs, addresses, driver licences")
+    p.add_argument("--floor", type=float, default=FLOOR, metavar="F",
+                   help=f"the recogniser's confidence under which a hit is ignored "
+                        f"(default: {FLOOR})")
+    p.add_argument("--fixtures", metavar="PATH",
+                   help="the allow-list of invented names (default: NAMES_FIXTURES, else "
+                        f"{DEFAULT_FIXTURES})")
+    p.add_argument("--json", action="store_true", help="one object per finding on stdout")
+    return p
 
 
 def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
          stdout: TextIO | None = None, engine: Any = None) -> int:
     """Read the tracked files (or, with ``--staged``, the index) and print what to look at.
-    Returns 1 when there is anything, 2 on a wrong call, else 0."""
+    Returns 1 when there is anything, else 0."""
     env = os.environ if env is None else env
     out = sys.stdout if stdout is None else stdout
-    try:
-        opts = _parse(list(argv or ()))
-    except (ValueError, StopIteration):
-        print(USAGE, file=sys.stderr)
-        return 2
-    root = os.path.abspath(opts["root"] or hook._git(None, "rev-parse", "--show-toplevel").strip())
-    if opts["staged"]:
+    opts = _parser().parse_args(list(argv or ()))
+    root = os.path.abspath(opts.root or hook._git(None, "rev-parse", "--show-toplevel").strip())
+    if opts.staged:
         staged_env = dict(env)
-        if opts["fixtures"]:
-            staged_env["NAMES_FIXTURES"] = opts["fixtures"]
+        if opts.fixtures:
+            staged_env["NAMES_FIXTURES"] = opts.fixtures
         return hook.main([], env=staged_env, root=root, stdout=out)
     if engine is None:
         engine = recogniser()
-    kinds = SIGNAL | (NOISY if opts["all"] else frozenset())
-    found = audit(root, env=env, kinds=kinds, floor=opts["floor"], fixtures=opts["fixtures"],
+    kinds = SIGNAL | (NOISY if opts.all else frozenset())
+    found = audit(root, env=env, kinds=kinds, floor=opts.floor, fixtures=opts.fixtures,
                   engine=engine)
-    fixtures = opts["fixtures"] or env.get("NAMES_FIXTURES", DEFAULT_FIXTURES)
-    if opts["json"]:
+    fixtures = opts.fixtures or env.get("NAMES_FIXTURES", DEFAULT_FIXTURES)
+    if opts.json:
         json.dump([asdict(f) for f in found], out, indent=1)
         print(file=out)
         return 1 if found else 0

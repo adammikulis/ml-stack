@@ -81,11 +81,11 @@ def run(where: Path, tmp_path: Path, *argv: str, engine=None) -> tuple[int, str]
 
 
 def test_a_card_number_in_a_tracked_file_is_reported(tmp_path):
-    where = repo(tmp_path, **{"notes/pay.md": "the card was 4111 1111 1111 1111\n"})
-    engine = FakeEngine(**{"4111 1111 1111 1111": ("CREDIT_CARD", 1.0)})
+    where = repo(tmp_path, **{"notes/pay.md": "the card was 0000 1111 2222 3333\n"})
+    engine = FakeEngine(**{"0000 1111 2222 3333": ("CREDIT_CARD", 1.0)})
     code, said = run(where, tmp_path, engine=engine)
     assert code == 1, said
-    assert "notes/pay.md:1" in said and "credit card" in said and "4111 1111 1111 1111" in said
+    assert "notes/pay.md:1" in said and "credit card" in said and "0000 1111 2222 3333" in said
     assert "a guess, not a verdict" in said
 
 
@@ -216,3 +216,10 @@ def test_the_script_runs_the_module_over_a_checkout(tmp_path):
                                           "PYTHON": sys.executable})
     assert done.returncode == 1, done.stdout + done.stderr
     assert "Wren Halloway" in done.stdout
+
+
+def test_a_wrong_flag_is_refused_with_the_usage(capsys):
+    with pytest.raises(SystemExit) as left:
+        audit.main(["--what"])
+    assert left.value.code == 2
+    assert "usage:" in capsys.readouterr().err
