@@ -35,6 +35,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.contracts import load as _load
 from ml_stack.ingest.reads import Read, _keep_reads, _slug
 from ml_stack.sources.pdf import Unit
 
@@ -237,22 +238,11 @@ RELATIONS: dict[str, tuple[str, bool] | None] = {
 the table names and has no counterpart for."""
 
 
-VAGUE = frozenset({
-    "related_to", "relates_to", "associated_with", "describes", "described_by",
-    "supports", "supported_by", "involves", "involved_in", "affects", "affected_by",
-    "is_affected_by", "influences", "determines", "determined_by", "provides",
-    "provided_by", "performs", "experiences", "interacts_with", "connects_to",
-    "sensitive_to", "underlies", "applies", "applies_to", "acts_as", "acts_on",
-    "functions_as", "exhibits", "has_property", "has_characteristic", "has_function",
-    "has_measurement", "has_feature", "has_shape", "indicates", "reflects", "covers",
-    "lists", "explains", "means", "measures", "quantifies", "assesses", "evaluates",
-    "identifies", "classifies", "compares", "characterizes", "demonstrates", "shows",
-    "summarizes", "records", "outlines", "states", "correlates_with", "equals", "lacks",
-    "excludes", "same_as", "synonym_of", "also_known_as", "is", "are", "has", "can_be",
-    "may_be", "or", "and",
-})
+VAGUE: frozenset[str] = frozenset(
+    _load("vague-predicates.json")["predicates"])
 """Predicates that say the two things were named together and not how they stand.
 
+`contracts/vague-predicates.json` holds the list, so the reader and the import read one.
 An edge under one of these carries ``vague``. Counted over the anatomy pair: 3,861 of its
 21,922 relations under 92 predicates -- ``supports`` 615, ``related_to`` 608, ``describes``
 601. They are not wrong, they are unspecific, and a graph asked a question cannot use

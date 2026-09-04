@@ -139,6 +139,35 @@ def test_core_only_fences_the_verbs_and_the_kinds_back_to_the_core_lists():
     assert "root" in grammar_for(schema), "and the grammar builder takes the fenced one"
 
 
+def test_the_vague_predicates_are_one_shared_list_and_not_a_refusal():
+    """The reader and the import read one list. It marks and it reports; it never fences
+    the decode, because a passage that hedges is read as it hedges -- epidemiology says
+    'associated with' to avoid claiming cause."""
+    from ml_stack.contracts import load
+
+    held = load("vague-predicates.json")
+    assert set(held["predicates"]) == set(ingest.VAGUE)
+    assert "associated_with" in ingest.VAGUE and ingest.vague("associated_with")
+
+    shape = ingest.schema()
+    validate = pytest.importorskip("jsonschema").validate
+    said = json.loads(json.dumps(LATTICE))
+    said["relations"][0]["rel"] = "associated_with"
+    validate(said, shape), "a hedged relation is still a relation the schema takes"
+    named = [w for w in ingest.VAGUE if "_" in w and w in ingest.INSTRUCTIONS]
+    assert named == [], f"{named}: a list of forbidden verbs in the prompt is the refusal"
+    assert "associated with" in ingest.INSTRUCTIONS, "the hedge is named as one to keep"
+
+
+def test_the_instructions_ask_for_a_relation_grounded_in_the_passage():
+    """A filler edge and an overclaimed one are both failures, and the second is worse."""
+    for shape in (ingest.INSTRUCTIONS, ingest.instructions(core_only=True)):
+        assert "grounded in the passage's own words" in shape
+        assert "write no relation between them" in shape
+        assert "keep the hedge" in shape
+        assert "a wrong `causes` is worse than no edge at all" in shape
+
+
 def test_the_instructions_follow_the_shape_the_section_is_read_under():
     """A prompt telling the model to use the schema's verbs and no other, sent with a shape
     that takes any verb, would fence by suggestion alone."""
