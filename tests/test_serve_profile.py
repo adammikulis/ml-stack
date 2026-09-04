@@ -180,6 +180,9 @@ def test_the_command_reads_out_the_serving_the_asking_and_what_measured_it(capsy
     assert MODEL in out
     assert "--build thornfell" in out and "--kv q8_0" in out and "--spec-n-max 4" in out
     assert "--reasoning-budget 0" in out
+    assert "--context 65536" in out and "--parallel" not in out.split("measured at")[0], \
+        "the serve line is one seat holding the whole measured cache"
+    assert "measured at --parallel 2, 32768 per seat" in out
     assert "-ub 2048 --spec-draft-p-min 0.5" in out
     assert "tight + batch + kinds + summary + greedy" in out
     assert "80% F1" in out and "26.7 s/question" in out and "100 question(s)" in out
@@ -241,7 +244,8 @@ def test_up_with_a_profile_fills_every_flag_that_was_not_given(leases, tmp_path)
     assert serve_cli.main(upped("--profile", root=tmp_path)) == 0
 
     spec = leases[0]
-    assert spec.context == 65536 and spec.parallel == 2
+    assert spec.context == 65536 and spec.parallel == 1, \
+        "one seat holding the whole cache the record measured across two"
     assert str(spec.draft) == f"/models/{HEAD}" and spec.spec_type == "draft-mtp"
     assert spec.spec_draft_max == 4
     assert spec.cache_type_k == spec.cache_type_v == "q8_0"
@@ -257,7 +261,14 @@ def test_a_flag_that_was_given_wins_over_the_record(leases, tmp_path):
     spec = leases[0]
     assert spec.cache_type_k == "f16", "a person naming a flag is overruling on purpose"
     assert spec.parallel == 4 and spec.spec_draft_max == 2
+    assert spec.context == 32768 * 4, "each seat asked for gets what one measured seat got"
     assert spec.reasoning_budget == 0, "and what nobody named still comes from the record"
+
+
+def test_a_context_that_was_given_wins_over_the_whole_measured_cache(leases, tmp_path):
+    add(measured(mmproj=""))
+    assert serve_cli.main(upped("--profile", "--context", "16384", root=tmp_path)) == 0
+    assert leases[0].context == 16384 and leases[0].parallel == 1
 
 
 def test_up_without_the_flag_reads_no_profile_at_all(leases, tmp_path):
@@ -388,17 +399,41 @@ def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
     assert ways_of({"label": "thornfield--plain", "asking": said}) == {
         "tight": True, "batch": True, "kinds": False, "summary": False, "rich": False,
-        "terse": False, "single": False, "few": False, "reach": 8000}
+        "terse": False, "single": False, "few": False, "constrain_ids": False,
+        "reach": 8000}
     assert ways_of({"label": "thornfield--loose-plain-kinds"}) == {
         "tight": False, "batch": False, "kinds": True, "summary": False, "rich": False,
-        "terse": False, "single": False, "few": False}, \
+        "terse": False, "single": False, "few": False, "constrain_ids": False}, \
         "an older run has only its label, read by whole word"
     # the ways of one asking per model: a record has to carry them or a model measured on
     # three tools and twenty turns would be served with eight and ten
     assert ways_of({"label": "x", "asking": {"tight": True, "few": True, "single": True,
                                              "rounds": 20}}) == {
         "tight": True, "batch": False, "kinds": False, "summary": False, "rich": False,
-        "terse": False, "single": True, "few": True, "rounds": 20}
+        "terse": False, "single": True, "few": True, "constrain_ids": False, "rounds": 20}
+    assert ways_of({"label": "x", "asking": {"tight": True, "constrain_ids": True}})[
+        "constrain_ids"] is True
+
+
+def test_constrain_ids_is_kept_on_the_record_and_read_out(tmp_path):
+    made = record(MODEL, constrain_ids=True)
+    assert Profile.from_dict(made.as_dict()).constrain_ids is True
+    assert made.as_dict()["ask"]["constrain_ids"] is True
+    assert made.asking() == {"tight": True, "constrain_ids": True}
+    assert made.asked().constrain_ids is True
+    line = next(one for one in said(made).splitlines() if "ask with" in one)
+    assert "constrain-ids" in line
+    assert "constrain-ids" not in said(record(OTHER))
+
+    from ml_stack.graph import bench
+    from ml_stack.graph.bench.report import write_profiles
+
+    store = str(tmp_path / "runs.ladybug")
+    keep_run(store, "thornfield--plain", asking={"tight": True, "constrain_ids": True})
+    where = tmp_path / "written.json"
+    write_profiles(bench.runs(store), path=where)
+    assert prof.profiles(package=where, local=where)[0].constrain_ids is True, \
+        "a run measured under the grammar writes a record that says so"
 
 
 def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_path):

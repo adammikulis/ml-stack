@@ -864,7 +864,7 @@ remembered. The commands below are the surface of that.
 From a shell:
 
 ```
-ml-stack-serve up model.gguf --context 32768 --parallel 2
+ml-stack-serve up model.gguf --context 32768
 ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.gguf
 ml-stack-serve status
 ml-stack-serve down
@@ -938,9 +938,10 @@ ml-stack-bench report --profile
 
 ```
 Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
-  serve with  --context 32768 --parallel 1 --build unsloth --draft mtp-…-shared-Q8_0.gguf
+  serve with  --context 32768 --build unsloth --draft mtp-…-shared-Q8_0.gguf
               --spec draft-mtp --spec-n-max 4 --kv q8_0 --mmproj auto --reasoning-budget 0
               and -ub 2048 --spec-draft-p-min 0.5 -- llama-server's own, passed by --profile
+  measured at --parallel 2, 16384 per seat
   ask with    tight + batch + kinds + summary + greedy
   measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
 ```

@@ -53,8 +53,12 @@ def digest(graph: Mapping[str, Any]) -> str:
 
 def fingerprint(question: str, *, graph: Mapping[str, Any] | None = None, on: str = "",
                 model: str = "", system: str = "", tools: Sequence[Any] = (),
-                opening: Sequence[str] = (), limit: int = 0, context: Any = ()) -> str:
+                opening: Sequence[str] = (), limit: int = 0, context: Any = (),
+                ways: Mapping[str, Any] | None = None) -> str:
     """The key under which this question's answer is the same answer.
+
+    ``ways`` is how the question is asked -- `Asking.said()`, or any mapping of the flags
+    `converse` was handed -- so an answer under one asking is never served under another.
 
     ``on`` is a graph digest already worked out; pass it rather than ``graph`` when asking
     many questions of one graph, since hashing a graph is the expensive part of this.
@@ -74,8 +78,10 @@ def fingerprint(question: str, *, graph: Mapping[str, Any] | None = None, on: st
         fn = (one.get("function") if isinstance(one, Mapping) else None) or {}
         named.append((str(fn.get("name") or ""), str(fn.get("description") or ""),
                       fn.get("parameters") or {}))
+    asked = sorted((str(k), v) for k, v in dict(ways or {}).items())
     return PREFIX + _hash(" ".join(str(question).split()).casefold(), on, model, system,
-                          sorted(named), sorted(map(str, opening)), int(limit), context)
+                          sorted(named), sorted(map(str, opening)), int(limit), context,
+                          *([asked] if asked else []))
 
 
 def remember(store: Any, key: str, answer: Any, *, question: str = "", on: str = "") -> None:

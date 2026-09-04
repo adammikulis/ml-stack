@@ -2339,3 +2339,10 @@ def test_constrain_ids_is_a_way_a_profile_fills_in(monkeypatch):
     model = _Recording([call("look_at", ids=["person:ada"])])
     converse("who is Ada?", GRAPH, model, profile=Asking(constrain_ids=True))
     assert _format_of(model.given[0]) is not None
+
+    from ml_stack.serve.profile import record
+
+    kept = record("thornfield-8B-UD-Q4_K_XL.gguf", constrain_ids=True)
+    model = _Recording([call("look_at", ids=["person:ada"])])
+    converse("who is Ada?", GRAPH, model, profile=kept)
+    assert _format_of(model.given[0]) is not None, "a record carries the way to converse"

@@ -69,6 +69,14 @@ def test_the_fingerprint_covers_everything_that_shapes_an_answer():
                                                                 "first.", "parameters": {}}}]
     assert fingerprint("who surveys?", **{**base, "tools": reworded}) != key
 
+    # how the question is asked: one flag either way is two answers
+    on = fingerprint("who surveys?", **base, ways={"constrain_ids": True})
+    off = fingerprint("who surveys?", **base, ways={"constrain_ids": False})
+    assert on != off and on != key
+    assert fingerprint("who surveys?", **base, ways={"tight": True, "constrain_ids": True}) \
+        == fingerprint("who surveys?", **base, ways={"constrain_ids": True, "tight": True})
+    assert fingerprint("who surveys?", **base, ways={}) == key, "nothing said is the same key"
+
 
 def test_a_precomputed_digest_and_a_graph_agree():
     on = digest(GRAPH)

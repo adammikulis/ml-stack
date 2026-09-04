@@ -100,7 +100,9 @@ class TestStatus:
     def test_it_says_whether_a_lease_would_adopt_or_start(self, server, state, capsys):
         instance = server(serving(n_ctx=4096, slots=1))
         assert cli.main(["status", "--port", str(instance.port)]) == 0
-        assert "would adopt this server" in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert "would adopt this server" in out
+        assert "--parallel" not in out, "one seat is the default and is not spelt out"
 
     def test_a_lease_that_would_be_refused_says_which_field(self, server, state, capsys):
         instance = server(serving(n_ctx=4096, slots=1))

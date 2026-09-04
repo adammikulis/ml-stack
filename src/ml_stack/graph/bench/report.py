@@ -304,8 +304,8 @@ def fit_for(model: str, fits: Sequence[Any]) -> Any | None:
 # than `ASKINGS`, which is only what the tables print: `batch`, `kinds` and `summary` ride
 # on a way rather than naming one, and a profile has to carry them or a model measured with
 # all three would be served with none.
-WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse", "reach",
-        "rounds")
+WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
+        "constrain_ids", "reach", "rounds")
 
 
 def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
@@ -323,7 +323,8 @@ def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
     said = one.get("asking")
     if isinstance(said, Mapping) and said:
         out: dict[str, Any] = {"tight": bool(said.get("tight", True))}
-        for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few"):
+        for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few",
+                    "constrain_ids"):
             out[way] = bool(said.get(way, False))
         if said.get("reach"):
             out["reach"] = int(said["reach"])
@@ -334,6 +335,7 @@ def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
     out = {"tight": "loose" not in words}
     for way in ("batch", "kinds", "summary", "rich", "terse", "single", "few"):
         out[way] = way in words
+    out["constrain_ids"] = False
     if "reach" in words:
         from ml_stack.graph.bench.run import REACH
 

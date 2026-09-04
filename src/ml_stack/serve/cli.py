@@ -126,7 +126,8 @@ def _lease_line(snapshot: Snapshot) -> str:
 
 
 def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
-    ask = f"'ml-stack-serve up {model} --parallel {parallel}'"
+    seats = f" --parallel {parallel}" if int(parallel or 1) != 1 else ""
+    ask = f"'ml-stack-serve up {model}{seats}'"
     if snapshot.verdict == "adopt":
         return f"{ask} would adopt this server"
     if snapshot.verdict == "refuse":
@@ -386,11 +387,16 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     Returns the profile (or None) and one line per field it filled, so `up` can say what
     it took rather than serving a shape nobody asked for in silence.
     """
-    from ml_stack.serve.profile import profile_for, resolved
+    from ml_stack.serve.profile import profile_for, resolved, whole_context
 
     found = profile_for(model)
     if found is None:
         return None, []
+    # One seat holds the whole measured cache unless --parallel was given, in which case
+    # each of those seats gets what one measured seat got.
+    seats = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
+    context = (found.seat_context * max(1, seats) if seats != DEFAULT_PARALLEL
+               else whole_context(found))
     # The head is recorded by file name -- that is what a kept run knows it as -- and
     # llama-server needs a path. 'auto' is left alone: `cmd_up` answers it below, and it is
     # the one resolution that has to know which binary will serve.
@@ -399,8 +405,8 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
         head = resolved(model, head, "", build=found.build)[0]
     # dest -> the value the profile would have, for the flags whose default `up` defines
     wanted = {
-        "context": found.seat_context * max(1, found.parallel),
-        "parallel": max(1, found.parallel),
+        "context": context,
+        "parallel": 1,
         "build": found.build,
         "draft": head,
         "spec": found.spec_type,

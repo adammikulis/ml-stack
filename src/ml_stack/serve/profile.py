@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["Profile", "add", "local_file", "package_file", "profile_for", "profiles",
-           "record", "resolved", "said", "writable_file"]
+           "record", "resolved", "said", "whole_context", "writable_file"]
 
 
 # The asking fields whose value is a plain on/off, in the order a person reads them out.
@@ -40,7 +40,8 @@ __all__ = ["Profile", "add", "local_file", "package_file", "profile_for", "profi
 # other way: how much one read carries, and how many tools there are to choose between.
 # Nothing here is a default -- a record says what *this* model measured, and two records
 # disagreeing about every one of these is the intended outcome, not a mistake.
-WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse")
+WAYS = ("tight", "batch", "single", "few", "kinds", "summary", "rich", "terse",
+        "constrain_ids")
 
 # The sampler settings a record keeps, and what each is called when it is read out. In the
 # order a publisher's card lists them, so a record and a card can be compared by eye.
@@ -86,6 +87,7 @@ class Profile:
     summary: bool = False                # `converse`'s summary_tool, named as the bench is
     rich: bool = False
     terse: bool = False                  # `tools_for`'s, not `converse`'s -- see `asking`
+    constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
     reach: int | None = None
     rounds: int | None = None            # tool-calling turns one question may spend
     sampling: Mapping[str, Any] = field(default_factory=dict)
@@ -461,10 +463,15 @@ def record(model: str, **fields: Any) -> Profile:
 
 # ---------------------------------------------------------------- saying it to a person
 
+def whole_context(profile: Profile) -> int:
+    """The cache the record measured, summed across its seats: one seat's worth."""
+    return profile.seat_context * max(1, profile.parallel)
+
+
 def _flags(profile: Profile) -> str:
-    """The serving line: what `ml-stack-serve up` would be told, in its own flags."""
-    parts = [f"--context {profile.seat_context * max(1, profile.parallel)}",
-             f"--parallel {max(1, profile.parallel)}"]
+    """The serving line: what `ml-stack-serve up` would be told, in its own flags. One
+    seat holding the whole measured cache; `--parallel` is left to the caller."""
+    parts = [f"--context {whole_context(profile)}"]
     if profile.build:
         parts.append(f"--build {profile.build}")
     if profile.draft:
@@ -501,7 +508,7 @@ def _sampled(sampling: Mapping[str, Any] | None) -> str:
 
 def _ways(profile: Profile) -> str:
     """The asking line, as the words the bench and `converse` both use."""
-    said = [way for way in WAYS if getattr(profile, way)]
+    said = [way.replace("_", "-") for way in WAYS if getattr(profile, way)]
     if not profile.tight:
         said.insert(0, "loose")
     if profile.reach is not None:
@@ -530,6 +537,8 @@ def said(profile: Profile) -> str:
         # something a person could type
         lines.append(f"              and {' '.join(profile.extra_args)} "
                      f"-- llama-server's own, passed by --profile")
+    lines.append(f"  measured at --parallel {max(1, profile.parallel)}, "
+                 f"{profile.seat_context} per seat")
     lines.append(f"  ask with    {_ways(profile)}")
     if profile.questions:
         lines.append(
