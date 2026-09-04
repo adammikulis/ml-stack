@@ -17,7 +17,13 @@ from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.serve import build
-from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
+from ml_stack.serve.backend import (
+    LlamaServerBackend,
+    ServerFailed,
+    ServerInfo,
+    ServerSpec,
+    parse_context,
+)
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import (
     DEFAULT_TIMEOUT_S,
@@ -539,6 +545,10 @@ def cmd_up(args: argparse.Namespace) -> int:
                       extra_args=tuple(profile.extra_args) if profile is not None else (),
                       cpu_moe=bool(getattr(args, "cpu_moe", False)))
 
+    spec, yarn_said = LlamaServerBackend.resolved_context(spec)
+    if yarn_said:
+        print(yarn_said, file=sys.stderr)
+
     if getattr(args, "preflight_only", False):
         from ml_stack.hub import room
         from ml_stack.serve.preflight import Preflight
@@ -1054,9 +1064,9 @@ def main(argv: list[str] | None = None) -> int:
     status.add_argument("--model", default="",
                         help="ask what leasing this model would do (default: whatever is "
                              "already serving)")
-    status.add_argument("--context", type=int, default=DEFAULT_CONTEXT,
-                        help=f"the context that lease would ask for (default: "
-                             f"{DEFAULT_CONTEXT})")
+    status.add_argument("--context", type=parse_context, default=DEFAULT_CONTEXT,
+                        help=f"the context that lease would ask for -- 32768, 256k, 1m "
+                             f"(default: {DEFAULT_CONTEXT})")
     status.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
                         help=f"the slots that lease would ask for (default: "
                              f"{DEFAULT_PARALLEL})")
@@ -1070,8 +1080,11 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("model", help="path to a .gguf file, or hf:owner/repo/file.gguf")
     up.add_argument("--port", type=int, default=DEFAULT_PORT,
                     help=f"port to serve on (default: {DEFAULT_PORT})")
-    up.add_argument("--context", type=int, default=DEFAULT_CONTEXT,
-                    help=f"tokens across all slots (default: {DEFAULT_CONTEXT})")
+    up.add_argument("--context", type=parse_context, default=DEFAULT_CONTEXT,
+                    help=f"tokens across all slots -- 32768, 256k, 1m (default: "
+                         f"{DEFAULT_CONTEXT}). Beyond what the model trained at, YaRN is "
+                         "turned on by itself; it scales every position, so shorter "
+                         "conversations on this server pay for it too")
     up.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
                     help=f"slots to serve at once (default: {DEFAULT_PARALLEL})")
     up.add_argument("--timeout", type=float, default=None,
@@ -1248,9 +1261,10 @@ def main(argv: list[str] | None = None) -> int:
     fit_p.add_argument("--write", default="", metavar="FILE",
                        help="write the Markdown for every record to a file -- at this "
                             "machine's room, and at --room's as a second section")
-    fit_p.add_argument("--context", type=int, default=32768, metavar="N",
-                       help="the context to measure at (default: 32768). The per-token cost "
-                            "does not depend on it; a long one just measures it precisely")
+    fit_p.add_argument("--context", type=parse_context, default=32768, metavar="N",
+                       help="the context to measure at -- 32768, 256k, 1m (default: 32768). "
+                            "The per-token cost does not depend on it; a long one just "
+                            "measures it precisely")
     fit_p.add_argument("--port", type=int, default=DEFAULT_PORT,
                        help=f"the port to measure on (default: {DEFAULT_PORT})")
     fit_p.add_argument("--timeout", type=float, default=None,

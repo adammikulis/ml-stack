@@ -237,6 +237,71 @@ class TestFit:
         assert fit.ok and "estimated" in fit.detail
 
 
+class TestYarnFitCheck:
+    """`fit (measured)` -- a real measurement's own per-token cost, in place of the
+    analytic estimate, for the one case that estimate is known to undercount: a context
+    YaRN was turned on to reach."""
+
+    def test_an_ordinary_ask_gets_no_extra_check(self, tmp_path, monkeypatch):
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        report = Preflight(ServerSpec(model=gguf, context=4096), binary=fake_binary(tmp_path))
+        assert not any(c.name == "fit (measured)" for c in report.checks)
+
+    def test_no_measured_record_says_so_and_passes(self, tmp_path, monkeypatch):
+        import ml_stack.setup as setup_module
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        spec = ServerSpec(model=gguf, context=1_000_000, rope_scaling="yarn",
+                          rope_scale=8.0, yarn_orig_ctx=131072)
+        report = Preflight(spec, binary=fake_binary(tmp_path), limit_bytes=64 * 2**30,
+                           fits=lambda: [])
+        found = next(c for c in report.checks if c.name == "fit (measured)")
+        assert found.ok and "no measured record" in found.detail
+
+    def test_a_measured_record_that_fits(self, tmp_path, monkeypatch):
+        import ml_stack.setup as setup_module
+
+        from ml_stack.serve.fit import Fit
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        spec = ServerSpec(model=gguf, context=1_000_000, cache_type_k="q8_0",
+                          cache_type_v="q8_0", rope_scaling="yarn", rope_scale=8.0,
+                          yarn_orig_ctx=131072)
+        measured = Fit(model="model.gguf", weights=4 * 2**30, per_token=13_056,
+                       per_seq=1024, compute=0, cache_type="q8_0")
+        report = Preflight(spec, binary=fake_binary(tmp_path), limit_bytes=64 * 2**30,
+                           fits=lambda: [measured])
+        found = next(c for c in report.checks if c.name == "fit (measured)")
+        assert found.ok, found.detail
+        assert "measured on model.gguf" in found.detail
+        assert "13,056 B/token" in found.detail
+
+    def test_a_measured_record_that_does_not_fit_refuses_with_the_numbers(self, tmp_path,
+                                                                          monkeypatch):
+        import ml_stack.setup as setup_module
+
+        from ml_stack.serve.fit import Fit
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        spec = ServerSpec(model=gguf, context=1_000_000, cache_type_k="q8_0",
+                          cache_type_v="q8_0", rope_scaling="yarn", rope_scale=8.0,
+                          yarn_orig_ctx=131072)
+        measured = Fit(model="model.gguf", weights=90 * 2**30, per_token=13_056,
+                       per_seq=1024, compute=0, cache_type="q8_0")
+        report = Preflight(spec, binary=fake_binary(tmp_path), limit_bytes=95 * 2**30,
+                           fits=lambda: [measured])
+        found = next(c for c in report.checks if c.name == "fit (measured)")
+        assert not found.ok
+        assert "exceeds" in found.detail
+        assert not report.ok
+
+
 class TestFlags:
     def test_a_flag_the_build_lacks_is_named(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module

@@ -8,7 +8,9 @@ from ml_stack.serve.backend import (
     ServerFailed,
     ServerInfo,
     ServerSpec,
+    parse_context,
     tail,
+    trained_context,
 )
 from ml_stack.serve.binary import (
     BinaryNotFound,
@@ -70,6 +72,7 @@ __all__ = [
     "kill_process_tree",
     "merge_state",
     "model_matches",
+    "parse_context",
     "pid_exists",
     "port_is_free",
     "profile_for",
@@ -84,4 +87,5 @@ __all__ = [
     "shape_mismatch",
     "stop_all_servers",
     "tail",
+    "trained_context",
 ]

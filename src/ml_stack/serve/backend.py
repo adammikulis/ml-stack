@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import difflib
 import logging
+import math
 import re
 import subprocess
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ml_stack.client import wait_for_health
@@ -113,7 +114,9 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
         cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
         slot_prompt_similarity=0.5, slot_save_path="slots", cache_type_k="q8_0",
-        cache_type_v="q8_0", mlock=True, reasoning_budget=2048)
+        cache_type_v="q8_0", mlock=True, reasoning_budget=2048, rope_scaling="yarn",
+        rope_scale=4.0, yarn_orig_ctx=32768, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
+        yarn_beta_fast=32.0, yarn_beta_slow=1.0)
     # the `--no-` forms are a third shape for the same reason: True and False exclude
     # each other on one spec
     shapes = (full,
@@ -128,6 +131,46 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
             if token.startswith("-") and token.lstrip("-")[:1].isalpha() and token not in flags:
                 flags.append(token)
     return flags
+
+
+_CONTEXT_SUFFIX = {"": 1, "k": 1_000, "m": 1_000_000}
+
+
+def parse_context(text: str | int) -> int:
+    """A context size the way a person names it: ``32768``, ``256k``, ``1m``.
+
+    ``k`` and ``m`` are the plain decimal multipliers a model card's own round figures
+    use -- 1,000 and 1,000,000 -- not a file size's binary kibi/mebi, so ``1m`` is
+    1,000,000 tokens, not 1,048,576.
+    """
+    if isinstance(text, int):
+        return text
+    raw = str(text).strip().lower()
+    match = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([km]?)", raw)
+    if not match:
+        raise ValueError(f"not a context size: {text!r} (want e.g. 32768, 256k, 1m)")
+    number, suffix = match.groups()
+    return int(float(number) * _CONTEXT_SUFFIX[suffix])
+
+
+def trained_context(model: str | Path) -> int:
+    """The context this model trained at, off its own GGUF header.
+
+    0 when that cannot be read -- an ``hf:`` reference not yet on disk, or a header that
+    does not name one -- which is unknown, not zero: a caller asking whether a context is
+    beyond it must treat 0 as no opinion rather than as a real training length.
+    """
+    if isinstance(model, str) and model.startswith("hf:"):
+        return 0
+    path = Path(model)
+    if not path.is_file():
+        return 0
+    try:
+        from ml_stack.serve.layout import layout
+
+        return layout(path).context_length
+    except Exception:  # noqa: BLE001 - an unreadable header names no trained length
+        return 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +289,20 @@ class ServerSpec:
     # None leaves the server's own default (-1: unlimited). Measured 2026-09-01: gemma-4-26B
     # spent 252 s and 505 s on two questions under a 16k ceiling, all of it in the thinking.
     reasoning_budget: int | None = None
+    # RoPE/YaRN: how a context longer than the model's own training length is read. ""
+    # leaves the server's own default (linear unless the model's header names one) --
+    # LlamaServerBackend.resolved_context sets these to "yarn" plus a scale and the
+    # trained length itself when a spec asks for more context than the model trained at,
+    # and leaves them untouched otherwise. None on the ext/attn/beta factors leaves
+    # llama.cpp's own YaRN defaults, which is what a person who has not measured a better
+    # one should serve with.
+    rope_scaling: str = ""
+    rope_scale: float | None = None
+    yarn_orig_ctx: int | None = None
+    yarn_ext_factor: float | None = None
+    yarn_attn_factor: float | None = None
+    yarn_beta_fast: float | None = None
+    yarn_beta_slow: float | None = None
     extra_args: tuple[str, ...] = ()
 
     @property
@@ -440,6 +497,18 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--mlock"]
         if spec.reasoning_budget is not None:
             argv += ["--reasoning-budget", str(spec.reasoning_budget)]
+        if spec.rope_scaling:
+            argv += ["--rope-scaling", str(spec.rope_scaling)]
+        if spec.rope_scale is not None:
+            argv += ["--rope-scale", str(spec.rope_scale)]
+        if spec.yarn_orig_ctx is not None:
+            argv += ["--yarn-orig-ctx", str(spec.yarn_orig_ctx)]
+        for flag, value in (("--yarn-ext-factor", spec.yarn_ext_factor),
+                            ("--yarn-attn-factor", spec.yarn_attn_factor),
+                            ("--yarn-beta-fast", spec.yarn_beta_fast),
+                            ("--yarn-beta-slow", spec.yarn_beta_slow)):
+            if value is not None:
+                argv += [flag, str(value)]
 
         argv += list(spec.extra_args)
         return argv
@@ -455,14 +524,42 @@ class LlamaServerBackend(ServerBackend):
         parts = spec.hf_parts(spec.draft) if spec.draft else None
         if not parts or not parts[1]:
             return spec
-        from dataclasses import replace
-
         from ml_stack.hub import fetch
 
         try:
             return replace(spec, draft=str(fetch(str(spec.draft))))
         except Exception as exc:  # noqa: BLE001 - whatever the Hub said, say it here
             raise ServerFailed(f"could not fetch the draft {spec.draft}: {exc}") from exc
+
+    @staticmethod
+    def resolved_context(spec: ServerSpec) -> tuple[ServerSpec, str]:
+        """The spec with YaRN turned on when ``context`` asks for more than the model
+        trained at, and the line to say about it -- "" when nothing changed.
+
+        Untouched when the spec already names any rope or YaRN field: whoever set one has
+        already made the choice. Untouched too when the trained length is not known -- the
+        file is not on disk yet, or its header does not say -- since an unknown length
+        gets no opinion rather than a guess. Otherwise ``rope_scaling`` is set to
+        ``"yarn"``, ``yarn_orig_ctx`` to the trained length, and ``rope_scale`` to the
+        ratio between the two, rounded up to two places so the served context always
+        covers what was asked.
+        """
+        if (spec.rope_scaling or spec.rope_scale is not None
+                or spec.yarn_orig_ctx is not None):
+            return spec, ""
+        trained = trained_context(spec.model)
+        if trained <= 0 or spec.context <= trained:
+            return spec, ""
+        scale = math.ceil((spec.context / trained) * 100) / 100
+        said = (
+            f"{spec.context:,} tokens is beyond the {trained:,} this model trained at; "
+            f"turning on YaRN (--rope-scaling yarn --rope-scale {scale} --yarn-orig-ctx "
+            f"{trained}). llama.cpp applies this scaling to every position, so a "
+            f"conversation shorter than {trained:,} tokens on this server pays for it too "
+            "-- ask for that much or less to keep the model's own trained context unscaled."
+        )
+        return replace(spec, rope_scaling="yarn", rope_scale=scale,
+                       yarn_orig_ctx=trained), said
 
     def start(self, spec: ServerSpec, *, lease: Lease, timeout: float = 300.0,
               check_flags: bool = True, preflight: bool = True,
@@ -483,6 +580,9 @@ class LlamaServerBackend(ServerBackend):
         whatever the first real question turns out to be.
         """
         spec = self.resolved_draft(spec)
+        spec, yarn_said = self.resolved_context(spec)
+        if yarn_said:
+            logger.warning(yarn_said)
         if not spec.is_hf_ref:
             model = Path(spec.model)
             if not model.is_file():

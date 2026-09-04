@@ -490,6 +490,45 @@ def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes
                 f"may use ({pieces})")
 
 
+def _yarn_fit_check(spec, limit_bytes: int,
+                    fits: Callable[[], list] | None = None) -> Check | None:
+    """Whether a real measurement of this model says the context YaRN was turned on for
+    actually fits, in place of the analytic estimate above.
+
+    None when the spec is not asking for a scaled context -- the "fit" check already
+    covers an ordinary ask, and YaRN's own extra KV cost (an indexer's own cache, on a
+    sparse-attention model, that the analytic estimate above does not count) is exactly
+    the case a measured number matters more than a guess.
+    """
+    if spec.rope_scaling != "yarn":
+        return None
+    from ml_stack.fleet.plan import fit_for
+    from ml_stack.serve.fit import records
+
+    every = (fits or records)()
+    found = fit_for(str(spec.model), every,
+                    cache_type=spec.cache_type_k or spec.cache_type_v, spec=spec.spec_type)
+    if found is None:
+        return Check("fit (measured)", True,
+                     "no measured record for this model; the estimate above is what stands")
+    at = found.at_room(limit_bytes)
+    loaded, per_seat = at.line(spec.context)
+    total = loaded + per_seat
+    pieces = (f"measured on {found.model} ({found.cache_type}"
+              + (f", {found.spec}" if found.spec else "") + "): "
+              f"loaded {_human(loaded)}, +{_human(per_seat)} at {spec.context:,} tokens "
+              f"({at.per_token:,} B/token)")
+    if not limit_bytes:
+        return Check("fit (measured)", True,
+                     f"{_human(total)} {pieces}; no machine memory limit is known to "
+                     "compare against")
+    ok = total <= limit_bytes
+    verb = "fits under" if ok else "exceeds"
+    return Check("fit (measured)", ok,
+                f"{_human(total)} {verb} the {_human(limit_bytes)} this machine may use "
+                f"({pieces})")
+
+
 # ---------------------------------------------------------------- flags (reuses backend.py)
 
 def _flags_check(spec, binary: str | Path, *,
@@ -526,23 +565,26 @@ def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
               read_header: Callable[[Path | str], dict[str, object]] | None = None,
               arches: Callable[[str | Path], set[str]] | None = None,
               flags: Callable[[str | Path], frozenset[str]] | None = None,
-              ref_bytes: Callable[[str | Path | None], int] | None = None) -> Report:
+              ref_bytes: Callable[[str | Path | None], int] | None = None,
+              fits: Callable[[], list] | None = None) -> Report:
     """Everything worth knowing about ``spec`` before a process is started for it.
 
     Every check runs and is recorded even after one fails -- a report that stopped at the
     first failure would hide a second, unrelated one behind it, and the whole point of
     asking before the load is asking everything at once rather than one slow round at a time.
 
-    The five keyword seams are where the facts come from, and each defaults to the real
+    The six keyword seams are where the facts come from, and each defaults to the real
     reader: ``shards_of(spec)`` is `_shards_of` (the disk, or the Hub cache),
     ``read_header(path)`` is `read_gguf_header`, ``arches(binary)`` is
     `known_architectures`, ``flags(binary)`` is `flags_of`, ``ref_bytes(ref)`` is
-    `_ref_bytes` (a companion's size, local or on the Hub). They exist for one caller: the
-    bench's self-check, which hands in facts that touch nothing so that every check's own
-    code -- the shard arithmetic, the KV estimate, the fit, and above all the argv
-    `_flags_check` builds -- runs over the exact spec a run is about to serve. Twice on
-    2026-09-02 a self-check that replaced this whole function said ok, and the run then
-    died in here. A fake that skips the checks is not a check of the checks.
+    `_ref_bytes` (a companion's size, local or on the Hub), ``fits()`` is
+    `ml_stack.serve.fit.records` (every model this machine or the package has measured).
+    They exist for one caller: the bench's self-check, which hands in facts that touch
+    nothing so that every check's own code -- the shard arithmetic, the KV estimate, the
+    fit, and above all the argv `_flags_check` builds -- runs over the exact spec a run is
+    about to serve. Twice on 2026-09-02 a self-check that replaced this whole function said
+    ok, and the run then died in here. A fake that skips the checks is not a check of the
+    checks.
     """
     report = Report()
 
@@ -567,6 +609,9 @@ def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
     mmproj_bytes = sized(spec.mmproj)
     report.checks.append(
         _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes))
+    yarn_fit = _yarn_fit_check(spec, limit_bytes, fits=fits)
+    if yarn_fit is not None:
+        report.checks.append(yarn_fit)
 
     report.checks.append(_flags_check(spec, binary, flags=flags))
     return report

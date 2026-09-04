@@ -19,9 +19,11 @@ from ml_stack.serve.backend import (
     UnknownFlag,
     emitted_flags,
     flags_of,
+    parse_context,
+    trained_context,
     unknown_flags,
 )
-from tests.conftest import leased
+from tests.conftest import leased, write_gguf
 
 HELP = """\
 usage: llama-server [options]
@@ -219,7 +221,10 @@ class TestEmittedFlags:
                      "--pooling", "--kv-unified", "--no-kv-unified", "--cache-ram",
                      "--cache-idle-slots", "--no-cache-idle-slots",
                      "--slot-prompt-similarity", "--slot-save-path", "--cache-type-k",
-                     "--cache-type-v", "--no-mmap", "--mlock", "--reasoning-budget"):
+                     "--cache-type-v", "--no-mmap", "--mlock", "--reasoning-budget",
+                     "--rope-scaling", "--rope-scale", "--yarn-orig-ctx",
+                     "--yarn-ext-factor", "--yarn-attn-factor", "--yarn-beta-fast",
+                     "--yarn-beta-slow"):
             assert flag in flags, flag
         assert len(flags) == len(set(flags))
         assert not any(token.endswith(".gguf") for token in flags)
@@ -276,6 +281,132 @@ class TestReasoningBudget:
         argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model="m.gguf", reasoning_budget=512))
         assert "--reasoning-budget" in dict(unknown_flags(argv, flags_of(binary)))
+
+
+class TestRopeYarnFlags:
+    """RoPE/YaRN: how a context past the model's own training length is read. None on
+    every field emits nothing, so the model's own default (unscaled) stands."""
+
+    def test_none_on_every_field_emits_nothing(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf"))
+        for flag in ("--rope-scaling", "--rope-scale", "--yarn-orig-ctx",
+                     "--yarn-ext-factor", "--yarn-attn-factor", "--yarn-beta-fast",
+                     "--yarn-beta-slow"):
+            assert flag not in argv, flag
+
+    def test_every_field_carries_its_value(self, tmp_path):
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model="m.gguf", rope_scaling="yarn", rope_scale=8.0,
+                       yarn_orig_ctx=131072, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
+                       yarn_beta_fast=32.0, yarn_beta_slow=1.0))
+        assert argv[argv.index("--rope-scaling") + 1] == "yarn"
+        assert argv[argv.index("--rope-scale") + 1] == "8.0"
+        assert argv[argv.index("--yarn-orig-ctx") + 1] == "131072"
+        assert argv[argv.index("--yarn-ext-factor") + 1] == "1.0"
+        assert argv[argv.index("--yarn-attn-factor") + 1] == "1.0"
+        assert argv[argv.index("--yarn-beta-fast") + 1] == "32.0"
+        assert argv[argv.index("--yarn-beta-slow") + 1] == "1.0"
+
+    def test_a_build_without_them_names_them_before_the_load(self, tmp_path):
+        binary = fake_server(tmp_path)
+        argv = LlamaServerBackend(binary=binary).command(
+            ServerSpec(model="m.gguf", rope_scaling="yarn", rope_scale=4.0,
+                       yarn_orig_ctx=32768))
+        lacking = dict(unknown_flags(argv, flags_of(binary)))
+        assert {"--rope-scaling", "--rope-scale", "--yarn-orig-ctx"} <= set(lacking)
+
+
+class TestParseContext:
+    """``--context`` the way a person names it, not only the raw integer llama-server
+    takes: ``32768``, ``256k``, ``1m``."""
+
+    @pytest.mark.parametrize("text, want", [
+        ("32768", 32768),
+        ("0", 0),
+        ("4096", 4096),
+        ("256k", 256_000),
+        ("256K", 256_000),
+        ("1m", 1_000_000),
+        ("1M", 1_000_000),
+        ("1.5m", 1_500_000),
+        (" 1m ", 1_000_000),
+    ])
+    def test_the_edges(self, text, want):
+        assert parse_context(text) == want
+
+    def test_an_int_passes_through(self):
+        assert parse_context(32768) == 32768
+
+    @pytest.mark.parametrize("text", ["", "abc", "1g", "-1m", "1 m 2", "k"])
+    def test_nonsense_is_refused(self, text):
+        with pytest.raises(ValueError):
+            parse_context(text)
+
+
+class TestTrainedContext:
+    def test_reads_the_context_length_off_the_header(self, tmp_path):
+        gguf = write_gguf(tmp_path / "m.gguf",
+                          {"general.architecture": "llama", "llama.block_count": 1,
+                           "llama.context_length": 131072})
+        assert trained_context(gguf) == 131072
+
+    def test_a_missing_file_is_unknown_not_zero_trained(self, tmp_path):
+        assert trained_context(tmp_path / "absent.gguf") == 0
+
+    def test_an_hf_reference_not_on_disk_is_unknown(self):
+        assert trained_context("hf:owner/repo/model.gguf") == 0
+
+    def test_a_file_with_no_context_length_key_is_zero(self, tmp_path):
+        gguf = write_gguf(tmp_path / "m.gguf",
+                          {"general.architecture": "llama", "llama.block_count": 1})
+        assert trained_context(gguf) == 0
+
+
+class TestResolvedContext:
+    """``LlamaServerBackend.resolved_context`` turns YaRN on by itself only when the ask
+    is past what the model trained at, and leaves everything else exactly as it was."""
+
+    def test_a_context_at_or_under_the_trained_length_is_untouched(self, tmp_path):
+        gguf = write_gguf(tmp_path / "m.gguf",
+                          {"general.architecture": "llama", "llama.block_count": 1,
+                           "llama.context_length": 131072})
+        for context in (4096, 131072):
+            spec = ServerSpec(model=gguf, context=context)
+            resolved, said = LlamaServerBackend.resolved_context(spec)
+            assert resolved == spec
+            assert said == ""
+
+    def test_a_context_past_the_trained_length_turns_yarn_on(self, tmp_path):
+        gguf = write_gguf(tmp_path / "m.gguf",
+                          {"general.architecture": "llama", "llama.block_count": 1,
+                           "llama.context_length": 131072})
+        spec = ServerSpec(model=gguf, context=1_000_000)
+        resolved, said = LlamaServerBackend.resolved_context(spec)
+        assert resolved.rope_scaling == "yarn"
+        assert resolved.yarn_orig_ctx == 131072
+        # ceil(1_000_000 / 131_072 * 100) / 100, rounded up so the scaled context always
+        # covers what was asked
+        assert resolved.rope_scale == pytest.approx(7.63)
+        assert 131072 * resolved.rope_scale >= 1_000_000
+        assert "131,072" in said and "1,000,000" in said and "YaRN" in said
+
+    def test_an_unknown_trained_length_is_untouched(self, tmp_path):
+        gguf = tmp_path / "m.gguf"
+        gguf.write_bytes(b"not a gguf at all")
+        spec = ServerSpec(model=gguf, context=1_000_000)
+        resolved, said = LlamaServerBackend.resolved_context(spec)
+        assert resolved == spec
+        assert said == ""
+
+    def test_a_spec_that_already_names_a_rope_field_is_left_alone(self, tmp_path):
+        gguf = write_gguf(tmp_path / "m.gguf",
+                          {"general.architecture": "llama", "llama.block_count": 1,
+                           "llama.context_length": 131072})
+        spec = ServerSpec(model=gguf, context=1_000_000, rope_scaling="linear")
+        resolved, said = LlamaServerBackend.resolved_context(spec)
+        assert resolved == spec
+        assert said == ""
 
 
 class TestLaunchRefusal:
