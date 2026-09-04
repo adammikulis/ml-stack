@@ -138,11 +138,16 @@ time with the page's server down for the Ollama half.
 
 ## Measure what landed tonight (each needs the GPU; sample first)
 
-- [ ] **The stable prefix.** `sweep --on flashprefix=http://127.0.0.1:8080 --plain-only
-  --batch --kinds --summary --sample 10` was running against the page's server as this was
-  written; read `show --last 2 --rates`: `cached` against `read` and s/question against
-  `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`. Two costs to watch: a model that searches after
-  "the searching is over" spends one refused call; the show nudge now offers every tool.
+- [ ] **The stable prefix: reading fell, calls rose; measure again on a quiet machine.**
+  Nine sampled questions on the page's Flash-Next against `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
+  (kept as `flashprefix-plain`): the last call of a question reads ~50 tokens with the whole
+  prefix cached where it read 3193 with none; prefix hits 100% from ~80%; uncached read
+  2.1k a question from 5.2k; F1 81% against 85% inside the ±19 band. But calls went 6.2 to
+  7.7 a question -- 22 `show` calls over nine questions where one is the design -- and
+  written tokens 5.1k to 7.8k, so the wall clock (27.7 against 25.6 s/q) did not move; three
+  agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
+  `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
+  offers every tool), then a quiet `--sample 20` of both.
 - [ ] **Constrained ids on E2B and E4B.** `sweep --serve <gemma> --profile --constrain-ids
   --sample 20` against the kept plain runs: precision up, recall held. Then `Profile.WAYS`
   needs `constrain_ids` so a profile can record it, and `graph.cache`'s fingerprint should
