@@ -73,6 +73,7 @@ class _Ollama:
     draft figure, durations in nanoseconds."""
 
     base_url = "http://127.0.0.1:11434"
+    api = "ollama"
 
     def __init__(self):
         self.calls = []

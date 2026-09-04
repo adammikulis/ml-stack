@@ -89,14 +89,22 @@ def client_for(url: str, *, client: Any = None, context: int | None = None,
         asked.update(how)
     if context is not None and _accepts(client, "context"):
         asked["context"] = int(context)
-    return client(url, **asked)
+    # the plain http address with the program and the model said outright, so a client
+    # that reads only one scheme off a URL is still told what the others mean
+    return client(http_of(url) if how else url, **asked)
+
+
+def speaks_llama(client: Any) -> bool:
+    """Whether the client talks to a llama-server: its ``api`` says so, or it has none."""
+    return str(getattr(client, "api", None) or "llama") == "llama"
 
 
 def served_by(client: Any, base_url: str = "") -> dict[str, Any] | None:
     """What served a run: ``program``, ``version``, ``format``, ``runtime``, ``quant``,
-    ``model``, ``weights_bytes`` -- from the client when it can say, else read off a
-    llama-server's ``/props`` and the GGUF it names. None when nothing answers."""
-    if hasattr(client, "served_by"):
+    ``model``, ``weights_bytes`` -- from the client for a program only it can ask, and
+    read off ``/props`` and every shard of the GGUF it names for a llama-server. None
+    when nothing answers."""
+    if hasattr(client, "served_by") and not speaks_llama(client):
         try:
             got = client.served_by()
         except Exception:  # noqa: BLE001 - a record nothing gave is no record
@@ -207,15 +215,18 @@ def timings_of(reply: Any) -> dict[str, float | int | None]:
     out: dict[str, float | int | None] = {key: None for key in TIMING_KEYS}
     timings = raw.get("timings") if isinstance(raw, Mapping) else None
     if isinstance(timings, Mapping):
-        for key in ("prompt_ms", "predicted_ms"):
+        # a key written as null is a figure this program does not measure; a key left
+        # out is llama.cpp with nothing to say -- no head, nothing cached -- which is 0
+        for key in ("prompt_ms", "predicted_ms", "load_ms"):
             if timings.get(key) is not None:
                 out[key] = float(timings[key])
         for key in ("prompt_n", "cache_n", "predicted_n"):
             if timings.get(key) is not None:
                 out[key] = int(timings[key])
-        out["draft_n"] = int(timings.get("draft_n") or 0)
-        out["draft_n_accepted"] = int(timings.get("draft_n_accepted") or 0)
-        if out["cache_n"] is None:
+        for key in ("draft_n", "draft_n_accepted"):
+            out[key] = None if (key in timings and timings[key] is None) \
+                else int(timings.get(key) or 0)
+        if out["cache_n"] is None and "cache_n" not in timings:
             usage = raw.get("usage") or {}
             cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
             out["cache_n"] = int(cached) if cached is not None else 0

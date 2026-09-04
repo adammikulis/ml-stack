@@ -678,9 +678,11 @@ def machine_memory() -> dict[str, int]:
 
 
 def said_by(client: Any) -> dict[str, Any] | None:
-    """What a client says served it (`Client.served_by`), None for one that cannot say --
-    a llama-server's record is read by `footprint` from ``/props`` instead."""
-    if client is None or not hasattr(client, "served_by"):
+    """What a client says served it (`Client.served_by`), for a program only the client
+    can ask; None for a llama-server's, which `footprint` reads from ``/props`` itself."""
+    from ml_stack.graph.bench.backends import speaks_llama
+
+    if client is None or not hasattr(client, "served_by") or speaks_llama(client):
         return None
     return served_by(client)
 

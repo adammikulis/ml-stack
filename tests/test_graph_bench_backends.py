@@ -70,9 +70,13 @@ def test_the_client_is_built_with_the_program_and_context_when_it_takes_them():
 
     client_for("ollama://127.0.0.1:11434/thornfell:125b-mlx", client=Newer, context=32768,
                timeout=300.0, temperature=0.0)
-    assert seen == {"base_url": "ollama://127.0.0.1:11434/thornfell:125b-mlx",
+    assert seen == {"base_url": "http://127.0.0.1:11434",
                     "api": "ollama", "model": "thornfell:125b-mlx", "context": 32768,
-                    "timeout": 300.0, "temperature": 0.0}
+                    "timeout": 300.0, "temperature": 0.0}, \
+        "the plain address, with the program and the model said outright"
+    client_for("openai://10.0.0.7:8000/pellard-9b", client=Newer)
+    assert seen["base_url"] == "http://10.0.0.7:8000" and seen["api"] == "openai"
+    assert seen["model"] == "pellard-9b"
 
     class Older:
         def __init__(self, base_url, *, timeout=180.0, temperature=None):
@@ -92,6 +96,7 @@ def test_served_by_is_read_off_a_client_that_can_say():
 
     class Ollama:
         base_url = "http://127.0.0.1:11434"
+        api = "ollama"
 
         def served_by(self):
             return {"program": "ollama", "version": "0.33.3", "format": "safetensors",
@@ -237,6 +242,20 @@ def test_a_reply_with_no_timings_at_all_is_none_everywhere():
 
     got = timings_of(_Reply({"usage": {"prompt_tokens": 100, "completion_tokens": 20}}))
     assert all(v is None for v in got.values()), got
+
+
+def test_a_timings_key_written_null_is_not_measured_and_one_left_out_is_zero():
+    """The client turns an Ollama reply into llama.cpp's ``timings`` with ``cache_n`` and
+    ``draft_n`` written null: that is a program that cannot say, not a server with no head."""
+    from ml_stack.graph.bench.backends import timings_of
+
+    got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
+                                         "load_ms": 5000.0, "prompt_n": 90, "predicted_n": 40,
+                                         "cache_n": None, "draft_n": None,
+                                         "draft_n_accepted": None}}))
+    assert got["cache_n"] is None and got["draft_n"] is None
+    assert got["draft_n_accepted"] is None
+    assert got["load_ms"] == 5000.0 and got["prompt_n"] == 90
 
 
 def test_an_ollama_reply_reports_prefill_and_decode_and_nothing_it_cannot():
@@ -427,6 +446,7 @@ def test_the_sampler_sums_the_tree_and_sees_a_runner_that_arrives_late(monkeypat
 
     class Ollama:
         base_url = "http://127.0.0.1:11434"
+        api = "ollama"
 
         def processes(self):
             return [5000]
@@ -482,6 +502,7 @@ def test_the_footprint_takes_the_weights_and_the_program_from_what_served_it(mon
 
     class Ollama:
         base_url = "http://127.0.0.1:11434"
+        api = "ollama"
 
         def processes(self):
             return [5000]
@@ -556,7 +577,7 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
                      temperature=None, n_predict=16384, **rest):
             built.update(base_url=base_url, api=api, model=model, context=context,
                          timeout=timeout, temperature=temperature)
-            self.base_url = base_url
+            self.base_url, self.api, self.model, self.context = base_url, api, model, context
             self.sampling = {"temperature": temperature if temperature is not None else 0.0}
             self.card = {}
 
@@ -590,7 +611,7 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
                         "--questions", str(questions), "--store", "", "--context", "16384",
                         "--no-smoke"])
     assert code == 0
-    assert built["base_url"] == "ollama://127.0.0.1:11434/thornfell:125b-mlx"
+    assert built["base_url"] == "http://127.0.0.1:11434"
     assert built["api"] == "ollama" and built["model"] == "thornfell:125b-mlx"
     assert built["context"] == 16384
     assert asked == ["http://127.0.0.1:11434"], "the busy check goes to the plain port"
