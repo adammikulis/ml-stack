@@ -39,7 +39,7 @@ the whole conversation -- the page's 49 s against the bench's 27); `Client(api="
 over `/api/chat` with a timing a server does not report as None, `served_by()`,
 `processes()`; `ml-stack-bench standard` (lm-evaluation-harness), `animate` (manim),
 `ml-stack-do` (a served model drives the commands, asks first), `ml-stack-audit` and
-`scripts/encrypted-volume.sh`; the divider rule in CLAUDE.md. Suite: ~3,420 green.
+`scripts/encrypted-volume.sh`; the divider rule in CLAUDE.md. Suite on the final `main` of the night: 3,541 green (5m36s, `-n 4`).
 
 - [ ] **The shelf holds APBiology and Biology2e chapter 2, sound; nine books are unread.**
   `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
@@ -183,10 +183,6 @@ time with the page's server down for the Ollama half.
   `/metrics`.
 
 ## Found tonight, not fixed
-
-- [ ] **No full-suite run on the final `main`.** The last branches landed on targeted suites
-  as `main` kept moving; run `python packaging/build.py && python3 -m pytest tests -q -n 4
-  > FILE; echo $?` once and watch `tests/test_harness.py` (below).
 
 - [ ] **`tests/test_harness.py` calls `asyncio.run` bare** (`harness.py:117`) and fails under
   `-n 4` ordering when a neighbour leaves a loop running; three agents hit it. Wrap it the
