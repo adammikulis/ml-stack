@@ -325,7 +325,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # two measurements, and the wall clock of the first is the run's, not the turns' sum.
     # `made` is what F1 cannot see -- entries the prose named that nothing found or read.
     #
-    # `ctx` carries the KV cache type when the run's server record names one (`32k x1/q8`):
+    # `ctx` carries the KV cache type when the run's server record names one (`32k x1/q8`),
+    # and `x?` for a program that does not say how many slots it has:
     # a run with a quantised cache against one at f16 is two configurations, not two
     # models. `load` is what the server took to come up, from the lease itself and not a
     # stopwatch around it; blank for a run kept before the lease recorded one.
@@ -405,7 +406,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         cached = measured(rows, "cached_tokens")
         print(f"{_shown(one.get('label', '')):28} "
               + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
-              + f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
+              + f"{(f'{ctx // 1024}k x{slots or chr(63)}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
               f"{len(scored):>3} "
               f"{_shown(shaped(one, ctx_shown=True), 32):32} "
               f"{wall_of(one):>6.0f}s "
