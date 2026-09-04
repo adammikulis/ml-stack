@@ -1925,6 +1925,7 @@ ml-stack-ingest ~/books/*.pdf --out ./shelf.ladybug --model Qwen3.8-Flash-Next -
 ml-stack-ingest status --out ./shelf.ladybug     # how far, what failed, how long is left
 ml-stack-ingest show   --out ./shelf.ladybug     # what each book was read as
 ml-stack-ingest fold   --out ./shelf.ladybug     # every book so far into the store
+ml-stack-ingest import ./extraction --out ./shelf.ladybug --dry-run   # a pair somebody else extracted
 ml-stack-ingest stop                             # end the run, after it folds what it read
 ```
 
@@ -1967,6 +1968,28 @@ otherwise. A shelf is hours, so `--detach` runs it in its own session with a log
 `~/.ml-stack/ingest/logs`, a progress file beside the store records every unit that finished,
 `--resume` skips those, and `status` says how many sections of how many books are done, at
 what rate, what is in the store, and how long the rest will take.
+
+### A book somebody else already extracted
+
+`ml-stack-ingest import DIR --out STORE` takes a `nodes.csv`/`edges.csv` pair another
+extractor wrote and puts it on the shelf as one book. The pair becomes this library's own
+reads -- one per section, in the document schema's shape -- and goes in through the same
+fold a read book does, so it has the same node and edge shape, the same `book:<slug>` and
+`read_from` edges, the same `<book>:<chapter>:<section>` unit ids behind every claim, and
+`shelf`, `show`, `tidy` and `ask` work over it unchanged. The model and run id on the rows
+become a `run` node the units point at, so `origin()` still says which model said this.
+
+The two vocabularies are joined by a table. This library sets eighteen verbs itself; an
+extractor free to choose its own writes thousands -- one anatomy textbook carries 2,110
+distinct predicates. A predicate with a counterpart is normalised onto that verb, subject
+and object swapped where the natural reading is the inverse: `includes` is `has_part`,
+`defines` is `defined_by`, `enables` is `requires`, `caused_by` is `causes` the other way
+round. Every other predicate comes in as it stands, its edges carrying `extension`, so a
+reader and a query can tell a verb this library set from a verb the extractor chose;
+`--core-only` takes the first kind alone. What each predicate became is counted by name,
+printed, and kept in the store as `ingest:predicates:<book>`. `--dry-run` prints all of it
+and writes nothing; `--confidence` takes rows at a level and above, `--no-provisional`
+leaves the ones the extractor left provisional, and `--slug` names the book.
 
 ### A book is readable before it is finished
 
