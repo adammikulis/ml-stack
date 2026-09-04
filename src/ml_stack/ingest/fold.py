@@ -490,9 +490,20 @@ def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: b
     What the fold rebuilt from the reads that no verdict covers is left as it is, and the
     line says how many verdicts were replayed, how many name a node the store no longer
     has, and what is left unjudged.
+
+    A store that still names its sources ``book:`` is refused, naming ``migrate``.
     """
+    from ml_stack.ingest.migrate import pending
     from ml_stack.ingest.sources import Sources
 
+    found = pending(out)
+    if any(found.values()):
+        say(f"{out} still names its sources `book:` -- {found['nodes']} node(s), "
+            f"{found['edges']} edge(s), {found['docs']} document(s), {found['rows']} reads "
+            f"row(s) and {found['progress']} progress entry(s). A fold would write "
+            f"`source:` beside them and the store would hold each source twice. Run "
+            f"ml-stack-ingest migrate --out {out} first")
+        return 1
     view = Sources(out)
     wanted = [s for s in view.sources() if s.units and (not source or s.slug == source)]
     if not wanted:

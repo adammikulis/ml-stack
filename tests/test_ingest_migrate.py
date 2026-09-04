@@ -306,3 +306,23 @@ def test_the_command_migrates_a_store_and_prints_what_it_changed(tmp_path, capsy
 def test_the_command_needs_a_store(capsys):
     assert ingest.main(["migrate"]) == 2
     assert "migrate needs --out STORE" in capsys.readouterr().err
+
+
+def test_fold_refuses_a_store_that_still_names_its_sources_books(tmp_path):
+    where = an_old_store(tmp_path)
+    from ml_stack.graph.store import GraphStore
+
+    with GraphStore(where, read_only=True) as store:
+        before = store.counts()
+
+    said = []
+    assert ingest.fold(where, say=said.append) == 1
+
+    assert f"{where} still names its sources `book:`" in said[0]
+    assert "ml-stack-ingest migrate" in said[0]
+    with GraphStore(where, read_only=True) as store:
+        assert store.counts() == before, "refused, and nothing written"
+        assert f"source:{SLUG}" not in {n["id"] for n in store.nodes()}
+
+    assert ingest.migrate(where, say=lambda _: None) == 0
+    assert ingest.fold(where, say=lambda _: None) == 0, "and it folds once migrated"
