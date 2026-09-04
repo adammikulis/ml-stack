@@ -137,7 +137,8 @@ class Shelf:
         holds for it. ``shared`` is every concept two or more books were read into, most
         shared first, each naming them. ``between`` is every edge whose two ends were read
         from different books -- one book's vocabulary joined to another's. ``merged`` is
-        `between_books`. ``decisions`` counts the pairs a judge has settled in the store's
+        `between_books`, and ``logged`` whether the store holds the merges document those
+        come from at all. ``decisions`` counts the pairs a judge has settled in the store's
         `graph.tidy` document.
 
         A book's node is one a ``read_from`` edge joins to ``book:<slug>``; a book's edge
@@ -201,7 +202,8 @@ class Shelf:
                             "books": [sorted(here), sorted(there)]})
         between.sort(key=lambda r: (-r["weight"], r["source_label"], r["target_label"]))
         return {"books": books, "shared": shared, "between": between,
-                "merged": self.between_books(store), "decisions": _decisions_in(store)}
+                "merged": self.between_books(store), "logged": _logged(store),
+                "decisions": _decisions_in(store)}
 
     def between_books(self, store: Any = None) -> list[dict[str, Any]]:
         """Every name the hygiene pass joined across two books, heaviest first.
@@ -239,6 +241,13 @@ class Shelf:
                                   + int(one.get("edges_moved") or 0)})
         out.sort(key=lambda r: (-r["weight"], r["a_label"], r["b_label"]))
         return out
+
+
+def _logged(store: Any) -> bool:
+    """Whether the store holds a merges document, however many merges are in it."""
+    from ml_stack.graph.tidy import MERGES
+
+    return (store.get_doc(MERGES) if hasattr(store, "get_doc") else None) is not None
 
 
 def _decisions_in(store: Any) -> dict[str, int]:
@@ -337,8 +346,11 @@ def shelf(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print
         say(f"    ... and {len(shared) - most} more")
     merged = got["merged"]
     say(f"  between books ({len(merged)})"
-        + ("" if merged else f": no concept merged across books yet; "
-                             f"ml-stack-ingest tidy --out {out}"))
+        + ("" if merged else
+           f": no concept merged across books yet; ml-stack-ingest tidy --out {out}"
+           if got.get("logged") else
+           f": no log of the names the books share; ml-stack-ingest fold --out {out} "
+           f"re-folds each book from its reads and writes one"))
     for one in merged[:most]:
         say(f"    {one['a_label']} ({one['a_book']}) = {one['b_label']} ({one['b_book']})  "
             f"{one['kind']}  {one['weight']}")

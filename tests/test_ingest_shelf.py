@@ -339,6 +339,35 @@ def test_a_shelf_never_tidied_has_nothing_between_books(tmp_path):
     assert ingest.Shelf(a_shelf_spelled_apart(tmp_path)).between_books() == []
 
 
+def a_shelf_a_plural_apart(tmp_path):
+    """Two books folded into one store, one naming `seam walls` what the other names
+    `seam wall`: the fold's own absorb lands the second on the first, with no model."""
+    store = a_part_read_book(tmp_path)
+    rows = [a_read(f"{FIELD_GUIDE}:1:1.1", book=FIELD_GUIDE, title="Spore Blooms",
+                   extracted=said("spore bloom", "seam walls",
+                                  relations=[("spore bloom", "part_of", "seam walls")]))]
+    a_part_read_book(tmp_path, slug=FIELD_GUIDE, rows=rows, title="Ambleford Field Guide",
+                     sections=6, store=store)
+    return store
+
+
+def test_a_fold_logs_the_name_it_lands_on_another_book_s_node(tmp_path, capsys):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES
+
+    store = a_shelf_a_plural_apart(tmp_path)
+    assert not store.exists(), "nothing has written the log, or anything else, yet"
+
+    assert ingest.fold(store, say=lambda _: None) == 0
+
+    with GraphStore(store, read_only=True) as held:
+        assert len(held.get_doc(MERGES)["merges"]) == 1
+    assert ingest.main(["shelf", "--out", str(store)]) == 0
+    said_out = capsys.readouterr().out
+    assert "between books (1)" in said_out
+    assert f"seam walls ({FIELD_GUIDE}) = seam wall ({OPEN_TEXTS})" in said_out
+
+
 def test_the_shelf_command_prints_the_names_joined_across_books(tmp_path, capsys):
     from ml_stack.graph.tidy import tidy
 
@@ -363,10 +392,34 @@ def test_the_shelf_command_prints_the_books_the_shared_concepts_and_the_judged_p
     assert OPEN_TEXTS in said_out and "Ambleford Field Guide" in said_out
     assert "concepts in more than one book (1)" in said_out
     assert "vault" in said_out and f"{FIELD_GUIDE}, {OPEN_TEXTS}" in said_out
-    assert (f"between books (0): no concept merged across books yet; "
-            f"ml-stack-ingest tidy --out {store}") in said_out
+    assert (f"between books (0): no log of the names the books share; "
+            f"ml-stack-ingest fold --out {store} re-folds each book from its reads and "
+            f"writes one") in said_out
     assert "relations between books (0)" in said_out
     assert "judged: nothing" in said_out
+
+
+def test_the_shelf_command_asks_for_a_tidy_once_a_merge_is_logged_within_one_book(
+        tmp_path, capsys):
+    from ml_stack.graph.store import GraphStore
+    from ml_stack.graph.tidy import MERGES, tidy
+
+    store = a_part_read_book(tmp_path)
+    ingest.fold(store, say=lambda _: None)
+    with GraphStore(store) as held:
+        held.write({"nodes": [{"id": "concept:seam-wal", "kind": "structure",
+                               "label": "seam wal", "mentions": 1, "attrs": {},
+                               "provenance": [f"{OPEN_TEXTS}:1:1.1"]}],
+                    "edges": [{"source": "concept:seam-wal", "rel": "read_from",
+                               "target": f"book:{OPEN_TEXTS}", "weight": 1}]})
+    assert tidy(store, dry_run=False, written=WRITTEN).merged_nodes == 1
+    with GraphStore(store, read_only=True) as held:
+        assert len(held.get_doc(MERGES)["merges"]) == 1, "a merge is logged, none across books"
+
+    assert ingest.main(["shelf", "--out", str(store)]) == 0
+
+    assert (f"between books (0): no concept merged across books yet; "
+            f"ml-stack-ingest tidy --out {store}") in capsys.readouterr().out
 
 
 def test_the_shelf_command_takes_a_sample_size(tmp_path, capsys):
