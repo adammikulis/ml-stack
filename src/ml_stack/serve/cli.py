@@ -176,6 +176,26 @@ def every_server() -> list[dict]:
     return sorted(out, key=lambda r: r["port"])
 
 
+def cache_of(model: str) -> tuple[Path, int] | None:
+    """The model root ``model`` lies under, with its weight bytes; the file's own
+    directory when it is under none; None when neither is there."""
+    from ml_stack.fleet.models import default_roots, holding
+
+    path = Path(str(model or "")).expanduser()
+    if not str(model or "").strip():
+        return None
+    for root in default_roots(Path.home() / ".ml-stack"):
+        try:
+            path.relative_to(root)
+        except ValueError:
+            continue
+        if root.is_dir():
+            return root, holding(root)[1]
+    if path.parent.is_dir() and str(path.parent) not in ("", "."):
+        return path.parent, holding(path.parent)[1]
+    return None
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     records = recorded_servers(STATE_FILE)
     if getattr(args, "every", False):
@@ -200,6 +220,11 @@ def cmd_status(args: argparse.Namespace) -> int:
             rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
             print(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
                   f"{rss} resident  {leased}  ({one['binary']})")
+            cache = cache_of(one["model"])
+            if cache is not None:
+                from ml_stack.fleet.models import sized
+
+                print(f"      cache  {cache[0]}  ({sized(cache[1])})")
             if one["port"] not in records:
                 print(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
         if strays:

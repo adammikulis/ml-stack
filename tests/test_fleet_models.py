@@ -894,3 +894,40 @@ class TestOverHTTP:
         peer, _ = served
         with pytest.raises(PeerError):
             peer.get_model("nothing-like-this.gguf")
+
+
+class TestCaches:
+    def test_each_existing_root_is_listed_with_its_weight_files_and_bytes(self, tmp_path,
+                                                                        monkeypatch):
+        from ml_stack.fleet import models as models_module
+        from ml_stack.fleet.models import caches, holding, sized
+
+        hub = tmp_path / "hf" / "hub"
+        blobs = hub / "models--maker--big-GGUF" / "blobs"
+        snapshot = hub / "models--maker--big-GGUF" / "snapshots" / "abc"
+        blobs.mkdir(parents=True)
+        snapshot.mkdir(parents=True)
+        (blobs / ("aa" * 8)).write_bytes(b"x" * 3000)
+        (snapshot / "big-Q4_K_M.gguf").symlink_to(blobs / ("aa" * 8))
+        (snapshot / "model.safetensors").write_bytes(b"y" * 1000)
+        (snapshot / "README.md").write_text("words")
+        mine = tmp_path / "models"
+        a_model(mine, "small.gguf", mb=1)
+        monkeypatch.setattr(models_module, "default_roots",
+                            lambda root: [tmp_path / "absent", hub, mine])
+
+        assert holding(hub) == (2, 4000), "the symlink reads through to its blob"
+        assert holding(tmp_path / "absent") == (0, 0)
+        assert caches(tmp_path) == [(hub, 2, 4000), (mine, 1, 1024 * 1024)]
+        assert sized(4000) == "0M" and sized(1024 * 1024) == "1M"
+        assert sized(int(86.2 * 2**30)) == "86.2G"
+
+    def test_hf_home_names_the_hub_cache(self, tmp_path, monkeypatch):
+        from ml_stack.fleet.models import default_roots
+
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "elsewhere"))
+        assert tmp_path / "elsewhere" / "hub" in default_roots(tmp_path)
+        assert Path.home() / ".cache" / "huggingface" / "hub" not in default_roots(tmp_path)
+        monkeypatch.delenv("HF_HOME")
+        assert Path.home() / ".cache" / "huggingface" / "hub" in default_roots(tmp_path)
+

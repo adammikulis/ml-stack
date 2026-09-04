@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -194,12 +195,18 @@ def look() -> list[Finding]:
                        "--binary /path/to/another/build"))
 
     try:
+        from ml_stack.fleet.models import caches, sized
         from ml_stack.hub import held
 
         mine = held()
+        where = ", ".join(f"{_tilde(path)} {sized(total)}"
+                          for path, files, total in caches(Path.home() / ".ml-stack")
+                          if files)
+        hf_home = os.environ.get("HF_HOME", "")
         out.append(Finding(name="models on this machine", good=bool(mine),
-                           said=f"{len(mine)} file(s)",
-                           note="" if mine else "nothing found; ml-stack-models find <words>"))
+                           said=f"{len(mine)} file(s)" + (f": {where}" if where else ""),
+                           note=(f"HF_HOME={hf_home} names the Hub cache" if hf_home else "")
+                           if mine else "nothing found; ml-stack-models find <words>"))
     except Exception:  # noqa: BLE001
         pass
 
@@ -210,6 +217,14 @@ def look() -> list[Finding]:
     if is_windows():
         out.append(_firewall_finding())
     return out
+
+
+def _tilde(path: Path) -> str:
+    """A path with the home directory written as ``~``."""
+    try:
+        return "~/" + str(Path(path).relative_to(Path.home()))
+    except ValueError:
+        return str(path)
 
 
 def _checkout() -> Path:

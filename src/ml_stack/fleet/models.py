@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Any
 
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
-           "Suggestion", "default_roots", "family_of", "is_unfiltered",
+           "Suggestion", "caches", "default_roots", "family_of", "holding", "is_unfiltered",
            "families", "how_many", "popular", "searched_count",
-           "searched_families", "suggestions"]
+           "searched_families", "sized", "suggestions"]
 
 SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
@@ -64,15 +64,62 @@ class Model:
 
 
 def default_roots(root: Path | str) -> list[Path]:
-    """Where model files live. The llama.cpp cache is included because a model pulled
-    by a server is one this machine already holds."""
+    """Where model files live: the store's own, the llama.cpp cache, the Hub cache
+    (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
     home = Path.home()
+    hub = home / ".cache" / "huggingface" / "hub"
+    named = os.environ.get("HF_HOME")
+    if named:
+        hub = Path(named).expanduser() / "hub"
     return [
         Path(root).expanduser() / "models",
         home / ".cache" / "llama.cpp",
-        home / ".cache" / "huggingface" / "hub",
+        hub,
         home / "models",
     ]
+
+
+WEIGHTS = (".gguf", ".safetensors")
+
+
+def holding(directory: Path | str) -> tuple[int, int]:
+    """How many weight files (GGUF, safetensors) are under ``directory``, and their bytes,
+    read through symlinks."""
+    files = total = 0
+    todo = [str(Path(directory).expanduser())]
+    while todo:
+        try:
+            with os.scandir(todo.pop()) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            todo.append(entry.path)
+                            continue
+                        if entry.name.lower().endswith(WEIGHTS) and entry.is_file():
+                            files += 1
+                            total += os.stat(entry.path).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return files, total
+
+
+def caches(root: Path | str) -> list[tuple[Path, int, int]]:
+    """Each model root that exists on this machine, with its weight-file count and bytes."""
+    out = []
+    for where in default_roots(root):
+        if where.is_dir():
+            files, total = holding(where)
+            out.append((where, files, total))
+    return out
+
+
+def sized(count: int) -> str:
+    """Bytes as a person reads them: ``86.2G``, ``412M``."""
+    if count >= 2**30:
+        return f"{count / 2**30:.1f}G"
+    return f"{count / 2**20:.0f}M"
 
 
 @dataclass

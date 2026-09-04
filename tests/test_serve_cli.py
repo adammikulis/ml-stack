@@ -815,23 +815,45 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     assert Path(found).is_symlink() and Path(found).stat().st_size == 100
 
 
-def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monkeypatch, capsys):
+def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monkeypatch, capsys,
+                                                                            tmp_path):
     """A stray server -- a Homebrew one from before the managed build -- holds memory a lease
     cannot see; `status --every` names it, and `pgrep` by hand is what the guard refuses."""
     import psutil
 
+    from ml_stack.fleet import models as models_module
+
+    hub = tmp_path / "hub" / "models--maker--big-GGUF" / "snapshots" / "abc"
+    hub.mkdir(parents=True)
+    (hub / "big-UD-Q4_K_XL.gguf").write_bytes(b"x" * (3 * 2**20))
+    (hub / "other.gguf").write_bytes(b"y" * (2 * 2**20))
+    aside = tmp_path / "aside"
+    aside.mkdir()
+    (aside / "alone-Q8_0.gguf").write_bytes(b"z" * (4 * 2**20))
+    monkeypatch.setattr(models_module, "default_roots", lambda root: [tmp_path / "hub"])
     fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
                            "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
              fake_process(["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",
                            "--port", "8082"], 60 * 2**30, pid=12),
+             fake_process(["/x/current/llama-server", "-m", str(hub / "big-UD-Q4_K_XL.gguf"),
+                           "--port", "8083"], 50 * 2**30, pid=15),
+             fake_process(["/x/current/llama-server", "-m", str(aside / "alone-Q8_0.gguf"),
+                           "--port", "8084"], 2 * 2**30, pid=16),
              fake_process(["/usr/bin/python3", "-m", "something"], 5, pid=13),
              fake_process(["llama-server"], 0, pid=14, state=psutil.STATUS_ZOMBIE)]
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: fakes)
-    monkeypatch.setattr(cli, "recorded_servers", lambda path: {8082: {"pid": 12}})
+    monkeypatch.setattr(cli, "recorded_servers",
+                        lambda path: {8082: {"pid": 12}, 8083: {"pid": 15}, 8084: {"pid": 16}})
     assert cli.main(["status", "--every"]) == 0
     out = capsys.readouterr().out
     assert ":8081  pid 11  embeddinggemma-300M (Q8_0)  1.0G resident  NOT leased" in out
     assert ":8082  pid 12  thing (Q4_K_XL)  60.0G resident  leased" in out
+    assert f":8083  pid 15  big (Q4_K_XL)  50.0G resident  leased" in out
+    assert f"      cache  {tmp_path / 'hub'}  (5M)" in out, "the root it lies under, whole"
+    assert f"      cache  {aside}  (4M)" in out, "under no root: the file's own directory"
+    lines = out.splitlines()
+    assert lines[lines.index(next(l for l in lines if ":8081" in l)) + 1].startswith(
+        "    foreign"), "a model whose directory is not there gets no cache line"
     assert "1 not leased" in out and "python3" not in out
     assert "pid 14  defunct" in out, "a zombie is named as such and not counted as a stray"
     monkeypatch.setattr(psutil, "process_iter", lambda attrs=None: [])

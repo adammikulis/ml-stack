@@ -283,3 +283,27 @@ def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, 
     out = capsys.readouterr().out
     assert "ml-stack-jobs" in out
     assert f"fix: pip install -e {tmp_path} && pyenv rehash" in out
+
+
+def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, tmp_path):
+    import os
+
+    from ml_stack.fleet import models as models_module
+
+    hub = tmp_path / "hf" / "hub" / "models--maker--big-GGUF" / "snapshots" / "abc"
+    hub.mkdir(parents=True)
+    (hub / "big-Q4_K_M.gguf").write_bytes(b"x" * (2 * 1024 * 1024))
+    mine = tmp_path / "models"
+    mine.mkdir()
+    (mine / "small.gguf").write_bytes(b"y" * (1024 * 1024 + 1024))
+    monkeypatch.setattr(models_module, "default_roots",
+                        lambda root: [tmp_path / "hf" / "hub", mine, tmp_path / "absent"])
+    monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    main(["--quiet"])
+    out = capsys.readouterr().out
+    line = next(one for one in out.splitlines() if "models on this machine" in one)
+    assert f"2 file(s): {tmp_path / 'hf' / 'hub'} 2M, {mine} 1M" in line
+    assert "absent" not in line
+    assert f"HF_HOME={os.environ['HF_HOME']} names the Hub cache" in out
+

@@ -9,6 +9,7 @@ so nothing between here and a running server needs writing again.
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import sys
 from dataclasses import dataclass
@@ -467,7 +468,8 @@ def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, 
                                     or name.rsplit("/", 1)[-1] == build)]
 
 
-HUB_CACHE = Path.home() / ".cache" / "huggingface" / "hub"
+HUB_CACHE = (Path(os.environ["HF_HOME"]).expanduser() if os.environ.get("HF_HOME")
+             else Path.home() / ".cache" / "huggingface") / "hub"
 
 
 def located(name: str, *, cache: Path | None = None) -> Path | None:
