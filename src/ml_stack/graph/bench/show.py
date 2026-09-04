@@ -16,6 +16,7 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.runs` -- so
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack.graph import bench
+from ml_stack.graph.bench.backends import short
 from ml_stack.graph.bench.score import (
     COSTS,
     NOISE,
@@ -38,6 +39,10 @@ from ml_stack.graph.bench.score import (
     speedup,
     wall_of,
 )
+
+
+# The kinds of run the answering table leaves out: each has a table of its own.
+NOT_ANSWERING = ("extract", "speed")
 
 
 def kv_short(cache_type: str) -> str:
@@ -222,7 +227,14 @@ def compare(store: str | Path, first: str, second: str) -> str:
     lines = [f"{'':22} {first:>16} {second:>16}   difference"]
     scored = [[r for r in rows if r.get("expected")] for _, rows in sides]
 
-    def row(name: str, a: float, b: float, unit: str = "", better_lower: bool = True) -> str:
+    def row(name: str, a: float | None, b: float | None, unit: str = "",
+            better_lower: bool = True) -> str:
+        # not measured is not 0: a side that reported nothing gets no percentage
+        if a is None or b is None:
+            missing = [label for label, value in ((first, a), (second, b)) if value is None]
+            return (f"{name:22} {('-' if a is None else f'{a:.1f}{unit}'):>16} "
+                    f"{('-' if b is None else f'{b:.1f}{unit}'):>16}"
+                    f"  not measured on {', '.join(missing)}")
         gap = b - a
         way = "" if not a else f"  {gap / a * +100:+.0f}%"
         return f"{name:22} {a:>16.1f}{unit} {b:>16.1f}{unit}{way}"
@@ -232,7 +244,8 @@ def compare(store: str | Path, first: str, second: str) -> str:
     lines.append(row("model calls", _total(a, "calls"), _total(b, "calls")))
     lines.append(row("prompt tokens (shown)", _total(a, "prompt_tokens"),
                      _total(b, "prompt_tokens")))
-    lines.append(row("  of those, cached", _total(a, "cached_tokens"), _total(b, "cached_tokens")))
+    lines.append(row("  of those, cached", measured(a, "cached_tokens"),
+                     measured(b, "cached_tokens")))
     lines.append(row("  of those, read", _total(a, "processed_tokens"),
                      _total(b, "processed_tokens")))
     lines.append(row("completion tokens", _total(a, "completion_tokens"),
@@ -263,22 +276,33 @@ def _shown(label: Any, width: int = 28) -> str:
     return text if len(text) <= width else "…" + text[-(width - 1):]
 
 
-def peak(rows: Sequence[Mapping[str, Any]]) -> int:
+def measured(rows: Sequence[Mapping[str, Any]], key: str) -> float | None:
+    """The total of ``key`` over the rows that carry a figure for it, None when none does
+    -- a run on a program that never reports the figure, or one kept before it was."""
+    said = [float(r[key]) for r in rows if r.get(key) is not None]
+    return sum(said) if said else None
+
+
+def peak(rows: Sequence[Mapping[str, Any]]) -> int | None:
     """The most a slot held for any one call of the run: cached plus read tokens, the
     largest of every call of every question. With a rolling window and recall, this --
     not the conversation's length -- is what the slot's context must hold, and what
-    decides 16k against 32k per slot. 0 for a run kept before calls were counted."""
-    most = 0
+    decides 16k against 32k per slot. None for a run whose calls reported nothing, or
+    one kept before calls were counted."""
+    most: int | None = None
     for row in rows:
         for call in row.get("cache_calls") or ():
             try:
-                most = max(most, int(call[0]) + int(call[1]))
+                if call[0] is None and call[1] is None:
+                    continue
+                held = int(call[0] or 0) + int(call[1] or 0)
             except (TypeError, ValueError, IndexError):
                 continue
+            most = held if most is None else max(most, held)
     return most
 
 
-def _k(n: int) -> str:
+def _k(n: int | None) -> str:
     return "-" if not n else (f"{n / 1024:.1f}k" if n < 10240 else f"{n // 1024}k")
 
 
@@ -343,13 +367,20 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # `F1` carries the interval its own questions put around it -- `70% ±6` -- because a
     # mean over twenty questions moves five points between identical runs, and a table that
     # prints the mean alone invites a comparison the questions cannot support.
+    kept = [one for one in kept if str(one.get("kind") or "") not in NOT_ANSWERING]
+    if not kept:
+        print("nothing kept yet")
+        return
     several = len(hosts_of(kept)) > 1
+    # `served` is what served the run -- program, runtime or format, quant -- so two runs
+    # of one model on two programs read apart: `llama.cpp·gguf·Q4_K_XL` beside
+    # `ollama·mlx·nvfp4`. `-` for a run kept before it was recorded.
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
             + f"{'ctx':>10} {'n':>3} {'shape':32} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'peak':>6} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'real':>9} {'mem':>9} {'wired':>8} {'kv+run':>8} {'per 1k':>8} {'F1':>8} "
             f"{'rec':>5} {'prec':>5} "
-            f"{'made':>5} {'t/o':>4}  {'sampling'}")
+            f"{'made':>5} {'t/o':>4}  {'sampling':14} {'served'}")
     print(head)
     print("-" * len(head))
     for one in kept:
@@ -371,6 +402,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         per1k = server.get("bytes_per_1k_context")
         rss = server.get("resident_bytes")
         load = server.get("load_s")
+        cached = measured(rows, "cached_tokens")
         print(f"{_shown(one.get('label', '')):28} "
               + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
               + f"{(f'{ctx // 1024}k x{slots}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
@@ -381,7 +413,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_total(rows, 'calls'):>6.0f} "
               f"{_total(rows, 'processed_tokens'):>8.0f} "
               f"{_total(rows, 'completion_tokens'):>8.0f} "
-              f"{_total(rows, 'cached_tokens'):>8.0f} "
+              f"{(f'{cached:.0f}' if cached is not None else '-'):>8} "
               f"{_k(peak(rows)):>6} "
               f"{prefixed(server):>4} "
               f"{drafting(rows):>6} "
@@ -392,7 +424,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
               f"{right:>8} {rec:>5} {prec:>5} {made(one):>5} {timeouts(one):>4}  "
-              f"{sampled(server)}")
+              f"{sampled(server):14} {short(server.get('served_by'))}")
 
 
 def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
@@ -573,9 +605,14 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
                     + (f", ERROR {r['error']}" if r.get("error") else ""))
             if together:
                 note += (f"; conversation {r.get('conversation', 0)} turn {r.get('turn', 0)}, "
-                         f"first token {r.get('first_token', 0):.1f}s, "
-                         f"queued {r.get('queued', 0):.1f}s")
+                         f"first token {_s(r.get('first_token'))}, "
+                         f"queued {_s(r.get('queued'))}")
             print(f"        {note}")
+
+
+def _s(value: Any) -> str:
+    """``1.2s``, or ``-`` for a clock nothing read."""
+    return f"{float(value):.1f}s" if value is not None else "-"
 
 
 def _args_line(args: Mapping[str, Any], width: int = 60) -> str:
@@ -965,11 +1002,16 @@ choosing a budget, not choosing a better run. Hover a point for its numbers.</p>
 
 
 def drafting(rows: Sequence[Mapping[str, Any]]) -> str:
-    """How much of what a draft model guessed was kept, as a percentage, or '-' for none.
+    """How much of what a draft model guessed was kept, as a percentage; ``none`` for a
+    llama-server that drafted nothing, and ``-`` for a program that does not say.
 
     The count of guesses is not the interesting number and the wall clock already has the
     benefit in it. What this says is *why*: a draft accepted 76% of the time is earning its
     place, and one accepted 20% of the time is costing a pass to be told it was wrong.
     """
-    guessed = _total(rows, "draft_tokens")
-    return f"{100 * _total(rows, 'draft_taken') / guessed:.0f}%" if guessed else "-"
+    guessed = measured(rows, "draft_tokens")
+    if guessed is None:
+        return "-"
+    if not guessed:
+        return "none"
+    return f"{100 * (measured(rows, 'draft_taken') or 0) / guessed:.0f}%"

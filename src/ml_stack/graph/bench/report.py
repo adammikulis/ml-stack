@@ -350,8 +350,17 @@ def build_of(server: Mapping[str, Any]) -> str:
     *name*, because that is what `ml-stack-serve up --build` takes. A head withheld from
     mainline loads on one build and no other, so this is not decoration.
     """
+    from ml_stack.graph.bench.backends import describe
     from ml_stack.serve.build import NAMED_DIR
 
+    record = (server or {}).get("served_by")
+    if isinstance(record, Mapping) and record.get("program"):
+        # a run on another program has no llama.cpp build: it is named as what served it,
+        # so an Ollama run never reads as the default build
+        if str(record.get("program")).lower() not in ("llama.cpp", "llama-server"):
+            return describe(record)
+        if record.get("build"):
+            return str(record["build"])
     binary = Path(str((server or {}).get("binary") or ""))
     try:
         named = binary.resolve().relative_to(Path(NAMED_DIR).resolve())

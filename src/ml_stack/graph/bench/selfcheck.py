@@ -192,6 +192,9 @@ def _rewritten(args: argparse.Namespace, scratch: Path) -> argparse.Namespace:
     if args.cmd == "extract":
         out.world = str(_scratch_world(scratch / "world"))
         out.sample = SMOKE_MESSAGES
+    elif args.cmd == "speed":
+        # the grid at its smallest that still has two cells and two streams
+        out.prompts, out.streams, out.generate = "32,64", "1,2", 8
     elif not getattr(out, "smoke", False):
         # two questions, but not as `--smoke`: a run that was not asked for as a smoke
         # runs its own smoke first, and that path is checked here too
@@ -324,7 +327,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
                 + report.said())
         return report
 
-    def fake_footprint(url: str) -> dict[str, Any]:
+    def fake_footprint(url: str, client: Any = None) -> dict[str, Any]:
         return {"base_url": url, "context": int(getattr(args, "context", 0) or 32768),
                 "slots": int(getattr(args, "parallel", 1) or 1), "model": "selfcheck.gguf",
                 "resident_bytes": 0}

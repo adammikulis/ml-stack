@@ -117,6 +117,12 @@ class Estimate:
                 f"--yes to run it anyway.")
 
 
+# What a served model reads and writes at, in tokens a second, when nothing has measured
+# it: a large model on Apple silicon, for the speed grid's estimate.
+GUESS_PREFILL_TPS = 300.0
+GUESS_DECODE_TPS = 20.0
+
+
 def _stem(named: Any) -> str:
     """``models/Flash-Next-Q4.gguf`` and ``flash-next-q4`` are the same model."""
     return str(named or "").rsplit("/", 1)[-1].removesuffix(".gguf").lower()
@@ -234,6 +240,30 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
                                    labels=[f"draft:{tagged}"], questions=q, ways=1,
                                    context=int(getattr(args, "context", 0) or 0),
                                    served=True))
+    elif cmd == "speed":
+        from ml_stack.graph.bench.speed import PROMPTS, STREAMS, _ints
+
+        prompts = [min(_ints(getattr(args, "prompts", ""), PROMPTS))] if smoke \
+            else _ints(getattr(args, "prompts", ""), PROMPTS)
+        streams = [min(_ints(getattr(args, "streams", ""), STREAMS))] if smoke \
+            else _ints(getattr(args, "streams", ""), STREAMS)
+        cells = len(prompts) * len(streams) + (1 if wants_smoke(args) else 0)
+        generate = int(getattr(args, "generate", 256) or 256)
+        # a cell reads its prompt at a few hundred tokens a second and writes at a few
+        # tens; the calibration reads it once more
+        per = sum(p / GUESS_PREFILL_TPS * 2 + generate / GUESS_DECODE_TPS for p in prompts) \
+            / max(1, len(prompts))
+        for wanted in getattr(args, "serve", None) or []:
+            model = bench.find_model(wanted)
+            stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+            models.append(ModelEstimate(stem, cells, 1, per, GUESS_LOAD_S,
+                                        "a guess from the grid, no run of it timed", guessed=True))
+        for one in getattr(args, "on", None) or []:
+            name = one.partition("=")[0]
+            if name:
+                models.append(ModelEstimate(name, cells, 1, per, 0.0,
+                                            "a guess from the grid, no run of it timed",
+                                            guessed=True))
     elif cmd == "concurrent":
         many, long = ((2, 1) if smoke else (int(getattr(args, "conversations", 1) or 1),
                                             int(getattr(args, "turns", 1) or 1)))

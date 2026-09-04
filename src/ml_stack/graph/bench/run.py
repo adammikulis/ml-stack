@@ -225,7 +225,13 @@ def with_card(client: Any, args: Any) -> Any:
         print(f"note: {client.base_url} serves a model whose card names no sampler settings",
               file=sys.stderr)
         return client
-    return type(client)(client.base_url, **asked)
+    # the program and the model the client was built for ride along, when it was built
+    # for one: a card is a sampling, not a new server
+    from ml_stack.graph.bench.backends import _accepts
+
+    kept = {name: getattr(client, name) for name in ("api", "model", "context")
+            if getattr(client, name, None) is not None and _accepts(type(client), name)}
+    return type(client)(client.base_url, **kept, **asked)
 
 
 def checking(one: argparse.ArgumentParser) -> argparse.ArgumentParser:
@@ -436,6 +442,14 @@ def _parser() -> argparse.ArgumentParser:
                             "-- the head at the length that measured best, its build, cache "
                             "type, thinking budget, raw flags and asking -- for every flag "
                             "this sweep leaves unset; --no-profile serves it bare")
+    sweep.add_argument("--serve-label", default="", metavar="NAME",
+                       help="what a --serve'd model's runs are labelled, instead of the "
+                            "first 14 characters of its file's name: flash, so its runs "
+                            "read flash-plain beside an --on flash-ollama=... run's")
+    sweep.add_argument("--no-draft", action="store_true",
+                       help="serve each --serve'd model without the draft head its profile "
+                            "measured best with, everything else as measured; every label "
+                            "carries -nodraft, so the head's worth is two labels apart")
     sweep.add_argument("--label-suffix", default="", metavar="TEXT",
                        help="appended to every label this sweep keeps, so a run that varies a "
                             "serving knob (--serve-arg, --serve-mlock, --serve-mmproj) is "
@@ -577,7 +591,11 @@ def _parser() -> argparse.ArgumentParser:
                               "measure them per model, and `report --profile` writes the "
                               "winner into that model's record. Repeatable")
 
-    for one in (run, sweep, heads, conc):
+    from ml_stack.graph.bench.speed import add_arguments as speeding
+
+    speed = speeding(sub)
+
+    for one in (run, sweep, heads, conc, speed):
         one.add_argument("--per-question", type=float, default=PER_QUESTION,
                          metavar="SECONDS",
                          help="the most one question may take before it is recorded as "
@@ -629,6 +647,10 @@ def _parser() -> argparse.ArgumentParser:
     show.add_argument("--extract", action="store_true",
                       help="only the extraction runs (ml-stack-bench extract), in their own "
                            "table; without it they print under the answering table")
+    show.add_argument("--speed", action="store_true",
+                      help="the speed runs (ml-stack-bench speed), one table per label: "
+                           "prefill and decode tokens/s and the first token by prompt size "
+                           "and streams")
     show.add_argument("--detail", nargs="?", const="", default=None, metavar="LABEL",
                       help="the questions themselves, not the totals: what each one wanted, "
                            "what it showed, and what it missed. A label narrows it to one run")
@@ -772,7 +794,10 @@ def _parser() -> argparse.ArgumentParser:
                              "the step it is on and what is left, `tail -f` for the log, "
                              "`stop` to end the queue and the step inside it")
 
+    from ml_stack.graph.bench.comparison import add_arguments as comparing
     from ml_stack.graph.bench.history import add_arguments as remembering
+
+    comparing(sub)
 
     remembering(sub.add_parser("history", allow_abbrev=False,
                                help="every measurement the logs remember: when, how long, "
@@ -820,6 +845,14 @@ def _run(args: Any) -> int:
         from ml_stack.graph.bench.history import run as remembered
 
         return remembered(args)
+    if args.cmd == "speed":
+        from ml_stack.graph.bench.speed import main as speeding
+
+        return speeding(args)
+    if args.cmd == "compare":
+        from ml_stack.graph.bench.comparison import main as comparing
+
+        return comparing(args)
     if args.cmd == "status":
         print(status())
         return 0
@@ -869,14 +902,15 @@ def _run(args: Any) -> int:
             print(f"{len(went)} run(s) labelled {args.label!r} removed")
         return 0
     if args.cmd == "sweep":
-        from ml_stack.client import Client
+        from ml_stack.graph.bench.backends import client_for, http_of, parse_on
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
         named = []
         for one in args.on:
-            name, _, url = one.partition("=")
-            if not name or not url:
-                print(f"error: --on wants NAME=URL, got {one!r}", file=sys.stderr)
+            try:
+                name, url, _ = parse_on(one)
+            except ValueError as why:
+                print(f"error: {why}", file=sys.stderr)
                 return 2
             named.append((name, url))
         if not named and not getattr(args, "serve", []):
@@ -920,7 +954,11 @@ def _run(args: Any) -> int:
                 head = chosen.path
                 print(f"    draft head: {head or 'none'} -- {chosen.why}"
                       + (f"\n      {chosen.note}" if chosen.note else ""))
-            stem = (str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
+            # the label's stem: the model's file, or what --serve-label says it is; then
+            # -nodraft for a model served without its head, and the suffix asked for
+            stem = ((str(getattr(args, "serve_label", "") or "")
+                     or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14])
+                    + ("-nodraft" if getattr(args, "no_draft", False) else "")
                     + str(getattr(args, "label_suffix", "") or ""))
             # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
             # and every `--also` of each, asked of one load. Loading twice per model was
@@ -977,10 +1015,13 @@ def _run(args: Any) -> int:
                              embed_url=args.embed_url, embed_model=args.embed_model,
                              terse=getattr(args, "terse", False), margin=args.margin)
                 print(f"\n{label} on {url}, look_up by {ask.finder}")
-                if not _idle(url, args):
+                if not _idle(http_of(url), args):
                     return 3
-                asking_with = with_card(Client(url, timeout=args.per_question,
-                                               **sampling_from(args)), args)
+                # the client for whatever program the URL names -- a llama-server, Ollama,
+                # an OpenAI-style server -- at the sweep's context
+                asking_with = with_card(client_for(url, timeout=args.per_question,
+                                                   context=total_context,
+                                                   **sampling_from(args)), args)
                 # what it will actually send, card and overrides together: a run measured at
                 # one temperature against a run at another is two measurements, and the only
                 # way to know later is to write it down now
@@ -1086,7 +1127,8 @@ def _run(args: Any) -> int:
         at = held["concurrency"]
         slots = at.get("slots") or 0
         print(f"  {at['seconds']:.1f}s for all of it"
-              + (f", {at['queued']:.1f}s of that queued" if slots and many > slots else "")
+              + (f", {at['queued']:.1f}s of that queued"
+                 if slots and many > slots and at.get("queued") is not None else "")
               + (f", {slots} slot(s)" if slots > 0 else ""))
         key = save(args.kept, rows,
                    held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
@@ -1111,9 +1153,17 @@ def _run(args: Any) -> int:
 
         # an extraction run is kept in the same store and is not an answering run: it has
         # no questions to score, and its table is its own
+        from ml_stack.graph.bench import speed as bench_speed
+
         everything = bench.runs(args.kept) if Path(args.kept).expanduser().exists() else []
         extracted = bench_extract.only(everything)
-        answering = [r for r in everything if r.get("kind") != bench_extract.KIND]
+        if getattr(args, "speed", False):
+            bench_speed.speed_table(newest(bench_speed.only(everything),
+                                           last=int(getattr(args, "last", 0) or 0),
+                                           since=str(getattr(args, "since", "") or "")))
+            return 0
+        answering = [r for r in everything
+                     if r.get("kind") not in (bench_extract.KIND, bench_speed.KIND)]
         answering = newest(answering, last=int(getattr(args, "last", 0) or 0),
                            since=str(getattr(args, "since", "") or ""))
         if getattr(args, "trace", None) is not None:
@@ -1318,7 +1368,7 @@ def _fleet_sweep(args: Any) -> int:
 
 
 # Which subcommands put load on the GPU, and so must never overlap with each other.
-MEASURING = ("run", "sweep", "drafts", "concurrent", "extract")
+MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
 
 
 # Windows has no sessions; a child that survives its parent's console is asked for by flag.
@@ -1473,6 +1523,10 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
         # a head named on the command line beats the one a record measured, and its method
         # is read off its own name rather than kept from the record's
         run = bench.drafted_by(run, head)
+    if getattr(args, "no_draft", False):
+        # the profile's shape minus its head: what the head is worth is this run against
+        # the drafted one, two labels apart
+        run = bench.drafted_by(run, "")
     if getattr(args, "serve_kv", ""):
         run = run.over(cache_type=str(args.serve_kv))
     if getattr(args, "reasoning_budget", None) is not None:
@@ -1705,7 +1759,7 @@ def main(argv: list[str] | None = None) -> int:
     # every subcommand there is, so a *value* that happens to read like one -- `report
     # --model run` -- is not mistaken for the command and sent through the lock
     known = {*MEASURING, "show", "report", "prepare", "forget", "status", "tail", "stop",
-             "wait", "history"}
+             "wait", "history", "compare"}
     cmd = next((a for a in (argv if argv is not None else sys.argv[1:]) if a in known), "")
     if cmd not in MEASURING:
         return _main(argv)

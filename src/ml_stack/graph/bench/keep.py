@@ -133,6 +133,18 @@ SHORT = 20
 SMOKE = 2
 
 
+class _Cell:
+    """One row of a run that is not an answering run: whatever the measurement kept, as
+    given, with the run's label on it."""
+
+    def __init__(self, label: str = "", **fields: Any) -> None:
+        self.label = label
+        self.fields = dict(fields)
+
+    def kept(self) -> dict[str, Any]:
+        return dict(self.fields)
+
+
 class RunNotKept(RuntimeError):
     """A run was written and did not come back the way `runs` reads it."""
 
@@ -168,8 +180,8 @@ def asked_with(asking: Mapping[str, Any] | None,
     return out
 
 
-def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None = None,
-         asking: Mapping[str, Any] | None = None) -> str:
+def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None = None,
+         asking: Mapping[str, Any] | None = None, kind: str = "", label: str = "") -> str:
     """Keep a run where it can be compared with another one, later, by anybody.
 
     Then read it back the way `runs` will, on a fresh handle, and refuse to return until
@@ -184,29 +196,39 @@ def save(store: str | Path, rows: Sequence[Row], *, held: dict[str, Any] | None 
     group on them or even read them. Written only when there is one, so a run kept before
     it existed and a run kept without it read back identically: an empty record in every
     run is a key that says nothing.
+
+    ``kind`` marks a run that is not an answering run -- ``speed``, whose rows are the
+    cells it measured rather than questions -- and ``label`` names it, since such a row
+    carries no label of its own. The answering table leaves those out and each kind has
+    a table of its own.
     """
     from ml_stack.graph.bench.score import prefix_hits
     from ml_stack.graph.store import GraphStore
 
+    rows = [r if is_dataclass(r) else _Cell(**{"label": label or "", **dict(r)})
+            if isinstance(r, Mapping) else r for r in rows]
     server = stamped(held)
     # the run's prompt-cache figure beside the per-question ones, so the table can carry
     # it without adding up every row. Only when there is one: a run with no turn to judge
     # carries no key, like a run kept before it was counted -- not counted is not zero
     if "prefix_hits" not in server:
-        hits = prefix_hits([asdict(r) for r in rows])
+        hits = prefix_hits([asdict(r) for r in rows if is_dataclass(r)])
         if hits is not None:
             server["prefix_hits"] = hits
-    stem = f"bench:{rows[0].label}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
-    kept_rows = [_told(asdict(r)) for r in rows]
+    named = label or (rows[0].label if rows else "")
+    stem = f"bench:{named}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
+    kept_rows = [_told(r.kept()) if isinstance(r, _Cell) else _told(asdict(r)) for r in rows]
     asked = asked_with(asking, server)
-    record = _plain({"at": time.strftime("%FT%T"), "label": rows[0].label if rows else "",
+    record = _plain({"at": time.strftime("%FT%T"), "label": named,
+                     **({"kind": kind} if kind else {}),
                      "server": server, **({"asking": asked} if asked else {}),
                      "rows": kept_rows,
                      # how many of the rows carry their transcript, so `show` and
                      # `train-tools from-bench` can say "this run kept none" rather than
                      # "this run found none"
                      "traced": sum(1 for r in kept_rows if r.get("trace")),
-                     "unread_named": sum(r.unread_named for r in rows)})
+                     "unread_named": sum(int(getattr(r, "unread_named", 0) or 0)
+                                         for r in rows)})
     record = json.loads(json.dumps(record))      # no default=: anything left raises here
     with GraphStore(store) as writer:
         # Two runs of one label inside a second used to land on the same key and the later

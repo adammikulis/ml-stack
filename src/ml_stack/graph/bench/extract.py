@@ -675,7 +675,7 @@ def extract_one(client: Any, message: Mapping[str, Any], sender: str, shape: Map
         row.seconds = float(per_message)
         row.extracted = {}
     row.prompt_tokens = counting.prompt_tokens
-    row.cached_tokens = counting.cached_tokens
+    row.cached_tokens = int(counting.cached_tokens or 0)
     row.processed_tokens = counting.processed_tokens
     row.completion_tokens = counting.completion_tokens
     return row

@@ -97,6 +97,14 @@ from ml_stack.graph.bench.estimate import (  # noqa: F401
     estimate,
     span,
 )
+from ml_stack.graph.bench import backends  # noqa: F401
+from ml_stack.graph.bench.backends import (  # noqa: F401
+    client_for,
+    describe,
+    parse_on,
+    served_by,
+    timings_of,
+)
 from ml_stack.graph.bench.measure import (  # noqa: F401
     PER_QUESTION,
     SAMPLE_EVERY,
@@ -123,8 +131,10 @@ from ml_stack.graph.bench.measure import (  # noqa: F401
     machine_memory,
     measure,
     mix,
+    process_tree,
     read_questions,
     sample,
+    serving_pids,
     serving_process,
     slot_count,
     wants_trace,
@@ -146,6 +156,7 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     head_short,
     kv_short,
     made,
+    measured,
     missed,
     pareto,
     plot,

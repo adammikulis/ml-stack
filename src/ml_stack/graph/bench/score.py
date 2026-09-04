@@ -33,20 +33,22 @@ class Row:
     seconds: float = 0.0
     calls: int = 0                 # round trips through the large model
     prompt_tokens: int = 0         # everything the model was shown
-    cached_tokens: int = 0         # of those, what it had already seen and did not reread
+    # None for a figure the serving program never reports: a run on a server that says
+    # nothing about its cache or its draft is not a run that cached and drafted nothing.
+    cached_tokens: int | None = 0  # of those, what it had already seen and did not reread
     processed_tokens: int = 0      # of those, what it actually had to read this time
     completion_tokens: int = 0
     steps: str = ""
     answer_chars: int = 0
-    draft_tokens: int = 0          # guessed ahead by a draft model, when one is served
-    draft_taken: int = 0           # of those, how many the large model kept
+    draft_tokens: int | None = 0   # guessed ahead by a draft model, when one is served
+    draft_taken: int | None = 0    # of those, how many the large model kept
     # Per call, ``[cached, processed]`` as the server reported them, and from those
     # whether the prompt cache's prefix survived from each call to the next -- see
     # `prefix_kept`. `prefix_hits` is kept over turns, None for a question of one call
     # or a server that reports nothing; the run's is under ``server["prefix_hits"]``.
-    cache_calls: list[list[int]] = field(default_factory=list)
-    prefix_kept: int = 0
-    prefix_turns: int = 0
+    cache_calls: list[list[int | None]] = field(default_factory=list)
+    prefix_kept: int | None = 0
+    prefix_turns: int | None = 0
     prefix_hits: float | None = None
     shown: list[str] = field(default_factory=list)
     expected: list[str] = field(default_factory=list)
@@ -57,8 +59,8 @@ class Row:
     # Which conversation and turn this was, when several were asked at once.
     conversation: int = 0
     turn: int = 0
-    first_token: float = 0.0       # seconds until the server began generating the first reply
-    queued: float = 0.0            # wall clock the turn spent not being read or generated
+    first_token: float | None = 0.0  # seconds until the server began generating the first reply
+    queued: float | None = 0.0     # wall clock the turn spent not being read or generated
     error: str = ""
     # The question ran past `--per-question`: no answer, `seconds` is the cap, scored wrong.
     # Measured 2026-09-01: gemma-4-26B-A4B took 252 s and 505 s on two questions, all of it
@@ -160,7 +162,9 @@ def prefix_kept(per_call: Sequence[Sequence[int]], *, slack: int = PREFIX_SLACK)
     """
     kept = turns = 0
     for before, after in zip(per_call, per_call[1:]):
-        cached_before, processed_before = int(before[0]), int(before[1])
+        if before[0] is None or after[0] is None:
+            continue                    # a call that reported nothing judges nothing
+        cached_before, processed_before = int(before[0]), int(before[1] or 0)
         if cached_before + processed_before <= 0:
             continue
         turns += 1
@@ -628,9 +632,20 @@ def _made(one: Mapping[str, Any]) -> str:
     return "-" if made is None else f"{float(made):.1f}"
 
 
-def _build(binary: Any) -> str:
-    """Which llama-server a run was served by, as the last two path segments: a managed
-    build is ``<name>/llama-server``, so a fork's run says so and mainline's says current."""
+def _build(server: Any) -> str:
+    """What served a run, for the ranking's last column: ``llama.cpp (unsloth) · gguf ·
+    Q4_K_XL`` from its ``served_by`` record when it has one; else the llama-server's last
+    two path segments -- a managed build is ``<name>/llama-server``, so a fork's run says
+    so and mainline's says current. ``server`` may be the record or the binary's path."""
+    from ml_stack.graph.bench.backends import describe
+
+    if isinstance(server, Mapping):
+        said = describe(server.get("served_by"), build=str(server.get("build") or ""))
+        if said:
+            return said
+        binary = server.get("binary")
+    else:
+        binary = server
     parts = Path(str(binary)).parts if binary else ()
     return "/".join(parts[-2:])
 
@@ -681,7 +696,7 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
         a, c = _flat(choice.accuracy, over), _flat(choice.cost, over)
         gb, kv, load = c.get("resident_bytes"), c.get("kv_and_run_bytes"), c.get("load_s")
         temp = (a.get("sampling") or {}).get("temperature")
-        build = _build(c.get("binary"))
+        build = _build(c)
         source = ("its own run" if choice.own
                   else f"`{c.get('label')}`") + (f" on {build}" if build else "")
         if not choice.own:
@@ -813,6 +828,11 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         "model": server.get("model", ""), "draft_model": server.get("draft_model", ""),
         # the llama-server that served it, so a fork's run is told from mainline's
         "binary": str(server.get("binary") or ""),
+        # and the program, its version, the format and the quant -- see `backends.served_by`;
+        # None for a run kept before it was recorded
+        "served_by": dict(server["served_by"]) if isinstance(server.get("served_by"), Mapping)
+        else None,
+        "build": _build(server) or None,
         # which machine and which code measured it; "" for a run from before either was
         "host": str(server.get("host") or ""),
         "commit": str(server.get("commit") or ""),

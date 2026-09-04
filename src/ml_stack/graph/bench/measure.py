@@ -29,6 +29,7 @@ from typing import Any
 # `bench.busy` -- so anything patchable is looked up there at call time, never bound here
 # at import.
 from ml_stack.graph import bench
+from ml_stack.graph.bench.backends import http_of, processes, served_by, timings_of
 from ml_stack.graph.bench.keep import SHORT, SMOKE
 from ml_stack.graph.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
@@ -158,18 +159,20 @@ class Counting:
         self.timed_out = False
         self.calls = 0
         self.prompt_tokens = 0
-        self.cached_tokens = 0
         self.processed_tokens = 0
         self.completion_tokens = 0
-        self.draft_tokens = 0
-        self.draft_taken = 0
+        # None until a call reports the figure: a program that never says what it cached,
+        # drafted or spent generating leaves None, and None is not 0.
+        self.cached_tokens: int | None = None
+        self.draft_tokens: int | None = None
+        self.draft_taken: int | None = None
         # Per call, ``(cached, processed)`` as the server reported them: the totals above
         # cannot say whether the prefix survived from one call to the next, and that --
         # see `prefix_kept` -- is the cheapest speed lever there is.
-        self.per_call: list[tuple[int, int]] = []
+        self.per_call: list[tuple[int | None, int | None]] = []
         # What the server itself spent reading and generating, so that the difference
         # between it and the wall clock -- time spent waiting for a slot -- is a number.
-        self.generating_ms = 0.0
+        self.generating_ms: float | None = None
         self.first_token: float | None = None
         # What was said, in order: the tools offered, then every message and every reply.
         # See `wants_trace` for when it is filled, `_message` and `_reply` for what one
@@ -277,33 +280,34 @@ class Counting:
             self._reply(reply, took, kw.get("tools"))
         raw = getattr(reply, "raw", None) or {}
         usage = raw.get("usage") or {}
-        timings = raw.get("timings") or {}
-        prompt_ms = float(timings.get("prompt_ms") or 0)
-        predicted_ms = float(timings.get("predicted_ms") or 0)
-        self.generating_ms += prompt_ms + predicted_ms
-        if self.first_token is None:
+        timings = timings_of(reply)
+        prompt_ms, predicted_ms = timings["prompt_ms"], timings["predicted_ms"]
+        if prompt_ms is not None or predicted_ms is not None:
+            self.generating_ms = (self.generating_ms or 0.0) + float(prompt_ms or 0) \
+                + float(predicted_ms or 0)
+        if self.first_token is None and predicted_ms is not None:
             # Nothing here streams, so the first token is not seen arriving. What is known
             # is how long the server spent generating; everything before that -- waiting
             # for a slot, then reading the prompt -- is what the first token waited for.
-            self.first_token = round(max(0.0, took - predicted_ms / 1000), 3)
+            self.first_token = round(max(0.0, took - float(predicted_ms) / 1000), 3)
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)
         self.completion_tokens += int(usage.get("completion_tokens") or 0)
         # A conversation re-sends everything every turn, so the prompt total counts the same
         # words over and over. What the machine actually pays for is what it had to read:
         # `timings.prompt_n`, with `cache_n` the part it kept from the turn before.
-        cached = int(timings.get("cache_n")
-                     or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                     or 0)
-        processed = int(timings.get("prompt_n") or 0)
-        self.cached_tokens += cached
-        self.processed_tokens += processed
-        self.per_call.append((cached, processed))
+        cached, processed = timings["cache_n"], timings["prompt_n"]
+        if cached is not None:
+            self.cached_tokens = (self.cached_tokens or 0) + int(cached)
+        self.processed_tokens += int(processed or 0)
+        self.per_call.append((None if cached is None else int(cached),
+                              None if processed is None else int(processed)))
         # A draft model guesses ahead and the large one checks the guesses in one pass, so
         # what decides whether it was worth serving is not that it ran but how often it was
-        # right. Both are zero on a server without one, which is how the table tells them
-        # apart without being told.
-        self.draft_tokens += int(timings.get("draft_n") or 0)
-        self.draft_taken += int(timings.get("draft_n_accepted") or 0)
+        # right. Both are 0 on a llama-server without one and None on a program that
+        # cannot say, which is how the table tells the three apart.
+        if timings["draft_n"] is not None:
+            self.draft_tokens = (self.draft_tokens or 0) + int(timings["draft_n"])
+            self.draft_taken = (self.draft_taken or 0) + int(timings["draft_n_accepted"] or 0)
         return reply
 
     def __getattr__(self, name: str) -> Any:
@@ -476,8 +480,10 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
         row.error = f"timed out after {per_question:.0f}s"
         row.seconds = float(per_question)
         row.shown, row.unread, row.unread_named, row.answer_chars, said = [], [], 0, 0, ""
-    row.first_token = counting.first_token or 0.0
-    row.queued = round(max(0.0, row.seconds - counting.generating_ms / 1000), 2)
+    # None for every figure the program did not report: not measured is not 0
+    row.first_token = counting.first_token
+    row.queued = (round(max(0.0, row.seconds - counting.generating_ms / 1000), 2)
+                  if counting.generating_ms is not None else None)
     row.calls = counting.calls
     row.prompt_tokens = counting.prompt_tokens
     row.cached_tokens = counting.cached_tokens
@@ -487,8 +493,11 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     row.draft_taken = counting.draft_taken
     row.cache_calls = [[c, p] for c, p in counting.per_call]
     row.trace = counting.trace
-    row.prefix_kept, row.prefix_turns = prefix_kept(counting.per_call)
-    row.prefix_hits = row.prefix_kept / row.prefix_turns if row.prefix_turns else None
+    if any(c is not None for c, _ in counting.per_call):
+        row.prefix_kept, row.prefix_turns = prefix_kept(counting.per_call)
+        row.prefix_hits = row.prefix_kept / row.prefix_turns if row.prefix_turns else None
+    else:
+        row.prefix_kept = row.prefix_turns = row.prefix_hits = None
     return row, said
 
 
@@ -523,7 +532,7 @@ def measure(ask: Callable[[str, Any], Any], questions: Sequence[dict[str, Any]],
     # found from the client's own base_url, so nothing above has to carry a pid; a client
     # with none, or a URL this machine does not own, samples nothing and says so.
     at = str(getattr(client, "base_url", "") or "")
-    with watching(at, baseline=baseline) if at else nullcontext():
+    with watching(at, baseline=baseline, client=client) if at else nullcontext():
         for one in questions:
             row, _ = _ask_once(ask, one, label=label, client=client, graph=graph,
                                per_question=per_question, trace=traced)
@@ -577,10 +586,10 @@ def slot_count(base_url: str) -> int:
 # own wired cost), and `available_low`, free plus inactive at its lowest, which is the
 # pressure proxy `vm_stat` gives.
 
-# How often the sampler looks. Two seconds against what it is watching: a llama-server's
-# resident set moves on the scale of a prompt being read, and a sample a second is a `ps`
-# and a process scan every second of a run that lasts an hour.
-SAMPLE_EVERY = 2.0
+# How often the sampler looks, in seconds. Once a second: a runner Ollama spawns on the
+# first request holds the weights within a second of it, and a llama-server's resident
+# set moves on the scale of a prompt being read.
+SAMPLE_EVERY = 1.0
 
 # `proc_pid_rusage(pid, RUSAGE_INFO_V4, &buf)`, and where `ri_phys_footprint` sits in
 # `rusage_info_v4`: sixteen bytes of uuid, then user and system time, two wakeup counts,
@@ -668,29 +677,87 @@ def machine_memory() -> dict[str, int]:
     return out
 
 
-def serving_process(base_url: str) -> Any | None:
-    """The llama-server holding this port, as a psutil process, or None.
+def said_by(client: Any) -> dict[str, Any] | None:
+    """What a client says served it (`Client.served_by`), None for one that cannot say --
+    a llama-server's record is read by `footprint` from ``/props`` instead."""
+    if client is None or not hasattr(client, "served_by"):
+        return None
+    return served_by(client)
 
-    The same match `footprint` makes -- ``llama-server`` on the command line with
-    ``--port N`` on it -- and made once here so the sampler and the footprint agree about
-    which process they are talking about. None for a run against a ``--base-url`` somebody
-    else put up: nothing on this machine owns that port, and a run that samples nothing
-    must say nothing rather than report zeroes.
+
+def serving_pids(base_url: str, client: Any = None) -> list[int]:
+    """The pids holding the weights behind ``base_url``: what the client says
+    (`Client.processes`), else the llama-server with ``--port N`` on its command line.
+
+    Empty for a run against a ``--base-url`` somebody else put up on another machine:
+    nothing here owns that port, and a run that samples nothing must say nothing rather
+    than report zeroes.
     """
+    named = processes(client) if client is not None else []
+    if named:
+        return named
     try:
         import psutil
 
-        port = int(str(base_url).rsplit(":", 1)[-1].strip("/"))
+        port = int(str(http_of(base_url)).rsplit(":", 1)[-1].strip("/"))
     except Exception:  # noqa: BLE001
-        return None
+        return []
     try:
         for process in psutil.process_iter(["pid", "cmdline"]):
             line = " ".join(process.info.get("cmdline") or ())
             if "llama-server" in line and f"--port {port}" in line:
-                return process
+                return [int(process.info.get("pid") or getattr(process, "pid", 0) or 0)]
+    except Exception:  # noqa: BLE001
+        return []
+    return []
+
+
+def serving_process(base_url: str, client: Any = None) -> Any | None:
+    """The first process holding the weights behind ``base_url``, as a psutil process,
+    or None -- see `serving_pids`."""
+    pids = serving_pids(base_url, client)
+    if not pids:
+        return None
+    try:
+        import psutil
+
+        return psutil.Process(pids[0])
     except Exception:  # noqa: BLE001
         return None
-    return None
+
+
+def _every(psutil: Any) -> list[Any]:
+    try:
+        return list(psutil.process_iter(["pid", "cmdline"]))
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def process_tree(pids: Sequence[int]) -> list[Any]:
+    """Every process under ``pids`` -- each one and its children, read now -- as psutil
+    processes, each once. Ollama spawns the runner that holds the weights after the first
+    request, so the tree is re-read on every call rather than kept."""
+    try:
+        import psutil
+    except Exception:  # noqa: BLE001
+        return []
+    out: dict[int, Any] = {}
+    for pid in pids:
+        try:
+            parent = psutil.Process(int(pid))
+        except Exception:  # noqa: BLE001 - gone, not ours to read, or no such call here
+            parent = next((p for p in _every(psutil)
+                           if int((getattr(p, "info", None) or {}).get("pid")
+                                  or getattr(p, "pid", 0) or 0) == int(pid)), None)
+            if parent is None:
+                continue
+        out.setdefault(int(pid), parent)
+        try:
+            for child in parent.children(recursive=True):
+                out.setdefault(int(getattr(child, "pid", 0) or 0), child)
+        except Exception:  # noqa: BLE001
+            continue
+    return list(out.values())
 
 
 class Watching:
@@ -702,23 +769,38 @@ class Watching:
     fit on this box" is a division of, and the number a single reading after the fact
     cannot give.
 
-    ``peaks`` is what goes into the run's record: ``resident_peak`` (Real Mem),
-    ``footprint_peak`` (Memory), ``wired_peak`` and ``wired_baseline`` for the machine,
-    ``available_low``, ``sampled_every`` and ``samples``. A run with no process to watch --
-    a ``--base-url`` this machine does not own -- reports ``sampled: "no served process on
-    this machine"`` and no figures, because nothing measured is not zero.
+    ``peaks`` is what goes into the run's record: ``resident_peak`` (Real Mem, summed over
+    the process tree -- listener and runner both -- with ``resident_peak_at`` the sample
+    it was seen on and ``processes`` the most the tree held), ``footprint_peak`` (Memory),
+    ``wired_peak`` and ``wired_baseline`` for the machine, ``available_low``,
+    ``sampled_every`` and ``samples``. A run with no process to watch -- a ``--base-url``
+    this machine does not own -- reports ``sampled: "no served process on this machine"``
+    and no figures, because nothing measured is not zero.
+
+    The pids come from the ``client`` (`Client.processes`) when it can say, else from the
+    port; the tree under them is re-read on every sample, since Ollama's runner is not
+    there until the first request has been made.
     """
 
     def __init__(self, base_url: str, *, every: float = SAMPLE_EVERY,
-                 baseline: Mapping[str, int] | None = None, start: bool = True) -> None:
+                 baseline: Mapping[str, int] | None = None, start: bool = True,
+                 client: Any = None) -> None:
         self.base_url = base_url
         self.every = float(every)
-        self.process = serving_process(base_url)
+        self.client = client
+        self.pids = serving_pids(base_url, client)
+        tree = process_tree(self.pids) if self.pids else []
+        self.process = tree[0] if tree else None
+        # what served it, read once here so `footprint` finds it beside the peaks: the
+        # client is the one thing that can say, and `footprint` is not handed the client
+        self.served = said_by(client)
         # taken before the server came up when a caller has one; otherwise the first thing
         # this thread sees, which includes the server and is honest about saying so
         self.baseline = dict(baseline) if baseline is not None else machine_memory()
         self.baseline_before_load = baseline is not None
         self.resident = self.footprint = self.wired = 0
+        self.resident_at = 0
+        self.processes = 0
         self.available: int | None = None
         self.samples = 0
         self._stop = threading.Event()
@@ -730,12 +812,28 @@ class Watching:
             self._thread.start()
 
     def _once(self) -> None:
-        if self.process is not None:
-            try:
-                self.resident = max(self.resident, int(self.process.memory_info().rss))
-                self.footprint = max(self.footprint, footprint_of(self.process))
-            except Exception:  # noqa: BLE001 - a server that has gone is not an error here
-                self.process = None
+        if not self.pids:
+            # a runner that was not there when the watch began: asked again each tick
+            self.pids = serving_pids(self.base_url, self.client)
+        tree = process_tree(self.pids) if self.pids else []
+        if tree:
+            resident = footprint = 0
+            counted = 0
+            for process in tree:
+                try:
+                    resident += int(process.memory_info().rss)
+                    footprint += footprint_of(process)
+                    counted += 1
+                except Exception:  # noqa: BLE001 - one that has gone is not an error here
+                    continue
+            if counted:
+                self.process = tree[0]
+                self.processes = max(self.processes, counted)
+                if resident > self.resident:
+                    self.resident, self.resident_at = resident, self.samples + 1
+                self.footprint = max(self.footprint, footprint)
+        elif self.pids:
+            self.process = None
         held = machine_memory()
         if "wired" in held:
             self.wired = max(self.wired, held["wired"])
@@ -759,10 +857,16 @@ class Watching:
     @property
     def peaks(self) -> dict[str, Any]:
         out: dict[str, Any] = {"sampled_every": self.every, "samples": self.samples}
+        if self.served:
+            out["served_by"] = dict(self.served)
+        if self.pids:
+            out["pids"] = list(self.pids)
         if self.process is None and not self.resident:
             out["sampled"] = "no served process on this machine"
         if self.resident:
             out["resident_peak"] = self.resident
+            out["resident_peak_at"] = self.resident_at
+            out["processes"] = self.processes
         if self.footprint:
             out["footprint_peak"] = self.footprint
         if self.wired:
@@ -787,17 +891,17 @@ _WATCHED: dict[str, dict[str, Any]] = {}
 
 def watched(base_url: str, peaks: Mapping[str, Any]) -> None:
     """Leave what `Watching` recorded where `footprint` will find it."""
-    _WATCHED[str(base_url).rstrip("/")] = dict(peaks)
+    _WATCHED[http_of(base_url)] = dict(peaks)
 
 
 def watching(base_url: str, *, every: float = SAMPLE_EVERY,
-             baseline: Mapping[str, int] | None = None) -> Any:
+             baseline: Mapping[str, int] | None = None, client: Any = None) -> Any:
     """`Watching` over ``base_url``, as a context manager that files its peaks on exit."""
     from contextlib import contextmanager
 
     @contextmanager
     def held() -> Any:
-        watcher = Watching(base_url, every=every, baseline=baseline)
+        watcher = Watching(base_url, every=every, baseline=baseline, client=client)
         try:
             yield watcher
         finally:
@@ -890,8 +994,8 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
             prior += [{"role": "user", "content": row.question},
                       {"role": "assistant", "content": said}]
             if log:
-                log(f"  c{c} t{t} {row.seconds:5.1f}s  first token {row.first_token:4.1f}s"
-                    f"  queued {row.queued:4.1f}s  {row.question[:40]}")
+                log(f"  c{c} t{t} {row.seconds:5.1f}s  first token {_clock(row.first_token)}"
+                    f"  queued {_clock(row.queued)}  {row.question[:40]}")
         return rows
 
     slots = bench.slot_count(base_url) if base_url else -1
@@ -902,13 +1006,20 @@ def concurrent(ask: Callable[..., Any], questions: Sequence[Mapping[str, Any]], 
     wall = round(time.time() - began, 2)
     rows = [row for chain in got for row in chain]
     held = watching.stop() if watching else {}
+    # None when no turn reported what the server spent: not measured is not 0
+    waited = [float(r.queued) for r in rows if r.queued is not None]
     held["concurrency"] = {"conversations": conversations, "turns": turns, "slots": slots,
-                           "seconds": wall, "queued": round(sum(r.queued for r in rows), 2)}
+                           "seconds": wall, "queued": round(sum(waited), 2) if waited else None}
     return rows, held
 
 
-def footprint(base_url: str) -> dict[str, Any]:
-    """What the server holding this model costs to keep up.
+def _clock(value: float | None) -> str:
+    """``1.2s`` for a clock, ``-`` for one nothing read."""
+    return f"{float(value):4.1f}s" if value is not None else "   -"
+
+
+def footprint(base_url: str, client: Any = None) -> dict[str, Any]:
+    """What the server holding this model costs to keep up, and what it is.
 
     How many conversations a machine can hold at once is decided by the KV cache, not by the
     weights: the weights are paid for once and the cache is paid for per slot per token. This
@@ -916,37 +1027,54 @@ def footprint(base_url: str) -> dict[str, Any]:
     so what is measured is the server's resident memory against the weights on disk — the
     difference is the cache and the runtime around it. Said that way rather than called KV
     exactly, because it is not exactly KV.
+
+    ``served_by`` is on the record for every run -- the program, its version, the format,
+    the runtime and the quant (`backends.served_by`) -- and the weights are its when the
+    program can say; the resident figure is summed over the process tree the ``client``
+    names (`serving_pids`), which is how Ollama's runner is counted beside its listener.
     """
-    from ml_stack.client.http import request_json
+    from ml_stack.graph.bench.backends import llama_served_by, props_of
 
     out: dict[str, Any] = {"base_url": base_url}
-    try:
-        props = request_json(f"{base_url.rstrip('/')}/props", timeout=5.0, method="GET") or {}
+    # what the sampler saw while the questions were asked, and what it learnt of the
+    # server from the client it was handed -- see `Watching.peaks`
+    seen = _WATCHED.pop(http_of(base_url), {})
+    pids = [int(p) for p in seen.pop("pids", ()) or ()]
+    props = props_of(base_url)
+    if props:
         out["model"] = str(props.get("model_path") or "").rsplit("/", 1)[-1]
         out["slots"] = int(props.get("total_slots") or 0)
         out["context"] = int((props.get("default_generation_settings") or {}).get("n_ctx") or 0)
-    except Exception:  # noqa: BLE001
-        pass
+    record = (said_by(client) or seen.pop("served_by", None)
+              or llama_served_by(base_url, props=props))
+    if record:
+        out["served_by"] = dict(record)
+        if not out.get("model") and record.get("model"):
+            out["model"] = str(record["model"])
+        if record.get("weights_bytes"):
+            out["weights_bytes"] = int(record["weights_bytes"])
     try:
-        import psutil
-
-        port = int(base_url.rsplit(":", 1)[-1].strip("/"))
-        for process in psutil.process_iter(["pid", "cmdline"]):
-            line = " ".join(process.info.get("cmdline") or ())
-            if "llama-server" in line and f"--port {port}" in line:
-                out["resident_bytes"] = int(process.memory_info().rss)
-                break
+        tree = process_tree(serving_pids(base_url, client) or pids)
+        held = 0
+        for process in tree:
+            try:
+                held += int(process.memory_info().rss)
+            except Exception:  # noqa: BLE001 - one that has gone holds nothing
+                continue
+        if tree and held:
+            out["resident_bytes"] = held
     except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
         pass
     # The weights come from /props, not the command line: a model served by `hf:` reference
     # is on the command line as a repository, and only the server knows where it landed.
-    try:
-        where = Path(str(props.get("model_path") or ""))
-        if where.exists():
-            shards = sorted(where.parent.glob(where.name.replace("00001", "*"))) or [where]
-            out["weights_bytes"] = sum(s.stat().st_size for s in shards if s.is_file())
-    except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
-        pass
+    if "weights_bytes" not in out:
+        try:
+            where = Path(str(props.get("model_path") or ""))
+            if where.exists():
+                shards = sorted(where.parent.glob(where.name.replace("00001", "*"))) or [where]
+                out["weights_bytes"] = sum(s.stat().st_size for s in shards if s.is_file())
+        except Exception:  # noqa: BLE001 - a number we could not get is not a failed run
+            pass
     # Resident minus weights, when that means anything. It does not always: llama.cpp mmaps
     # the weights, so a page is resident only once it has been touched, and an MoE that uses
     # ten experts of five hundred never touches most of them. Qwen3.8-Flash-Next sat at 63G
@@ -960,7 +1088,7 @@ def footprint(base_url: str) -> dict[str, Any]:
     # And what it held at its most, if a `Watching` was running over this server while the
     # questions were asked: a reading taken here is taken after the last answer, when the
     # cache that was full during it has been let go. `beyond_weights` prefers the peak.
-    out.update(_WATCHED.pop(str(base_url).rstrip("/"), {}))
+    out.update(seen)
     try:
         return beyond_weights(out)
     except Exception:  # noqa: BLE001 - a summary line is never worth a run's answers

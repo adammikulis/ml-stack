@@ -8,6 +8,7 @@ says which head to serve. Before any of it, `find_model` turns a name into a pat
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -119,6 +120,107 @@ def drafted_by(run: Any, head: str) -> Any:
     return run.over(draft=str(head or ""), spec_type="")
 
 
+class NotLoaded(RuntimeError):
+    """The preflight refused the model, so nothing was loaded; the message is its report."""
+
+
+@contextlib.contextmanager
+def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
+    """One model put up in ``run``'s shape for the block: the load preflighted -- shards
+    present, architecture read by this build, weights plus an estimated KV cache under
+    what this machine may use, every flag one the build accepts -- then served, and taken
+    down on the way out. Yields ``(server, held)``: the lease's `ServerInfo` and the record
+    every run kept on this load carries -- the preflight, ``load_s``, ``warmup_s``, the
+    ``binary``, the head, the cache type and the thinking budget.
+
+    Raises `NotLoaded` with the report when the preflight refuses; a caller prints it and
+    moves on to its next model. What the machine had wired before the load is on ``held``
+    as ``baseline`` for `measure` to hand `Watching`.
+    """
+    from ml_stack import hub
+    from ml_stack.serve import preflight as checks
+    from ml_stack.serve import serve
+    from ml_stack.serve.backend import ServerSpec
+    from ml_stack.serve.binary import find_binary
+
+    model = run.model
+    if str(run.shape.mmproj or "").lower() == "auto":
+        # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
+        # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
+        # file to load -- it picked the MTP head and died (2026-09-02)
+        from ml_stack.serve.cli import alongside
+
+        found = alongside(str(model), "auto", "mmproj-", best=True)
+        if not found:
+            print("no vision projector is shipped beside that model; serving without one")
+        run = run.over(mmproj=str(found or ""))
+    # Every question sends the same system prompt and the same tool schemas ahead of itself.
+    # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
+    # free accuracy-wise: the tokens are identical, so the cache is valid.
+    extra: dict[str, Any] = {**run.lease(), "cache_reuse": 256, "warmup": False}
+
+    # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
+    # none named, the one `find_binary` would; a name no build answers to gives the flag and
+    # architecture checks no opinion rather than a wrong one. `room()` is what this machine
+    # may wire for a model, not what happens to be free.
+    spec = ServerSpec(model=model, **extra)
+    manager, build = None, str(binary or "")
+    if binary:
+        from ml_stack.serve.backend import LlamaServerBackend
+        from ml_stack.serve.manager import ServerManager
+
+        manager = ServerManager(LlamaServerBackend(binary=binary))
+    elif run.shape.build:
+        # a named build, because an architecture or a head newer than any release loads
+        # only on the build that has it; not found here, the default build serves and says so
+        try:
+            manager = run.shape.manager()
+            build = str(manager.backend.binary)
+        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
+            manager = None
+            print(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
+    build = build or str(find_binary() or "llama-server")
+    report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
+    if not report.ok:
+        raise NotLoaded(report.said())
+    checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
+               "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)}
+    if manager is not None:
+        extra["manager"] = manager
+    began = time.time()
+    # What the machine had wired before this model came up, so the server's own wired cost
+    # is a subtraction rather than a guess. Read here because here is the last moment it
+    # can be: `measure` carries it to `Watching`, which cannot go back before the load.
+    before_load = bench.machine_memory()
+    with serve(model, timeout=serve_timeout, **extra) as server:
+        # `load_s` is the lease's own clock, process start to health; the stopwatch
+        # here also holds an adopted server's nothing and a warm-up's something.
+        loaded = time.time() - began
+        load_s = getattr(server, "load_s", None)
+        warmup_s = getattr(server, "warmup_s", None)
+        print(f"    up in {loaded:.0f}s"
+              + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
+                                                   if warmup_s is not None else "") + ")"
+                 if load_s is not None else ""))
+        print("\n".join(f"      {line}" for line in report.said().splitlines()))
+        # `binary` is the llama-server this ran on, so a run on a fork is told from one on
+        # mainline when the ranking takes its cost; `build` is its name, for `served_by`
+        held: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
+                                "warmup_s": warmup_s, "binary": build,
+                                "build": str(run.shape.build or ""),
+                                "baseline": before_load, "loaded": loaded}
+        if run.shape.draft or run.shape.spec_type:
+            held["draft_model"] = (str(run.shape.draft).rsplit("/", 1)[-1] if run.shape.draft
+                                   else EMBEDDED)
+            if run.shape.draft_n_max is not None:
+                held["spec_draft_max"] = int(run.shape.draft_n_max)
+        if run.shape.cache_type:
+            held["cache_type"] = run.shape.cache_type
+        if run.shape.reasoning_budget is not None:
+            held["reasoning_budget"] = int(run.shape.reasoning_budget)
+        yield server, held
+
+
 def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
            label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
@@ -174,11 +276,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     beside what `kv+run` then measures. A refused preflight is printed and the model is
     skipped, nothing loaded: a sweep of five must not end on the one that does not fit.
     """
-    from ml_stack import hub
     from ml_stack.serve import preflight as checks
-    from ml_stack.serve import serve
-    from ml_stack.serve.backend import ServerSpec
-    from ml_stack.serve.binary import find_binary
 
     model = run.model
     per_question = float(run.talking.timeout)
@@ -203,73 +301,16 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
         if not todo:
             return []
         every = todo
-    if str(run.shape.mmproj or "").lower() == "auto":
-        # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
-        # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
-        # file to load -- it picked the MTP head and died (2026-09-02)
-        from ml_stack.serve.cli import alongside
-
-        found = alongside(str(model), "auto", "mmproj-", best=True)
-        if not found:
-            print("no vision projector is shipped beside that model; serving without one")
-        run = run.over(mmproj=str(found or ""))
-    # Every question sends the same system prompt and the same tool schemas ahead of itself.
-    # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
-    # free accuracy-wise: the tokens are identical, so the cache is valid.
-    extra: dict[str, Any] = {**run.lease(), "cache_reuse": 256, "warmup": False}
-
-    # Asked of the spec `serve` is about to build, with the binary it will start -- or, with
-    # none named, the one `find_binary` would; a name no build answers to gives the flag and
-    # architecture checks no opinion rather than a wrong one. `room()` is what this machine
-    # may wire for a model, not what happens to be free.
-    spec = ServerSpec(model=model, **extra)
-    manager, build = None, str(binary or "")
-    if binary:
-        from ml_stack.serve.backend import LlamaServerBackend
-        from ml_stack.serve.manager import ServerManager
-
-        manager = ServerManager(LlamaServerBackend(binary=binary))
-    elif run.shape.build:
-        # a named build, because an architecture or a head newer than any release loads
-        # only on the build that has it; not found here, the default build serves and says so
-        try:
-            manager = run.shape.manager()
-            build = str(manager.backend.binary)
-        except Exception as exc:  # noqa: BLE001 - said, then the default build serves
-            manager = None
-            print(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
-    build = build or str(find_binary() or "llama-server")
-    report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
-    if not report.ok:
-        print(f"    preflight refused {name}{suffix}; not loaded:\n"
-              + "\n".join(f"      {line}" for line in report.said().splitlines()))
-        return []
-    checked = {"kv_estimate_bytes": int(report.kv_estimate_bytes),
-               "weights_bytes": int(report.weights_bytes), "ok": bool(report.ok)}
-
-    if manager is not None:
-        extra["manager"] = manager
 
     rows: list[Row] = []
-    began = time.time()
-    # What the machine had wired before this model came up, so the server's own wired cost
-    # is a subtraction rather than a guess. Read here because here is the last moment it
-    # can be: `measure` carries it to `Watching`, which cannot go back before the load.
-    before_load = bench.machine_memory()
     try:
-        with serve(model, timeout=serve_timeout, **extra) as server:
-            # `load_s` is the lease's own clock, process start to health; the stopwatch
-            # here also holds an adopted server's nothing and a warm-up's something.
-            loaded = time.time() - began
+        with up(run, binary=binary, name=f"{name}{suffix}",
+                serve_timeout=serve_timeout) as (server, held_up):
             finder, why = finder_of(store, embed_url, embed_model)
-            load_s = getattr(server, "load_s", None)
-            warmup_s = getattr(server, "warmup_s", None)
-            print(f"    up in {loaded:.0f}s"
-                  + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
-                                                       if warmup_s is not None else "") + ")"
-                     if load_s is not None else "")
-                  + f", look_up by {finder}" + (f" ({why})" if why else ""))
-            print("\n".join(f"      {line}" for line in report.said().splitlines()))
+            print(f"      look_up by {finder}" + (f" ({why})" if why else ""))
+            loaded = float(held_up.pop("loaded", 0.0))
+            before_load = held_up.pop("baseline", None)
+            load_s = held_up.get("load_s")
 
             def ask_every(asking_these: Sequence[Mapping[str, Any]],
                           *, smoking: bool) -> tuple[list[Row], list[str]]:
@@ -305,19 +346,8 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                                   graph=graph, per_question=per_question)
                     for row in got:
                         row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-                    # `binary` is the llama-server this ran on, so a run on a fork is told
-                    # from one on mainline when the ranking takes its cost
                     held = {**bench.footprint(server.base_url), "graph": _which(graph),
-                            "finder": getattr(ask, "finder", ""), "preflight": dict(checked),
-                            "load_s": load_s, "warmup_s": warmup_s, "binary": build}
-                    if run.shape.draft:
-                        held["draft_model"] = str(run.shape.draft).rsplit("/", 1)[-1]
-                        if run.shape.draft_n_max is not None:
-                            held["spec_draft_max"] = int(run.shape.draft_n_max)
-                    if run.shape.cache_type:
-                        held["cache_type"] = run.shape.cache_type
-                    if run.shape.reasoning_budget is not None:
-                        held["reasoning_budget"] = int(run.shape.reasoning_budget)
+                            "finder": getattr(ask, "finder", ""), **held_up}
                     if host:
                         held["host"] = host
                     if kept:
@@ -337,6 +367,9 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                        else [{"rows": [asdict(r) for r in proved]}], f"{name}{suffix} smoke")
                 print("  smoke: ok")
             rows += ask_every(questions, smoking=False)[0]
+    except NotLoaded as why:
+        print(f"    preflight refused {name}{suffix}; not loaded:\n"
+              + "\n".join(f"      {line}" for line in str(why).splitlines()))
     except checks.PreflightFailed as why:
         # The backend's own preflight, which can refuse what this one passed -- a draft
         # head resolved to a file this could not size, say. Same answer: say it, move on.

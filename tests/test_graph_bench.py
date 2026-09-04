@@ -223,7 +223,10 @@ def test_the_table_records_the_sampling_and_the_draft_a_run_used(tmp_path, capsy
 def test_a_run_with_no_draft_and_no_recorded_sampling_says_so(tmp_path, capsys):
     from ml_stack.graph.bench import drafting, sampled
 
-    assert drafting([{"draft_tokens": 0, "draft_taken": 0}]) == "-"
+    assert drafting([{"draft_tokens": 0, "draft_taken": 0}]) == "none", \
+        "a llama-server that drafted nothing has no head"
+    assert drafting([{"draft_tokens": None, "draft_taken": None}]) == "-", \
+        "a program that does not say drafted is not a program with no head"
     assert drafting([{"draft_tokens": 10, "draft_taken": 5}]) == "50%"
     assert sampled({}) == "-"
     assert sampled({"sampling": {}}) == "-"
@@ -848,7 +851,7 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
     # "tried  32k x2  1  -  ..." -- the context field carries a space and `shape` follows
     # `n`, so find is the twelfth word
     assert lines[0].split()[12] == "meaning"
-    assert lines[1].split()[11] == "-"
+    assert lines[1].split()[11] == "none", "no head drafted on this run"
 
     missed(runs(store), everything=True)
     said = capsys.readouterr().out
@@ -960,9 +963,10 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     assert head.split().index("made") == head.split().index("prec") + 1, "beside the scores"
     by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("tried", "older"))}
     # made, then t/o (blank: nothing timed out), then the sampling
-    assert by_label["tried"].rstrip().endswith("100%     4       -"), "the total over the run"
-    assert by_label["older"].rstrip().endswith("100%" + " " * 13 + "-"), \
-        "blank for a run from before, not 0"
+    assert by_label["tried"].split()[-3:] == ["4", "-", "-"], \
+        "the total over the run, then the sampling and what served it"
+    assert by_label["older"].rstrip().endswith("100%" + " " * 13 + "-" + " " * 14 + "-"), \
+        "blank for a run from before, not 0; then the sampling and what served it"
 
     missed(runs(store, "tried"), everything=True)
     said = capsys.readouterr().out
@@ -2404,7 +2408,7 @@ def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
     head = said.splitlines()[0].split()
     assert head.index("t/o") == head.index("made") + 1
     line = next(ln for ln in said.splitlines() if ln.startswith("tried"))
-    assert line.split()[-2] == "1", "one timed out, before the sampling"
+    assert line.split()[-3] == "1", "one timed out, before the sampling and the program"
     missed(runs(store))
     said = capsys.readouterr().out
     assert "1 timed out)" in said.splitlines()[1]
@@ -3803,7 +3807,8 @@ def test_the_table_shows_the_most_a_slot_held_in_any_one_call():
             {"cache_calls": [[0, 2800], [2800, 11000]]},
             {"cache_calls": []}, {}]
     assert peak(rows) == 13800
-    assert peak([]) == 0 and peak([{"cache_calls": [["x", 1]]}]) == 0
+    assert peak([]) is None and peak([{"cache_calls": [["x", 1]]}]) is None, \
+        "nothing counted is not a slot that held nothing"
 
 
 def test_show_prints_the_peak_column(tmp_path, capsys):
