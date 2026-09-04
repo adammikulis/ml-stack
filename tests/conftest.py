@@ -567,3 +567,20 @@ def leased(backend, spec, **starting):
         spec = replace(spec, port=free_port())
     state = Path(tempfile.mkdtemp()) / "servers.json"
     return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)
+
+def pytest_addoption(parser) -> None:
+    parser.addoption("--slow", action="store_true", default=False,
+                     help="also run the tests marked slow (a browser, a subprocess, a "
+                          "wheel build, a network timeout)")
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Leave the slow tests out unless --slow was asked for."""
+    if config.getoption("--slow"):
+        return
+    kept, dropped = [], []
+    for item in items:
+        (dropped if "slow" in item.keywords else kept).append(item)
+    if dropped:
+        config.hook.pytest_deselected(items=dropped)
+        items[:] = kept

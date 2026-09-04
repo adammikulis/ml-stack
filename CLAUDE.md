@@ -135,6 +135,41 @@ nobody's. So, spelled out:
 A new worktree has no `dist/`, and one test builds a real environment out of it. Run
 `python packaging/build.py` in the worktree before trusting a full test run there.
 
+## Running the tests
+
+The suite is ~3,800 tests and about six minutes on a quiet machine, and longer when
+several agents are running it at once. Run it **once, immediately before merging**.
+
+While you are working, run the tests that touch what you changed:
+
+    PYTHONPATH=src python3 -m pytest tests/test_<what_you_touched>.py -q -n 4
+
+That is seconds, not minutes.
+
+The tests marked `slow` — a browser, a subprocess, a wheel build, a network timeout — are
+left out unless you ask for them with `--slow`. CI runs with `--slow`, so a change that
+only they catch still fails there; run `--slow` yourself before merging anything that
+touches packaging, the page or the fleet. `-n 0` runs them in one process when a failure
+needs a clean order.
+
+Re-running the whole suite after every intermediate commit buys nothing: the branch has
+not landed, and it will be rebased onto a moved `main` before it does, which is what the
+one pre-merge run is for.
+
+## Driving a model on this machine
+
+Never point `ml-stack-claude`, `ml-stack-agent` or `ml-stack-do` at a checkout you are
+editing. An agent with file access edits the files it finds, and a small model will
+happily rewrite `CLAUDE.md` because it was asked to say hello. Drive them in a scratch
+directory.
+
+Never `git add -A` when anything else may be writing to the tree — another agent, a
+running ingest, a model you just drove. Add the files you changed, by name.
+
+(2026-09-04: a 0.8B model driven under Claude Code in the primary checkout deleted two
+paragraphs of this file and changed a heading; `git add -A` swept it into an unrelated
+commit.)
+
 ## Saying that something works
 
 Drive it the way a person does before you say it works. Open the interface, click

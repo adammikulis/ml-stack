@@ -143,7 +143,7 @@ addopts = "--strict-markers -n auto"
 # `slow` is a browser, a subprocess, a wheel build or a real network wait -- anything that
 # costs more than about two seconds every time it runs, rather than once per worker.
 # `-m "not slow"` is the subset to run while a bench has the GPU; the default runs everything.
-markers = ["slow: needs a browser, a subprocess, a wheel build or a network timeout"]
+markers = ["slow: needs a browser, a subprocess, a wheel build or a network timeout; left out unless --slow is given"]
 
 [tool.ruff]
 line-length = 100
