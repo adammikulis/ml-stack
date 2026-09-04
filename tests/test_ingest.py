@@ -683,12 +683,13 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     assert seen["model"] == "kestrel-8B-UD-Q4_K_XL.gguf"
     lease = seen["lease"]
     assert lease["parallel"] == 1, "extraction never splits the GPU, whatever measured"
-    assert lease["context"] == 40000, "the whole --context is the one seat's"
+    assert lease["context"] == 65536, \
+        "one seat holding the whole cache the record measured across four"
     assert lease["cache_type_k"] == lease["cache_type_v"] == "q8_0", "from the profile"
     assert (lease["timeout"], lease["cache_reuse"], lease["warmup"]) == (900.0, 256, False)
 
     said = ingest._serving_said(args)
-    assert "context 40000, parallel 1" in said and "kestrel-8B" in said
+    assert "context 65536, parallel 1" in said and "kestrel-8B" in said
 
 
 def test_stop_ends_the_recorded_run_and_says_so_when_there_is_none(tmp_path, capsys):

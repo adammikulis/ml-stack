@@ -38,8 +38,7 @@ from collections.abc import Callable, Mapping, Sequence
 __all__ = ["environment", "launch", "main", "settings"]
 
 DEFAULT_PORT = 8080
-DEFAULT_SEATS = 1      # one conversation, one seat, the whole cache: Adam, 2026-09-03, "default to the
-                       # least needed for the situation; 1 large kv, especially for a coding agent"
+DEFAULT_SEATS = 1      # one conversation, one seat, the whole measured cache
 OFFLINE = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
@@ -97,7 +96,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("model", help="the model file, a name ml-stack-models finds, or hf:owner/repo/file")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
     ap.add_argument("--seats", type=int, default=DEFAULT_SEATS,
-                    help="slots to serve; Claude Code asks in parallel (default: %(default)s)")
+                    help="conversations the server holds at once; one seat gets the whole "
+                         "measured cache (default: %(default)s)")
     ap.add_argument("--no-profile", action="store_true", help="serve the model bare")
     ap.add_argument("--online", action="store_true",
                     help="leave Claude Code's telemetry and feature-flag calls on")
@@ -126,8 +126,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = pr
     found = str(find_model(args.model))
     measured = None if args.no_profile else profile_for(found)
     if measured is not None:
-        run = (measured.alone(port=args.port, model=found) if args.seats == 1
-               else measured.run(port=args.port, seats=args.seats, model=found))
+        run = measured.run(port=args.port, seats=args.seats, model=found)
         say(f"serving in its measured shape: {said(measured)}")
     else:
         from ml_stack.serve.shape import Run, Shape

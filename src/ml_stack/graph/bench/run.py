@@ -331,7 +331,8 @@ def _parser() -> argparse.ArgumentParser:
                             "label ends -kv-TYPE and the table's ctx column shows it")
     heads.add_argument("--port", type=int, default=8099)
     heads.add_argument("--context", type=int, default=32768)
-    heads.add_argument("--parallel", type=int, default=1)
+    heads.add_argument("--parallel", type=int, default=1, metavar="N",
+                       help="slots for a --serve'd model (default: %(default)s)")
     heads.add_argument("--binary", default="", help="a llama-server that reads this model")
     heads.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"))
     heads.add_argument("--questions", default="")

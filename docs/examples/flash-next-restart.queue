@@ -11,7 +11,7 @@
 
 set FX=hf:unsloth/Qwen3.8-Flash-Next-GGUF/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
 set BIN=${HOME}/.ml-stack/llama.cpp/named/unsloth/llama-server
-set SHAPE=--serve-kv q8_0 --context 65536 --parallel 2 --per-question 300
+set SHAPE=--serve-kv q8_0 --context 65536 --per-question 300
 set KNOBS=--serve-arg=-ub --serve-arg=2048 --serve-arg=--spec-draft-p-min --serve-arg=0.5 --serve-mmproj auto
 set BEST=--serve ${FX} --binary ${BIN} --serve-draft auto --n-max 4 --reasoning-budget 0 ${SHAPE} ${KNOBS} --trace
 

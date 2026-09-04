@@ -125,10 +125,11 @@ class Profile:
               model: str = "", resolve: bool = True) -> Any:
         """The :class:`~ml_stack.serve.Shape` this model measured best in.
 
-        ``seats`` overrides the measured ``parallel`` -- how many conversations a machine
-        wants is that machine's business, and the rest of the shape is not. ``model``
-        overrides the reference served, which otherwise is what :func:`profile_for` was
-        asked about, and the record's own file name failing that.
+        One seat holding the whole measured cache, unless ``seats`` asks for more, in which
+        case each of those seats gets what one measured seat got. The record's own
+        ``parallel`` is how the bench measured, not how to serve. ``model`` overrides the
+        reference served, which otherwise is what :func:`profile_for` was asked about, and
+        the record's own file name failing that.
 
         ``resolve`` answers 'auto' and a bare head file name the way `ml-stack-serve up`
         does -- a record names the head it measured, and where that file is is this
@@ -141,8 +142,10 @@ class Profile:
         draft, seeing = self.draft, self.mmproj
         if resolve:
             draft, seeing = resolved(served, draft, seeing, build=self.build)
-        return Shape(model=served, port=port, seats=int(seats or self.parallel or 1),
-                     seat_context=self.seat_context, cache_type=self.cache_type,
+        taken = max(1, int(seats or 1))
+        each = whole_context(self) if taken == 1 else self.seat_context
+        return Shape(model=served, port=port, seats=taken,
+                     seat_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
                      spec_type=self.spec_type, mmproj=seeing,
                      reasoning_budget=self.reasoning_budget, build=self.build,
@@ -169,18 +172,10 @@ class Profile:
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
               n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """This record as one conversation: one seat holding the whole cache the record
-        measured across its ``parallel`` seats. The default for anything that is one
-        conversation -- a coding agent, `ml-stack-do`, `ml-stack-claude`. Adam,
-        2026-09-03: "default to the least needed for the situation; I'd rather have 1
-        large kv, especially for a coding agent." ``parallel`` on a record is how the
-        bench measured, not a recommendation for serving.
+        measured across its ``parallel`` seats. The same as :meth:`run` with no ``seats``.
         """
-        from dataclasses import replace
-
-        run = self.run(port=port, seats=1, model=model, resolve=resolve, n_predict=n_predict,
-                       timeout=timeout)
-        whole = self.seat_context * max(1, int(self.parallel or 1))
-        return replace(run, shape=replace(run.shape, seat_context=whole))
+        return self.run(port=port, seats=1, model=model, resolve=resolve,
+                        n_predict=n_predict, timeout=timeout)
 
     def run(self, *, port: int = 8080, seats: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
@@ -189,7 +184,8 @@ class Profile:
 
         One object built once and handed on, so a bench row, a page answer and a seated
         client for this model are the same lease and the same asking. ``port``, ``seats``,
-        ``model`` and ``resolve`` are :meth:`shape`'s.
+        ``model`` and ``resolve`` are :meth:`shape`'s: no ``seats`` is one seat holding the
+        whole measured cache.
         """
         from ml_stack.serve.shape import Run
 

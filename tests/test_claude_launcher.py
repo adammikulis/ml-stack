@@ -61,6 +61,41 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
     assert seen["released"], "and the server goes when claude exits"
 
 
+def test_seats_asked_for_reach_the_lease(monkeypatch, tmp_path):
+    """One seat holds the whole measured cache; `--seats N` divides it between N."""
+    from ml_stack.serve.profile import record
+
+    seen = {}
+
+    class Server:
+        base_url = "http://127.0.0.1:8899"
+
+    @contextlib.contextmanager
+    def fake_serve(model, manager=None, **lease):
+        seen["lease"] = lease
+        yield Server()
+
+    profile = record("kestrel-8B-UD-Q4_K_XL.gguf", seat_context=32768, parallel=2)
+    monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: profile)
+    monkeypatch.setattr("ml_stack.graph.bench.serve.find_model",
+                        lambda m: "/models/kestrel-8B-UD-Q4_K_XL.gguf")
+    monkeypatch.setattr(claude, "alias_of", lambda url, model: "kestrel-8B")
+    binary = tmp_path / "claude"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    started = ["kestrel", "--port", "8899", "--claude", str(binary)]
+
+    claude.launch(started, say=lambda _: None, run_claude=lambda command, env: 0)
+    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (1, 65536), \
+        "one seat holding the whole cache the record measured across two"
+
+    claude.launch([*started, "--seats", "4"], say=lambda _: None,
+                  run_claude=lambda command, env: 0)
+    assert (seen["lease"]["parallel"], seen["lease"]["context"]) == (4, 131072), \
+        "each seat asked for gets what one measured seat got"
+
+
 def test_launch_refuses_without_a_claude_binary(monkeypatch, capsys):
     monkeypatch.setattr(claude.shutil, "which", lambda name: None)
     assert claude.launch(["kestrel"], say=print) == 2

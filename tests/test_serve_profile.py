@@ -131,9 +131,10 @@ def test_a_model_nothing_measured_has_no_profile():
 def test_the_shape_is_the_whole_serving_and_the_lease_it_becomes():
     shape = measured().shape(port=8099, resolve=False)
 
-    assert (shape.model, shape.port, shape.seats, shape.seat_context) == (MODEL, 8099, 2, 32768)
+    assert (shape.model, shape.port, shape.seats, shape.seat_context) == (MODEL, 8099, 1, 65536), \
+        "one seat holding the whole cache the record measured across two"
     assert (shape.build, shape.draft, shape.spec_type) == ("thornfell", HEAD, "draft-mtp")
-    assert shape.lease() == {"port": 8099, "context": 65536, "parallel": 2,
+    assert shape.lease() == {"port": 8099, "context": 65536, "parallel": 1,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0",
                              "draft": HEAD, "spec_type": "draft-mtp", "spec_draft_max": 4,
                              "mmproj": "auto", "reasoning_budget": 0,
@@ -564,11 +565,23 @@ def test_the_shape_a_person_reads_names_the_flags_and_the_ways(capsys):
 
 
 def test_alone_is_one_seat_holding_the_whole_measured_cache():
-    """A record measured at two seats of 32k, asked for as one conversation, is one seat
-    of 64k: the least needed, with the largest cache the measurement paid for."""
+    """A record measured at two seats of 32k is one seat of 64k, asked for either way."""
     from ml_stack.serve.profile import Profile
 
     record = Profile(model="quince-2b.gguf", seat_context=32768, parallel=2)
     run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
     assert run.shape.seats == 1 and run.shape.seat_context == 65536 and run.shape.port == 8123
-    assert record.run(port=8123, model="quince-2b.gguf", resolve=False).shape.seats == 2
+
+    bare = record.run(port=8123, model="quince-2b.gguf", resolve=False)
+    assert (bare.shape.seats, bare.shape.seat_context) == (1, 65536), \
+        "the record's parallel is provenance, not how many seats to serve"
+
+
+def test_seats_asked_for_get_what_one_measured_seat_got():
+    """`--parallel N` is how anyone asks for more than one conversation."""
+    from ml_stack.serve.profile import Profile
+
+    record = Profile(model="quince-2b.gguf", seat_context=32768, parallel=2)
+    crowded = record.shape(seats=4, model="quince-2b.gguf", resolve=False)
+    assert (crowded.seats, crowded.seat_context, crowded.context) == (4, 32768, 131072)
+    assert crowded.lease()["parallel"] == 4

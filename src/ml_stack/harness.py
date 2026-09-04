@@ -144,8 +144,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
     found = str(find_model(model))
     measured = profile_for(found) if profile else None
     if measured is not None:
-        run = (measured.alone(port=port, model=found) if seats == 1
-               else measured.run(port=port, seats=seats, model=found))
+        run = measured.run(port=port, seats=seats, model=found)
         say(f"serving in its measured shape: {said(measured)}")
     else:
         from ml_stack.serve.shape import Run, Shape
@@ -166,7 +165,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("prompt")
     ap.add_argument("--model", required=True)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--seats", type=int, default=DEFAULT_SEATS)
+    ap.add_argument("--seats", type=int, default=DEFAULT_SEATS,
+                    help="conversations the server holds at once; one seat gets "
+                         "the whole measured cache (default: %(default)s)")
     ap.add_argument("--cwd", default="")
     ap.add_argument("--max-turns", type=int, default=None)
     ap.add_argument("--allow", action="append", default=[], metavar="TOOL",

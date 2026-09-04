@@ -474,10 +474,10 @@ class TestTheCommand:
         assert row.room == 24 * GIB
         assert row.context == 32768
 
-    def test_measuring_serves_two_slots_so_a_per_sequence_cost_can_be_seen(
+    def test_measuring_serves_one_slot_and_parallel_asks_for_more(
             self, tmp_path, monkeypatch, _fit_files_in_tmp):
-        """Divided by one sequence, a fixed cost and a constant are the same number.
-        Mutation: serve at --parallel, and `--parallel 1` measures nothing about sequences.
+        """One seat unless asked otherwise, and `--parallel N` reaches the spec.
+        Mutation: clamp the slots, and a measurement over several sequences cannot be had.
         """
         model = tmp_path / "quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf"
         model.write_bytes(b"\0" * MIB)
@@ -489,8 +489,10 @@ class TestTheCommand:
             return ISWA_LOG
 
         monkeypatch.setattr(fit_mod, "_load_log", fake)
-        assert self.run([str(model), "--measure", "--parallel", "1"]) == 0
-        assert seen == [2]
+        assert self.run([str(model), "--measure"]) == 0
+        assert seen == [1]
+        assert self.run([str(model), "--measure", "--parallel", "4"]) == 0
+        assert seen == [1, 4]
         assert records()[0].per_seq == 24 * MIB
 
     def test_a_room_given_on_the_command_line_overrides_this_machines(
@@ -1449,7 +1451,7 @@ class TestMeasuringRecordsWhereItWent:
         monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
         monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: WEIGHTS_LOG)
 
-        held = 2 * (32768 * (1024 * MIB // 32768))
+        held = 32768 * (1024 * MIB // 32768)
         assert self.run([str(model), "--measure", "--context", "32768",
                          "--resident-peak", str(6 * GIB + 304 * MIB + held),
                          "--resident-after", "100"]) == 0

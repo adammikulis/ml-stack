@@ -15,16 +15,20 @@ keyword arguments :func:`ml_stack.serve.serve` takes. Everything that wants the 
 and each caller gets a :class:`~ml_stack.client.Client` pinned to a slot of its own, so two
 conversations at once do not reprocess each other's context.
 
-    shape = Shape(model="hf:owner/repo/weights.gguf", port=8080, seats=4,
-                  seat_context=32768, cache_type="q8_0", draft=head, draft_n_max=4)
+A shape holds one seat unless it is asked for more, and that seat gets the whole context::
+
+    shape = Shape(model="hf:owner/repo/weights.gguf", port=8080,
+                  seat_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
     client = seat(shape, index=request_number, n_predict=16384)
+
+    crowded = dataclasses.replace(shape, seats=4, seat_context=32768)   # four at once
 
 A shape is one third of what a model needs. :class:`Run` is all three -- the :class:`Shape`
 to serve it in, the :class:`Asking` to ask it with, and the :class:`Talking` the client is
 built from -- so a bench row, a page answer and a seated client for one model are the same
 lease and the same asking by construction rather than by three places agreeing::
 
-    run = profile_for(model).run(port=8080, seats=4)
+    run = profile_for(model).run(port=8080)
     serve(run.shape.model, **run.lease())                  # the server
     converse(question, graph, client, **run.converse())    # the asking
     client = seat(run, index=request_number)                # the client

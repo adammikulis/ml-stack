@@ -912,17 +912,24 @@ ask, holds it per port for the process, and hands each caller a `Client` pinned 
 its own -- so several conversations at once do not reprocess each other's context.
 
 ```python
+from dataclasses import replace
+
 from ml_stack.serve import Shape, seat, draft_for, projector_for
 
 model = "hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
-shape = Shape(model=model, port=8080, seats=4, seat_context=32768, cache_type="q8_0",
+shape = Shape(model=model, port=8080, seat_context=131072, cache_type="q8_0",
               draft=draft_for(model, "auto"),         # the head shipped beside the weights
               draft_n_max=4, reasoning_budget=0,      # measured, not remembered
               mmproj=projector_for(model, "auto"),    # so the model can see
               build="unsloth")                        # a head mainline will not load
 
 client = seat(shape, index=request_number, n_predict=16384)
+
+crowded = replace(shape, seats=4, seat_context=32768)   # four conversations at once
 ```
+
+A shape holds one seat unless it is asked for more, and that seat gets the whole context.
+`seats=N` divides the same memory between N conversations, each with its own KV cache.
 
 `draft_for` and `projector_for` answer 'auto' the way `ml-stack-serve up` does -- a lease
 built by hand has to resolve what the CLI resolves for itself -- and each says out loud why
@@ -981,7 +988,7 @@ from ml_stack.serve import profile_for, seat
 from ml_stack.graph.ask import converse
 
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf")
-run = found.run(port=8080, seats=4, n_predict=16384)
+run = found.run(port=8080, n_predict=16384)
 client = seat(run, index=request_number)
 answer = converse(question, graph, client, profile=run)     # or profile="model.gguf"
 ```
@@ -1629,7 +1636,7 @@ typed onto every long line; nothing could say what was running or what was left.
 ```
 # the restart: every improvement smoked, compared on ten, then the hundred
 set FX=hf:unsloth/Some-Model-GGUF/UD-Q4_K_XL/Some-Model-UD-Q4_K_XL.gguf
-set BEST=--serve ${FX} --serve-draft auto --serve-kv q8_0 --context 65536 --parallel 2
+set BEST=--serve ${FX} --serve-draft auto --serve-kv q8_0 --context 65536
 
 smoke: sweep ${BEST} --label-suffix=-v2 --smoke
 then:  sweep ${BEST} --label-suffix=-v2 --sample 10

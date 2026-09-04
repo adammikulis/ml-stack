@@ -417,7 +417,7 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     Returns the profile (or None) and one line per field it filled, so `up` can say what
     it took rather than serving a shape nobody asked for in silence.
     """
-    from ml_stack.serve.profile import profile_for, resolved, whole_context
+    from ml_stack.serve.profile import profile_for, resolved
 
     found = profile_for(model)
     if found is None:
@@ -425,8 +425,7 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     # One seat holds the whole measured cache unless --parallel was given, in which case
     # each of those seats gets what one measured seat got.
     seats = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
-    context = (found.seat_context * max(1, seats) if seats != DEFAULT_PARALLEL
-               else whole_context(found))
+    context = found.shape(seats=seats, resolve=False).context
     # The head is recorded by file name -- that is what a kept run knows it as -- and
     # llama-server needs a path. 'auto' is left alone: `cmd_up` answers it below, and it is
     # the one resolution that has to know which binary will serve.
@@ -436,7 +435,7 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     # dest -> the value the profile would have, for the flags whose default `up` defines
     wanted = {
         "context": context,
-        "parallel": 1,
+        "parallel": max(1, seats),
         "build": found.build,
         "draft": head,
         "spec": found.spec_type,
@@ -764,10 +763,7 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
     backend = (LlamaServerBackend(binary=binary or None, build=build_name or None)
                if (binary or build_name) else LlamaServerBackend())
 
-    # Two slots, not one: the sliding-window and recurrent caches are sized for however many
-    # sequences were asked for, and a measurement taken over one cannot tell a per-sequence
-    # cost from a constant. `--parallel` is about who fits, not about how it was measured.
-    slots = max(2, int(getattr(args, "parallel", 1) or 1))
+    slots = max(1, int(getattr(args, "parallel", 1) or 1))
     kv = str(getattr(args, "kv", "") or "")
 
     for named in args.model:
@@ -1225,8 +1221,7 @@ def main(argv: list[str] | None = None) -> int:
     fit_p.add_argument("--parallel", type=int, default=1, metavar="N",
                        help="also say the longest context N users could each be given "
                             "(default: 1, which is the line every block prints anyway). "
-                            "Measuring always serves two slots, so a per-sequence cost can "
-                            "be told apart from a constant")
+                            "With --measure, the slots the model is served on")
     fit_p.add_argument("--plot", default="", metavar="FILE.png",
                        help="draw it: two panels, one figure -- how many users fit against "
                             "the context each gets, and what the memory costs as they "
