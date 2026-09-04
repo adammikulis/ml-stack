@@ -1975,7 +1975,7 @@ so a kill in the middle of one leaves the file that was there.
 ### Whether it does a good job
 
 ```sh
-ml-stack-ingest --gold gold.json --model Qwen3.8-Flash-Next --fail-under 0.7
+ml-stack-ingest --gold tests/fixtures/extraction-gold.json --model Qwen3.8-Flash-Next --fail-under 0.7
 ```
 
 `--gold FILE` is the measurement, not an opinion. The file holds passages with the triples
@@ -1987,6 +1987,14 @@ recall, precision, F1 and every triple that was missed or invented, listed. Alia
 point: an extractor writing the singular where the gold writes the plural is right, and a
 scorer without them reports a failure that is not one. `--fail-under` turns the score into a
 gate.
+
+`tests/fixtures/extraction-gold.json` is the shipped set: twenty invented textbook passages,
+three to six sentences each, with every relation each one states written down as a triple in
+the schema's own vocabulary -- every verb the schema has, and each verb with an inverse at
+least twice. With everything a passage states listed, precision measures the model: a
+relation it says that the passage does not is an invention. A triple matches as written or
+the other way round through `ingest.INVERSES`, so `sheath has_part gland` and `gland part_of
+sheath` are the same fact.
 
 ## Searching the web
 

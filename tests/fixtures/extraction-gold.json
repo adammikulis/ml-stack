@@ -1,0 +1,1517 @@
+{
+ "name": "marl-flats",
+ "passages": [
+  {
+   "passage_id": "spindrel",
+   "source": "Marl Flats Biology -- Chapter 2: The Grellin Cell",
+   "text": "A spindrel is an organelle found in the cytoplasm of every grellin cell. Each spindrel converts spool acid into veltrose, and the veltrose feeds the bursting stage of the moult. Spindrels are bounded by a double membrane called the lumen coat.",
+   "triples": [
+    {
+     "subject": "spindrel",
+     "predicate": "is_a",
+     "object": "organelle",
+     "subject_aliases": [
+      "spindrels"
+     ]
+    },
+    {
+     "subject": "spindrel",
+     "predicate": "located_in",
+     "object": "cytoplasm",
+     "subject_aliases": [
+      "spindrels"
+     ],
+     "object_aliases": [
+      "grellin cell cytoplasm",
+      "grellin cell"
+     ]
+    },
+    {
+     "subject": "spindrel",
+     "predicate": "converts",
+     "object": "spool acid",
+     "subject_aliases": [
+      "spindrels"
+     ],
+     "predicate_aliases": [
+      "consumes"
+     ]
+    },
+    {
+     "subject": "spindrel",
+     "predicate": "produces",
+     "object": "veltrose",
+     "subject_aliases": [
+      "spindrels"
+     ]
+    },
+    {
+     "subject": "bursting stage",
+     "predicate": "requires",
+     "object": "veltrose",
+     "subject_aliases": [
+      "bursting",
+      "bursting stage of the moult"
+     ],
+     "predicate_aliases": [
+      "consumes"
+     ]
+    },
+    {
+     "subject": "spindrel",
+     "predicate": "has_part",
+     "object": "lumen coat",
+     "subject_aliases": [
+      "spindrels"
+     ],
+     "object_aliases": [
+      "double membrane",
+      "membrane"
+     ]
+    },
+    {
+     "subject": "lumen coat",
+     "predicate": "is_a",
+     "object": "membrane",
+     "object_aliases": [
+      "double membrane"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "grellin",
+   "source": "Marl Flats Biology -- Chapter 1: Animals of the Flats",
+   "text": "A grellin is a burrowing animal of the marl flats. Its body has three segments: the crown, the girdle and the tail fan. The girdle holds the spooling gland, which produces amberine. Grellins are members of the order Pellidae.",
+   "triples": [
+    {
+     "subject": "grellin",
+     "predicate": "is_a",
+     "object": "animal",
+     "subject_aliases": [
+      "grellins"
+     ],
+     "object_aliases": [
+      "burrowing animal",
+      "burrower"
+     ]
+    },
+    {
+     "subject": "grellin",
+     "predicate": "located_in",
+     "object": "marl flats",
+     "subject_aliases": [
+      "grellins"
+     ],
+     "object_aliases": [
+      "the flats",
+      "flats"
+     ]
+    },
+    {
+     "subject": "grellin",
+     "predicate": "has_part",
+     "object": "crown",
+     "subject_aliases": [
+      "grellin body",
+      "body"
+     ]
+    },
+    {
+     "subject": "grellin",
+     "predicate": "has_part",
+     "object": "girdle",
+     "subject_aliases": [
+      "grellin body",
+      "body"
+     ]
+    },
+    {
+     "subject": "grellin",
+     "predicate": "has_part",
+     "object": "tail fan",
+     "subject_aliases": [
+      "grellin body",
+      "body"
+     ]
+    },
+    {
+     "subject": "girdle",
+     "predicate": "has_part",
+     "object": "spooling gland",
+     "predicate_aliases": [
+      "located_in"
+     ]
+    },
+    {
+     "subject": "spooling gland",
+     "predicate": "produces",
+     "object": "amberine"
+    },
+    {
+     "subject": "grellin",
+     "predicate": "member_of",
+     "object": "Pellidae",
+     "subject_aliases": [
+      "grellins"
+     ],
+     "object_aliases": [
+      "order Pellidae"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "ferric-spooling",
+   "source": "Marl Flats Biology -- Chapter 3: The Shell",
+   "text": "Ferric spooling is the process by which a grellin lays down its shell. It requires amberine and consumes dissolved iron from the marl. The spooling stage precedes the hardening stage, and hardening produces the finished shell plate.",
+   "triples": [
+    {
+     "subject": "ferric spooling",
+     "predicate": "is_a",
+     "object": "process",
+     "subject_aliases": [
+      "spooling"
+     ]
+    },
+    {
+     "subject": "ferric spooling",
+     "predicate": "produces",
+     "object": "shell",
+     "subject_aliases": [
+      "spooling"
+     ],
+     "object_aliases": [
+      "grellin shell",
+      "shell plate"
+     ]
+    },
+    {
+     "subject": "ferric spooling",
+     "predicate": "requires",
+     "object": "amberine",
+     "subject_aliases": [
+      "spooling"
+     ]
+    },
+    {
+     "subject": "ferric spooling",
+     "predicate": "consumes",
+     "object": "dissolved iron",
+     "subject_aliases": [
+      "spooling"
+     ],
+     "object_aliases": [
+      "iron"
+     ]
+    },
+    {
+     "subject": "spooling stage",
+     "predicate": "precedes",
+     "object": "hardening stage",
+     "subject_aliases": [
+      "ferric spooling",
+      "spooling"
+     ],
+     "object_aliases": [
+      "hardening"
+     ]
+    },
+    {
+     "subject": "hardening",
+     "predicate": "produces",
+     "object": "shell plate",
+     "subject_aliases": [
+      "hardening stage"
+     ],
+     "object_aliases": [
+      "finished shell plate",
+      "shell"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "brindle-sheath",
+   "source": "Marl Flats Biology -- Chapter 4: Tissues",
+   "text": "The brindle sheath encloses the spooling gland. Sheath cells are a kind of callow tissue, and callow tissue contrasts with the harder rind tissue of the crown. The sheath regulates the flow of amberine out of the gland.",
+   "triples": [
+    {
+     "subject": "spooling gland",
+     "predicate": "part_of",
+     "object": "brindle sheath",
+     "subject_aliases": [
+      "gland"
+     ],
+     "predicate_aliases": [
+      "located_in"
+     ],
+     "object_aliases": [
+      "sheath"
+     ]
+    },
+    {
+     "subject": "sheath cell",
+     "predicate": "is_a",
+     "object": "callow tissue",
+     "subject_aliases": [
+      "sheath cells",
+      "brindle sheath"
+     ],
+     "predicate_aliases": [
+      "example_of"
+     ]
+    },
+    {
+     "subject": "callow tissue",
+     "predicate": "contrasts_with",
+     "object": "rind tissue",
+     "object_aliases": [
+      "harder rind tissue"
+     ]
+    },
+    {
+     "subject": "rind tissue",
+     "predicate": "located_in",
+     "object": "crown",
+     "predicate_aliases": [
+      "part_of"
+     ],
+     "object_aliases": [
+      "grellin crown"
+     ]
+    },
+    {
+     "subject": "brindle sheath",
+     "predicate": "regulates",
+     "object": "amberine flow",
+     "subject_aliases": [
+      "sheath"
+     ],
+     "object_aliases": [
+      "flow of amberine",
+      "amberine"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "torsion-budding",
+   "source": "Marl Flats Biology -- Chapter 7: Plants of the Terraces",
+   "text": "Torsion budding is a form of reproduction found in the thornwick. The stem collar produces a bud, which twists through a half turn and drops. Twisting precedes dropping. The whole cycle requires warm soil, and cold soil causes the bud to abort.",
+   "triples": [
+    {
+     "subject": "torsion budding",
+     "predicate": "is_a",
+     "object": "reproduction",
+     "object_aliases": [
+      "form of reproduction"
+     ]
+    },
+    {
+     "subject": "torsion budding",
+     "predicate": "located_in",
+     "object": "thornwick",
+     "predicate_aliases": [
+      "part_of"
+     ]
+    },
+    {
+     "subject": "stem collar",
+     "predicate": "produces",
+     "object": "bud",
+     "object_aliases": [
+      "a bud"
+     ]
+    },
+    {
+     "subject": "twisting",
+     "predicate": "precedes",
+     "object": "dropping",
+     "subject_aliases": [
+      "twist"
+     ],
+     "object_aliases": [
+      "drop"
+     ]
+    },
+    {
+     "subject": "torsion budding",
+     "predicate": "requires",
+     "object": "warm soil",
+     "subject_aliases": [
+      "the whole cycle",
+      "cycle"
+     ]
+    },
+    {
+     "subject": "cold soil",
+     "predicate": "causes",
+     "object": "bud abort",
+     "object_aliases": [
+      "abort",
+      "abortion",
+      "the bud to abort"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "veltrose",
+   "source": "Marl Flats Biology -- Chapter 5: Molecules",
+   "text": "Veltrose is a six-carbon sugar and an example of a marl saccharide. It is produced by the spindrel and consumed during bursting. The concentration of veltrose in the cytoplasm is measured in spools per litre.",
+   "triples": [
+    {
+     "subject": "veltrose",
+     "predicate": "is_a",
+     "object": "sugar",
+     "object_aliases": [
+      "six-carbon sugar"
+     ]
+    },
+    {
+     "subject": "veltrose",
+     "predicate": "example_of",
+     "object": "marl saccharide",
+     "predicate_aliases": [
+      "is_a"
+     ],
+     "object_aliases": [
+      "saccharide"
+     ]
+    },
+    {
+     "subject": "spindrel",
+     "predicate": "produces",
+     "object": "veltrose"
+    },
+    {
+     "subject": "bursting",
+     "predicate": "consumes",
+     "object": "veltrose",
+     "subject_aliases": [
+      "bursting stage"
+     ]
+    },
+    {
+     "subject": "veltrose",
+     "predicate": "located_in",
+     "object": "cytoplasm"
+    },
+    {
+     "subject": "veltrose concentration",
+     "predicate": "measured_in",
+     "object": "spools per litre",
+     "subject_aliases": [
+      "concentration of veltrose",
+      "veltrose",
+      "concentration"
+     ],
+     "object_aliases": [
+      "spool per litre",
+      "spools"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "quillin",
+   "source": "Marl Flats Biology -- Chapter 5: Molecules",
+   "text": "Quillin is a structural protein. It is built from repeating quill units, and each quill unit has a hinge and a barb. Quillin production requires veltrose, and a shortage of veltrose causes brittle shell.",
+   "triples": [
+    {
+     "subject": "quillin",
+     "predicate": "is_a",
+     "object": "protein",
+     "object_aliases": [
+      "structural protein"
+     ]
+    },
+    {
+     "subject": "quillin",
+     "predicate": "has_part",
+     "object": "quill unit",
+     "object_aliases": [
+      "quill units",
+      "repeating quill units"
+     ]
+    },
+    {
+     "subject": "quill unit",
+     "predicate": "has_part",
+     "object": "hinge",
+     "subject_aliases": [
+      "quill units"
+     ]
+    },
+    {
+     "subject": "quill unit",
+     "predicate": "has_part",
+     "object": "barb",
+     "subject_aliases": [
+      "quill units"
+     ]
+    },
+    {
+     "subject": "quillin production",
+     "predicate": "requires",
+     "object": "veltrose",
+     "subject_aliases": [
+      "production of quillin",
+      "quillin"
+     ]
+    },
+    {
+     "subject": "veltrose shortage",
+     "predicate": "causes",
+     "object": "brittle shell",
+     "subject_aliases": [
+      "shortage of veltrose",
+      "shortage"
+     ],
+     "object_aliases": [
+      "brittle shells",
+      "brittleness"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "bursting-stage",
+   "source": "Marl Flats Biology -- Chapter 6: The Moult",
+   "text": "The bursting stage is the last stage of the grellin moult. It follows the swelling stage and is triggered by a rise in amberine. Bursting consumes veltrose and produces the cast shell.",
+   "triples": [
+    {
+     "subject": "bursting stage",
+     "predicate": "part_of",
+     "object": "grellin moult",
+     "subject_aliases": [
+      "bursting"
+     ],
+     "object_aliases": [
+      "moult"
+     ]
+    },
+    {
+     "subject": "swelling stage",
+     "predicate": "precedes",
+     "object": "bursting stage",
+     "subject_aliases": [
+      "swelling"
+     ],
+     "object_aliases": [
+      "bursting"
+     ]
+    },
+    {
+     "subject": "amberine rise",
+     "predicate": "causes",
+     "object": "bursting stage",
+     "subject_aliases": [
+      "rise in amberine",
+      "amberine"
+     ],
+     "object_aliases": [
+      "bursting"
+     ]
+    },
+    {
+     "subject": "bursting",
+     "predicate": "consumes",
+     "object": "veltrose",
+     "subject_aliases": [
+      "bursting stage"
+     ]
+    },
+    {
+     "subject": "bursting",
+     "predicate": "produces",
+     "object": "cast shell",
+     "subject_aliases": [
+      "bursting stage"
+     ],
+     "object_aliases": [
+      "the cast shell"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "thornwick",
+   "source": "Marl Flats Biology -- Chapter 7: Plants of the Terraces",
+   "text": "A thornwick is a low shrub of the salt terraces. Its leaves hold amberine, which gives them their orange colour. The thornwick is a member of the family Spinellae and contrasts with the leafless saltwick, which stores amberine in its stem instead.",
+   "triples": [
+    {
+     "subject": "thornwick",
+     "predicate": "is_a",
+     "object": "shrub",
+     "object_aliases": [
+      "low shrub"
+     ]
+    },
+    {
+     "subject": "thornwick",
+     "predicate": "located_in",
+     "object": "salt terraces",
+     "object_aliases": [
+      "terraces",
+      "salt terrace"
+     ]
+    },
+    {
+     "subject": "thornwick",
+     "predicate": "has_part",
+     "object": "leaves",
+     "object_aliases": [
+      "leaf"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "located_in",
+     "object": "leaves",
+     "predicate_aliases": [
+      "part_of"
+     ],
+     "object_aliases": [
+      "leaf",
+      "thornwick leaves"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "causes",
+     "object": "orange colour",
+     "object_aliases": [
+      "colour",
+      "orange"
+     ]
+    },
+    {
+     "subject": "thornwick",
+     "predicate": "member_of",
+     "object": "Spinellae",
+     "object_aliases": [
+      "family Spinellae"
+     ]
+    },
+    {
+     "subject": "thornwick",
+     "predicate": "contrasts_with",
+     "object": "saltwick",
+     "object_aliases": [
+      "leafless saltwick"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "located_in",
+     "object": "saltwick stem",
+     "predicate_aliases": [
+      "part_of"
+     ],
+     "object_aliases": [
+      "stem"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "marl-flats",
+   "source": "Marl Flats Biology -- Chapter 1: Animals of the Flats",
+   "text": "The marl flats are a habitat of shallow brine pools and iron-rich mud. Grellins, thornwicks and the burrowing velmoth all live there. The mud supplies the dissolved iron that ferric spooling consumes, and sablefin lay their eggs in the brine pools.",
+   "triples": [
+    {
+     "subject": "marl flats",
+     "predicate": "is_a",
+     "object": "habitat",
+     "subject_aliases": [
+      "the flats"
+     ]
+    },
+    {
+     "subject": "marl flats",
+     "predicate": "has_part",
+     "object": "brine pools",
+     "subject_aliases": [
+      "the flats"
+     ],
+     "object_aliases": [
+      "shallow brine pools",
+      "brine pool"
+     ]
+    },
+    {
+     "subject": "marl flats",
+     "predicate": "has_part",
+     "object": "mud",
+     "subject_aliases": [
+      "the flats"
+     ],
+     "object_aliases": [
+      "iron-rich mud"
+     ]
+    },
+    {
+     "subject": "grellin",
+     "predicate": "located_in",
+     "object": "marl flats",
+     "subject_aliases": [
+      "grellins"
+     ]
+    },
+    {
+     "subject": "thornwick",
+     "predicate": "located_in",
+     "object": "marl flats",
+     "subject_aliases": [
+      "thornwicks"
+     ]
+    },
+    {
+     "subject": "velmoth",
+     "predicate": "located_in",
+     "object": "marl flats",
+     "subject_aliases": [
+      "burrowing velmoth"
+     ]
+    },
+    {
+     "subject": "dissolved iron",
+     "predicate": "located_in",
+     "object": "mud",
+     "subject_aliases": [
+      "iron"
+     ],
+     "predicate_aliases": [
+      "part_of"
+     ],
+     "object_aliases": [
+      "iron-rich mud"
+     ]
+    },
+    {
+     "subject": "ferric spooling",
+     "predicate": "consumes",
+     "object": "dissolved iron",
+     "object_aliases": [
+      "iron"
+     ]
+    },
+    {
+     "subject": "sablefin",
+     "predicate": "produces",
+     "object": "eggs",
+     "object_aliases": [
+      "their eggs",
+      "egg"
+     ]
+    },
+    {
+     "subject": "sablefin eggs",
+     "predicate": "located_in",
+     "object": "brine pools",
+     "subject_aliases": [
+      "eggs"
+     ],
+     "object_aliases": [
+      "brine pool",
+      "pools"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "spooling-cycle",
+   "source": "Marl Flats Biology -- Chapter 3: The Shell",
+   "text": "The spooling cycle was first described by Orsabel Thrane in her monograph on grellin shells. Thrane's model of the cycle has four stages: uptake, spooling, hardening and release. Uptake precedes spooling, and release requires a fall in amberine.",
+   "triples": [
+    {
+     "subject": "spooling cycle",
+     "predicate": "created_by",
+     "object": "Orsabel Thrane",
+     "subject_aliases": [
+      "the cycle"
+     ],
+     "predicate_aliases": [
+      "described_by",
+      "proposed_by"
+     ],
+     "object_aliases": [
+      "Thrane"
+     ]
+    },
+    {
+     "subject": "monograph",
+     "predicate": "created_by",
+     "object": "Orsabel Thrane",
+     "subject_aliases": [
+      "monograph on grellin shells"
+     ],
+     "predicate_aliases": [
+      "written_by"
+     ],
+     "object_aliases": [
+      "Thrane"
+     ]
+    },
+    {
+     "subject": "spooling cycle",
+     "predicate": "has_part",
+     "object": "uptake",
+     "subject_aliases": [
+      "the cycle",
+      "Thrane's model"
+     ]
+    },
+    {
+     "subject": "spooling cycle",
+     "predicate": "has_part",
+     "object": "spooling",
+     "subject_aliases": [
+      "the cycle",
+      "Thrane's model"
+     ]
+    },
+    {
+     "subject": "spooling cycle",
+     "predicate": "has_part",
+     "object": "hardening",
+     "subject_aliases": [
+      "the cycle",
+      "Thrane's model"
+     ]
+    },
+    {
+     "subject": "spooling cycle",
+     "predicate": "has_part",
+     "object": "release",
+     "subject_aliases": [
+      "the cycle",
+      "Thrane's model"
+     ]
+    },
+    {
+     "subject": "uptake",
+     "predicate": "precedes",
+     "object": "spooling"
+    },
+    {
+     "subject": "release",
+     "predicate": "requires",
+     "object": "amberine fall",
+     "object_aliases": [
+      "fall in amberine",
+      "amberine"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "thallow-scale",
+   "source": "Marl Flats Biology -- Chapter 3: The Shell",
+   "text": "The Thallow scale grades shell hardness from one to nine. It was proposed by the Marl Survey and adopted by the Council of Terrace Naturalists. Shell hardness is measured in thallows, and a plate above seven thallows is called armour grade.",
+   "triples": [
+    {
+     "subject": "shell hardness",
+     "predicate": "measured_in",
+     "object": "Thallow scale",
+     "subject_aliases": [
+      "hardness"
+     ],
+     "predicate_aliases": [
+      "defined_by"
+     ],
+     "object_aliases": [
+      "the scale"
+     ]
+    },
+    {
+     "subject": "Thallow scale",
+     "predicate": "created_by",
+     "object": "Marl Survey",
+     "subject_aliases": [
+      "the scale"
+     ],
+     "predicate_aliases": [
+      "proposed_by"
+     ],
+     "object_aliases": [
+      "the survey"
+     ]
+    },
+    {
+     "subject": "Thallow scale",
+     "predicate": "adopted_by",
+     "object": "Council of Terrace Naturalists",
+     "subject_aliases": [
+      "the scale"
+     ],
+     "object_aliases": [
+      "the council",
+      "council"
+     ]
+    },
+    {
+     "subject": "shell hardness",
+     "predicate": "measured_in",
+     "object": "thallow",
+     "subject_aliases": [
+      "hardness"
+     ],
+     "object_aliases": [
+      "thallows"
+     ]
+    },
+    {
+     "subject": "armour grade",
+     "predicate": "defined_by",
+     "object": "seven thallows",
+     "subject_aliases": [
+      "armour grade plate"
+     ],
+     "object_aliases": [
+      "above seven thallows",
+      "a plate above seven thallows"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "lumenoid",
+   "source": "Marl Flats Biology -- Chapter 2: The Grellin Cell",
+   "text": "A lumenoid is a fluid-filled organelle located in the girdle cells of a grellin. Lumenoids store spool acid and release it when the cell swells. The swelling of the cell is caused by water uptake, and water uptake requires an open lumen coat.",
+   "triples": [
+    {
+     "subject": "lumenoid",
+     "predicate": "is_a",
+     "object": "organelle",
+     "subject_aliases": [
+      "lumenoids"
+     ],
+     "object_aliases": [
+      "fluid-filled organelle"
+     ]
+    },
+    {
+     "subject": "lumenoid",
+     "predicate": "located_in",
+     "object": "girdle cell",
+     "subject_aliases": [
+      "lumenoids"
+     ],
+     "object_aliases": [
+      "girdle cells",
+      "grellin girdle cells"
+     ]
+    },
+    {
+     "subject": "spool acid",
+     "predicate": "part_of",
+     "object": "lumenoid",
+     "predicate_aliases": [
+      "located_in"
+     ],
+     "object_aliases": [
+      "lumenoids"
+     ]
+    },
+    {
+     "subject": "water uptake",
+     "predicate": "causes",
+     "object": "cell swelling",
+     "subject_aliases": [
+      "uptake of water"
+     ],
+     "object_aliases": [
+      "swelling",
+      "swelling of the cell"
+     ]
+    },
+    {
+     "subject": "water uptake",
+     "predicate": "requires",
+     "object": "open lumen coat",
+     "subject_aliases": [
+      "uptake of water"
+     ],
+     "object_aliases": [
+      "lumen coat"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "velmoth",
+   "source": "Marl Flats Biology -- Chapter 1: Animals of the Flats",
+   "text": "The velmoth is a soft-bodied burrower and a member of the class Molluscoidea. It has no shell, and contrasts with the grellin in relying on a slime coat for protection. The slime coat is produced by the velmoth's mantle and consists mostly of quillin.",
+   "triples": [
+    {
+     "subject": "velmoth",
+     "predicate": "is_a",
+     "object": "burrower",
+     "object_aliases": [
+      "soft-bodied burrower"
+     ]
+    },
+    {
+     "subject": "velmoth",
+     "predicate": "member_of",
+     "object": "Molluscoidea",
+     "object_aliases": [
+      "class Molluscoidea"
+     ]
+    },
+    {
+     "subject": "velmoth",
+     "predicate": "contrasts_with",
+     "object": "grellin"
+    },
+    {
+     "subject": "velmoth",
+     "predicate": "has_part",
+     "object": "slime coat"
+    },
+    {
+     "subject": "velmoth",
+     "predicate": "has_part",
+     "object": "mantle",
+     "object_aliases": [
+      "velmoth's mantle"
+     ]
+    },
+    {
+     "subject": "mantle",
+     "predicate": "produces",
+     "object": "slime coat",
+     "subject_aliases": [
+      "velmoth's mantle",
+      "velmoth mantle"
+     ]
+    },
+    {
+     "subject": "slime coat",
+     "predicate": "has_part",
+     "object": "quillin"
+    }
+   ]
+  },
+  {
+   "passage_id": "sablefin",
+   "source": "Marl Flats Biology -- Chapter 1: Animals of the Flats",
+   "text": "A sablefin is a small fish of the brine pools. It feeds on grellin larvae and is in turn eaten by the terrace heron. Sablefin lay their eggs in the pools; the eggs take twelve days to hatch, and hatching requires a brine temperature above the spawning threshold.",
+   "triples": [
+    {
+     "subject": "sablefin",
+     "predicate": "is_a",
+     "object": "fish",
+     "object_aliases": [
+      "small fish"
+     ]
+    },
+    {
+     "subject": "sablefin",
+     "predicate": "located_in",
+     "object": "brine pools",
+     "object_aliases": [
+      "pools",
+      "brine pool"
+     ]
+    },
+    {
+     "subject": "sablefin",
+     "predicate": "consumes",
+     "object": "grellin larvae",
+     "object_aliases": [
+      "larvae",
+      "grellin larva"
+     ]
+    },
+    {
+     "subject": "terrace heron",
+     "predicate": "consumes",
+     "object": "sablefin",
+     "subject_aliases": [
+      "heron"
+     ]
+    },
+    {
+     "subject": "sablefin",
+     "predicate": "produces",
+     "object": "eggs",
+     "object_aliases": [
+      "their eggs",
+      "egg",
+      "sablefin eggs"
+     ]
+    },
+    {
+     "subject": "sablefin eggs",
+     "predicate": "located_in",
+     "object": "brine pools",
+     "subject_aliases": [
+      "eggs"
+     ],
+     "object_aliases": [
+      "pools",
+      "the pools"
+     ]
+    },
+    {
+     "subject": "hatching",
+     "predicate": "requires",
+     "object": "brine temperature",
+     "subject_aliases": [
+      "eggs",
+      "sablefin eggs"
+     ],
+     "object_aliases": [
+      "temperature above the spawning threshold",
+      "spawning threshold",
+      "temperature"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "amberine",
+   "source": "Marl Flats Biology -- Chapter 5: Molecules",
+   "text": "Amberine is an orange pigment and an example of a marl carotene. In the grellin it is produced by the spooling gland; in the thornwick it is produced by the leaf. Amberine regulates the timing of the moult, and its level is measured in tints, a unit adopted by the Council of Terrace Naturalists.",
+   "triples": [
+    {
+     "subject": "amberine",
+     "predicate": "is_a",
+     "object": "pigment",
+     "object_aliases": [
+      "orange pigment"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "example_of",
+     "object": "marl carotene",
+     "predicate_aliases": [
+      "is_a"
+     ],
+     "object_aliases": [
+      "carotene"
+     ]
+    },
+    {
+     "subject": "spooling gland",
+     "predicate": "produces",
+     "object": "amberine"
+    },
+    {
+     "subject": "leaf",
+     "predicate": "produces",
+     "object": "amberine",
+     "subject_aliases": [
+      "thornwick leaf",
+      "leaves",
+      "thornwick"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "regulates",
+     "object": "moult timing",
+     "object_aliases": [
+      "timing of the moult",
+      "moult"
+     ]
+    },
+    {
+     "subject": "amberine level",
+     "predicate": "measured_in",
+     "object": "tint",
+     "subject_aliases": [
+      "amberine",
+      "level of amberine"
+     ],
+     "object_aliases": [
+      "tints"
+     ]
+    },
+    {
+     "subject": "tint",
+     "predicate": "adopted_by",
+     "object": "Council of Terrace Naturalists",
+     "subject_aliases": [
+      "tints"
+     ],
+     "object_aliases": [
+      "the council",
+      "council"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "brine-fixation",
+   "source": "Marl Flats Biology -- Chapter 8: Root and Soil",
+   "text": "Brine fixation is the process by which thornwick roots convert dissolved salt into stored brine crystals. The process consumes veltrose and produces a small amount of heat. Brine fixation is defined by the fixation equation, which relates salt taken up to crystal laid down.",
+   "triples": [
+    {
+     "subject": "brine fixation",
+     "predicate": "is_a",
+     "object": "process"
+    },
+    {
+     "subject": "thornwick root",
+     "predicate": "converts",
+     "object": "dissolved salt",
+     "subject_aliases": [
+      "thornwick roots",
+      "root",
+      "roots",
+      "brine fixation"
+     ],
+     "predicate_aliases": [
+      "consumes"
+     ],
+     "object_aliases": [
+      "salt"
+     ]
+    },
+    {
+     "subject": "brine fixation",
+     "predicate": "produces",
+     "object": "brine crystals",
+     "subject_aliases": [
+      "thornwick roots",
+      "thornwick root"
+     ],
+     "object_aliases": [
+      "stored brine crystals",
+      "crystals",
+      "brine crystal"
+     ]
+    },
+    {
+     "subject": "brine fixation",
+     "predicate": "consumes",
+     "object": "veltrose",
+     "subject_aliases": [
+      "the process"
+     ]
+    },
+    {
+     "subject": "brine fixation",
+     "predicate": "produces",
+     "object": "heat",
+     "subject_aliases": [
+      "the process"
+     ],
+     "object_aliases": [
+      "a small amount of heat"
+     ]
+    },
+    {
+     "subject": "brine fixation",
+     "predicate": "defined_by",
+     "object": "fixation equation",
+     "object_aliases": [
+      "the fixation equation"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "moult-order",
+   "source": "Marl Flats Biology -- Chapter 6: The Moult",
+   "text": "The grellin moult runs in a fixed order. Swelling comes first, bursting second, and spooling of the new shell last; no stage can begin until the one before it is complete. The moult is triggered by amberine and takes about nine days, a span the older naturalists measured in terrace nights.",
+   "triples": [
+    {
+     "subject": "grellin moult",
+     "predicate": "has_part",
+     "object": "swelling",
+     "subject_aliases": [
+      "moult",
+      "the moult"
+     ],
+     "object_aliases": [
+      "swelling stage"
+     ]
+    },
+    {
+     "subject": "grellin moult",
+     "predicate": "has_part",
+     "object": "bursting",
+     "subject_aliases": [
+      "moult",
+      "the moult"
+     ],
+     "object_aliases": [
+      "bursting stage"
+     ]
+    },
+    {
+     "subject": "grellin moult",
+     "predicate": "has_part",
+     "object": "spooling",
+     "subject_aliases": [
+      "moult",
+      "the moult"
+     ],
+     "object_aliases": [
+      "spooling of the new shell",
+      "spooling stage"
+     ]
+    },
+    {
+     "subject": "swelling",
+     "predicate": "precedes",
+     "object": "bursting",
+     "subject_aliases": [
+      "swelling stage"
+     ],
+     "object_aliases": [
+      "bursting stage"
+     ]
+    },
+    {
+     "subject": "bursting",
+     "predicate": "precedes",
+     "object": "spooling",
+     "subject_aliases": [
+      "bursting stage"
+     ],
+     "object_aliases": [
+      "spooling of the new shell",
+      "spooling stage"
+     ]
+    },
+    {
+     "subject": "bursting",
+     "predicate": "requires",
+     "object": "swelling",
+     "subject_aliases": [
+      "bursting stage"
+     ],
+     "object_aliases": [
+      "swelling stage"
+     ]
+    },
+    {
+     "subject": "spooling",
+     "predicate": "requires",
+     "object": "bursting",
+     "subject_aliases": [
+      "spooling stage",
+      "spooling of the new shell"
+     ],
+     "object_aliases": [
+      "bursting stage"
+     ]
+    },
+    {
+     "subject": "amberine",
+     "predicate": "causes",
+     "object": "grellin moult",
+     "object_aliases": [
+      "moult",
+      "the moult"
+     ]
+    },
+    {
+     "subject": "moult span",
+     "predicate": "measured_in",
+     "object": "terrace nights",
+     "subject_aliases": [
+      "moult",
+      "grellin moult",
+      "moult duration",
+      "span",
+      "nine days"
+     ],
+     "object_aliases": [
+      "terrace night"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "quillosome",
+   "source": "Marl Flats Biology -- Chapter 2: The Grellin Cell",
+   "text": "A quillosome is the organelle that assembles quillin. It is located in the mantle cells of the velmoth and in the girdle cells of the grellin. Assembly requires veltrose and spool acid, and the finished quillin is passed to the slime coat or the shell. A blocked quillosome causes the slime coat to thin.",
+   "triples": [
+    {
+     "subject": "quillosome",
+     "predicate": "is_a",
+     "object": "organelle",
+     "subject_aliases": [
+      "quillosomes"
+     ]
+    },
+    {
+     "subject": "quillosome",
+     "predicate": "produces",
+     "object": "quillin",
+     "subject_aliases": [
+      "quillosomes"
+     ]
+    },
+    {
+     "subject": "quillosome",
+     "predicate": "located_in",
+     "object": "mantle cell",
+     "subject_aliases": [
+      "quillosomes"
+     ],
+     "object_aliases": [
+      "mantle cells",
+      "velmoth mantle cells",
+      "velmoth"
+     ]
+    },
+    {
+     "subject": "quillosome",
+     "predicate": "located_in",
+     "object": "girdle cell",
+     "subject_aliases": [
+      "quillosomes"
+     ],
+     "object_aliases": [
+      "girdle cells",
+      "grellin girdle cells",
+      "grellin"
+     ]
+    },
+    {
+     "subject": "quillin assembly",
+     "predicate": "requires",
+     "object": "veltrose",
+     "subject_aliases": [
+      "assembly",
+      "quillosome",
+      "quillin"
+     ]
+    },
+    {
+     "subject": "quillin assembly",
+     "predicate": "requires",
+     "object": "spool acid",
+     "subject_aliases": [
+      "assembly",
+      "quillosome",
+      "quillin"
+     ]
+    },
+    {
+     "subject": "quillin",
+     "predicate": "part_of",
+     "object": "slime coat",
+     "subject_aliases": [
+      "finished quillin"
+     ],
+     "predicate_aliases": [
+      "located_in"
+     ]
+    },
+    {
+     "subject": "quillin",
+     "predicate": "part_of",
+     "object": "shell",
+     "subject_aliases": [
+      "finished quillin"
+     ],
+     "predicate_aliases": [
+      "located_in"
+     ]
+    },
+    {
+     "subject": "blocked quillosome",
+     "predicate": "causes",
+     "object": "slime coat thinning",
+     "subject_aliases": [
+      "quillosome blockage",
+      "blockage"
+     ],
+     "object_aliases": [
+      "thin slime coat",
+      "thinning",
+      "the slime coat to thin"
+     ]
+    }
+   ]
+  },
+  {
+   "passage_id": "rind-tissue",
+   "source": "Marl Flats Biology -- Chapter 4: Tissues",
+   "text": "Rind tissue is the hard outer tissue of the grellin crown. Its cells are packed with quillin and contain no lumenoids, which sets rind tissue against the soft callow tissue of the girdle. Rind tissue forms before callow tissue in the embryo, and its hardness is measured in thallows.",
+   "triples": [
+    {
+     "subject": "rind tissue",
+     "predicate": "is_a",
+     "object": "tissue",
+     "object_aliases": [
+      "hard outer tissue",
+      "outer tissue"
+     ]
+    },
+    {
+     "subject": "rind tissue",
+     "predicate": "part_of",
+     "object": "grellin crown",
+     "predicate_aliases": [
+      "located_in"
+     ],
+     "object_aliases": [
+      "crown"
+     ]
+    },
+    {
+     "subject": "quillin",
+     "predicate": "located_in",
+     "object": "rind cell",
+     "predicate_aliases": [
+      "part_of"
+     ],
+     "object_aliases": [
+      "rind cells",
+      "rind tissue",
+      "rind tissue cells"
+     ]
+    },
+    {
+     "subject": "rind tissue",
+     "predicate": "contrasts_with",
+     "object": "callow tissue",
+     "object_aliases": [
+      "soft callow tissue"
+     ]
+    },
+    {
+     "subject": "callow tissue",
+     "predicate": "located_in",
+     "object": "girdle",
+     "subject_aliases": [
+      "soft callow tissue"
+     ],
+     "predicate_aliases": [
+      "part_of"
+     ]
+    },
+    {
+     "subject": "rind tissue",
+     "predicate": "precedes",
+     "object": "callow tissue"
+    },
+    {
+     "subject": "rind hardness",
+     "predicate": "measured_in",
+     "object": "thallow",
+     "subject_aliases": [
+      "hardness",
+      "rind tissue hardness",
+      "rind tissue"
+     ],
+     "object_aliases": [
+      "thallows"
+     ]
+    }
+   ]
+  }
+ ]
+}

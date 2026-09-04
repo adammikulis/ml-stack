@@ -115,6 +115,8 @@ from ml_stack.ingest.gold import (
     gold_lines as gold_lines,
     gold_score as gold_score,
     read_gold as read_gold,
+    sayable as sayable,
+    vocabulary as vocabulary,
     _matches as _matches,
     _names as _names,
     _passage_unit as _passage_unit,
@@ -180,5 +182,6 @@ from ml_stack.ingest.shelf import (
 __all__ = ["FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS", "PER_SECTION", "VERBS",
            "Book", "Progress", "Scored", "Shelf", "Stopped", "ask", "asked_lines", "build",
            "detach", "extract_unit", "fold", "fold_book", "fold_into", "gold_score",
-           "graph_of", "main", "read_asked", "read_gold", "schema", "score_asked", "shelf",
+           "graph_of", "main", "read_asked", "read_gold", "sayable", "schema", "score_asked",
+           "shelf", "vocabulary",
            "show", "status", "unit_of", "units_of", "write"]

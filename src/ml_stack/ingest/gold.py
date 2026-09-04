@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 import time
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,7 +14,8 @@ from typing import Any
 from ml_stack.ingest.extract import PER_SECTION
 from ml_stack.ingest.reads import _slug
 
-__all__ = ["INVERSES", "Scored", "gold_lines", "gold_score", "read_gold"]
+__all__ = ["INVERSES", "Scored", "gold_lines", "gold_score", "read_gold", "sayable",
+           "vocabulary"]
 
 
 INVERSES: dict[str, frozenset[str]] = {
@@ -118,6 +119,21 @@ def _same(said: str, wanted: str, aliases: Sequence[str]) -> bool:
     return False
 
 
+def vocabulary(shape: Mapping[str, Any]) -> set[str]:
+    """The relation verbs a document schema allows: its ``relations[].rel`` enum."""
+    return {str(v) for v in
+            ((shape.get("properties") or {}).get("relations") or {})
+            .get("items", {}).get("properties", {}).get("rel", {}).get("enum") or ()}
+
+
+def sayable(triple: Mapping[str, Any], words: Collection[str]) -> bool:
+    """Whether the triple's predicate, one of its aliases, or a flip of either through
+    `INVERSES` is a word in ``words``. An empty vocabulary says everything."""
+    said = {str(triple.get("predicate") or ""), *_names(triple.get("predicate_aliases"))}
+    flipped = {verb for verb, other_way in INVERSES.items() if said & other_way}
+    return not words or bool((said | flipped) & words)
+
+
 def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mapping[str, Any],
                *, per_section: float = PER_SECTION,
                log: Callable[[str], None] | None = None) -> Scored:
@@ -132,9 +148,7 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
     from ml_stack import ingest
 
     out = Scored(passages=len(passages))
-    vocabulary = {str(v) for v in
-                  ((shape.get("properties") or {}).get("relations") or {})
-                  .get("items", {}).get("properties", {}).get("rel", {}).get("enum") or ()}
+    words = vocabulary(shape)
     for passage in passages:
         text = str(passage.get("text") or "")
         unit = _passage_unit(passage)
@@ -146,9 +160,7 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
         out.wanted += len(wanted)
         out.found += len(said)
         for triple in wanted:
-            words = {str(triple.get("predicate") or ""), *_names(triple.get("predicate_aliases"))}
-            flipped = {verb for verb, other_way in INVERSES.items() if words & other_way}
-            if vocabulary and not ((words | flipped) & vocabulary):
+            if not sayable(triple, words):
                 out.unsayable.append({"passage": str(passage.get("passage_id") or ""),
                                       "predicate": str(triple.get("predicate") or "")})
         taken: set[int] = set()
