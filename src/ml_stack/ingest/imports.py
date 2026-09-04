@@ -11,15 +11,15 @@ maps one predicate onto one of the eighteen, swapping subject and object where t
 reading is the inverse (``includes`` is ``has_part``; ``defines`` is ``defined_by`` the
 other way round), or onto nothing where the predicate has no counterpart among them.
 
-Every predicate is written either way: one with a counterpart under that verb, one without
-as it stands, its edges carrying ``extension``. ``core_only`` writes the first and leaves
-the second. What each predicate became is counted by name and kept in the store as
+A predicate with a counterpart is written under that verb; a specific one without is
+written as it stands, its edges carrying ``extension``. ``core_only`` writes the first and
+leaves the second. What each predicate became is counted by name and kept in the store as
 ``ingest:predicates:<source>``.
 
-`VAGUE` is the part of an open vocabulary that is not a vocabulary. ``related_to``,
-``describes``, ``supports`` and their kind say the two things were named near one another
-and nothing about how they stand; an edge under one carries ``vague`` as well as
-``extension``, so a question put to the graph can leave them out.
+`VAGUE` names the predicates that usually stand in for a relation rather than being one:
+``related_to``, ``describes``, ``supports`` and their kind. A relation under one of them is
+counted by name and not carried across; ``keep_vague`` takes them anyway, their edges
+carrying ``vague`` as well as ``extension``.
 """
 
 from __future__ import annotations
@@ -240,13 +240,16 @@ the table names and has no counterpart for."""
 
 VAGUE: frozenset[str] = frozenset(
     _load("vague-predicates.json")["predicates"])
-"""Predicates that say the two things were named together and not how they stand.
+"""Predicates that usually say the two things were named together and not how they stand.
 
 `contracts/vague-predicates.json` holds the list, so the reader and the import read one.
-An edge under one of these carries ``vague``. Counted over the anatomy pair: 3,861 of its
-21,922 relations under 92 predicates -- ``supports`` 615, ``related_to`` 608, ``describes``
-601. They are not wrong, they are unspecific, and a graph asked a question cannot use
-them."""
+Usually, not always: ``associated_with`` is the exact claim an epidemiological source
+means, and reading it as ``causes`` would say more than the source did. What separates the
+hedge from the shrug is the passage, and an import has no passage -- it has another
+extractor's output, where the two look the same. So a relation under one of these is
+counted by name and not carried across, and ``keep_vague`` takes them anyway, their edges
+carrying ``vague``. Counted over the anatomy pair: 3,861 of its 21,922 relations under 92
+predicates -- ``supports`` 615, ``related_to`` 608, ``describes`` 601."""
 
 
 def _word(predicate: str) -> str:
@@ -301,6 +304,7 @@ class Imported:
     extensions: Counter = field(default_factory=Counter)     # written as they stand
     unnamed: Counter = field(default_factory=Counter)        # and not in the table at all
     vague: Counter = field(default_factory=Counter)          # and `VAGUE` names them
+    kept_vague: bool = False                                 # ... and they were written
     left: Counter = field(default_factory=Counter)           # core_only left these
     dropped: Counter = field(default_factory=Counter)
     models: list[str] = field(default_factory=list)
@@ -315,7 +319,7 @@ class Imported:
     @property
     def specific(self) -> int:
         """Relations written as they stand that say something a graph can be asked."""
-        return sum(self.extensions.values()) - sum(self.vague.values())
+        return sum(self.extensions.values())
 
 
 def _json(text: str, where: str, column: str) -> Any:
@@ -391,18 +395,19 @@ def _titled(uri: str) -> tuple[str, str]:
 
 def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
              confidence: str = "medium", provisional: bool = True,
-             core_only: bool = False) -> Imported:
+             core_only: bool = False, keep_vague: bool = False) -> Imported:
     """One nodes/edges CSV pair as a source's reads, and what the predicate table did to it.
 
     Every row under ``confidence`` is left, and every provisional row when ``provisional``
     is false. A predicate `RELATIONS` maps onto one of the eighteen is written as that verb;
-    every other predicate is written as it stands, counted by name in ``extensions``, and
-    left only under ``core_only``.
+    a specific one it does not is written as it stands and counted in ``extensions``, and
+    left under ``core_only``. A predicate `VAGUE` names is counted in ``vague`` and not
+    carried across, and written -- marked ``vague`` -- only under ``keep_vague``.
     """
     if confidence not in CONFIDENCE:
         raise ValueError(f"confidence is one of {', '.join(CONFIDENCE)}, not {confidence!r}")
     nodes, edges = Path(nodes).expanduser(), Path(edges).expanduser()
-    got = Imported(slug=slug, title="")
+    got = Imported(slug=slug, title="", kept_vague=keep_vague and not core_only)
     by_id: dict[str, dict[str, Any]] = {}
     units: dict[str, Unit] = {}
     per_unit: dict[str, dict[str, list]] = {}
@@ -464,14 +469,17 @@ def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
         if found is None:
             if not named(word):
                 got.unnamed[word] += 1
-            if core_only:
-                got.left[word] += 1
-                continue
-            got.extensions[word] += 1
-            found = (word, False)
             if vague(word):
                 got.vague[word] += 1
+                if not got.kept_vague:
+                    continue
                 said = {"vague": True}
+            elif core_only:
+                got.left[word] += 1
+                continue
+            else:
+                got.extensions[word] += 1
+            found = (word, False)
         verb, flipped = found
         unit = unit_for(row, where)
         one, other = (target, source) if flipped else (source, target)
@@ -550,20 +558,22 @@ def lines(got: Imported, *, most: int = 12) -> list[str]:
     if len(core) > most:
         out.append(f"    ... and {len(core) - most} more, "
                    f"{sum(c for *_, c in core[most:])} relation(s)")
-    kept = sum(got.extensions.values())
-    specific = {w: c for w, c in got.extensions.items() if w not in got.vague}
-    out.append(f"  written as they stand ({len(specific)} predicate(s), {got.specific} "
+    out.append(f"  written as they stand ({len(got.extensions)} predicate(s), {got.specific} "
                f"relation(s)) -- every edge of one carries `extension`")
-    for word, count in Counter(specific).most_common(most):
+    for word, count in got.extensions.most_common(most):
         out.append(f"    {word:<28} {count:>6}"
                    + ("   (the table does not name it)" if word in got.unnamed else ""))
-    if len(specific) > most:
-        out.append(f"    ... and {len(specific) - most} more, "
-                   f"{got.specific - sum(c for _, c in Counter(specific).most_common(most))} "
+    if len(got.extensions) > most:
+        out.append(f"    ... and {len(got.extensions) - most} more, "
+                   f"{got.specific - sum(c for _, c in got.extensions.most_common(most))} "
                    f"relation(s)")
     said = sum(got.vague.values())
-    out.append(f"  vague ({len(got.vague)} predicate(s), {said} relation(s)) -- they say the "
-               f"two were named together, not how they stand; their edges carry `vague`")
+    out.append(f"  vague ({len(got.vague)} predicate(s), {said} relation(s), "
+               f"{said / max(got.edge_rows, 1):.0%} of the rows) -- the predicate usually "
+               f"says the two were named together and not how they stand, and here there is "
+               f"no passage to tell a hedge from a shrug; "
+               + ("carried across, their edges marked `vague`" if got.kept_vague
+                  else "not carried across (--keep-vague takes them, marked `vague`)"))
     for word, count in got.vague.most_common(most):
         out.append(f"    {word:<28} {count:>6}")
     if len(got.vague) > most:
@@ -588,14 +598,15 @@ def _core() -> frozenset[str]:
 
 
 def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: str = "medium",
-          provisional: bool = True, core_only: bool = False, dry_run: bool = False,
-          say: Callable[[str], None] = print) -> int:
+          provisional: bool = True, core_only: bool = False, keep_vague: bool = False,
+          dry_run: bool = False, say: Callable[[str], None] = print) -> int:
     """``ml-stack-ingest import NODES.csv EDGES.csv --out STORE``: a pair another extractor
     wrote, into this store as one source.
 
     A directory holding ``nodes.csv`` and ``edges.csv`` may be named instead of the two
     files. ``--dry-run`` says what would be written -- the source, its units, the predicates
-    onto this library's verbs and the ones written as they stand -- and writes nothing.
+    onto this library's verbs, the ones written as they stand, and the vague ones not
+    carried across -- and writes nothing.
     """
     from ml_stack.ingest.fold import fold_into
     from ml_stack.ingest.progress import Progress
@@ -607,7 +618,8 @@ def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: 
         return 2
     try:
         got = imported(nodes, edges, slug=slug, confidence=confidence,
-                       provisional=provisional, core_only=core_only)
+                       provisional=provisional, core_only=core_only,
+                       keep_vague=keep_vague)
     except (OSError, ValueError) as why:
         say(f"error: {why}")
         return 2
@@ -656,7 +668,7 @@ def _keep_predicates(out: str | Path, got: Imported) -> None:
             "core": {word: {"verb": verb, "flipped": flipped, "relations": count}
                      for word, verb, flipped, count in got.table if verb in core},
             "extensions": dict(got.extensions.most_common()),
-            "vague": dict(got.vague.most_common()),
+            "vague": dict(got.vague.most_common()), "kept_vague": got.kept_vague,
             "unnamed": dict(got.unnamed.most_common()),
             "left": dict(got.left.most_common())})
 

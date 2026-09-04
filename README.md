@@ -2003,13 +2003,17 @@ reader and a query can tell a verb this library set from a verb the extractor ch
 `--core-only` takes the first kind alone. What each predicate became is counted by name,
 printed, and kept in the store as `ingest:predicates:<source>`.
 
-A third of what an open vocabulary writes is not a vocabulary. `related_to`, `describes`,
-`supports` and their kind say the two things were named near one another and nothing about
-how they stand -- 3,861 of the anatomy textbook's 21,922 relations, under 92 predicates.
-Those edges carry `vague` as well as `extension` (`ingest.VAGUE` names them), so a question
-put to the graph, or a count of what a set of sources knows, can leave them out without
-also leaving out the `has_ir_absorption_at` kind of edge, which says something real this
-library has no verb for. `--dry-run` prints all of it
+Some of what an open vocabulary writes stands in for a relation rather than being one.
+`related_to`, `describes` and `supports` mostly say the two things were named near one
+another -- 3,861 of the anatomy textbook's 21,922 relations, under 92 predicates that
+`ingest.VAGUE` lists. Mostly, not always: `associated_with` is the exact claim an
+epidemiological source means, and reading it as `causes` would say more than the source
+did. Telling the deliberate hedge from the shrug takes the passage, and an import has no
+passage -- it has another extractor's output, where the two look alike. So those relations
+are counted by name and not carried across, and `--keep-vague` takes them anyway, their
+edges marked `vague` beside `extension`. What is carried across either way is the
+`has_ir_absorption_at` kind of edge, which says something real this library has no verb
+for. `--dry-run` prints all of it
 and writes nothing; `--confidence` takes rows at a level and above, `--no-provisional`
 leaves the ones the extractor left provisional, and `--slug` names the source.
 

@@ -130,31 +130,39 @@ def _files(where):
 # -- what it makes of a pair ----------------------------------------------------------------
 
 
-def test_a_predicate_outside_the_core_verbs_is_written_as_it_stands(tmp_path):
+def test_a_specific_predicate_outside_the_core_verbs_is_written_as_it_stands(tmp_path):
+    """`shelters` says something a graph can be asked, and this library has no verb for it."""
     got = ingest.imported(*_files(a_small_source(tmp_path)))
     verbs = sorted(r["rel"] for row in got.rows for r in row["extracted"]["relations"])
-    assert verbs == ["has_part", "part_of", "related_to", "shelters"]
-    # both are counted by name: one the table names and has no counterpart for, one it
-    # does not name at all
-    assert got.extensions == {"shelters": 1, "related_to": 1}
+    assert verbs == ["has_part", "part_of", "shelters"]
+    assert got.extensions == {"shelters": 1}
     assert got.unnamed == {"shelters": 1}
-    assert got.core == 2
-    said = ingest.import_lines(got)
-    assert any("shelters" in line for line in said)
-    assert any("related_to" in line for line in said)
+    assert got.core == 2 and got.specific == 1
+    assert any("shelters" in line for line in ingest.import_lines(got))
 
 
-def test_a_predicate_that_only_says_two_things_were_named_together_is_vague(tmp_path):
-    """`related_to` says there is a link and not what it is; `shelters` says something."""
+def test_a_vague_predicate_is_counted_by_name_and_not_carried_across(tmp_path):
+    """`related_to` says there is a link and not what it is, and no passage is here to say
+    whether the extractor meant a hedge or had nothing."""
     got = ingest.imported(*_files(a_small_source(tmp_path)))
-    assert got.vague == {"related_to": 1}
-    assert got.specific == 1 and got.core == 2
+    assert got.vague == {"related_to": 1} and not got.kept_vague
+    assert "related_to" not in {r["rel"] for row in got.rows
+                                for r in row["extracted"]["relations"]}
     said = ingest.import_lines(got)
-    assert any(line.startswith("  vague (1 predicate(s), 1 relation(s))") for line in said)
+    assert any(line.startswith("  vague (1 predicate(s), 1 relation(s), 25% of the rows)")
+               and "not carried across" in line for line in said)
+    assert any("    related_to" in line for line in said)
+
+
+def test_keep_vague_takes_them_anyway_and_marks_every_edge(tmp_path):
+    got = ingest.imported(*_files(a_small_source(tmp_path)), keep_vague=True)
+    assert got.kept_vague and got.vague == {"related_to": 1}
     written = {r["rel"]: r.get("vague") for row in got.rows
                for r in row["extracted"]["relations"]}
     assert written == {"part_of": None, "has_part": None, "shelters": None,
                        "related_to": True}
+    assert any("carried across, their edges marked `vague`" in line
+               for line in ingest.import_lines(got))
 
 
 def test_every_vague_predicate_is_one_the_table_names_and_has_no_verb_for():
@@ -164,9 +172,20 @@ def test_every_vague_predicate_is_one_the_table_names_and_has_no_verb_for():
     assert not ingest.vague("connects") and ingest.vague("related_to")
 
 
-def test_the_vague_flag_lands_on_the_edge_and_not_on_a_core_one(tmp_path):
+def test_a_vague_relation_never_reaches_the_store_and_the_count_of_it_does(tmp_path):
     store = tmp_path / "sources.ladybug"
     assert ingest.bring(store, [str(a_small_source(tmp_path))]) == 0
+    with ingest.Sources(store).store() as held:
+        rels = {(e["source"], e["rel"], e["target"]) for e in held.edges()}
+        predicates = held.get_doc("ingest:predicates:velthorne-open-texts")
+    assert ("concept:vault-current", "related_to", "concept:glimmer-node") not in rels
+    assert ("concept:vault", "shelters", "concept:glimmer-node") in rels
+    assert predicates["vague"] == {"related_to": 1} and predicates["kept_vague"] is False
+
+
+def test_keep_vague_puts_them_in_the_store_marked_and_a_core_edge_unmarked(tmp_path):
+    store = tmp_path / "sources.ladybug"
+    assert ingest.bring(store, [str(a_small_source(tmp_path))], keep_vague=True) == 0
     with ingest.Sources(store).store() as held:
         marked = {(e["source"], e["rel"], e["target"]): bool(e.get("vague"))
                   for e in held.edges()}
@@ -174,16 +193,24 @@ def test_the_vague_flag_lands_on_the_edge_and_not_on_a_core_one(tmp_path):
     assert marked[("concept:vault-current", "related_to", "concept:glimmer-node")] is True
     assert marked[("concept:vault", "shelters", "concept:glimmer-node")] is False
     assert marked[("concept:glimmer-node", "part_of", "concept:vault")] is False
-    assert predicates["vague"] == {"related_to": 1}
+    assert predicates["kept_vague"] is True
 
 
 def test_core_only_leaves_the_predicates_outside_those_verbs(tmp_path):
     got = ingest.imported(*_files(a_small_source(tmp_path)), core_only=True)
     verbs = sorted(r["rel"] for row in got.rows for r in row["extracted"]["relations"])
     assert verbs == ["has_part", "part_of"]
-    assert got.extensions == {} and got.left == {"shelters": 1, "related_to": 1}
-    assert got.vague == {}
+    assert got.extensions == {} and got.left == {"shelters": 1}
+    # a vague one is counted as vague, whichever flag took it out
+    assert got.vague == {"related_to": 1} and not got.kept_vague
     assert any("--core-only" in line for line in ingest.import_lines(got))
+
+
+def test_core_only_wins_over_keep_vague(tmp_path):
+    got = ingest.imported(*_files(a_small_source(tmp_path)), core_only=True, keep_vague=True)
+    assert not got.kept_vague
+    assert sorted(r["rel"] for row in got.rows
+                  for r in row["extracted"]["relations"]) == ["has_part", "part_of"]
 
 
 def test_the_confidence_filter_leaves_the_rows_under_it(tmp_path):
@@ -261,11 +288,10 @@ def test_an_extension_verb_is_marked_on_its_edge_and_a_core_one_is_not(tmp_path)
         predicates = held.get_doc("ingest:predicates:velthorne-open-texts")
     assert marked[("concept:glimmer-node", "part_of", "concept:vault")] is False
     assert marked[("concept:vault", "shelters", "concept:glimmer-node")] is True
-    assert marked[("concept:vault-current", "related_to", "concept:glimmer-node")] is True
     assert marked[("concept:vault", "read_from", "source:velthorne-open-texts")] is False
     assert predicates["core"]["includes"] == {"verb": "has_part", "flipped": False,
                                               "relations": 1}
-    assert predicates["extensions"] == {"related_to": 1, "shelters": 1}
+    assert predicates["extensions"] == {"shelters": 1}
     assert predicates["unnamed"] == {"shelters": 1}
 
 

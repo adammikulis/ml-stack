@@ -271,6 +271,12 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--provisional", action=argparse.BooleanOptionalAction, default=True,
                     help="with import: take rows their extractor left provisional "
                          "(default); --no-provisional leaves them")
+    ap.add_argument("--keep-vague", action="store_true",
+                    help="with import: take the relations whose predicate usually stands in "
+                         "for one -- `related_to`, `describes`, `supports`. By default they "
+                         "are counted by name and not carried across: telling a deliberate "
+                         "hedge from a shrug needs the passage, and an import has only "
+                         "another extractor's output")
     ap.add_argument("--core-only", action="store_true",
                     help="keep to the core verbs and kinds. Reading a source, the schema "
                          "is fenced to them, so a section is read with the shared "
@@ -379,7 +385,8 @@ def _dispatch(args: Any, rest: list[str]) -> int:
         if word == "import":
             return ingest.bring(args.out, args.docs[1:], slug=args.slug,
                                 confidence=args.confidence, provisional=args.provisional,
-                                core_only=args.core_only, dry_run=args.dry_run)
+                                core_only=args.core_only, keep_vague=args.keep_vague,
+                                dry_run=args.dry_run)
         if word == "show":
             return show(args.out, source=args.source, most=args.sample or 5)
         if word == "sources":
