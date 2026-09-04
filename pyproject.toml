@@ -123,6 +123,7 @@ ml-stack-agent = "ml_stack.harness:main"
 ml-stack-graph = "ml_stack.graph.serve:main"
 # a task in words: a served model asks what is open, plans, asks go, then runs the commands
 ml-stack-do = "ml_stack.do:main"
+ml-stack-help = "ml_stack.cli:help_main"
 # every tracked file read for a person's details, reported and never blocked
 ml-stack-audit = "ml_stack.redact.audit:main"
 

@@ -68,7 +68,7 @@ def _parser(table: dict[str, str]) -> argparse.ArgumentParser:
         usage="ml-stack [--list] [<command> [args...]]",
         description="Run an ml-stack-<command>, or with none, start the app.",
         epilog=f"commands (each is also ml-stack-<command>):\n{listed}\n\n"
-               "ml-stack <command> --help is that command's help.",
+               "ml-stack help <command> is that command's help; ml-stack help lists them.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--list", action="store_true",
                     help="every command with the first line of its help")
@@ -85,6 +85,56 @@ def _unknown(words: list[str], table: dict[str, str]) -> int:
     return 2
 
 
+HELP_LINE = "every command with the first line of its help, or one command's own help"
+
+
+def listing(table: dict[str, str] | None = None) -> str:
+    """Every command, one line each: the word as `ml-stack` takes it and the first line of
+    its help. `help` itself is described in a sentence rather than asked, or it would ask
+    itself forever."""
+    table = commands() if table is None else table
+    width = max((len(w) for w in table), default=0)
+    return "\n".join(
+        f"{word.replace('-', ' '):<{width}}  "
+        + (HELP_LINE if word == "help" else _first_help_line(table[word]))
+        for word in sorted(table))
+
+
+def _help_parser(table: dict[str, str]) -> argparse.ArgumentParser:
+    ap = argparse.ArgumentParser(
+        prog="ml-stack-help",
+        usage="ml-stack help [<command>...]   (also ml-stack-help)",
+        description="Every command with the first line of its help; with a command named, "
+                    "that command's own help (ml-stack help bench sweep is ml-stack-bench "
+                    "sweep --help).",
+        epilog=listing(table), formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("words", nargs="*", metavar="command")
+    return ap
+
+
+def help_main(argv: list[str] | None = None) -> int:
+    """``ml-stack help`` and ``ml-stack-help``: with no words, every command with the first
+    line of its help; with words, that command's own ``--help``. Adam, 2026-09-03: "is
+    there ml-stack-help".
+    """
+    argv = list(sys.argv[1:] if argv is None else argv)
+    table = commands()
+    ap = _help_parser(table)
+    words = list(ap.parse_args(argv).words)
+    if not words:
+        print(ap.format_help())
+        return 0
+    for k in range(len(words), 0, -1):
+        word = "-".join(words[:k])
+        if word in table and word != "help":
+            try:
+                result = load(table[word])([*words[k:], "--help"])
+            except SystemExit as left:
+                return int(left.code or 0)
+            return 0 if result is None else int(result)
+    return _unknown(words, table)
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     table = commands()
@@ -98,9 +148,7 @@ def main(argv: list[str] | None = None) -> int:
 
     known, rest = _parser(table).parse_known_args(argv)
     if known.list:
-        width = max((len(w) for w in table), default=0)
-        for word in sorted(table):
-            print(f"{word.replace('-', ' '):<{width}}  {_first_help_line(table[word])}")
+        print(listing(table))
         return 0
     from .fleet.launch import main as app
     return app(rest)

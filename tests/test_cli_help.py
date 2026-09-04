@@ -25,9 +25,9 @@ README = REPO / "README.md"
 
 
 def _scripts() -> dict[str, str]:
-    """``command -> module`` for every entry point ``pyproject.toml`` installs."""
+    """``command -> module:attr`` for every entry point ``pyproject.toml`` installs."""
     table = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["scripts"]
-    return {command: target.split(":")[0] for command, target in table.items()}
+    return dict(table)
 
 
 SCRIPTS = _scripts()
@@ -35,7 +35,8 @@ SCRIPTS = _scripts()
 
 
 def _main_of(command: str):
-    return importlib.import_module(SCRIPTS[command]).main
+    module, _, attr = SCRIPTS[command].partition(":")
+    return getattr(importlib.import_module(module), attr or "main")
 
 
 class _Captured(Exception):
