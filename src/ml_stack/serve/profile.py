@@ -164,6 +164,22 @@ class Profile:
 
         return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling))
 
+    def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
+              n_predict: int = 16384, timeout: float = 300.0) -> Any:
+        """This record as one conversation: one seat holding the whole cache the record
+        measured across its ``parallel`` seats. The default for anything that is one
+        conversation -- a coding agent, `ml-stack-do`, `ml-stack-claude`. Adam,
+        2026-09-03: "default to the least needed for the situation; I'd rather have 1
+        large kv, especially for a coding agent." ``parallel`` on a record is how the
+        bench measured, not a recommendation for serving.
+        """
+        from dataclasses import replace
+
+        run = self.run(port=port, seats=1, model=model, resolve=resolve, n_predict=n_predict,
+                       timeout=timeout)
+        whole = self.seat_context * max(1, int(self.parallel or 1))
+        return replace(run, shape=replace(run.shape, seat_context=whole))
+
     def run(self, *, port: int = 8080, seats: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """This record whole, as a :class:`~ml_stack.serve.Run`: the shape to serve it in,

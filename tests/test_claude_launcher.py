@@ -52,7 +52,7 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
     code = claude.launch(["kestrel", "--port", "8899", "--claude", str(binary), "--",
                           "--print", "hello"], say=lambda _: None, run_claude=run_claude)
     assert code == 7
-    assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 2
+    assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one seat"
     assert seen["lease"]["cache_type_k"] == "q8_0", "the measured shape"
     assert seen["command"][0] == str(binary) and seen["command"][1] == "--settings"
     assert seen["command"][-2:] == ["--print", "hello"]

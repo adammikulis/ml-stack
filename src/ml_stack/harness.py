@@ -144,7 +144,8 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
     found = str(find_model(model))
     measured = profile_for(found) if profile else None
     if measured is not None:
-        run = measured.run(port=port, seats=seats, model=found)
+        run = (measured.alone(port=port, model=found) if seats == 1
+               else measured.run(port=port, seats=seats, model=found))
         say(f"serving in its measured shape: {said(measured)}")
     else:
         from ml_stack.serve.shape import Run, Shape

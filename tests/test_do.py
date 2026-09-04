@@ -482,3 +482,25 @@ def test_a_task_with_no_model_and_nothing_measured_on_disk_still_asks_for_one(mo
     with pytest.raises(SystemExit) as told:
         do.main(["look"])
     assert told.value.code == 2
+
+
+def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_path, capsys):
+    """The weights already up in another shape are used, not reloaded into one seat."""
+    from ml_stack import do
+
+    here = tmp_path / "quince-2b.gguf"
+    here.write_bytes(b"gguf")
+    monkeypatch.setattr("ml_stack.graph.bench.serve.find_model", lambda name: str(here))
+    monkeypatch.setattr("ml_stack.serve.manager.already_up",
+                        lambda model, port, **_: {"base_url": "http://127.0.0.1:8080", "slots": 2,
+                                                  "model": str(here), "pid": 1})
+    built = {}
+
+    class FakeClient:
+        def __init__(self, url, **kw):
+            built["url"] = url
+
+    monkeypatch.setattr("ml_stack.client.Client", FakeClient)
+    client = do.client_for(do.parser().parse_args(["look", "--model", "quince-2b.gguf"]))
+    assert isinstance(client, FakeClient) and built["url"] == "http://127.0.0.1:8080"
+    assert "using the server already up on 8080: quince-2b.gguf, 2 slot(s)" in capsys.readouterr().out

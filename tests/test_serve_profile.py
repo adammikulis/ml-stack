@@ -526,3 +526,14 @@ def test_the_shape_a_person_reads_names_the_flags_and_the_ways(capsys):
     text = said(measured())
     assert text.splitlines()[0] == MODEL
     assert "serve with" in text and "ask with" in text and "measured" in text
+
+
+def test_alone_is_one_seat_holding_the_whole_measured_cache():
+    """A record measured at two seats of 32k, asked for as one conversation, is one seat
+    of 64k: the least needed, with the largest cache the measurement paid for."""
+    from ml_stack.serve.profile import Profile
+
+    record = Profile(model="quince-2b.gguf", seat_context=32768, parallel=2)
+    run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
+    assert run.shape.seats == 1 and run.shape.seat_context == 65536 and run.shape.port == 8123
+    assert record.run(port=8123, model="quince-2b.gguf", resolve=False).shape.seats == 2

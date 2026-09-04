@@ -652,19 +652,27 @@ def client_for(args: argparse.Namespace) -> Any:
         from ml_stack.client import Client
 
         return Client(args.url, n_predict=args.n_predict, timeout=args.timeout)
+    from pathlib import Path
+
+    from ml_stack.client import Client
     from ml_stack.graph.bench.serve import find_model
+    from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.shape import Run, Shape, seat
 
     found = str(find_model(args.model))
+    up = already_up(found, args.port)
+    if up is not None:
+        # the weights are up already, in whatever shape: use them rather than reload them
+        print(f"using the server already up on {args.port}: {Path(found).name}, "
+              f"{up.get('slots') or '?'} slot(s)")
+        return Client(str(up["base_url"]), n_predict=args.n_predict, timeout=args.timeout)
     measured = profile_for(found)
     if measured is not None:
-        print(f"serving in its measured shape: {said(measured)}")
-        # the record's own seats, not one: a server already up in the measured shape (the
-        # page's, say) is adopted, where a one-seat lease on the same port would be a
-        # mismatch and reload the weights
-        run = measured.run(port=args.port, model=found, n_predict=args.n_predict,
-                           timeout=args.timeout)
+        run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
+                             timeout=args.timeout)
+        print(f"serving alone in its measured shape, one seat of {run.shape.seat_context} "
+              f"tokens: {said(measured)}")
     else:
         run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
                               reasoning_budget=0))

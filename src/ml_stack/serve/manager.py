@@ -134,6 +134,19 @@ def shape_mismatch(
     return out
 
 
+def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:
+    """The recorded server on ``port`` if it serves ``model`` (by file name) and its
+    process is alive -- whatever its shape. A conversation that would lease one seat on a
+    port already holding the same weights in another shape uses what is up rather than
+    reloading them: the reload is the cost, the shape is not (Adam, 2026-09-03)."""
+    entry = recorded_servers(state_file).get(int(port))
+    if not entry:
+        return None
+    if Path(str(entry.get("model") or "")).name != Path(str(model)).name:
+        return None
+    return entry if pid_exists(int(entry.get("pid") or 0)) else None
+
+
 def recorded_servers(state_file: Path | None = None) -> dict[int, dict]:
     """Every server in the lease file, keyed by port."""
     try:

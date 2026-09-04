@@ -759,3 +759,19 @@ def test_the_serving_knobs_that_shorten_a_run():
     # zero is a choice: reuse nothing, which is not the same as leaving it unset
     assert "--cache-reuse" in backend.command(
         ServerSpec(model="/m/w.gguf", port=1, cache_reuse=0))
+
+
+def test_already_up_names_the_recorded_server_that_holds_the_same_weights(tmp_path, monkeypatch):
+    import json
+
+    from ml_stack.serve.manager import already_up
+
+    state = tmp_path / "servers.json"
+    state.write_text(json.dumps({"8080": {"port": 8080, "pid": 4242, "model": "/models/quince-2b.gguf",
+                                          "base_url": "http://127.0.0.1:8080", "slots": 2}}))
+    monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: pid == 4242)
+    assert already_up("quince-2b.gguf", 8080, state_file=state)["base_url"] == "http://127.0.0.1:8080"
+    assert already_up("ember-1b.gguf", 8080, state_file=state) is None
+    assert already_up("quince-2b.gguf", 8081, state_file=state) is None
+    monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: False)
+    assert already_up("quince-2b.gguf", 8080, state_file=state) is None

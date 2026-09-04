@@ -38,7 +38,8 @@ from collections.abc import Callable, Mapping, Sequence
 __all__ = ["environment", "launch", "main", "settings"]
 
 DEFAULT_PORT = 8080
-DEFAULT_SEATS = 2      # Claude Code asks in parallel (subagents); the page's measured shape
+DEFAULT_SEATS = 1      # one conversation, one seat, the whole cache: Adam, 2026-09-03, "default to the
+                       # least needed for the situation; 1 large kv, especially for a coding agent"
 OFFLINE = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
@@ -125,7 +126,8 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = pr
     found = str(find_model(args.model))
     measured = None if args.no_profile else profile_for(found)
     if measured is not None:
-        run = measured.run(port=args.port, seats=args.seats, model=found)
+        run = (measured.alone(port=args.port, model=found) if args.seats == 1
+               else measured.run(port=args.port, seats=args.seats, model=found))
         say(f"serving in its measured shape: {said(measured)}")
     else:
         from ml_stack.serve.shape import Run, Shape
