@@ -118,23 +118,40 @@ measuring actual max mem usage during the test". The machine has 128 GB; the GGU
 safetensors tensors, `file_type nvfp4`, default context 262144), so the halves run one at a
 time with the page's server down for the Ollama half.
 
-- [ ] **Run the three configurations and draw them.** Labels `flash-plain`,
-  `flash-nodraft-plain`, `flash-ollama-plain`. Per configuration: `ml-stack-bench sweep`
-  (the graph bench, sampled first, then the hundred), `ml-stack-bench speed` (prefill and
-  decode tokens/s and first token at 512/4k/16k prompt tokens, 1/2/4 streams), `ml-stack-bench
-  standard` (gsm8k, mmlu_pro, ifeval, humaneval through lm-eval, `--limit 200`, thinking
-  off), memory sampled over the serving process tree every second (Ollama: the listener's
-  children hold the weights). Then `compare --labels ... --standard *.json --export
-  comparison.json` and `animate comparison.json --out FILE.mp4 --png FILE.png`. Estimate
-  before each: ~40 min standard sets per configuration, ~45 min the hundred-question graph
-  bench, ~10 min speed. The bench wiring (`--on ollama://...`, `speed`, `compare`,
-  `--no-draft`, `served_by` on every run, None for unmeasured) is the `bench-backends`
-  branch, landing as this is written; `standard` and `animate` are subcommands once it does.
+- [ ] **Run the three configurations and draw them.** Everything is landed and tested on
+  fakes; nothing has touched a real server yet, so `--smoke` each line first. Labels carry
+  the profile's suffix as `served()` always did; `served_by` is recorded on every run.
+  ```
+  # 1. llama.cpp + draft head, against the page's server on 8080 (its profile shape)
+  ml-stack-bench sweep --on flash=http://127.0.0.1:8080 --plain-only --short
+  ml-stack-bench speed --on flash=http://127.0.0.1:8080
+  # 2. llama.cpp without the head, served by the bench in the measured shape minus -md
+  ml-stack-bench sweep --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash --no-draft --plain-only --short
+  ml-stack-bench speed --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash --no-draft
+  # 3. Ollama, after `ml-stack-serve down` on 8080 (104 GB does not fit beside 90)
+  ml-stack-bench sweep --on flash-ollama=ollama://127.0.0.1:11434/qwen3.8-flash-next:125b-mlx --plain-only --short --context 32768
+  ml-stack-bench speed --on flash-ollama=ollama://127.0.0.1:11434/qwen3.8-flash-next:125b-mlx --context 32768
+  # the standard sets, per configuration (~40 min each at --limit 200, thinking off)
+  ml-stack-bench standard --url http://127.0.0.1:8080/v1 --model flash --label flash-plain --no-think --limit 200 --out ~/.ml-stack/bench/standard/flash-plain.json
+  # then
+  ml-stack-bench show --speed
+  ml-stack-bench compare flash-plain flash-nodraft-plain-kv-q8_0 flash-ollama-plain --standard ~/.ml-stack/bench/standard/*.json --export ~/flash-comparison.json --title "Flash-Next three ways"
+  ml-stack-bench animate ~/flash-comparison.json --out ~/flash-comparison.mp4 --png ~/flash-comparison.png
+  ```
+  Memory is sampled over the serving process tree every second (Ollama: the listener's
+  children hold the weights) and kept as `resident_peak`. `speed --serve` defaults
+  `--parallel` to the most streams asked (4) and the per-seat context to the largest prompt
+  plus the generation, so set `--context` for the 4-stream cells. Estimate before each:
+  ~45 min the hundred-question graph bench, ~10 min speed, ~40 min the standard sets.
+- [ ] **`ttft_s` is the server's prompt clock**, never a streamed first token: `gather_stream`
+  drops `timings` and the Ollama client raises on `on_delta`. A streamed measurement needs
+  the client to keep `timings` on a streamed reply (`client/chat.py`); the speed table says
+  `ttft_from: prompt_ms` until then.
+- [ ] **`ml-stack-do`'s `bench_standard` example does not match `standard`'s parser**
+  (`--url`/`--model` are required); routing works, the example in `do.py` does not.
 - [ ] **One measured call on Ollama first.** Whether `prompt_eval_count` includes a cached
   prefix is not in its docs; whether `think: false` holds for this model; what the runner's
   process is called on 0.33.3 (found from source, not seen). Then the Ollama half.
-- [ ] **Ollama streaming** (`on_delta`) raises `NotImplementedError`; first-token time on
-  that side is `prompt_ms` until it exists, and the speed table says so.
 
 ## Measure what landed tonight (each needs the GPU; sample first)
 
@@ -167,6 +184,10 @@ time with the page's server down for the Ollama half.
 
 ## Found tonight, not fixed
 
+- [ ] **No full-suite run on the final `main`.** The last branches landed on targeted suites
+  as `main` kept moving; run `python packaging/build.py && python3 -m pytest tests -q -n 4
+  > FILE; echo $?` once and watch `tests/test_harness.py` (below).
+
 - [ ] **`tests/test_harness.py` calls `asyncio.run` bare** (`harness.py:117`) and fails under
   `-n 4` ordering when a neighbour leaves a loop running; three agents hit it. Wrap it the
   way `conftest.on_a_fresh_loop`/`test_mcp.py` do.
@@ -184,12 +205,10 @@ time with the page's server down for the Ollama half.
   A closer that names `{first}` would let that rule go.
 - [ ] **`ScriptedModel`'s docstring** in `testing/fakes.py` still says "the last turn taking
   the searching tools away"; the behaviour is fine, the sentence is stale.
-- [ ] **A `stats` document written before a tidy pass** is what a caller's export reads back
-  (the Slack pipeline printed 475 edges after a pass that left 598): whichever side writes
-  it, it should be recounted after the pass. `GraphStore` has no cheap count query today.
-- [ ] **`ml-stack <command>` dispatching to `ml-stack-<command>`** (Adam: "isn't it more
-  common for a program to be `ml-stack do`?") is the `umbrella` branch, landing as this
-  is written; when it has, this line goes.
+- [ ] **A `stats` document written before a tidy pass is what the export reads back** (the
+  Slack pipeline printed 475 edges after a pass that left 598). `GraphStore.write` keeps the
+  caller's `stats` verbatim and the export at `store.py:~565` returns it; recount on export,
+  or have `graph.tidy` rewrite `stats` after it drops. `GraphStore` has no cheap count query.
 
 ## Library
 
