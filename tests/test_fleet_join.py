@@ -62,8 +62,10 @@ class FakeDaemon:
     """Answers ``/health`` on loopback and beacons on the test's UDP port -- what a daemon
     `join` started would do, without the daemon."""
 
-    def __init__(self, port: int, key: bytes, udp: int, name: str = "larch") -> None:
+    def __init__(self, port: int, key: bytes, udp: int, name: str = "larch",
+                 device: dict | None = None) -> None:
         self.name = name
+        device = dict(DEVICE if device is None else device)
 
         class H(BaseHTTPRequestHandler):
             def do_GET(self_) -> None:  # noqa: N802
@@ -80,7 +82,7 @@ class FakeDaemon:
 
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        self.advertiser = Advertiser(Beacon(name=name, port=port, device=dict(DEVICE)),
+        self.advertiser = Advertiser(Beacon(name=name, port=port, device=device),
                                      key, port=udp, interval_s=0.2).start()
 
     def close(self) -> None:

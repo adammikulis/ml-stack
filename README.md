@@ -753,6 +753,27 @@ current and when it last looked. A fleet half on one commit and half on another 
 thing those two columns exist to make visible -- `harrowgate` above is six days behind and
 following nothing, which is a machine somebody has to visit.
 
+### Seating users
+
+`plan` says which model each peer should serve, and with how many seats, for a number of
+conversations at once:
+
+```
+ml-stack-fleet plan --users 36 --context 16384
+PEER             MODEL                                            SEATS  CONTEXT     USED     ROOM
+studio           Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf    31    16384   109.9G   110.0G
+larch            gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf                   5    16384     5.7G    24.0G
+36 of 36 user(s) seated at 16384 tokens each
+```
+
+Models are taken in the order `docs/model-ranking.md` ranks them, and each goes to every
+peer with room for its loaded weights and at least one seat's cache at `--context`, taking
+as many seats as fit or as are still wanted; so the best model reaches the most users, and
+a smaller machine serves a smaller model to the rest. A peer serves one model. A user who
+gets no seat is counted, with every peer's reason. `--apply` serves the plan: each placed
+peer's daemon runs its model with those seats (`POST /serve`), and what each is serving
+afterwards is printed. `--json` is the same as data.
+
 ### Following main
 
 A machine that is a git checkout with an editable install can follow a branch instead of

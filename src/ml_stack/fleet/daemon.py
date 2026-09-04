@@ -29,7 +29,7 @@ from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
 from .models import Downloads, Models, ModelError, default_roots
-from .serving import Serving
+from .serving import Hosting, Serving
 from .settings import Settings
 from ml_stack.platform import (
     on_quit, private_file, process_group_kwargs, stop_gently, stop_pid)
@@ -662,10 +662,13 @@ def make_handler(runner: JobRunner, files_root: Path,
                  models: "Models | None" = None,
                  cluster_key_path: "Path | str | None" = None,
                  tokens: "Callable[[], set[str]] | None" = None,
-                 bench: "Any | None" = None):
+                 bench: "Any | None" = None,
+                 hosting: "Hosting | None" = None):
     """``bench`` is a `fleet.bench.BenchHost`: with one, this daemon takes bench jobs
     beside training jobs (``POST /bench``), says what it can measure (``GET /bench``) and
-    hands back what it measured (``GET /bench/export``)."""
+    hands back what it measured (``GET /bench/export``). ``hosting`` is a
+    `fleet.serving.Hosting`: with one and ``models``, ``POST /serve`` runs a model this
+    machine holds."""
     class Handler(BaseHTTPRequestHandler):
         server_version = "ml-stack-traind/0.1"
 
@@ -832,7 +835,9 @@ def make_handler(runner: JobRunner, files_root: Path,
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
                 self._send(200, {"ok": True, "name": name, **status, **report(),
-                                 **({"availability": sched} if sched else {})})
+                                 **({"availability": sched} if sched else {}),
+                                 **({"serving": serving.public()} if serving is not None
+                                    else {})})
                 return
             if not self._guard():
                 return
@@ -1049,6 +1054,35 @@ def make_handler(runner: JobRunner, files_root: Path,
                 except (DaemonError, ValueError) as e:
                     self._send(400, {"error": str(e)}); return
                 self._send(202, fetch.public()); return
+            if parsed.path == "/serve":
+                if hosting is None or models is None:
+                    self._send(501, {"error": "this daemon serves no models"}); return
+                from .serving import NoRoom
+                try:
+                    req = json.loads(body or b"{}")
+                    wanted = str(req.get("model") or "")
+                    context = int(req.get("context") or 8192)
+                    parallel = max(1, int(req.get("parallel") or 1))
+                except (TypeError, ValueError) as e:
+                    self._send(400, {"error": str(e)}); return
+                if not wanted:
+                    self._send(400, {"error": "name the model"}); return
+                found = models.find(wanted)
+                if found is None:
+                    self._send(404, {"error": f"no model called {wanted!r} on this "
+                                              f"machine"}); return
+                running = hosting.already(found.name)
+                if running is not None:
+                    self._send(200, running.public()); return
+                try:
+                    served = hosting.start(found.path, name=found.name, context=context,
+                                           parallel=parallel,
+                                           room=int(report().get("room_bytes") or 0))
+                except NoRoom as e:
+                    self._send(409, {"error": str(e), "refused": "room"}); return
+                except (OSError, RuntimeError, ValueError) as e:
+                    self._send(502, {"error": str(e)}); return
+                self._send(201, served.public()); return
             m = re.match(r"^/jobs/([^/]+)/stop$", parsed.path)
             if m:
                 try:
@@ -1197,6 +1231,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     environment = Environment(root)
     serving = Serving(root / "serving.json")
+    hosting = Hosting(root, serving)
     models = Models(default_roots(root), root / "models")
     conversations = Conversations(root / "chats")
     downloads = Downloads(models)
@@ -1247,7 +1282,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path, serving, models,
                                              cluster_key_path, every_token,
-                                             bench=bench_host[0]))
+                                             bench=bench_host[0], hosting=hosting))
     # Keeping this machine current, in one of two modes and never in both. Either way the
     # gate is the same: nothing is replaced over a job, a measurement or a loaded model.
     from . import updates as updating
@@ -1324,6 +1359,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         interface.report = report
         interface.environment = environment
         interface.serving = serving
+        interface.hosting = hosting
         interface.models = models
         interface.conversations = conversations
         interface.downloads = downloads

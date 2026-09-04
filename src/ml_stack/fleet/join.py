@@ -5,7 +5,8 @@ a llama-server if there is none, a cluster passphrase, the daemon (started now, 
 with ``--persist``), and then a listing of every peer that answered on the discovery port --
 the same beacons `ml-stack-peers ls` reads, since there is one discovery mechanism and this
 adds no second one. ``status`` is that listing on its own, with what each peer serves, its
-room, whether it is measuring, and its commit; ``leave`` undoes ``join``.
+room, whether it is measuring, and its commit; ``plan`` says which model each peer should
+serve for a number of users, and ``--apply`` serves it; ``leave`` undoes ``join``.
 
 Every step is a function that takes what it needs, so the app's Join button, the MCP
 ``fleet_join`` tool and the command line all run this one path.
@@ -32,6 +33,7 @@ from .discovery import (
     Beacon,
     DiscoveryError,
     default_port,
+    derive_token,
     discover,
     in_cluster,
     join as join_cluster,
@@ -41,9 +43,10 @@ from .discovery import (
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
 
-__all__ = ["Check", "JoinError", "Joined", "DEFAULT_ROOT", "STARTED_FILE", "checks",
-           "describe", "join_machine", "leave_machine", "main", "peers", "remember_track",
-           "running_code", "start_daemon", "sweep_argv", "table", "updating"]
+__all__ = ["Check", "JoinError", "Joined", "DEFAULT_ROOT", "STARTED_FILE", "apply_plan",
+           "checks", "describe", "join_machine", "leave_machine", "main", "peers",
+           "remember_track", "running_code", "serving_table", "start_daemon", "sweep_argv",
+           "table", "updating"]
 
 DEFAULT_ROOT = "~/.ml-stack/traind"
 STARTED_FILE = "fleet-daemon.json"
@@ -596,6 +599,107 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0 if rows else 1
 
 
+def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
+               cluster_key_path: Path | str | None = None,
+               say: Callable[[str], None] = print) -> list[dict[str, Any]]:
+    """``POST /serve`` on each placed peer, and what each answered.
+
+    Each answer is ``{"peer", "model", "seats", "status", "served" | "error", "serving"}``;
+    ``serving`` is the peer's ``/health`` serving rows after the call.
+    """
+    from .remote import Peer, PeerError
+
+    tokens = {m.group: derive_token(m.key) for m in memberships(cluster_key_path)}
+    by_name = {r["name"]: r for r in rows}
+    out: list[dict[str, Any]] = []
+    for row in placement.rows:
+        peer_row = by_name.get(row.peer)
+        answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "seats": row.seats}
+        token = next((tokens[g] for g in (peer_row or {}).get("clusters") or []
+                      if g in tokens), "")
+        if peer_row is None or not token:
+            answer.update(status=0, error="no daemon answered for this peer")
+            out.append(answer)
+            say(f"{row.peer}: {row.model}: {answer['error']}")
+            continue
+        peer = Peer(peer_row["base_url"], token, timeout=600.0)
+        try:
+            served = peer._json("POST", "/serve", {"model": row.model, "context": row.context,
+                                                   "parallel": row.seats})
+            answer.update(status=201, served=served)
+            say(f"{row.peer}: {row.model}: {served.get('slots', row.seats)} seat(s) on "
+                f"port {served.get('port', '?')}")
+        except PeerError as exc:
+            status, body = _refusal(str(exc))
+            answer.update(status=status, error=body.get("error") or str(exc))
+            say(f"{row.peer}: {row.model}: {answer['error']}")
+        try:
+            answer["serving"] = list(peer.health().get("serving") or [])
+        except (PeerError, OSError, ValueError):
+            answer["serving"] = []
+        out.append(answer)
+    return out
+
+
+def serving_table(applied: Sequence[dict[str, Any]]) -> str:
+    """What each peer serves after an apply, as text."""
+    lines = [f"{'PEER':<16} SERVING"]
+    for answer in applied:
+        cells = [f"{m}:{one.get('port', '?')} ({int(one.get('slots') or 1)} seat(s))"
+                 for one in answer.get("serving") or [] for m in one.get("models") or []]
+        lines.append(f"{answer['peer']:<16} {', '.join(cells) or '-'}")
+    return "\n".join(lines)
+
+
+def _refusal(message: str) -> tuple[int, dict[str, Any]]:
+    """The status and JSON body out of a `PeerError`'s message; ``(0, {})`` for none."""
+    import re
+
+    found = re.search(r"-> (\d{3}): (\{.*\})", message, re.S)
+    if not found:
+        return 0, {}
+    try:
+        return int(found.group(1)), json.loads(found.group(2))
+    except ValueError:
+        return int(found.group(1)), {}
+
+
+def _measurements() -> tuple[list[Any], list[Any]]:
+    """Every measured shape and every memory record this machine knows."""
+    from ml_stack.serve.fit import records
+    from ml_stack.serve.profile import profiles
+
+    return profiles(), records()
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    from .plan import place, table as plan_table
+
+    if not memberships(args.cluster_key):
+        print(f"in no cluster (no key at {key_path(args.cluster_key)}); "
+              "run 'ml-stack-fleet join'", file=sys.stderr)
+        return 1
+    me = already_running(args.port)
+    rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
+                 self_name=str((me or {}).get("name") or ""))
+    shapes, fits = _measurements()
+    placement = place(args.users, args.context, rows, shapes, fits)
+    applied: list[dict[str, Any]] = []
+    if args.apply and placement.rows:
+        applied = apply_plan(placement, rows, cluster_key_path=args.cluster_key,
+                             say=(lambda line: None) if args.json else print)
+    if args.json:
+        print(json.dumps({**placement.as_dict(), "applied": applied}, indent=1))
+    else:
+        if not rows:
+            print(table(rows))
+        print(plan_table(placement))
+        if applied:
+            print()
+            print(serving_table(applied))
+    return 0 if placement.rows and not placement.unplaced else 1
+
+
 def cmd_leave(args: argparse.Namespace) -> int:
     leave_machine(group=args.group, root=args.root, cluster_key_path=args.cluster_key,
                   stop=not args.keep_running)
@@ -642,6 +746,19 @@ def main(argv: list[str] | None = None) -> int:
     status_p.add_argument("--timeout", type=float, default=2.0)
     status_p.add_argument("--json", action="store_true")
 
+    plan_p = sub.add_parser("plan", help="which model each peer serves, and how many "
+                                         "seats, for a number of users at one context; "
+                                         "the best measured models go to the most users")
+    plan_p.add_argument("--users", type=int, required=True,
+                        help="how many conversations at once, across the fleet")
+    plan_p.add_argument("--context", type=int, default=16384,
+                        help="tokens each conversation gets (default: 16384)")
+    plan_p.add_argument("--apply", action="store_true",
+                        help="serve the plan: each peer runs its model with its seats")
+    plan_p.add_argument("--timeout", type=float, default=2.0,
+                        help="seconds to listen for peers (default: 2)")
+    plan_p.add_argument("--json", action="store_true")
+
     leave_p = sub.add_parser("leave", help="drop the cluster, the logon service and the "
                                            "daemon join started")
     leave_p.add_argument("--group", default="",
@@ -650,7 +767,8 @@ def main(argv: list[str] | None = None) -> int:
                          help="leave the daemon up, just stop answering as a peer")
 
     args = ap.parse_args(argv)
-    fn = {"join": cmd_join, "status": cmd_status, "leave": cmd_leave}[args.cmd]
+    fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
+          "leave": cmd_leave}[args.cmd]
     try:
         return fn(args)
     except (JoinError, DiscoveryError, OSError) as exc:

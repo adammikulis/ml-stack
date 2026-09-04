@@ -9,12 +9,13 @@ import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack.files import write_json
 
-__all__ = ["Endpoint", "Served", "Serving", "Started", "discover_serving",
-           "start_model", "stop_model"]
+__all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
+           "discover_serving", "start_model", "stop_model"]
 
 # Each health path waits this long, and the beacon rebuilds the list every 10s.
 PROBE_TIMEOUT = 1.0
@@ -110,9 +111,10 @@ class Started:
 
 
 def start_model(root: Path | str, model_path: Path | str, *, name: str | None = None,
-                context: int = 8192, manager: Any = None, serving: Serving | None = None,
-                port: int | None = None) -> Started:
-    """Run ``model_path`` on this machine. Registers the port when given a ``Serving``."""
+                context: int = 8192, parallel: int = 1, manager: Any = None,
+                serving: Serving | None = None, port: int | None = None) -> Started:
+    """Run ``model_path`` on this machine with ``parallel`` seats of ``context`` tokens.
+    Registers the port when given a ``Serving``."""
     from ml_stack.serve import (
         LlamaServerBackend, ServerManager, ServerSpec, free_port)
 
@@ -125,17 +127,86 @@ def start_model(root: Path | str, model_path: Path | str, *, name: str | None = 
 
     if port is None:
         port = free_port()
+    parallel = max(1, int(parallel))
     extra: tuple[str, ...] = ()
     draft = draft_beside(Path(model_path))
     if draft is not None:
         # -md is what this build calls --spec-draft-model.
         extra = ("-md", str(draft), "-ngld", "99")
-    lease = manager.lease(ServerSpec(model=model_path, port=port,
-                                     context=int(context), extra_args=extra))
+    lease = manager.lease(ServerSpec(model=model_path, port=port, context=int(context),
+                                     parallel=parallel, extra_args=extra))
     served = None
     if serving is not None:
-        served = serving.register(port, [name or Path(model_path).name])
+        served = serving.register(port, [name or Path(model_path).name], slots=parallel)
     return Started(port=port, lease=lease, manager=manager, served=served)
+
+
+class NoRoom(RuntimeError):
+    """The model and its seats do not fit in this machine's room."""
+
+
+class Hosting:
+    """The model servers this process started, by port."""
+
+    def __init__(self, root: Path | str, serving: Serving, *, manager: Any = None,
+                 fits: Callable[[], Sequence[Any]] | None = None) -> None:
+        self.root = Path(root).expanduser()
+        self.serving = serving
+        self.manager = manager
+        self.fits = fits
+        self.leases: dict[int, Any] = {}
+
+    def already(self, name: str) -> Served | None:
+        """The live server holding ``name``, or None."""
+        wanted = _name(name).lower()
+        for served in self.serving.live(force=True):
+            if any(_name(m).lower() == wanted for m in served.models):
+                return served
+        return None
+
+    def fits_in(self, name: str, *, context: int, parallel: int, room: int) -> str:
+        """"" when the model with ``parallel`` seats fits in ``room`` bytes by its memory
+        record, or a line saying what it needs. A model with no record passes."""
+        from ml_stack.hub import _human
+        from ml_stack.serve.fit import records
+        from .plan import fit_for
+
+        if room <= 0:
+            return ""
+        fit = fit_for(name, list(self.fits() if self.fits else records()))
+        if fit is None:
+            return ""
+        loaded, each = fit.at_room(room).line(context)
+        need = loaded + max(1, int(parallel)) * each
+        if need <= room:
+            return ""
+        return (f"{_human(need)} for {parallel} seat(s) at {context} tokens; "
+                f"this machine has {_human(room)}")
+
+    def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
+              parallel: int = 1, room: int = 0) -> Served:
+        """Serve ``model_path`` here, or raise `NoRoom`."""
+        name = name or Path(model_path).name
+        why = self.fits_in(name, context=int(context), parallel=int(parallel), room=int(room))
+        if why:
+            raise NoRoom(f"{name} does not fit: {why}")
+        started = start_model(self.root, model_path, name=name, context=int(context),
+                              parallel=int(parallel), manager=self.manager,
+                              serving=self.serving)
+        self.manager = started.manager
+        self.leases[started.port] = started.lease
+        return started.served or Served(port=started.port, models=[name],
+                                        slots=max(1, int(parallel)))
+
+    def stop(self, port: int) -> None:
+        """Release the server on ``port``; a port this process did not start is only
+        taken out of the registry."""
+        held = self.leases.pop(port, None)
+        if held is None or self.manager is None:
+            self.serving.unregister(port)
+            return
+        stop_model(Started(port=port, lease=held, manager=self.manager),
+                   serving=self.serving)
 
 
 def stop_model(started: Started, serving: Serving | None = None) -> None:

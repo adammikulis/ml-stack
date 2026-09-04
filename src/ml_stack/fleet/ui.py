@@ -108,8 +108,7 @@ class UI:
         self.conversations: Any = None
         self.downloads: Any = None
         self.root: Any = None
-        self.servers: Any = None
-        self._leases: dict[int, Any] = {}
+        self.hosting: Any = None
         self.detach: Any = None
         """How a sweep is started: the bench's own `detach` unless a test hands in a fake."""
         self.answers: Any = None
@@ -282,28 +281,23 @@ class UI:
             settings.save(self.settings_path)
         return out
 
+    def _hosting(self) -> Any:
+        if self.hosting is None:
+            from .join import DEFAULT_ROOT
+            from .serving import Hosting
+
+            self.hosting = Hosting(self.root or DEFAULT_ROOT, self.serving)
+        return self.hosting
+
     def start_serving(self, model: Any) -> Any:
         """Run ``model`` on this machine and tell the network it is here."""
-        from .serving import start_model
-
-        started = start_model(
-            self.root, model.path, name=model.name,
-            context=int(getattr(self.settings, "context", 0) or 8192),
-            manager=self.servers, serving=self.serving)
-        self.servers = started.manager
-        self._leases[started.port] = started.lease
-        return started.served
+        return self._hosting().start(
+            model.path, name=model.name,
+            context=int(getattr(self.settings, "context", 0) or 8192))
 
     def stop_serving(self, port: int) -> None:
         """Stop a model server this machine started."""
-        from .serving import Started, stop_model
-
-        held = self._leases.pop(port, None)
-        if held is None or self.servers is None:
-            self.serving.unregister(port)
-            return
-        stop_model(Started(port=port, lease=held, manager=self.servers),
-                   serving=self.serving)
+        self._hosting().stop(port)
 
     # -- the fleet, and a sweep over it ----------------------------------
     def fleet(self) -> dict[str, Any]:
