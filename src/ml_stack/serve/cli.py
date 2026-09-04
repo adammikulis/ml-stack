@@ -168,11 +168,16 @@ def every_server() -> list[dict]:
             state = str(proc.status())
         except (psutil.Error, OSError):
             state = ""
+        rss = int(getattr(mem, "rss", 0) or 0)
+        if isinstance(proc, psutil.Process):
+            from ml_stack.graph.bench.measure import footprint_of
+
+            rss = footprint_of(proc) or rss
         out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
                     "defunct": state == psutil.STATUS_ZOMBIE,
                     "model": after("--model", "-m") or after("-hf") or "",
                     "binary": argv[0] if argv else name,
-                    "rss": int(getattr(mem, "rss", 0) or 0)})
+                    "rss": rss})
     return sorted(out, key=lambda r: r["port"])
 
 

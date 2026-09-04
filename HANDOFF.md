@@ -45,8 +45,11 @@ ten questions, unconfirmed.
   a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the
   instructions now say keep both only when the passages support both (2026-09-03); the
   shelf's verdicts predate that and are worth a `tidy --rejudge` over the shelf, ~an hour.
-  The same pass writes the shelf's first `tidy:merges` log, which is what `ml-stack-ingest
-  shelf`'s "between books" section reads.
+- [ ] **Fill the shelf's "between books" log.** `ml-stack-ingest shelf` reads
+  `tidy:merges`, written by every fold and tidy from 2026-09-04 on; the shelf's 210 shared
+  concepts were joined before it existed, so the section is empty. `ml-stack-ingest fold
+  --out ~/.ml-stack/shelf.ladybug` re-folds every book from its reads (no model, minutes)
+  and writes the log; it rewrites the store, so take a copy beside it first.
 - [ ] **Run the shipped extraction gate on a model** (`ml-stack-ingest --gold
   tests/fixtures/extraction-gold.json --model <flash-next> --fail-under 0.7`, ~10 min):
   twenty invented passages with every triple written down, so the number is precision as
@@ -80,6 +83,11 @@ ten questions, unconfirmed.
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
   here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
+- [ ] **`docs/architectures/qwen4exp.md` says 48K bytes a token on the 12 attention layers
+  at f16; the header says 12 x 2 KV heads x 256 x (K+V) x 2 bytes = 24K.** The difference
+  may be the indexer key cache (one head of `indexer.key_length` 128 per attention layer)
+  or the MTP head; `ml-stack-serve fit` at two contexts on Flash-Next says which, and the
+  note and `preflight._kv_estimate_bytes` follow the measurement.
 - [ ] **Watch ggml-org/llama.cpp#27836.** When the qwen4exp MTP graph merges, `ml-stack-serve
   build` and `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance
   on an M3 Max against the fork's 73–79%. Then the profile's build field can go.
@@ -139,6 +147,10 @@ time with the page's server down for the Ollama half.
   aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the
   server's own `/metrics`; then measure a small task set the bench's way so the local
   harness has a number beside the page's.
+- [ ] **The Slack page's answer cache keys on the asking ways only once the app passes
+  them.** `cache.asked`/`fingerprint` take `ways=` (at least `{"constrain_ids": ...}`);
+  the one caller is `~/ai_ceo/slack_graph/ask.py:424`, which does not pass it yet, so a
+  cached answer there is returned regardless of the flag. One line in the app.
 - [ ] **The Slack page's own `Config` keeps two seats** (a run plus a reader) while every
   command here serves one seat by default. Adam's to keep or drop, in `~/ai_ceo`.
 
@@ -162,6 +174,12 @@ time with the page's server down for the Ollama half.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
+- [ ] **`fleet plan` gives a peer the best model at one seat even when a smaller model
+  there would seat more users.** Best models to the most users is what it does; whether a
+  peer that can hold the best model for one person should hold a smaller one for three is
+  Adam's call (quality against coverage), and a `--prefer seats|quality` flag is the shape.
+  Two records are half-measured: `gpt-oss-20b-MXFP4.gguf` has a profile and no fit record,
+  `Qwen3.8-27B` a fit record and no profile, so neither is placed.
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.

@@ -443,7 +443,7 @@ def _ask_run(args: Any) -> int:
         print(line)
     f1 = asked_f1(rows)
     if args.fail_under is not None and f1 < args.fail_under:
-        print(f"error: F1 {f1:.2f} is under {args.fail_under:.2f}", file=sys.stderr)
+        print(f"error: F1 {f1:.2f} is under {args.fail_under:g}", file=sys.stderr)
         return 1
     return 0
 
@@ -463,6 +463,6 @@ def _gold_run(args: Any) -> int:
     for line in gold_lines(scored):
         print(line)
     if args.fail_under is not None and scored.f1 < args.fail_under:
-        print(f"error: F1 {scored.f1:.2f} is under {args.fail_under:.2f}", file=sys.stderr)
+        print(f"error: F1 {scored.f1:.2f} is under {args.fail_under:g}", file=sys.stderr)
         return 1
     return 0

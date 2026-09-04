@@ -248,8 +248,8 @@ def test_fail_under_gates_the_questions(tmp_path, monkeypatch, capsys):
     serving(monkeypatch, found_then_shown("concept:vault"))
 
     assert ingest.main(["ask", "--out", str(store), "--gold", str(path),
-                        "--fail-under", "0.5"]) == 1
-    assert "is under 0.50" in capsys.readouterr().err
+                        "--fail-under", "0.999"]) == 1
+    assert "is under 0.999" in capsys.readouterr().err
 
 
 def test_ask_with_neither_a_question_nor_a_gold_set_is_an_error(tmp_path, capsys):

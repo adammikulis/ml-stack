@@ -109,6 +109,14 @@ class TestPlacing:
         assert "4 user(s) without a seat" in text
         assert "small: quince-70b-Q4_K_M.gguf: room 24.0G < 41.0G loaded" in text
 
+    def test_no_peer_answering_is_the_reason_given(self):
+        said: list[str] = []
+        got = place(3, 16384, [], PROFILES, FITS, log=said.append)
+        assert got.unplaced == 3 and got.rows == []
+        assert got.why == [("*", "*", "no peer answered")]
+        assert "no peer answered" in table(got)
+        assert any("no peer answered" in line for line in said)
+
     def test_a_shorter_context_seats_everyone_on_one_peer(self):
         long = place(5, 16384, [SMALLER, ROOMY], PROFILES, FITS)
         short = place(5, 4096, [SMALLER, ROOMY], PROFILES, FITS)

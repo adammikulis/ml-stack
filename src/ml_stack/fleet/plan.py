@@ -132,6 +132,11 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
     left = max(0, int(users))
     open_peers = sorted((room_of(p) for p in peers), key=lambda r: -r.room)
     say(f"planning {left} user(s) at {context} tokens over {len(open_peers)} peer(s):")
+    if not open_peers:
+        out.why.append(("*", "*", "no peer answered"))
+        out.unplaced = left
+        say(f"  {left} user(s) without a seat: no peer answered")
+        return out
     for profile in ranked(profiles):
         if left <= 0:
             break
