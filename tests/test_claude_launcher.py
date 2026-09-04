@@ -107,3 +107,52 @@ def test_alias_falls_back_to_the_file_stem(monkeypatch):
     assert claude.alias_of("http://127.0.0.1:1", "/m/kestrel-8B-UD-Q4_K_XL.gguf") == "kestrel-8B-UD-Q4_K_XL"
     monkeypatch.setattr("ml_stack.client.reported_models", lambda url, **kw: ["served-name"])
     assert claude.alias_of("http://127.0.0.1:1", "x.gguf") == "served-name"
+
+
+class TestPicking:
+    """`ml-stack-claude` with nothing named."""
+
+    def _options(self):
+        return [{"kind": "server", "port": 8080, "url": "http://127.0.0.1:8080",
+                 "name": "a served model", "note": "already running"},
+                {"kind": "model", "name": "quince-2b.gguf", "record": None, "note": ""},
+                {"kind": "model", "name": "brack-9b.gguf", "record": None, "note": ""}]
+
+    def test_a_bare_number_takes_that_one(self):
+        from ml_stack.claude import pick
+
+        assert pick(self._options(), say=lambda _: None, ask=lambda _: "2")["name"] == \
+            "quince-2b.gguf"
+
+    def test_nothing_typed_takes_the_first(self):
+        from ml_stack.claude import pick
+
+        got = pick(self._options(), say=lambda _: None, ask=lambda _: "")
+        assert got["kind"] == "server"
+
+    def test_a_name_takes_the_one_it_names(self):
+        from ml_stack.claude import pick
+
+        got = pick(self._options(), say=lambda _: None, ask=lambda _: "brack")
+        assert got["name"] == "brack-9b.gguf"
+
+    def test_a_name_matching_none_chooses_none(self):
+        from ml_stack.claude import pick
+
+        said: list[str] = []
+        assert pick(self._options(), say=said.append, ask=lambda _: "velthorne") is None
+        assert any("not a choice" in line for line in said)
+
+    def test_nothing_to_run_says_so(self):
+        from ml_stack.claude import pick
+
+        said: list[str] = []
+        assert pick([], say=said.append, ask=lambda _: "1") is None
+        assert any("nothing to run" in line for line in said)
+
+    def test_the_servers_are_offered_before_the_models(self):
+        from ml_stack.claude import pick
+
+        said: list[str] = []
+        pick(self._options(), say=said.append, ask=lambda _: "1")
+        assert said[0] == "already running:"

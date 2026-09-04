@@ -116,7 +116,8 @@ def emitted_flags(backend: LlamaServerBackend) -> list[str]:
         spec_draft_type_v="q8_0", lookup_static="static.bin", lookup_dynamic="dynamic.bin",
         cache_reuse=256, warmup=False, context_per_slot=4096, override_tensor=("x=CPU",),
         cpu_moe=True, n_cpu_moe=1, kv_unified=True, cache_ram_mb=8192, cache_idle_slots=True,
-        slot_prompt_similarity=0.5, slot_save_path="slots", cache_type_k="q8_0",
+        slot_prompt_similarity=0.5, slot_save_path="slots", chat_template_file="t.jinja",
+        cache_type_k="q8_0",
         cache_type_v="q8_0", mlock=True, reasoning_budget=2048, rope_scaling="yarn",
         rope_scale=4.0, yarn_orig_ctx=32768, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
         yarn_beta_fast=32.0, yarn_beta_slow=1.0)
@@ -252,6 +253,8 @@ class ServerSpec:
     # A directory a slot's cache can be saved to and restored from through the `/slots`
     # API -- a conversation put down and picked up across a restart.
     slot_save_path: str | Path | None = None
+    # A chat template file to serve with, in place of the one the weights carry.
+    chat_template_file: str | Path | None = None
     # Where individual tensors live, as `pattern=buffer` -- the way to keep part of a model
     # off the GPU without keeping all of it off.
     #
@@ -482,6 +485,8 @@ class LlamaServerBackend(ServerBackend):
             argv += ["--slot-prompt-similarity", str(spec.slot_prompt_similarity)]
         if spec.slot_save_path:
             argv += ["--slot-save-path", str(spec.slot_save_path)]
+        if spec.chat_template_file:
+            argv += ["--chat-template-file", str(spec.chat_template_file)]
         if spec.lookup_static:
             argv += ["--lookup-cache-static", str(spec.lookup_static)]
         if spec.lookup_dynamic:
