@@ -265,9 +265,8 @@ class ScriptedModel:
 
     The tool loop hands a model only the tools it may call this turn, and a model can only
     call what it was offered: the next scripted call is issued when its tool is on offer and
-    otherwise the model answers ``answer`` in words without spending it -- which is the whole
-    point of the last turn taking the searching tools away. ``seen`` is the messages of
-    every turn; ``told()`` is what the tools answered.
+    otherwise the model answers ``answer`` in words without spending it. ``seen`` is the
+    messages of every turn; ``told()`` is what the tools answered.
 
     Not a `Client`: nothing here builds one, the tool loop takes whatever has a ``chat`` --
     but that ``chat`` has `Client.chat`'s signature.
