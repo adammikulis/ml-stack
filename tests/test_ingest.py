@@ -84,7 +84,9 @@ def test_the_document_schema_compiles_to_a_grammar():
     assert "root ::=" in text and "concepts" in text
 
 
-def test_the_schema_accepts_an_extraction_and_refuses_one_outside_the_vocabulary():
+def test_the_schema_takes_a_verb_and_a_kind_the_model_coined_and_refuses_another_shape():
+    """A book states relations the core eighteen have no word for. The shape is the fence,
+    not the list."""
     validate = pytest.importorskip("jsonschema").validate
     ValidationError = pytest.importorskip("jsonschema").ValidationError
     schema = ingest.schema()
@@ -92,15 +94,62 @@ def test_the_schema_accepts_an_extraction_and_refuses_one_outside_the_vocabulary
     validate(LATTICE, schema)
     validate(EMPTY, schema)
 
-    invented = json.loads(json.dumps(LATTICE))
-    invented["relations"][0]["rel"] = "sits_inside"
-    with pytest.raises(ValidationError):
-        validate(invented, schema)
+    coined = json.loads(json.dumps(LATTICE))
+    coined["relations"][0]["rel"] = "sits_inside"
+    coined["concepts"][0]["kind"] = "lattice_part"
+    validate(coined, schema)
+
+    for wrong in ("Sits_Inside", "sits inside", "sits-inside", "_sits", "sits__inside",
+                  "s", "sits_inside" * 8):
+        bad = json.loads(json.dumps(LATTICE))
+        bad["relations"][0]["rel"] = wrong
+        with pytest.raises(ValidationError):
+            validate(bad, schema)
+        bad = json.loads(json.dumps(LATTICE))
+        bad["concepts"][0]["kind"] = wrong
+        with pytest.raises(ValidationError):
+            validate(bad, schema)
 
     extra = json.loads(json.dumps(LATTICE))
     extra["concepts"][0]["colour"] = "blue"
     with pytest.raises(ValidationError):
         validate(extra, schema)
+
+
+def test_core_only_fences_the_verbs_and_the_kinds_back_to_the_core_lists():
+    validate = pytest.importorskip("jsonschema").validate
+    ValidationError = pytest.importorskip("jsonschema").ValidationError
+    schema = ingest.schema(core_only=True)
+
+    validate(LATTICE, schema)
+    assert ingest.closed(schema) and not ingest.closed(ingest.schema())
+    assert ingest.fenced(schema) == set(ingest.VERBS)
+    assert ingest.fenced(ingest.schema()) == set(), "an open shape fences nothing"
+
+    coined = json.loads(json.dumps(LATTICE))
+    coined["relations"][0]["rel"] = "sits_inside"
+    with pytest.raises(ValidationError):
+        validate(coined, schema)
+
+    other = json.loads(json.dumps(LATTICE))
+    other["concepts"][0]["kind"] = "lattice_part"
+    with pytest.raises(ValidationError):
+        validate(other, schema)
+
+    assert "root" in grammar_for(schema), "and the grammar builder takes the fenced one"
+
+
+def test_the_instructions_follow_the_shape_the_section_is_read_under():
+    """A prompt telling the model to use the schema's verbs and no other, sent with a shape
+    that takes any verb, would fence by suggestion alone."""
+    unit = a_unit()
+    open_turns, _ = ingest.prompt_for(unit)
+    closed_turns, _ = ingest.prompt_for(unit, core_only=True)
+    assert "and no other" in closed_turns[0]["content"]
+    assert "and no other" not in open_turns[0]["content"]
+    assert "name the relation the text states" in open_turns[0]["content"]
+    for kind, gloss in ingest.CORE_KINDS.items():
+        assert f"{kind} -- {gloss}" in open_turns[0]["content"]
 
 
 def test_the_schema_mirrors_the_message_one_so_the_same_fold_takes_both():
@@ -227,6 +276,55 @@ def test_a_source_is_written_as_a_node_everything_it_holds_hangs_off(tmp_path):
         assert store.get_doc("ingest:unit:lattice:1:1.1")["extracted"] == LATTICE
 
 
+def test_a_verb_and_a_kind_from_outside_the_core_lists_survive_the_fold_and_the_store(tmp_path):
+    """A book's own vocabulary is a finding: which relations and kinds came out of the core
+    lists and which the reader named itself reaches the store."""
+    pytest.importorskip("ladybug")
+    from ml_stack.graph.store import GraphStore
+
+    said = json.loads(json.dumps(LATTICE))
+    said["relations"].append({"from": "glimmer node", "rel": "sits_inside", "to": "vault"})
+    said["concepts"][1]["kind"] = "lattice_part"
+    unit = a_unit()
+    graph = ingest.fold_source([{"unit": unit.id, "extracted": said}], {unit.id: unit})
+
+    assert {e["rel"] for e in graph["edges"] if e.get("extension")} == {"sits_inside"}
+    assert all("extension" not in e for e in graph["edges"]
+               if e["rel"] in ("part_of", "consumes", "illustrates"))
+    kinds = {n["label"]: (n["attrs"] or {}).get("extension_kind") for n in graph["nodes"]
+             if n["id"].startswith("concept:")}
+    assert kinds["vault"] is True and kinds["glimmer node"] is None
+
+    store = tmp_path / "shelf.ladybug"
+    ingest.write(store, graph, source="lattice", title="Lattice Studies")
+    with GraphStore(store, read_only=True) as held:
+        back = {e["rel"]: e.get("extension") for e in held.edges()}
+        assert back["sits_inside"] is True
+        assert back["part_of"] is None and back["read_from"] is None, \
+            "a core verb and the graph's own links are not the book's vocabulary"
+        kinds = {n["label"]: (n["attrs"] or {}).get("extension_kind") for n in held.nodes()}
+        assert kinds["vault"] is True and kinds["glimmer node"] is None
+        assert kinds["Lattice Studies"] is None, "nor is the book itself"
+
+
+def test_a_kind_a_later_read_takes_from_the_core_list_stops_being_an_extension(tmp_path):
+    """The mark is derived from the kind the store ends up holding, never merged into it."""
+    pytest.importorskip("ladybug")
+    from ml_stack.graph.store import GraphStore
+
+    unit = a_unit()
+    coined = json.loads(json.dumps(LATTICE))
+    coined["concepts"][1]["kind"] = "lattice_part"
+    store = tmp_path / "shelf.ladybug"
+    for said in (coined, LATTICE):
+        graph = ingest.fold_source([{"unit": unit.id, "extracted": said}], {unit.id: unit})
+        ingest.write(store, graph, source="lattice", title="Lattice Studies")
+    with GraphStore(store, read_only=True) as held:
+        vault = next(n for n in held.nodes() if n["label"] == "vault")
+        assert vault["kind"] == "structure"
+        assert "extension_kind" not in (vault["attrs"] or {})
+
+
 # -- the gold set ------------------------------------------------------------------------------------
 
 
@@ -327,7 +425,7 @@ def test_a_gold_predicate_the_schema_has_no_word_for_is_named_rather_than_hidden
     from ml_stack.client import Client
 
     scored = ingest.gold_score(Client(instance.base_url), ingest.read_gold(where),
-                               ingest.schema())
+                               ingest.schema(core_only=True))
     assert [m["predicate"] for m in scored.unsayable] == ["drains"]
     assert any("no word for" in line for line in ingest.gold_lines(scored))
 
@@ -467,6 +565,29 @@ def test_gold_through_the_command_prints_the_rates(tmp_path, server, capsys):
     assert "recall 33%" in capsys.readouterr().out
 
 
+def test_core_only_reads_a_section_under_the_core_lists_alone(tmp_path, server, capsys):
+    """The two ways of reading, through the command: what the server is sent says which."""
+    pytest.importorskip("ladybug")
+
+    def sent_rel(argv):
+        source, instance, asked = a_reading(tmp_path, server)
+        assert run([source, "--out", str(tmp_path / f"{len(argv)}.ladybug"),
+                    "--base-url", instance.base_url, *argv]) == 0
+        shape = asked[0]["response_format"]["json_schema"]["schema"]
+        return (shape["properties"]["relations"]["items"]["properties"]["rel"],
+                shape["properties"]["concepts"]["items"]["properties"]["kind"],
+                str(asked[0]["messages"][0]["content"]))
+
+    rel, kind, told = sent_rel(["--core-only"])
+    assert rel["enum"] == list(ingest.VERBS) and "pattern" not in rel
+    assert kind["enum"] == list(ingest.CORE_KINDS)
+    assert "and no other" in told
+
+    rel, kind, told = sent_rel([])
+    assert "enum" not in rel and rel["pattern"] and "enum" not in kind
+    assert "name the relation the text states" in told
+
+
 def test_fail_under_is_a_gate(tmp_path, server, capsys):
     instance, _ = a_model(server, lambda prompt: EMPTY)
     argv = ["--base-url", instance.base_url, "--gold", str(a_gold_file(tmp_path))]
@@ -541,12 +662,15 @@ def test_what_a_section_cost_is_kept_call_by_call(tmp_path, server):
     assert row.calls[0]["seconds"] >= 0.0 and not row.error
 
 
-def test_the_schema_verbs_are_the_glossed_verbs_and_the_instructions_name_each():
-    """A verb the schema allows without a gloss would be used for whatever the model guessed."""
-    allowed = ingest.schema()["properties"]["relations"]["items"]["properties"]["rel"]["enum"]
-    assert list(ingest.VERBS) == allowed
+def test_the_core_verbs_and_kinds_are_the_glossed_ones_and_the_instructions_name_each():
+    """A core verb without a gloss would be used for whatever the model guessed."""
+    assert list(ingest.VERBS) == ingest.core_verbs(ingest.schema())
+    assert list(ingest.CORE_KINDS) == ingest.core_kinds(ingest.schema())
+    assert ingest.core_verbs(ingest.schema(core_only=True)) == list(ingest.VERBS)
     for verb, gloss in ingest.VERBS.items():
         assert f"{verb} -- {gloss}" in ingest.INSTRUCTIONS
+    for kind, gloss in ingest.CORE_KINDS.items():
+        assert f"{kind} -- {gloss}" in ingest.INSTRUCTIONS
 
 
 def test_a_gold_triple_written_the_other_way_round_is_still_found():
@@ -563,9 +687,22 @@ def test_a_gold_triple_written_the_other_way_round_is_still_found():
         "created_by the right way round is the wrong fact"
 
 
-def test_every_inverse_names_a_verb_the_schema_has():
-    allowed = ingest.schema()["properties"]["relations"]["items"]["properties"]["rel"]["enum"]
-    assert set(ingest.INVERSES) <= set(allowed)
+def test_a_coined_verb_that_states_a_core_one_backwards_is_still_found():
+    """An open vocabulary lets the model write `veltrose produced_by spindrel` where the
+    gold says `spindrel produces veltrose`. Same fact, and the gate counted it a miss."""
+    gold = {"subject": "spindrel", "predicate": "produces", "object": "veltrose"}
+    assert ingest._matches({"from": "veltrose", "rel": "produced_by", "to": "spindrel"}, gold)
+    assert not ingest._matches({"from": "spindrel", "rel": "produced_by", "to": "veltrose"},
+                               gold), "the same verb the right way round is the wrong fact"
+    assert ingest._matches({"from": "thornwick", "rel": "contains", "to": "amberine"},
+                           {"subject": "amberine", "predicate": "part_of",
+                            "object": "thornwick"})
+    assert not ingest._matches({"from": "veltrose", "rel": "dissolves_in", "to": "spindrel"},
+                               gold), "a verb no core one stands behind matches nothing"
+
+
+def test_every_inverse_names_a_core_verb():
+    assert set(ingest.INVERSES) <= set(ingest.core_verbs(ingest.schema()))
 
 
 def test_a_unit_that_failed_is_not_done_so_resume_reads_it_again(tmp_path):

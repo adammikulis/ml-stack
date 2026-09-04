@@ -11,11 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.ingest.extract import PER_SECTION
+from ml_stack.ingest.extract import PER_SECTION, VERBS
 from ml_stack.ingest.reads import _slug
 
-__all__ = ["INVERSES", "Scored", "gold_lines", "gold_score", "read_gold", "sayable",
-           "vocabulary"]
+__all__ = ["INVERSES", "Scored", "fenced", "gold_lines", "gold_score", "read_gold",
+           "sayable"]
 
 
 INVERSES: dict[str, frozenset[str]] = {
@@ -31,11 +31,17 @@ INVERSES: dict[str, frozenset[str]] = {
 }
 """What each verb says when the ends are swapped: `X created_by Y` is `Y authored X`.
 
-A gold set written by hand names facts in whichever direction the sentence did, and a
-closed vocabulary says each one in one direction only. Matching the flipped triple through
+A gold set written by hand names facts in whichever direction the sentence did, and the
+core vocabulary says each one in one direction only. Matching the flipped triple through
 this map is how the gate tells 'the vocabulary has no word for it' from 'it has the word,
 pointing the other way' -- the first gold run counted 'the author authored the charter'
 as unsayable when the model had said `charter created_by the author`, the same fact."""
+
+
+_FLIPPED: dict[str, str] = {alias: verb for verb, others in INVERSES.items()
+                            for alias in others}
+"""``{a verb that states a core one backwards: the core verb}``: `produced_by` states
+`produces` with the ends swapped, `contains` states `part_of`."""
 
 
 @dataclass
@@ -49,12 +55,13 @@ class Scored:
     seconds: float = 0.0
     misses: list[dict[str, str]] = field(default_factory=list)
     spurious: list[dict[str, str]] = field(default_factory=list)
-    # Gold triples whose predicate -- and none of its aliases -- is a word the schema's
-    # closed vocabulary has. A constrained decode cannot say it, so the triple can never be
-    # matched and the recall it drags down is a fact about the gold set, not the model.
-    # Said out loud rather than quietly subtracted: which of the two to change is a
-    # decision, and it is not this function's.
+    # Gold triples whose predicate -- and none of its aliases -- is a word the shape's
+    # vocabulary has. A shape fenced to the core verbs cannot say it, so the triple can
+    # never be matched and the recall it drags down is a fact about the gold set, not the
+    # model. Empty when the shape takes any verb.
     unsayable: list[dict[str, str]] = field(default_factory=list)
+    # The verbs outside the core vocabulary the run wrote, and how often each.
+    coined: dict[str, int] = field(default_factory=dict)
 
     @property
     def recall(self) -> float:
@@ -119,8 +126,9 @@ def _same(said: str, wanted: str, aliases: Sequence[str]) -> bool:
     return False
 
 
-def vocabulary(shape: Mapping[str, Any]) -> set[str]:
-    """The relation verbs a document schema allows: its ``relations[].rel`` enum."""
+def fenced(shape: Mapping[str, Any]) -> set[str]:
+    """The relation verbs a document schema fences itself to: its ``relations[].rel``
+    enum, empty when the shape takes any verb in the right shape."""
     return {str(v) for v in
             ((shape.get("properties") or {}).get("relations") or {})
             .get("items", {}).get("properties", {}).get("rel", {}).get("enum") or ()}
@@ -148,7 +156,7 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
     from ml_stack import ingest
 
     out = Scored(passages=len(passages))
-    words = vocabulary(shape)
+    words = fenced(shape)
     for passage in passages:
         text = str(passage.get("text") or "")
         unit = _passage_unit(passage)
@@ -159,6 +167,10 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
         wanted = [t for t in (passage.get("triples") or ()) if isinstance(t, Mapping)]
         out.wanted += len(wanted)
         out.found += len(said)
+        for relation in said:
+            verb = str(relation.get("rel") or "")
+            if verb and verb not in VERBS:
+                out.coined[verb] = out.coined.get(verb, 0) + 1
         for triple in wanted:
             if not sayable(triple, words):
                 out.unsayable.append({"passage": str(passage.get("passage_id") or ""),
@@ -186,9 +198,11 @@ def gold_score(client: Any, passages: Sequence[Mapping[str, Any]], shape: Mappin
     return out
 
 
-def _matches(said: Mapping[str, Any], triple: Mapping[str, Any]) -> bool:
-    """The extracted relation says the gold triple -- as written, or the other way round
-    through `INVERSES` (`charter created_by orlan vesk` says `orlan vesk authored charter`)."""
+def _matches(said: Mapping[str, Any], triple: Mapping[str, Any], *, flip: bool = True) -> bool:
+    """The extracted relation says the gold triple -- as written, the other way round
+    through `INVERSES` (`charter created_by orlan vesk` says `orlan vesk authored charter`),
+    or with a verb that states a core one backwards turned round first (`veltrose
+    produced_by spindrel` is `spindrel produces veltrose`)."""
     subject, subject_aliases = str(triple.get("subject") or ""), _names(triple.get("subject_aliases"))
     obj, obj_aliases = str(triple.get("object") or ""), _names(triple.get("object_aliases"))
     rel = str(said.get("rel") or "")
@@ -198,10 +212,13 @@ def _matches(said: Mapping[str, Any], triple: Mapping[str, Any]) -> bool:
             and _same(str(said.get("to") or ""), obj, obj_aliases)):
         return True
     words = {str(triple.get("predicate") or ""), *_names(triple.get("predicate_aliases"))}
-    if not (words & INVERSES.get(rel, frozenset())):
-        return False
-    return (_same(str(said.get("from") or ""), obj, obj_aliases)
-            and _same(str(said.get("to") or ""), subject, subject_aliases))
+    if words & INVERSES.get(rel, frozenset()):
+        return (_same(str(said.get("from") or ""), obj, obj_aliases)
+                and _same(str(said.get("to") or ""), subject, subject_aliases))
+    if flip and rel in _FLIPPED:
+        return _matches({"from": said.get("to"), "rel": _FLIPPED[rel],
+                         "to": said.get("from")}, triple, flip=False)
+    return False
 
 
 def _passage_unit(passage: Mapping[str, Any]) -> Any:
@@ -234,6 +251,11 @@ def gold_lines(scored: Scored, *, most: int = 20) -> list[str]:
                    f"predicate the schema has no word for ({', '.join(words)}); no "
                    f"constrained answer can match them, so the recall above is a floor -- "
                    f"widen the vocabulary or give those triples an alias inside it")
+    if scored.coined:
+        said = sorted(scored.coined.items(), key=lambda pair: (-pair[1], pair[0]))
+        out.append(f"  {sum(scored.coined.values())} of {scored.found} relations used a verb "
+                   f"outside the core vocabulary ({len(scored.coined)} of them): "
+                   + ", ".join(f"{verb} x{count}" for verb, count in said[:most]))
     if scored.spurious:
         out.append(f"  said but not in the gold ({len(scored.spurious)}):")
         out += [f"    {m['passage']}: {m['triple']}" for m in scored.spurious[:most]]

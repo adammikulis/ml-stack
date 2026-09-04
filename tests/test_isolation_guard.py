@@ -100,6 +100,27 @@ class TestCacheGuard:
         finally:
             shutil.rmtree(fake_home_cache, ignore_errors=True)
 
+    def test_another_process_first_server_starting_does_not_fail_the_run(self, tmp_path):
+        """A person's serve on this machine writes the state file while the suite runs. When
+        it is the first one, the file appears; that is theirs, not a test's."""
+        fake_home_cache = tmp_path / "impersonated-real-cache-theirs"
+        body = """
+            def test_somebody_else_starts_a_server():
+                import json
+
+                from ml_stack.serve.manager import STATE_FILE
+
+                STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+                # a pid past this machine's ceiling: no process of ours owns it
+                STATE_FILE.write_text(json.dumps({"8080": {"owner_pid": 999999, "port": 8080}}))
+        """
+        env = {**os.environ, "ML_STACK_CACHE": str(fake_home_cache)}
+        try:
+            code, out = _run_generated(tmp_path, body, env=env)
+            assert code == 0, out
+        finally:
+            shutil.rmtree(fake_home_cache, ignore_errors=True)
+
     def test_leaving_it_untouched_passes(self, tmp_path):
         fake_home_cache = tmp_path / "impersonated-real-cache-untouched"
         body = """

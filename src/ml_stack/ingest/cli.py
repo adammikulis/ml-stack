@@ -272,9 +272,12 @@ def parser() -> argparse.ArgumentParser:
                     help="with import: take rows their extractor left provisional "
                          "(default); --no-provisional leaves them")
     ap.add_argument("--core-only", action="store_true",
-                    help="with import: write only the predicates that map onto the verbs "
-                         "this library sets, and leave the rest; without it every predicate "
-                         "comes in, the ones outside those verbs marked as extensions")
+                    help="keep to the core verbs and kinds. Reading a source, the schema "
+                         "is fenced to them, so a section is read with the shared "
+                         "vocabulary and nothing else; importing, only the predicates that "
+                         "map onto them are written and the rest are left, where without "
+                         "it every predicate comes in and the ones outside them are marked "
+                         "as extensions")
     ap.add_argument("--source", default="", metavar="SLUG",
                     help="with `show` or `fold`, only this source")
     ap.add_argument("--chapter", default="", metavar="N",
@@ -484,8 +487,8 @@ def _gold_run(args: Any) -> int:
     print(f"gold: {len(passages)} passages from {args.gold}")
     try:
         with _stopping(), ingest._serving(args) as client:
-            scored = gold_score(client, passages, schema(), per_section=args.per_section,
-                                log=print)
+            scored = gold_score(client, passages, schema(core_only=args.core_only),
+                                per_section=args.per_section, log=print)
     except Stopped:
         print("stopped before the gold set was scored")
         return 1

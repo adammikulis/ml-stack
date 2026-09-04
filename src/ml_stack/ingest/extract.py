@@ -3,15 +3,17 @@ the prompt, and what one extraction cost."""
 
 from __future__ import annotations
 
+import copy
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from ml_stack.ingest.reads import Read
 
-__all__ = ["IMAGES_PER_SECTION", "INSTRUCTIONS", "PER_SECTION", "VERBS", "WITH_IMAGES",
-           "extract_unit", "prompt_for", "schema"]
+__all__ = ["CORE_KINDS", "IMAGES_PER_SECTION", "INSTRUCTIONS", "PER_SECTION",
+           "VERBS", "WITH_IMAGES", "closed", "core_kinds", "core_verbs", "extract_unit",
+           "instructions", "prompt_for", "schema"]
 
 
 PER_SECTION = 1200.0    # a ceiling, not a budget: a legitimate unit writes 6k tokens at ~50 tok/s
@@ -42,40 +44,109 @@ VERBS: dict[str, str] = {
     "adopted_by": "enacted, ratified or taken up by a body (the declaration adopted_by the congress)",
     "member_of": "one of a group, class or body (a delegate member_of the congress)",
 }
-"""The closed relation vocabulary, each verb glossed with the sense the model should take.
+"""The core relation vocabulary, each verb glossed with the sense the model should take.
 
-The schema's enum is this list; a test keeps them equal. The gloss is what moved
+The schema's ``examples`` are this list; a test keeps them equal. The gloss is what moved
 precision on the Slack graph -- a model told what a verb means uses it for that and
 nothing else -- so every verb here has one, and a verb without a gloss is not added."""
 
 
-def _verbs_line() -> str:
-    return "The verb phrases, and what each means: " + "; ".join(
-        f"{verb} -- {gloss}" for verb, gloss in VERBS.items()) + ".\n"
+CORE_KINDS: dict[str, str] = {
+    "concept": "an idea, a quantity or anything the other kinds do not fit",
+    "process": "something that happens over time (photosynthesis)",
+    "structure": "a thing with parts (an organ, an organelle, a machine)",
+    "substance": "a material or a chemical (glucose, water)",
+    "law": "a named law, principle or theorem (Ohm's law)",
+    "method": "a technique or a procedure (gel electrophoresis)",
+    "person": "a named person",
+    "organisation": "a named body, institution or group",
+    "place": "a named place or region",
+    "unit": "a unit of measurement (newton)",
+}
+"""The core concept kinds, each glossed. The schema's ``examples`` are this list."""
 
 
-INSTRUCTIONS = (
-    "You are reading one section of a textbook into a knowledge graph. List the concepts "
-    "the section names, how they stand to one another, what its figures show, and the "
-    "terms it defines.\n"
-    "Invent nothing. Every concept, relation and definition must be stated in the text "
-    "you were given; a fact you know from elsewhere does not belong here.\n"
-    "A definition is the book's own words, cut to one line, and only when the section "
-    "defines the thing. When it does not, the definition is an empty string -- an empty "
-    "string is always better than a definition you wrote yourself.\n"
-    "`aliases` are other names this same section uses for the same thing: a plural, an "
-    "abbreviation, a symbol. Not synonyms you happen to know.\n"
-    "A relation joins two concept names from your own `concepts` list, using one of the "
-    "verb phrases the schema allows and no other. State only what the section states. "
-    "Both ends are concept names -- never a clause or a phrase such as 'lights the "
-    "system'. When no verb says what the text says, leave the relation out: a relation "
-    "with the wrong verb is worse than none.\n"
-    + _verbs_line() +
-    "A caption is marked in the text as [Figure 2.9]. For each figure, `shows` is what "
-    "the picture shows in one line, and `concepts` are only those the caption or the "
-    "surrounding text says it illustrates -- never a concept guessed from the picture.\n"
-    "Return only JSON matching the schema."
-)
+def _verbs_line(*, core_only: bool = False) -> str:
+    head = ("The verb phrases, and what each means: " if core_only else
+            "The core verb phrases, and what each means: ")
+    return head + "; ".join(f"{verb} -- {gloss}" for verb, gloss in VERBS.items()) + ".\n"
+
+
+def _seen_line(verbs: Sequence[str], kinds: Sequence[str]) -> str:
+    out = ""
+    if verbs:
+        out += ("Verb phrases earlier sections have already been read with: "
+                + ", ".join(verbs) + ". That is what has been used so far, not everything "
+                "you may use: take one of these where it says what the text says, so the "
+                "shelf keeps one word per relationship, and name a new one only where none "
+                "of them does.\n")
+    if kinds:
+        out += ("Kinds earlier sections have already used, on the same terms: "
+                + ", ".join(kinds) + ".\n")
+    return out
+
+
+def _kinds_line(*, core_only: bool = False) -> str:
+    tail = ("Anything the section names that fits none of these is a `concept`.\n"
+            if core_only else
+            "A thing none of these fits takes a kind you name yourself, in the same "
+            "shape.\n")
+    return ("The kinds, and what each means: " + "; ".join(
+        f"{kind} -- {gloss}" for kind, gloss in CORE_KINDS.items()) + ". ") + tail
+
+
+def instructions(*, core_only: bool = False, seen: tuple[Sequence[str], Sequence[str]]
+                 | None = None) -> str:
+    """What the model is told to read a section as. With ``core_only`` the relation verbs
+    and the concept kinds are the core lists and nothing else, matching
+    ``schema(core_only=True)``. ``seen`` is ``(verbs, kinds)`` earlier sections coined,
+    named so the next section reuses them instead of coining a third spelling."""
+    if core_only:
+        verbs = ("A relation joins two concept names from your own `concepts` list, using "
+                 "one of the verb phrases the schema allows and no other. State only what "
+                 "the section states. Both ends are concept names -- never a clause or a "
+                 "phrase such as 'lights the system'. When no verb says what the text "
+                 "says, leave the relation out: a relation with the wrong verb is worse "
+                 "than none.\n")
+    else:
+        verbs = ("A relation joins two concept names from your own `concepts` list. State "
+                 "only what the section states. Both ends are concept names -- never a "
+                 "clause or a phrase such as 'lights the system'.\n"
+                 "Prefer a core verb phrase wherever one of them says what the text says: "
+                 "every book is read with the same core verbs, so a relation written with "
+                 "one joins up with the rest of the shelf. When none of them says it, name "
+                 "the relation the text states in the same shape -- lower case, words "
+                 "joined by underscores, the verb of the sentence, as `dissolves_in` or "
+                 "`inhibits`. Never stretch a core verb over a relation it does not "
+                 "state, and never write a relation the section does not state.\n"
+                 "A core verb with its ends swapped is not a new relation: write `A "
+                 "produces B`, never `B produced_by A`, and `A part_of B`, never `B "
+                 "contains A`. Nor is a word that means what a core verb means: keep the "
+                 "core one, and save a new name for what the core list cannot say.\n")
+    return (
+        "You are reading one section of a textbook into a knowledge graph. List the "
+        "concepts the section names, how they stand to one another, what its figures show, "
+        "and the terms it defines.\n"
+        "Invent nothing. Every concept, relation and definition must be stated in the text "
+        "you were given; a fact you know from elsewhere does not belong here.\n"
+        "A definition is the book's own words, cut to one line, and only when the section "
+        "defines the thing. When it does not, the definition is an empty string -- an "
+        "empty string is always better than a definition you wrote yourself.\n"
+        "`aliases` are other names this same section uses for the same thing: a plural, an "
+        "abbreviation, a symbol. Not synonyms you happen to know.\n"
+        + _kinds_line(core_only=core_only)
+        + verbs
+        + _verbs_line(core_only=core_only)
+        + ("" if core_only or not seen else _seen_line(*seen)) +
+        "A caption is marked in the text as [Figure 2.9]. For each figure, `shows` is what "
+        "the picture shows in one line, and `concepts` are only those the caption or the "
+        "surrounding text says it illustrates -- never a concept guessed from the "
+        "picture.\n"
+        "Return only JSON matching the schema."
+    )
+
+
+INSTRUCTIONS = instructions()
 
 WITH_IMAGES = (
     "\nThe section's figures follow the text as pictures. Use them to say what each figure "
@@ -84,11 +155,54 @@ WITH_IMAGES = (
 )
 
 
-def schema() -> dict[str, Any]:
-    """The document extraction shape, read from the contracts."""
+def _rel_field(shape: Mapping[str, Any]) -> dict[str, Any]:
+    return dict(((shape.get("properties") or {}).get("relations") or {})
+                .get("items", {}).get("properties", {}).get("rel") or {})
+
+
+def _kind_field(shape: Mapping[str, Any]) -> dict[str, Any]:
+    return dict(((shape.get("properties") or {}).get("concepts") or {})
+                .get("items", {}).get("properties", {}).get("kind") or {})
+
+
+def core_verbs(shape: Mapping[str, Any]) -> list[str]:
+    """The core relation verbs a document shape names, fenced to them or not."""
+    field = _rel_field(shape)
+    return [str(v) for v in (field.get("enum") or field.get("examples") or ())]
+
+
+def core_kinds(shape: Mapping[str, Any]) -> list[str]:
+    """The core concept kinds a document shape names, fenced to them or not."""
+    field = _kind_field(shape)
+    return [str(v) for v in (field.get("enum") or field.get("examples") or ())]
+
+
+def closed(shape: Mapping[str, Any]) -> bool:
+    """Whether ``shape`` fences `rel` to its core list."""
+    return bool(_rel_field(shape).get("enum"))
+
+
+def schema(*, core_only: bool = False) -> dict[str, Any]:
+    """The document extraction shape, read from the contracts.
+
+    With ``core_only`` the relation verbs and the concept kinds are fenced to their core
+    lists, so a constrained decode can say those and nothing else.
+    """
     from ml_stack.contracts import load
 
-    return dict(load("extraction-document.schema.json"))
+    shape = dict(load("extraction-document.schema.json"))
+    if not core_only:
+        return shape
+    shape = copy.deepcopy(shape)
+    for field, values in (
+            (shape["properties"]["relations"]["items"]["properties"]["rel"],
+             core_verbs(shape)),
+            (shape["properties"]["concepts"]["items"]["properties"]["kind"],
+             core_kinds(shape))):
+        for key in ("pattern", "minLength", "maxLength", "examples"):
+            field.pop(key, None)
+        field["enum"] = values
+    return shape
 
 
 class _Recording:
@@ -132,7 +246,8 @@ class _Recording:
         return Client._raw_extractor(self, *args, **kwargs)  # type: ignore[arg-type]
 
 
-def prompt_for(unit: Any, *, images: bool = False,
+def prompt_for(unit: Any, *, images: bool = False, core_only: bool = False,
+               seen: tuple[Sequence[str], Sequence[str]] | None = None,
                most: int = IMAGES_PER_SECTION) -> tuple[list[dict[str, Any]], int]:
     """The turns one section is extracted from, and how many pictures went with it.
 
@@ -150,7 +265,8 @@ def prompt_for(unit: Any, *, images: bool = False,
     terms = ("\n\nTerms this section sets in bold: " + ", ".join(unit.key_terms)
              if unit.key_terms else "")
     turns: list[dict[str, Any]] = [
-        {"role": "system", "content": INSTRUCTIONS + (WITH_IMAGES if images else "")},
+        {"role": "system", "content": instructions(core_only=core_only, seen=seen)
+                                      + (WITH_IMAGES if images else "")},
         {"role": "user", "content": f"{head}\n\n{unit.text}{terms}"},
     ]
     if not images:
@@ -171,16 +287,23 @@ def prompt_for(unit: Any, *, images: bool = False,
 
 
 def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bool = False,
-                 per_section: float = PER_SECTION, cache_dir: str | Path | None = None) -> Read:
+                 per_section: float = PER_SECTION, cache_dir: str | Path | None = None,
+                 vocabulary: Any = None) -> Read:
     """One unit through ``client.extract``, and what it cost.
 
     A failure is a result, not the end of the run: the row keeps the error and the next
     section is read. ``think=False`` -- reading a page is a reading, not a reasoning, and
     the thinking channel is where a ceiling gets spent.
+
+    ``vocabulary`` is a `ml_stack.ingest.vocabulary.Vocabulary`: what earlier sections
+    coined goes in the prompt, never in the schema, so a shelf that has grown a word for
+    something does not change the shape a cached read was answered under.
     """
     row = Read(unit=unit.id, source=unit.source, chapter=unit.chapter, section=unit.section,
                title=unit.section_title, pages=[unit.first_page, unit.last_page])
-    turns, shown = prompt_for(unit, images=images)
+    fenced = closed(shape)
+    seen = None if (vocabulary is None or fenced) else vocabulary.seen()
+    turns, shown = prompt_for(unit, images=images, core_only=fenced, seen=seen)
     row.images = shown
     recording = _Recording(client)
     began = time.time()

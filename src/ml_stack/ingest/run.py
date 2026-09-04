@@ -88,11 +88,14 @@ def _stopping() -> Any:
 def _read_run(args: Any) -> int:
     from ml_stack import ingest
     from ml_stack.client.spent import Spent
+    from ml_stack.ingest.vocabulary import Vocabulary
     from ml_stack.sources import pdf
 
     progress = Progress(Progress.beside(args.out))
     spent = Spent()
-    shape = schema()
+    core_only = bool(getattr(args, "core_only", False))
+    shape = schema(core_only=core_only)
+    words = None if core_only else Vocabulary.read(args.out)
     started = time.time()
     code = 0
     stopped = False
@@ -105,6 +108,8 @@ def _read_run(args: Any) -> int:
         judge = None if args.no_tidy else ingest._judge(client, args.out, model=args.model)
         got = fold_into(args.out, slug, title=title, reads=rows, units_by_id=units_by_id,
                         progress=progress, judge=judge)
+        if words is not None:
+            words.write(args.out)
         folded_seconds = float(got["seconds"])
         landed = got.get("absorbed") or {}
         print(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
@@ -169,7 +174,8 @@ def _read_run(args: Any) -> int:
                     for index, unit in enumerate(to_read):
                         row = read_unit(client, unit, shape, images=args.images,
                                         per_section=args.per_section,
-                                        cache_dir=args.cache or None)
+                                        cache_dir=args.cache or None, vocabulary=words)
+                        fresh = words.note(row.extracted, unit.id) if words is not None else []
                         row.run = run_id
                         reads_by_unit[unit.id] = asdict(row)
                         for call in row.calls:
@@ -192,6 +198,7 @@ def _read_run(args: Any) -> int:
                               f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
                               f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
                               + (" (read again after a reset)" if row.retried else "")
+                              + (f"  coined {', '.join(fresh)}" if fresh else "")
                               + (f"  {row.error}" if row.error else ""))
                         ahead = to_read[index + 1] if index + 1 < len(to_read) else None
                         if ahead is not None and _time_to_fold(
@@ -219,6 +226,9 @@ def _read_run(args: Any) -> int:
     except Stopped:
         stopped = True
 
+    if words is not None:
+        for line in words.lines():
+            print(line)
     totals = progress.totals()
     print(f"\n{totals['sections']} section(s) of {totals['sources']} source(s) in "
           f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "

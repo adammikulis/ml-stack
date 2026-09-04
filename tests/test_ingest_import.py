@@ -112,8 +112,7 @@ def test_every_verb_the_table_normalises_onto_is_one_this_library_sets():
     """The left-hand side of the table is open; the right-hand side is `fold.CORE`."""
     written = {found[0] for found in ingest.RELATIONS.values() if found}
     assert written <= ingest.CORE, written - ingest.CORE
-    assert set(ingest.schema()["properties"]["relations"]["items"]
-               ["properties"]["rel"]["enum"]) <= ingest.CORE
+    assert set(ingest.core_verbs(ingest.schema())) <= ingest.CORE
 
 
 def test_a_flipped_predicate_is_written_with_its_ends_the_other_way(tmp_path):

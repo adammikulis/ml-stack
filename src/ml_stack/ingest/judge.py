@@ -10,7 +10,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack.ingest.extract import INSTRUCTIONS, WITH_IMAGES, schema
+from ml_stack.ingest.extract import WITH_IMAGES, instructions, schema
 from ml_stack.ingest.sources import Sources
 
 __all__ = ["located", "origin", "run_record", "sources_for", "write_run"]
@@ -43,6 +43,8 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
     def sha(text: str) -> str:
         return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
+    core_only = bool(getattr(args, "core_only", False))
+
     try:
         version = metadata.version("ml-stack")
     except metadata.PackageNotFoundError:  # pragma: no cover - a checkout without install
@@ -57,8 +59,9 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
                                            ("top_k", getattr(args, "top_k", None)),
                                            ("min_p", getattr(args, "min_p", None)))
                          if v is not None},
-            "schema_sha": sha(json.dumps(schema(), sort_keys=True)),
-            "instructions_sha": sha(INSTRUCTIONS + WITH_IMAGES),
+            "core_only": core_only,
+            "schema_sha": sha(json.dumps(schema(core_only=core_only), sort_keys=True)),
+            "instructions_sha": sha(instructions(core_only=core_only) + WITH_IMAGES),
             "ml_stack": version, "host": _platform.node(),
             "started": time.strftime("%FT%T"), "argv": list(sys.argv[1:])}
 

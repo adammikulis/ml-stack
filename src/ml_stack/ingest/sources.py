@@ -323,8 +323,9 @@ def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = pri
 
     Per source, how much of it is read and what the store holds for it; the concepts more
     than one source was read into; the names the hygiene pass joined across sources, with
-    a weight; the relations joining one source's vocabulary to another's; and how many
-    name pairs the hygiene pass has judged. `Sources.shared` is the same as data.
+    a weight; the relations joining one source's vocabulary to another's; how many name
+    pairs the hygiene pass has judged; and the vocabulary the sources were read with.
+    `Sources.shared` is the same as data.
     """
     where = Path(out).expanduser()
     if not where.exists():
@@ -373,6 +374,10 @@ def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = pri
     say(f"  judged: {judged['pairs']} pair(s) -- {judged['same']} the same name, "
         f"{judged['different']} a spelling apart, {judged['unsure']} unsure"
         if judged["pairs"] else "  judged: nothing -- the hygiene pass has settled no pair")
+    from ml_stack.ingest.vocabulary import Vocabulary
+
+    for line in Vocabulary.read(out).lines(most=most):
+        say(f"  {line}")
     return 0
 
 

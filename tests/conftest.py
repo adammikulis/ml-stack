@@ -538,8 +538,12 @@ def _real_cache_and_state_untouched():
         changed = {k: v for k, v in (after_state or {}).items()
                    if (before_state or {}).get(k) != v}
         gone = {k: v for k, v in (before_state or {}).items() if k not in (after_state or {})}
-        mine = [k for k, v in {**changed, **gone}.items() if ours(v)]
-        if mine or (before_state is None) != (after_state is None):
+        touched = {**changed, **gone}
+        mine = [k for k, v in touched.items() if ours(v)]
+        # a file that appears or vanishes carrying only somebody else's entries is their
+        # first server starting or their last one ending, which `ours` already excuses
+        appeared = (before_state is None) != (after_state is None)
+        if mine or (appeared and not touched):
             problems.append(f"{STATE_FILE}: changed (entries {sorted(mine) or 'created/removed'})")
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),

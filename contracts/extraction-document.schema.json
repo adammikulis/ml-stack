@@ -1,5 +1,5 @@
 {
-  "$comment": "What one section of a textbook yields, read out by a model: the concepts it names, how they stand to one another, what its figures show, and the terms it defines. The document twin of extraction.schema.json -- same shape (arrays of flat objects, relations as from/rel/to) so entities.fold folds it and the graph builder takes it without a second reader. A field the section does not give is an empty string, never a guess; `rel` is a closed vocabulary because an open one drifts into fourteen spellings of `part_of` inside one book.",
+  "$comment": "What one section of a textbook yields, read out by a model: the concepts it names, how they stand to one another, what its figures show, and the terms it defines. The document twin of extraction.schema.json -- same shape (arrays of flat objects, relations as from/rel/to) so entities.fold folds it and the graph builder takes it without a second reader. A field the section does not give is an empty string, never a guess. `rel` and `kind` name a core vocabulary and accept any other name in the same snake_case shape; entities.fold_edges folds the spellings one book drifts into, and ingest.schema(core_only=True) fences both back to their core lists.",
   "type": "object",
   "properties": {
     "concepts": {
@@ -14,7 +14,10 @@
           },
           "kind": {
             "type": "string",
-            "enum": [
+            "minLength": 2,
+            "maxLength": 40,
+            "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+            "examples": [
               "concept",
               "process",
               "structure",
@@ -26,7 +29,7 @@
               "place",
               "unit"
             ],
-            "$comment": "`unit` is a unit of measurement; `law` a named law, principle or theorem; `structure` a thing with parts (an organ, an organelle, a machine); `process` something that happens over time. Anything the section names that fits none of these is a `concept`."
+            "$comment": "A snake_case kind. The ten in `examples` are the core set -- `unit` is a unit of measurement, `law` a named law, principle or theorem, `structure` a thing with parts, `process` something that happens over time -- and ingest.CORE_KINDS glosses each. A thing none of them fits takes a kind named in the same shape, and the fold marks the node `extension_kind`."
           },
           "definition": {
             "type": "string",
@@ -64,7 +67,10 @@
           },
           "rel": {
             "type": "string",
-            "enum": [
+            "minLength": 2,
+            "maxLength": 40,
+            "pattern": "^[a-z][a-z0-9]*(_[a-z0-9]+)*$",
+            "examples": [
               "is_a",
               "part_of",
               "has_part",
@@ -84,7 +90,7 @@
               "adopted_by",
               "member_of"
             ],
-            "$comment": "A closed vocabulary: eighteen verb phrases that between them say what a textbook says -- ingest.VERBS glosses each, and a test keeps the two lists equal. Nothing outside it, and nothing the section does not state."
+            "$comment": "A snake_case verb phrase. The eighteen in `examples` are the core vocabulary, shared across every book and preferred wherever one of them states what the text states; ingest.VERBS glosses each and a test keeps the two lists equal. A relation none of them states is named in the same shape, and the fold marks the edge `extension`."
           },
           "to": {
             "type": "string",

@@ -38,11 +38,12 @@ def _flipped(triple):
     return None
 
 
-def _score(server, passages, script):
+def _score(server, passages, script, shape=None):
     from ml_stack.client import Client
 
     instance, asked = a_model(server, script)
-    scored = ingest.gold_score(Client(instance.base_url), passages, ingest.schema())
+    scored = ingest.gold_score(Client(instance.base_url), passages,
+                               shape if shape is not None else ingest.schema())
     return scored, asked
 
 
@@ -57,8 +58,8 @@ def test_the_set_holds_twenty_passages_each_stating_at_least_three_triples(passa
             assert triple["subject"] and triple["predicate"] and triple["object"]
 
 
-def test_every_predicate_is_a_word_the_schema_has(passages):
-    words = ingest.vocabulary(ingest.schema())
+def test_every_predicate_is_a_core_verb(passages):
+    words = ingest.fenced(ingest.schema(core_only=True))
     assert words == set(ingest.VERBS)
     for p in passages:
         for triple in p["triples"]:
@@ -121,6 +122,29 @@ def test_a_reading_that_says_the_flippable_triples_the_other_way_round_still_sco
     assert flipped >= 20, "part_of and has_part go both ways"
     assert scored.recall == 1.0 and scored.precision == 1.0
     assert scored.misses == []
+
+
+def test_the_gate_runs_under_both_shapes_and_counts_the_verbs_the_model_coined(server,
+                                                                                 passages):
+    """The core-only run and the hybrid run are the same gate, scored the same way; the
+    hybrid one names the verbs the model reached for outside the core list."""
+    def script(prompt):
+        said = [_as_said(t) for t in _passage_for(prompt, passages)["triples"]]
+        return dict(EMPTY, relations=[{**said[0], "rel": "drains_into"}, *said[1:]])
+
+    fenced, _ = _score(server, passages, script, ingest.schema(core_only=True))
+    hybrid, _ = _score(server, passages, script)
+
+    assert fenced.wanted == hybrid.wanted == sum(len(p["triples"]) for p in passages)
+    assert fenced.matched == hybrid.matched == fenced.wanted - 20, "one verb per passage lost"
+    assert fenced.coined == hybrid.coined == {"drains_into": 20}
+    assert fenced.unsayable == [] and hybrid.unsayable == []
+    line = next(x for x in ingest.gold_lines(hybrid) if "outside the core" in x)
+    assert "drains_into x20" in line
+    assert not any("outside the core" in x for x in ingest.gold_lines(
+        _score(server, passages, lambda prompt: dict(
+            EMPTY, relations=[_as_said(t) for t in _passage_for(prompt, passages)["triples"]])
+        )[0]))
 
 
 def test_the_shipped_file_is_the_shape_read_gold_documents():

@@ -8,17 +8,40 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack.ingest.extract import VERBS
+from ml_stack.ingest.extract import CORE_KINDS, VERBS
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
 
-__all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "plurals", "write"]
+__all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "marked", "plurals",
+           "write"]
 
 
 CORE = frozenset(VERBS) | {"illustrates", "read_from"}
 """The verbs this library sets itself. An edge with any other verb carries ``extension``,
 and ``vague`` too when the extraction marked its verb as naming an association rather than
 a relation."""
+
+
+def marked(nodes: Iterable[dict[str, Any]], edges: Iterable[dict[str, Any]]) -> None:
+    """Mark, in place, every relation and kind that came from outside the core lists:
+    ``extension`` on an edge, ``extension_kind`` in a concept's attrs. Both keys are absent
+    on a core one.
+
+    Only a concept node is kinded here; a book's and a figure's kind is the graph's own.
+    """
+    for edge in edges:
+        if edge["rel"] in CORE:
+            edge.pop("extension", None)
+        else:
+            edge["extension"] = True
+    for node in nodes:
+        if not str(node.get("id") or "").startswith("concept:"):
+            continue
+        attrs = node.setdefault("attrs", {})
+        if node.get("kind") in CORE_KINDS:
+            attrs.pop("extension_kind", None)
+        else:
+            attrs["extension_kind"] = True
 
 
 def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
@@ -113,6 +136,7 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
                 edges[key]["weight"] += 1
                 if where["unit"] not in edges[key]["provenance"]:
                     edges[key]["provenance"].append(where["unit"])
+    marked(nodes.values(), edges.values())
     return nodes, edges
 
 
@@ -165,13 +189,6 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
     edges, relation_folds = fold_edges(
         edges, log=log, label="relations", provenance="provenance",
         settles="the schema's vocabulary settles which is right")
-    for edge in edges.values():
-        if edge["rel"] in CORE:
-            edge.pop("extension", None)
-            edge.pop("vague", None)
-        else:
-            edge["extension"] = True
-
     weight = {node["label"]: int(node["mentions"]) for node in nodes.values()
               if node["kind"] != "figure"}
     canonical, name_folds = fold_names(weight, plurals(weight), log=log, label="concepts",
@@ -180,6 +197,7 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
              for name, into in canonical.items() if into != name}
     if moved:
         nodes, edges = _apply(nodes, edges, moved)
+    marked(nodes.values(), edges.values())
 
     return {"nodes": sorted(nodes.values(), key=lambda n: n["id"]),
             "edges": sorted(edges.values(), key=lambda e: (e["source"], e["rel"], e["target"])),
@@ -296,6 +314,7 @@ def write(out: str | Path, graph: Mapping[str, Any], *, source: str, title: str,
         held = {str(n["id"]): n for n in store.nodes()}
         nodes = [_joined(node, held.get(str(node["id"])), source, shares, previous)
                  for node in nodes]
+        marked(nodes, edges)
         counts = store.write({"nodes": nodes, "edges": edges})
         for key, value in (docs or {}).items():
             store.put_doc(key, value)

@@ -1947,12 +1947,25 @@ renamed by whoever downloaded it says nothing.
 
 `ml-stack-ingest` is the other half. Each unit goes through `Client.extract` against
 `contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
-*in the book's words or empty*, relations from a closed vocabulary of eighteen glossed verb phrases,
-what each figure shows and which concepts it illustrates, and the key terms -- and the
-extractions are folded into one graph per source with `entities.fold`, so `has_part` and
-`haspart` are one relationship and a plural folds into the spelling the source uses more.
-Nodes and edges go into one `GraphStore`, every one of them *pointing at* the units it was
-read from -- `provenance` is unit ids and nothing else, the unit document holds the source,
+*in the book's words or empty*, relations whose verb phrase is one of eighteen glossed core
+ones or, where none of those says what the page says, one the model names itself in the same
+snake_case shape, what each figure shows and which concepts it illustrates, and the key terms
+-- and the extractions are folded into one graph per source with `entities.fold`, so
+`has_part` and `haspart` are one relationship and a plural folds into the spelling the
+source uses more. The core verbs and kinds are what every source shares; a verb from
+outside them is marked `extension` on its edge and a kind `extension_kind` on its node --
+the same mark an imported predicate carries -- so a source's own vocabulary can be read
+back. `ml-stack-ingest sources` prints it, and `--core-only` reads a source with the core
+lists and nothing else.
+
+The vocabulary grows as the store is read into. What earlier sections named for themselves
+is kept as `ingest:vocabulary`, with a use count and the unit that first said it, and the
+forty most-used are named in the next section's prompt so the reader takes a word already
+in use rather than coining a third spelling of it. It goes in the prompt and never in the
+schema, so a store that has grown a word does not change the shape earlier reads were
+answered under: the extraction cache and `--resume` are untouched by it. Nodes
+and edges go into one `GraphStore`, every one of them *pointing at* the units it was read
+from -- `provenance` is unit ids and nothing else, the unit document holds the source,
 chapter, section and pages, and points in turn at the hidden `run` node that read it: the
 model, its build and head, sampling, the schema and instructions hashes, the version, the
 host, when. `located()` and `origin()` walk the pointers back to a page and a model, so a
@@ -2066,8 +2079,7 @@ gate.
 
 `tests/fixtures/extraction-gold.json` is the shipped set: twenty invented textbook passages,
 three to six sentences each, with every relation each one states written down as a triple in
-the schema's own vocabulary -- every verb the schema has, and each verb with an inverse at
-least twice. With everything a passage states listed, precision measures the model: a
+the core vocabulary -- every core verb, and each verb with an inverse at least twice. With everything a passage states listed, precision measures the model: a
 relation it says that the passage does not is an invention. A triple matches as written or
 the other way round through `ingest.INVERSES`, so `sheath has_part gland` and `gland part_of
 sheath` are the same fact.

@@ -108,6 +108,21 @@ def test_an_inverse_pair_folds_to_the_canonical_direction(tmp_path):
     assert canonical_direction("part_of") == ("part_of", False)
 
 
+def test_a_verb_the_inverses_do_not_name_is_left_where_it_was_read(tmp_path):
+    """A book coins a verb the core list has no word for. The pass has no other direction
+    to keep it in, so it stays as read and its edge is not touched."""
+    path = _store(tmp_path, [_node("concept:spindrel", "spindrel"),
+                             _node("concept:grellin", "grellin")],
+                  [_edge("concept:spindrel", "sits_inside", "concept:grellin", 2),
+                   _edge("concept:grellin", "has_part", "concept:spindrel", 1)])
+    report = tidy(path, dry_run=False)
+    assert report.inverses_folded == 1, "has_part turned round; sits_inside had no partner"
+    _nodes, edges = _ids(path)
+    assert edges[("concept:spindrel", "sits_inside", "concept:grellin")]["weight"] == 2
+    assert ("concept:spindrel", "part_of", "concept:grellin") in edges
+    assert canonical_direction("sits_inside") == ("sits_inside", False)
+
+
 def test_the_pass_recounts_the_stats_document_after_its_writes(tmp_path):
     path = tmp_path / "g.ladybug"
     with GraphStore(path) as store:

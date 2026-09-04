@@ -58,12 +58,13 @@ Nothing here is about any one source: it reads a document, it asks a model, it w
 graph.
 
 The modules: `reads` (a unit's `Read`, and the files beside the store), `extract` (one
-section through the model), `fold` (extractions into a graph, and into the store),
-`progress` (how far a run has got), `sources` (what has been read), `migrate` (a store
-written before the rename, brought up to date), `judge` (the run record
-and the judge a fold hands close spellings to), `gold` (the extraction scored), `ask` (the
-store asked questions), `serving` (the model a run reads with), `run` (the read run) and
-`cli` (the command). Everything a caller needs is re-exported here.
+section through the model), `vocabulary` (the verbs and kinds a store is read with, core
+and extension), `fold` (extractions into a graph, and into the store), `progress` (how far
+a run has got), `sources` (what has been read), `migrate` (a store written before the
+rename, brought up to date), `judge` (the run record and the judge a fold hands close
+spellings to), `gold` (the extraction scored), `ask` (the store asked questions),
+`serving` (the model a run reads with), `run` (the read run) and `cli` (the command).
+Everything a caller needs is re-exported here.
 """
 
 from ml_stack.ingest.ask import (
@@ -94,12 +95,17 @@ from ml_stack.ingest.cli import (
     _recorded_alive as _recorded_alive,
 )
 from ml_stack.ingest.extract import (
+    CORE_KINDS as CORE_KINDS,
     IMAGES_PER_SECTION as IMAGES_PER_SECTION,
     INSTRUCTIONS as INSTRUCTIONS,
     PER_SECTION as PER_SECTION,
     VERBS as VERBS,
     WITH_IMAGES as WITH_IMAGES,
+    closed as closed,
+    core_kinds as core_kinds,
+    core_verbs as core_verbs,
     extract_unit as extract_unit,
+    instructions as instructions,
     prompt_for as prompt_for,
     schema as schema,
     _Recording as _Recording,
@@ -110,6 +116,7 @@ from ml_stack.ingest.fold import (
     fold as fold,
     fold_source as fold_source,
     fold_into as fold_into,
+    marked as marked,
     plurals as plurals,
     write as write,
     _apply as _apply,
@@ -121,11 +128,11 @@ from ml_stack.ingest.fold import (
 from ml_stack.ingest.gold import (
     INVERSES as INVERSES,
     Scored as Scored,
+    fenced as fenced,
     gold_lines as gold_lines,
     gold_score as gold_score,
     read_gold as read_gold,
     sayable as sayable,
-    vocabulary as vocabulary,
     _matches as _matches,
     _names as _names,
     _passage_unit as _passage_unit,
@@ -213,12 +220,17 @@ from ml_stack.ingest.sources import (
     _label as _label,
     _run_said as _run_said,
 )
+from ml_stack.ingest.vocabulary import (
+    Vocabulary as Vocabulary,
+)
 
-__all__ = ["CONFIDENCE", "CORE", "FOLD_EVERY", "FOLD_SECONDS", "HOME", "INSTRUCTIONS",
-           "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
-           "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "ask",
-           "asked_lines", "bring", "build", "detach", "extract_unit", "fold", "fold_into",
-           "fold_source", "gold_score", "graph_of", "import_lines", "imported", "main",
-           "migrate", "read_asked", "read_gold", "sayable", "schema", "score_asked", "show",
-           "sources", "status", "unit_of", "units_of", "vague", "verb_for", "vocabulary",
+__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS", "HOME",
+           "INSTRUCTIONS", "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
+           "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "Vocabulary",
+           "ask", "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs",
+           "detach", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
+           "gold_score", "graph_of", "import_lines", "imported", "instructions", "main",
+           "marked", "migrate", "read_asked", "read_gold", "sayable", "schema",
+           "score_asked", "show", "sources", "status", "unit_of", "units_of", "vague",
+           "verb_for",
            "write"]
