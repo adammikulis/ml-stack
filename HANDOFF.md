@@ -12,34 +12,11 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
 `src/ml_stack/data/profiles.json` (a model's measured shape, read by `ml-stack-serve up
 --profile`, `sweep`, `extract` and `converse`).
 
-## Where things stand (2026-09-03, late night)
+Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% node / 76%
+relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
+ten questions, unconfirmed.
 
-The day's record: `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `profiles.json`,
-`fit.json`, `docs/architectures/qwen4exp.md`. Settled: Flash-Next answers (80% F1 at 27 s/q,
-100 questions) and extracts (96% node / 76% relation F1); draft length 4 for both; one slot
-for extraction; `single` +8 pts on E4B at ten questions, unconfirmed.
-
-Landed tonight, thirteen branches by thirteen agents in their own worktrees (the rule held;
-the ai_ceo diff was tens of lines): the judge reads a conflict's and a suspect's passages
-through the caller's pointers (it had read `provenance` directly, so a community graph
-keeping its pointers under `messages` judged 208 verdicts blind; re-judged with passages,
-76 changed), `tidy --rejudge`, `ml-stack-store doc KEY [--drop]`; the bench's frontier,
-rates and plot compare per question, the ranking breaks ties on made-up ids, `finding()`
-reads the store, `drafts --store/--embed-url`; `GraphStore.has`/`unset_attribute`,
-`remove_edge(source, rel, target)`, `merge_nodes` raising on a missing node, each `search`
-its own statement (ladybug 0.20.2 served a cached plan's stale answers), `_unjson` refusing
-a non-object; a colour for every kind, `render(most_messages=)`, `ml-stack-graph serve`;
-orphaned servers named, adopted when the shape matches and stopped when not, `down
---orphans`, the ingest under `_stopping()` and the measuring lock, a queue step's fast
-death printed, `ml-stack-setup` checking every entry point against PATH; `ml-stack-world
-check`; ids constrained through `response_format` (llama.cpp refuses a grammar beside
-tools) with `sweep --constrain-ids`; the tool list never changing within a question (the
-final turn used to drop the searching tools, rendering a different prefix and re-reading
-the whole conversation -- the page's 49 s against the bench's 27); `Client(api="ollama")`
-over `/api/chat` with a timing a server does not report as None, `served_by()`,
-`processes()`; `ml-stack-bench standard` (lm-evaluation-harness), `animate` (manim),
-`ml-stack-do` (a served model drives the commands, asks first), `ml-stack-audit` and
-`scripts/encrypted-volume.sh`; the divider rule in CLAUDE.md. Suite on the final `main` of the night: 3,541 green (5m36s, `-n 4`).
+## The shelf (each needs the GPU; Adam's call)
 
 - [ ] **The shelf holds APBiology and Biology2e chapter 2, sound; nine books are unread.**
   `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
@@ -54,12 +31,8 @@ over `/api/chat` with a timing a server does not report as None, `served_by()`,
   book's end. Two answers before that: what a question over the shelf scores
   (`ml-stack-ingest ask --out ... --gold FILE`, no gold questions written yet), and what
   `ml-stack-ingest shelf` says once a second full book is in.
-
-- [ ] **Watch for units that still run to the ceiling.** Two causes found and fixed on the
-  first night: chapter-end question banks (`pdf.units` leaves them out) and a greedy
-  decode circling a long relations array (63 clean concepts, then 378 relations of which
-  282 were distinct, until n_predict) -- the document schema now caps every list
-  (`maxItems`), so the grammar closes the array. A unit that still fails is read once
+- [ ] **Watch for units that still run to the ceiling.** The document schema caps every
+  list (`maxItems`), so the grammar closes the array; a unit that still fails is read once
   more, then given up on; `status` counts those, its whole reply is `raw` in the reads
   file beside the store, and `ml-stack-ingest retry --out STORE` frees them after a fix.
   If one still circles under the cap, try DRY sampling for extraction and measure it on
@@ -72,19 +45,36 @@ over `/api/chat` with a timing a server does not report as None, `served_by()`,
   a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the
   instructions now say keep both only when the passages support both (2026-09-03); the
   shelf's verdicts predate that and are worth a `tidy --rejudge` over the shelf, ~an hour.
-- [ ] **A fold across books.** Every book folds alone; `tidy` joins duplicates across the
-  shelf after the fact, but nothing yet says "this concept in Biology2e is that one in
-  APBiology" with a weight a person can read. `Shelf.graph()` per book plus `tidy`'s merge
-  log is the material; a `shelf` view (books, shared concepts, the edges between books'
-  vocabularies) is the command.
+  The same pass writes the shelf's first `tidy:merges` log, which is what `ml-stack-ingest
+  shelf`'s "between books" section reads.
+- [ ] **Run the shipped extraction gate on a model** (`ml-stack-ingest --gold
+  tests/fixtures/extraction-gold.json --model <flash-next> --fail-under 0.7`, ~10 min):
+  twenty invented passages with every triple written down, so the number is precision as
+  well as recall. Then E4B and E2B the same way, and the numbers into
+  `docs/model-ranking.md`.
+
+## Measurements queued (each needs the GPU; sample first)
+
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
-  --profile --plain-only --also single --yes`, ~10 min): the one asking-way change tonight
-  that moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
-- [ ] **The gold set is nine triples**, two of them (`center_of`, `independent_from`) outside
-  the vocabulary on purpose, and precision against three triples a passage is not a model
-  score (the model states true things the gold omits). Write twenty invented passages with
-  everything they state written down (`tests/known-fixtures.txt` names), so the gate
-  measures precision too; `ingest.INVERSES` covers the flipped ones.
+  --profile --plain-only --also single --yes`, ~10 min): the one asking-way change that
+  moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
+- [ ] **Constrained ids on E2B and E4B.** `sweep --serve <gemma> --profile --constrain-ids
+  --sample 20` against the kept plain runs: precision up, recall held. A profile records
+  `constrain_ids` and the answer cache keys on it, so `report --profile` can set it.
+- [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
+- [ ] **The stable prefix: reading fell, calls rose; measure again on a quiet machine.**
+  Nine sampled questions on the page's Flash-Next against `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
+  (kept as `flashprefix-plain`): the last call of a question reads ~50 tokens with the whole
+  prefix cached where it read 3193 with none; prefix hits 100% from ~80%; uncached read
+  2.1k a question from 5.2k; F1 81% against 85% inside the ±19 band. But calls went 6.2 to
+  7.7 a question -- 22 `show` calls over nine questions where one is the design -- and
+  written tokens 5.1k to 7.8k, so the wall clock (27.7 against 25.6 s/q) did not move; three
+  agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
+  `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
+  offers every tool), then a quiet `--sample 20` of both.
+- [ ] **The 27B is unranked** -- a two-question smoke is all the store holds, and a record is
+  never set from fewer than 20. Its twenty questions belong on the 3090 Ti through the
+  fleet (below), not on this machine (Adam: "don't test the smaller models on this device").
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
   (traces are on by default at ≤20 questions; the hundred-question runs before that carry
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
@@ -93,21 +83,6 @@ over `/api/chat` with a timing a server does not report as None, `served_by()`,
 - [ ] **Watch ggml-org/llama.cpp#27836.** When the qwen4exp MTP graph merges, `ml-stack-serve
   build` and `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance
   on an M3 Max against the fork's 73–79%. Then the profile's build field can go.
-- [ ] **The 27B is unranked** -- a two-question smoke is all the store holds, and a record is
-  never set from fewer than 20. Its twenty questions belong on the 3090 Ti through the
-  fleet (below), not on this machine (Adam: "don't test the smaller models on this device").
-
-## Improvements queued 2026-09-03 afternoon (Adam: "knock them out")
-
-Extraction quality
-Store integrity
-- [ ] **Two ladybug reports to file upstream, with Adam's go-ahead.** 0.18.x: a single
-  `DETACH DELETE` in a ~10k-node store blanks other nodes' string columns (reproduction:
-  `tests/test_graph_store_scale.py`). 0.20.2: the cached-physical-plan fast path
-  re-executes a parameterized MERGE against a table rewritten since and segfaults, and
-  the text index returns a node once per version written (reproduction: the store's
-  `_written` docstring; two lines). ml-stack is on 0.20.2 with the per-write guard and
-  the pin `>=0.19,<0.21`; the probes gate any bump.
 
 ## Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
@@ -141,115 +116,55 @@ time with the page's server down for the Ollama half.
   Memory is sampled over the serving process tree every second (Ollama: the listener's
   children hold the weights) and kept as `resident_peak`. `speed --serve` defaults
   `--parallel` to the most streams asked (4) and the per-seat context to the largest prompt
-  plus the generation, so set `--context` for the 4-stream cells. Estimate before each:
-  ~45 min the hundred-question graph bench, ~10 min speed, ~40 min the standard sets.
-- [ ] **`ttft_s` is the server's prompt clock**, never a streamed first token: `gather_stream`
-  drops `timings` and the Ollama client raises on `on_delta`. A streamed measurement needs
-  the client to keep `timings` on a streamed reply (`client/chat.py`); the speed table says
-  `ttft_from: prompt_ms` until then.
-- [ ] **`ml-stack-do`'s `bench_standard` example does not match `standard`'s parser**
-  (`--url`/`--model` are required); routing works, the example in `do.py` does not.
+  plus the generation, so set `--context` for the 4-stream cells. `ttft_s` is a streamed
+  first token on llama.cpp (`ttft_from: stream`) and the server's prompt clock on Ollama
+  (`prompt_ms`, marked `*`). Estimate before each: ~45 min the hundred-question graph
+  bench, ~10 min speed, ~40 min the standard sets.
 - [ ] **One measured call on Ollama first.** Whether `prompt_eval_count` includes a cached
   prefix is not in its docs; whether `think: false` holds for this model; what the runner's
   process is called on 0.33.3 (found from source, not seen). Then the Ollama half.
 
-## Measure what landed tonight (each needs the GPU; sample first)
+## Driving what is built (each needs the served model; minutes)
 
-- [ ] **The stable prefix: reading fell, calls rose; measure again on a quiet machine.**
-  Nine sampled questions on the page's Flash-Next against `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
-  (kept as `flashprefix-plain`): the last call of a question reads ~50 tokens with the whole
-  prefix cached where it read 3193 with none; prefix hits 100% from ~80%; uncached read
-  2.1k a question from 5.2k; F1 81% against 85% inside the ±19 band. But calls went 6.2 to
-  7.7 a question -- 22 `show` calls over nine questions where one is the design -- and
-  written tokens 5.1k to 7.8k, so the wall clock (27.7 against 25.6 s/q) did not move; three
-  agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
-  `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
-  offers every tool), then a quiet `--sample 20` of both.
-- [ ] **Constrained ids on E2B and E4B.** `sweep --serve <gemma> --profile --constrain-ids
-  --sample 20` against the kept plain runs: precision up, recall held. Then `Profile.WAYS`
-  needs `constrain_ids` so a profile can record it, and `graph.cache`'s fingerprint should
-  include it (a cached answer is returned regardless of the flag today).
-- [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
-- [ ] **One seat by default, everywhere one conversation is served.** Adam, 2026-09-03:
-  "don't default to two slots. default to the least needed for the situation. i'd rather
-  have 1 large kv, especially for a coding agent." Done for `ml-stack-do`, `ml-stack-claude`
-  and the harness (`Profile.alone()`: one seat holding the whole measured cache; a server
-  already up with the same weights is used as it stands, `manager.already_up`). Left: a
-  profile's `parallel` still reads as a serving recommendation in `ml-stack-serve up
-  --profile` and `serve profile`'s "serve with --parallel 2" line -- say "measured at" there
-  and serve one seat unless `--parallel` is given; and the Slack page's own `Config` keeps
-  two seats on purpose (a run plus a reader), which is Adam's to keep or drop.
-- [ ] **`ml-stack-do` against a served model.** Driven once bare (2026-09-03): with no
-  `--model` it chose Flash-Next from the profiles, used the page's server as it stood,
-  called `serve_status` and answered. The acceptance prompt below is still untried. `ml-stack-do "benchmark qwen3.8-flash-next
-  with llama.cpp (both with draft head and no draft head) and with ollama, make some
-  animations"`: it must look both backends up, ask to confirm the files, ask the bench
-  kind and the animation, plan, then act. Tested on a scripted model only. `bench_standard/speed/compare/animate` tools follow the CLI and error until
-  the subcommands land.
+- [ ] **`ml-stack-do` against a served model, the acceptance prompt.** Driven once bare
+  (2026-09-03): with no `--model` it chose Flash-Next from the profiles, used the page's
+  server as it stood, called `serve_status` and answered. Untried: `ml-stack-do "benchmark
+  qwen3.8-flash-next with llama.cpp (both with draft head and no draft head) and with
+  ollama, make some animations"`: it must look both backends up, ask to confirm the files,
+  ask the bench kind and the animation, plan, then act. Tested on a scripted model only.
 - [ ] **First real `ml-stack-claude` and `ml-stack-agent`.** Built and tested against fakes
   only. `ml-stack-claude <flash-next> -- --print "say hello"`; one `ml-stack-agent "read
   README.md and say what this is" --model <flash-next> --allow Read`; watch the served
-  alias, the stream-idle watchdog (`CLAUDE_STREAM_IDLE_TIMEOUT_MS`), `Usage` against
-  `/metrics`.
+  alias the model variables carry, the stream-idle watchdog (five minutes of silence
+  aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the
+  server's own `/metrics`; then measure a small task set the bench's way so the local
+  harness has a number beside the page's.
+- [ ] **The Slack page's own `Config` keeps two seats** (a run plus a reader) while every
+  command here serves one seat by default. Adam's to keep or drop, in `~/ai_ceo`.
 
-## Found tonight, not fixed
+## Store integrity
 
-- [ ] **`tests/test_harness.py` calls `asyncio.run` bare** (`harness.py:117`) and fails under
-  `-n 4` ordering when a neighbour leaves a loop running; three agents hit it. Wrap it the
-  way `conftest.on_a_fresh_loop`/`test_mcp.py` do.
-- [ ] **`tests/test_ingest.py::test_a_book_is_read_section_by_section_into_a_store`** asserts
-  `'1.2' not in` output that contained `unit 2 in 1.2s` under load: the timing string
-  collides with the section number; assert on the structured line instead.
-- [ ] **`merge_state` still drops a dead-owner record the next time any process saves**, so a
-  second orphan's record can vanish when a lease adopts or stops a first one (`down
-  --orphans` reads everything up front, so its sweep is unaffected). Changing it breaks
-  `tests/test_serve.py::TestMergeState`, which wants rewriting with it.
-- [ ] **`_unjson` returns `{}` silently for invalid JSON** in a column (a valid non-object
-  now raises); decide whether invalid should raise too.
-- [ ] **`simulate`'s `decision` closer never names the decider**; `world check` counts a
-  speaker in the closing thread as named there, which is what lets a made world pass.
-  A closer that names `{first}` would let that rule go.
-- [ ] **`ScriptedModel`'s docstring** in `testing/fakes.py` still says "the last turn taking
-  the searching tools away"; the behaviour is fine, the sentence is stale.
-- [ ] **A `stats` document written before a tidy pass is what the export reads back** (the
-  Slack pipeline printed 475 edges after a pass that left 598). `GraphStore.write` keeps the
-  caller's `stats` verbatim and the export at `store.py:~565` returns it; recount on export,
-  or have `graph.tidy` rewrite `stats` after it drops. `GraphStore` has no cheap count query.
+- [ ] **Two ladybug reports to file upstream, with Adam's go-ahead.** 0.18.x: a single
+  `DETACH DELETE` in a ~10k-node store blanks other nodes' string columns (reproduction:
+  `tests/test_graph_store_scale.py`). 0.20.2: the cached-physical-plan fast path
+  re-executes a parameterized MERGE against a table rewritten since and segfaults, and
+  the text index returns a node once per version written (reproduction: the store's
+  `_written` docstring; two lines). ml-stack is on 0.20.2 with the per-write guard and
+  the pin `>=0.19,<0.21`; the probes gate any bump.
 
-## Library
-
-- [ ] **`ml-stack-models layout MODEL`**: the attention layout off the GGUF header in one
-  paragraph -- which layers hold a cache, which are recurrent, sliding (window, pattern,
-  `key_length_swa`), shared, plus compress ratios, indexers, experts, and any lookup-table
-  tensor (`fit --tensors` has the tensor side; `preflight._recurrent_layers` /
-  `_sliding_layers` the layer side). It is how a `docs/architectures/` note starts.
 ## Measuring across the fleet
 
 - [ ] **Run it for real across two machines.** Everything is tested against fakes and
   loopback; nothing has crossed a real network or a real Windows box. One visit:
   `irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 |
-  iex` (the app) or the `--headless` mode, then from here `ml-stack-fleet status` and a
-  `sweep --fleet --serve gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the
-  daemon's log and `ml-stack-doctor` are the first two places to look. After that the
-  Windows box follows releases or main on its own (`fleet status` shows COMMIT/UPDATES).
-- [ ] **Place users across the fleet by what fits.** Adam: "if we have more users we can
-  sacrifice quality and use a smaller model with more simultaneous kv caches ... some users
-  will get the bigger model and some smaller". Inputs exist: `fit` (per-token and
-  per-sequence bytes, measured), `profiles.json` (each model's best shape and score),
-  discovery (each peer's room). Build `ml-stack-fleet plan --users N --context C`: for every
-  peer the best-ranked model whose loaded size plus N_i caches fit, N_i summed to N, best
-  models to the most users; `--apply` serves it through each daemon. Then a router that
-  sends a new session to a free slot on the best model. Tests on fakes.
-- [ ] **`ml-stack-serve status --every` and `ml-stack-setup` should say which model cache
-  is in use and its size** (the installer's `--system` mode can point a service at a user's
-  cache; nothing reports it yet).
-- [ ] **First real run of `ml-stack-claude` and `ml-stack-agent`.** Built and tested
-  against fakes only (Adam had the GPU). Run `ml-stack-claude <flash-next> -- --print
-  "say hello"` and one `ml-stack-agent "read README.md and say what this is" --model
-  <flash-next> --allow Read`; watch the served alias the model variables carry, the
-  stream-idle watchdog (five minutes of silence aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`),
-  and what `Usage` reports against the server's own `/metrics`; then measure a small task
-  set the bench's way so the local harness has a number beside the page's.
+  iex` (the app) or the `--headless` mode, then from here `ml-stack-fleet status`, a
+  `ml-stack-fleet plan --users 3 --context 16384 --apply`, and a `sweep --fleet --serve
+  gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
+  `ml-stack-doctor` are the first two places to look. After that the Windows box follows
+  releases or main on its own (`fleet status` shows COMMIT/UPDATES).
+- [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
+  nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
+  proxies by model name on one machine; the router picks the machine.
 
 ## Verifying
 
