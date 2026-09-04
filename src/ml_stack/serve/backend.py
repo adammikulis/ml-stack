@@ -358,8 +358,7 @@ class LlamaServerBackend(ServerBackend):
         elif spec.n_gpu_layers is not None:
             argv += ["-ngl", str(spec.n_gpu_layers)]
 
-        if spec.parallel > 1:
-            argv += ["-np", str(spec.parallel)]
+        argv += ["-np", str(max(1, spec.parallel))]
         if spec.embedding:
             argv += ["--embeddings", "--pooling", "mean"]
         if spec.mmproj:

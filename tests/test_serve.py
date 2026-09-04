@@ -795,3 +795,16 @@ def test_already_up_names_the_recorded_server_that_holds_the_same_weights(tmp_pa
     assert already_up("quince-2b.gguf", 8081, state_file=state) is None
     monkeypatch.setattr("ml_stack.serve.manager.pid_exists", lambda pid: False)
     assert already_up("quince-2b.gguf", 8080, state_file=state) is None
+
+
+def test_one_seat_says_so_rather_than_leaving_it_to_the_server():
+    """llama-server's own --parallel default is -1, auto, which picked 4 on a 128 GB Mac."""
+    from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+
+    argv = LlamaServerBackend(binary="llama-server").command(
+        ServerSpec(model="model.gguf", port=8080, context=32768))
+    assert "-np" in argv and argv[argv.index("-np") + 1] == "1"
+
+    four = LlamaServerBackend(binary="llama-server").command(
+        ServerSpec(model="model.gguf", port=8080, context=32768, parallel=4))
+    assert four[four.index("-np") + 1] == "4"

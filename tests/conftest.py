@@ -229,6 +229,7 @@ LLAMA_SERVER_HELP = (
     "       --host HOST                      ip address to listen on\n"
     "       --port PORT                      port to listen on\n"
     "       --jinja                          use jinja template for chat\n"
+    "-np,   --parallel N                     number of server slots\n"
 )
 
 

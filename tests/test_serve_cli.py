@@ -568,6 +568,7 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
                       "       --host HOST                      ip address to listen on\n"
                       "       --port PORT                      port to listen on\n"
                       "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
+                      "-np,   --parallel N                     number of server slots\n"
                       "       --jinja                          use jinja template\n"
                       "--spec-draft-n-max N                    tokens to draft (default: 3)\n"
                       "--draft, --draft-max N                  the argument has been removed\n"
