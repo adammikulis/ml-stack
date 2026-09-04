@@ -450,6 +450,22 @@ def _no_real_ports(request):
         pytest.fail("a real port was touched:\n" + "\n".join(violations), pytrace=False)
 
 
+def truncated_logs(before: dict[str, tuple[int, int]],
+                   after: dict[str, tuple[int, int]]) -> list[str]:
+    """The log files the same server wrote and something then shortened.
+
+    Each value is ``(inode, size)``. A restart gives the name a new inode and a fresh
+    file, which is a server this machine started, not a test; the same inode getting
+    smaller is a truncation, which only a test does.
+    """
+    out = []
+    for name, (was_ino, was_size) in before.items():
+        now = after.get(name)
+        if now is not None and now[0] == was_ino and now[1] < was_size:
+            out.append(name)
+    return sorted(out)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _real_cache_and_state_untouched():
     """Fails the run if a test wrote into the real ml_stack cache or server state.
@@ -459,16 +475,26 @@ def _real_cache_and_state_untouched():
     before any per-test fixture repoints them -- and compares again once every test in
     the session has run. Safe when neither path exists.
 
-    ``LOG_DIR`` holds one growing file per server this machine is actually running, so
-    only a *new* filename appearing counts -- an existing one's size is a live server
-    writing, not a test. ``STATE_FILE`` is a single record touched only by a lease or a
-    release, so its mtime and size are compared directly.
+    ``LOG_DIR`` holds one append-only file per server this machine is running, so a file
+    that got *shorter* is a truncation and nothing but a test does that; a file that grew
+    is a live server, and a new name is any server this machine started while the suite
+    ran. ``STATE_FILE`` is a single record touched only by a lease or a release, so its
+    mtime and size are compared directly.
     """
     from ml_stack.serve.backend import LOG_DIR
     from ml_stack.serve.manager import STATE_FILE
 
-    def log_names() -> set[str]:
-        return {p.name for p in LOG_DIR.iterdir()} if LOG_DIR.is_dir() else set()
+    def log_sizes() -> dict[str, tuple[int, int]]:
+        if not LOG_DIR.is_dir():
+            return {}
+        out = {}
+        for one in LOG_DIR.iterdir():
+            try:
+                stat = one.stat()
+            except OSError:
+                continue
+            out[one.name] = (stat.st_ino, stat.st_size)
+        return out
 
     def state_entries() -> dict | None:
         """The state file's entries by port, or None when there is no file. A file that
@@ -499,14 +525,14 @@ def _real_cache_and_state_untouched():
         except Exception:  # noqa: BLE001 - no psutil: judge by the pid alone
             return owner == os.getpid()
 
-    before_logs, before_state = log_names(), state_entries()
+    before_logs, before_state = log_sizes(), state_entries()
     yield
-    after_logs, after_state = log_names(), state_entries()
+    after_logs, after_state = log_sizes(), state_entries()
 
     problems = []
-    new_logs = after_logs - before_logs
-    if new_logs:
-        problems.append(f"{LOG_DIR}: new file(s) {sorted(new_logs)}")
+    cut = truncated_logs(before_logs, after_logs)
+    if cut:
+        problems.append(f"{LOG_DIR}: truncated {cut}")
     if after_state != before_state:
         changed = {k: v for k, v in (after_state or {}).items()
                    if (before_state or {}).get(k) != v}

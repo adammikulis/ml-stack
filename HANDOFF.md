@@ -56,6 +56,12 @@ ten questions, unconfirmed.
 
 ## Measurements queued (each needs the GPU; sample first)
 
+Adam, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
+go (with shared MTP) always." So ranking a second model is not worth GPU: `gpt-oss-20b`
+(a profile, no fit record), `Qwen3.8-27B` (a fit record, no profile) and Flash-Next
+`IQ4_XS` (a fit record, no profile) stay half-measured on purpose, and `ml-stack-fleet
+plan` names them as unplaceable rather than guessing.
+
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change that
   moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
@@ -86,9 +92,6 @@ ten questions, unconfirmed.
   agents' suites were running, so the wall clock is unreliable either way (Adam). Next:
   `show --trace flashprefix-plain`, find what invites the second `show` (the show nudge now
   offers every tool), then a quiet `--sample 20` of both.
-- [ ] **The 27B is unranked** -- a two-question smoke is all the store holds, and a record is
-  never set from fewer than 20. Its twenty questions belong on the 3090 Ti through the
-  fleet (below), not on this machine (Adam: "don't test the smaller models on this device").
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
   (traces are on by default at ≤20 questions; the hundred-question runs before that carry
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
@@ -187,12 +190,6 @@ time with the page's server down for the Ollama half.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
-- [ ] **`fleet plan` gives a peer the best model at one seat even when a smaller model
-  there would seat more users.** Best models to the most users is what it does; whether a
-  peer that can hold the best model for one person should hold a smaller one for three is
-  Adam's call (quality against coverage), and a `--prefer seats|quality` flag is the shape.
-  Two records are half-measured: `gpt-oss-20b-MXFP4.gguf` has a profile and no fit record,
-  `Qwen3.8-27B` a fit record and no profile, so neither is placed.
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
