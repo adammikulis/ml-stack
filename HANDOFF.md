@@ -12,21 +12,34 @@ Slack-specific. What was measured on 2026-09-02 and what it settled is
 `src/ml_stack/data/profiles.json` (a model's measured shape, read by `ml-stack-serve up
 --profile`, `sweep`, `extract` and `converse`).
 
-## Where things stand (2026-09-03, night)
+## Where things stand (2026-09-03, late night)
 
 The day's record: `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `profiles.json`,
 `fit.json`, `docs/architectures/qwen4exp.md`. Settled: Flash-Next answers (80% F1 at 27 s/q,
-100 questions) and extracts (96% node / 76% relation F1); draft length 4 for both, on
-textbook units too (97% acceptance, no faster at 8 or 12); one slot for extraction (two
-workers measured slower in aggregate); `single` +8 pts on E4B at ten questions, unconfirmed.
-Landed 2026-09-03: the ingest as a package with fold-as-you-go, provenance by pointer, a
-hidden run node, `show`/`status`/`shelf`/`ask`; `graph.tidy` (the separate hygiene pass,
-automated by a model judge that re-reads the source; `absorb` on the way in, wired into
-the ingest, the Slack pipeline and the simulator); the lifecycle closed (a backend
-launches nothing without a manager's `Lease`, a port is never reclaimed from a server we
-did not record, one detached run at a time, `jobs` with `wait`); one `Run` across bench,
-page, seat and ingest; the report's Ingest section; the isolation guards; ladybug 0.20.2
-with a write guard; `ml-stack-claude` and `ml_stack.harness`. Suite: 3,226 green.
+100 questions) and extracts (96% node / 76% relation F1); draft length 4 for both; one slot
+for extraction; `single` +8 pts on E4B at ten questions, unconfirmed.
+
+Landed tonight, thirteen branches by thirteen agents in their own worktrees (the rule held;
+the ai_ceo diff was tens of lines): the judge reads a conflict's and a suspect's passages
+through the caller's pointers (it had read `provenance` directly, so a community graph
+keeping its pointers under `messages` judged 208 verdicts blind; re-judged with passages,
+76 changed), `tidy --rejudge`, `ml-stack-store doc KEY [--drop]`; the bench's frontier,
+rates and plot compare per question, the ranking breaks ties on made-up ids, `finding()`
+reads the store, `drafts --store/--embed-url`; `GraphStore.has`/`unset_attribute`,
+`remove_edge(source, rel, target)`, `merge_nodes` raising on a missing node, each `search`
+its own statement (ladybug 0.20.2 served a cached plan's stale answers), `_unjson` refusing
+a non-object; a colour for every kind, `render(most_messages=)`, `ml-stack-graph serve`;
+orphaned servers named, adopted when the shape matches and stopped when not, `down
+--orphans`, the ingest under `_stopping()` and the measuring lock, a queue step's fast
+death printed, `ml-stack-setup` checking every entry point against PATH; `ml-stack-world
+check`; ids constrained through `response_format` (llama.cpp refuses a grammar beside
+tools) with `sweep --constrain-ids`; the tool list never changing within a question (the
+final turn used to drop the searching tools, rendering a different prefix and re-reading
+the whole conversation -- the page's 49 s against the bench's 27); `Client(api="ollama")`
+over `/api/chat` with a timing a server does not report as None, `served_by()`,
+`processes()`; `ml-stack-bench standard` (lm-evaluation-harness), `animate` (manim),
+`ml-stack-do` (a served model drives the commands, asks first), `ml-stack-audit` and
+`scripts/encrypted-volume.sh`; the divider rule in CLAUDE.md. Suite: ~3,420 green.
 
 - [ ] **The shelf holds APBiology and Biology2e chapter 2, sound; nine books are unread.**
   `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
@@ -56,9 +69,9 @@ with a write guard; `ml-stack-claude` and `ml_stack.harness`. Suite: 3,226 green
   scorer) and run them through Flash-Next in its profile; until that number exists, "a
   usable bio graph" means queryable and sound, not scored. The judge's conflict verdicts
   are worth reading first: it kept both edges in cases where its own reason said one was
-  a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the schema
-  offers keep both / keep one / unsure, and the instructions should say keep both only
-  when both are true.
+  a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the
+  instructions now say keep both only when the passages support both (2026-09-03); the
+  shelf's verdicts predate that and are worth a `tidy --rejudge` over the shelf, ~an hour.
 - [ ] **A fold across books.** Every book folds alone; `tidy` joins duplicates across the
   shelf after the fact, but nothing yet says "this concept in Biology2e is that one in
   APBiology" with a weight a person can read. `Shelf.graph()` per book plus `tidy`'s merge
@@ -67,19 +80,11 @@ with a write guard; `ml-stack-claude` and `ml_stack.harness`. Suite: 3,226 green
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change tonight
   that moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
-- [ ] **`ml-stack-ingest` serves on 8099 by default, the port the bench leaves its last
-  model on**; one shape per port refused it twice tonight, silently inside a queue. Either
-  the ingest takes the bench's lock and port discipline (`bench.serve` has both) or its
-  default moves; and a queue step that dies in under a second should print why (`step`'s
-  `tail` swallowed it).
 - [ ] **The gold set is nine triples**, two of them (`center_of`, `independent_from`) outside
   the vocabulary on purpose, and precision against three triples a passage is not a model
   score (the model states true things the gold omits). Write twenty invented passages with
   everything they state written down (`tests/known-fixtures.txt` names), so the gate
   measures precision too; `ingest.INVERSES` covers the flipped ones.
-- [ ] **A new entry point is invisible until `pip install -e . && pyenv rehash`**: every
-  textbook step in two queues died in 0 s on `command not found`. `ml-stack-setup` (or the
-  updater's dev track) should compare `[project.scripts]` with what is on PATH and say so.
 - [ ] **The fine-tuned tool caller.** `ml-stack-train-tools from-bench` over the traced runs
   (traces are on by default at ≤20 questions; the hundred-question runs before that carry
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
@@ -96,14 +101,6 @@ with a write guard; `ml-stack-claude` and `ml_stack.harness`. Suite: 3,226 green
 
 Extraction quality
 Store integrity
-- [ ] **A recorded server whose owner has gone should be stopped by the lifecycle, not by
-  hand.** Twice on 2026-09-03 `ml-stack-serve status` showed Flash-Next on 8080 with "the
-  process that started it (pid N) has gone" -- a judged pass's `_serving` lease whose
-  owner ended without releasing (a monitor's shell killed, once; the other unexplained),
-  ~90G of memory held until a person ran `down`. The record makes it ours, so: `status`
-  says "orphaned" and the next `lease` on that port (or `ml-stack-serve down --orphans`)
-  stops it; and find why `_serving`'s exit did not release -- a `Stopped`/SIGTERM path
-  that skips the context manager's exit, most likely.
 - [ ] **Two ladybug reports to file upstream, with Adam's go-ahead.** 0.18.x: a single
   `DETACH DELETE` in a ~10k-node store blanks other nodes' string columns (reproduction:
   `tests/test_graph_store_scale.py`). 0.20.2: the cached-physical-plan fast path
@@ -112,6 +109,83 @@ Store integrity
   `_written` docstring; two lines). ml-stack is on 0.20.2 with the per-write guard and
   the pin `>=0.19,<0.21`; the probes gate any bump.
 
+## Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
+
+Adam, 2026-09-03: which is better, faster, or both; a LinkedIn graphic; "if ollama can't
+keep up due to lack of drafting head, points in llama.cpp's favor"; "make sure we're
+measuring actual max mem usage during the test". The machine has 128 GB; the GGUF serves at
+~90 GB and the Ollama model is 104 GB on disk (`qwen3.8-flash-next:125b-mlx`, 1658
+safetensors tensors, `file_type nvfp4`, default context 262144), so the halves run one at a
+time with the page's server down for the Ollama half.
+
+- [ ] **Run the three configurations and draw them.** Labels `flash-plain`,
+  `flash-nodraft-plain`, `flash-ollama-plain`. Per configuration: `ml-stack-bench sweep`
+  (the graph bench, sampled first, then the hundred), `ml-stack-bench speed` (prefill and
+  decode tokens/s and first token at 512/4k/16k prompt tokens, 1/2/4 streams), `ml-stack-bench
+  standard` (gsm8k, mmlu_pro, ifeval, humaneval through lm-eval, `--limit 200`, thinking
+  off), memory sampled over the serving process tree every second (Ollama: the listener's
+  children hold the weights). Then `compare --labels ... --standard *.json --export
+  comparison.json` and `animate comparison.json --out FILE.mp4 --png FILE.png`. Estimate
+  before each: ~40 min standard sets per configuration, ~45 min the hundred-question graph
+  bench, ~10 min speed. The bench wiring (`--on ollama://...`, `speed`, `compare`,
+  `--no-draft`, `served_by` on every run, None for unmeasured) is the `bench-backends`
+  branch, landing as this is written; `standard` and `animate` are subcommands once it does.
+- [ ] **One measured call on Ollama first.** Whether `prompt_eval_count` includes a cached
+  prefix is not in its docs; whether `think: false` holds for this model; what the runner's
+  process is called on 0.33.3 (found from source, not seen). Then the Ollama half.
+- [ ] **Ollama streaming** (`on_delta`) raises `NotImplementedError`; first-token time on
+  that side is `prompt_ms` until it exists, and the speed table says so.
+
+## Measure what landed tonight (each needs the GPU; sample first)
+
+- [ ] **The stable prefix.** `sweep --on flashprefix=http://127.0.0.1:8080 --plain-only
+  --batch --kinds --summary --sample 10` was running against the page's server as this was
+  written; read `show --last 2 --rates`: `cached` against `read` and s/question against
+  `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`. Two costs to watch: a model that searches after
+  "the searching is over" spends one refused call; the show nudge now offers every tool.
+- [ ] **Constrained ids on E2B and E4B.** `sweep --serve <gemma> --profile --constrain-ids
+  --sample 20` against the kept plain runs: precision up, recall held. Then `Profile.WAYS`
+  needs `constrain_ids` so a profile can record it, and `graph.cache`'s fingerprint should
+  include it (a cached answer is returned regardless of the flag today).
+- [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
+- [ ] **`ml-stack-do` against a served model.** `ml-stack-do "benchmark qwen3.8-flash-next
+  with llama.cpp (both with draft head and no draft head) and with ollama, make some
+  animations" --url http://127.0.0.1:8080`: it must look both backends up, ask to confirm
+  the files, ask the bench kind and the animation, plan, then act. Tested on a scripted
+  model only. `bench_standard/speed/compare/animate` tools follow the CLI and error until
+  the subcommands land.
+- [ ] **First real `ml-stack-claude` and `ml-stack-agent`.** Built and tested against fakes
+  only. `ml-stack-claude <flash-next> -- --print "say hello"`; one `ml-stack-agent "read
+  README.md and say what this is" --model <flash-next> --allow Read`; watch the served
+  alias, the stream-idle watchdog (`CLAUDE_STREAM_IDLE_TIMEOUT_MS`), `Usage` against
+  `/metrics`.
+
+## Found tonight, not fixed
+
+- [ ] **`tests/test_harness.py` calls `asyncio.run` bare** (`harness.py:117`) and fails under
+  `-n 4` ordering when a neighbour leaves a loop running; three agents hit it. Wrap it the
+  way `conftest.on_a_fresh_loop`/`test_mcp.py` do.
+- [ ] **`tests/test_ingest.py::test_a_book_is_read_section_by_section_into_a_store`** asserts
+  `'1.2' not in` output that contained `unit 2 in 1.2s` under load: the timing string
+  collides with the section number; assert on the structured line instead.
+- [ ] **`merge_state` still drops a dead-owner record the next time any process saves**, so a
+  second orphan's record can vanish when a lease adopts or stops a first one (`down
+  --orphans` reads everything up front, so its sweep is unaffected). Changing it breaks
+  `tests/test_serve.py::TestMergeState`, which wants rewriting with it.
+- [ ] **`_unjson` returns `{}` silently for invalid JSON** in a column (a valid non-object
+  now raises); decide whether invalid should raise too.
+- [ ] **`simulate`'s `decision` closer never names the decider**; `world check` counts a
+  speaker in the closing thread as named there, which is what lets a made world pass.
+  A closer that names `{first}` would let that rule go.
+- [ ] **`ScriptedModel`'s docstring** in `testing/fakes.py` still says "the last turn taking
+  the searching tools away"; the behaviour is fine, the sentence is stale.
+- [ ] **A `stats` document written before a tidy pass** is what a caller's export reads back
+  (the Slack pipeline printed 475 edges after a pass that left 598): whichever side writes
+  it, it should be recounted after the pass. `GraphStore` has no cheap count query today.
+- [ ] **`ml-stack <command>` dispatching to `ml-stack-<command>`** (Adam: "isn't it more
+  common for a program to be `ml-stack do`?") is the `umbrella` branch, landing as this
+  is written; when it has, this line goes.
+
 ## Library
 
 - [ ] **`ml-stack-models layout MODEL`**: the attention layout off the GGUF header in one
@@ -119,8 +193,6 @@ Store integrity
   `key_length_swa`), shared, plus compress ratios, indexers, experts, and any lookup-table
   tensor (`fit --tensors` has the tensor side; `preflight._recurrent_layers` /
   `_sliding_layers` the layer side). It is how a `docs/architectures/` note starts.
-- [ ] **`only_one(wait=False)` truncates the holder's pid when refused** (found 2026-09-02):
-  the message read `pid 5` for pid 55017. Read the whole lock file before reporting it.
 ## Measuring across the fleet
 
 - [ ] **Run it for real across two machines.** Everything is tested against fakes and
