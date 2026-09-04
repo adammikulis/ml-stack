@@ -646,6 +646,16 @@ def test_material_no_verdict_covers_is_left_unjudged(tmp_path):
     assert report.flagged == 1 and "flagged 1 label(s)" in report.said()
 
 
+def test_a_verb_pair_no_verdict_covers_is_counted_and_left(tmp_path):
+    path = _two_verbs(tmp_path)
+
+    report = tidy(path, dry_run=False)
+
+    assert report.unjudged == 1 and report.conflict_edges_dropped == 0
+    assert len(_ids(path)[1]) == 2, "both verbs kept until someone settles them"
+    assert "1 verb pair(s) no verdict covers" in report.said()
+
+
 def test_a_verdict_is_found_again_when_the_rebuild_gave_the_node_another_id(tmp_path):
     path = _store(tmp_path, [
         _node("concept:number", "42"),

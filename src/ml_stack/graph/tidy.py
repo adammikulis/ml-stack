@@ -430,6 +430,7 @@ class Report:
     rejudged: int = 0
     replayed: int = 0      # verdicts the store already held, applied without asking again
     stale: int = 0         # verdicts naming a node the store no longer holds
+    unjudged: int = 0      # verb pairs met with no verdict and no judge to ask
     conflicts: list[tuple[str, str, str, str]] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
     self_loops: list[tuple[str, str]] = field(default_factory=list)
@@ -478,6 +479,8 @@ class Report:
                    if self.replayed else "")
                 + (f"; {self.stale} held verdict(s) name a node the store no longer has"
                    if self.stale else "")
+                + (f"; {self.unjudged} verb pair(s) no verdict covers"
+                   if self.unjudged else "")
                 + (f"; asked the judge again about {self.rejudged} held verdict(s)"
                    if self.rejudged else ""))
 
@@ -1293,6 +1296,7 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
         replayed = held is not None
         if held is None:
             if judge is None:
+                report.unjudged += 1
                 at += 1
                 continue
             held = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
