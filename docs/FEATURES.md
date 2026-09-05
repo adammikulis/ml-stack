@@ -320,6 +320,23 @@ machines" finds a robotics technician. All three run and the rankings are fused,
 anyone pretending a cosine similarity and a BM25 score are the same kind of number. Whichever
 is unavailable simply does not vote.
 
+**An entry nobody wrote about is still findable.** Vectors come from text and plenty of
+entries have none. Every vector is spread over the graph -- rounds of the same message
+passing a graph neural network uses -- so an entry with nothing written about it ends up
+meaning what its neighbours mean, and an entry with plenty is nudged towards the company it
+keeps. Searching does not change: the vectors are simply better placed.
+
+**Where things are.** An entry that says where it is gets a point, through a gazetteer, cached
+so a place is asked about once however often the run is repeated -- which is what puts it on
+the page's map. The closest of them can be joined to each other, weighted by how far apart
+they are, so distance is something the graph itself holds rather than something only the map
+shows.
+
+**A hierarchy has a top.** Relations that say one thing is under another -- part of, reports
+to, contains, member of -- are checked to be free of rings, each on its own, and a ring is
+reported naming the entries round it. Nothing is broken to fix it: a cycle is a fact about the
+data, and which link is the wrong one is not the hygiene pass's to decide.
+
 **Asking a model about it.** Handing a model the whole graph does not scale, and handing it a
 pre-chosen slice makes the choosing the answer. It gets six things it can do instead — find
 entries by name or by the words attached to them, read what is held on them, read a whole

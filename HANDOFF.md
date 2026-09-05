@@ -62,6 +62,15 @@ plan` names them as unplaceable rather than guessing.
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change that
   moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
+- [ ] **Smoothed embeddings on the bench.** `graph.smooth` spreads every vector over the
+  graph (`ml-stack-store embed PATH --smooth N`, or `remember(..., smooth_hops=N)`); nothing
+  says whether it makes the answers better. The measure: `ml-stack-bench ready --embed-url
+  ... --embed-model ...` to build the vectors, `embed --smooth 1` and `--smooth 2` over
+  copies of that store, then a sampled `sweep --plain-only --sample 20` on each against the
+  unsmoothed one. What to watch is recall on questions about entries nobody wrote about --
+  the whole point -- against precision on the rest, since a vector pulled towards its
+  neighbours is a vector less about itself.
+
 - [ ] **Constrained ids on E2B and E4B.** `sweep --serve <gemma> --profile --constrain-ids
   --sample 20` against the kept plain runs: precision up, recall held. A profile records
   `constrain_ids` and the answer cache keys on it, so `report --profile` can set it.
@@ -188,6 +197,19 @@ worth taking, in this order:
 - [ ] **A terminal command centre** (`tooling/daemon/tui.py`, 477 lines, Textual): the
   facts the fleet app's cluster view already shows, in a terminal. Worth it only if a
   headless machine wants one.
+
+## The tensor toolkit
+
+- [ ] **Six of the toolkit's functions have no caller here.** `graph.tensors` (the mapping
+  graph as arrays) is called by `graph.smooth`, and `topology.knn_edges` by
+  `graph.places.geocode`. `batch_graphs`, `resolvent_sweep`, `decompose_to_dags`,
+  `mst_edges`, `morton_codes` and `spatial_window_edges` are tested library API that nothing
+  in this repository calls. Each has an obvious home when the work arrives -- `batch_graphs`
+  when a graph model is trained on many graphs at once, `resolvent_sweep` for influence down
+  a DAG (a `reports_to` tree, a `part_of` hierarchy), `mst_edges`/`morton_codes`/
+  `spatial_window_edges` for a cheaper `--near` on a graph too big for the full distance
+  matrix `knn_edges` builds. The last one is the near-term task: `geocode --near K` is
+  O(n^2) in placed entries, which is nothing at 300 and a problem at 30,000.
 
 ## The interface
 

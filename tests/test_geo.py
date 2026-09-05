@@ -5,7 +5,7 @@ import urllib.parse
 
 from conftest import json_reply
 
-from ml_stack.geo import CACHE_VERSION, best, expand, geocode_all
+from ml_stack.geo import CACHE_VERSION, LANGUAGE, best, expand, geocode_all
 
 
 def row(name, rank, kind="administrative", category="boundary", importance=0.5, short=None):
@@ -71,6 +71,21 @@ def test_a_community_adds_its_own_shorthand_without_losing_the_rest():
     assert expand("The Bay", ours) == "San Francisco Bay Area"
     assert expand("MD", ours) == "Marlow Dell"
     assert expand("TX", ours) == "Texas"
+
+
+def test_the_names_are_asked_for_in_one_language_so_the_typed_name_can_match(tmp_path, server):
+    """Nominatim names Turin "Torino" unless asked otherwise, and then it loses to Turin, Iowa."""
+    seen = []
+
+    def handle(method, path, body):
+        seen.append(urllib.parse.parse_qs(urllib.parse.urlparse(path).query))
+        return json_reply([row("Turin, Piedmont, Italy", 8, short="Turin")])
+
+    srv = server(handle)
+    got = geocode_all(["Turin"], tmp_path / "geo.json", url=srv.base_url, sleep=0,
+                      log=lambda _line: None)
+    assert seen[0]["accept-language"] == [LANGUAGE]
+    assert got["Turin"]["display"] == "Turin, Piedmont, Italy"
 
 
 def _asked(server):

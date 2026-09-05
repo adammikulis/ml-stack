@@ -917,6 +917,61 @@ def _():
     return "all three vote"
 
 
+@check("Graphs", "an entry nobody wrote about takes its meaning from its neighbours")
+def _():
+    from ml_stack.graph import smooth
+    graph = {"nodes": [{"id": "p:a"}, {"id": "p:b"}, {"id": "p:c"}],
+             "edges": [{"source": "p:c", "target": "p:a", "rel": "works_with"},
+                       {"source": "p:c", "target": "p:b", "rel": "works_with"}]}
+    spread = smooth(graph, {"p:a": [1.0, 0.0], "p:b": [0.0, 1.0]}, hops=1)
+    got = spread["p:c"]
+    assert abs(got[0] - got[1]) < 1e-5, f"c did not land between its two neighbours: {got}"
+    return "the entry with no text of its own points where its neighbours do"
+
+
+@check("Graphs", "a place becomes a point, asked about once, and the closest are joined")
+def _():
+    from ml_stack.graph import geocode, points
+    where = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84), "Kyoto": (35.01, 135.77)}
+    asked = []
+
+    def lookup(place, **_):
+        asked.append(place)
+        found = where.get(place)
+        return None if found is None else {"lat": found[0], "lon": found[1],
+                                           "display": place, "type": "city"}
+
+    graph = {"nodes": [{"id": "p:a", "label": "A", "attrs": {"place": "Turin"}},
+                       {"id": "p:b", "label": "B", "attrs": {"place": "Lyon"}},
+                       {"id": "p:c", "label": "C", "attrs": {"place": "Turin"}},
+                       {"id": "p:d", "label": "D", "attrs": {"place": "Kyoto"}}],
+             "edges": []}
+    cache = TMP / "geocode-cache.json"
+    placed = geocode(graph, cache, near=1, lookup=lookup, log=lambda _line: None)
+    assert len(points(placed)) == 4, "not every entry that named a place got a point"
+    assert sorted(asked) == ["Kyoto", "Lyon", "Turin"], f"a place was asked twice: {asked}"
+    near = {frozenset({e["source"], e["target"]}): e["weight"]
+            for e in placed["edges"] if e["rel"] == "near"}
+    assert frozenset({"p:a", "p:c"}) in near, "the two in one city were not joined"
+    assert near[frozenset({"p:a", "p:c"})] == 1.0
+    far = min(near.values())
+    assert far < 0.01, f"a continent apart weighed {far}"
+    return f"4 points, 3 lookups, {len(near)} near edges"
+
+
+@check("Graphs", "a hierarchy that runs in a ring is reported and never broken")
+def _():
+    from ml_stack.graph import cycles
+    chain = [{"source": "u:a", "rel": "part_of", "target": "u:b"},
+             {"source": "u:b", "rel": "part_of", "target": "u:c"}]
+    assert cycles(chain) == []
+    ring = [*chain, {"source": "u:c", "rel": "part_of", "target": "u:a"}]
+    found = cycles(ring)
+    assert len(found) == 1 and found[0][0] == "part_of", found
+    assert set(found[0][1]) == {"u:a", "u:b", "u:c"}, found
+    return "the three on the ring are named"
+
+
 @check("Graphs", "the model reads a graph with tools, and invented ids are refused")
 def _():
     from dataclasses import dataclass

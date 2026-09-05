@@ -1,8 +1,9 @@
 """Place name -> lat/lon through Nominatim, cached on disk, one request per second.
 
 People write where they live in prose — "Raleigh", "MD", "sf" — and a map needs a point.
-Nominatim answers free text, but ranks a county above the city that shares its name and
-reads a two-letter code as whichever country owns it (MD is Moldova). :func:`expand` turns
+Nominatim answers free text, but ranks a county above the city that shares its name, names
+each place the way it is named locally ("Turin" comes back as "Torino"), and reads a
+two-letter code as whichever country owns it (MD is Moldova). :func:`expand` turns
 the shorthand into what was meant, :func:`best` picks the answer that is actually called
 what was asked, and :func:`geocode_all` keeps the whole thing in a JSON cache so a place is
 asked about once, at the one request per second Nominatim's usage policy allows.
@@ -20,8 +21,8 @@ from typing import Any
 
 from ml_stack.files import read_json, write_json
 
-__all__ = ["CACHE_VERSION", "SHORTHAND", "URL", "USER_AGENT", "best", "expand", "geocode_all",
-           "lookup"]
+__all__ = ["CACHE_VERSION", "LANGUAGE", "SHORTHAND", "URL", "USER_AGENT", "best", "expand",
+           "geocode_all", "lookup"]
 
 URL = "https://nominatim.openstreetmap.org/search"
 
@@ -30,7 +31,11 @@ URL = "https://nominatim.openstreetmap.org/search"
 USER_AGENT = "ml-stack/geo (https://github.com/adammikulis/ml-stack)"
 
 # bump when best() changes its mind about what a query means, so cached answers are re-asked
-CACHE_VERSION = 4
+CACHE_VERSION = 5
+
+# Nominatim answers with each place's local name unless it is asked otherwise, and best()
+# looks for the name that was typed: "Turin" comes back as "Torino" and loses to Turin, Iowa
+LANGUAGE = "en"
 
 # people write where they live the short way, and a two-letter code means something else
 # entirely to a world gazetteer: MD is Moldova, SF is Santa Fe. Keys are casefolded.
@@ -87,13 +92,17 @@ def best(rows: list[dict[str, Any]], query: str = "") -> dict[str, Any] | None:
 
 
 def lookup(place: str, *, user_agent: str = USER_AGENT, url: str = URL, timeout: float = 15.0,
-           shorthand: Mapping[str, str] | None = None) -> dict[str, Any] | None:
+           shorthand: Mapping[str, str] | None = None,
+           language: str = LANGUAGE) -> dict[str, Any] | None:
     """One place, asked of Nominatim now: ``{"lat", "lon", "display", "type"}`` or None.
 
-    Uncached and unthrottled — :func:`geocode_all` is the one to call for a list.
+    ``language`` is the language the names come back in, so a place asked for in English is
+    compared against its English name. Uncached and unthrottled — :func:`geocode_all` is the
+    one to call for a list.
     """
     asked = expand(place, shorthand)
-    q = urllib.parse.urlencode({"q": asked, "format": "jsonv2", "limit": 10})
+    q = urllib.parse.urlencode({"q": asked, "format": "jsonv2", "limit": 10,
+                                "accept-language": language})
     req = urllib.request.Request(f"{url}?{q}", headers={"User-Agent": user_agent})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         rows = json.loads(r.read().decode())
