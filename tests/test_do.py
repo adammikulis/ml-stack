@@ -235,6 +235,20 @@ def test_models_on_disk_lists_the_weights_with_the_head_and_projector_beside_the
     assert do.models_on_disk("larch", files=[other]) == []
 
 
+def test_a_head_in_a_sibling_folder_of_the_repository_counts_as_beside(tmp_path):
+    """A Hub snapshot keeps the head under MTP/ beside the quant folders. Driven
+    2026-09-05: ml-stack-do said no head was on disk and planned to fetch one."""
+    snap = tmp_path / "snapshots" / "abc"
+    (snap / "UD-Q4_K_XL").mkdir(parents=True)
+    (snap / "MTP").mkdir()
+    weights = snap / "UD-Q4_K_XL" / "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"
+    head = snap / "MTP" / "mtp-Qwen3.8-Flash-Next-BF16.gguf"
+    for p in (weights, head):
+        p.write_bytes(b"gguf")
+    [found] = do.models_on_disk("flash-next", files=[weights, head])
+    assert found["draft"] == "mtp-Qwen3.8-Flash-Next-BF16.gguf"
+
+
 def test_ollama_models_reads_the_tags_and_the_show_of_each_match():
     asked = []
 

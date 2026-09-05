@@ -336,13 +336,16 @@ def gguf_files() -> list[Path]:
 def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list[dict[str, Any]]:
     """The GGUF weights this machine holds whose name has every word of ``words``, each
     with the draft head (``mtp-``, ``eagle3-``, ``.draft``) and the ``mmproj`` projector
-    kept beside it, the first shard standing for a sharded file."""
+    kept beside it -- in its own directory, or in a sibling directory of the same
+    repository, where a Hub snapshot keeps its ``MTP/`` folder -- the first shard standing
+    for a sharded file."""
     from ml_stack.fleet.models import DRAFT_MARK
 
     every = [Path(p) for p in (files if files is not None else gguf_files())]
     by_dir: dict[Path, list[Path]] = {}
     for path in every:
         by_dir.setdefault(path.parent, []).append(path)
+        by_dir.setdefault(path.parent.parent, []).append(path)
     out: list[dict[str, Any]] = []
     for path in every:
         name = path.name
@@ -357,7 +360,10 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
         if not _matches(words, name):
             continue
         beside = by_dir.get(path.parent, [])
+        # the head in this directory first, then one a sibling directory holds
         heads = [p.name for p in beside if p.name.lower().startswith(_HEAD)]
+        heads += [p.name for p in by_dir.get(path.parent.parent, [])
+                  if p.name.lower().startswith(_HEAD) and p.name not in heads]
         marked = path.with_suffix(DRAFT_MARK + path.suffix)
         if marked in beside:
             heads.append(marked.name)
