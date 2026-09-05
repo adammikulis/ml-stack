@@ -391,12 +391,18 @@ questions as well. It is not built yet.
 | `ml_stack.graph` | A graph: stored, searched, asked about, drawn — and as tensors |
 | `ml_stack.entities` | Resolving names, planning edits, spelling, paths through a graph |
 | `ml_stack.scrape` | Reading a site you are signed in to, with presets to start from |
+| `ml_stack.sources` | A PDF, a Slack export, an mbox or scraper rows into one document and message shape |
+| `ml_stack.ingest` | Documents read into a store section by section, with the page behind every claim |
+| `ml_stack.world` | An invented organisation that talks, and questions about it with known answers |
+| `ml_stack.web` | Search, read and screenshot the web as tools, refused against private addresses |
+| `ml_stack.redact` | Reading a file for a real person's details — the hook's reader and `ml-stack-audit` |
 | `ml_stack.train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
 | `ml_stack.testing` | Cross-backend numerical parity harness |
 
 Everything above ships in one package. The extras carry what a module needs beyond the
-standard library: `[app] [train] [serve] [gguf] [graph] [store] [scrape] [vision] [testing]
-[torch] [mlx] [telemetry]`, and `[all]`.
+standard library: `[app] [claude] [train] [train-lora] [serve] [gguf] [graph] [store]
+[scrape] [web] [hub] [vision] [pdf] [viz] [plot] [testing] [telemetry] [mcp] [standard]
+[privacy] [arrays] [test]`, plus `[torch]` and `[mlx]`, and `[all]`.
 
 ## Working with a graph
 
@@ -704,13 +710,14 @@ command.
 | --- | --- |
 | `ml-stack-models find <words>` | search the Hub for a model, unsloth first; `files <repo>` lists the quantisations and prints the `hf:` reference to serve each; `card <repo>` reads the sampler settings its publisher recommends; `layout <model>` prints the attention layout off a GGUF header -- which layers hold a full cache, slide, recur or share it, plus experts, indexers and lookup tables |
 | `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown; `--ui` puts the same two panels up as an interactive page on loopback (also the app's **Fit** view) |
-| `ml-stack-serve status\|up\|down\|profile\|build` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in and `up --profile` fills every flag not given from it; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary` |
+| `ml-stack-serve status\|up\|down\|profile\|build\|escalate\|memory` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in and `up --profile` fills every flag not given from it; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary`; `escalate --add N` grows a running server's seats in place, carrying its conversations over; `memory` says how much a model may use here and `--persist` makes that survive a reboot |
 | `ml-stack-bench prepare\|run\|sweep\|drafts\|concurrent\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`). `--on NAME=URL` measures a server somebody else started -- a llama-server by `http://`, Ollama by `ollama://host:port/model`, an OpenAI-style server by `openai://host/model` -- and every run records what served it (program, version, format, runtime, quant), the process tree's resident peak sampled every second, and None rather than 0 for any figure that program does not report; `sweep --no-draft` serves a model in its measured shape minus the head, `--serve-label` names the runs |
 | `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
-| `ml-stack-claude MODEL [-- claude args]` | Claude Code on a model this machine serves, in its measured shape: the lease is taken, every model variable names the served alias, telemetry and betas a local server lacks are off, and the server goes when claude exits |
+| `ml-stack-claude MODEL [-- claude args]` | Claude Code on a model this machine serves, in its measured shape: the lease is taken, every model variable names the served alias, telemetry and betas a local server lacks are off, and the server goes when claude exits. With no MODEL it lists the servers already up and the models on this disk, best measured first, and takes a number or a name; `--on URL` talks to a server as it stands and leaves it up afterwards; the served model's own chat template is rewritten first, so Claude Code's mid-conversation system messages render rather than fail |
 | `ml-stack-agent "task" --model MODEL` | one agentic task through the Claude Agent SDK (the `claude` extra) on the same lease; prints what it said and what it spent. `ml_stack.harness.session()` is the same for a program |
-| `ml-stack-ingest DOCS --out STORE` | documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per source with `entities.fold`, and written with the source, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, and `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate) |
+| `ml-stack-ingest DOCS --out STORE` | documents read section by section into one graph: chapters, sections, figures and key terms out of a PDF (`ml_stack.sources.pdf` -- the publisher's outline when there is one, the way the headings are set when there is not), each section through `Client.extract` against the document contract, folded per source with `entities.fold`, and written with the source, chapter, section and page behind every node; `--images` shows the model the figures, `--chapter` and `--sample` smoke it, `--detach` and `--resume` survive an evening, `status` says how far it has got, `ask` answers a question of the store so far, `--gold FILE` scores the extraction against passages with known triples (`--fail-under` makes that a gate), and `retry` re-reads the units that gave up |
 | `ml-stack-store check\|docs\|doc\|tidy` | what a graph store holds and whether it agrees with itself: `check` reads every document, node and edge by key and by scan and prints each disagreement (`--fix` rewrites a document a scan reads empty), `docs` lists the documents with their sizes, `doc PATH KEY` prints one as JSON (`--drop` takes it out), and `tidy` runs the hygiene pass -- duplicates merged, inverses folded, doubtful labels flagged, conflicts and orphans reported -- dry unless `--apply`; `--base-url URL` has a served model judge the names a spelling apart, the verbs in conflict and the doubtful labels from their passages, every verdict written to the store, `--rejudge` asks about every held verdict again, and `--gold` scores the judge against pairs whose answers are known |
+| `ml-stack-world make\|questions\|simulate\|emit\|check` | an invented organised group -- company, community, university, open-source, nonprofit -- as a graph with people who could talk: `make` writes graph, personas and calendar from a seed; `questions` draws scored questions off its truth; `simulate` has the people talk for N working days, templated unless `--mix` hands a share of threads to a served model at `--model-url`; `emit` writes what was said the way Slack, a mail client, Teams or a scraper exports it; `check` reads an export back against its truth and runs every generated name through the name detector |
 | `ml-stack-jobs status\|wait KIND\|stop KIND` | the long commands this machine has recorded -- a detached bench sweep, an ingest reading documents -- with the pid, the argv and the log of each: what is running, blocking until one has ended so the next command is `wait && next` rather than a `pgrep` loop written by hand, and ending one |
 | `ml-stack-setup` | what this machine can do — memory a model may use and whether that survives a reboot, which architectures the installed build reads and how old it is, what is already downloaded — and what the stack does without being asked |
 | `ml-stack-doctor` | what `ml-stack-setup` does not check — the checkouts (hooks installed, working tree clean, how far ahead of origin, a worktree pinned behind HEAD, whether `import ml_stack` lands in the checkout or a copy), the bench store (runs that read back as nothing, a `measuring.json` whose pid is dead, a log with no run kept from it) and the managed llama.cpp (`current` answers `--help`, the named builds, one older than 14 days); `--repo PATH` picks the checkouts, `--bench-home PATH` the store, `--yes` runs the fixes it offers; exit 1 when anything is wrong, and never a push |
@@ -929,7 +936,13 @@ crowded = replace(shape, seats=4, seat_context=32768)   # four conversations at 
 ```
 
 A shape holds one seat unless it is asked for more, and that seat gets the whole context.
-`seats=N` divides the same memory between N conversations, each with its own KV cache.
+`seats=N` divides the same memory between N conversations, each with its own KV cache. A
+lone seat is given the model's own trained window when the room allows it, read off the
+GGUF header; a context asked for past the trained window turns on YaRN position scaling by
+itself and says so, because past the trained length the positions are the part that goes
+wrong first. `ml-stack-serve escalate --port 8080 --add 2` grows a running server's seats
+in place and carries its conversations across, so the next person does not cost the ones
+already talking a cold reload.
 
 `draft_for` and `projector_for` answer 'auto' the way `ml-stack-serve up` does -- a lease
 built by hand has to resolve what the CLI resolves for itself -- and each says out loud why
@@ -1927,6 +1940,11 @@ ml-stack-ingest show    --out ./sources.ladybug     # what each source was read 
 ml-stack-ingest sources --out ./sources.ladybug     # what every source holds together
 ml-stack-ingest fold    --out ./sources.ladybug     # every source so far into the store
 ml-stack-ingest import ./extraction --out ./sources.ladybug --dry-run   # a pair somebody else extracted
+ml-stack-ingest ask     --out ./sources.ladybug "how is heart rate controlled"   # ask the store
+ml-stack-ingest ask     --out ./sources.ladybug --gold ./questions.json  # score the answers, not the reading
+ml-stack-ingest retry   --out ./sources.ladybug   # read again the units that gave up
+ml-stack-ingest tidy    --out ./sources.ladybug   # the hygiene pass; --apply to write it
+ml-stack-ingest migrate --out ./sources.ladybug   # a store from the books era becomes a sources store
 ml-stack-ingest stop                              # end the run, after it folds what it read
 ```
 
@@ -2045,7 +2063,13 @@ prints them together: what the store holds for each, the concepts more than one 
 names, the names `tidy` joined across sources, and the relations joining one source's
 vocabulary to another's. `stop` ends a detached run: it raises inside the section being
 read, folds the source so far, and exits, and the command waits for it and says whether the
-fold landed.
+fold landed. `ask` questions the store with the same tools a page asks with:
+`ask --out STORE "question"` answers from the sources read so far, and `ask --gold FILE`
+runs a set of questions -- `{"question", "expected": [ids or labels]}` -- and prints F1 the
+way the bench prints it, so *answerable* is a number and `--fail-under` gates that too.
+`retry` re-reads the units `status` counts as given up, after the fix that should save
+them; `tidy` is the hygiene pass over the store -- dry unless `--apply`, and it refuses to
+run beside a detached ingest, because one job is on the GPU.
 
 `Sources` is the same thing for an application:
 
