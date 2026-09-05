@@ -220,33 +220,42 @@
       });
       node.attr('transform', d => `translate(${d.x},${d.y})`);
       if (sim.alpha() < 0.06) layoutLabels();
+      // A layout takes tens of seconds to settle on a graph of any size, and it spreads the
+      // whole way: a frame taken early holds a knot, and everything then walks out of it.
+      // So the view follows the graph until the reader moves it themselves.
+      if (following && performance.now() - followed > FOLLOW_MS) frame(0);
     });
     let fitK = 1, lastK = 1;
     const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => {
       root.attr('transform', e.transform);
       label.attr('transform', `scale(${1 / e.transform.k})`);
+      // a gesture is the reader's; a programmatic transform carries no source event
+      if (e.sourceEvent) following = false;
       if (Math.abs(e.transform.k - lastK) > lastK * 0.08) { lastK = e.transform.k; layoutLabels(); }
     });
     svg.call(zoom).on('dblclick.zoom', null);
     let fitted = false;
-    function fit() {
+    // how often the view re-frames itself while the layout is still moving
+    const FOLLOW_MS = 400;
+    let following = true, followed = 0;
+    function frame(dur) {
       if (!nodes.length) return;
+      followed = performance.now();
       const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
       const x0 = Math.min(...xs) - 60, x1 = Math.max(...xs) + 60, y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
       const k = Math.min(2.2, 0.92 / Math.max((x1 - x0) / W, (y1 - y0) / H));
       const t = d3.zoomIdentity.translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2).scale(k);
-      const dur = fitted ? 400 : 0;
       fitK = lastK = k;
       fitted = true;
       // the labels are placed in screen pixels, so they have to be placed against the zoom this
       // transition lands on, not the one it starts from
-      svg.transition().duration(dur).call(zoom.transform, t)
-        .on('end interrupt', () => { lastK = d3.zoomTransform(svg.node()).k; layoutLabels(); wrap.classList.remove('settling'); });
+      const done = () => { lastK = d3.zoomTransform(svg.node()).k; layoutLabels();
+                           wrap.classList.remove('settling'); };
+      if (!dur) { svg.call(zoom.transform, t); done(); return; }
+      svg.transition().duration(dur).call(zoom.transform, t).on('end interrupt', done);
     }
-    // the frame at 1.5 s is a first look while the layout is still a spiral; the frame at
-    // the end is the one that holds everything
-    let settled = false;
-    sim.on('end', () => { if (!settled || needsFit) { needsFit = false; settled = true; fit(); } });
+    function fit() { frame(fitted ? 400 : 0); }
+    sim.on('end', () => { if (following || needsFit) { needsFit = false; fit(); } });
     setTimeout(() => { if (!fitted) fit(); }, 1500);
     svg.on('click', e => { if (e.target === svg.node()) select(null); });
     new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
@@ -344,6 +353,8 @@
     // Frame everything that is on screen, in whichever view is on screen.
     function recenter() {
       if (M.is3d && M.g3) { M.g3.zoomToFit(500, 70); return; }
+      // framing everything is also asking the view to keep doing so
+      following = true;
       fit();
     }
     let signalRoute = [], signalRaf = 0, signalFrom = 0;
@@ -478,6 +489,8 @@
     // zoom never changes, so the labels around it keep their placement.
     function bringIntoView(d) {
       if (!d || d.x == null) return;
+      // moving to what was clicked is the reader choosing where to look
+      following = false;
       const t = d3.zoomTransform(svg.node()), x = t.applyX(d.x), y = t.applyY(d.y);
       if (x > W * 0.18 && x < W * 0.82 && y > H * 0.18 && y < H * 0.82) return;
       svg.transition().duration(450).call(zoom.transform,

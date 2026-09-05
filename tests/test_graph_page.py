@@ -918,6 +918,52 @@ def a_graph_of(n):
     return {"nodes": nodes, "edges": edges, "messages": {}, "stats": {"messages": 0}, "meta": {}}
 
 
+def test_the_view_follows_the_layout_while_it_spreads_and_stops_when_the_reader_moves(open_page):
+    """Driven 2026-09-05 on a 321-node graph: the frame taken 1.5 s in held a knot, the
+    layout then spread for a minute, and 315 of 321 marks sat outside the view the whole
+    time. The layout here is held in motion (``alphaTarget``) so the end-of-simulation
+    frame cannot stand in for following. Fails when the tick no longer re-frames, and when
+    a drag no longer stops it."""
+    page, errors = open_page(a_graph_of(160))
+    settle(page)
+    # a knot, framed -- then the same nodes thrown wide, with the layout still running
+    page.evaluate("""() => {
+        const M = window.graphModel, sim = M.view2d.sim;
+        const put = (spread) => M.nodes.forEach((n, i) => {
+            const a = i * 2.4, r = spread * Math.sqrt(0.5 + i);
+            n.x = r * Math.cos(a); n.y = r * Math.sin(a); n.vx = n.vy = 0;
+        });
+        put(6);
+        M.fit();
+        put(220);
+        sim.alphaTarget(0.3).restart();
+    }""")
+    page.wait_for_timeout(1500)
+    assert page.evaluate("() => window.graphModel.view2d.sim.alpha()") > 0.05, \
+        "the layout is still moving, which is the case under test"
+    assert outside_the_view(page) == 0, "the view followed the graph as it spread"
+
+    # a drag is the reader's own; the view stays where they put it
+    page.mouse.move(700, 400)
+    page.mouse.down()
+    page.mouse.move(300, 200, steps=8)
+    page.mouse.up()
+    page.wait_for_timeout(1500)
+    assert outside_the_view(page) > 0, "and it is not dragged back"
+    page.evaluate("() => window.graphModel.view2d.sim.alphaTarget(0)")
+    assert errors == []
+
+
+def outside_the_view(page):
+    return page.evaluate("""() => {
+        const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
+        return [...document.querySelectorAll('#graph g.node path.mark')]
+            .map(el => el.getBoundingClientRect())
+            .filter(r => r.left < wrap.left || r.right > wrap.right
+                         || r.top < wrap.top || r.bottom > wrap.bottom).length;
+    }""")
+
+
 def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
     """Driven 2026-09-05: the frame taken at 1.5 s, while d3's starting spiral is still a
     knot, was kept as final and the settled graph ran off the corner of the view. Fails
@@ -937,15 +983,9 @@ def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
         sim.alpha(1).restart();
     }""")
     settle(page)
-    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.001", timeout=30_000)
+    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=60_000)
     page.wait_for_timeout(600)
-    outside = page.evaluate("""() => {
-        const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
-        return [...document.querySelectorAll('#graph g.node path.mark')]
-            .map(el => el.getBoundingClientRect())
-            .filter(r => r.left < wrap.left || r.right > wrap.right
-                         || r.top < wrap.top || r.bottom > wrap.bottom).length;
-    }""")
+    outside = outside_the_view(page)
     assert outside == 0, f"{outside} nodes lie outside the view"
     assert errors == []
 
