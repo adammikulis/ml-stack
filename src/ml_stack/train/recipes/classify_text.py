@@ -53,7 +53,8 @@ def build_classifier(spec: dict[str, Any], config: dict[str, Any], data: Path,
         model = build_mlx_classifier(
             layers=shape["layers"], d_model=shape["d_model"], heads=shape["heads"],
             context=context, classes=len(classes))
-        optimizer = optim.AdamW(learning_rate=config["learning_rate"])
+        optimizer = optim.AdamW(learning_rate=config["learning_rate"],
+                                bias_correction=True)
 
         def loss(m, batch):
             x, y = batch

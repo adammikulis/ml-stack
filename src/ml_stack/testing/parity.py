@@ -42,7 +42,7 @@ def inputs(shape: tuple[int, ...], seed: int = 0) -> np.ndarray:
 
 def _normalize_mlx_name(name: str) -> str:
     """MLX's ``nn.Sequential`` nests parameters under ``layers``; torch's does not."""
-    return name.replace(".layers.", ".")
+    return name.replace(".layers.", ".").removeprefix("layers.")
 
 
 def copy_torch_weights_to_mlx(torch_module: Any, mlx_module: Any) -> None:

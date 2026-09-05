@@ -47,7 +47,8 @@ def build_text_lm(spec: dict[str, Any], config: dict[str, Any], data: Path,
 
         model = build_mlx_lm(layers=shape["layers"], d_model=shape["d_model"],
                              heads=shape["heads"], context=context)
-        optimizer = optim.AdamW(learning_rate=config["learning_rate"])
+        optimizer = optim.AdamW(learning_rate=config["learning_rate"],
+                                bias_correction=True)
 
         def loss(m, batch):
             x, y = batch

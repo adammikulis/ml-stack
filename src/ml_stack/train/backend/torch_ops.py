@@ -93,11 +93,13 @@ class TorchArrayOps:
     # ---------------------------------------------------------------- indexing
 
     def take(self, x: Tensor, index: Tensor, axis: int = 0) -> Tensor:
+        """``index``'s shape replaces the taken axis, as NumPy and MLX both do."""
         torch = self._torch
-        idx = index
-        if idx.ndim > 1:
-            idx = idx.reshape(idx.shape[0])
-        return torch.index_select(x, axis, idx.to(dtype=torch.int64, device=x.device))
+        axis_norm = _normalize_axis(axis, x.ndim)
+        idx = torch.as_tensor(index).to(dtype=torch.int64, device=x.device)
+        picked = torch.index_select(x, axis_norm, idx.reshape(-1))
+        shape = tuple(x.shape[:axis_norm]) + tuple(idx.shape) + tuple(x.shape[axis_norm + 1:])
+        return picked.reshape(shape)
 
     def argsort(self, x: Tensor, axis: int = -1) -> Tensor:
         return self._torch.argsort(x, dim=axis)
