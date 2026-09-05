@@ -1134,7 +1134,7 @@ def _pyplot():
     """matplotlib, or a refusal that says how to get it.
 
     Optional the way every other heavy dependency here is optional -- `torch_ops`,
-    `vision.payloads`, `fleet.app` all raise with the install line rather than failing on
+    `vision.payloads` both raise with the install line rather than failing on
     an ImportError somebody has to interpret. Note that `ml-stack-bench show --plot` is
     *not* the precedent it looks like: that one writes hand-built SVG with no library at
     all, on purpose, because it has to open on a machine with no packages. A PNG cannot be
