@@ -233,6 +233,11 @@ same interface to a browser.
 - **Closing** asks once whether to keep running so the others can still send it work, or
   quit. The answer is remembered if you leave the box ticked.
 
+**Made of components.** Every screen is a custom element in a file of its own — the cluster,
+chat, models, settings, what fits, first run, signing in — sharing one model of the daemon's
+routes; a page is the list of them, so a caller leaves one out (`ml-stack-serve fit --ui`
+serves what fits and nothing else). Each screen has a route mixin to match.
+
 Setup on a machine that has not joined a cluster is refused from anywhere but that
 machine, because until it joins there is no credential to check and the first person to
 reach it would own it. A headless machine can be set up over the network with a one-time

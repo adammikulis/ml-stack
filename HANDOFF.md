@@ -231,11 +231,6 @@ worth taking, in this order:
 
 ## The interface
 
-- [ ] **The fleet app as components.** `graph/page.py` assembles a page out of custom
-  elements (`ml_stack.ui.assemble`, one file a component under `graph/web/components/`);
-  `fleet/web/app.js` (1,500 lines of screens as functions) and `fleet/web/fit.html` (a
-  second standalone page) are the same shape waiting for the same split: one element per
-  screen, the `/ui/*` routes in `fleet/ui.py` as mixins, `index.html` as the wiring.
 - [ ] **Nobody has drawn 3,000 nodes in the page.** The page ships the whole graph as one
   JSON blob and lays it out in the browser; the biggest graph it has held is a few hundred
   nodes. `ml-stack-world make --size 5000` gives one to try, and `most_messages` already
