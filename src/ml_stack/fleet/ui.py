@@ -149,6 +149,19 @@ class UI:
             with contextlib.suppress(Exception):
                 self.on_join()
 
+    def itself(self) -> dict[str, Any]:
+        """This machine as a peer row, for a screen counting machines before any
+        other one is on the network."""
+        status = self.runner.status() if self.runner is not None else {}
+        slots = int(status.get("slots") or 1)
+        return {"name": self.name, "port": self.peer_port,
+                "device": self.report() if callable(self.report) else {},
+                "busy": bool(status.get("busy")), "queued": int(status.get("queued") or 0),
+                "slots": slots, "free": int(status.get("free", slots)),
+                "host": "127.0.0.1", "hostname": "",
+                "base_url": f"http://127.0.0.1:{self.peer_port}",
+                "is_self": True, "clusters": []}
+
     def peers(self, *, force: bool = False) -> list[dict[str, Any]]:
         """Everyone on the LAN, cached briefly. The browser cannot do this itself."""
         from .discovery import memberships
@@ -158,7 +171,7 @@ class UI:
             return cached
         joined = memberships(self.cluster_key_path)
         if not joined:
-            return []
+            return [self.itself()]
         # One machine in two of your clusters is one machine, listed once, with the
         # clusters you share with it. Each cluster is advertised separately, so the
         # same daemon answers on each with a beacon of its own.

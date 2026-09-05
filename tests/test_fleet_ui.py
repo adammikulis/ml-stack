@@ -257,6 +257,19 @@ class TestOnItsOwn:
         self.finished(serving)
         assert Settings.load(serving.ui.settings_path).setup_done is True
 
+    def test_the_cluster_screen_counts_the_machine_it_is_running_on(self, serving):
+        """A machine that joined nothing is still a machine, with slots and a card.
+        Counting only the beacons on the network showed it '0 machines'."""
+        self.finished(serving)
+
+        status, body, _ = serving.call("/ui/peers")
+
+        assert status == 200, body
+        assert [row["name"] for row in body["peers"]] == [serving.ui.name]
+        assert body["peers"][0]["is_self"] is True
+        assert body["peers"][0]["slots"] == 1
+        assert body["peers"][0]["device"]["cpus"] == 8
+
     def test_there_is_no_password_to_ask_for(self, serving):
         assert serving.call("/ui/setup")[1]["needs_password"] is False
         serving.call("/ui/setup/join", method="POST",

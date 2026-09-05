@@ -166,12 +166,15 @@
              peers.filter((p) => M.vendorOf(p.device || {}).key !== "cpu").length),
            el("div", { class: "k" }, "with a GPU")));
 
-      this.querySelector("#cluster-cards").replaceChildren(peers.length
-        ? el("div", { class: "grid" }, peers.map(peerCard))
-        : el("div", { class: "empty" },
-            el("div", { class: "big" }, "Just this machine so far"),
-            el("div", {}, "Install ml-stack on another machine and open it."),
-            el("div", {}, "Type the same passphrase, and it appears here on its own.")));
+      const alone = peers.length <= 1;
+      this.querySelector("#cluster-cards").replaceChildren(...M.kids(
+        peers.length ? el("div", { class: "grid" }, peers.map(peerCard)) : null,
+        alone
+          ? el("div", { class: "empty" },
+              el("div", { class: "big" }, "Just this machine so far"),
+              el("div", {}, "Install ml-stack on another machine and open it."),
+              el("div", {}, "Type the same passphrase, and it appears here on its own."))
+          : null));
 
       const nav = document.querySelector("fleet-nav");
       if (nav && nav.paint) nav.paint("cluster");
