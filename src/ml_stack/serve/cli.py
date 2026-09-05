@@ -1225,10 +1225,10 @@ def main(argv: list[str] | None = None) -> int:
     up.add_argument("--embedding", action="store_true",
                     help="serve an embedding model (llama-server --embedding), the way the "
                          "graph's vectors and the thread's recall want one")
-    up.add_argument("--kv", default="", metavar="TYPE",
-                    help="what the KV cache is stored as: q8_0 halves it (measured 2026-09-02 "
-                         "on Flash-Next: F1 unchanged, faster; the recurrent state is not "
-                         "the KV and stays); f16 is the server's own default")
+    up.add_argument("--kv", default="q8_0", metavar="TYPE",
+                    help="what the KV cache is stored as (default q8_0: measured 2026-09-02 "
+                         "on Flash-Next, F1 unchanged, faster, half the cache; the recurrent "
+                         "state is not the KV and stays); f16 is the full-size cache")
     up.add_argument("--kv-unified", action=argparse.BooleanOptionalAction, default=None,
                     help="one cache pool for every slot, masked per sequence, rather than a "
                          "cache per slot; --no-kv-unified asks for the latter outright. "
@@ -1298,10 +1298,10 @@ def main(argv: list[str] | None = None) -> int:
                        help="measure it with a draft head as well -- a path, an hf: "
                             "reference, or 'auto'. A draft *model* keeps its own cache at "
                             "the same context, which is the real cost of drafting with one")
-    fit_p.add_argument("--kv", default="", metavar="TYPE",
-                       help="measure with the main model's KV cache stored as this: f16 "
-                            "(the server's own default), q8_0, q4_0. A record is kept per "
-                            "cache type, because that is what changes the per-token cost")
+    fit_p.add_argument("--kv", default="q8_0", metavar="TYPE",
+                       help="measure with the main model's KV cache stored as this: q8_0 "
+                            "(the default), f16, q4_0. A record is kept per cache type, "
+                            "because that is what changes the per-token cost")
     fit_p.add_argument("--room", action="append", default=[], metavar="SIZE",
                        help="ask about a machine with this much memory instead of this one "
                             "-- 24G, 24576M, or a plain number of bytes. Default: what "

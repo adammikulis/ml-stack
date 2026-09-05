@@ -50,9 +50,12 @@ def test_a_unified_cache_is_asked_for_only_when_the_shape_says():
     assert Shape(model="m", kv_unified=False).lease()["kv_unified"] is False
 
 
-def test_a_lease_says_only_what_was_asked_for():
+def test_a_lease_says_only_what_was_asked_for_and_the_cache_is_q8_0_unless_said():
     plain = Shape(model="weights.gguf", port=8080, seats=2, seat_context=32768)
-    assert plain.lease() == {"port": 8080, "context": 65536, "parallel": 2}
+    assert plain.lease() == {"port": 8080, "context": 65536, "parallel": 2,
+                             "cache_type_k": "q8_0", "cache_type_v": "q8_0"}
+    full = Shape(model="weights.gguf", port=8080, seats=2, seat_context=32768, cache_type="f16")
+    assert full.lease()["cache_type_k"] == "f16"
     assert plain.context == 65536, "what the server is asked for is every seat added up"
 
 

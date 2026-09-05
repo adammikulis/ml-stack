@@ -64,9 +64,9 @@ class Shape:
     # any one conversation actually gets.
     seats: int = 1
     seat_context: int = 4096
-    # How the KV cache is stored. "" leaves the server's own f16; "q8_0" halves it, which is
-    # twice the seats at a context -- measure whether the answers change before taking it.
-    cache_type: str = ""
+    # How the KV cache is stored: q8_0 unless a shape says otherwise (measured 2026-09-02
+    # on Flash-Next: F1 unchanged, faster, half the cache); "f16" asks for the full one.
+    cache_type: str = "q8_0"
     # Whether every seat's cache is one pool the server masks per sequence, or a cache per
     # slot. None leaves the build's own default; measure before choosing.
     kv_unified: bool | None = None

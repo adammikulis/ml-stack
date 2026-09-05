@@ -18,6 +18,7 @@ import pytest
 from ml_stack.serve import backend as backend_module
 from ml_stack.serve import preflight
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
+import ml_stack.serve.preflight as preflight
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 
 from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
@@ -237,18 +238,66 @@ class TestFit:
         assert fit.ok and "estimated" in fit.detail
 
 
-class TestYarnFitCheck:
-    """`fit (measured)` -- a real measurement's own per-token cost, in place of the
-    analytic estimate, for the one case that estimate is known to undercount: a context
-    YaRN was turned on to reach."""
+class TestMeasuredFitCheck:
+    """`fit (measured)` -- a real measurement's own load and per-token cost, deciding in
+    place of the analytic estimate whenever a record for the model exists."""
 
-    def test_an_ordinary_ask_gets_no_extra_check(self, tmp_path, monkeypatch):
+    def test_an_ordinary_ask_with_no_record_gets_no_extra_check(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
         gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
-        report = Preflight(ServerSpec(model=gguf, context=4096), binary=fake_binary(tmp_path))
+        report = Preflight(ServerSpec(model=gguf, context=4096), binary=fake_binary(tmp_path),
+                           fits=lambda: [])
         assert not any(c.name == "fit (measured)" for c in report.checks)
+        assert any(c.name == "fit" for c in report.checks)
+
+    def test_a_record_prices_the_load_from_what_was_resident_not_the_file(self, tmp_path,
+                                                                          monkeypatch):
+        """A 100G file whose lookup table is paged a row at a time loads at 80G on the
+        GPU; the file size refused a shape that runs (driven 2026-09-05, Flash-Next at
+        its whole window). Mutation: let the estimate keep the verdict."""
+        import ml_stack.setup as setup_module
+
+        from ml_stack.serve.fit import Fit
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        spec = ServerSpec(model=gguf, context=262_144, parallel=1, cache_type_k="q8_0",
+                          cache_type_v="q8_0")
+        measured = Fit(model="model.gguf", weights=100 * 2**30, weights_gpu=80 * 2**30,
+                       per_token=26_112, per_seq=600 * 2**20, compute=512 * 2**20,
+                       cache_type="q8_0")
+        from conftest import LLAMA_SERVER_HELP
+
+        binary = fake_binary(tmp_path, help_text=LLAMA_SERVER_HELP)
+        report = Preflight(spec, binary=binary, limit_bytes=100 * 2**30,
+                           fits=lambda: [measured],
+                           shards_of=lambda s: (100 * 2**30, gguf,
+                                                preflight.Check("shards", True, "")))
+        names = [c.name for c in report.checks]
+        assert "fit (estimate)" in names and "fit (measured)" in names and "fit" not in names
+        assert next(c for c in report.checks if c.name == "fit (estimate)").ok
+        found = next(c for c in report.checks if c.name == "fit (measured)")
+        assert found.ok, found.detail
+        assert "loaded 80.5G" in found.detail and "a seat at 262,144 tokens" in found.detail
+        assert report.ok
+
+    def test_seats_are_charged_each(self, tmp_path, monkeypatch):
+        import ml_stack.setup as setup_module
+
+        from ml_stack.serve.fit import Fit
+
+        monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
+        gguf = write_gguf(tmp_path / "model.gguf", LLAMA_META)
+        spec = ServerSpec(model=gguf, context=8192, parallel=4, cache_type_k="q8_0",
+                          cache_type_v="q8_0")
+        measured = Fit(model="model.gguf", weights=4 * 2**30, per_token=1024,
+                       per_seq=2**20, compute=0, cache_type="q8_0")
+        report = Preflight(spec, binary=fake_binary(tmp_path), limit_bytes=64 * 2**30,
+                           fits=lambda: [measured])
+        found = next(c for c in report.checks if c.name == "fit (measured)")
+        assert "a seat at 2,048 tokens" in found.detail and " x 4" in found.detail
 
     def test_no_measured_record_says_so_and_passes(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module

@@ -495,18 +495,16 @@ def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes
                 f"may use ({pieces})")
 
 
-def _yarn_fit_check(spec, limit_bytes: int,
-                    fits: Callable[[], list] | None = None) -> Check | None:
-    """Whether a real measurement of this model says the context YaRN was turned on for
-    actually fits, in place of the analytic estimate above.
+def _measured_fit_check(spec, limit_bytes: int,
+                        fits: Callable[[], list] | None = None) -> Check | None:
+    """Whether a real measurement of this model says the shape asked for fits, in place of
+    the analytic estimate above.
 
-    None when the spec is not asking for a scaled context -- the "fit" check already
-    covers an ordinary ask, and YaRN's own extra KV cost (an indexer's own cache, on a
-    sparse-attention model, that the analytic estimate above does not count) is exactly
-    the case a measured number matters more than a guess.
+    A record prices the load from what landed on the GPU, not the file: a gathered lookup
+    table is paged a row at a time and its file size is never resident. None when no
+    record exists and the spec is an ordinary ask; a context YaRN was turned on to reach
+    says so even without one, since that is where the estimate is known to undercount.
     """
-    if spec.rope_scaling != "yarn":
-        return None
     from ml_stack.fleet.plan import fit_for
     from ml_stack.serve.fit import records
 
@@ -514,15 +512,20 @@ def _yarn_fit_check(spec, limit_bytes: int,
     found = fit_for(str(spec.model), every,
                     cache_type=spec.cache_type_k or spec.cache_type_v, spec=spec.spec_type)
     if found is None:
+        if spec.rope_scaling != "yarn":
+            return None
         return Check("fit (measured)", True,
                      "no measured record for this model; the estimate above is what stands")
     at = found.at_room(limit_bytes)
-    loaded, per_seat = at.line(spec.context)
-    total = loaded + per_seat
+    seats = max(1, int(spec.parallel or 1))
+    per_seat_context = int(spec.context) // seats
+    loaded, per_seat = at.line(per_seat_context)
+    total = loaded + per_seat * seats
     pieces = (f"measured on {found.model} ({found.cache_type}"
               + (f", {found.spec}" if found.spec else "") + "): "
-              f"loaded {_human(loaded)}, +{_human(per_seat)} at {spec.context:,} tokens "
-              f"({at.per_token:,} B/token)")
+              f"loaded {_human(loaded)}, +{_human(per_seat)} a seat at "
+              f"{per_seat_context:,} tokens ({at.per_token:,} B/token)"
+              + (f" x {seats}" if seats > 1 else ""))
     if not limit_bytes:
         return Check("fit (measured)", True,
                      f"{_human(total)} {pieces}; no machine memory limit is known to "
@@ -612,11 +615,14 @@ def Preflight(spec, *, binary: str | Path, limit_bytes: int = 0,
     sized = ref_bytes or _ref_bytes
     draft_bytes = sized(spec.draft)
     mmproj_bytes = sized(spec.mmproj)
-    report.checks.append(
-        _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes))
-    yarn_fit = _yarn_fit_check(spec, limit_bytes, fits=fits)
-    if yarn_fit is not None:
-        report.checks.append(yarn_fit)
+    estimate = _fit_check(weights_bytes, draft_bytes, mmproj_bytes, kv_bytes, limit_bytes)
+    measured = _measured_fit_check(spec, limit_bytes, fits=fits)
+    if measured is not None and "no measured record" not in measured.detail:
+        # the record decides; the estimate is kept for the reader, never the verdict
+        estimate = Check("fit (estimate)", True, estimate.detail)
+    report.checks.append(estimate)
+    if measured is not None:
+        report.checks.append(measured)
 
     report.checks.append(_flags_check(spec, binary, flags=flags))
     return report

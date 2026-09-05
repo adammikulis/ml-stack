@@ -71,7 +71,7 @@ class Profile:
     draft: str = ""                      # the head's file name, path, or hf: reference
     spec_type: str = ""                  # draft-mtp, draft-eagle3; "" reads it off the name
     spec_draft_max: int | None = None    # tokens guessed ahead
-    cache_type: str = ""                 # "" is the server's f16
+    cache_type: str = ""                 # "" leaves the shape's own, q8_0
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
     extra_args: tuple[str, ...] = ()     # -ub 2048, --spec-draft-p-min 0.5

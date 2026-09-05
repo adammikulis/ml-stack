@@ -362,14 +362,14 @@ def test_up_without_the_flag_reads_no_profile_at_all(leases, tmp_path):
     assert serve_cli.main(upped(root=tmp_path)) == 0
 
     spec = leases[0]
-    assert spec.cache_type_k == "" and spec.draft is None and spec.extra_args == ()
+    assert spec.cache_type_k == "q8_0" and spec.draft is None and spec.extra_args == ()
 
 
 def test_up_says_so_and_serves_as_asked_when_nothing_measured_this_model(leases, tmp_path,
                                                                         capsys):
     assert serve_cli.main(upped("--profile", root=tmp_path)) == 0
     assert "no measured profile" in capsys.readouterr().err
-    assert leases[0].cache_type_k == ""
+    assert leases[0].cache_type_k == "q8_0"
 
 
 # -- converse(profile=...) ---------------------------------------------------------------

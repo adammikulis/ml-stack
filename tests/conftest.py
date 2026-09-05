@@ -231,6 +231,8 @@ LLAMA_SERVER_HELP = (
     "       --port PORT                      port to listen on\n"
     "       --jinja                          use jinja template for chat\n"
     "-np,   --parallel N                     number of server slots\n"
+    "-ctk, --cache-type-k TYPE            KV cache data type for K\n"
+    "-ctv, --cache-type-v TYPE            KV cache data type for V\n"
 )
 
 
