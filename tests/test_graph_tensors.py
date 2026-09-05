@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ml_stack.backend import available, get_backend
+from ml_stack.train.backend import available, get_backend
 from ml_stack.graph.data import _to_list
 from ml_stack.graph.tensors import relations_in, tensors
 

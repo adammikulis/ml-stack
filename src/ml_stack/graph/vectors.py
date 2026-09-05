@@ -134,7 +134,7 @@ def smooth(graph: Mapping[str, Any], vectors: Mapping[str, Sequence[float]], *,
     result scaled to unit length. A node with no vector of its own starts at zero and ends
     with what its neighbours mean; one still at zero is left out.
     """
-    from ml_stack.backend import get_backend
+    from ml_stack.train.backend import get_backend
     from ml_stack.graph.data import Graph, _to_list
     from ml_stack.graph.message import normalize_by_degree, propagate
 

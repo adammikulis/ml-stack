@@ -29,7 +29,7 @@ def tensors(graph: Mapping[str, Any], *, backend: Any = None,
     each edge's ``weight``, 1.0 without one. An edge naming a node the graph does not hold,
     or a relation outside a given vocabulary, is left out.
     """
-    from ml_stack.backend import get_backend
+    from ml_stack.train.backend import get_backend
 
     ops = (backend or get_backend()).ops
     ids = [str(n.get("id")) for n in graph.get("nodes") or () if n.get("id") is not None]
