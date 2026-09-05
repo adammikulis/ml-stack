@@ -91,6 +91,8 @@ def main(argv: list[str] | None = None) -> int:
     """Run the scoreboard."""
     parser = argparse.ArgumentParser(prog="scripts/budgets", description=__doc__)
     parser.add_argument("--update", action="store_true", help="rewrite budgets.json")
+    parser.add_argument("--allow-increase", action="store_true",
+                        help="let --update raise a budget as well as lower it")
     parser.add_argument("--show", metavar="METRIC", help="list every site for one metric")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
@@ -100,6 +102,15 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update:
         counts = {name: len(sites) for name, sites in found.items()}
+        risen = {n: (allowed[n], counts[n]) for n in counts
+                 if n in allowed and counts[n] > allowed[n]}
+        if risen and not args.allow_increase:
+            for name, (was, now) in sorted(risen.items()):
+                print(f"{name}: {was} -> {now}, up {now - was}. "
+                      f"scripts/budgets --show {name}")
+            print("\nA budget only falls. Take the new sites out, or say "
+                  "--allow-increase and the diff will show what was let through.")
+            return 1
         write_budgets(counts)
         changed = [n for n in counts if allowed.get(n) != counts[n]]
         for name in sorted(changed):
