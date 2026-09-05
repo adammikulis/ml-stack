@@ -37,6 +37,7 @@ KNOWN = {
     ("fleet", "setup"),
     ("gguf", "serve"),
     ("graph", "ingest"),
+    ("graph", "train"),
     ("graph", "world"),
     ("hub", "serve"),
     ("ingest", "graph"),

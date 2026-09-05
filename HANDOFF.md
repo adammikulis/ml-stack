@@ -203,14 +203,16 @@ worth taking, in this order:
 
 ## Layers
 
-- [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
+- [ ] **Eighteen imports still cross the layers `tests/test_layers.py` sets out.** The
   layers are core, model, machine, graph, tools; a package may import downwards, and
   sideways only when the other package does not import it back. `KNOWN` in that file lists
   every edge that breaks it, and the test fails both on a new violation and on a `KNOWN`
   entry that is no longer one, so the set only shrinks. The three worth taking next, each
   a two-way cycle inside one layer: `serve` <-> `fleet` (3 files one way, 7 the other),
   `graph` <-> `ingest` (1 and 11), and `serve` <-> `setup` (2 and 1). `graph` <-> `world`
-  and `sources` <-> `world` go when `world.Message` moves down.
+  and `sources` <-> `world` go when `world.Message` moves down. `graph.data` reaches up
+  into `ml_stack.train.backend` for a device handle; the ops that sit under both belong
+  below `graph`, not in the tools layer.
 
 ## Verifying
 
