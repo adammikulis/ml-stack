@@ -232,7 +232,7 @@ class TestTheChatView:
         page, errors = open_page(joined, cookie=joined.cookie)
         page.wait_for_selector("#cluster:not([hidden])")
         page.click("nav.tabs a:has-text('Chat')")
-        page.wait_for_selector("#chat:not([hidden])")
+        page.wait_for_selector("#chat-none:not([hidden])")
         assert "No model is running yet" in page.locator("#chat-none").inner_text()
         assert page.locator("#chat-askrow").is_hidden()
         assert not errors
@@ -286,7 +286,7 @@ class TestTheSettingsView:
     def test_it_says_what_this_machine_is_called(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")
-        page.wait_for_selector("#settings:not([hidden])")
+        page.wait_for_selector("#settings-sub:not(:empty)")
         assert "studio" in page.locator("#settings-sub").inner_text()
         assert not errors
 
