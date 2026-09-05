@@ -30,7 +30,7 @@ __all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "peak_memory_bytes
 Metrics = Mapping[str, float]
 Measure = Callable[..., Metrics]
 
-_SUITES: dict[str, "Suite"] = {}
+_SUITES: dict[str, Suite] = {}
 
 #: What a suite run is marked with, so it is never read as an answering run.
 KIND = "suite"
