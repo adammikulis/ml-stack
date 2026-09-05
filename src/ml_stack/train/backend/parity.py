@@ -14,7 +14,7 @@ from ml_stack.train.backend.registry import BackendUnavailable, get_backend
 Tensor = Any
 
 ATOL = 1e-6
-"""Tolerance for one operation on one input: fp32 rounding, not a different algorithm."""
+"""Largest absolute difference two backends may show on one operation."""
 
 _X = inputs((4, 5), seed=0)
 _W = inputs((5, 3), seed=1)

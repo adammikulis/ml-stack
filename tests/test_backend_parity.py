@@ -27,7 +27,7 @@ STEP_ATOL = 1e-5
 
 
 def test_every_protocol_operation_has_a_case():
-    """A method nobody compares is a method whose two implementations may differ."""
+    """Fails when the protocol grows a method no case covers."""
     declared = {
         attr for attr in dir(ArrayOps)
         if not attr.startswith("_") and callable(getattr(ArrayOps, attr, None))
@@ -43,7 +43,7 @@ def test_every_backend_field_has_a_case():
 
 
 def test_axis_arguments_are_compared_on_more_than_one_axis():
-    """An axis convention that differs shows up only when the axis is not the default."""
+    """Every operation taking an axis is compared on more than its default axis."""
     for op in ("stack", "concatenate", "softmax", "sum", "mean", "max", "min",
                "logsumexp", "argsort", "argmin", "take", "scatter_add", "segment_sum"):
         axes = [n for n in CASES if n.partition("(")[0] == op]
@@ -104,7 +104,6 @@ def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
 
 
 def test_a_shape_mismatch_is_a_failure(monkeypatch):
-    """An axis convention that differs usually changes the shape, not only the values."""
     from ml_stack.train.backend import parity
 
     monkeypatch.setitem(parity.CASES, "reshaped", lambda b, o: b.value)
@@ -194,7 +193,7 @@ def _grad_norms(torch_model, mlx_model, batch):
 
 @needs_both
 def test_sgd_steps_track_across_backends():
-    """The README's claim: the same loop, the same numbers, on either framework."""
+    """Six SGD steps through TorchStep and MLXStep from one set of weights."""
     import mlx.optimizers as optim
     import torch
 
@@ -294,7 +293,7 @@ def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
 
 
 def test_the_command_says_so_when_a_backend_is_missing():
-    """One framework installed means the parity claim is untested, not proven."""
+    """Naming a backend that cannot be built here exits 2 and says which."""
     from ml_stack.train.run import parity
 
     said: list[str] = []
