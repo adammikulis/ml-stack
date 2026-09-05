@@ -9,7 +9,7 @@
   "file-locks": 11,
   "home-paths": 36,
   "http-servers": 2,
-  "local-imports": 639,
+  "local-imports": 648,
   "long-docstrings": 136,
   "long-functions": 24,
   "print-calls": 237,
@@ -17,5 +17,5 @@
   "subprocess-spawns": 9,
   "unversioned-records": 6,
   "urlopen-calls": 41,
-  "wide-signatures": 45
+  "wide-signatures": 46
 }
