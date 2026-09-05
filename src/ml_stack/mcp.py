@@ -318,6 +318,36 @@ def setup_look() -> list[dict[str, Any]]:
     return [_plain(f) for f in look()]
 
 
+def speech_providers() -> dict[str, Any]:
+    """Every speech engine on this machine -- recognition, synthesis and voice activity --
+    with whether it could run and which one ``auto`` picks (``ml-stack-speech providers``)."""
+    from ml_stack.speech.service import providers
+
+    return providers()
+
+
+def speech_transcribe(path: str, provider: str = "", language: str = "") -> dict[str, Any]:
+    """An audio file (anything ffmpeg reads) as text with per-segment times
+    (``ml-stack-speech transcribe``); ``language`` is guessed when it is not given."""
+    from ml_stack.speech.service import transcribe
+
+    return _plain(transcribe(Path(path).expanduser(), provider=provider or None,
+                             language=language or None))
+
+
+def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict[str, Any]:
+    """Speak ``text`` into the WAV file ``out`` (``ml-stack-speech say``); returns the path,
+    how long it is and the voice that said it."""
+    from ml_stack.speech.service import say
+
+    spoken = say(text, provider=provider or None, voice=voice or None)
+    target = Path(out).expanduser()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(spoken.to_wav())
+    return {"out": str(target), "duration_s": spoken.duration_s,
+            "sample_rate": spoken.sample_rate, "voice": spoken.voice}
+
+
 def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
@@ -353,6 +383,11 @@ TOOLS: list[Tool] = [
          setup_look),
     Tool("doctor", "The checkouts, the bench store and the managed llama.cpp, checked.",
          doctor),
+    Tool("speech_providers", "Every speech engine here: recognition, synthesis, voice "
+                             "activity.", speech_providers),
+    Tool("speech_transcribe", "An audio file as text, with the times of each segment.",
+         speech_transcribe),
+    Tool("speech_say", "Speak text into a WAV file.", speech_say),
 ]
 _BY_NAME = {t.name: t for t in TOOLS}
 

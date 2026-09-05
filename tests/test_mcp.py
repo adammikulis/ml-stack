@@ -18,7 +18,8 @@ from ml_stack import mcp as server
 
 EXPECTED = {"serve_status", "serve_up", "serve_down", "serve_escalate", "models_find",
             "models_files", "models_fetch", "bench_run", "bench_status", "bench_history",
-            "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor"}
+            "bench_show", "fleet_peers", "fleet_join", "world_make", "setup_look", "doctor",
+            "speech_providers", "speech_transcribe", "speech_say"}
 
 
 def rpc(ident, method, **params):
@@ -169,6 +170,83 @@ class TestTheTools:
         assert got["pid"] == 77
         first = Path(got["log"]).read_text().splitlines()[0]
         assert first.startswith("command:") and "ml_stack.hub fetch" in first
+
+
+class TestTheSpeechTools:
+    """No speech engine is installed where the suite runs, so a fake stands on the registry
+    the tools resolve through -- the same one ``ml-stack-speech`` resolves through."""
+
+    @pytest.fixture(autouse=True)
+    def registered(self, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.media import wav
+        from ml_stack.speech import ProviderHealth, Registry, Segment, Speech, Transcript
+
+        class Ears:
+            name = "fake"
+
+            def probe(self):
+                return ProviderHealth.ok("fake")
+
+            def start(self):
+                return None
+
+            def stop(self):
+                return None
+
+            def transcribe(self, audio, *, language=None):
+                return Transcript(text="the fleet is up", language=language or "en",
+                                  duration_s=1.5, model="fake",
+                                  segments=(Segment("the fleet is up", 0.0, 1.5),))
+
+        class Voice(Ears):
+            name = "fake-voice"
+
+            def synthesize(self, text, *, voice=None):
+                return Speech(pcm=b"\x10\x00" * 8000, sample_rate=16000,
+                              voice=voice or "fake-voice")
+
+        asr, tts = Registry(kind="asr"), Registry(kind="tts")
+        asr.register("fake", Ears)
+        tts.register("fake-voice", Voice)
+        monkeypatch.setattr(package, "ASR", asr)
+        monkeypatch.setattr(package, "TTS", tts)
+        self.wav = wav
+
+    def test_speech_providers_reports_each_registry(self):
+        (reply,) = drive(rpc(1, "tools/call", name="speech_providers", arguments={}))
+        found = said(reply)
+        assert found["asr"]["auto"] == "fake"
+        assert found["tts"]["providers"][0]["name"] == "fake-voice"
+
+    def test_speech_transcribe_returns_the_text_and_its_segments(self, tmp_path):
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(self.wav.encode(b"\x00\x00" * 1600, sample_rate=16000))
+        (reply,) = drive(rpc(1, "tools/call", name="speech_transcribe",
+                             arguments={"path": str(clip), "language": "en"}))
+        got = said(reply)
+        assert got["text"] == "the fleet is up" and got["model"] == "fake"
+        assert got["segments"][0]["end_s"] == 1.5
+
+    def test_speech_say_writes_the_wav_and_says_where(self, tmp_path):
+        out = tmp_path / "spoken" / "said.wav"
+        (reply,) = drive(rpc(1, "tools/call", name="speech_say",
+                             arguments={"text": "the fleet is up", "out": str(out)}))
+        got = said(reply)
+        assert got["out"] == str(out) and got["duration_s"] == 0.5
+        assert self.wav.decode(out.read_bytes())[1].sample_rate == 16000
+
+    def test_no_engine_is_an_error_result_rather_than_a_crash(self, monkeypatch, tmp_path):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+
+        monkeypatch.setattr(package, "ASR", Registry(kind="asr"))
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(self.wav.encode(b"\x00\x00" * 1600, sample_rate=16000))
+        (reply,) = drive(rpc(1, "tools/call", name="speech_transcribe",
+                             arguments={"path": str(clip)}))
+        assert reply["result"]["isError"]
+        assert "no asr provider" in reply["result"]["content"][0]["text"]
 
 
 class TestTheCommand:
