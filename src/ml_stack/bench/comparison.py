@@ -2,7 +2,7 @@
 
 `assemble` takes the store and a list of labels and writes, per label, what served it
 (`served_by`), the graph bench's newest run under that label, the newest speed run
-(`speed.KIND`) beside it, the memory either measured, the standard sets a
+(`speed.KIND`) served the same way, the memory either measured, the standard sets a
 ``ml-stack-bench standard`` JSON scored under the same label, and the draft head's
 acceptance. Nothing absent is 0: a configuration measured on the graph and not for
 speed carries ``"speed": null``.
@@ -29,20 +29,6 @@ from ml_stack.bench.score import derived, invented_digest
 from ml_stack.bench.speed import KIND as SPEED
 from ml_stack.paths import repo_root
 
-# The way suffixes a graph run's label ends in, which a speed run's does not.
-WAYS = ("plain", "shortlist")
-
-
-def stem_of(label: str) -> str:
-    """``flash-plain-batch`` -> ``flash``: the label with its way and everything after
-    it taken off, which is what a speed run of the same server is labelled by."""
-    words = str(label or "").split("-")
-    for n, word in enumerate(words):
-        if word in WAYS and n > 0:
-            return "-".join(words[:n])
-    return str(label or "")
-
-
 def _graph_runs(kept: Sequence[Mapping[str, Any]], label: str, *, anyway: bool = False
                 ) -> list[Mapping[str, Any]]:
     """The graph runs labelled ``label``, over the invented community unless ``anyway``."""
@@ -59,12 +45,22 @@ def _graph_runs(kept: Sequence[Mapping[str, Any]], label: str, *, anyway: bool =
     return out
 
 
-def _speed_runs(kept: Sequence[Mapping[str, Any]], label: str) -> list[Mapping[str, Any]]:
-    """The speed runs that go with ``label``: labelled the same, or by its stem with
-    ``-speed`` on the end."""
-    wanted = {label, f"{label}-speed", f"{stem_of(label)}-speed", stem_of(label)}
-    return [one for one in kept
-            if str(one.get("kind") or "") == SPEED and str(one.get("label") or "") in wanted]
+def _speed_runs(kept: Sequence[Mapping[str, Any]], label: str,
+               graph_run: Mapping[str, Any] | None = None) -> list[Mapping[str, Any]]:
+    """The speed runs served the way ``graph_run`` was; failing that, the ones labelled
+    ``label``.
+
+    A speed grid over one server and a graph run over the same one carry the same model,
+    build, head and serve shape (`record.Measured.serving`); a run kept before those were
+    recorded carries only its label.
+    """
+    mine = [one for one in kept if str(one.get("kind") or "") == SPEED]
+    served = of(graph_run).serving if graph_run is not None else ()
+    if any(served):
+        found = [one for one in mine if of(one).serving == served]
+        if found:
+            return found
+    return [one for one in mine if str(one.get("label") or "") == label]
 
 
 def _newest(runs: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -76,10 +72,10 @@ def _newest(runs: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
 
 
 def _standard_for(standards: Sequence[Mapping[str, Any]], label: str) -> dict[str, Any] | None:
-    """The standard-set record whose ``label`` is this one or its stem."""
-    wanted = {label, stem_of(label), f"{stem_of(label)}-speed"}
+    """The standard-set record labelled ``label``; a standard set carries no server record
+    to be matched on."""
     for one in standards:
-        if str(one.get("label") or "") in wanted:
+        if str(one.get("label") or "") == label:
             sets = one.get("sets") or {}
             return {name: {"score": got.get("score"), "n": got.get("n"),
                            "metric": got.get("metric"), "seconds": got.get("seconds")}
@@ -175,7 +171,7 @@ def assemble(kept: Sequence[Mapping[str, Any]], labels: Sequence[str], *,
     configs = []
     for label in labels:
         graph_run = _newest(_graph_runs(kept, label, anyway=anyway))
-        speed_run = _newest(_speed_runs(kept, label))
+        speed_run = _newest(_speed_runs(kept, label, graph_run))
         server = dict((graph_run or speed_run or {}).get("server") or {})
         said = server.get("served_by") if isinstance(server.get("served_by"), Mapping) else None
         build = str(server.get("build") or "")
@@ -229,8 +225,8 @@ def add_arguments(sub: Any) -> Any:
                          help="several configurations as one document: the graph bench, "
                               "the speed grid, the memory and the standard sets per label")
     one.add_argument("labels_given", nargs="*", metavar="LABEL",
-                     help="the graph runs' labels, newest of each; a speed run matches by "
-                          "the same label, or its stem with -speed on the end")
+                     help="the graph runs' labels, newest of each; a speed run matches "
+                          "by what served it, or failing that by the same label")
     one.add_argument("--labels", default="", metavar="A,B,C",
                      help="the same labels, comma-separated")
     one.add_argument("--last", nargs="?", const=3, type=int, default=0, metavar="N",

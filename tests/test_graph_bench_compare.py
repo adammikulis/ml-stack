@@ -10,7 +10,7 @@ import json
 import pytest
 
 from ml_stack.bench import invented_digest, runs, save
-from ml_stack.bench.comparison import assemble, read_standards, stem_of, write
+from ml_stack.bench.comparison import assemble, read_standards, write
 from ml_stack.bench.speed import KIND as SPEED
 
 from conftest import scored_rows
@@ -34,8 +34,15 @@ def store(tmp_path):
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 900.0, "decode_tps": 30.0,
                  "decode_tps_per_stream": 30.0, "ttft_s": 0.6, "ttft_from": "prompt_ms"}],
          held={"resident_peak": 74 * G, "served_by": {"program": "llama.cpp", "format": "gguf",
-                                                       "quant": "Q4_K_XL"}, "build": "unsloth"},
+                                                      "quant": "Q4_K_XL"},
+               "build": "unsloth", "context": 32768, "slots": 1,
+               "binary": "/opt/builds/unsloth/bin/llama-server",
+               "draft_model": "mtp-thornfell.gguf"},
          kind=SPEED, label="flash-speed")
+    # a speed run from before a server record was kept: only its label says what it is
+    save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 100.0, "decode_tps": 9.0,
+                 "decode_tps_per_stream": 9.0, "ttft_s": 2.0, "ttft_from": "prompt_ms"}],
+         held={}, kind=SPEED, label="bare-speed")
     # the same without the head: a graph run only
     rows = scored_rows("flash-nodraft-plain", questions=20, hits=16, seconds=260.0,
                        tokens=(300, 40))
@@ -56,7 +63,8 @@ def store(tmp_path):
                                          "quant": "nvfp4", "model": "thornfell:125b-mlx"}})
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 700.0, "decode_tps": 25.0,
                  "decode_tps_per_stream": 25.0, "ttft_s": 0.8, "ttft_from": "prompt_ms"}],
-         held={"served_by": {"program": "ollama", "version": "0.33.3", "format": "safetensors",
+         held={"context": 32768,
+               "served_by": {"program": "ollama", "version": "0.33.3", "format": "safetensors",
                              "runtime": "mlx", "quant": "nvfp4"}},
          kind=SPEED, label="flash-ollama-speed")
     # a graph run over some other community, newer, which must not be taken
@@ -65,17 +73,33 @@ def store(tmp_path):
     return kept
 
 
-def test_a_label_stem_drops_the_way_and_what_follows_it():
-    assert stem_of("flash-plain") == "flash"
-    assert stem_of("flash-nodraft-plain-batch") == "flash-nodraft"
-    assert stem_of("flash-ollama-shortlist") == "flash-ollama"
-    assert stem_of("flash") == "flash"
-    assert stem_of("plain") == "plain", "a label that is only a way is its own stem"
+def test_a_speed_run_is_found_by_what_served_it_and_not_by_its_label(store):
+    """The label said `flash-plain` and the speed grid said `flash-speed`, and the way the
+    two were joined was a suffix. What joins them is the model, the build, the head and the
+    serve shape, all of which both runs record."""
+    from ml_stack.bench.comparison import _speed_runs
+
+    kept = runs(store)
+    drafted = next(one for one in kept if one.get("label") == "flash-plain"
+                   and not one.get("kind"))
+    found = _speed_runs(kept, "no-such-label", drafted)
+    assert [one["label"] for one in found] == ["flash-speed"]
+
+    bare = next(one for one in kept if one.get("label") == "flash-nodraft-plain")
+    assert _speed_runs(kept, "flash-nodraft-plain", bare) == [], \
+        "a server with no head is not the server the drafted grid measured"
+
+
+def test_a_speed_run_that_cannot_say_what_served_it_is_found_by_its_label(store):
+    from ml_stack.bench.comparison import _speed_runs
+
+    kept = runs(store)
+    assert [one["label"] for one in _speed_runs(kept, "bare-speed", None)] == ["bare-speed"]
 
 
 def test_the_document_has_one_entry_per_label_with_nothing_absent_as_zero(store, tmp_path):
     standard = tmp_path / "flash-standard.json"
-    standard.write_text(json.dumps({"label": "flash", "sets": {
+    standard.write_text(json.dumps({"label": "flash-plain", "sets": {
         "gsm8k": {"score": 0.91, "metric": "exact", "n": 200, "seconds": 900.0}}}))
     got = assemble(runs(store), ["flash-plain", "flash-nodraft-plain", "flash-ollama-plain",
                                  "nothing-plain"],

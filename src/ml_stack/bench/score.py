@@ -486,26 +486,24 @@ def baseline(one: Mapping[str, Any],
              kept: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The undrafted run a drafted one is measured against, or None.
 
-    The newest run among ``kept`` of the same model, on the same llama-server (or neither
-    naming one), over the same number of scored questions, served with no draft head. The
-    same size because a twenty-question run and a thirty-four are two measurements; the
-    same build because a fork's speed against mainline's is the fork's, not the head's.
+    The newest run among ``kept`` whose identity is this one's with the head taken out --
+    `record.Measured.undrafted` -- over the same number of scored questions. The same size
+    because a twenty-question run and a thirty-four are two measurements; the rest of the
+    identity because a fork's speed against mainline's is the fork's, not the head's, and
+    because a run asked another way, or under another prompt, answered other questions.
     None for a run with no head: it is its own baseline, and a speedup of 1.00x would say
     nothing.
     """
-    if not of(one).head:
+    me = of(one)
+    if not me.head:
         return None
-    server = one.get("server") or {}
     mine = derived(one)
     if not mine.get("questions"):
         return None
-    wanted = (str(server.get("model") or ""), str(server.get("binary") or ""),
-              mine["questions"])
+    wanted = (me.undrafted(), mine["questions"])
     found = [(n, o) for n, o in enumerate(kept)
-             if o is not one and not of(o).head
-             and (str((o.get("server") or {}).get("model") or ""),
-                  str((o.get("server") or {}).get("binary") or ""),
-                  derived(o).get("questions")) == wanted]
+             if o is not one and not (other := of(o)).head
+             and (other.undrafted(), derived(o).get("questions")) == wanted]
     if not found:
         return None
     return max(found, key=lambda pair: (str(pair[1].get("at") or ""), pair[0]))[1]

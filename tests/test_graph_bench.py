@@ -2540,15 +2540,15 @@ def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatc
 # -- what a draft head was worth, as a number ----------------------------------------------
 
 def _measured(label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0,
-              binary="/builds/current/llama-server", draft="", at="2026-09-01T12:00:00",
-              guessed=0, taken=0):
+              build="current", draft="", at="2026-09-01T12:00:00",
+              guessed=0, taken=0, **over):
     """A kept run as `runs` hands it back, built by hand so ``at`` is chosen and not the
     clock's: ``hits`` of ``questions`` answered in full over ``seconds`` altogether."""
     from dataclasses import asdict
 
     rows = [asdict(r) for r in scored_rows(label, questions=questions, hits=hits,
                                            seconds=seconds, draft=(guessed, taken))]
-    server = {"model": model, "binary": binary, "context": 32768, "slots": 1}
+    server = {"model": model, "build": build, "context": 32768, "slots": 1, **over}
     if draft:
         server["draft_model"] = draft
     return {"key": f"bench:{label}:{at}", "at": at, "label": label, "server": server,
@@ -2562,7 +2562,7 @@ def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_ove
 
     older = _measured("draft:none", seconds=300.0, at="2026-09-01T10:00:00")
     newest = _measured("draft:none", seconds=200.0, at="2026-09-01T11:00:00")
-    fork = _measured("draft:none", seconds=100.0, binary="/builds/brayfork/llama-server")
+    fork = _measured("draft:none", seconds=100.0, build="brayfork")
     larger = _measured("flash-plain", questions=34, hits=20, seconds=170.0)
     other = _measured("draft:none", model="tiny.gguf", seconds=50.0)
     drafted = _measured("draft:mtp-flash@n4", seconds=140.8, draft="mtp-flash.gguf",
@@ -2576,9 +2576,17 @@ def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_ove
     # a fork's baseline says nothing about mainline's head, nor a larger run about a smaller
     assert speedup(drafted, [fork, larger, other, drafted]) is None
     # the same model on no named build pairs with a baseline on no named build
-    bare = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf", binary="")
+    bare = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf", build="")
     assert speedup(bare, [newest, bare]) is None
-    assert speedup(bare, [_measured("draft:none", binary=""), bare]) == pytest.approx(2.0)
+    assert speedup(bare, [_measured("draft:none", build=""), bare]) == pytest.approx(2.0)
+    # ...and a run at another cache, budget or asking is another measurement, whatever the
+    # label's suffixes said: a speedup read across one is the head's and the change's
+    quantised = _measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf",
+                          cache_type="q8_0")
+    assert speedup(quantised, [newest, quantised]) is None
+    asked = {**_measured("draft:mtp-flash@n4", seconds=100.0, draft="mtp-flash.gguf"),
+             "asking": {"tight": True, "batch": True}}
+    assert speedup(asked, [newest, asked]) is None
     # a run that took no time has nothing to divide by
     still = _measured("draft:mtp-flash@n4", seconds=0.0, draft="mtp-flash.gguf")
     assert speedup(still, [newest, still]) is None
@@ -2590,13 +2598,11 @@ def test_the_table_prints_speed_after_draft_and_leaves_it_blank_without_a_baseli
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=200.0,
-              binary="/builds/current/llama-server")
+              build="current")
     _kept_run(store, "draft:mtp-flash@n4", model="flash.gguf", questions=20, hits=12,
-              seconds=140.8, binary="/builds/current/llama-server",
-              draft_model="mtp-flash.gguf")
+              seconds=140.8, build="current", draft_model="mtp-flash.gguf")
     _kept_run(store, "draft:mtp-flash@n8", model="flash.gguf", questions=20, hits=12,
-              seconds=100.0, binary="/builds/brayfork/llama-server",
-              draft_model="mtp-flash.gguf")
+              seconds=100.0, build="brayfork", draft_model="mtp-flash.gguf")
     table(runs(store))
     said = capsys.readouterr().out
     head = said.splitlines()[0].split()
