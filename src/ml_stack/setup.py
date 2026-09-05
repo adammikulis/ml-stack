@@ -25,7 +25,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-__all__ = ["BEHAVIOURS", "Behaviour", "Finding", "ask", "look", "main"]
+__all__ = ["BEHAVIOURS", "CHECKOUT", "Behaviour", "Finding", "ask", "look", "main"]
+
+CHECKOUT = Path("~/Documents/repos/ml-stack").expanduser()
+"""Where the editable install must point: the checkout, not a copy of it."""
 
 
 @dataclass(frozen=True)
@@ -230,11 +233,7 @@ def _tilde(path: Path) -> str:
 def _checkout() -> Path:
     """The checkout this package is imported from, else the one `ml-stack-doctor` checks."""
     here = Path(__file__).resolve().parents[2]
-    if (here / "pyproject.toml").is_file():
-        return here
-    from ml_stack.doctor import CHECKOUT
-
-    return CHECKOUT
+    return here if (here / "pyproject.toml").is_file() else CHECKOUT
 
 
 def _scripts() -> list[str]:

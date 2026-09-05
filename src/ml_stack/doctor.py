@@ -26,12 +26,9 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ml_stack.setup import Finding, ask
+from ml_stack.setup import CHECKOUT, Finding, ask
 
-__all__ = ["CHECKOUT", "STALE_BUILD_DAYS", "look", "main", "repositories"]
-
-CHECKOUT = Path("~/Documents/repos/ml-stack").expanduser()
-"""Where the editable install must point: the checkout, not a copy of it."""
+__all__ = ["STALE_BUILD_DAYS", "look", "main", "repositories"]
 
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted. Master gains an architecture every week

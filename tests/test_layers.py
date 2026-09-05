@@ -32,7 +32,6 @@ RANK = {package: height for height, (_, packages) in enumerate(LAYERS)
 
 KNOWN = {
     ("doctor", "graph"),
-    ("doctor", "setup"),
     ("fleet", "graph"),
     ("fleet", "serve"),
     ("fleet", "setup"),
@@ -44,7 +43,6 @@ KNOWN = {
     ("serve", "fleet"),
     ("serve", "graph"),
     ("serve", "setup"),
-    ("setup", "doctor"),
     ("setup", "fleet"),
     ("setup", "serve"),
     ("sources", "world"),
