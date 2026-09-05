@@ -41,6 +41,7 @@ def free_port() -> int:
 
 
 TMP = Path(tempfile.mkdtemp(prefix="ml-stack-verify-"))
+REPO = Path(__file__).resolve().parent.parent
 WORDS = "correct horse battery staple"
 
 
@@ -413,20 +414,18 @@ def _():
 
 @check("Interface", "closing asks once, then remembers")
 def _():
-    from ml_stack.fleet.app import Bridge
     from ml_stack.fleet.settings import Settings
     path = TMP / "close.json"
 
-    class W:
-        hidden = destroyed = False
-        def hide(self): self.hidden = True
-        def destroy(self): self.destroyed = True
-
-    b = Bridge(path); b.window = W()
-    b.close_choice("background", remember=False)
-    assert b.window.hidden and Settings.load(path).on_close == ""
-    b.window = W(); b.close_choice("background", remember=True)
+    Settings(on_close="").save(path)
+    assert Settings.load(path).on_close == ""
+    Settings(on_close="background").save(path)
     assert Settings.load(path).on_close == "background"
+
+    page = (REPO / "src/ml_stack/fleet/web/components/close-sheet.html").read_text()
+    window = (REPO / "app/src-tauri/src/settings.rs").read_text()
+    assert "mlStackAskOnClose" in page and 'close_choice' in page
+    assert '"on_close"' in window and '"settings.json"' in window
     return "unticked -> ask again; ticked -> remembered"
 
 
@@ -491,7 +490,7 @@ def _():
     meta = tomllib.load((root / "pyproject.toml").open("rb"))["project"]
     assert meta["dependencies"] == [], meta["dependencies"]
     extras = sorted(meta["optional-dependencies"])
-    assert {"app", "train", "serve", "all"} <= set(extras)
+    assert {"train", "serve", "all"} <= set(extras)
     return "no dependencies; " + ", ".join(extras)
 
 

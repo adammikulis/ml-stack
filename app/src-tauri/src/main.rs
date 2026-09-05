@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use tauri::utils::config::Color;
+use tauri::PhysicalPosition;
 use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_shell::process::CommandChild;
 
@@ -96,8 +97,19 @@ fn asked(home: &std::path::Path) -> (u16, PathBuf) {
     (port, root)
 }
 
+/// Where `ML_STACK_WINDOW_POSITION` ("X,Y") says to put the window, if it says.
+fn told_where() -> Option<PhysicalPosition<i32>> {
+    let told = std::env::var("ML_STACK_WINDOW_POSITION").ok()?;
+    let (x, y) = told.split_once(',')?;
+    Some(PhysicalPosition::new(
+        x.trim().parse().ok()?,
+        y.trim().parse().ok()?,
+    ))
+}
+
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![close_choice, on_closing])
         .setup(|app| {
@@ -117,12 +129,16 @@ fn main() {
             });
 
             let url = format!("http://127.0.0.1:{port}/ui/");
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
+            let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url.parse()?))
                 .title(TITLE)
                 .inner_size(WIDTH, HEIGHT)
                 .min_inner_size(MIN_WIDTH, MIN_HEIGHT)
                 .background_color(BACKGROUND)
+                .center()
                 .build()?;
+            if let Some(at) = told_where() {
+                window.set_position(at)?;
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -145,7 +161,7 @@ fn main() {
             }
             RunEvent::Exit => {
                 if let Some(child) = app.state::<Shell>().daemon.lock().unwrap().take() {
-                    let _ = child.kill();
+                    daemon::stop(child);
                 }
             }
             _ => {}

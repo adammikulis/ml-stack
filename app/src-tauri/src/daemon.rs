@@ -53,8 +53,20 @@ pub fn start(app: &AppHandle, port: u16, root: &str) -> Result<CommandChild, Str
         .spawn()
         .map_err(|e| format!("could not start {SIDECAR}: {e}"))?;
     if !wait_for_health(port) {
-        let _ = child.kill();
+        stop(child);
         return Err(format!("the daemon did not start on port {port}"));
     }
     Ok(child)
+}
+
+/// Stop a daemon this app started, and the worker the frozen launcher runs under it.
+pub fn stop(child: CommandChild) {
+    let pid = child.pid();
+    #[cfg(unix)]
+    let _ = std::process::Command::new("/bin/kill")
+        .args(["-TERM", &pid.to_string()])
+        .status();
+    #[cfg(unix)]
+    std::thread::sleep(Duration::from_millis(500));
+    let _ = child.kill();
 }

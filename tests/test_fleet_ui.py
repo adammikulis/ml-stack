@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -568,113 +569,34 @@ class TestPreferences:
 
 
 class TestClosingTheWindow:
-    """Asked once, then remembered if the box was left ticked."""
+    """Asked once by the native window, then remembered if the box was left ticked."""
 
-    class FakeWindow:
-        """Records what was asked of it, and on which thread."""
-
-        def __init__(self):
-            self.hidden = self.destroyed = False
-            self.evaluated = []
-            self.threads = []
-
-        def _mark(self):
-            self.threads.append(threading.current_thread().name)
-
-        def hide(self):
-            self._mark()
-            self.hidden = True
-
-        def destroy(self):
-            self._mark()
-            self.destroyed = True
-
-        def evaluate_js(self, script):
-            self._mark()
-            self.evaluated.append(script)
-
-    def bridge(self, tmp_path):
-        from ml_stack.fleet.app import Bridge
-
-        b = Bridge(tmp_path / "settings.json")
-        b.window = self.FakeWindow()
-        return b
+    WINDOW = Path(__file__).resolve().parent.parent / "app" / "src-tauri" / "src"
 
     def test_a_fresh_machine_has_no_saved_answer(self, tmp_path):
         from ml_stack.fleet.settings import Settings
 
         assert Settings.load(tmp_path / "settings.json").on_close == ""
 
-    def test_keeping_it_running_hides_the_window(self, tmp_path):
-        b = self.bridge(tmp_path)
-        b.close_choice("background", remember=False)
-        assert b.window.hidden and not b.window.destroyed
-
-    def test_quitting_destroys_it(self, tmp_path):
-        b = self.bridge(tmp_path)
-        b.close_choice("quit", remember=False)
-        assert b.window.destroyed
-
-    def test_unticking_the_box_asks_again_next_time(self, tmp_path):
+    def test_the_answer_is_kept_where_the_daemon_reads_it(self, tmp_path):
         from ml_stack.fleet.settings import Settings
 
-        b = self.bridge(tmp_path)
-        b.close_choice("quit", remember=False)
-        assert Settings.load(tmp_path / "settings.json").on_close == ""
+        path = tmp_path / "settings.json"
+        Settings(on_close="background").save(path)
+        assert Settings.load(path).on_close == "background"
+        Settings(on_close="quit").save(path)
+        assert Settings.load(path).on_close == "quit"
 
-    def test_leaving_the_box_ticked_remembers(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
+    def test_the_window_writes_the_same_field_into_the_same_file(self):
+        source = (self.WINDOW / "settings.rs").read_text()
+        assert '"settings.json"' in source
+        assert '"on_close"' in source
+        assert 'BACKGROUND: &str = "background"' in source
+        assert 'QUIT: &str = "quit"' in source
 
-        b = self.bridge(tmp_path)
-        b.close_choice("background", remember=True)
-        assert Settings.load(tmp_path / "settings.json").on_close == "background"
-
-    def test_the_answer_can_be_changed_later(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
-
-        b = self.bridge(tmp_path)
-        b.close_choice("background", remember=True)
-        b.window = self.FakeWindow()
-        b.close_choice("quit", remember=True)
-        assert Settings.load(tmp_path / "settings.json").on_close == "quit"
-
-    def test_an_answer_that_is_neither_is_refused(self, tmp_path):
-        b = self.bridge(tmp_path)
-        assert b.close_choice("explode", True) == {"ok": False}
-        assert not b.window.hidden and not b.window.destroyed
-
-    def test_the_question_is_asked_off_the_drawing_thread(self, tmp_path):
-        b = self.bridge(tmp_path)
-        assert b.on_closing() is False
-        b.pending.join(5)
-        assert b.window.evaluated == [
-            "window.mlStackAskOnClose && window.mlStackAskOnClose()"]
-        assert b.window.threads == ["ml-stack-close"]
-
-    def test_keeping_it_running_hides_off_the_drawing_thread(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
-
-        b = self.bridge(tmp_path)
-        Settings(on_close="background").save(tmp_path / "settings.json")
-        assert b.on_closing() is False
-        b.pending.join(5)
-        assert b.window.hidden and b.window.threads == ["ml-stack-close"]
-
-    def test_a_saved_quit_closes_without_asking(self, tmp_path):
-        from ml_stack.fleet.settings import Settings
-
-        b = self.bridge(tmp_path)
-        Settings(on_close="quit").save(tmp_path / "settings.json")
-        assert b.on_closing() is True
-        assert b.window.evaluated == []
-
-    def test_quitting_does_not_ask_the_question_again(self, tmp_path):
-        """Closing the window runs the handler a second time."""
-        b = self.bridge(tmp_path)
-        b.close_choice("quit", remember=False)
-        assert b.window.destroyed
-        assert b.on_closing() is True
-        assert b.window.evaluated == []
+    def test_the_window_asks_the_page_by_name(self):
+        source = (self.WINDOW / "main.rs").read_text()
+        assert "window.mlStackAskOnClose && window.mlStackAskOnClose()" in source
 
     def test_the_page_offers_the_question(self):
         """The native window calls this by name when the close button is clicked."""
@@ -682,8 +604,17 @@ class TestClosingTheWindow:
 
         html = render()
         assert "mlStackAskOnClose" in html
-        assert "close_choice" in html
+        assert 'invoke("close_choice", { mode, remember })' in html
         assert 'id="remember" checked="1"' in html, "the box must start ticked"
+
+    def test_the_page_finds_no_window_in_a_browser(self):
+        """The same page is served to a browser, where there is no bridge at all."""
+        from ml_stack.fleet.page import render
+
+        html = render()
+        assert "window.__TAURI__ && window.__TAURI__.core" in html
+        assert "if (!core || typeof core.invoke !== \"function\") return null;" in html
+        assert "pywebview" not in html
 
 
 class TestSettingsScreen:

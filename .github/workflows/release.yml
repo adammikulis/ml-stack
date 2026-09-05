@@ -49,12 +49,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: what the window needs on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
       - run: python -m pip install --upgrade pip build
       - run: python packaging/build.py --bundle
 
       # The bundle has to run on a machine with no Python and no source tree.
       # The window needs a display, so CI checks the headless binary instead: same
       # daemon, same interface, and it is the half that can be tested without one.
+      # It is also what the window runs as its sidecar.
       - name: it starts and serves the interface
         shell: bash
         run: |
@@ -164,7 +178,7 @@ jobs:
             fi
             if [ -n "$wheel" ]; then
               echo
-              echo "**If you write Python**: \`pip install ml-stack\`, and \`ml-stack[train]\`, \`[serve]\`, \`[app]\` or \`[all]\` for what needs more than the standard library."
+              echo "**If you write Python**: \`pip install ml-stack\`, and \`ml-stack[train]\`, \`[serve]\` or \`[all]\` for what needs more than the standard library."
             fi
             echo "DOWNLOADS_EOF"
           } >> "$GITHUB_OUTPUT"
@@ -194,7 +208,7 @@ jobs:
               case "$file" in
                 "") ;;
                 *.md|docs/*) ;;
-                pyproject.toml|packaging/ml-stack-app.spec) ;;
+                pyproject.toml|app/src-tauri/Cargo.toml) ;;
                 *) return 0 ;;
               esac
             done < <(git show --name-only --pretty=format: "$1")

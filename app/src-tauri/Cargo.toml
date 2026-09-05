@@ -7,11 +7,12 @@ rust-version = "1.82"
 publish = false
 
 [build-dependencies]
-tauri-build = "=2.6.3"
+tauri-build = { version = "=2.6.3", features = [] }
 
 [dependencies]
-tauri = "=2.11.5"
+tauri = { version = "=2.11.5", features = [] }
 tauri-plugin-shell = "=2.3.6"
+tauri-plugin-window-state = "=2.4.1"
 serde_json = "1"
 
 [profile.release]

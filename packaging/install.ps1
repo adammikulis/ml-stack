@@ -125,15 +125,22 @@ function Install-App {
         $dest = if ($env:ML_STACK_DEST) { $env:ML_STACK_DEST }
                 else { Join-Path $env:LOCALAPPDATA "Programs\ml-stack" }
         New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        Copy-Item -Path (Join-Path $tmp "out\*") -Destination $dest -Recurse -Force
+        # The window is a Windows installer; the daemon beside it is copied as it is.
+        $setup = Get-ChildItem -Path (Join-Path $tmp "out") -Filter "*-setup.exe" -Recurse |
+                 Select-Object -First 1
+        if ($setup) {
+            Start-Process -FilePath $setup.FullName -ArgumentList "/S" -Wait
+            Get-ChildItem -Path (Join-Path $tmp "out") -Filter "ml-stack-headless*" -Recurse |
+                ForEach-Object { Copy-Item $_.FullName -Destination $dest -Force }
+        }
+        else { Copy-Item -Path (Join-Path $tmp "out\*") -Destination $dest -Recurse -Force }
         Add-ToPath $dest
         Open-Firewall
         Write-Host ""
         Write-Host "Installed to $dest"
-        Write-Host "Open ml-stack.exe, and type the same passphrase you used on your other machines."
+        Write-Host "Open ml-stack from the Start menu, and type the same passphrase you used on your other machines."
         Write-Host "It downloads gemma-4-E2B on first run (2.6G, about 1.5s a question) and offers"
         Write-Host "the bigger models this machine has room for."
-        Start-Process (Join-Path $dest "ml-stack.exe") -ErrorAction SilentlyContinue
     }
     finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

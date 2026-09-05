@@ -238,7 +238,7 @@ def test_release_please_is_pointed_at_every_file_that_holds_the_version():
     config = json.loads((REPO / "release-please-config.json").read_text())
     listed = {e["path"] for e in config["packages"]["."]["extra-files"]}
     carry = {str(p.relative_to(REPO)) for p in (REPO.glob("pyproject.toml"))}
-    carry |= {"packaging/ml-stack-app.spec"}
+    carry |= {"app/src-tauri/Cargo.toml"}
 
     assert listed == carry, f"registered: {listed}; carrying: {carry}"
     for path in sorted(carry):

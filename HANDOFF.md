@@ -310,6 +310,51 @@ worth taking, in this order:
   are the far end; what is missing is a control that records in the browser and posts the
   audio.
 
+## The window
+
+- [ ] **The Tauri window is proven on macOS only, and three things are unfinished.** `app/`
+  is a Tauri 2 project (`app/src-tauri`, tauri 2.11.5, tauri-plugin-shell 2.3.6,
+  tauri-plugin-window-state 2.4.1, CLI 2.11.4 pinned in `app/package.json`). It bundles no
+  HTML: the window opens on `http://127.0.0.1:8770/ui/`, the page `ml_stack.ui.assemble`
+  builds, and `window.mlStackNative()` in `close-sheet.html` returns null in a browser so
+  the same page still works headless. The daemon is a sidecar, the PyInstaller binary
+  `packaging/ml-stack.spec` builds; `packaging/build.py --bundle` freezes it, copies it to
+  `app/src-tauri/binaries/ml-stack-headless-<target triple>` and runs the bundler.
+  `--no-window` stops before that, for a machine with no Rust. An app command reached from
+  the loopback page needs three things or it is refused by the ACL: the capability's
+  `remote.urls`, `build.rs` declaring the command names, and the name in the capability's
+  permissions.
+  - **Windows and Linux have never been built.** The release workflow installs Rust, node
+    and (on Linux) webkit2gtk and runs the same build; the NSIS setup and the AppImage the
+    bundler makes there are what `install.ps1` and `install.sh` now expect, and neither has
+    run. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
+  - **`hub.room` pulls the whole graph library in.** `room()` imports `serve.limits`, which
+    runs `ml_stack/serve/__init__.py`, which imports `serve/shape.py`, which imports
+    `graph.asking` and so `graph/__init__.py` and `graph/topology.py`, which needs numpy.
+    The beacon calls `room()` every ten seconds. numpy is bundled into the frozen daemon to
+    get past it (11.7 MB to 15.5 MB); the fix is that a memory number should not reach the
+    tools layer.
+  - **Adam's call: what a person downloading it gets on macOS.** There is no Apple
+    developer certificate and there is not going to be one, so `packaging/build.py`
+    ad-hoc signs the app, which is enough to open it on the machine that built it. A file
+    fetched by `curl` carries no `com.apple.quarantine`, so the install script's path opens
+    without complaint; a `.dmg` or a zip a browser downloaded is quarantined and refused
+    with "the developer cannot be verified". Nothing publishes a `.dmg` today. Either it
+    stays that way and the release page offers only the install command, or a `.dmg` is
+    published and the README tells a first-time reader to open it from the right-click
+    menu once.
+  - **Adam's call: which updater, and what happens to the rule that nothing updates while
+    a job runs.** `ml_stack.fleet.updates` is what runs now, unchanged: it asks GitHub
+    once a day, checks the download against the digest GitHub publishes, swaps
+    `ml-stack.app` into place and restarts, and `in_the_way` holds it back while a job is
+    running, a benchmark is measuring or a model is loaded. It keeps working because the
+    release zip still holds `ml-stack.app`. Tauri has its own updater, with its own
+    keypair (`tauri signer generate`, the private key and its password in
+    `TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the release
+    workflow's secrets, the public key in `tauri.conf.json`; lose the private key and no
+    published app can be updated again). It is not turned on, and it knows nothing about a
+    running job, so turning it on means writing that gate again on the Rust side.
+
 ## The interface
 
 - [ ] **`fit-view` is three screens in one component, 1,150 lines.** What fits, what it cost

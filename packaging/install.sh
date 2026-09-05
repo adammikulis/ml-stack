@@ -136,6 +136,8 @@ install_app() {
   else
     DEST="${ML_STACK_DEST:-$HOME/.local/bin}"
     mkdir -p "$DEST"
+    APPIMAGE=$(find "$TMP/out" -maxdepth 2 -name '*.AppImage' -type f | head -1)
+    [ -n "$APPIMAGE" ] && install -m 0755 "$APPIMAGE" "$DEST/ml-stack"
     for name in ml-stack ml-stack-headless; do
       [ -f "$TMP/out/$name" ] || continue
       install -m 0755 "$TMP/out/$name" "$DEST/$name"

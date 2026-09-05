@@ -213,9 +213,10 @@ downloads one. Nothing is installed into the system Python.
 
 ## The interface
 
-A native window — WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux. Each
-download also carries a headless binary for a machine with no screen, which serves the
-same interface to a browser.
+A native window — WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux. It carries
+no interface of its own: it opens on the page the daemon serves, which is the same page a
+browser gets. Each download also carries that daemon on its own, for a machine with no
+screen.
 
 - **First run** asks what to call the machine, then which clusters it belongs to, then
   what the machine is for. The settings are pre-filled from the hardware, with the reason
@@ -485,6 +486,10 @@ tomorrow. Only the selectors differ, so the selectors are data — `website`, `s
   cluster on a single box.
 - **The native window is verified on macOS.** Windows and Linux use different webview
   backends, and a window cannot be tested without a display.
+- **The macOS app carries no developer certificate.** Install it with the command on the
+  release page: a download fetched that way opens straight away. A `.app` pulled out of a
+  zip in a browser is quarantined, and macOS refuses it until it is opened once from the
+  right-click menu.
 - **No dataset browser yet.** Models are catalogued across the network; datasets are
   not. Peer-to-peer transfer of them exists, but nothing indexes what each machine has.
 - **Conversations stay on the machine they were held on.** They are not shared across
