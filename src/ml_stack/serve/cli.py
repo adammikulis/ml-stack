@@ -10,6 +10,8 @@ import subprocess
 import pathlib
 import json
 import sys
+import time
+from typing import Any
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -908,6 +910,93 @@ def machine_memory() -> dict | None:
             "largest": [f"{name} {_human(r)}" for r, name in rest[:5]]}
 
 
+def cmd_limits(args: argparse.Namespace) -> int:
+    """``ml-stack-serve limits`` -- how much of this machine ml-stack may take.
+
+    Set nothing and it prints what is set. Every limit is off until somebody sets one, so
+    a machine nobody has told anything about behaves exactly as it did.
+    """
+    from ml_stack.graph.bench.history import parse_duration
+    from ml_stack.hub import _human, machine_room
+    from ml_stack.serve.fit import parse_room
+    from ml_stack.serve.limits import changed, clear, read, where
+
+    if args.clear:
+        print(f"every limit is off; {clear()} says so")
+        return 0
+
+    asked: dict[str, Any] = {}
+    if args.memory:
+        try:
+            asked["memory_bytes"] = parse_room(args.memory)
+        except ValueError as why:
+            print(f"error: {why}", file=sys.stderr)
+            return 2
+    if args.idle:
+        seconds = parse_duration(args.idle)
+        if seconds is None:
+            print(f"error: cannot read {args.idle!r} as a length of time; try 10m",
+                  file=sys.stderr)
+            return 2
+        asked["idle_s"] = seconds
+    for name, value in (("servers", args.servers), ("seats", args.seats)):
+        if value is not None:
+            asked[name] = int(value)
+    if asked:
+        changed(**asked)
+
+    limits = read()
+    lines = limits.said()
+    machine = machine_room()
+    if lines:
+        print(f"what ml-stack may take here ({where()}):")
+        for line in lines:
+            print(f"  {line}")
+    else:
+        print("nothing is limited here; ml-stack may use whatever this machine allows")
+    if machine:
+        print(f"\nthis machine allows {_human(machine)}; a model may use "
+              f"{_human(limits.room(machine))}")
+    return 0
+
+
+def cmd_reclaim(args: argparse.Namespace) -> int:
+    """``ml-stack-serve reclaim`` -- stop the servers nobody is using.
+
+    Idleness is asked of each server and what the looks found is kept, so a pass adds
+    `--settle` seconds of its own watching to whatever the daemon has already seen.
+    `--watch` keeps looking for as long as it runs.
+    """
+    from ml_stack.graph.bench.history import parse_duration
+    from ml_stack.serve.limits import read
+    from ml_stack.serve.reclaim import Idleness, reclaim_idle, watching
+
+    older = parse_duration(args.idle) if args.idle else read().idle_s
+    if not older:
+        print("no idle time given and none is set; nothing to reclaim "
+              "(ml-stack-serve limits --idle 10m)", file=sys.stderr)
+        return 2
+    watcher = Idleness()
+    if args.watch:
+        every = parse_duration(args.every) or 60.0
+        print(f"watching every {every:.0f}s, reclaiming after {older:.0f}s idle; "
+              "Ctrl-C to stop", flush=True)
+        try:
+            with watching(older_than=older, every=every, idleness=watcher, say=print):
+                while True:
+                    time.sleep(3600)
+        except KeyboardInterrupt:
+            return 0
+    watcher.look(dict(recorded_servers(STATE_FILE)))
+    settle = parse_duration(args.settle) or 0.0
+    if settle:
+        time.sleep(settle)
+    stopped = reclaim_idle(older_than=older, idleness=watcher, say=print)
+    if not stopped:
+        print("nothing has been idle that long")
+    return 0
+
+
 def cmd_memory(args: argparse.Namespace) -> int:
     """``ml-stack-serve memory`` -- what this machine will let a model use, and for how long.
 
@@ -1367,6 +1456,32 @@ def main(argv: list[str] | None = None) -> int:
                         help="preview: what the rest of the machine would have under this "
                              "wiring limit, against what it holds now")
 
+    limits_p = sub.add_parser("limits", help="how much of this machine ml-stack may take")
+    limits_p.add_argument("--memory", default="", metavar="SIZE",
+                          help="the most a model and its caches may use here -- 90G, "
+                               "24576M, a plain number of bytes. Every preflight, fit and "
+                               "lease reads it")
+    limits_p.add_argument("--servers", type=int, default=None, metavar="N",
+                          help="the most model servers to run at once")
+    limits_p.add_argument("--seats", type=int, default=None, metavar="N",
+                          help="the most conversations one server may hold")
+    limits_p.add_argument("--idle", default="", metavar="TIME",
+                          help="stop a server unused for this long -- 10m, 1h, 600. "
+                               "`ml-stack-serve reclaim` and the fleet daemon act on it")
+    limits_p.add_argument("--clear", action="store_true",
+                          help="take every limit off this machine")
+
+    reclaim_p = sub.add_parser("reclaim", help="stop the servers nobody is using")
+    reclaim_p.add_argument("--idle", default="", metavar="TIME",
+                           help="how long unused is idle (default: what `limits --idle` set)")
+    reclaim_p.add_argument("--settle", default="30", metavar="TIME",
+                           help="how long to watch before deciding, on top of what earlier "
+                                "looks found (default: %(default)ss)")
+    reclaim_p.add_argument("--watch", action="store_true",
+                           help="keep looking rather than making one pass")
+    reclaim_p.add_argument("--every", default="60", metavar="TIME",
+                           help="with --watch: how often to look (default: %(default)ss)")
+
     down = sub.add_parser("down", help="stop a server started on this machine")
     down.add_argument("--port", type=int, default=DEFAULT_PORT,
                       help=f"port of the server to stop (default: {DEFAULT_PORT})")
@@ -1447,6 +1562,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "escalate": cmd_escalate,
             "memory": cmd_memory, "fit": cmd_fit, "profile": cmd_profile,
+            "limits": cmd_limits, "reclaim": cmd_reclaim,
             "build": build.cmd_build}[args.cmd](args)
 
 

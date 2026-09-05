@@ -1409,11 +1409,24 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         raise KeyboardInterrupt(f"signal {signum}")
 
     on_quit(_quit)
+    # A server this machine was told to stop when nobody is using it (`ml-stack-serve
+    # limits --idle`). Without one, nothing is watched and nothing is stopped.
+    from contextlib import ExitStack
+
+    from ml_stack.serve.limits import read as limits_read
+    from ml_stack.serve.reclaim import watching
+
+    idle_s = limits_read().idle_s
+    reclaiming = ExitStack()
+    if idle_s:
+        print(f"  reclaiming a server unused for {idle_s:.0f}s")
+        reclaiming.enter_context(watching(older_than=idle_s, say=print))
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
+        reclaiming.close()
         if advertiser is not None:
             advertiser.stop()
         runner.shutdown()

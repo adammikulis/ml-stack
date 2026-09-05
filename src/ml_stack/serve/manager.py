@@ -280,6 +280,9 @@ class ServerManager:
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
         starting = {"check_flags": check_flags, "preflight": preflight,
                     "warmup_request": warmup_request}
+        refused = self._over_limit(spec)
+        if refused:
+            raise ServerFailed(refused)
 
         with self._port_lock(spec.port):
             told = say or self.say or logger.info
@@ -711,6 +714,18 @@ class ServerManager:
     def _port_lock(self, port: int) -> threading.Lock:
         with self._lock:
             return self._port_locks.setdefault(port, threading.Lock())
+
+    def _over_limit(self, spec: ServerSpec) -> str:
+        """Why this machine's limits refuse this lease, or "". A server already up on this
+        port is adopted rather than added, so it is not counted against the server limit."""
+        from ml_stack.serve.limits import read
+
+        limits = read()
+        if not (limits.servers or limits.seats):
+            return ""
+        running = sum(1 for port, entry in recorded_servers(self.state_file).items()
+                      if port != spec.port and pid_exists(int(entry.get("pid") or 0)))
+        return limits.refusal(running=running, seats=max(1, int(spec.parallel or 1)))
 
     def reclaim(self, port: int) -> bool:
         """Free ``port`` if one of our servers is holding it."""

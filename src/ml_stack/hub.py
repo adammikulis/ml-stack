@@ -704,7 +704,19 @@ def fetch(reference: str) -> Path:
 
 
 def room() -> int:
-    """How much memory a model could actually use here, in bytes, or 0 when unknown.
+    """How much memory a model may use here, in bytes, or 0 when unknown.
+
+    `machine_room` is what the machine allows; this is that, capped by what this machine
+    was told ml-stack may take (`ml_stack.serve.limits`). Every preflight, fit and lease
+    reads it, so a limit set once is honoured everywhere without anybody passing it on.
+    """
+    from ml_stack.serve.limits import read
+
+    return read().room(machine_room())
+
+
+def machine_room() -> int:
+    """How much memory this machine would let a model use, in bytes, or 0 when unknown.
 
     On a machine with unified memory this is not the whole of RAM: Metal will not wire more
     than `iogpu.wired_limit_mb`, and a model plus its KV cache has to fit under that. On a
