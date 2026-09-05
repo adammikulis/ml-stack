@@ -30,7 +30,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import ServerError, ServerUnreachable, open_stream, request_json
+from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
 
 __all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
            "checkout_here", "current_version", "in_the_way", "quiet", "state", "track",

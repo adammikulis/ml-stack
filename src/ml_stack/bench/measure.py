@@ -549,7 +549,7 @@ def slot_count(base_url: str) -> int:
     -1 when it will not say. It is what decides whether concurrent conversations queue:
     more of them than slots, and a turn waits for a slot before a token is read.
     """
-    from ml_stack.client.http import request_json
+    from ml_stack.http import request_json
 
     try:
         slots = request_json(f"{base_url.rstrip('/')}/slots", timeout=5.0, method="GET")
@@ -1151,7 +1151,7 @@ def busy(base_url: str) -> int:
 
     -1 when the server will not say, which is not the same as idle and is not treated as it.
     """
-    from ml_stack.client.http import request_json
+    from ml_stack.http import request_json
 
     try:
         slots = request_json(f"{base_url.rstrip('/')}/slots", timeout=5.0, method="GET")

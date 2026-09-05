@@ -64,7 +64,7 @@ def busy_now(base_url: str, *, timeout: float = 2.0) -> bool | None:
     A build served with ``--no-slots``, or anything else on the port, says nothing -- and
     nothing is not idle.
     """
-    from ml_stack.client.http import ServerError, request_json
+    from ml_stack.http import ServerError, request_json
 
     try:
         slots = request_json(f"{base_url.rstrip('/')}/slots", timeout=timeout)

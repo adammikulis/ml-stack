@@ -45,7 +45,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import Retry, ServerError, open_stream
+from ml_stack.http import Retry, ServerError, open_stream
 
 Engine = Callable[[str, int], list[dict[str, Any]]]
 """``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable."""

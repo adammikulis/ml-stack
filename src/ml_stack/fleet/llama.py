@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
            "ensure_server", "find_server"]

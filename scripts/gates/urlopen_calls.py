@@ -8,14 +8,14 @@ from . import Finding
 from ._util import calls, exempt, parse, python_files, rel
 
 NAME = "urlopen-calls"
-OWNER = "ml_stack.client.http.request_json"
+OWNER = "ml_stack.http.request_json"
 ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/client/http.py",)
+OWNS = ("src/ml_stack/http.py",)
 TARGETS = {"urllib.request.urlopen", "urllib.request.Request"}
 
 
 def describe() -> str:
-    return "A urllib request built by hand; ml_stack.client.http.request_json already does it."
+    return "A urllib request built by hand; ml_stack.http.request_json already does it."
 
 
 def find(root: Path) -> list[Finding]:

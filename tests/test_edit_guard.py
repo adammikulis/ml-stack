@@ -102,7 +102,7 @@ def test_editing_a_function_that_is_already_there_is_not_a_duplicate(tree, tmp_p
 
 @pytest.mark.parametrize("added, expected", [
     ("def fetch(url):\n    with urllib.request.urlopen(url) as r:\n        return r.read()",
-     "ml_stack.client.http.request_json"),
+     "ml_stack.http.request_json"),
     ("def live():\n    return list(psutil.process_iter(['pid']))",
      "ml_stack.serve.process"),
     ("def save(path, obj):\n    tmp = path.with_suffix('.json.tmp')\n"

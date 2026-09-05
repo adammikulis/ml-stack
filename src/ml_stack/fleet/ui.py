@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import ServerError, open_stream
+from ml_stack.http import ServerError, open_stream
 
 from .discovery import (
     DiscoveryError,

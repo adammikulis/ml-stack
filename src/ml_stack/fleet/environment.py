@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import ServerError, open_stream, request_json
+from ml_stack.http import ServerError, open_stream, request_json
 
 __all__ = ["Environment", "Library", "CATALOG", "catalog_for"]
 

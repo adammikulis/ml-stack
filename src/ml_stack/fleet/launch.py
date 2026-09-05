@@ -8,7 +8,7 @@ import time
 import webbrowser
 from typing import Any
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 
 from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
 

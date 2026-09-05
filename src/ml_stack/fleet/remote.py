@@ -12,7 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ml_stack.client.http import (
+from ml_stack.http import (
     ONCE,
     Retry,
     ServerError,

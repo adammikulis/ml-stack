@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from ml_stack.client.http import request_json
+from ml_stack.http import request_json
 
 # The programs a URL can name ahead of its host, and the api each is spoken to with.
 SCHEMES = {"ollama": "ollama", "openai": "openai"}

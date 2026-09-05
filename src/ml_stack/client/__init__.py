@@ -22,7 +22,7 @@ from ml_stack.client.health import (
     serving_params,
     wait_for_health,
 )
-from ml_stack.client.http import ServerError, ServerUnreachable, request_json, request_stream
+from ml_stack.http import ServerError, ServerUnreachable, request_json, request_stream
 from ml_stack.client.tokens import (
     CHARS_PER_TOKEN,
     estimate_tokens,

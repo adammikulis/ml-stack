@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import hub
-from ml_stack.client.http import ServerError, ServerUnreachable, open_stream, request_json
+from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
 
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
            "Suggestion", "caches", "family_of", "holding", "is_unfiltered",

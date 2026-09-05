@@ -33,7 +33,7 @@ MAX_PARAMS = 8
 # (what it calls, the pattern, the module that owns it, what to use instead)
 OWNED = [
     ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/ml_stack/client/http.py",
-     "use `ml_stack.client.http.request_json` -- it carries the timeout, the JSON decode "
+     "use `ml_stack.http.request_json` -- it carries the timeout, the JSON decode "
      "and the error type this tree already agrees on."),
     ("psutil.process_iter", r"psutil\.process_iter", "src/ml_stack/serve/process.py",
      "use the helpers in `ml_stack.serve.process`; a fresh process scan is the seventh "

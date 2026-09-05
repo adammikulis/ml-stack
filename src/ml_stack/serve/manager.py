@@ -17,7 +17,7 @@ from typing import Any
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.hub import free_memory
 from ml_stack.client.health import ServingParams, serving_params
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 from ml_stack.serve.backend import (
     DEFAULT_SLOT_SAVE_PATH,
     Lease,

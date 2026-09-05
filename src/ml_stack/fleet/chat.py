@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from ml_stack.client.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.http import ServerError, ServerUnreachable, open_stream
 
 __all__ = ["ChatError", "Target", "find", "reply_text", "stream", "targets"]
 

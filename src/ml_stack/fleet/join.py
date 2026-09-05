@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import ServerError, ServerUnreachable, request_bytes
+from ml_stack.http import ServerError, ServerUnreachable, request_bytes
 
 from .discovery import (
     DEFAULT_CLUSTER,

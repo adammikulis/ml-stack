@@ -453,7 +453,7 @@ def test_a_graph_that_keeps_its_pointers_elsewhere_says_where(tmp_path):
 
 def test_a_failed_model_call_leaves_the_pair_unsure_and_undecided_and_the_pass_goes_on(tmp_path):
     """One pair's compute error is that pair's, not the pass's -- and not a verdict."""
-    from ml_stack.client.http import ServerError
+    from ml_stack.http import ServerError
 
     class Flaky(Scripted):
         def extract(self, text, schema, **kw):

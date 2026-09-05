@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 
 HEALTH_PATHS = ("/health", "/v1/models", "/models", "/props")
 

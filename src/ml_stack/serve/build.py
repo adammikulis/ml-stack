@@ -33,7 +33,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 from ml_stack.serve.binary import (
     CACHE_ROOT,
     MANAGED_CURRENT,

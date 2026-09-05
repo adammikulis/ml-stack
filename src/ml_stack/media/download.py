@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from ml_stack.client.http import ServerError, ServerUnreachable, open_stream
+from ml_stack.http import ServerError, ServerUnreachable, open_stream
 
 _CHUNK = 1 << 16
 _PROGRESS_INTERVAL_S = 0.25

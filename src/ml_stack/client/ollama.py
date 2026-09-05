@@ -28,7 +28,7 @@ import re
 import sys
 from typing import Any
 
-from ml_stack.client.http import request_json
+from ml_stack.http import request_json
 
 PLATFORM = sys.platform
 

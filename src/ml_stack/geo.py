@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
-from ml_stack.client.http import request_json
+from ml_stack.http import request_json
 from ml_stack.files import read_json, write_json
 
 __all__ = ["CACHE_VERSION", "LANGUAGE", "SHORTHAND", "URL", "USER_AGENT", "best", "expand",

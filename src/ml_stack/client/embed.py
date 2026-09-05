@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from ml_stack.client.http import ServerError, request_json
+from ml_stack.http import ServerError, request_json
 
 
 class EmbeddingError(ServerError):

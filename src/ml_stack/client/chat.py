@@ -17,7 +17,7 @@ from typing import Any
 from ml_stack.client import families
 from ml_stack.client.families import Family
 from ml_stack.client.health import reported_models
-from ml_stack.client.http import ServerError, request_json, request_stream
+from ml_stack.http import ServerError, request_json, request_stream
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +215,7 @@ class Client:
             if self.api != "llama":
                 return {}
             try:
-                from ml_stack.client.http import request_json
+                from ml_stack.http import request_json
                 from ml_stack.hub import in_gguf
 
                 props = request_json(f"{self.base_url}/props", timeout=5.0, method="GET") or {}
