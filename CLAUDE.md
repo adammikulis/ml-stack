@@ -40,13 +40,35 @@ The body is for detail a reader would want later: what was wrong, what the fix i
 it costs. Plain sentences. No war stories, no rhetorical questions, no lines that argue
 with a future reader.
 
-## Budgets
+## The gates
+
+Five checks refuse a change rather than describing what it should have been. Run them
+before you ask whether the suite passes.
 
 `budgets.json` holds the highest count each shape in `scripts/gates/` is allowed.
-`scripts/budgets` prints metric, budget, actual and delta, and names every site that is over.
-`tests/test_budgets.py` fails when a number rises, and also when it falls without being recorded.
-A branch that lowers one runs `scripts/budgets --update` and commits the file.
-`scripts/budgets --show METRIC` lists the sites; `SKIP_BUDGETS=1` skips the pre-commit check.
+`scripts/budgets` prints metric, budget, actual and delta, and names every site that is
+over. `tests/test_budgets.py` fails when a number rises, and also when it falls without
+being recorded, so a branch that lowers one runs `scripts/budgets --update` and commits the
+file. `--update` refuses to raise a number; `--allow-increase` puts a rise in the diff.
+`scripts/budgets --show METRIC` lists the sites. `SKIP_BUDGETS=1` skips the pre-commit
+check.
+
+`tests/test_layers.py` sets out core, model, machine, graph, tools, and reads every import
+including the ones inside functions. A package imports downwards, and sideways only when
+the other does not import it back. `KNOWN` lists what still crosses; it only shrinks.
+
+`tests/test_wiring.py` requires every package to be imported by something, back a console
+script, or be named in `STANDALONE` with a reason. Code nothing calls is a gap to close,
+never a reason to delete.
+
+`scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
+`tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
+that quietly tightens is caught.
+
+`scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
+raw HTTP call, a docstring over twelve lines and a signature over eight parameters, at the
+moment it is written. `.claude/settings.json` wires it and the Bash guard; `MLSTACK_GUARD=off`
+turns both off. `scripts/install-hooks.sh` installs the pre-commit chain.
 
 ## Anything a user reads
 

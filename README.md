@@ -381,13 +381,15 @@ questions as well. It is not built yet.
 |---|---|
 | `ml_stack.contracts` | Reader for `contracts/`; the RAM→model ladder and the fitting rule |
 | `ml_stack.media` | WAV containers, image format sniffing, resumable asset download |
-| `ml_stack.client` | HTTP client: chat, completion, embeddings, health, token estimate |
+| `ml_stack.http` | One HTTP client: JSON, bytes, streams, resumed downloads, retries |
+| `ml_stack.client` | Talking to a model server: chat, completion, embeddings, health, token estimate |
 | `ml_stack.fleet` | Find the other boxes, run jobs on them, move files between them |
 | `ml_stack.serve` | Start, adopt and tear down a model server |
 | `ml_stack.gguf` | Converter/quantiser discovery, export, tokenizer-metadata repair |
 | `ml_stack.speech` | ASR / TTS / VAD behind three protocols and one resolver |
 | `ml_stack.vision` | Image payloads, and a gate that verifies a model can see |
 | `ml_stack.graph` | A graph: stored, searched, asked about, drawn — and as tensors: a converter, message passing, spatial topology, DAG sweeps |
+| `ml_stack.bench` | Timing and scoring a model's answers, and comparing what served them |
 | `ml_stack.entities` | Resolving names, planning edits, spelling, paths through a graph |
 | `ml_stack.scrape` | Reading a site you are signed in to, with presets to start from |
 | `ml_stack.sources` | A PDF, a Slack export, an mbox or scraper rows into one document and message shape |
