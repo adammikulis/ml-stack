@@ -554,13 +554,21 @@ then asks that way, filling in only what the call left unsaid, and `ml-stack-ser
 MODEL` reads it out: `ask with tight + few + rounds 20 at temperature 1.0 / top-p 0.95 /
 top-k 20`.
 
-**The page's routes come with the page.** `graph.html` streams its answers from
+**The page is components, and a page is the list of them.** `graph.page.render` assembles
+the page out of one file per component under `graph/web/components/` -- a custom element
+apiece, each holding its own style, markup and script, sharing one model -- so a caller can
+leave a component out (`parts=`) or add one of its own file; `ml_stack.ui.assemble` is the
+assembler, for any page built this way. The ask pane, the review queue, the change-request
+form, the refresh button and the note drafter each have a route behind them, and
+`ml_stack.graph.serve` has one mixin per route: `AskRoutes` streams answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
-`ml_stack.graph.serve.AskRoutes` is that server side for any `http.server` handler. A
-subclass says how a question is answered (`asker`) and where conversations are kept
-(`threads`), and hangs its own journal or queue off `answered`; the SSE framing, the `done`
-frame carrying the whole answer, the history handed back to the model and the turns
-remembered with their `steps` are the library's. Who may ask is still the project's policy.
+`ReviewRoutes` lists and acts on a `graph.review.Queue`; `RequestRoutes` keeps a request
+on disk before saying so; `RefreshRoutes` streams the stages a subclass's `stages()`
+yields; `DraftRoutes` hands ids to a `drafter`. A subclass says how a question is answered
+(`asker`), where conversations are kept (`threads`) and what each other route is given,
+and hangs its own journal off `answered`; each route is a 404 until it is given its thing,
+and the ones that change the machine refuse a request that came through a proxy.
+`Handler` composes them all; who may ask is still the project's policy.
 
 **A store cannot be lost to a bad rebuild.** A pipeline that read nothing produces an empty
 graph, and an empty graph looks exactly like "remove everything". `replace` refuses a write
@@ -725,7 +733,7 @@ command.
 | `ml-stack-fleet join\|status\|leave` | one command makes this machine a peer: the checks serving depends on, a llama-server if there is none, the passphrase, the daemon (`--persist` starts it at logon too), and then what the fleet sees; `status` lists every peer with what it serves, its room, whether it is measuring, the commit it runs and how it updates itself; `leave` undoes it; `--track main` makes this machine follow a branch rather than releases |
 | `ml-stack-mcp` | the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools |
 | `ml-stack <command>` | runs any `ml-stack-<command>` below (`ml-stack do ...`, `ml-stack bench sweep ...`, `ml-stack train run ...`); `--list` prints each with the first line of its help; bare, the windowed app. Also `ml-stack-app`, `ml-stack-traind`, `ml-stack-peers`, `ml-stack-train-run` |
-| `ml-stack-graph serve --site FILE` | a rendered graph page (`graph.page.render`) served on loopback: `GET /` is the page with `window.GRAPH_LIVE` set so it asks this server rather than nothing, `/export/<path>` a file under `--export DIR` (JSON and HTML by their suffix, anything else as bytes, nothing outside the root), and the ask routes -- `/ask`, `/ask/stream`, `/thread/<name>`, `/ask/model`, `/metrics` -- answered over `--graph FILE` with `--model` leased on the first question (`--model-port` is where it is served), conversations kept in `--store PATH`; `--port` picks the listener |
+| `ml-stack-graph serve --site FILE` | a rendered graph page (`graph.page.render`) served on loopback as a whole document: `GET /` is the page with `window.GRAPH_LIVE` set so it asks this server rather than nothing, `/export/<path>` a file under `--export DIR` (JSON and HTML by their suffix, anything else as bytes, nothing outside the root), and the ask routes -- `/ask`, `/ask/stream`, `/thread/<name>`, `/ask/model`, `/metrics` -- answered over `--graph FILE` with `--model` leased on the first question (`--model-port` is where it is served), conversations kept in `--store PATH`; `--port` picks the listener. `/review`, `/refresh`, `/request` and `/draft` answer once a subclass gives them a queue, stages, a requests file and a drafter |
 | `ml-stack-audit` | every tracked file of a checkout read for a person's details with the pre-commit hook's reader -- names from `NAMES_GRAPH` and `NAMES_SCRAPE`, the allow-lists, the shape rules and the recogniser, asked about card numbers, IBANs and passports as well as people -- printed as a list to look at, exit 1 when there is one; `--staged` is the hook's own check without a commit, `--all` adds the noisy kinds (places, dates, URLs, addresses, driver licences), `--floor` the recogniser's confidence, `--root` another checkout, `--fixtures` the allow-list, `--json` one object per finding. `scripts/encrypted-volume.sh NAME DIR setup\|mount\|unmount` keeps a directory inside an AES-256 sparsebundle on macOS, the passphrase in the login keychain as `NAME-data`; setup with a source directory moves it in and leaves a symlink |
 | `ml-stack-bench standard` | the standard sets -- GSM8K (`gsm8k_cot_llama`), MMLU-Pro, IFEval and HumanEval (`humaneval_instruct`, which runs the model's code on this machine) -- through lm-evaluation-harness (the `standard` extra) against any OpenAI-compatible chat endpoint, given its `--url` and `--model` name, under the same measuring lock as a run; `--limit N` scores the first N of each set, the thinking switch (`--think` or `--no-think`) rides in every request and the JSON says which was sent (or `server default`), `--dry-run` prints the `simple_evaluate` kwargs per set, and the `--out` file (`--label` names the configuration) is one JSON per configuration -- score, metric, documents scored and seconds per set -- for a comparison to read |
 | `ml-stack-do "TASK"` | a task in words -- "run benchmarks with quince-2b" -- done by a served model (`--model` leased in its measured shape, or `--url` for one already up) with every `ml-stack-mcp` tool, the bench subcommands, the jobs, and the GGUFs and Ollama models on this machine to look up: it asks what the task leaves open, one question at a time, confirms the models it found, prints a plan and asks go (`--yes` skips only the go), runs the tools, waits for what detached, and reports what was measured and where it is; `--dry-run` prints the system prompt and the tools as the model sees them, `--rounds` caps the turns, and with no TASK a session reads tasks from stdin until EOF |

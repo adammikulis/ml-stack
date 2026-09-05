@@ -335,6 +335,12 @@ layout that re-settles when a kind is switched off, a map, and evidence for ever
 Everything ships inside the file, which is what makes it mailable and also what limits it —
 whoever has the file has the graph, so anything private is served rather than sent.
 
+**Made of components.** The page is sixteen custom elements, one file each — the graph, the
+map, the ask pane, the review queue, the change-request form, the display panel and the rest
+— sharing one model of the graph; a page is the list of them, so a project leaves one out or
+adds its own without touching the others. Each piece that talks to a server has a route
+mixin to match, and a server is the list of those.
+
 ## Reading documents into a graph
 
 A book, a mailbox and a Slack export are one kind of thing: a source that is read into the

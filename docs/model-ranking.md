@@ -28,3 +28,19 @@ not taken. A head cannot change an answer, so look at what else these changed:
 - `Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf` rejected: `Qwen3.8-Flash--plain-kv-q8_0-rb0` F1 -11 pts (100 q, 25.4 s/question)
 
 *256 run(s) not ranked: fewer than 20 questions, which is a smoke run proving the path works rather than a measurement -- it supplies neither accuracy nor cost. 91 run(s) not ranked: not measured over the community that ships with this package.*
+
+## Extraction, on the shipped gold set
+
+`ml-stack-ingest --gold tests/fixtures/extraction-gold.json --model MODEL --fail-under 0.7`:
+twenty invented passages with every triple written down, so the number is precision as well
+as recall. Measured 2026-09-05, each model in its profile's shape.
+
+| model | F1 | recall | precision | triples | wall clock | passes 0.7 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `Qwen3.8-Flash-Next-UD-Q4_K_XL` | 78% | 74% | 83% | 101 of 137 | 237 s | yes |
+| `gemma-4-E4B-it-qat-UD-Q4_K_XL` | 61% | 62% | 61% | 85 of 137 | 113 s | no |
+| `gemma-4-E2B-it-qat-UD-Q4_K_XL` | 51% | 45% | 57% | 62 of 137 | 69 s | no |
+
+The gemma models also reach outside the core vocabulary far more (44 of 140 relations on
+E4B, 46 of 108 on E2B, against 13 of 122 on Flash-Next), which is what the fold has to
+absorb afterwards.
