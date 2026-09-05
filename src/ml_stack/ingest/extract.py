@@ -78,7 +78,7 @@ def _seen_line(verbs: Sequence[str], kinds: Sequence[str]) -> str:
         out += ("Verb phrases earlier sections have already been read with: "
                 + ", ".join(verbs) + ". That is what has been used so far, not everything "
                 "you may use: take one of these where it says what the text says, so the "
-                "shelf keeps one word per relationship, and name a new one only where none "
+                "store keeps one word per relationship, and name a new one only where none "
                 "of them does.\n")
     if kinds:
         out += ("Kinds earlier sections have already used, on the same terms: "
@@ -113,8 +113,8 @@ def instructions(*, core_only: bool = False, seen: tuple[Sequence[str], Sequence
                  "only what the section states. Both ends are concept names -- never a "
                  "clause or a phrase such as 'lights the system'.\n"
                  "Prefer a core verb phrase wherever one of them says what the text says: "
-                 "every book is read with the same core verbs, so a relation written with "
-                 "one joins up with the rest of the shelf. When none of them says it, name "
+                 "every source is read with the same core verbs, so a relation written with "
+                 "one joins up with the rest of the store. When none of them says it, name "
                  "the relation the text states in the same shape -- lower case, words "
                  "joined by underscores, the verb of the sentence, as `dissolves_in` or "
                  "`inhibits`. Never stretch a core verb over a relation it does not "
@@ -303,7 +303,7 @@ def extract_unit(client: Any, unit: Any, shape: Mapping[str, Any], *, images: bo
     the thinking channel is where a ceiling gets spent.
 
     ``vocabulary`` is a `ml_stack.ingest.vocabulary.Vocabulary`: what earlier sections
-    coined goes in the prompt, never in the schema, so a shelf that has grown a word for
+    coined goes in the prompt, never in the schema, so a store that has grown a word for
     something does not change the shape a cached read was answered under.
     """
     row = Read(unit=unit.id, source=unit.source, chapter=unit.chapter, section=unit.section,

@@ -16,38 +16,40 @@ Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% 
 relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
 ten questions, unconfirmed.
 
-## The shelf (each needs the GPU; Adam's call)
+## The store (each needs the GPU; Adam's call)
 
-- [ ] **The shelf holds APBiology and Biology2e chapter 2, sound; nine books are unread.**
-  `~/.ml-stack/shelf.ladybug` on ladybug 0.20.2: ~9,500 concepts with definitions, page
-  provenance and the run that read each, after the judged pass (362 merges, 1,489 inverse
-  pairs, 622 conflicts judged with 282 edges dropped, 186 definitions, 113 suspects),
-  `ml-stack-store check` clean. Reads beside the store are the truth (`ml-stack-ingest fold` rebuilds). Whether the other nine books -- about four days of GPU at 86
-  s a unit, one slot -- are worth it is Adam's call; the command is `ml-stack-ingest
-  ~/Documents/Textbooks/<book>.pdf --out ~/.ml-stack/shelf.ladybug --model <flash-next>
-  --images --resume --serve-port 8080`, one book at a time, and it tidies itself at the
-  book's end. Two answers before that: what a question over the shelf scores
+- [ ] **The store holds APBiology and Biology2e chapter 2, sound; nine textbook PDFs are
+  unread.** `~/.ml-stack/sources.ladybug` on ladybug 0.20.2: ~9,500 concepts with
+  definitions, page provenance and the run that read each, after the judged pass (362
+  merges, 1,489 inverse pairs, 622 conflicts judged with 282 edges dropped, 186 definitions,
+  113 suspects), `ml-stack-store check` clean. The reads files beside the store are the
+  truth (`ml-stack-ingest fold` rebuilds). Whether the other nine -- about four days of GPU
+  at 86 s a unit, one slot -- are worth it is Adam's call; the command is `ml-stack-ingest
+  ~/Documents/Textbooks/<pdf> --out ~/.ml-stack/sources.ladybug --model <flash-next>
+  --images --resume --serve-port 8080`, one source at a time, and it tidies itself at the
+  source's end. Two answers before that: what a question over the store scores
   (`ml-stack-ingest ask --out ... --gold FILE`, no gold questions written yet), and what
-  `ml-stack-ingest sources` says once a second full book is in.
+  `ml-stack-ingest sources` says once a second full source is in.
 - [ ] **Watch for units that still run to the ceiling.** The document schema caps every
   list (`maxItems`), so the grammar closes the array; a unit that still fails is read once
   more, then given up on; `status` counts those, its whole reply is `raw` in the reads
   file beside the store, and `ml-stack-ingest retry --out STORE` frees them after a fix.
   If one still circles under the cap, try DRY sampling for extraction and measure it on
   the gold gate.
-- [ ] **Score answering over the shelf.** Write twenty invented-free but real-book
+- [ ] **Score answering over the store.** Write twenty invented-free but real-source
   questions with expected concept ids (`ml-stack-ingest ask --gold FILE`, the bench's
   scorer) and run them through Flash-Next in its profile; until that number exists, "a
   usable bio graph" means queryable and sound, not scored. The judge's conflict verdicts
   are worth reading first: it kept both edges in cases where its own reason said one was
   a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the
   instructions now say keep both only when the passages support both (2026-09-03); the
-  shelf's verdicts predate that and are worth a `tidy --rejudge` over the shelf, ~an hour.
-- [ ] **Fill the shelf's "between books" log.** `ml-stack-ingest sources` reads
-  `tidy:merges`, written by every fold and tidy from 2026-09-04 on; the shelf's 210 shared
+  store's verdicts predate that and are worth `ml-stack-store tidy --rejudge
+  ~/.ml-stack/sources.ladybug`, ~an hour.
+- [ ] **Fill the store's "between sources" section.** `ml-stack-ingest sources` reads
+  `tidy:merges`, written by every fold and tidy from 2026-09-04 on; the store's 210 shared
   concepts were joined before it existed, so the section is empty. `ml-stack-ingest fold
-  --out ~/.ml-stack/shelf.ladybug` re-folds every book from its reads (no model, minutes)
-  and writes the log; it rewrites the store, so take a copy beside it first.
+  --out ~/.ml-stack/sources.ladybug` re-folds every source from its reads (no model,
+  minutes) and writes the log; it rewrites the store, so take a copy beside it first.
 - [ ] **Run the shipped extraction gate on a model** (`ml-stack-ingest --gold
   tests/fixtures/extraction-gold.json --model <flash-next> --fail-under 0.7`, ~10 min):
   twenty invented passages with every triple written down, so the number is precision as
@@ -162,12 +164,6 @@ time with the page's server down for the Ollama half.
   aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the
   server's own `/metrics`; then measure a small task set the bench's way so the local
   harness has a number beside the page's.
-- [ ] **The Slack page's answer cache keys on the asking ways only once the app passes
-  them.** `cache.asked`/`fingerprint` take `ways=` (at least `{"constrain_ids": ...}`);
-  the one caller is `~/ai_ceo/slack_graph/ask.py:424`, which does not pass it yet, so a
-  cached answer there is returned regardless of the flag. One line in the app.
-- [ ] **The Slack page's own `Config` keeps two seats** (a run plus a reader) while every
-  command here serves one seat by default. Adam's to keep or drop, in `~/ai_ceo`.
 
 ## Store integrity
 
@@ -193,6 +189,18 @@ time with the page's server down for the Ollama half.
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
+
+## The interface
+
+- [ ] **The fleet app as components.** `graph/page.py` assembles a page out of custom
+  elements (`ml_stack.ui.assemble`, one file a component under `graph/web/components/`);
+  `fleet/web/app.js` (1,500 lines of screens as functions) and `fleet/web/fit.html` (a
+  second standalone page) are the same shape waiting for the same split: one element per
+  screen, the `/ui/*` routes in `fleet/ui.py` as mixins, `index.html` as the wiring.
+- [ ] **Nobody has drawn 3,000 nodes in the page.** The page ships the whole graph as one
+  JSON blob and lays it out in the browser; the biggest graph it has held is a few hundred
+  nodes. `ml-stack-world make --size 5000` gives one to try, and `most_messages` already
+  trims the quotes; nothing trims the drawing.
 
 ## Verifying
 

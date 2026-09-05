@@ -880,7 +880,7 @@ def _recheck(path: str | Path, report: Report, log: Callable[[str], None] | None
     """The store's own check again, on a fresh handle, and the report's last line with it.
 
     A handle that has just dropped nodes and upserted thousands of edges reads its own edge
-    count stale: over the shelf the writer's count said 25,612 against a scan of 25,513 and
+    count stale: over a store of two sources the writer's count said 25,612 against a scan of 25,513 and
     a reopen agreed with the scan. What a pass leaves is what the next reader finds, so
     that is what is asked.
     """
