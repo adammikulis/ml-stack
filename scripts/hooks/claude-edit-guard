@@ -206,11 +206,11 @@ def check(tool: str, given: dict) -> int:
         return refuse("a JSON file is written through `ml_stack.files.write_json`, which "
                       "already does the temp file and the atomic os.replace.")
 
-    if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) and ".ml-stack" in fresh \
-            and here != "src/ml_stack/paths.py":
-        return refuse("do not build `~/.ml-stack` again. Each package keeps one `HOME` "
-                      "constant (`ml_stack.jobs.HOME`, `ml_stack.bench.keep.HOME`); "
-                      "use that package's, or add one to the package that owns this file.")
+    if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) \
+            and here != "src/ml_stack/home.py":
+        return refuse("a home directory is resolved in `ml_stack.home`: `state(...)` for "
+                      "`~/.ml-stack`, `cache(...)` for `~/.cache/ml_stack`, `user_home()` "
+                      "for the account's own, `expand(...)` for a path somebody named.")
 
     try:
         tree = ast.parse(proposed)
