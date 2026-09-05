@@ -59,6 +59,17 @@ go (with shared MTP) always." So ranking a second model is not worth GPU: `gpt-o
 `IQ4_XS` (a fit record, no profile) stay half-measured on purpose, and `ml-stack-fleet
 plan` names them as unplaceable rather than guessing.
 
+- [ ] **Re-read every draft-head speedup taken before 2026-09-05.** The bench pairs a
+  drafted run against a "baseline" to say what the head bought. That pairing used to match
+  on the label string, so it happily paired runs that also differed in cache type,
+  reasoning budget, slot count or asking. On this machine's store: 225 runs carry a head,
+  the old rule paired 175 of them, the new rule (identity minus the head) pairs 54, and the
+  121 that fell away were comparisons across more than one change. Any head speedup quoted
+  from those runs was partly measuring the KV quantisation or a different way of asking.
+  `ml-stack-bench show` and `compare` now use the new pairing, so the numbers are already
+  right going forward; what is pending is deciding which recorded conclusions rested on the
+  old ones. The three-configuration comparison above is the first place it matters.
+
 - [ ] **`single` on E4B at a hundred questions** (`sweep --serve gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf
   --profile --plain-only --also single --yes`, ~10 min): the one asking-way change that
   moved a small model, unconfirmed at ten. If it holds, `report --profile` sets it.
@@ -175,6 +186,20 @@ time with the page's server down for the Ollama half.
   gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf --sample 6`. Expect bugs; the daemon's log and
   `ml-stack-doctor` are the first two places to look. After that the Windows box follows
   releases or main on its own (`fleet status` shows COMMIT/UPDATES).
+- [ ] **Two machines with the same name share one speed record and one run history.**
+  Discovery is safe: each daemon mints a random token when it starts advertising and peers
+  are keyed on that, so two machines both called `Mac` are two peers and both get work.
+  Nothing else uses that token. `fleet/rates.py` keys measured speed on `(peer name, kind)`,
+  so two machines of one name average into a single number and placement scores them
+  identically; `fleet/bench.py` stamps gathered runs with `_name_of(peer)`, so their
+  measurements land in the store indistinguishable. Nothing checks for the collision at
+  join. The default name is the hostname, and this machine already records `"host": "Mac"`.
+  Fixing it means a stable per-machine identity (the current token is per process, so a
+  restarted machine is already a new peer to anything that remembers) and keying rates and
+  the run host on that, leaving the name as a label. Adam's call on what a person sees:
+  refuse a duplicate name at join, accept it and disambiguate in the listing, or accept it
+  silently and fix only the keying.
+
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
