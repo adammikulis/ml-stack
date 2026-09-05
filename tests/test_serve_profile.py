@@ -17,7 +17,8 @@ from types import SimpleNamespace
 import pytest
 
 from ml_stack.client import Reply
-from ml_stack.graph.ask import _under, converse
+from ml_stack.graph.ask import converse
+from ml_stack.graph.asking import Asking
 from ml_stack.serve import cli as serve_cli
 from ml_stack.serve import profile as prof
 from ml_stack.serve.fit import Fit
@@ -245,15 +246,13 @@ def test_more_than_one_seat_still_gets_the_profiles_own_seat_context(tmp_path, f
     assert shape.note == ""
 
 
-def test_the_asking_is_what_converse_takes_and_nothing_it_does_not():
-    assert measured().asking() == {"tight": True, "batch": True, "kinds": True,
-                                   "summary_tool": True}
+def test_the_asking_is_every_way_the_record_measured_and_nothing_it_did_not():
+    assert measured().asked() == Asking(batch=True, kinds=True, summary=True)
     plain = record(OTHER, terse=True, sampling={"temperature": 1.0})
-    assert plain.asking() == {"tight": True}, \
-        "terse chooses the schemas and sampling is the client's; neither is converse's"
+    assert plain.asked() == Asking(terse=True), "sampling is the client's, not the asking"
     assert plain.terse is True and plain.sampling == {"temperature": 1.0}
-    assert record(OTHER, rich=True, reach=8000, tight=False).asking() == {
-        "tight": False, "rich": True, "reach": 8000}
+    assert record(OTHER, rich=True, reach=8000, tight=False).asked() == Asking(
+        tight=False, rich=True, reach=8000)
 
 
 # -- ml-stack-serve profile --------------------------------------------------------------
@@ -372,7 +371,7 @@ def test_up_says_so_and_serves_as_asked_when_nothing_measured_this_model(leases,
     assert leases[0].cache_type_k == "q8_0"
 
 
-# -- converse(profile=...) ---------------------------------------------------------------
+# -- Asking.for_model -------------------------------------------------------------------
 
 GRAPH = {"nodes": [{"id": "person:ada", "kind": "person", "label": "Ada Lovelace",
                     "mentions": 2, "attrs": {}, "messages": []}],
@@ -393,7 +392,7 @@ class Watcher:
 def test_a_profile_asks_the_way_that_model_measured_best():
     add(measured())
     watching = Watcher()
-    converse("who is here?", GRAPH, watching, profile=MODEL)
+    converse("who is here?", GRAPH, watching, asking=Asking.for_model(MODEL))
 
     assert "summarise" in watching.offered[0], \
         "the record measured the summary tool, so the model is offered it"
@@ -407,22 +406,15 @@ def test_no_profile_leaves_the_asking_exactly_as_it_was():
     assert "summarise" not in watching.offered[0]
 
 
-def test_a_profile_fills_in_only_what_the_call_left_unsaid():
-    given = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
-             "summary_tool": False}
-    both = _under(measured(), given)
-    assert both["batch"] is True and both["kinds"] is True and both["summary_tool"] is True
-
-    said_outright = _under(measured(), {**given, "tight": False, "rich": True})
-    assert said_outright["tight"] is False and said_outright["rich"] is True, \
-        "a caller overruling a measurement is not overruled back"
-    assert said_outright["batch"] is True, "and the rest still comes from the record"
+def test_the_way_a_model_measured_is_every_way_that_record_holds():
+    add(measured())
+    how = Asking.for_model(MODEL)
+    assert (how.batch, how.kinds, how.summary) == (True, True, True)
+    assert how == measured().asked()
 
 
-def test_a_model_nothing_measured_changes_nothing_about_the_asking():
-    given = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
-             "summary_tool": False}
-    assert _under("nothing-measured-this-Q4_K_M.gguf", given) == given
+def test_a_model_nothing_measured_is_asked_the_default_way():
+    assert Asking.for_model("nothing-measured-this-Q4_K_M.gguf") == Asking()
 
 
 # -- ml-stack-bench report --profile ------------------------------------------------------
@@ -505,8 +497,7 @@ def test_constrain_ids_is_kept_on_the_record_and_read_out(tmp_path):
     made = record(MODEL, constrain_ids=True)
     assert Profile.from_dict(made.as_dict()).constrain_ids is True
     assert made.as_dict()["ask"]["constrain_ids"] is True
-    assert made.asking() == {"tight": True, "constrain_ids": True}
-    assert made.asked().constrain_ids is True
+    assert made.asked() == Asking(constrain_ids=True)
     line = next(one for one in said(made).splitlines() if "ask with" in one)
     assert "constrain-ids" in line
     assert "constrain-ids" not in said(record(OTHER))
@@ -571,19 +562,19 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
 
 def test_the_asking_a_profile_writes_is_the_whole_asking_and_reaches_converse():
     """Every way the bench can measure has to survive the round trip into a record and back
-    out as `converse`'s keywords: a way measured and then dropped on the way to the record
-    is a measurement paid for and thrown away."""
+    out as an `Asking`: a way measured and then dropped on the way to the record is a
+    measurement paid for and thrown away."""
     made = record(MODEL, tight=True, few=True, single=False, batch=False, rounds=20,
                   reach=8000, kinds=True, summary=True, rich=True,
                   sampling={"temperature": 1.0, "top_p": 0.95, "top_k": 20})
-    assert made.asking() == {"tight": True, "kinds": True, "rich": True, "few": True,
-                             "summary_tool": True, "reach": 8000, "rounds": 20}
+    assert made.asked() == Asking(kinds=True, rich=True, few=True, summary=True,
+                                  reach=8000, rounds=20)
     read_back = Profile.from_dict(made.as_dict())
-    assert read_back.asking() == made.asking()
+    assert read_back.asked() == made.asked()
 
     add(made)
     watching = Watcher()
-    converse("who is here?", GRAPH, watching, profile=MODEL)
+    converse("who is here?", GRAPH, watching, asking=Asking.for_model(MODEL))
     assert watching.offered[0] == ["look_up", "look_at", "show"], \
         "the record measured three tools, so three are what the model is offered"
 

@@ -30,7 +30,7 @@ lease and the same asking by construction rather than by three places agreeing::
 
     run = profile_for(model).run(port=8080)
     serve(run.shape.model, **run.lease())                  # the server
-    converse(question, graph, client, **run.converse())    # the asking
+    converse(question, graph, client, asking=run.asking)   # the asking
     client = seat(run, index=request_number)                # the client
 
 :func:`draft_for` and :func:`projector_for` answer 'auto' the way `ml-stack-serve up` does,
@@ -185,9 +185,9 @@ class Run:
 
     Three sections, because three different pieces of code read them, and one object,
     because a bench row, a page answer and a seated client that build their own drift.
-    :meth:`lease` is the server's, :meth:`converse` the asking's, :meth:`client` the
-    client's, and :meth:`over` is how a caller changes one knob without knowing which
-    section owns it.
+    :meth:`lease` is the server's, :attr:`asking` the asking, :meth:`client` the client's,
+    and :meth:`over` is how a caller changes one knob without knowing which section owns
+    it.
     """
 
     shape: Shape
@@ -206,10 +206,6 @@ class Run:
     def lease(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.serve.serve` takes, model aside."""
         return self.shape.lease()
-
-    def converse(self) -> dict[str, Any]:
-        """The keyword arguments :func:`ml_stack.graph.ask.converse` takes."""
-        return self.asking.converse()
 
     def client(self, base_url: str, *, index: int | None = None, **over: Any) -> Any:
         """A :class:`~ml_stack.client.Client` on this run's server.

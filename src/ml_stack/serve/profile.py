@@ -84,7 +84,7 @@ class Profile:
     single: bool = False                 # one entry to a read, more turns -- batch's opposite
     few: bool = False                    # three tools offered, not eight
     kinds: bool = False
-    summary: bool = False                # `converse`'s summary_tool, named as the bench is
+    summary: bool = False                # the `summarise` tool, named as the bench is
     rich: bool = False
     terse: bool = False                  # `tools_for`'s, not `converse`'s -- see `asking`
     constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
@@ -196,22 +196,6 @@ class Profile:
         return Run(shape=self.shape(port=port, seats=seats, model=model, resolve=resolve),
                    asking=self.asked(),
                    talking=self.talking(n_predict=n_predict, timeout=timeout))
-
-    def asking(self) -> dict[str, Any]:
-        """The keyword arguments :func:`ml_stack.graph.ask.converse` takes.
-
-        Only what this record actually asks for, so a profile that measured nothing about
-        the asking leaves `converse` exactly as it was. ``summary`` becomes
-        ``summary_tool`` -- `converse`'s own ``summary`` is a thread's rolling summary and
-        the two must never be confused; the bench renames it at the same hop and for the
-        same reason.
-
-        ``terse`` and ``sampling`` are not here and cannot be: ``terse`` chooses the tool
-        *schemas*, which is :func:`~ml_stack.graph.ask.tools_for`'s argument, and sampling
-        is the client's. Both are on the record because both were measured, and
-        :meth:`run` is what carries all three of them together.
-        """
-        return dict(self.asked().converse())
 
     # -- the file -----------------------------------------------------------------------
 

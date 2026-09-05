@@ -50,6 +50,7 @@ from ml_stack.bench.measure import (
 from ml_stack.bench.score import NOISE, _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, missed, plot, rates, shape, table
+from ml_stack.graph.asking import Asking
 from ml_stack.graph.vectors import MARGIN
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
@@ -64,11 +65,8 @@ def _ways(args: Any) -> list[dict[str, Any]]:
     asking is minutes too, and repeating the load for a question about the *asking* pays it
     twice for nothing.
     """
-    first: dict[str, Any] = {"terse": bool(getattr(args, "terse", False)),
-                             **sampling_from(args)}
-    # `--reach N` is not a way of its own: it is how much every way's tool results may
-    # carry, so it is put on each of them at the end rather than adding a load.
-    asked_reach = int(getattr(args, "reach", 0) or 0)
+    asked = asking_from(args)
+    first: dict[str, Any] = {"terse": asked.terse, **sampling_from(args)}
     out = [first]
     for also in getattr(args, "also", []) or []:
         if also == "terse":
@@ -91,7 +89,7 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             # `reach` is what lets a result be worth making; 8000 tokens is a page of
             # neighbourhood, which is nothing to a 256k window and too much for E2B's.
             out.append({"label": "reach", "terse": first["terse"],
-                        "reach": asked_reach or REACH, **sampling_from(args)})
+                        "reach": asked.reach or REACH, **sampling_from(args)})
         elif also == "loose":
             # the control: show told to name what the answer is about with no cap and no
             # closing rule -- what every run before 2026-09-02 measured. Tight is the
@@ -141,22 +139,18 @@ def _ways(args: Any) -> list[dict[str, Any]]:
         elif also == "tight":
             print("note: tight is the default asking now; --also tight measures nothing new "
                   "(--also loose is the old asking, as a control)", file=sys.stderr)
-    asked_rounds = int(getattr(args, "rounds", 0) or 0)
+    # `--reach`, `--rounds`, `--batch`, `--kinds`, `--summary` and `--constrain-ids` are
+    # not ways of their own: each rides on every way, so the hundred-question run of
+    # "everything that held" is one way and not four.
+    riders: dict[str, Any] = {name: True for name in
+                              ("batch", "kinds", "summary", "constrain_ids")
+                              if getattr(asked, name)}
+    for name in ("reach", "rounds"):
+        if getattr(asked, name):
+            riders[name] = getattr(asked, name)
     for way in out:
-        if asked_reach:
-            way.setdefault("reach", asked_reach)
-        if asked_rounds:
-            # `--rounds N` is not a way of its own either: it is how many tool-calling
-            # turns every way's questions may spend, and `few` and `single` both want more
-            # of them than `batch` does
-            way.setdefault("rounds", asked_rounds)
-    for flag in ("batch", "kinds", "summary", "constrain_ids"):
-        # --batch / --kinds / --summary / --constrain-ids ride on every way, the way
-        # --reach does: the hundred-question run of "everything that held" is one way,
-        # not four
-        if getattr(args, flag, False):
-            for way in out:
-                way.setdefault(flag, True)
+        for name, value in riders.items():
+            way.setdefault(name, value)
     return out
 
 
@@ -193,6 +187,17 @@ def _asked(args: Any, parts: Sequence[tuple[str, int]]) -> list[dict[str, Any]]:
             out.append({**way, "label": f"{suffix}-{tag}" if tag else suffix,
                         "shortlist": shortlist})
     return out
+
+
+def asking_from(args: Any) -> Asking:
+    """The ways of asking given on the command line, and nothing else."""
+    return Asking(terse=bool(getattr(args, "terse", False)),
+                  reach=int(getattr(args, "reach", 0) or 0) or None,
+                  rounds=int(getattr(args, "rounds", 0) or 0) or None,
+                  batch=bool(getattr(args, "batch", False)),
+                  kinds=bool(getattr(args, "kinds", False)),
+                  summary=bool(getattr(args, "summary", False)),
+                  constrain_ids=bool(getattr(args, "constrain_ids", False)))
 
 
 def sampling_from(args: Any) -> dict[str, Any]:
@@ -733,7 +738,7 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--profile", action="store_true",
                         help="write each model's measured shape into profiles.json -- the "
                              "build, head, cache, thinking and asking of its best row -- so "
-                             "`ml-stack-serve up --profile` and `converse(profile=...)` "
+                             "`ml-stack-serve up --profile` and `Asking.for_model` "
                              "serve and ask what was measured. Writes that and nothing else")
     report.add_argument("--profiles", default="", metavar="FILE",
                         help="with --profile, write the records here instead of the shipped "
@@ -1060,9 +1065,9 @@ def _run(args: Any) -> int:
                 if already is not None and already(label):
                     print(f"skipping {label}: kept at {already(label).get('at', '?')}")
                     continue
-                ask = bench.asking(graph, shortlist=shortlist, store=args.store or None,
-                             embed_url=args.embed_url, embed_model=args.embed_model,
-                             terse=getattr(args, "terse", False), margin=args.margin)
+                ask = bench.asking(graph, how=asking_from(args), shortlist=shortlist,
+                             store=args.store or None, embed_url=args.embed_url,
+                             embed_model=args.embed_model, margin=args.margin)
                 print(f"\n{label} on {url}, look_up by {ask.finder}")
                 if not _idle(http_of(url), args):
                     return 3
@@ -1164,8 +1169,8 @@ def _run(args: Any) -> int:
         # a smoke run proves the path -- two conversations really overlapping, one turn
         # each -- and its numbers mean nothing, as with every other --smoke
         many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
-        ask = bench.asking(graph, store=args.store or None, embed_url=args.embed_url,
-                     embed_model=args.embed_model)
+        ask = bench.asking(graph, how=asking_from(args), store=args.store or None,
+                     embed_url=args.embed_url, embed_model=args.embed_model)
         where = args.graph or "the invented community"
         print(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
               f"look_up by {ask.finder}")
@@ -1281,7 +1286,7 @@ def _run(args: Any) -> int:
             return 3
         client = with_card(Client(args.base_url, **sampling_from(args)), args)
     ask = bench.ask_from(args.ask) if args.ask else bench.asking(
-        graph, shortlist=args.shortlist, store=args.store or None,
+        graph, how=asking_from(args), shortlist=args.shortlist, store=args.store or None,
         embed_url=args.embed_url, embed_model=args.embed_model, margin=args.margin)
     where = args.graph or "the invented community"
     found = getattr(ask, "finder", "")
@@ -1538,7 +1543,7 @@ def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: in
         said["draft_n_max"] = int(shape.draft_n_max)
     serving = {k: v for k, v in (("extra_args", tuple(shape.extra_args)),
                                  ("mmproj", shape.mmproj)) if v}
-    asking = run.converse()
+    asking = run.asking.said()
     print("    measured shape: " + ", ".join(f"{k}={v}" for k, v in said.items())
           + (f"; serving {serving}" if serving else "")
           + (f"; asking {asking}" if asking else ""))

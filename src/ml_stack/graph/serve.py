@@ -972,12 +972,13 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
               emit: Any) -> Any:
         if self.graph is None:
             raise RuntimeError("no graph on this server: serve with --graph FILE")
-        from ml_stack.graph.ask import converse, converse_stream
+        from ml_stack.graph.ask import ASKING, converse, converse_stream
 
         client = self.seated(index=0)
-        ways = dict(self.run.converse()) if self.run is not None else {}
-        ways.update(turns=turns, held=held, summary=getattr(turns, "summary", None),
-                    recalled=list(getattr(turns, "recalled", ()) or ()))
+        ways = {"asking": self.run.asking if self.run is not None else ASKING,
+                "turns": turns, "held": held,
+                "summary": getattr(turns, "summary", None),
+                "recalled": list(getattr(turns, "recalled", ()) or ())}
         if stream:
             return converse_stream(question, self.graph, client, on_event=emit, **ways)
         return converse(question, self.graph, client, **ways)

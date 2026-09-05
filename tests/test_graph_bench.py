@@ -13,6 +13,7 @@ import pytest
 
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
+from ml_stack.graph.asking import Asking
 
 from conftest import a_row, json_reply, scored_rows
 
@@ -772,7 +773,7 @@ def test_the_terse_tools_look_up_through_the_store_too(tmp_path):
     from ml_stack.bench import asking
 
     terse = _Scripted()
-    asking(TINY, store=_tiny_store(tmp_path), terse=True)("who?", terse)
+    asking(TINY, store=_tiny_store(tmp_path), how=Asking(terse=True))("who?", terse)
     assert "topic:compiler" in terse.told()
 
 
@@ -1024,8 +1025,8 @@ def test_rich_is_asked_for_the_way_terse_is():
     assert "rich" not in ways[0], "the first way is what was asked for, unchanged"
 
 
-def test_rich_reaches_converse_as_a_keyword(monkeypatch):
-    """`converse(..., rich=True)` is another agent's keyword; this only has to hand it on."""
+def test_rich_reaches_converse_on_the_asking(monkeypatch):
+    """`rich` is a field of `converse`'s `Asking`; this only has to hand the record on."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.bench import asking
 
@@ -1036,11 +1037,11 @@ def test_rich_reaches_converse_as_a_keyword(monkeypatch):
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
     monkeypatch.setattr(ask_module, "converse", fake_converse)
-    asking(TINY, rich=True)("who?", _Scripted())
-    assert reached.get("rich") is True
+    asking(TINY, how=Asking(rich=True))("who?", _Scripted())
+    assert reached["asking"].rich is True
     reached.clear()
     asking(TINY)("who?", _Scripted())
-    assert "rich" not in reached, "not asked for, not sent -- the default is converse's own"
+    assert reached["asking"] == Asking(), "asked for nothing, asked the default way"
 
 
 # -- several conversations at once --------------------------------------------------------
@@ -2683,7 +2684,7 @@ def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatc
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        asked_tight.append(kw["run"].asking.tight)
+        asked_tight.append(kw["how"].tight)
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -2702,11 +2703,10 @@ def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatc
     assert "tight is the default asking now" in said.err
 
 
-def test_tight_reaches_converse_as_a_keyword(monkeypatch):
-    """`converse(..., tight=...)` is ask's; this only has to hand it on -- both ways, which
-    is the whole of `--also loose` -- and hand the terse set in already told, since that set
-    is built here rather than chosen inside. Mutation: send the keyword only when tight,
-    and the loose control measures the tight default twice."""
+def test_tight_reaches_converse_on_the_asking(monkeypatch):
+    """`tight` is a field of `converse`'s `Asking`; this only has to hand the record on --
+    both ways, which is the whole of `--also loose` -- and hand the terse set in already
+    told, since that set is built here rather than chosen inside."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.graph.ask import TERSE, TIGHT_SHOW_TERSE
     from ml_stack.bench import asking
@@ -2718,20 +2718,20 @@ def test_tight_reaches_converse_as_a_keyword(monkeypatch):
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
     monkeypatch.setattr(ask_module, "converse", fake_converse)
-    asking(TINY, tight=True)("who?", _Scripted())
-    assert reached.get("tight") is True and "tools" not in reached
+    asking(TINY, how=Asking(tight=True))("who?", _Scripted())
+    assert reached["asking"].tight is True and reached["tools"] is None
     reached.clear()
-    asking(TINY, terse=True, tight=True)("who?", _Scripted())
-    assert reached.get("tight") is True
+    asking(TINY, how=Asking(terse=True, tight=True))("who?", _Scripted())
+    assert reached["asking"].tight is True
     show = next(s for s, _ in reached["tools"] if s["function"]["name"] == "show")
     assert show["function"]["description"] == TIGHT_SHOW_TERSE
     reached.clear()
     asking(TINY)("who?", _Scripted())
-    assert reached.get("tight") is True, "asked nothing, asked tight -- that is the asking"
+    assert reached["asking"].tight is True, "asked nothing, asked tight -- that is the asking"
     reached.clear()
     # the control: loose is sent, not left out, or it would arrive as the tight default
-    asking(TINY, terse=True, tight=False)("who?", _Scripted())
-    assert reached.get("tight") is False
+    asking(TINY, how=Asking(terse=True, tight=False))("who?", _Scripted())
+    assert reached["asking"].tight is False
     show = next(s for s, _ in reached["tools"] if s["function"]["name"] == "show")
     assert show["function"]["description"] == TERSE[-1]["function"]["description"]
 
@@ -2819,7 +2819,7 @@ def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeyp
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        asked_reach.append(kw["run"].asking.reach)
+        asked_reach.append(kw["how"].reach)
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -2836,11 +2836,10 @@ def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeyp
     assert asked_reach == [3000], "a size on every way, without a second load to pay for"
 
 
-def test_reach_reaches_converse_as_a_keyword_and_is_absent_without_one(monkeypatch):
-    """`converse(..., reach=...)` is ask's; this only has to hand it on, and hand the terse
-    set in already built with it, since that set is built here rather than chosen inside.
-    Mutation: send `reach=None` rather than leaving it out, and a run that asked for nothing
-    is no longer byte for byte the run the ranking was written from."""
+def test_reach_reaches_converse_on_the_asking_and_is_none_without_one(monkeypatch):
+    """`reach` is a field of `converse`'s `Asking`; this only has to hand the record on, and
+    hand the terse set in already built with it, since that set is built here rather than
+    chosen inside."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.bench import asking
 
@@ -2852,14 +2851,14 @@ def test_reach_reaches_converse_as_a_keyword_and_is_absent_without_one(monkeypat
 
     monkeypatch.setattr(ask_module, "converse", fake_converse)
     asking(TINY)("who?", _Scripted())
-    assert "reach" not in reached, "asked for no budget, sent no budget"
+    assert reached["asking"].reach is None, "asked for no budget, sent no budget"
     reached.clear()
-    asking(TINY, reach=8000)("who?", _Scripted())
-    assert reached.get("reach") == 8000
+    asking(TINY, how=Asking(reach=8000))("who?", _Scripted())
+    assert reached["asking"].reach == 8000
     reached.clear()
     # the terse set is handed in, so it has to be built with the budget too
-    asking(TINY, terse=True, reach=8000)("who?", _Scripted())
-    assert reached.get("reach") == 8000 and "tools" in reached
+    asking(TINY, how=Asking(terse=True, reach=8000))("who?", _Scripted())
+    assert reached["asking"].reach == 8000 and reached["tools"] is not None
     named = [s["function"]["name"] for s, _ in reached["tools"]]
     assert "look_around" in named, "the fat call is on the table wherever the budget is"
 
@@ -4085,7 +4084,7 @@ def test_the_three_askings_reach_the_serving_seam_and_never_the_client(tmp_path,
     takes = set(inspect.signature(real_asking).parameters)
 
     def watched(graph, **kw):
-        way = kw["run"].asking
+        way = kw["how"]
         asked.append({k: True for k in ("batch", "kinds", "summary") if getattr(way, k)})
         return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
 
@@ -4103,16 +4102,12 @@ def test_the_three_askings_reach_the_serving_seam_and_never_the_client(tmp_path,
     # signature, so a keyword it does not take raises there rather than on the GPU
 
 
-def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_without_one(
-        monkeypatch):
-    """Three ways another agent added to `converse`; this only has to hand them on, and hand
+def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
+    """Three fields of `converse`'s `Asking`; this only has to hand the record on, and hand
     the terse set in already built with the two that change what tools exist.
 
-    `summary` is renamed at this hop: `converse`'s own `summary` is a thread's rolling
-    summary and takes text, so passing the tool's bool as that one would hand a bool to
-    something that reads prose. Mutation: send them as `False` rather than leaving them out,
-    and a run that asked for none is no longer byte for byte the run the ranking was
-    written from."""
+    `Asking.summary` is the summarise tool; `converse`'s own `summary` keyword is a thread's
+    rolling summary and takes text. The two must never be confused."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.bench import asking
 
@@ -4124,16 +4119,19 @@ def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_witho
 
     monkeypatch.setattr(ask_module, "converse", fake_converse)
     asking(TINY)("who?", _Scripted())
-    assert not {"batch", "kinds", "summary", "summary_tool"} & set(reached), \
+    way = reached["asking"]
+    assert not (way.batch or way.kinds or way.summary), \
         "asked for none of them, sent none of them"
+    assert "summary" not in reached, "the rolling summary is not the summary tool"
 
     reached.clear()
-    asking(TINY, batch=True, kinds=True, summary=True)("who?", _Scripted())
-    assert reached.get("batch") is True and reached.get("kinds") is True
-    assert reached.get("summary_tool") is True and "summary" not in reached
+    asking(TINY, how=Asking(batch=True, kinds=True, summary=True))("who?", _Scripted())
+    way = reached["asking"]
+    assert (way.batch, way.kinds, way.summary) == (True, True, True)
+    assert "summary" not in reached
 
     reached.clear()
-    asking(TINY, terse=True, batch=True, summary=True)("who?", _Scripted())
+    asking(TINY, how=Asking(terse=True, batch=True, summary=True))("who?", _Scripted())
     named = [s["function"]["name"] for s, _ in reached["tools"]]
     assert "summarise" in named, "the terse set is built here, so it is built with them too"
 
@@ -4196,7 +4194,7 @@ def test_single_few_and_rounds_reach_the_serving_seam_and_never_the_client(tmp_p
     takes = set(inspect.signature(real_asking).parameters)
 
     def watched(graph, **kw):
-        way = kw["run"].asking
+        way = kw["how"]
         asked.append({k: getattr(way, k) for k in ("single", "few", "rounds")
                       if getattr(way, k)})
         return real_asking(graph, **{k: v for k, v in kw.items() if k in takes})
@@ -4229,19 +4227,20 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
     monkeypatch.setattr(ask_module, "converse", fake_converse)
     plain = asking(TINY)
     plain("who?", _Scripted())
-    assert not {"single", "few", "rounds"} & set(reached), "asked for none, sent none"
+    way = reached["asking"]
+    assert not (way.single or way.few or way.rounds), "asked for none, sent none"
     assert not {"single", "few", "rounds"} & set(plain.asking)
 
     reached.clear()
-    ask = asking(TINY, single=True, few=True, rounds=20)
+    ask = asking(TINY, how=Asking(single=True, few=True, rounds=20))
     ask("who?", _Scripted())
-    assert reached.get("single") is True and reached.get("few") is True
-    assert reached.get("rounds") == 20
+    way = reached["asking"]
+    assert (way.single, way.few, way.rounds) == (True, True, 20)
     assert ask.asking["single"] is True and ask.asking["few"] is True
     assert ask.asking["rounds"] == 20
 
     reached.clear()
-    asking(TINY, terse=True, few=True)("who?", _Scripted())
+    asking(TINY, how=Asking(terse=True, few=True))("who?", _Scripted())
     named = [s["function"]["name"] for s, _ in reached["tools"]]
     assert named == ["look_up", "look_at", "show"], \
         "the terse set is built here, so it is built few too"
@@ -4318,8 +4317,9 @@ def test_asking_records_what_it_handed_converse(tmp_path):
              "edges": []}
     plain = asking(graph)
     assert plain.asking == {"tight": True, "terse": False}
-    every = asking(graph, terse=True, tight=False, rich=True, batch=True, kinds=True,
-                   summary=True, reach=8000, shortlist=12)
+    every = asking(graph, shortlist=12,
+                   how=Asking(terse=True, tight=False, rich=True, batch=True, kinds=True,
+                              summary=True, reach=8000))
     assert every.asking == {"tight": False, "terse": True, "rich": True, "batch": True,
                             "kinds": True, "summary": True, "reach": 8000, "shortlist": 12}
 
@@ -4669,13 +4669,14 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
         return type("A", (), {"content": "", "show": [], "ids": [], "why": ""})()
 
     monkeypatch.setattr(ask_module, "converse", fake_converse)
-    ask = asking(TINY, constrain_ids=True)
+    ask = asking(TINY, how=Asking(constrain_ids=True))
     ask("who?", _Scripted())
-    assert reached.get("constrain_ids") is True
+    assert reached["asking"].constrain_ids is True
     assert ask.asking == {"tight": True, "terse": False, "constrain_ids": True}
     reached.clear()
     plain = asking(TINY)
     plain("who?", _Scripted())
-    assert "constrain_ids" not in reached and "constrain_ids" not in plain.asking
+    assert not reached["asking"].constrain_ids
+    assert "constrain_ids" not in plain.asking
     assert asked_as({"asking": ask.asking}) == "+ids"
     assert asked_as({"asking": plain.asking}) == "tight"

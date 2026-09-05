@@ -109,7 +109,7 @@ class _First:
 def _digest(way: Asking) -> str:
     watching = _First()
     tools = tools_for(GRAPH, terse=True, **way.tools()) if way.terse else None
-    converse(QUESTION, GRAPH, watching, tools=tools, profile=way)
+    converse(QUESTION, GRAPH, watching, tools=tools, asking=way)
     blob = json.dumps([watching.system, watching.schemas, watching.format],
                       sort_keys=False, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

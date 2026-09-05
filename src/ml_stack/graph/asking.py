@@ -36,20 +36,6 @@ class Asking:
         found = profile_for(str(model))
         return found.asked() if found is not None else cls()
 
-    def converse(self) -> dict[str, Any]:
-        """The keyword arguments :func:`ml_stack.graph.ask.converse` takes."""
-        out: dict[str, Any] = {"tight": bool(self.tight)}
-        for way in ("batch", "kinds", "rich", "single", "few", "constrain_ids"):
-            if getattr(self, way):
-                out[way] = True
-        if self.summary:
-            out["summary_tool"] = True
-        if self.reach is not None:
-            out["reach"] = int(self.reach)
-        if self.rounds is not None:
-            out["rounds"] = int(self.rounds)
-        return out
-
     def tools(self) -> dict[str, Any]:
         """The keyword arguments :func:`~ml_stack.graph.ask.tools_for` takes about the
         asking -- the terse set is chosen outside `converse` and handed in."""

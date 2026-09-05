@@ -273,9 +273,9 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_seat(shipped, lea
     assert len(asked) == 2 and answering.base_url == elsewhere.base_url
     assert held() == {8099: answering.base_url}
     # and the asking is one asking: what the bench asks with is what the page asks with
-    assert leased["asked"]["run"].asking == shipped.asking
-    assert shipped.converse() == {"tight": True, "batch": True, "kinds": True,
-                                  "summary_tool": True}
+    assert leased["asked"]["how"] == shipped.asking
+    assert shipped.asking.said() == {"tight": True, "terse": False, "batch": True,
+                                     "kinds": True, "summary": True}
 
 
 def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
@@ -300,5 +300,6 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
         assert lease["cache_type_k"] == "f16" and lease["cache_type_v"] == "f16"
         assert lease["context"] == 16384, "8192 a seat, two seats"
     assert (client.n_predict, seated.n_predict) == (4096, 4096)
-    assert changed.converse() == {"tight": True, "kinds": True, "few": True,
-                                  "summary_tool": True}, "batch off, few on, in one place"
+    assert changed.asking.said() == {"tight": True, "terse": False, "kinds": True,
+                                     "few": True, "summary": True}, \
+        "batch off, few on, in one place"

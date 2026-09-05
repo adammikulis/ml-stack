@@ -449,7 +449,7 @@ a question cheaper is to take more per call. `look_around(ids, hops=1)` is the f
 entries you name, and under each of them everything joined to it with the relation, the
 neighbour's kind, **its id in brackets** and a line of its own words — so "who could help
 with X" is one `look_up` and one `look_around` where it used to be five `look_at`s, and the
-answer may select a neighbour it never looked up. `converse(..., reach=N)` is the budget
+answer may select a neighbour it never looked up. `Asking(reach=N)` is the budget
 that makes such a result safe to ask for: N tokens per tool result instead of the flat 6000
 characters, with `look_at`, `look_around` and `list_kind` packing **whole entries with their
 quotes**, most-mentioned first, rather than every entry with its words clipped — because the
@@ -482,7 +482,7 @@ the ones a store already holds without asking a model anything.
 measured.** `look_up` returns `{id, label, kind}` and nothing else, so a model cannot tell an
 exact label from one word in one quote, and a topic it finds is only halfway to the people
 who have it — measured against a real graph, every staffing question spent rounds guessing
-spellings. `tools_for(graph, rich=True)` (and `converse(..., rich=True)`, `hybrid(...,
+spellings. `tools_for(graph, rich=True)` (and `Asking(rich=True)`, `hybrid(...,
 rich=True)`) adds `score`, `matched` — which of `label`, `attribute`, `said`, `words`,
 `meaning` found it — and, on anything that is not a person, `joined`: the eight
 most-mentioned people on any edge to it. The look_up description gains one sentence saying
@@ -508,20 +508,20 @@ fingerprinted, the same schema objects, byte for byte as they were — and
 **Three more askings, each off until it is measured: `batch`, `kinds`, `summary`.**
 Measured 2026-09-02 over the invented community, Qwen3.8-Flash-Next answered at 70% F1 —
 85% recall, 65% precision — and spent 25 seconds a question over about seven tool calls.
-`converse(..., batch=True)` is for the seconds: the calls were one question asked one entry
+`Asking(batch=True)` is for the seconds: the calls were one question asked one entry
 at a time, because nothing said the ids are a list, so the system prompt says it, each
 searching tool's description gains a worked three-entry call, and a turn that reads one
 entry while more are still unread is told once to *read the rest in one call*. What it
 should move is `Answer.rounds` — a round is a round trip through the model, and a reply that
 asks for three tools at once is one round, all three of them run before the next turn.
-`converse(..., kinds=True)` is for the precision: the misses were mostly right-adjacent —
+`Asking(kinds=True)` is for the precision: the misses were mostly right-adjacent —
 the topic lit beside the people for a question that asked *who* — and the question word
 already says what kind the answer is, so `asked_kinds` reads it off the asking clause and
 `show` keeps only that kind. It filters nothing when the question named several kinds or
 none (`how is X connected to Y`, `tell me about X`), a listing is exempt as it is from the
 cap, and a filter that would empty the selection is not applied; over the bench's own 110
 questions it filters 72 to the right kind, leaves 31 alone and gets exactly one wrong.
-`converse(..., summary_tool=True)` is for the broad question no search reaches — "what is
+`Asking(summary=True)` is for the broad question no search reaches — "what is
 this group about?" has no name in it to look up — and adds `summarise`: counts per kind, the
 ten most-mentioned entries of each kind with a line of their own words and their ids in
 brackets, and the busiest relations, computed from the graph with no model call at all.
@@ -529,14 +529,14 @@ brackets, and the busiest relations, computed from the graph with no model call 
 `ml-stack-bench --also batch --also kinds --also summary` measures all three against the
 default on one load.
 
-**Two more, pulling the other way: `single` and `few`.** `converse(..., single=True)` is
+**Two more, pulling the other way: `single` and `few`.** `Asking(single=True)` is
 `batch` turned around, and it is here for the opposite model. A fat tool result is a long
 thing to hold in mind: a small model handed a dozen entries in one message answers about the
 last one it read, or about none of them, and what comes back is fluent and about nothing. So
 the system prompt says to read one entry at a time, each searching tool's description gains a
 worked *one*-entry call, and a turn that reads several at once is told once to read them one
 at a time. It buys short results and spends rounds — exactly the trade `batch` makes in the
-other direction. `converse(..., few=True)` offers three tools — `look_up`, `look_at`, `show`
+other direction. `Asking(few=True)` offers three tools — `look_up`, `look_at`, `show`
 — and takes away every other way of looking, for the model whose tool choice degrades with
 the number of schemas rather than with the question. **Nothing is faked to cover what went.**
 There is no path tool and no listing tool in that offer, so look_up's description and the
@@ -545,7 +545,7 @@ ends up, read them, and read on to whatever they are joined to. A description te
 model to "ask for a path as `path A to B`" would be a tool that does not exist, and a model
 that believed it would spend every turn it has on a call nothing answers. Anything that does
 not search survives `few` — `show`, and a caller's own change request — because it is not a
-choice between ways to look. `converse(..., rounds=N)` is the ceiling those two trade
+choice between ways to look. `Asking(rounds=N)` is the ceiling those two trade
 against: `--rounds N` rides on every way a sweep asks, the way `--reach` does.
 
 **One asking per model.** These ways exist to be *chosen per model by measurement*, never
@@ -559,9 +559,9 @@ lives in the model's **profile** (`ml_stack/data/profiles.json`,
 `ml-stack-bench report --profile`
 writes, per model, the asking and the sampling of the fastest row whose F1 the questions
 could not tell apart from the best — F1 alone would trade real seconds for a hundredth of a
-point it cannot see — with the label of the row that set it. `converse(..., profile=MODEL)`
-then asks that way, filling in only what the call left unsaid, and `ml-stack-serve profile
-MODEL` reads it out: `ask with tight + few + rounds 20 at temperature 1.0 / top-p 0.95 /
+point it cannot see — with the label of the row that set it. `converse(question, graph, client,
+asking=Asking.for_model(MODEL))` then asks that way, and `ml-stack-serve profile MODEL`
+reads it out: `ask with tight + few + rounds 20 at temperature 1.0 / top-p 0.95 /
 top-k 20`.
 
 **Where people say they are becomes a point on the map.** A node that carries a place in its
@@ -1035,13 +1035,13 @@ from ml_stack.graph.ask import converse
 found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf")
 run = found.run(port=8080, n_predict=16384)
 client = seat(run, index=request_number)
-answer = converse(question, graph, client, profile=run)     # or profile="model.gguf"
+answer = converse(question, graph, client, asking=run.asking)
 ```
 
 `Profile.run()` is a **`Run`**: the whole configuration in one object, in three sections
 that different code reads. `run.shape` is the `Shape` the server is leased in, `run.asking`
 is an `Asking` — the ways `converse` is called with — and `run.talking` is a `Talking`, what
-the `Client` is built from. `run.lease()`, `run.converse()` and `run.client()` are the only
+the `Client` is built from. `run.lease()`, `run.asking` and `run.client()` are the only
 places each becomes arguments, and `run.over(cache_type="f16", few=True, temperature=0.7)`
 lays a knob over it, routed to the section that owns it rather than to whichever call takes
 `**kwargs` next.
@@ -1053,9 +1053,8 @@ asking reached `Client.__init__` and took an 87G load down with it, and how two 
 could lease one port two ways — which llama.cpp answers by stopping the server and loading
 the weights again.
 
-`converse(profile=...)` takes a `Run`, a `Profile` or a model name, and applies the ways
-that model measured best *under* anything the call said outright, so overruling one on
-purpose still works. A model matched only by family (the same weights at another
+`Asking.for_model(name)` is the way that model measured best, and `Profile.asked()` is the
+same record's. A model matched only by family (the same weights at another
 quantisation) comes back with `note` saying so: a shape measured on Q4_K_XL is the right
 place to start for IQ4_XS and is not a measurement of it.
 

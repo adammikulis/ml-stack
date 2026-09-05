@@ -914,6 +914,7 @@ class ModelWriter:
 
     def __call__(self, persona: Mapping[str, Any], prompt: str, context: Mapping[str, Any]) -> str:
         from ml_stack.graph.ask import SYSTEM, converse, spoken_show, tools_for, without_notes
+        from ml_stack.graph.asking import Asking
 
         graph = self.known(persona)
         me = str(persona.get("id") or "")
@@ -930,7 +931,8 @@ class ModelWriter:
         opening = list(dict.fromkeys(i for i in opening if i in known))
         answer = converse(prompt, graph, self.client, turns=turns,
                           system=str(persona.get("system") or SYSTEM),
-                          tools=tools_for(graph), rounds=self.rounds, opening=opening)
+                          tools=tools_for(graph), asking=Asking(rounds=self.rounds),
+                          opening=opening)
         self.last = answer
         from ml_stack.graph.thread import drew_on
 

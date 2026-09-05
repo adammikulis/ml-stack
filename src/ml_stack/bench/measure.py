@@ -1172,79 +1172,33 @@ def ask_from(spec: str) -> Callable[[str, Any], Any]:
     return getattr(import_module(module), name)
 
 
-def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
+def asking(graph: Mapping[str, Any], *, how: Any = None, shortlist: int = 0,
            store: str | Path | None = None,
-           embed_url: str = "", embed_model: str = "", terse: bool = False,
-           margin: float = MARGIN, rich: bool = False,
-           tight: bool = True, reach: int | None = None, batch: bool = False,
-           kinds: bool = False, summary: bool = False, single: bool = False,
-           few: bool = False, rounds: int | None = None,
-           constrain_ids: bool = False) -> Callable[..., Any]:
+           embed_url: str = "", embed_model: str = "",
+           margin: float = MARGIN) -> Callable[..., Any]:
     """The ordinary way to ask this graph a question, with or without a search run first.
 
-    ``run`` is a :class:`~ml_stack.serve.Run`, and its ``asking`` is every way below said
-    once: given one, none of them is passed again. That is what stops a bench row and a
-    page answer over the same model being asked two different questions.
+    ``how`` is the :class:`~ml_stack.graph.Asking`: every way of asking, said once, so a
+    bench row and a page answer over the same model cannot be asked two different
+    questions.
 
-    Nothing here is any project's: it is `converse` over the graph you handed in. Two
-    choices, both about where the looking happens. Whether a cheap embedder gets to suggest
-    where to look before the large model starts (``shortlist``), which is the thing most
-    worth measuring. And what `look_up` is when the model calls it: with a ``store``, the
-    same hybrid the application ships -- characters, the word index and, given
-    ``embed_url``, vectors, fused -- and without one, characters alone. For months the bench
-    had no store on this path and every ranking it wrote measured a look_up nobody ran.
+    Two choices about where the looking happens. Whether a cheap embedder gets to suggest
+    where to look before the large model starts (``shortlist``), and what `look_up` is when
+    the model calls it: with a ``store``, the same hybrid the application ships --
+    characters, the word index and, given ``embed_url``, vectors, fused -- and without one,
+    characters alone. ``margin`` is how far the nearest vector must stand out before a
+    shortlist is offered at all.
 
-    ``rich`` asks with `converse(..., rich=True)`: look_up results carry a score and why
-    they matched, and a topic hit brings the people joined to it. ``tight`` is the asking,
-    as it is in `converse`: show is told to light only what answers the question, and what
-    is lit is capped. ``reach`` is `converse`'s too: a ceiling in tokens on what one tool
-    result may carry, with look_at, look_around and list_kind packing up to it rather than
-    stopping at a fixed number of entries. ``None`` is the flat character cut every run
-    before it measured, so a model left on the default is measured unchanged.
-    ``tight=False`` is the loose asking the ranking runs used, kept as a
-    control, and it is passed on rather than left out -- left out it would be the default,
-    which is now tight, and `--also loose` would have measured tight twice.
-
-    ``batch``, ``kinds`` and ``summary`` are `converse`'s too, and each is a way a sweep
-    measures: a searching tool shown a three-entry call (``batch``), look_up filtered to
-    the kind the question's own words settle on (``kinds``), and the whole graph at a
-    glance offered as a tool for the broad question no search reaches (``summary`` --
-    `converse`'s ``summary_tool``, renamed at this hop only, because `converse`'s
-    ``summary`` is a thread's rolling summary and the two must never be confused). Like
-    ``rich`` and ``reach``, each is sent only when it is asked for, so a run that asked
-    for none reaches `converse` byte for byte as it always did.
-
-    ``constrain_ids`` is `converse`'s too: every turn that offers a tool taking an id
-    answers under a grammar in which those ids can only be the graph's.
-
-    ``single``, ``few`` and ``rounds`` are the same again, and they are why this list is a
-    space rather than a set of defaults. ``single`` is ``batch`` turned around -- one entry
-    to a read, more turns -- for the model that loses the thread of a long tool result;
-    ``few`` offers three tools (look_up, look_at, show) and no other way of looking, for
-    the model whose tool choice degrades with the number of schemas; ``rounds`` is how many
-    tool-calling turns a question may spend, which is the thing the other two trade against
-    each other. Measuring them is the only way one model gets asked with three tools and
-    twenty rounds while another gets eight and six -- see `ml_stack.serve.profile`.
-
-    The returned callable carries ``.finder`` -- see `finding` -- so a run can write down
-    which one it measured, and ``.asking``, which is the way itself: every keyword above
-    that changes what `converse` is asked, as `keep.save` writes it beside the rows and
-    `show.asked_as` prints it. The ways lived only in the end of a run's label --
-    ``...-plain-batch-kv-q8_0-rb0`` -- so nothing could group runs by them, say that two
-    runs differed only in the asking, or notice a micro-batch that had been left on. A
-    record is read; a suffix is guessed at.
-
-    It also takes ``turns=`` -- the earlier turns of a conversation, as `converse` does --
-    so `concurrent` can carry one on.
+    The returned callable carries ``.finder`` -- see `finding` -- and ``.asking``, the way
+    itself as `keep.save` writes it beside the rows and `show.asked_as` prints it. It also
+    takes ``turns=`` -- the earlier turns of a conversation, as `converse` does -- so
+    `concurrent` can carry one on.
     """
     from ml_stack.graph.ask import converse, tools_for
-    from ml_stack.graph.search import hybrid
     from ml_stack.graph.asking import Asking
+    from ml_stack.graph.search import hybrid
 
-    how = run.asking if run is not None else Asking(
-        tight=tight, batch=batch, single=single, few=few, kinds=kinds, summary=summary,
-        rich=rich, terse=terse, reach=reach or None, rounds=rounds or None,
-        constrain_ids=constrain_ids)
+    how = how if how is not None else Asking()
 
     finder_name = finding(store, embed_url, embed_model)
 
@@ -1275,15 +1229,10 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
                       turns: Sequence[Mapping[str, str]]) -> Any:
         # `finder` goes to both, because `converse` swaps look_up's callable in whichever
         # tools it is handed, and the terse set is handed in rather than chosen inside
-        extra: dict[str, Any] = (
-            {"tools": tools_for(graph, terse=True, finder=finder, **how.tools())}
-            if how.terse else {})
-        # every way, in the words `converse` takes them, from the one record that holds
-        # them: `summary` becomes `summary_tool`, and nothing not asked for is sent, so a
-        # way that asked for none reaches `converse` byte for byte as it always did
-        extra.update(how.converse())
-        return converse(question, graph, client, opening=opening, finder=finder,
-                        turns=list(turns), **extra)
+        tools = (tools_for(graph, terse=True, finder=finder, **how.tools())
+                 if how.terse else None)
+        return converse(question, graph, client, asking=how, opening=opening,
+                        finder=finder, turns=list(turns), tools=tools)
 
     def ask(question: str, client: Any, *, turns: Sequence[Mapping[str, str]] = ()) -> Any:
         if store is None or not str(store):
@@ -1300,9 +1249,8 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
             return converse_with(question, client, finder, likely(question, held), turns)
 
     ask.finder = finder_name  # type: ignore[attr-defined]
-    # The way, said once, in the words `converse` uses. Only what was asked for: a way that
-    # asked for nothing carries `{"tight": True}` and no other key, so the record says what
-    # the run did rather than what every default happened to be that week.
+    # Only what was asked for: a way that asked for nothing carries `{"tight": True}` and
+    # no other key.
     ask.asking = {  # type: ignore[attr-defined]
         **how.said(), **({"shortlist": int(shortlist)} if shortlist else {}),
     }

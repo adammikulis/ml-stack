@@ -28,6 +28,7 @@ from typing import Any
 
 from ml_stack.client.spent import Spent
 from ml_stack.client.tokens import estimate_tokens
+from ml_stack.graph.asking import Asking
 from ml_stack.graph.grammar import CAP, call_from, call_schema, response_format
 from ml_stack.graph.search import MATCHED_BY_RANK
 
@@ -1431,173 +1432,49 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
 
 
-# What each way of asking is when nobody says: a profile fills in only what is still this.
-_UNSAID = {"rich": False, "tight": True, "reach": None, "kinds": False, "batch": False,
-           "summary_tool": False, "single": False, "few": False, "rounds": ROUNDS,
-           "constrain_ids": False}
-
-
-def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
-    """``given``, with a measured profile's ways filling in whatever nobody said.
-
-    ``profile`` is a `Profile`, a `Run`, an `Asking`, or a model name to look one up by.
-
-    A keyword still at its default takes the record's; anything said outright is kept, so a
-    caller overruling a measurement on purpose is not overruled back. A value typed out that
-    happens to equal the default cannot be told from one not typed at all -- argparse cannot
-    either -- and it does not matter: what it asked for is what it got.
-    """
-    from ml_stack.serve.profile import Profile, profile_for
-    from ml_stack.graph.asking import Asking
-    from ml_stack.serve.shape import Run
-
-    if isinstance(profile, Run):
-        profile = profile.asking
-    if isinstance(profile, Asking):
-        ways = profile.converse()
-    else:
-        found = profile if isinstance(profile, Profile) else profile_for(str(profile))
-        if found is None:
-            return given
-        ways = found.asking()
-    out = dict(given)
-    for name, value in ways.items():
-        if out.get(name) == _UNSAID.get(name):
-            out[name] = value
-    return out
+#: the way a question is asked when nobody says
+ASKING = Asking()
 
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
+             asking: Asking = ASKING,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
-             rounds: int = ROUNDS, limit: int = LIT,
+             limit: int = LIT,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
              finder: Any = None, held: Sequence[str] = (),
-             opening: Sequence[str] = (), rich: bool = False,
-             tight: bool = True, reach: int | None = None, summary: Any = None,
-             recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
-             single: bool = False, few: bool = False,
-             summary_tool: bool = False, profile: Any = None,
-             constrain_ids: bool = False) -> Answer:
+             opening: Sequence[str] = (), summary: Any = None,
+             recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
 
+    ``asking`` is the :class:`~ml_stack.graph.Asking` -- every way of asking, in one
+    record; `Asking.for_model` reads a model's measured one.
+
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
-    ``content`` and ``tool_calls`` — ``ml_stack.client.Client`` does. ``tools`` is
-    ``[(schema, callable), ...]``, each callable taking the parsed arguments mapping;
-    ``tools_for(graph)`` by default. ``finder`` replaces just look_up's callable.
-    ``held`` names entries already highlighted for the reader: they are told to the model
-    by label and id, and enter ``ids`` only if a tool call touches them. ``rich`` is
-    ``tools_for``'s: look_up hits that say why they matched and who is joined to them.
+    ``content`` and ``tool_calls``. ``tools`` is ``[(schema, callable), ...]``, each
+    callable taking the parsed arguments mapping; ``tools_for(graph)`` by default.
+    ``finder`` replaces just look_up's callable. ``held`` names entries already highlighted
+    for the reader: they are told to the model by label and id, and enter ``ids`` only if a
+    tool call touches them. ``limit`` caps what ``show`` may light.
 
-    ``tight`` is the asking, and on by default, because a model that finds nearly
-    everything then lights far more than the answer. `show`'s description and the closing
-    nudge say to light only what answers the question, the system prompt says to name only
-    what a tool returned, ``show`` is capped at `LIT_TIGHT` -- the ids the prose names kept
-    first -- and an id the prose names that no tool returned is dropped from it. Each of
-    those is a line in ``steps``. ``tight=False`` is the loose asking the ranking runs and
-    the answer cache were fingerprinted on, kept as a control: with it, nothing observable
-    changes from what this did before, byte for byte.
-
-    ``reach`` is how much one tool result may carry, in tokens, for this whole
-    conversation. ``None`` -- the default -- is the flat `CUT` characters a tool message
-    has always been trimmed to, and nothing else changes. An int is that many tokens per
-    result, and `look_at`, `look_around` and `list_kind` pack up to it: whole entries with
-    their quotes, most-mentioned first, rather than every entry with its words clipped.
-    Measured 2026-09-02: Qwen3.8-Flash-Next reads a tool result back at about 390 tok/s and
-    writes at about 35, so one fat result is far cheaper than the five thin ones it
-    replaces; a small model with an expensive cache has the opposite profile and is left
-    on the default.
-
-    ``turns`` is the window: the last few turns, chosen by recency, sent whole and in
-    order. ``summary`` -- a thread's rolling summary, as a ``Turn``, a mapping with
-    ``text`` or ``content``, or a string -- goes first after the system prompt, as one
-    message reading "Earlier in this conversation: ...", ahead of anything that changes
-    per question so it stays inside the model's cached prefix. ``recalled`` -- earlier
-    turns outside the window that match this question, oldest first, the same shapes --
-    follow it, each marked as recalled, before the window. With neither, the messages are
-    byte for byte what they were.
-
-    Five ways of asking, each off by default and each measured by `ml-stack-bench --also`.
-    None of them is a default waiting to be promoted: they exist so that one model can be
-    asked the way *it* measured best while another is asked the opposite, and which is
-    which lives in a profile (see ``profile`` below), never in a habit:
-
-    ``batch`` is all the lookups in one turn. The system prompt gains a sentence saying the
-    ids are a list, each searching tool's description gains a worked three-entry call, and a
-    turn that reads one entry while more are still unread is told once to read the rest in
-    one call. What it saves is *rounds* -- `Answer.rounds` -- and a round is a round trip
-    through the model, which is where the wall clock goes.
-
-    ``kinds`` drops from ``show`` the entries whose kind the question did not ask for: a
-    question that asks *who* keeps the people and drops the topic it found them through.
-    Only when the question word settles the kind -- see `asked_kinds`, which answers
-    ``None`` for a question naming several kinds or none, and then nothing is dropped. A
-    listing (`list_kind`) is exempt, as it is from the cap, and a filter that would empty
-    the selection is not applied.
-
-    ``summary_tool`` offers `summarise`: the whole graph at a glance -- counts per kind, the
-    most-mentioned entries of each kind, the busiest relations -- computed without a model,
-    for the broad question ("what is this group about?") that no search reaches.
-
-    ``single`` is `batch` turned around, for the model that loses the thread of a long tool
-    result rather than running out of turns: the system prompt says to read one entry at a
-    time, each searching tool is shown a one-entry call, and a turn that reads several
-    entries at once is told once to read them one at a time. It buys short results and
-    spends rounds, which is exactly the trade `batch` makes in the other direction.
-
-    ``few`` offers three tools -- `look_up`, `look_at`, `show` -- and takes away every other
-    way of looking, for the model whose tool choice degrades with the number of schemas. No
-    tool is faked to cover what went: look_up's description says the offer has no path tool
-    and no listing tool, and says how to answer those questions by reading, which is what
-    the loop then does. Anything that does not search -- a caller's change request -- is
-    kept, because it is not a choice between ways to look.
-
-    ``rounds`` is not a way but is measured beside them: how many tool-calling turns a
-    question may spend before it must answer. `few` and `single` both want more of them and
-    `batch` wants fewer, which is the whole reason they are measured together.
-
-    ``constrain_ids`` makes every turn that offers a tool taking an id -- `look_at`,
-    `look_around`, `show`, `path_between` -- answer under a schema (`graph.grammar`) in
-    which those ids can only be ones the graph holds: the request carries it as
-    ``response_format``, the reply is one JSON object, a tool call or an answer, and it is
-    read back into the same tool calls and prose the loop always handled. A graph with more
-    than `grammar.CAP` entries is asked as before, and a step says so.
-
-    ``profile`` is a :class:`~ml_stack.serve.Profile` or a model name, and supplies those
-    ways from what that model *measured* best rather than from what a caller remembered:
-    Flash-Next wants batch, kinds and summary together and gemma-4 wants none of them, and
-    which is which is a number in a store, not a habit. One asking per model is the point --
-    a model that answers better on three tools and twenty rounds is asked that way, and the
-    one that answers better on eight tools and six is not asked to match it. It fills in
-    only what this call left unsaid -- see `_under`.
+    ``turns`` is the window: the last few turns, sent whole and in order. ``summary`` -- a
+    thread's rolling summary, as a ``Turn``, a mapping with ``text`` or ``content``, or a
+    string -- goes first after the system prompt. ``recalled`` -- earlier turns outside the
+    window that match this question, oldest first, the same shapes -- follows it.
+    ``opening`` names entries a cheap search already found, read out before the first turn.
     """
-    if profile is not None:
-        said = _under(profile, {"rich": rich, "tight": tight, "reach": reach,
-                                "kinds": kinds, "batch": batch,
-                                "summary_tool": summary_tool, "single": single,
-                                "few": few, "rounds": rounds,
-                                "constrain_ids": constrain_ids})
-        rich, tight, reach = said["rich"], said["tight"], said["reach"]
-        kinds, batch, summary_tool = said["kinds"], said["batch"], said["summary_tool"]
-        single, few, rounds = said["single"], said["few"], int(said["rounds"])
-        constrain_ids = bool(said["constrain_ids"])
-    return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
+    return _converse(question, graph, client, asking=asking, turns=turns, system=system,
                      limit=limit, tools=tools, finder=finder, held=held, emit=None,
-                     opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
-                     summary_tool=summary_tool, constrain_ids=constrain_ids)
+                     opening=opening, summary=summary, recalled=recalled)
 
 
 def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
-                    on_event: Any,
+                    on_event: Any, asking: Asking = ASKING,
                     turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
-                    rounds: int = ROUNDS, limit: int = LIT,
+                    limit: int = LIT,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
                     finder: Any = None, held: Sequence[str] = (),
-                    opening: Sequence[str] = (), rich: bool = False,
-                    tight: bool = True, reach: int | None = None, summary: Any = None,
-                    recalled: Sequence[Any] = (), kinds: bool = False, batch: bool = False,
-                    single: bool = False, few: bool = False,
-                    summary_tool: bool = False, constrain_ids: bool = False) -> Answer:
+                    opening: Sequence[str] = (), summary: Any = None,
+                    recalled: Sequence[Any] = ()) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
 
     ``on_event`` gets one mapping per event: ``{"event": "thinking", "text"}`` as the
@@ -1607,11 +1484,9 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     A client whose ``chat`` takes ``on_delta`` streams the text a piece at a time;
     any other client's text arrives whole.
     """
-    return _converse(question, graph, client, turns=turns, system=system, rounds=rounds,
+    return _converse(question, graph, client, asking=asking, turns=turns, system=system,
                      limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
-                     opening=opening, rich=rich, tight=tight, reach=reach, summary=summary,
-                     recalled=recalled, kinds=kinds, batch=batch, single=single, few=few,
-                     summary_tool=summary_tool, constrain_ids=constrain_ids)
+                     opening=opening, summary=summary, recalled=recalled)
 
 
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
@@ -1742,14 +1617,15 @@ def _spoken(turn: Any) -> tuple[str, str]:
     return ("assistant" if role == "assistant" else "user"), str(text or "")
 
 
-def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
-              turns: Sequence[Mapping[str, str]], system: str, rounds: int, limit: int,
+def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: Asking,
+              turns: Sequence[Mapping[str, str]], system: str, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
               finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              rich: bool = False, tight: bool = True, reach: int | None = None,
-              summary: Any = None, recalled: Sequence[Any] = (), kinds: bool = False,
-              batch: bool = False, single: bool = False, few: bool = False,
-              summary_tool: bool = False, constrain_ids: bool = False) -> Answer:
+              summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
+    rich, tight, reach = asking.rich, asking.tight, asking.reach
+    kinds, batch, single, few = asking.kinds, asking.batch, asking.single, asking.few
+    summary_tool, constrain_ids = asking.summary, asking.constrain_ids
+    rounds = ROUNDS if asking.rounds is None else int(asking.rounds)
     given = tools is not None
     if tools is None:
         tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach,

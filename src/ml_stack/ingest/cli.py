@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import jobs
+from ml_stack.graph.asking import Asking
 from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
 from ml_stack.ingest.extract import PER_SECTION, schema
 from ml_stack.ingest.fold import fold
@@ -468,14 +469,15 @@ def _ask_run(args: Any) -> int:
     # the asking comes from the same profile the serving does, so a model measured with
     # one way of asking is not served in its shape and asked in somebody else's
     measured = ingest._find_model(args.model) if args.model else None
+    how = Asking.for_model(measured) if measured else None
     try:
         with _stopping(), ingest._serving(args) as client:
             if not args.gold:
-                ingest.ask(graph, question, client, profile=measured)
+                ingest.ask(graph, question, client, asking=how)
                 return 0
             asked = read_asked(args.gold)
             print(f"asking {len(asked)} question(s) from {args.gold}")
-            rows = score_asked(graph, client, asked, log=print, profile=measured)
+            rows = score_asked(graph, client, asked, log=print, asking=how)
     except Stopped:
         print("stopped before the answer was finished")
         return 1

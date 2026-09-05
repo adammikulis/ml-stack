@@ -343,7 +343,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                         # what the model itself recommends, read from the GGUF it is serving
                         this = this.over(**client.card)
                         client = this.client(server.base_url)
-                    ask = bench.asking(graph, run=this, shortlist=first, store=store,
+                    ask = bench.asking(graph, how=this.asking, shortlist=first, store=store,
                                        embed_url=embed_url, embed_model=embed_model)
                     got = bench.measure(ask, asking_these, label=here, client=client,
                                         trace=trace,

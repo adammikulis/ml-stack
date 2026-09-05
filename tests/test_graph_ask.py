@@ -12,6 +12,7 @@ import json
 
 from ml_stack.graph.ask import (LISTED, Answer, converse, converse_stream, list_kind, look_at,
                                 look_up, path_between, tools_for)
+from ml_stack.graph.asking import Asking
 from ml_stack.testing import ScriptedModel
 
 GRAPH = {
@@ -126,7 +127,7 @@ def test_running_out_of_rounds_still_answers():
     """The last reply of an exhausted loop is a tool call; the question still deserves words."""
     asking = [call("look_up", text="Ada Lovelace")] * 3
     model = ScriptedModel(asking)
-    out = converse("who?", GRAPH, model, rounds=2)
+    out = converse("who?", GRAPH, model, asking=Asking(rounds=2))
     assert out.content == "Ada and Bea both work on compilers."
     assert out.ids == ["person:ada"]
     # two rounds of tools, the search refused on the final turn, the answer, and the ask
@@ -181,7 +182,7 @@ def test_every_call_in_a_question_offers_the_same_tools_and_the_same_system_mess
     # ran out of rounds: two searches, the refused one, the answer, the ask for what to light
     over = Recording(ScriptedModel([call("look_up", text="Ada"), call("look_up", text="Bea"),
                                     call("look_up", text="compilers")]))
-    out = converse("who?", GRAPH, over, rounds=2)
+    out = converse("who?", GRAPH, over, asking=Asking(rounds=2))
     assert out.content == ScriptedModel.ANSWER
     _same_prefix(over, calls=5)
 
@@ -236,7 +237,7 @@ def test_the_final_turn_is_told_the_searching_is_over_and_refuses_a_search_once(
                     "name": "look_at", "arguments": '{"ids": ["person:bea"]}'}}])
             return Reply(content="Ada works on compilers.")
 
-    out = converse("who?", GRAPH, Deaf(), rounds=1)
+    out = converse("who?", GRAPH, Deaf(), asking=Asking(rounds=1))
     assert out.content == "Ada works on compilers."
     assert out.steps.count("refused look_at: the searching is over") == 1
     assert out.read == ["person:bea"], "the refused call read nothing"
@@ -257,7 +258,7 @@ def test_the_final_turn_is_told_the_searching_is_over_and_refuses_a_search_once(
             return Reply(content="", tool_calls=[{"id": "x", "function": {
                 "name": "look_up", "arguments": '{"text": "Ada"}'}}])
 
-    out = converse("who?", GRAPH, Stubborn(), rounds=1)
+    out = converse("who?", GRAPH, Stubborn(), asking=Asking(rounds=1))
     assert out.content == "Nothing more to find."
     assert out.steps.count("refused look_up: the searching is over") == 1
 
@@ -306,7 +307,7 @@ def test_a_model_that_goes_quiet_is_told_to_answer():
             return super().chat(messages, tools=tools, **kw)
 
     model = Quiet([("look_up", {"text": "compilers"})] * 3)
-    out = converse("who works on compilers?", GRAPH, model, rounds=5)
+    out = converse("who works on compilers?", GRAPH, model, asking=Asking(rounds=5))
     assert out.content
     assert any("plain words" in m["content"] for said in model.seen for m in said)
 
@@ -332,7 +333,7 @@ def test_a_model_that_stops_calling_tools_without_answering_is_nudged():
             return Reply(content="Ada works on compilers.")
 
     model = Silent([("look_up", {"text": "compilers"})])
-    out = converse("who works on compilers?", GRAPH, model, rounds=5)
+    out = converse("who works on compilers?", GRAPH, model, asking=Asking(rounds=5))
     assert out.content == "Ada works on compilers."
     assert any("plain words" in m["content"] for said in model.seen for m in said)
 
@@ -405,7 +406,7 @@ def test_a_model_that_only_searched_gets_the_top_finds_read_to_it():
             return Reply(content="")
 
     model = Searcher([call("look_up", text="compilers")] * 3)
-    out = converse("who works on compilers?", GRAPH, model, rounds=3)
+    out = converse("who works on compilers?", GRAPH, model, asking=Asking(rounds=3))
     assert out.content == "Ada and Bea, going by what they said."
     assert out.read == ["topic:compilers", "person:ada", "person:bea"]
     assert out.steps[-1] == "read the top 3 finds"
@@ -698,7 +699,7 @@ def test_a_turn_that_stops_searching_can_still_act():
                 "arguments": _json.dumps({"text": "I moved to Denver"})}}])
 
     out = converse("I moved to Denver, please fix my entry.", GRAPH, GoesInCircles(),
-                   tools=[*tools_for(GRAPH), change], rounds=2)
+                   tools=[*tools_for(GRAPH), change], asking=Asking(rounds=2))
     assert raised == ["I moved to Denver"], "the request never reached the tool"
     assert "did not finish an answer" not in out.content
     assert out.content == "Recorded."
@@ -885,7 +886,7 @@ def test_going_in_circles_costs_a_handful_of_calls_and_stops():
             return Reply(content="Nothing more to find.")
 
     model = Stubborn()
-    out = converse("who?", GRAPH, model, rounds=10)
+    out = converse("who?", GRAPH, model, asking=Asking(rounds=10))
     assert "stopped searching in circles" in out.steps
     assert model.calls == 5, f"a circle costs five calls here, not {model.calls}"
 
@@ -953,7 +954,7 @@ def test_listing_a_kind_is_a_search_and_is_refused_on_the_final_turn():
                     "name": "list_kind", "arguments": '{"kind": "org"}'}}])
             return Reply(content="Pellard Foundry is the only company here.")
 
-    out = converse("which companies?", GRAPH, Lister(), rounds=2)
+    out = converse("which companies?", GRAPH, Lister(), asking=Asking(rounds=2))
     assert out.content == "Pellard Foundry is the only company here."
     assert out.listed == ["org:pellard"]
     assert "list_kind" in offered_by_call[0]
@@ -1272,7 +1273,7 @@ def test_converse_rich_reaches_the_tool():
     import json
 
     model = ScriptedModel([call("look_up", text="compilers")])
-    out = converse("who does compilers?", GRAPH, model, rich=True)
+    out = converse("who does compilers?", GRAPH, model, asking=Asking(rich=True))
     assert out.found[0] == "topic:compilers"
     handed = [m for m in model.seen[-1] if m.get("role") == "tool"]
     rows = json.loads(handed[0]["content"])
@@ -1283,7 +1284,8 @@ def test_converse_rich_reaches_the_tool():
     # the streamed path takes the same flag
     events = []
     streamed = ScriptedModel([call("look_up", text="compilers")])
-    converse_stream("who does compilers?", GRAPH, streamed, on_event=events.append, rich=True)
+    converse_stream("who does compilers?", GRAPH, streamed, on_event=events.append,
+                    asking=Asking(rich=True))
     handed = [m for m in streamed.seen[-1] if m.get("role") == "tool"]
     assert "joined" in json.loads(handed[0]["content"])[0]
 
@@ -1335,7 +1337,7 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
     assert TIGHT_SENTENCE not in TERSE[-1]["function"]["description"]
 
     loose = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
-    out = converse("who?", GRAPH, loose, tight=False)
+    out = converse("who?", GRAPH, loose, asking=Asking(tight=False))
     assert out.read == ["person:ada"] and not out.show
     assert loose.seen[0][0]["content"] == SYSTEM
     assert loose.seen[-1][-1]["content"] == (
@@ -1384,7 +1386,7 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     from ml_stack.graph.ask import SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH
 
     model = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
-    converse("who?", GRAPH, model, tight=True)
+    converse("who?", GRAPH, model, asking=Asking(tight=True))
     assert model.seen[0][0]["content"] == SYSTEM.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
     assert TIGHT_NUDGE.startswith("Now call show once with only the entries that answer the")
     assert "which-of-a-kind" in TIGHT_NUDGE and "chain" in TIGHT_NUDGE
@@ -1396,7 +1398,7 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     # caller assembling its own set has it -- gets the terse tight show
     handed = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
     converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True, tight=False),
-             tight=True)
+             asking=Asking(tight=True))
     first = handed.offered[0]
     assert next(s for s in first if s["function"]["name"] == "show")["function"]["description"] \
         == TIGHT_SHOW_TERSE
@@ -1409,14 +1411,14 @@ def test_tight_caps_show_at_six_keeping_what_the_prose_names_most_named_first():
     assert LIT_TIGHT == 6
     said = "Marek Voss leads it, with Ida Pellow beside him; ask Marek Voss first."
     model = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
-    out = converse("who leads?", MANY, model, tight=True)
+    out = converse("who leads?", MANY, model, asking=Asking(tight=True))
     assert out.show == ["person:p7", "person:p3", "person:p1", "person:p2", "person:p4",
                         "person:p5"]
     assert "cut 2 of 8 lit" in out.steps
     assert "selected 8 entries" in out.steps, "what the model asked for is still on record"
     # the same script, asked loose (tight=False, the control): all eight, capped only by LIT
     plain = SayingModel([call("look_at", ids=EIGHT), call("show", ids=EIGHT)], said)
-    out = converse("who leads?", MANY, plain, tight=False)
+    out = converse("who leads?", MANY, plain, asking=Asking(tight=False))
     assert out.show == EIGHT
     assert not [s for s in out.steps if s.startswith("cut ")]
 
@@ -1440,12 +1442,14 @@ def test_tight_keeps_what_a_tool_returned_and_drops_what_none_did():
     said = "Ada Lovelace and Bea Marlow both do compilers, and so does Cass Lindley."
     script = [call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
               call("show", ids=["person:ada", "person:bea", never])]
-    out = converse("who does compilers?", graph, SayingModel(list(script), said), tight=True)
+    out = converse("who does compilers?", graph, SayingModel(list(script), said),
+                   asking=Asking(tight=True))
     assert "person:bea" in out.found and "person:bea" not in out.read
     assert out.show == ["person:ada", "person:bea"], "found counts as known; the guess goes"
     assert "dropped 1 unread from show" in out.steps
     # asked loose (tight=False, the control): everything the model asked for
-    out = converse("who does compilers?", graph, SayingModel(list(script), said), tight=False)
+    out = converse("who does compilers?", graph, SayingModel(list(script), said),
+                   asking=Asking(tight=False))
     assert out.show == ["person:ada", "person:bea", never]
     assert not [s for s in out.steps if s.startswith("dropped ")]
 
@@ -1455,7 +1459,7 @@ def test_the_streamed_path_takes_tight_too():
     said = "Ada Lovelace works on compilers, and so does Bea Marlow."
     model = SayingModel([call("look_up", text="compilers"), call("look_at", ids=["person:ada"]),
                          call("show", ids=["person:ada", "person:bea"])], said)
-    out = converse_stream("who?", GRAPH, model, on_event=events.append, tight=True)
+    out = converse_stream("who?", GRAPH, model, on_event=events.append, asking=Asking(tight=True))
     assert out.show == ["person:ada", "person:bea"], "found by look_up, so known"
     assert not [s for s in out.steps if s.startswith("dropped ")]
     assert events[-1] == {"event": "done"}
@@ -1522,7 +1526,7 @@ def test_without_a_summary_or_recall_the_messages_are_byte_for_byte_what_they_we
                               {"role": "user", "content": "who else?"}]
     # and the control still sends SYSTEM itself
     loose = ScriptedModel([])
-    converse("who else?", GRAPH, loose, turns=WINDOW_TURNS, tight=False)
+    converse("who else?", GRAPH, loose, turns=WINDOW_TURNS, asking=Asking(tight=False))
     assert loose.seen[0][0] == {"role": "system", "content": SYSTEM}
 
     explicit = ScriptedModel([])
@@ -1763,12 +1767,13 @@ def test_converse_offers_look_around_and_a_reach_reaches_its_result():
 
     # with a reach small enough to matter, the same call comes back shorter
     small = ScriptedModel([call("look_around", ids=["topic:ceramics"])])
-    converse("who?", AROUND_GRAPH, small, reach=12)
+    converse("who?", AROUND_GRAPH, small, asking=Asking(reach=12))
     short = [m for turn in small.seen for m in turn if m.get("role") == "tool"]
     assert len(short[0]["content"]) < len(handed[0]["content"])
-    assert converse_stream("who?", AROUND_GRAPH,
-                           ScriptedModel([call("look_around", ids=["topic:ceramics"])]),
-                           on_event=lambda e: None, reach=8000).read == ["topic:ceramics"]
+    streamed = converse_stream(
+        "who?", AROUND_GRAPH, ScriptedModel([call("look_around", ids=["topic:ceramics"])]),
+        on_event=lambda e: None, asking=Asking(reach=8000))
+    assert streamed.read == ["topic:ceramics"]
 
 
 def test_look_around_is_a_search_and_is_refused_on_the_last_turn():
@@ -1781,7 +1786,7 @@ def test_look_around_is_a_search_and_is_refused_on_the_last_turn():
     assert "look_around" in named
     model = SayingModel([call("look_around", ids=["topic:ceramics"]),
                          call("look_around", ids=["person:wren"])], "Hollis Fen teaches it.")
-    out = converse("who?", AROUND_GRAPH, model, rounds=1)
+    out = converse("who?", AROUND_GRAPH, model, asking=Asking(rounds=1))
     assert out.content == "Hollis Fen teaches it."
     assert "refused look_around: the searching is over" in out.steps
     assert out.read == ["topic:ceramics"], "the refused call read nothing"
@@ -1861,7 +1866,7 @@ def test_reading_three_entries_in_one_call_is_one_round_not_three():
                            call("look_around", ids=["person:ada", "person:bea",
                                                     "topic:compilers"]),
                            call("show", ids=["person:ada", "person:bea"])])
-    out = converse("who works on compilers?", GRAPH, model, batch=True)
+    out = converse("who works on compilers?", GRAPH, model, asking=Asking(batch=True))
     assert out.rounds == 3, "look_up, look_around, show"
     assert out.spent.calls == 4, "three rounds and the turn that wrote the answer"
     assert out.spent.tool_calls == 3
@@ -1872,7 +1877,7 @@ def test_reading_three_entries_in_one_call_is_one_round_not_three():
                           call("look_at", ids=["person:bea"]),
                           call("look_at", ids=["topic:compilers"]),
                           call("show", ids=["person:ada", "person:bea"])])
-    assert converse("who works on compilers?", GRAPH, slow, batch=True).rounds == 5
+    assert converse("who works on compilers?", GRAPH, slow, asking=Asking(batch=True)).rounds == 5
 
 
 def test_a_turn_that_read_one_entry_while_more_were_found_is_told_to_read_the_rest():
@@ -1881,14 +1886,14 @@ def test_a_turn_that_read_one_entry_while_more_were_found_is_told_to_read_the_re
     one_at_a_time = ScriptedModel([call("look_up", text="compil"),
                                    call("look_at", ids=["person:ada"]),
                                    call("look_at", ids=["person:bea"])])
-    out = converse("who works on compilers?", GRAPH, one_at_a_time, batch=True)
+    out = converse("who works on compilers?", GRAPH, one_at_a_time, asking=Asking(batch=True))
     said = [m for turn in one_at_a_time.seen for m in turn if m.get("role") == "user"]
     assert any(m["content"] == BATCH_NUDGE for m in said)
     assert "asked it to read the rest in one call" in out.steps
 
     both_at_once = ScriptedModel([call("look_up", text="compil"),
                                   call("look_at", ids=["person:ada", "person:bea"])])
-    converse("who works on compilers?", GRAPH, both_at_once, batch=True)
+    converse("who works on compilers?", GRAPH, both_at_once, asking=Asking(batch=True))
     assert not any(m.get("content") == BATCH_NUDGE
                    for turn in both_at_once.seen for m in turn)
 
@@ -1907,7 +1912,7 @@ def test_the_batch_sentence_and_the_worked_calls_are_said_only_when_asked_for():
                                     tools_for)
 
     said = ScriptedModel([])
-    converse("who?", GRAPH, said, batch=True)
+    converse("who?", GRAPH, said, asking=Asking(batch=True))
     system = said.seen[0][0]["content"]
     assert BATCH_SYSTEM_SENTENCE in system
 
@@ -1943,7 +1948,7 @@ def test_reading_one_entry_at_a_time_is_asked_for_and_nudged_when_it_is_not():
     all_at_once = ScriptedModel([call("look_up", text="compil"),
                                  call("look_at", ids=["person:ada", "person:bea"]),
                                  call("look_at", ids=["topic:compilers"])])
-    out = converse("who works on compilers?", GRAPH, all_at_once, single=True)
+    out = converse("who works on compilers?", GRAPH, all_at_once, asking=Asking(single=True))
     # the last turn carries every message the conversation accumulated, so counting it
     # there is counting how many times the nudge was actually appended
     said = [m.get("content") for m in all_at_once.seen[-1] if m.get("role") == "user"]
@@ -1953,7 +1958,7 @@ def test_reading_one_entry_at_a_time_is_asked_for_and_nudged_when_it_is_not():
     one_by_one = ScriptedModel([call("look_up", text="compil"),
                                 call("look_at", ids=["person:ada"]),
                                 call("look_at", ids=["person:bea"])])
-    converse("who works on compilers?", GRAPH, one_by_one, single=True)
+    converse("who works on compilers?", GRAPH, one_by_one, asking=Asking(single=True))
     assert not any(m.get("content") == SINGLE_NUDGE
                    for turn in one_by_one.seen for m in turn), "it did what was asked"
 
@@ -1971,7 +1976,7 @@ def test_the_single_sentence_and_the_one_entry_calls_are_said_only_when_asked_fo
                                     SINGLE_SYSTEM_SENTENCE, TOOLS, tools_for)
 
     said = ScriptedModel([])
-    converse("who?", GRAPH, said, single=True)
+    converse("who?", GRAPH, said, asking=Asking(single=True))
     assert SINGLE_SYSTEM_SENTENCE in said.seen[0][0]["content"]
     assert BATCH_SYSTEM_SENTENCE not in said.seen[0][0]["content"], "the opposite asking"
 
@@ -2019,8 +2024,8 @@ def test_a_caller_s_acting_tool_survives_few_and_keeps_its_callable():
         return {"filed": True}
 
     model = SayingModel([call("request_change", id="person:ada")], "Filed it.")
-    converse("fix Ada's role", GRAPH, model, few=True,
-             tools=[*tools_for(GRAPH), (schema, change)])
+    converse("fix Ada's role", GRAPH, model, tools=[*tools_for(GRAPH), (schema, change)],
+             asking=Asking(few=True))
     assert filed == {"id": "person:ada"}
     assert [t["function"]["name"] for t in model.offered[0]] == \
         ["look_up", "look_at", "show", "request_change"]
@@ -2040,7 +2045,7 @@ def test_a_path_question_under_few_is_answered_by_reading_not_by_a_faked_tool():
                          call("look_at", ids=["topic:compilers", "person:bea"]),
                          call("show", ids=["person:ada", "topic:compilers", "person:bea"])],
                         "Ada and Bea are connected through compilers.")
-    out = converse("how are Ada and Bea connected?", GRAPH, model, few=True)
+    out = converse("how are Ada and Bea connected?", GRAPH, model, asking=Asking(few=True))
     assert [t["function"]["name"] for t in model.offered[0]] == \
         ["look_up", "look_at", "show"]
     assert "path_between" not in {t["function"]["name"]
@@ -2066,9 +2071,9 @@ def test_rounds_is_what_a_way_may_spend_and_reaches_the_loop():
 
     asking = [call("look_up", text="compil")] * 6
     two = ScriptedModel(list(asking))
-    assert converse("who?", GRAPH, two, rounds=2).rounds <= 2
+    assert converse("who?", GRAPH, two, asking=Asking(rounds=2)).rounds <= 2
     many = ScriptedModel(list(asking))
-    assert converse("who?", GRAPH, many, rounds=5).rounds > 2
+    assert converse("who?", GRAPH, many, asking=Asking(rounds=5)).rounds > 2
     assert ROUNDS == 10, "the library default, which a way that says nothing keeps"
 
 
@@ -2124,7 +2129,7 @@ def test_a_who_question_does_not_light_the_topic_it_was_found_through():
     model = ScriptedModel([call("look_up", text="compil"),
                            call("show", ids=["person:ada", "person:bea",
                                              "topic:compilers"])])
-    out = converse("who knows about compilers?", GRAPH, model, kinds=True)
+    out = converse("who knows about compilers?", GRAPH, model, asking=Asking(kinds=True))
     assert out.show == ["person:ada", "person:bea"]
     assert any("another kind" in step for step in out.steps)
 
@@ -2140,7 +2145,7 @@ def test_a_question_naming_no_kind_or_several_filters_nothing():
                            call("show", ids=["person:ada", "topic:compilers",
                                              "person:bea"])])
     out = converse("How are Ada Lovelace and Bea Marlow connected?", GRAPH, model,
-                   kinds=True)
+                   asking=Asking(kinds=True))
     assert out.show == ["person:ada", "topic:compilers", "person:bea"]
     assert not any("another kind" in step for step in out.steps)
 
@@ -2152,12 +2157,12 @@ def test_a_listing_is_exempt_from_the_kind_filter_and_an_empty_selection_is_neve
     selection."""
     listing = ScriptedModel([call("list_kind", kind="topic"),
                              call("show", ids=["topic:compilers", "org:pellard"])])
-    out = converse("Who is here?", GRAPH, listing, kinds=True)
+    out = converse("Who is here?", GRAPH, listing, asking=Asking(kinds=True))
     assert out.show == ["topic:compilers"], "the listed entry stays; the other kind goes"
 
     everything = ScriptedModel([call("look_up", text="compil"),
                                 call("show", ids=["topic:compilers"])])
-    kept = converse("who knows about compilers?", GRAPH, everything, kinds=True)
+    kept = converse("who knows about compilers?", GRAPH, everything, asking=Asking(kinds=True))
     assert kept.show == ["topic:compilers"]
     assert not any("another kind" in step for step in kept.steps)
 
@@ -2192,7 +2197,7 @@ def test_the_summary_tool_is_offered_only_when_asked_for_and_goes_away_last():
 def test_a_broad_question_calls_summarise_once_and_selects_the_top_entries():
     model = ScriptedModel([call("summarise"),
                            call("show", ids=["person:ada", "topic:compilers"])])
-    out = converse("what is this community about?", GRAPH, model, summary_tool=True)
+    out = converse("what is this community about?", GRAPH, model, asking=Asking(summary=True))
     assert out.steps.count("read the graph at a glance") == 1
     assert out.show == ["person:ada", "topic:compilers"]
     # what the summary read out counts as found, so it may be selected without a look_at
@@ -2255,7 +2260,7 @@ def test_ids_are_constrained_on_a_turn_that_offers_a_tool_taking_them_and_not_ot
 
     model = _Recording([call("look_up", text="Ada Lovelace"),
                         call("look_at", ids=["person:ada"])])
-    converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    converse("who is Ada?", GRAPH, model, asking=Asking(constrain_ids=True))
     first = model.given[0]
     assert "look_at" in first["tools"]
     schema = _format_of(first)
@@ -2274,7 +2279,7 @@ def test_ids_are_constrained_on_a_turn_that_offers_a_tool_taking_them_and_not_ot
     listed = _Recording([call("list_kind", kind="org")])
     offer = [(schema, fn) for schema, fn in tools_for(GRAPH)
              if schema["function"]["name"] == "list_kind"]
-    converse("which orgs?", GRAPH, listed, tools=offer, constrain_ids=True)
+    converse("which orgs?", GRAPH, listed, tools=offer, asking=Asking(constrain_ids=True))
     assert listed.given[0]["tools"] == ["list_kind"]
     assert "response_format" not in listed.given[0]
 
@@ -2293,7 +2298,7 @@ def test_a_constrained_reply_is_read_as_the_tool_call_or_the_answer_it_holds():
         Reply(content=json.dumps({"answer": "Ada is an analyst in Turin."})),
         Reply(content=json.dumps({"name": "show", "arguments": {"ids": ["person:ada"]}})),
     ])
-    out = converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    out = converse("who is Ada?", GRAPH, model, asking=Asking(constrain_ids=True))
     assert out.read == ["person:ada"]
     assert out.steps[0] == "read 1 entry"
     assert out.content == "Ada is an analyst in Turin."
@@ -2309,7 +2314,7 @@ def test_the_show_nudge_is_constrained_too():
 
     model = _Recording([call("look_up", text="Ada Lovelace"),
                         call("look_at", ids=["person:ada"])])
-    converse("who is Ada?", GRAPH, model, constrain_ids=True)
+    converse("who is Ada?", GRAPH, model, asking=Asking(constrain_ids=True))
     assert model.seen[-1][-1]["content"] == TIGHT_NUDGE, "the answer was asked what it is about"
     assert len(model.given) == 4
     assert len({tuple(g["tools"]) for g in model.given}) == 1, "the same tools on every call"
@@ -2324,25 +2329,22 @@ def test_over_the_cap_nothing_is_constrained_and_the_steps_say_so():
                           "mentions": 1, "attrs": {}, "messages": []} for n in range(CAP))],
              "edges": GRAPH["edges"], "messages": GRAPH["messages"]}
     model = _Recording([call("look_at", ids=["person:ada"])])
-    out = converse("who is Ada?", crowd, model, constrain_ids=True)
+    out = converse("who is Ada?", crowd, model, asking=Asking(constrain_ids=True))
     assert all("response_format" not in g for g in model.given)
     assert any("not constrained" in s for s in out.steps)
     assert '{"answer"' not in model.seen[0][0]["content"]
 
 
-def test_constrain_ids_is_a_way_a_profile_fills_in(monkeypatch):
-    from ml_stack.graph.asking import Asking
-
-    assert Asking(constrain_ids=True).converse() == {"tight": True, "constrain_ids": True}
-    assert "constrain_ids" not in Asking().converse()
+def test_constrain_ids_is_a_way_a_record_carries(monkeypatch):
     assert Asking(constrain_ids=True).said()["constrain_ids"] is True
+    assert "constrain_ids" not in Asking().said()
     model = _Recording([call("look_at", ids=["person:ada"])])
-    converse("who is Ada?", GRAPH, model, profile=Asking(constrain_ids=True))
+    converse("who is Ada?", GRAPH, model, asking=Asking(constrain_ids=True))
     assert _format_of(model.given[0]) is not None
 
     from ml_stack.serve.profile import record
 
     kept = record("thornfield-8B-UD-Q4_K_XL.gguf", constrain_ids=True)
     model = _Recording([call("look_at", ids=["person:ada"])])
-    converse("who is Ada?", GRAPH, model, profile=kept)
+    converse("who is Ada?", GRAPH, model, asking=kept.asked())
     assert _format_of(model.given[0]) is not None, "a record carries the way to converse"
