@@ -59,6 +59,11 @@ header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 
 .chip[aria-pressed="true"] { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
 .chip .sw { width: 9px; height: 9px; }
 .panel .sw, .links .sw { width: 9px; height: 9px; flex: none; }
+/* the controls row along the bottom of the graph: the legend, the counts, the view switch */
+.footbar { position: absolute; right: 14px; bottom: 12px; z-index: 3; display: flex;
+  align-items: center; gap: 12px; padding: 6px 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(6px); }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { padding: 5px 12px; border: 0; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
 .seg button + button { border-left: 1px solid var(--line); }

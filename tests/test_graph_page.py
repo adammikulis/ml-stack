@@ -879,3 +879,25 @@ def test_a_kind_the_template_never_named_loads_clean_in_its_own_colour(open_page
     colour = page.evaluate("(JSON.parse(document.getElementById('data').textContent).kinds"
                            ".find(k => k.k === 'group') || {}).colour")
     assert colour and colour.startswith("#")
+
+
+def test_the_controls_row_sits_at_the_bottom_right_of_the_graph_and_nothing_scrolls(open_page):
+    """Driven 2026-09-05: the split left the footbar's rule behind, and the legend, the
+    counts, the view switch and the refresh button stacked down the left and pushed the
+    page into scrolling. Fails when `.footbar` loses its position or its flex row."""
+    page, errors = open_page()
+    settle(page)
+    box = page.evaluate("""() => {
+        const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
+        const bar = document.querySelector('.footbar').getBoundingClientRect();
+        const chips = [...document.querySelectorAll('.footbar > *')]
+            .map(el => el.getBoundingClientRect()).filter(r => r.width);
+        return { right: wrap.right - bar.right, bottom: wrap.bottom - bar.bottom,
+                 row: new Set(chips.map(r => Math.round(r.top))).size,
+                 scrolls: document.documentElement.scrollHeight > window.innerHeight + 1 };
+    }""")
+    assert 0 <= box["right"] <= 20 and 0 <= box["bottom"] <= 20, box
+    assert box["row"] == 1, "the legend, the counts and the switch share one row"
+    assert not box["scrolls"]
+    assert errors == []
+
