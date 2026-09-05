@@ -118,6 +118,6 @@ __all__ = [
     "Fertility", "embedding_params", "measure", "report_markdown",
 ]
 
-from ml_stack.train.fertility import (  # noqa: E402
+from ml_stack.train.fertility import (
     Fertility, embedding_params, measure, report_markdown,
 )

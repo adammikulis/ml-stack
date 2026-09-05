@@ -10,7 +10,7 @@ from ml_stack.graph.review import Queue, as_change, listed
 
 pytest.importorskip("ladybug")
 
-from ml_stack.graph.store import GraphStore  # noqa: E402
+from ml_stack.graph.store import GraphStore
 
 GRAPH = {
     "meta": {"model": "m"},

@@ -543,7 +543,7 @@ class LlamaServerBackend(ServerBackend):
 
         try:
             return replace(spec, draft=str(fetch(str(spec.draft))))
-        except Exception as exc:  # noqa: BLE001 - whatever the Hub said, say it here
+        except Exception as exc:
             raise ServerFailed(f"could not fetch the draft {spec.draft}: {exc}") from exc
 
     @staticmethod

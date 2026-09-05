@@ -597,7 +597,7 @@ class BenchHost:
                                           f"use {human_bytes(room)}")
         try:
             pid, log = self.launch(job.argv, self.home)
-        except Exception as exc:  # noqa: BLE001 - said in the answer, not swallowed
+        except Exception as exc:
             raise Refused("launch", f"{self.name} could not start ml-stack-bench: {exc}") from exc
         import secrets
 

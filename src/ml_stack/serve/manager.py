@@ -552,7 +552,7 @@ class ServerManager:
                     reply = Client(base_url, slot=sid, timeout=timeout or 120.0).chat(
                         [{"role": "user", "content": SUMMARY_PROMPT}], n_predict=512)
                     summary = (getattr(reply, "content", "") or "").strip()
-            except Exception as exc:  # noqa: BLE001 - summarising failed; refuse, do not lose it
+            except Exception as exc:
                 raise EscalationRefused(
                     f"slot {sid} on port {spec.port} holds {tok:,} tokens, too long for "
                     f"the seat a split leaves it, and summarising it failed: {exc}. Its "
@@ -597,7 +597,7 @@ class ServerManager:
                 try:
                     Client(new_base, slot=sid, timeout=timeout or 120.0).complete(
                         summaries[sid], n_predict=1)
-                except Exception as exc:  # noqa: BLE001 - surfaced, never swallowed
+                except Exception as exc:
                     raise ServerFailed(
                         f"could not re-seed the summary for slot {sid} on port "
                         f"{spec.port}: {exc}. Its full cache is kept at {saved[sid]}."

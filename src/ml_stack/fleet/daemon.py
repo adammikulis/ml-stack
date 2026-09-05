@@ -784,7 +784,7 @@ def make_handler(runner: JobRunner, files_root: Path,
             from .ui import routes
             return routes(ui, self)
 
-        def do_GET(self) -> None:                      # noqa: N802
+        def do_GET(self) -> None:
             if self._proxy():
                 return
             if self._ui():
@@ -916,7 +916,7 @@ def make_handler(runner: JobRunner, files_root: Path,
 
         do_HEAD = do_GET
 
-        def do_POST(self) -> None:                     # noqa: N802
+        def do_POST(self) -> None:
             if self._proxy():
                 return
             if self._ui():
@@ -1070,12 +1070,12 @@ def make_handler(runner: JobRunner, files_root: Path,
                 self._send(200, job.public()); return
             self._send(404, {"error": "no such route"})
 
-        def do_DELETE(self) -> None:                   # noqa: N802
+        def do_DELETE(self) -> None:
             if self._ui():
                 return
             self._send(404, {"error": "no such route"})
 
-        def do_PUT(self) -> None:                      # noqa: N802
+        def do_PUT(self) -> None:
             if self._ui():
                 return
             if not self._guard():

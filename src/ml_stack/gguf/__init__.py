@@ -49,6 +49,6 @@ __all__ = [
     "Check", "FidelityReport", "verify_metadata", "verify_tokenizer_fidelity",
 ]
 
-from ml_stack.gguf.verify import (  # noqa: E402
+from ml_stack.gguf.verify import (
     Check, FidelityReport, verify_metadata, verify_tokenizer_fidelity,
 )

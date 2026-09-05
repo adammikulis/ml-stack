@@ -123,7 +123,7 @@ class SileroVAD:
                     model, _utils = torch.hub.load(
                         "snakers4/silero-vad", "silero_vad", trust_repo=True
                     )
-                except Exception as exc:  # noqa: BLE001 - a hub load fails many ways
+                except Exception as exc:
                     raise ProviderError(f"silero VAD would not load: {exc}") from exc
                 self._model = model
 

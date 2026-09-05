@@ -729,7 +729,7 @@ class TestWhatAMachineIsDoing:
 
         psutil = sys.modules.get("psutil")
         if psutil is None:
-            import psutil                             # noqa: PLC0415
+            import psutil
         monkeypatch.setattr(psutil, "cpu_percent", lambda **k: 0.0)
         monkeypatch.setattr(mod.os, "getloadavg", lambda: (8.0, 8.0, 8.0))
         monkeypatch.setattr(mod.os, "cpu_count", lambda: 16)

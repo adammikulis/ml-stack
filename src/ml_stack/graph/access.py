@@ -308,7 +308,7 @@ class ReaderCache:
             if entry is None:
                 try:
                     entry = _Cached(store=opener(Path(key)))
-                except Exception as exc:  # noqa: BLE001 - whatever the opener raises
+                except Exception as exc:
                     who = holder(key)
                     raise LockError(
                         f"could not open {key} read-only" +

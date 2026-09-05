@@ -100,7 +100,7 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = print) -> int:
             raise NotSound(f"{len(findings)} finding(s), e.g. {findings[0]!r}")
         if left:
             raise NotSound(f"{len(left)} node(s) still named books, e.g. {left[0]}")
-    except BaseException as why:  # noqa: BLE001 - the store goes back whatever stopped it
+    except BaseException as why:
         for path, raw in kept.items():
             path.write_bytes(raw)
         roll_back(snap.path)

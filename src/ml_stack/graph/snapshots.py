@@ -131,7 +131,7 @@ def clone_store(src: Path, dst: Path, *, fold: Any = None) -> str:
         return method
     try:
         fold(dst)
-    except Exception as exc:  # noqa: BLE001 - the caller's opener, whatever it raises
+    except Exception as exc:
         raise SnapshotError(
             f"could not fold {wal.name} into the snapshot of {src.name}: {exc}. The source "
             "holds writes that were never checkpointed, and is not safely copyable.") from exc
@@ -202,7 +202,7 @@ def take(source: str | Path, *, reason: str, count: Any, fold: Any = None,
 
     try:
         after = dict(count(dst))
-    except Exception as exc:  # noqa: BLE001 - the caller's opener
+    except Exception as exc:
         _clear(dst)
         raise SnapshotError(
             f"the snapshot of {src.name} would not open or read back: {exc}. Discarded — "

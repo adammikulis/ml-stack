@@ -19,7 +19,7 @@ from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
 from ml_stack.fleet.discovery import join_cluster
 from ml_stack.fleet.serving import Serving
-from test_fleet_ui import WORDS, Serving as UIServing  # noqa: N811
+from test_fleet_ui import WORDS, Serving as UIServing
 
 PIECES = ["Hel", "lo", " there"]
 

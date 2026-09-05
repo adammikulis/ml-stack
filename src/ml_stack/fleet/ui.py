@@ -1141,7 +1141,7 @@ class _Loopback(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def do_GET(self) -> None:      # noqa: N802 - BaseHTTPRequestHandler's spelling
+    def do_GET(self) -> None:
         if self.path in ("/", ""):
             self._send(302, None, raw=b"", headers={"Location": "/ui/fit"})
             return

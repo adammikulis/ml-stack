@@ -120,8 +120,8 @@ def _words_index(store: Any) -> bool:
     extension, a reader -- still keeps the conversation; recall simply has one voter fewer.
     """
     try:
-        store._extension("fts")                       # noqa: SLF001 - same package
-        store._index("turn_fts", TURN_INDEX)          # noqa: SLF001
+        store._extension("fts")
+        store._index("turn_fts", TURN_INDEX)
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -413,7 +413,7 @@ def recall(store: Any, thread: str, question: str, *,
 def _by_words(store: Any, text: str, k: int) -> list[str]:
     """Turn ids whose words match, best first; empty when the store has no word index."""
     try:
-        store._extension("fts")                       # noqa: SLF001 - same package
+        store._extension("fts")
     except Exception:  # noqa: BLE001
         return []
     rows = _rows(

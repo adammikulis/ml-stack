@@ -68,7 +68,7 @@ class FakeDaemon:
         device = dict(DEVICE if device is None else device)
 
         class H(BaseHTTPRequestHandler):
-            def do_GET(self_) -> None:  # noqa: N802
+            def do_GET(self_) -> None:
                 body = json.dumps({"ok": True, "name": name, "busy": False,
                                    "free": 1, "slots": 1, "queued": 0}).encode()
                 self_.send_response(200 if self_.path == "/health" else 404)

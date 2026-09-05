@@ -316,7 +316,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
                                     arches=lambda build: {"llama"},
                                     flags=lambda build: _mainline_flags(build) | _raw_flags(spec),
                                     ref_bytes=lambda ref: _COMPANION_BYTES if ref else 0)
-        except Exception as exc:  # noqa: BLE001 - the point is to say so before the GPU
+        except Exception as exc:
             raise SelfCheckFailed(
                 f"the preflight raised over the spec the run builds for {spec.model}"
                 + (f" with draft {spec.draft}" if spec.draft else "")
@@ -428,7 +428,7 @@ def selfcheck(argv: Sequence[str]) -> str:
                         raise SelfCheckFailed("the scripted model was never asked anything")
         except SelfCheckFailed as why:
             raise SelfCheckFailed(f"{why}\n\n{_printed(said)}") from None
-        except (Exception, SystemExit) as exc:  # noqa: BLE001 - the point is to catch it
+        except (Exception, SystemExit) as exc:
             raise SelfCheckFailed(f"{type(exc).__name__}: {exc}\n\n"
                                   f"{traceback.format_exc()}\n{_printed(said)}") from exc
     labels = sorted({str(r.get("label", "")) for r in kept})
