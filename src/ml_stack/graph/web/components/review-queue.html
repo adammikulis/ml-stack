@@ -1,0 +1,122 @@
+<!-- <review-queue>: the change requests waiting for a person, with accept, refuse and undo -->
+<style>
+.review-box { border-top: 1px solid var(--line); }
+.review-box[hidden] { display: none; }
+.review-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
+  font: 500 12px var(--font-body); color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; }
+.review-box > summary::-webkit-details-marker { display: none; }
+.review-box > summary::after { content: "\2212"; margin-left: auto; font-family: var(--font-mono); color: var(--line-strong); }
+.review-box:not([open]) > summary::after { content: "+"; }
+.review-box > summary:hover { color: var(--ink); }
+.review-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+.review { padding: 0 18px 8px; display: grid; gap: 10px; max-height: 32vh; overflow: auto; }
+.req { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 10px 12px; font-size: 12px; }
+.req .meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); }
+.req .meta .status { color: var(--ink); }
+.req .from { margin-top: 4px; color: var(--ink-2); }
+.req .text { margin: 6px 0; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.req .edit { padding-left: 10px; border-left: 2px solid var(--line); margin: 4px 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.req .warn { color: var(--k-org); }
+.req .act { display: flex; gap: 6px; margin-top: 8px; }
+.req .act button { font: inherit; font-size: 11px; padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.req .act button:hover { color: var(--ink); border-color: var(--accent); }
+.req .act button[disabled] { opacity: .6; cursor: progress; }
+.review-note { padding: 0 18px 12px; margin: 0; font-size: 11px; color: var(--ink-3); }
+</style>
+<template>
+      <details class="review-box" id="review-box" hidden>
+        <summary><b id="review-count">0</b> <span>change requests</span></summary>
+        <div class="review" id="review-list"></div>
+        <p class="review-note">Accepted changes reach the picture on the next “Refresh graph”.</p>
+      </details>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { esc, local } = M;
+  function wire() {
+    const editSaid = e => {
+      const said = {
+        add_node: `add ${e.value || e.target}`,
+        add_edge: `join ${e.target} -${e.name}-> ${e.other}`,
+        rename: `rename ${e.target} to ${e.value}`,
+        set_attribute: `set ${e.name} of ${e.target} to ${e.value}`,
+        set_attr: `set ${e.name} of ${e.target} to ${e.value}`,
+        remove_node: `remove ${e.target}`,
+        remove_edge: `unjoin ${e.target} -${e.name}-> ${e.other}`,
+        merge_nodes: `fold ${e.other} into ${e.target}`,
+      }[e.op] || `${e.op} ${e.target || ''}`.trim();
+      return said + (e.reason ? ` — ${e.reason}` : '');
+    };
+    if (local) {
+      const reviewBox = document.getElementById('review-box');
+      const reviewList = document.getElementById('review-list');
+      const reviewCount = document.getElementById('review-count');
+      const stamp = t => String(t || '').replace('T', ' ').slice(0, 16);
+      const editHtml = e => `<div class="edit">${esc(editSaid(e))}${(e.problems || [])
+        .map(x => `<div class="warn">the graph says: ${esc(x)}</div>`).join('')}</div>`;
+      let showDone = false;
+      let raisedForReview = false;
+      function paintReview(rows) {
+        reviewBox.hidden = false;
+        // an addressed request leaves the list; a small toggle keeps it reachable for Undo
+        const settled = p => p.status === 'accepted' || p.status === 'refused';
+        const open = rows.filter(p => !settled(p)), done = rows.filter(settled);
+        reviewCount.textContent = open.length;
+        // the list lives inside the panel that raises requests now, so a waiting request has
+        // to say so once — otherwise it is behind a shut panel and nobody curating sees it
+        if (open.length && !raisedForReview) { raisedForReview = true; reviewBox.open = true; }
+        // the list lives inside the panel that raises requests now, so the panel has to say a
+        // request is waiting — otherwise it is behind a shut panel and nobody curating sees it
+        const summary = document.getElementById('ask-summary');
+        summary.textContent = open.length
+          ? `Ask for a change · ${open.length} to review` : 'Ask for a change';
+        const req = p => `<div class="req">
+          <div class="meta"><span>${esc(stamp(p.at))}</span><span>${esc(p.kind || '')}</span>
+            <span class="status">${esc(p.status || '')}</span>
+            <span>${p.attested ? 'attested' : 'NOT ATTESTED'}</span></div>
+          <div class="from">from: ${esc(p.claimedLabel || p.claimed || '(did not say)')}</div>
+          ${(p.concerns || []).map(c => `<div class="warn">${esc(c)}</div>`).join('')}
+          <div class="text">${esc(p.text || '')}</div>
+          ${(p.edits || []).length ? p.edits.map(editHtml).join('')
+            : '<div class="edit">(nothing proposed — decide by hand)</div>'}
+          <div class="act">${p.status === 'accepted'
+            ? `<button type="button" data-id="${esc(p.id)}" data-act="undo">Undo</button>`
+            : `<button type="button" data-id="${esc(p.id)}" data-act="accept">Accept</button>
+               <button type="button" data-id="${esc(p.id)}" data-act="refuse">Refuse</button>`}</div>
+        </div>`;
+        reviewList.innerHTML = open.map(req).join('')
+          + (open.length ? '' : '<div class="edit">nothing waiting</div>')
+          + (done.length ? `<button type="button" class="chip" id="review-done">${done.length} addressed · ${showDone ? 'hide' : 'show'}</button>` : '')
+          + (showDone ? done.map(req).join('') : '');
+        const toggle = document.getElementById('review-done');
+        if (toggle) toggle.addEventListener('click', () => { showDone = !showDone; paintReview(rows); });
+        reviewList.querySelectorAll('button[data-act]').forEach(b => b.addEventListener('click', async () => {
+          b.disabled = true;
+          try {
+            await fetch('/review', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                     body: JSON.stringify({ id: b.dataset.id, action: b.dataset.act }) });
+          } catch (err) {}
+          loadReview();
+        }));
+      }
+      async function loadReview() {
+        try {
+          const r = await fetch('/review');
+          if (!r.ok) return;
+          const rows = await r.json();
+          if (Array.isArray(rows)) paintReview(rows);
+        } catch (err) {}
+      }
+      loadReview();
+      // the chat can raise a request too, and it is declared far above this block
+      window.reloadReview = loadReview;
+    }
+  }
+  class ReviewQueue extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('review-queue', ReviewQueue);
+})();
+</script>

@@ -1,0 +1,41 @@
+<!-- <graph-search>: the box that narrows the graph as you type -->
+<style>
+/* the search sits in the graph, because the graph is what it searches */
+.search { position: absolute; right: 14px; top: 12px; z-index: 3; }
+.search input { width: 210px; padding: 6px 10px 6px 30px; border: 1px solid var(--line); border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-2) 88%, transparent); backdrop-filter: blur(6px); }
+.search svg { position: absolute; left: 9px; top: 8px; width: 14px; height: 14px; color: var(--ink-3); }
+.search .count { position: absolute; right: 26px; top: 7px; font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+</style>
+<template>
+      <label class="search">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+        <input id="gq" type="search" placeholder="Filter the graph" aria-label="Filter the graph">
+        <span class="count" id="qcount" aria-live="polite"></span>
+      </label>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  function wire() {
+    const qCount = document.getElementById('qcount');
+    const setCount = text => { qCount.textContent = text; };
+    // the filter in the graph is the graph's own; asking the model pushes its answer into it
+    const gBox = document.getElementById('gq');
+    gBox.addEventListener('input', () => {
+      M.answer = null; M.pathLinks = new Set(); M.stopSignal();
+      M.query = gBox.value.trim().toLowerCase();
+      M.refresh();
+    });
+    gBox.addEventListener('keydown', e => {
+      if (e.key !== 'Escape') return;
+      gBox.value = ''; M.query = ''; M.answer = null; M.refresh();
+    });
+    Object.assign(M, { setCount });
+  }
+  class GraphSearch extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-search', GraphSearch);
+})();
+</script>

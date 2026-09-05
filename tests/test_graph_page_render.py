@@ -40,9 +40,8 @@ def test_every_kind_gets_a_colour_and_a_given_one_is_kept_verbatim():
 
 
 def test_a_colour_chosen_for_a_kind_is_none_of_the_five_shipped_ones():
-    template = (graph_page.WEB / "graph.html").read_text()
     shipped = set(re.findall(r"--k-(?:person|org|place|topic|opportunity): (#[0-9a-f]{6})",
-                             template))
+                             graph_page.template()))
     html = graph_page.render(graph_with("group", "event", "product", "department"))
     kinds = payload_of(html)["kinds"]
     chosen = [k["colour"].lower() for k in kinds]

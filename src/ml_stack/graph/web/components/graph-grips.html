@@ -1,0 +1,63 @@
+<!-- <graph-grips>: the two handles that resize the graph and the map -->
+<template mount="grip-x">
+    <div class="grip vertical" id="grip-x" role="separator" aria-orientation="vertical"
+         aria-label="Resize the graph"></div>
+</template>
+<template mount="grip-y">
+      <div class="grip horizontal" id="grip-y" role="separator" aria-orientation="horizontal"
+           aria-label="Resize the map"></div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { saveDisplay, view } = M;
+  function wire() {
+    Object.assign(M, { setSplit, setMapHeight });
+    function draggable(grip, apply) {
+      let dragging = false;
+      const stop = () => {
+        if (!dragging) return;
+        dragging = false;
+        grip.classList.remove('dragging');
+        document.body.style.userSelect = '';
+        saveDisplay();
+      };
+      grip.addEventListener('pointerdown', e => {
+        dragging = true;
+        grip.classList.add('dragging');
+        document.body.style.userSelect = 'none';
+        grip.setPointerCapture(e.pointerId);
+      });
+      grip.addEventListener('pointermove', e => { if (dragging) { apply(e); e.preventDefault(); } });
+      grip.addEventListener('pointerup', stop);
+      grip.addEventListener('pointercancel', stop);
+      // a double click puts it back where it started, which is easier than aiming for it
+      grip.addEventListener('dblclick', () => { apply(null); saveDisplay(); });
+    }
+
+    const appMain = document.querySelector('main');
+    function setSplit(px) {
+      view.split = px;
+      document.documentElement.style.setProperty('--split', px ? px + 'px' : '1.6fr');
+      M.resized();
+    }
+    function setMapHeight(px) {
+      view.mapH = px;
+      document.documentElement.style.setProperty('--map-h', px ? px + 'px' : 'auto');
+    }
+    draggable(document.getElementById('grip-x'), e => setSplit(
+      e ? Math.max(240, Math.min(e.clientX - appMain.getBoundingClientRect().left,
+                                 appMain.clientWidth - 306)) : 0));
+    draggable(document.getElementById('grip-y'), e => {
+      const top = document.querySelector('.map-wrap').getBoundingClientRect().top;
+      setMapHeight(e ? Math.max(90, Math.min(e.clientY - top, window.innerHeight - 240)) : 0);
+    });
+    if (view.split) setSplit(view.split);
+    if (view.mapH) setMapHeight(view.mapH);
+  }
+  class GraphGrips extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-grips', GraphGrips);
+})();
+</script>

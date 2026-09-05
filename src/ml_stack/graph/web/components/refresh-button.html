@@ -1,0 +1,39 @@
+<!-- <refresh-button>: the button that re-reads the sources, on a page served from the machine that can -->
+<style>
+#refresh { display: none; align-items: center; gap: 8px; }
+#refresh.local { display: inline-flex; }
+#refresh .stage { font-size: 12px; color: var(--ink-2); font-family: var(--font-mono); max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#refresh button { padding: 5px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
+#refresh button[disabled] { opacity: .6; cursor: progress; }
+</style>
+<template>
+        <div id="refresh"><button id="refresh-btn">Refresh graph</button><span class="stage" id="refresh-stage"></span></div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { local } = M;
+  function wire() {
+    if (local) {
+      const box = document.getElementById('refresh'), btn = document.getElementById('refresh-btn'), st = document.getElementById('refresh-stage');
+      box.classList.add('local');
+      btn.addEventListener('click', () => {
+        btn.disabled = true; st.textContent = 'starting…';
+        const es = new EventSource('/refresh');
+        es.onmessage = ev => {
+          const d = JSON.parse(ev.data);
+          st.textContent = `${d.stage}: ${d.detail}`;
+          if (d.stage === 'done') { es.close(); st.textContent = 'done — reloading'; setTimeout(() => location.reload(), 600); }
+          if (d.stage === 'error') { es.close(); btn.disabled = false; }
+        };
+        es.onerror = () => { es.close(); btn.disabled = false; if (!/done|error/.test(st.textContent)) st.textContent = 'refresh already running or server gone'; };
+      });
+    }
+
+  }
+  class RefreshButton extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('refresh-button', RefreshButton);
+})();
+</script>

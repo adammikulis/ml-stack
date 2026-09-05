@@ -1,0 +1,240 @@
+<!-- <display-panel>: the legend, the filters, the colours and the physics -->
+<style>
+/* in the graph's own top-left corner, where what it controls is */
+.menu { position: relative; }
+.menu .chip { backdrop-filter: blur(6px); }
+/* hung off its own button: opening it across the window read as a different control */
+/* opening upwards, because the button that owns it sits along the bottom */
+.panel { position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 9; width: 350px;
+  max-height: 74vh; overflow: auto;
+         max-height: 74vh; overflow: auto; background: var(--surface); border: 1px solid var(--line);
+         border-radius: 10px; box-shadow: var(--shadow); padding: 12px 14px 14px; display: none; }
+.menu.display-open .panel { display: block; }
+/* a small notch so the panel reads as belonging to the button above it */
+.menu.display-open .panel::before { content: ""; position: absolute; left: 16px; bottom: -6px;
+  width: 10px; height: 10px; background: var(--surface); border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line); transform: rotate(45deg); }
+.panel h4 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
+            color: var(--ink-3); margin: 14px 0 6px; }
+.panel h4:first-child { margin-top: 0; }
+.panel .row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 2px 0; }
+.panel .name { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.panel .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel .n { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+.panel input[type="color"] { width: 24px; height: 19px; padding: 0; border: 1px solid var(--line);
+                             border-radius: 4px; background: none; cursor: pointer; }
+.three { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.three button { padding: 2px 7px; border: 0; background: var(--surface); font-size: 11px;
+                color: var(--ink-3); cursor: pointer; }
+.three button + button { border-left: 1px solid var(--line); }
+.three button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.bulk { display: flex; gap: 6px; margin: 8px 0 2px; }
+.bulk button { font-size: 11px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px;
+               background: var(--surface); color: var(--ink-2); cursor: pointer; }
+.bulk button:hover { border-color: var(--line-strong); color: var(--ink); }
+.about { display: grid; grid-template-columns: max-content 1fr; gap: 2px 10px; font-size: 11px;
+         font-family: var(--font-mono); color: var(--ink-2); margin-bottom: 8px; }
+.about .k { color: var(--ink-3); }
+</style>
+<template>
+        <div class="menu">
+          <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
+          <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
+        </div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { DATA, G, KINDS, RELS, STATES, buildNeighbors, colors, colourOf, counted, display, esc, modelName, p2pCount, paint, relCount, relText, saveDisplay, stats, swatch, view } = M;
+  const { node, link, hitline, root, svg, sim } = M.view2d;
+  function wire() {
+    const panel = document.getElementById('panel');
+    const displayBtn = document.getElementById('display-btn');
+    const syncers = [];
+    let liveSig = '';
+
+    const menu = displayBtn.closest('.menu');
+    displayBtn.addEventListener('click', () => {
+      displayBtn.setAttribute('aria-expanded', menu.classList.toggle('display-open'));
+    });
+    document.addEventListener('click', e => {
+      if (!panel.contains(e.target) && e.target !== displayBtn) {
+        menu.classList.remove('display-open');
+        displayBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && menu.classList.contains('display-open')) {
+        menu.classList.remove('display-open');
+        displayBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+
+    function settingsChanged() {
+      syncers.forEach(f => f());
+      M.paintCounts();
+      buildNeighbors();
+      // only a removal reshapes the layout; hiding must leave every position where it was
+      const sig = KINDS.map(k => display.node[k.k] === 'remove').join()
+        + '|' + RELS.map(r => display.link[r] === 'remove').join()
+        + '|' + display.source.session + '|' + display.between;
+      if (sig !== liveSig) { liveSig = sig; M.applyRemoval(); }
+      M.refresh();
+      saveDisplay();
+    }
+
+    const hexOf = kind => (getComputedStyle(document.documentElement).getPropertyValue(`--k-${kind}`).trim() || colourOf(kind));
+
+    function stateRow(parent, nameHtml, count, get, set, states, colorKind) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.innerHTML = `${nameHtml}${count == null ? '' : ` <span class="n">${count}</span>`}`;
+      row.appendChild(name);
+      const box = document.createElement('span');
+      box.className = 'three';
+      const buttons = states.map(st => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = st;
+        b.addEventListener('click', () => { set(st); settingsChanged(); });
+        box.appendChild(b);
+        return [st, b];
+      });
+      row.appendChild(box);
+      const slot = document.createElement('span');
+      if (colorKind) {
+        const picker = document.createElement('input');
+        picker.type = 'color';
+        picker.value = hexOf(colorKind);
+        picker.addEventListener('input', () => { paint(colorKind, picker.value); settingsChanged(); });
+        slot.appendChild(picker);
+      }
+      row.appendChild(slot);
+      syncers.push(() => buttons.forEach(([st, b]) => b.setAttribute('aria-pressed', String(get() === st))));
+      parent.appendChild(row);
+    }
+
+    function bulkRow(parent, apply) {
+      const bar = document.createElement('div');
+      bar.className = 'bulk';
+      STATES.forEach(st => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = `${st} all`;
+        b.addEventListener('click', () => { apply(st); settingsChanged(); });
+        bar.appendChild(b);
+      });
+      parent.appendChild(bar);
+    }
+
+    function sliderRow(parent, text, key, min, max, step, apply) {
+      const row = document.createElement('div');
+      row.className = 'row';
+      row.innerHTML = `<span class="name"><span>${text}</span></span>`;
+      const input = document.createElement('input');
+      input.type = 'range';
+      input.min = min; input.max = max; input.step = step; input.value = view[key];
+      input.style.width = '120px';
+      input.addEventListener('input', () => { view[key] = +input.value; apply(); saveDisplay(); });
+      row.appendChild(input);
+      row.appendChild(document.createElement('span'));
+      parent.appendChild(row);
+    }
+
+    function heading(text) {
+      const h = document.createElement('h4');
+      h.textContent = text;
+      panel.appendChild(h);
+    }
+
+    function applyLabelScale() {
+      document.documentElement.style.setProperty('--label-scale', view.labelScale);
+      document.documentElement.style.setProperty('--elabel-scale', view.elabelScale);
+      M.measure();
+      M.layoutLabels();
+    }
+
+    function buildPanel() {
+      heading('Nodes');
+      KINDS.forEach(k => stateRow(panel, `${swatch(k.k)}<span>${k.label}</span>`, counted().by_kind[k.k] ?? 0,
+        () => display.node[k.k], v => { display.node[k.k] = v; }, STATES, k.k));
+      bulkRow(panel, v => KINDS.forEach(k => { display.node[k.k] = v; }));
+
+      if (stats.session_nodes) {
+        heading('Sources');
+        stateRow(panel, '<span>Working sessions</span>', stats.session_nodes,
+          () => display.source.session, v => { display.source.session = v; }, STATES);
+      }
+
+      heading('Links');
+      stateRow(panel, '<span>Between two people</span>', p2pCount,
+        () => display.between, v => { display.between = v; }, STATES);
+      RELS.forEach(r => stateRow(panel, `<span>${relText(r)}</span>`, relCount.get(r),
+        () => display.link[r], v => { display.link[r] = v; }, STATES));
+      bulkRow(panel, v => RELS.forEach(r => { display.link[r] = v; }));
+
+      heading('Labels');
+      stateRow(panel, '<span>Edge names</span>', null,
+        () => display.edgeLabels, v => { display.edgeLabels = v; }, ['show', 'hide']);
+      sliderRow(panel, 'How many', 'density', 0, 100, 1, M.layoutLabels);
+      sliderRow(panel, 'Node size', 'labelScale', 0.7, 2, 0.05, applyLabelScale);
+      sliderRow(panel, 'Edge size', 'elabelScale', 0.7, 2, 0.05, applyLabelScale);
+
+      heading('Physics');
+      stateRow(panel, '<span>Animate (3D)</span>', null,
+        () => (view.spin ? 'show' : 'hide'),
+        v => { view.spin = v === 'show'; M.setSpin(view.spin); }, ['show', 'hide']);
+      sliderRow(panel, 'Springiness', 'spring', 0.3, 3, 0.05, () => {
+        M.applyPhysics();
+        sim.alpha(0.4).restart();
+        if (M.g3) M.g3.d3ReheatSimulation();
+      });
+      sliderRow(panel, 'Repulsion', 'repel', 0.3, 3, 0.05, () => {
+        M.applyPhysics();
+        sim.alpha(0.4).restart();
+        if (M.g3) M.g3.d3ReheatSimulation();
+      });
+
+      const reset = document.createElement('div');
+      reset.className = 'bulk';
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = 'reset colours';
+      b.addEventListener('click', () => {
+        KINDS.forEach(k => document.documentElement.style.removeProperty(`--k-${k.k}`));
+        Object.keys(colors).forEach(k => delete colors[k]);
+        panel.querySelectorAll('input[type="color"]').forEach((el, i) => { el.value = hexOf(KINDS[i].k); });
+        settingsChanged();
+      });
+      reset.appendChild(b);
+      panel.appendChild(reset);
+
+      heading('Built');
+      const meta = G.meta || {};
+      const about = document.createElement('div');
+      about.className = 'about';
+      about.innerHTML = [
+        ['read by', meta.model ? modelName(meta.model) : '—'],
+        ['embedded by', DATA.embedModel ? modelName(DATA.embedModel) : '—'],
+        ['built', (meta.built_at || '').replace('T', ' ').slice(0, 16) || '—'],
+        ['channels', (meta.channels || []).join(', ') || '—'],
+        ['created by', DATA.author || '—'],
+      ].map(([k, v]) => `<span class="k">${esc(k)}</span><span>${esc(v)}</span>`).join('');
+      panel.appendChild(about);
+
+      applyLabelScale();
+      liveSig = KINDS.map(k => display.node[k.k] === 'remove').join()
+        + '|' + RELS.map(r => display.link[r] === 'remove').join()
+        + '|' + display.source.session + '|' + display.between;
+      syncers.forEach(f => f());
+    }
+    buildPanel();
+  }
+  class DisplayPanel extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('display-panel', DisplayPanel);
+})();
+</script>

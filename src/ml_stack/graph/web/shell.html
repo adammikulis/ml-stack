@@ -1,0 +1,134 @@
+<title>__TITLE__</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- inline, so the page stays one file and asks the server for nothing it has
+     no route for: a bare /favicon.ico 404 is the only error a clean load produced -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22%231c1c1a%22%2F%3E%3Cpath%20d%3D%22M9%2022%20L16%2010%20L23%2022%22%20stroke%3D%22%233987e5%22%20stroke-width%3D%222.2%22%20fill%3D%22none%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%2F%3E%3Ccircle%20cx%3D%2216%22%20cy%3D%2210%22%20r%3D%223.4%22%20fill%3D%22%233987e5%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%2222%22%20r%3D%222.8%22%20fill%3D%22%23f1f0ea%22%2F%3E%3Ccircle%20cx%3D%2223%22%20cy%3D%2222%22%20r%3D%222.8%22%20fill%3D%22%23f1f0ea%22%2F%3E%3C%2Fsvg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/3d-force-graph@1.80.0/dist/3d-force-graph.min.js"></script>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f7f7f4; --surface: #ffffff; --surface-2: #efeeea; --line: #dcdbd4; --line-strong: #b9b8b0;
+  --ink: #1c1c1a; --ink-2: #5a5a55; --ink-3: #8a8983; --accent: #2a78d6; --accent-ink: #ffffff;
+  --land: #e6e5df; --land-line: #cfcec6; --sea: #f2f3f0;
+  --k-person: #2a78d6; --k-org: #eb6834; --k-place: #1baf7a; --k-topic: #eda100; --k-opportunity: #e87ba4;
+  --shadow: 0 1px 2px rgba(20,20,18,.06), 0 8px 24px rgba(20,20,18,.06);
+  --link-op: .55;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #161715; --surface: #1e1f1c; --surface-2: #262723; --line: #33342f; --line-strong: #4a4b45;
+    --ink: #f1f0ea; --ink-2: #b9b8b0; --ink-3: #82817a; --accent: #3987e5; --accent-ink: #ffffff;
+    --land: #2a2b27; --land-line: #3a3b36; --sea: #1a1b18;
+    --k-person: #3987e5; --k-org: #d95926; --k-place: #199e70; --k-topic: #c98500; --k-opportunity: #d55181;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --link-op: .8;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161715; --surface: #1e1f1c; --surface-2: #262723; --line: #33342f; --line-strong: #4a4b45;
+  --ink: #f1f0ea; --ink-2: #b9b8b0; --ink-3: #82817a; --accent: #3987e5; --accent-ink: #ffffff;
+  --land: #2a2b27; --land-line: #3a3b36; --sea: #1a1b18;
+  --k-person: #3987e5; --k-org: #d95926; --k-place: #199e70; --k-topic: #c98500; --k-opportunity: #d55181;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  --link-op: .8;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--font-body); -webkit-font-smoothing: antialiased; }
+button, input { font: inherit; color: inherit; }
+button:focus-visible, input:focus-visible, .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { display: grid; grid-template-rows: auto 1fr; height: 100vh; min-height: 0; overflow: hidden; }
+header { display: flex; align-items: center; padding: 10px 20px; border-bottom: 1px solid var(--line);
+  background: var(--surface); }
+.brand { font: 600 13px var(--font-display); letter-spacing: .34em; text-transform: uppercase;
+  color: var(--ink); display: inline-flex; align-items: center; gap: 10px; }
+.brand::before { content: ""; width: 9px; height: 9px; border-radius: 2px; letter-spacing: 0;
+  background: linear-gradient(135deg, var(--k-person), var(--k-opportunity)); }
+.brand::after { content: ""; flex: 1; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.chip[aria-pressed="true"] { color: var(--ink); border-color: var(--line-strong); background: var(--surface-2); }
+.chip .sw { width: 9px; height: 9px; }
+.panel .sw, .links .sw { width: 9px; height: 9px; flex: none; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { padding: 5px 12px; border: 0; background: var(--surface); cursor: pointer; font-size: 12px; color: var(--ink-2); }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+header { position: relative; }
+main { display: grid; grid-template-columns: minmax(240px, var(--split, 1.6fr)) 6px minmax(300px, 1fr);
+  min-height: 0; }
+/* the borders are handles: a graph is never the right size for everyone */
+.grip { background: var(--line); position: relative; z-index: 4; touch-action: none; }
+.grip::after { content: ""; position: absolute; inset: -3px; }
+.grip:hover, .grip.dragging { background: var(--accent); }
+.grip.vertical { cursor: col-resize; }
+.grip.horizontal { cursor: row-resize; height: 6px; }
+.graph-wrap { position: relative; min-height: 0; border-right: 1px solid var(--line); }
+.graph-wrap svg { width: 100%; height: 100%; display: block; background: var(--bg); }
+aside { display: grid; grid-template-rows: auto 6px minmax(0, 1fr); min-height: 0; }
+/* the question on the left, what it is about on the right */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); min-height: 0; }
+@media (max-width: 1180px) { .two { grid-template-columns: 1fr; } .askpane { border-right: 0;
+  border-bottom: 1px solid var(--line); } }
+.tip { position: fixed; pointer-events: none; z-index: 10; padding: 6px 9px; border-radius: 6px; background: var(--ink); color: var(--bg); font-size: 12px; box-shadow: var(--shadow); opacity: 0; transition: opacity .12s; max-width: 260px; }
+.tip.on { opacity: 1; }
+.tip .sub { color: color-mix(in srgb, var(--bg) 70%, transparent); font-size: 11px; }
+@media (max-width: 900px) {
+  .app { height: auto; }
+  main { grid-template-columns: 1fr; }
+  .graph-wrap { height: 70vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .search input { width: 160px; }
+}
+@media (max-width: 640px) {
+  header { position: relative; }
+  .graph-wrap { height: 62vh; }
+}
+@media (prefers-reduced-motion: reduce) { .tip { transition: none; } }
+/* a component's tag is a seam, not a box: its markup lays out as if it were the page's own */
+graph-banner, graph-stats, graph-search, graph-view, graph-grips, graph-map, graph-history, graph-3d,
+graph-detail, ask-pane, draft-note, change-request, display-panel, refresh-button, review-queue { display: contents; }
+</style>
+__STYLES__
+
+<div class="app">
+  <header><span class="brand" id="brand">__BRAND__</span></header>
+  <main>
+    <section class="graph-wrap" aria-label="Knowledge graph">
+      <graph-view></graph-view>
+      <graph-3d></graph-3d>
+      <graph-banner></graph-banner>
+      <div class="footbar">
+        <display-panel></display-panel>
+        <graph-stats></graph-stats>
+        <!--mount:footbar-->
+        <refresh-button></refresh-button>
+      </div>
+      <graph-search></graph-search>
+      <change-request></change-request>
+    </section>
+    <!--mount:grip-x-->
+    <aside>
+      <graph-map></graph-map>
+      <!--mount:grip-y-->
+      <div class="two">
+        <ask-pane></ask-pane>
+        <graph-detail></graph-detail>
+      </div>
+    </aside>
+  </main>
+  <graph-grips></graph-grips>
+</div>
+<div class="tip" id="tip"></div>
+
+<script id="data" type="application/json">__DATA__</script>
+<script id="world" type="application/json">__WORLD__</script>
+__SCRIPTS__

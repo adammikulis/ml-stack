@@ -1,0 +1,70 @@
+<!-- <draft-note>: a note introducing the entries an answer named, written by the model for a person to send -->
+<style>
+.show-again.draft { border-color: var(--accent); color: var(--accent); }
+.note-draft { margin-top: 8px; padding: 9px 11px; border: 1px solid var(--line);
+  border-left: 2px solid var(--accent); border-radius: 6px; background: var(--surface); }
+.note-words { margin: 0 0 7px; font-size: 12px; line-height: 1.6; color: var(--ink);
+  white-space: pre-wrap; }
+</style>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { words } = M;
+  function wire() {
+    Object.assign(M, { draftable });
+    const qTurns = document.getElementById('qturns');
+    // The note that turns an answer into an introduction. It is offered, never sent: a page
+    // that could post to the community is a page that will, one day, post something nobody
+    // read first.
+    function draftable(el, ids, said, asked) {
+      const write = document.createElement('button');
+      write.type = 'button';
+      write.className = 'show-again draft';
+      write.textContent = 'draft an introduction';
+      el.appendChild(write);
+      write.addEventListener('click', async e => {
+        e.stopPropagation();
+        if (write.disabled) return;
+        write.disabled = true;
+        write.textContent = 'writing…';
+        try {
+          const r = await fetch('/draft', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids, question: asked || '', answer: said || '' }) });
+          const out = await r.json();
+          write.remove();
+          const box = document.createElement('div');
+          box.className = 'note-draft';
+          if (!out.text) {
+            box.textContent = out.why || out.error || 'no note came back';
+          } else {
+            const words = document.createElement('p');
+            words.className = 'note-words';
+            words.textContent = out.text;
+            const copy = document.createElement('button');
+            copy.type = 'button';
+            copy.className = 'show-again';
+            copy.textContent = 'copy it';
+            copy.addEventListener('click', async ev => {
+              ev.stopPropagation();
+              try { await navigator.clipboard.writeText(out.text); copy.textContent = 'copied'; }
+              catch (err) { copy.textContent = 'select it and copy'; }
+            });
+            // no line saying nothing was sent: a button that only copies says it already
+            box.append(words, copy);
+          }
+          el.appendChild(box);
+          qTurns.scrollTop = qTurns.scrollHeight;
+        } catch (err) {
+          write.disabled = false;
+          write.textContent = 'draft an introduction';
+        }
+      });
+    }
+  }
+  class DraftNote extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('draft-note', DraftNote);
+})();
+</script>

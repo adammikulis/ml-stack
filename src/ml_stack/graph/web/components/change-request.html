@@ -1,0 +1,197 @@
+<!-- <change-request>: the form that asks for a change to somebody's own information -->
+<style>
+.ask-box { border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+           box-shadow: var(--shadow); }
+/* Shut, it is a small label in a corner and nothing more — it used to hold its open width
+   whether or not it was open, so a 310px slab sat over the graph the whole time. */
+#ask-box { position: absolute; left: 14px; bottom: 12px; z-index: 4; max-width: calc(100% - 28px); }
+#ask-box:not([open]) { width: auto; }
+#ask-box[open] { width: 310px; max-height: calc(100% - 24px); overflow: auto; }
+.ask-box > summary { list-style: none; cursor: pointer; padding: 6px 12px;
+  font: 600 10px var(--font-body); letter-spacing: .05em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.ask-box > summary::-webkit-details-marker { display: none; }
+.ask-box > summary::before { content: "+"; font-family: var(--font-mono); font-size: 13px; color: var(--line-strong); }
+.ask-box[open] > summary::before { content: "\2212"; }
+.ask-box > summary:hover { color: var(--ink); }
+.ask { padding: 0 18px 14px; display: grid; gap: 6px; min-width: 0; }
+/* the examples were in the placeholder, which cannot wrap out of a two-row box */
+.for-instance { margin: -2px 0 2px; font-size: 11px; line-height: 1.5; color: var(--ink-3); }
+.opt-out { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 4px; }
+.ask textarea { font: inherit; font-size: 13px; line-height: 1.45; padding: 6px 8px;
+                border: 1px solid var(--line); border-radius: 8px; min-height: 60px;
+                background: var(--surface-2); color: var(--ink); resize: vertical;
+                /* without a border box the padding pushes the field past its column and the
+                   whole form scrolls sideways */
+                width: 100%; max-width: 100%; box-sizing: border-box; }
+.ask .ask-row { display: flex; align-items: center; gap: 10px; }
+.ask button { padding: 4px 12px; border: 1px solid var(--line-strong); border-radius: 8px;
+              background: var(--ink); color: var(--bg); cursor: pointer; font-size: 12px; }
+.ask .note { font-size: 11px; color: var(--ink-3); }
+.who-i-am { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); }
+.who-i-am select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--line);
+                   border-radius: 6px; background: var(--surface-2); color: var(--ink); flex: 1; min-width: 0; }
+.attest { display: flex; gap: 7px; align-items: flex-start; font-size: 12px; color: var(--ink-2); line-height: 1.35; }
+.attest input { margin-top: 2px; }
+.kinds-of-ask { display: flex; flex-wrap: wrap; gap: 4px; }
+.kinds-of-ask button { font-size: 11px; padding: 2px 8px; border: 1px solid var(--line);
+                       border-radius: 999px; background: var(--surface); color: var(--ink-3); cursor: pointer; }
+.kinds-of-ask button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.picked { display: flex; flex-wrap: wrap; gap: 4px; }
+.picked .hint-inline { font-size: 11px; color: var(--ink-3); }
+.picked button { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 6px;
+                 border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2);
+                 color: var(--ink-2); cursor: pointer; }
+</style>
+<template>
+      <details class="ask-box" id="ask-box">
+      <summary id="ask-summary">Ask for a change</summary>
+      <form class="ask" id="ask">
+        <div class="kinds-of-ask" id="ask-kind"></div>
+        <div class="picked" id="picked"><span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span></div>
+        <textarea id="ask-text" rows="3" placeholder="What should change?"></textarea>
+        <p class="for-instance">for instance: drop my location · I left that company · this is not my topic</p>
+        <p class="for-instance opt-out" id="opt-out"></p>
+        <label class="who-i-am"><span>Which of these are you?</span>
+          <select id="ask-who"><option value="">choose your name</option></select>
+        </label>
+        <label class="attest"><input type="checkbox" id="ask-attest">
+          <span>I am the person this is about, and I am asking for my own information to change.</span>
+        </label>
+        <div class="ask-row"><button type="submit">Send</button><span class="note" id="ask-note"></span></div>
+      </form>
+      <review-queue></review-queue>
+      </details>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { COPY, byId, links, nodes, picked, relText, served, shown } = M;
+  function wire() {
+    Object.assign(M, { pick, clearPicks, renderPicked });
+    document.getElementById('opt-out').textContent = COPY.optOut || '';
+    const ASK_KINDS = ['Fix my information', 'Remove something', 'New feature', 'Bug', 'Something else'];
+    let askKind = ASK_KINDS[0];
+    const askKindBox = document.getElementById('ask-kind');
+    const syncAskKinds = () => [...askKindBox.children].forEach(b =>
+      b.setAttribute('aria-pressed', String(b.textContent === askKind)));
+    ASK_KINDS.forEach(k => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = k;
+      b.addEventListener('click', () => { askKind = k; syncAskKinds(); });
+      askKindBox.appendChild(b);
+    });
+    syncAskKinds();
+
+    const pickedBox = document.getElementById('picked');
+    const askForm = document.getElementById('ask');
+    const askText = document.getElementById('ask-text');
+    const askNote = document.getElementById('ask-note');
+
+    const askBox = document.getElementById('ask-box');
+    const graphTally = document.getElementById('gathered-tally');
+    const pickLabel = key => {
+      if (key.startsWith('node:')) return (byId.get(key.slice(5)) || {}).label || key;
+      const l = links[+key.slice(5)];
+      return l ? `${shown(l.source)} ${relText(l.rel)} ${shown(l.target)}` : key;
+    };
+    function pick(key) {
+      picked.has(key) ? picked.delete(key) : picked.add(key);
+      renderPicked();
+      M.refresh();
+    }
+    function clearPicks() {
+      // a plain click is a fresh start: it selects the node it hit and drops the gathering,
+      // so nobody has to remember which nodes are still held from a minute ago
+      if (!picked.size) return;
+      picked.clear();
+      renderPicked();
+      M.refresh();
+    }
+    function renderPicked() {
+      if (M.g3) { M.mark3dPicked(); M.g3.nodeColor(M.g3.nodeColor()); }
+      // The count belongs where the gathering happens, not welded to the button that opens
+      // the form. The panel stays shut so the graph stays clickable — an open one is an
+      // overlay and takes the clicks meant for the nodes underneath it — so the graph's own
+      // hint line says how many are held, and the form lists them when it is opened.
+      if (graphTally) {
+        graphTally.hidden = !picked.size;
+        graphTally.textContent = `${picked.size} gathered`;
+      }
+      if (!picked.size) {
+        pickedBox.innerHTML = '<span class="hint-inline">Shift- or Ctrl-click nodes or links to gather what this is about.</span>';
+        return;
+      }
+      pickedBox.innerHTML = '';
+      picked.forEach(key => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = `${pickLabel(key)} ✕`;
+        b.addEventListener('click', () => pick(key));
+        pickedBox.appendChild(b);
+      });
+    }
+    renderPicked();
+
+    const askWho = document.getElementById('ask-who');
+    const askAttest = document.getElementById('ask-attest');
+    nodes.filter(n => n.kind === 'person' && n.attrs.member)
+      .sort((a, b) => a.label.localeCompare(b.label))
+      .forEach(n => {
+        const opt = document.createElement('option');
+        opt.value = n.id;
+        opt.textContent = n.label;
+        askWho.appendChild(opt);
+      });
+
+    askForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const text = askText.value.trim();
+      if (!text) { askNote.textContent = 'Say what should change.'; return; }
+      if (!askWho.value) { askNote.textContent = 'Choose which of these is you.'; return; }
+      if (!askAttest.checked) {
+        askNote.textContent = 'Tick the box to say this is your own information.';
+        return;
+      }
+      const body = {
+        at: new Date().toISOString(),
+        kind: askKind,
+        claimed: askWho.value,
+        claimedLabel: (byId.get(askWho.value) || {}).label || '',
+        attested: true,
+        text,
+        targets: [...picked].map(key => ({ key, label: pickLabel(key) })),
+      };
+      if (served) {
+        try {
+          const r = await fetch('/request', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                              body: JSON.stringify(body) });
+          askNote.textContent = r.ok ? 'Saved. It will be reviewed before anything changes.' : 'Could not save.';
+          if (r.ok) {
+            askText.value = ''; askAttest.checked = false; picked.clear(); renderPicked(); M.refresh();
+            // The server works out what the request means after answering, so the review list
+            // is a moment behind it. Asking again a few times is the difference between a
+            // member seeing their request waiting and seeing nothing at all.
+            if (window.reloadReview) {
+              for (const wait of [1200, 4000, 9000, 16000]) setTimeout(window.reloadReview, wait);
+            }
+          }
+        } catch (err) { askNote.textContent = 'Could not reach the local server.'; }
+        return;
+      }
+      const asText = `[${body.kind}] ${body.text}\n\nAbout: ${body.targets.map(t => t.label).join(', ') || '(nothing selected)'}`;
+      try {
+        await navigator.clipboard.writeText(asText);
+        askNote.textContent = COPY.copied;
+      } catch (err) {
+        askNote.textContent = 'Copy this and send it: ' + asText;
+      }
+    });
+  }
+  class ChangeRequest extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('change-request', ChangeRequest);
+})();
+</script>

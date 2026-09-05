@@ -1,0 +1,413 @@
+<!-- <graph-detail>: the panel about the selected entry, link or answer, with the evidence behind it -->
+<style>
+.connects { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.connects h4 { margin: 0 0 6px; font-size: 11px; font-weight: 500; letter-spacing: .04em;
+               text-transform: uppercase; color: var(--ink-3); }
+.connects p { margin: 0 0 6px; font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+.connects b { color: var(--ink); font-weight: 500; }
+.ways { display: block; margin-top: 4px; font-size: 11px; color: var(--ink-3); }
+.way { display: block; margin-top: 2px; padding-left: 10px; font-family: var(--font-mono);
+       color: var(--ink-2); }
+.detail { overflow: auto; padding: 16px 18px 24px; }
+.detail[hidden] { display: none; }
+.detail h2 { font: 700 20px/1.15 var(--font-display); margin: 0 0 4px; letter-spacing: -0.01em; text-wrap: balance; }
+.kind { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); margin-bottom: 10px; }
+.attrs { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; font-size: 13px; margin: 8px 0 14px; }
+.attrs dt { color: var(--ink-3); } .attrs dd { margin: 0; }
+.detail h3 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin: 18px 0 8px; }
+.detail h3:first-child { margin-top: 0; }
+.aside-note { font-size: 11px; color: var(--ink-3); margin: 8px 0 0; }
+.back { margin: 0 0 10px; padding: 4px 10px; font: inherit; font-size: 11px; cursor: pointer;
+  border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.back:hover { color: var(--ink); }
+.read { margin-top: 7px; }
+.read > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;
+  font-size: 10px; letter-spacing: .04em; text-transform: uppercase; color: var(--line-strong); }
+.read > summary::-webkit-details-marker { display: none; }
+.read > summary::before { content: "\24D8"; font-size: 12px; }
+.read > summary:hover { color: var(--ink-2); }
+.read dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; margin: 6px 0 0;
+  font-size: 11px; font-family: var(--font-mono); color: var(--ink-3); }
+.read dt { color: var(--line-strong); }
+.read dd { margin: 0; overflow-wrap: anywhere; }
+/* a well-joined node has dozens of links; folded, the evidence for it stays in reach */
+.fold { margin: 18px 0 8px; }
+.fold > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary::before { content: "+"; font-family: var(--font-mono); color: var(--line-strong); }
+.fold[open] > summary::before { content: "\2212"; }
+.fold > summary:hover { color: var(--ink); }
+.fold .muted { text-transform: none; letter-spacing: 0; color: var(--line-strong); }
+.fold .links { margin-top: 8px; }
+.fold:not([open]) .links { display: none; }   /* the list sets its own display, which wins */
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links button { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 7px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: 12px; }
+.links button:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.links .rel { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; }
+.msg .open { float: right; font-size: 11px; color: var(--accent); text-decoration: none; margin-left: 8px; }
+.msg .open:hover { text-decoration: underline; }
+.facts { margin: 6px 0 0; padding: 0; list-style: none; font-size: 12px; color: var(--ink-3); }
+.facts li::before { content: "↳ "; color: var(--line-strong); }
+.ref { border: 0; padding: 0; background: none; font: inherit; color: inherit; cursor: pointer;
+       border-bottom: 1px solid var(--line-strong); }
+.ref:hover { color: var(--accent); border-bottom-color: var(--accent); }
+.ref.rel { font-family: var(--font-mono); font-size: 10px; color: var(--ink-3); border: 1px solid var(--line);
+           border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+.foot { margin-top: 22px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-3); font-family: var(--font-mono); }
+.edge-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin-bottom: 8px; }
+.edge-head .rel { font-family: var(--font-mono); font-size: 11px; color: var(--ink-3); padding: 2px 6px; border: 1px solid var(--line); border-radius: 4px; }
+.msg { border-left: 2px solid var(--line-strong); padding: 6px 10px; margin: 0 0 10px; font-size: 13px; color: var(--ink-2); }
+.msg .who { color: var(--ink); font-weight: 500; }
+.msg .when { color: var(--ink-3); font-family: var(--font-mono); font-size: 11px; margin-left: 6px; }
+.placeholder { color: var(--ink-3); }
+.placeholder p { max-width: 42ch; }
+.shared { display: grid; gap: 8px; margin: 4px 0 20px; }
+.shared .row { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; align-items: baseline; }
+.shared .chip { cursor: pointer; }
+.shared .who { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.shared .who button { border: 0; padding: 0; background: none; cursor: pointer; font-size: 13px;
+                      color: var(--ink); border-bottom: 1px solid var(--line); }
+.shared .who button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.caveat { font-size: 12px; margin: -4px 0 8px; }
+.close { display: grid; gap: 6px; margin-bottom: 20px; }
+.close .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.close button { border: 0; padding: 0; background: none; cursor: pointer; font-size: 13px;
+                color: var(--ink); border-bottom: 1px solid var(--line); }
+.close button:hover { border-bottom-color: var(--accent); color: var(--accent); }
+.close .tilde { color: var(--ink-3); font-family: var(--font-mono); }
+</style>
+<template>
+        <div class="detail" id="detail"></div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { ASIDE, COPY, DATA, G, PAINT, ROUTES, byId, display, esc, joinUp, linkGone, links, listOut, mainKind, nameOf, namedIn, nodes, routeThrough, routesBetween, shown, swatch, throughable, when } = M;
+  const { node, link, hitline, root, svg, sim } = M.view2d;
+  function wire() {
+    Object.assign(M, { renderDetail, renderFound, selectEdge, showAnswerAgain });
+    let ground = null;
+    function sharedGround() {
+      if (ground) return ground;
+      const byTopic = new Map();
+      for (const l of links) {
+        for (const [t, who] of [[l.source, l.target], [l.target, l.source]]) {
+          if (t.kind !== 'topic' || who.kind !== 'person' || !who.attrs.member) continue;
+          if (!byTopic.has(t.id)) byTopic.set(t.id, new Set());
+          byTopic.get(t.id).add(who.id);
+        }
+      }
+      ground = [...byTopic]
+        .filter(([, who]) => who.size > 1)
+        .map(([id, who]) => ({ topic: byId.get(id), people: [...who].map(x => byId.get(x)) }))
+        .sort((a, b) => b.people.length - a.people.length || a.topic.label.localeCompare(b.topic.label));
+      return ground;
+    }
+    function groundHtml() {
+      const rows = sharedGround();
+      if (!rows.length) return '';
+      const pairs = new Set();
+      rows.forEach(r => r.people.forEach((a, i) => r.people.slice(i + 1)
+        .forEach(b => pairs.add([a.id, b.id].sort().join('|')))));
+      return `<h3>${esc(COPY.ground)} · ${pairs.size} pair${pairs.size === 1 ? '' : 's'}</h3>
+        <div class="shared">${rows.map(r => `<div class="row">
+          <button class="chip" data-id="${esc(r.topic.id)}">${swatch('topic', 9)}${esc(r.topic.label)}</button>
+          <span class="who">${r.people.map(x => `<button data-id="${esc(x.id)}">${esc(x.label)}</button>`).join('')}</span>
+        </div>`).join('')}</div>`;
+    }
+    // Ranked by how alike two members' own words read, which is a hint about who to introduce and
+    // not a claim that they said the same thing. Only the closest few, and only pairs the exact
+    // shared-topic list already misses, so the two blocks never say the same thing twice.
+    const CLOSE_FRACTION = 0.15, CLOSE_MAX = 5;
+    function closeByBackground() {
+      const ranked = DATA.affinity || [];
+      if (ranked.length < 4) return [];
+      const already = new Set();
+      sharedGround().forEach(r => r.people.forEach((a, i) => r.people.slice(i + 1)
+        .forEach(b => already.add([a.id, b.id].sort().join('|')))));
+      return ranked.slice(0, Math.ceil(ranked.length * CLOSE_FRACTION))
+        .filter(([a, b]) => !already.has([a, b].sort().join('|')) && byId.has(a) && byId.has(b))
+        .slice(0, CLOSE_MAX)
+        .map(([a, b, score]) => ({ a: byId.get(a), b: byId.get(b), score }));
+    }
+    function closeHtml() {
+      const rows = closeByBackground();
+      if (!rows.length) return '';
+      return `<h3>Close by background</h3>
+        <p class="caveat">How alike their introductions read. Not a shared topic — read both and judge.</p>
+        <div class="close">${rows.map(r => `<div class="row">
+          <button data-id="${esc(r.a.id)}">${esc(r.a.label)}</button><span class="tilde">~</span>
+          <button data-id="${esc(r.b.id)}">${esc(r.b.label)}</button>
+        </div>`).join('')}</div>`;
+    }
+    // The ids that come back are everything the tools touched — the working, not the answer.
+    // Filling this pane with all of it buries what was asked about, so the pane lists the
+    // entries the answer actually names, and the rest merely light up on the graph.
+    M.fromAnswer = null;
+    // An answer names things the tools never handed back as ids — it reads a quote and names the
+    // person in it. So the match is against the whole graph, on whole words, and anything the
+    // tools opened without the answer mentioning is counted rather than listed.
+    function connectionSaid(a, b) {
+      const ways = routesBetween(a, b, ROUTES, throughable(a, b));
+      const walk = ways[0] || null;
+      // how many ways round there are, said only when there is more than one: two people
+      // joined three different ways are differently connected from two joined by one thread
+      // Measured: a pair joined directly came back with two more ways round as well, four and
+      // five hops long, through people the question never mentioned.
+      // Everything is connected to everything at that distance; only a route about as short
+      // as the best one is telling the reader something.
+      const shortest = walk ? walk.length : 0;
+      const spare = ways.slice(1)
+        .filter(w => w.length > 2 && shortest && w.length <= shortest + 1 && w.length <= 4)
+        .map(w => w.slice(1, -1).map(nameOf)).filter(x => x.length);
+      // each way round drawn as its own chain: a list of lists reads as one long list, and
+      // "through Ada, operations and Grace and Ada, systems and Alan" says nothing
+      const alsoVia = spare.length
+        ? `<span class="ways">${spare.length === 1 ? 'also joined this way:'
+            : `also joined ${spare.length} other ways:`}${spare
+            .map(x => `<span class="way">${esc(x.join(' → '))}</span>`).join('')}</span>`
+        : '';
+      const both = new Set();
+      for (const l of links) {
+        if (linkGone(l)) continue;
+        const ends = [l.source.id, l.target.id];
+        for (const [x, y] of [[a, b], [b, a]]) {
+          const other = ends[0] === x ? ends[1] : (ends[1] === x ? ends[0] : null);
+          if (other !== null && other !== y) both.add(other + '|' + x);
+        }
+      }
+      const near = xs => new Set([...both].filter(k => k.endsWith('|' + xs)).map(k => k.split('|')[0]));
+      const shared = [...near(a)].filter(id => near(b).has(id));
+      const pair = `<b>${esc(nameOf(a))}</b> and <b>${esc(nameOf(b))}</b>`;
+      if (!walk) {
+        return `<p>${pair} are not connected at all in what has been said`
+          + `${shared.length ? ', despite both being tied to ' + esc(listOut(shared.slice(0, 3).map(nameOf))) : ''}.`
+          + ` Nothing here can introduce them.</p>`;
+      }
+      // Joined directly is the end of the question. "They are joined directly, and also this
+      // other way" is a fact about the graph being connected, not about them.
+      if (walk.length === 2) return `<p>${pair} are joined directly.</p>`;
+      const between = walk.slice(1, -1).map(nameOf);
+      if (walk.length === 3) {
+        return `<p>${pair} both meet at <b>${esc(between[0])}</b>`
+          + `${shared.length > 1 ? `, and share ${esc(listOut(shared.slice(0, 3).map(nameOf)))}` : ''}`
+          + ` — that is the ground to open with.${alsoVia}</p>`;
+      }
+      return `<p>${pair} are ${walk.length - 1} steps apart, through ${esc(listOut(between))}.`
+        + ` That is far: any of them could make the introduction`
+        + `${shared.length ? `, and both are already tied to ${esc(listOut(shared.slice(0, 3).map(nameOf)))}` : ''}.${alsoVia}</p>`;
+    }
+    // At most a few pairs: the point is to say how to connect the entries an answer is about,
+    // not to enumerate a set's every combination.
+    function connectHtml(ids) {
+      const real = ids.filter(id => byId.has(id));
+      // Three entries produced three sentences, two of them pairing a member with the subject
+      // they share — which is the link you can already see, said in words. What a reader wants
+      // is how the members reach each other, so the pairs are drawn from whichever kind the
+      // answer is mostly about, and only fall back to everything when there is no such pair.
+      const main = mainKind(new Set(real));
+      const same = main ? real.filter(id => main.has((byId.get(id) || {}).kind)) : [];
+      const here = (same.length > 1 ? same : real).slice(0, 4);
+      if (here.length < 2) return '';
+      const said = [];
+      for (let i = 0; i < here.length; i++) {
+        for (let j = i + 1; j < here.length; j++) {
+          if (said.length < 4) said.push(connectionSaid(here[i], here[j]));
+        }
+      }
+      return `<div class="connects"><h4>How these connect</h4>${said.join('')}</div>`;
+    }
+    // Where the panel has been. Clicking a member, then one of their connections, then one of
+    // theirs, is how anyone reads a graph — and until this there was no way back but finding
+    // the first one again by eye. The button is drawn at the top of the panel, because the
+    // thing you want to undo is the thing you just clicked, and that is where you were looking.
+    const seen = [];
+    let goingBack = false;
+    function remember(where) {
+      if (goingBack) return;
+      const last = seen[seen.length - 1];
+      if (last && last.kind === where.kind && last.id === where.id
+          && String(last.ids) === String(where.ids)) return;
+      seen.push(where);
+      if (seen.length > 40) seen.shift();
+    }
+    function backHtml() {
+      const to = seen[seen.length - 2];
+      if (!to) return '';
+      return `<button class="back" id="panel-back">← back to ${esc(to.name)}</button>`;
+    }
+    function wireBack(el) {
+      const b = el.querySelector('#panel-back');
+      if (!b) return;
+      b.addEventListener('click', () => {
+        seen.pop();                       // where we are
+        const to = seen[seen.length - 1]; // where we were
+        if (!to) return;
+        goingBack = true;
+        try {
+          if (to.kind === 'answer') showAnswerAgain(to);
+          else if (to.kind === 'home') M.select(null);
+          else if (to.kind === 'node' && byId.has(to.id)) M.select(to.id);
+          else if (to.kind === 'edge' && links[to.id]) selectEdge(links[to.id]);
+        } finally { goingBack = false; }
+      });
+    }
+    // going back to an answer puts its graph back too, not only its list
+    function showAnswerAgain(to) {
+      const ids = (to.ends || to.ids || []).filter(id => byId.has(id));
+      M.selected = null;
+      M.answer = ids.length ? new Set(ids) : null;
+      M.pathLinks = new Set();
+      if (ids.length > 1) {
+        const { joined, onPath } = joinUp(ids);
+        M.answer = joined;
+        M.pathLinks = onPath;
+        M.runSignal(routeThrough(ids));
+      }
+      M.refresh();
+      M.setCount(ids.length ? String(ids.length) : '');
+      renderFound(to.ids, to.said, to.ends);
+    }
+    function renderFound(ids, said, ends = null) {
+      // `ids` is what the answer is about — the model's own `show`, or the entries its prose
+      // names. The ordering below still puts the named ones first, because a model that lit
+      // more than it wrote about should not bury what it wrote about.
+      const here = ids.map(id => byId.get(id)).filter(Boolean);
+      const spoken = new Set(namedIn(said).map(n => n.id));
+      // the ones the answer talks about come first; the rest are the working behind it
+      const shown = here.sort((a, b) => (spoken.has(b.id) - spoken.has(a.id))
+        || PAINT[b.kind] - PAINT[a.kind] || (b.mentions || 0) - (a.mentions || 0));
+      // `ends` is what was asked for; `ids` is that plus whatever joining it added. Re-joining
+      // must start from the ends, or a connector becomes an end and every rule about what a
+      // route may pass through stops applying to it.
+      M.fromAnswer = { ids, said, ends: ends || ids };
+      remember({ kind: 'answer', name: 'the answer', ids, said, ends: ends || ids });
+      const el = document.getElementById('detail');
+      el.innerHTML = `${backHtml()}<h3>In this answer · ${shown.length}</h3>
+        <div class="links">${shown.map(n => `<button data-id="${esc(n.id)}">${swatch(n.kind, 9)}<span class="rel">${esc(n.kind)}</span>${esc(n.label)}</button>`).join('')}</div>
+        ${spoken.size && spoken.size < shown.length
+            ? `<p class="aside-note">The first ${spoken.size} are named in the answer; the rest are what it read to get there.</p>` : ''}
+        ${connectHtml(shown.map(n => n.id))}
+        ${footer()}`;
+      wireRefs(el);
+      wireBack(el);
+      el.scrollTop = 0;
+    }
+
+    function renderDetail(n) {
+      const el = document.getElementById('detail');
+      // The panel with nothing chosen is a view like any other, and the only one holding the
+      // shared ground — the pairs who talk about the same things. Somebody who opens one of
+      // those pairs has left the one place it was listed, and until this the only way back to
+      // it was clicking empty space, which nothing on screen tells you.
+      remember(n ? { kind: 'node', name: shown(n), id: n.id }
+                 : { kind: 'home', name: COPY.heading, id: '' });
+      if (!n) {
+        el.innerHTML = `<div class="placeholder"><h3>${esc(COPY.heading)}</h3>${groundHtml()}${closeHtml()}${COPY.note ? `<p class="aside-note">${esc(COPY.note)}</p>` : ''}</div>`;
+        wireRefs(el);
+        return;
+      }
+      const attrs = Object.entries(n.attrs).filter(([k, v]) => !k.endsWith('_message') && k !== 'member' && k !== 'type' && k !== 'handle' && !(k === 'stated_location' && v === n.attrs.location)).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]);
+      // the panel lists what the graph is showing; a relation you have switched off is counted,
+      // not listed, so the two never disagree about what this node is joined to
+      const joined = links.filter(l => l.source.id === n.id || l.target.id === n.id);
+      const rels = joined.filter(l => !linkGone(l)).sort((a, b) => b.weight - a.weight);
+      const hiddenRels = joined.length - rels.length;
+      // evidence follows the same switch the nodes do: with working sessions out of the picture,
+      // a transcript turn is not what this member said
+      const fromSession = m => ASIDE && m.channel === ASIDE && display.source.session !== 'show';
+      const quotes = (n.messages || []).map(id => G.messages[id]).filter(Boolean)
+        .filter(m => !fromSession(m)).sort((a, b) => +b.ts - +a.ts).slice(0, 12);
+      el.innerHTML = `
+        ${backHtml()}
+        <div class="kind">${swatch(n.kind)}${n.kind}${n.attrs.type ? ' · ' + esc(n.attrs.type) : ''}${n.attrs.member ? ' · member' : ''}</div>
+        <h2>${esc(shown(n))}</h2>
+        ${attrs.length ? `<dl class="attrs">${attrs.map(([k, v]) => `<dt>${esc(k.replace(/_/g, ' '))}</dt><dd>${k === 'url' ? `<a href="${esc(v)}" target="_blank" rel="noopener">${esc(v)}</a>` : esc(v)}</dd>`).join('')}</dl>` : ''}
+        ${rels.length ? `<details class="fold"><summary>Connections · ${rels.length}${hiddenRels ? ` <span class="muted">(${hiddenRels} hidden)</span>` : ''}</summary><div class="links">${rels.map(l => { const o = l.source.id === n.id ? l.target : l.source; return `<button data-id="${esc(o.id)}">${swatch(o.kind, 9)}<span class="rel">${l.source.id === n.id ? l.rel : '← ' + l.rel}</span>${esc(o.label)}</button>`; }).join('')}</div></details>` : ''}
+        ${quotes.length ? `<h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}` : ''}
+        ${footer()}`;
+      wireRefs(el);
+      wireBack(el);
+      el.scrollTop = 0;
+    }
+    function wireRefs(el) {
+      el.querySelectorAll('button[data-id]').forEach(b => b.addEventListener('click', () => M.select(b.dataset.id)));
+      el.querySelectorAll('button[data-edge]').forEach(b =>
+        b.addEventListener('click', () => selectEdge(links[+b.dataset.edge])));
+    }
+    const linkable = nodes.filter(n => n.label.length >= 3)
+      .sort((a, b) => b.label.length - a.label.length);
+    const reSafe = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    function linkify(text) {
+      const hits = [];
+      for (const n of linkable) {
+        const re = new RegExp(`(^|[^\\p{L}\\p{N}])(${reSafe(n.label)})(?![\\p{L}\\p{N}])`, 'giu');
+        let m;
+        while ((m = re.exec(text))) {
+          const start = m.index + m[1].length;
+          hits.push({ start, end: start + m[2].length, id: n.id });
+          re.lastIndex = start + m[2].length;
+        }
+      }
+      hits.sort((a, b) => a.start - b.start || (b.end - b.start) - (a.end - a.start));
+      let out = '', at = 0;
+      for (const h of hits) {
+        if (h.start < at) continue;
+        out += esc(text.slice(at, h.start));
+        out += `<button class="ref" data-id="${esc(h.id)}">${esc(text.slice(h.start, h.end))}</button>`;
+        at = h.end;
+      }
+      return out + esc(text.slice(at));
+    }
+    const factEdge = fact => links.findIndex(l =>
+      fact === `${l.source.label} ${relText(l.rel)} ${l.target.label}`);
+    // How a reading was made, for anyone who wants to know whether to trust it. Out of the way
+    // until asked for: the answer to "which model said this" is rarely the reason you are here.
+    const READ_ORDER = ['model', 'version', 'prompt', 'context', 'n_predict', 'at'];
+    const READ_NAME = { n_predict: 'answer limit', at: 'read on', version: 'extractor' };
+    function readHtml(m) {
+      const read = m.read || {};
+      const rows = READ_ORDER.filter(k => read[k] !== undefined && read[k] !== '')
+        .map(k => `<dt>${esc(READ_NAME[k] || k)}</dt><dd>${esc(String(read[k]).replace('T', ' ').slice(0, 40))}</dd>`)
+        .join('');
+      if (!rows) return '';
+      return `<details class="read"><summary title="How this message was read">how it was read</summary><dl>${rows}</dl></details>`;
+    }
+    function quoteHtml(m) {
+      const facts = (m.facts || []).map(f => {
+        const i = factEdge(f);
+        return `<li>${linkify(f)}${i < 0 ? '' : ` <button class="ref rel" data-edge="${i}">link</button>`}</li>`;
+      }).join('');
+      return `<blockquote class="msg">${m.url ? `<a class="open" href="${esc(m.url)}" target="_blank" rel="noopener">${esc(COPY.openMessage)}</a>` : ''}<span class="who">${esc(m.sender)}</span><span class="when">${esc(m.channel)} · ${when(m.ts)}</span><br>${linkify(m.text)}${facts ? `<ul class="facts">${facts}</ul>` : ''}${readHtml(m)}</blockquote>`;
+    }
+    // A model has a name; the file it arrived in has a filename, and nobody wants to read
+    // "-mxfp4-00001-of-00003.gguf" to find out which model read their messages.
+    function footer() { return ''; }
+    function selectEdge(l) {
+      remember({ kind: 'edge', name: `${shown(l.source)} → ${shown(l.target)}`,
+                 id: links.indexOf(l) });
+      M.selected = null; M.refresh();
+      link.classed('on', x => x === l).classed('dim', x => x !== l);
+      node.classed('dim', d => d !== l.source && d !== l.target).classed('hushed', d => d !== l.source && d !== l.target);
+      const el = document.getElementById('detail');
+      const quotes = (l.messages || []).map(id => G.messages[id]).filter(Boolean)
+        .filter(m => !(ASIDE && m.channel === ASIDE && display.source.session !== 'show'))
+        .sort((a, b) => +b.ts - +a.ts);
+      el.innerHTML = `
+        ${backHtml()}
+        <div class="kind">link</div>
+        <div class="edge-head"><button class="chip" data-id="${esc(l.source.id)}">${swatch(l.source.kind, 9)}${esc(shown(l.source))}</button><span class="rel">${esc(l.rel.replace(/_/g, ' '))}</span><button class="chip" data-id="${esc(l.target.id)}">${swatch(l.target.kind, 9)}${esc(shown(l.target))}</button></div>
+        <h3>Evidence · ${quotes.length} message${quotes.length === 1 ? '' : 's'}</h3>${quotes.map(quoteHtml).join('')}${footer()}`;
+      wireRefs(el);
+      wireBack(el);
+      el.scrollTop = 0;
+    }
+    M.select(null);
+  }
+  class GraphDetail extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-detail', GraphDetail);
+})();
+</script>

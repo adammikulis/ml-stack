@@ -1,0 +1,112 @@
+<!-- <graph-map>: the entries that said where they are, on a map -->
+<style>
+.map-note { color: var(--ink-3); font-weight: 400; }
+.map-note:not(:empty)::before { content: " · "; }
+.map-box { border-bottom: 1px solid var(--line); }
+.map-box > summary { list-style: none; cursor: pointer; padding: 10px 18px; display: flex; gap: 8px; align-items: baseline;
+  font: 500 12px var(--font-body); color: var(--ink-2); letter-spacing: .04em; text-transform: uppercase; }
+.map-box > summary::-webkit-details-marker { display: none; }
+.map-box > summary::after { content: "\2212"; margin-left: auto; font-family: var(--font-mono); color: var(--line-strong); }
+.map-box:not([open]) > summary::after { content: "+"; }
+.map-box > summary:hover { color: var(--ink); }
+.map-box > summary b { color: var(--ink); font-family: var(--font-mono); font-weight: 500; }
+.map-wrap { position: relative; background: var(--sea); }
+.map-wrap svg { width: 100%; height: var(--map-h, auto); display: block; }
+.land { fill: var(--land); stroke: var(--land-line); stroke-width: .5; }
+.dot { fill: var(--k-person); stroke: var(--surface); stroke-width: 1.5; cursor: pointer; }
+.dot.on { stroke: var(--accent); stroke-width: 3; }
+.leader { stroke: var(--line-strong); stroke-width: 1; stroke-opacity: .65; }
+.dot-label { font: 10px var(--font-body); fill: var(--ink); paint-order: stroke; stroke: var(--sea); stroke-width: 3px; pointer-events: none; }
+</style>
+<template>
+      <details class="map-box" id="map-box" open>
+        <summary><b id="located">0</b> <span id="on-map">on the map</span><span class="map-note" id="map-note"></span></summary>
+        <div class="map-wrap" aria-label="Member map">
+          <svg id="map"></svg>
+        </div>
+      </details>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { COPY, DATA, WORLD, hideTip, neighbors, nodes, on, saveDisplay, tip, view } = M;
+  function wire() {
+    document.getElementById('on-map').textContent = COPY.onMap;
+    const mapBox = document.getElementById('map-box');
+    mapBox.open = view.map !== false;
+    mapBox.addEventListener('toggle', () => { view.map = mapBox.open; saveDisplay(); });
+
+    const mapSvg = d3.select('#map');
+    const MW = 640, MH = 330;
+    mapSvg.attr('viewBox', `0 0 ${MW} ${MH}`).attr('preserveAspectRatio', 'xMidYMid meet');
+    const placed = DATA.points || [];
+    // Frame the people, not the planet — a whole sphere spends this panel on empty ocean. The floor
+    // on the span keeps one city from zooming the map to street level.
+    function extent() {
+      if (!placed.length) return { type: 'Sphere' };
+      const lons = placed.map(p => p.lon), lats = placed.map(p => p.lat);
+      let x0 = Math.min(...lons), x1 = Math.max(...lons), y0 = Math.min(...lats), y1 = Math.max(...lats);
+      const growX = Math.max(18, (x1 - x0) * 0.25, (70 - (x1 - x0)) / 2);
+      const growY = Math.max(12, (y1 - y0) * 0.25, (40 - (y1 - y0)) / 2);
+      x0 = Math.max(-180, x0 - growX); x1 = Math.min(180, x1 + growX);
+      y0 = Math.max(-84, y0 - growY); y1 = Math.min(84, y1 + growY);
+      return { type: 'MultiPoint', coordinates: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] };
+    }
+    const proj = d3.geoNaturalEarth1().fitExtent([[6, 6], [MW - 6, MH - 6]], extent());
+    const path = d3.geoPath(proj);
+    mapSvg.append('path').attr('d', path({ type: 'Sphere' })).attr('fill', 'var(--sea)');
+    mapSvg.append('path').attr('class', 'land').attr('d', path(topojson.feature(WORLD, WORLD.objects.land)));
+    const pts = placed.map(p => ({ ...p, xy: proj([p.lon, p.lat]) })).filter(p => p.xy);
+    document.getElementById('located').textContent = pts.length;
+    // "26 on the map" beside "39 members" invites "why not everyone", and the answer is
+    // ordinary: a member is placed only if they said where they are. Saying so is one line;
+    // leaving it out costs the question every time anyone looks at it.
+    const members = nodes.filter(n => n.attrs && n.attrs.member).length;
+    const unplaced = members - pts.length;
+    const mapNote = document.getElementById('map-note');
+    if (mapNote) {
+      mapNote.textContent = unplaced > 0
+        ? `${unplaced} more ${COPY.unplaced || 'have not said where they are'}`
+        : '';
+    }
+    const dots = mapSvg.append('g').selectAll('circle').data(pts).join('circle').attr('class', 'dot')
+      .attr('cx', p => p.xy[0]).attr('cy', p => p.xy[1]).attr('r', 5)
+      .on('click', (e, p) => M.select(p.id))
+      .on('mousemove', (e, p) => tip(e, p.label, p.place)).on('mouseleave', hideTip);
+    const dotLabels = mapSvg.append('g').selectAll('text').data(pts).join('text').attr('class', 'dot-label')
+      .text(p => p.label.split(' ')[0]);
+    // two members a couple of degrees apart stack their names on top of each other; try each side
+    const dotBoxes = pts.map(q => ({ x0: q.xy[0] - 6, x1: q.xy[0] + 6, y0: q.xy[1] - 6, y1: q.xy[1] + 6 }));
+    const leaders = mapSvg.append('g');
+    dotLabels.each(function (p) {
+      const w = this.getComputedTextLength() || 30;
+      // near spots first, then further out: two members a couple of degrees apart leave no room
+      // beside their own dots, so the name steps back and a hairline says which dot it belongs to
+      const spots = [[7, 3], [-7 - w, 3], [-w / 2, -8], [-w / 2, 15], [10, -9], [-10 - w, -9],
+                     [10, 16], [-10 - w, 16], [17, -17], [-17 - w, -17], [17, 23], [-17 - w, 23],
+                     [28, -26], [-28 - w, -26], [28, 32], [-28 - w, 32]];
+      for (const [dx, dy] of spots) {
+        const box = { x0: p.xy[0] + dx - 2, x1: p.xy[0] + dx + w + 2, y0: p.xy[1] + dy - 9, y1: p.xy[1] + dy + 3 };
+        if (dotBoxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+        dotBoxes.push(box);
+        d3.select(this).attr('x', p.xy[0] + dx).attr('y', p.xy[1] + dy);
+        if (Math.abs(dy - 3) > 12 || Math.abs(dx) > 12) {
+          leaders.append('line').attr('class', 'leader')
+            .attr('x1', p.xy[0]).attr('y1', p.xy[1])
+            .attr('x2', p.xy[0] + (dx < 0 ? dx + w + 2 : dx - 2)).attr('y2', p.xy[1] + dy - 3);
+        }
+        return;
+      }
+      d3.select(this).attr('display', 'none');
+    });
+    on('refresh', () => {
+      const focus = M.selected ? new Set([M.selected, ...(neighbors.get(M.selected) || [])]) : null;
+      dots.classed('on', p => p.id === M.selected || !!(focus && focus.has(p.id)));
+    });
+  }
+  class GraphMap extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-map', GraphMap);
+})();
+</script>

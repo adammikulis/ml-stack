@@ -1,0 +1,47 @@
+<!-- <graph-banner>: the title over the graph, and the line saying what built it -->
+<style>
+/* the title sits over the graph, centred, out of the way of everything */
+/* below the controls row, so the title is centred on the graph and not on whatever is beside it */
+/* the title in the corner, where a title goes */
+.banner { position: absolute; left: 16px; top: 12px; z-index: 3; pointer-events: none;
+  max-width: 46%; }
+.banner h1 { font: 500 20px/1.15 var(--font-display); letter-spacing: -0.01em; margin: 0;
+  text-wrap: balance; color: var(--ink); }
+.banner small { display: block; font: 400 11px/1.4 var(--font-body); color: var(--ink-3); margin-top: 3px; }
+
+/* what the graph counts, and what to do about it, along the bottom */
+.built { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2;
+  font-size: 11px; color: var(--line-strong); white-space: nowrap; pointer-events: none; }
+</style>
+<template>
+      <div class="banner">
+        <h1 id="title">__TITLE__</h1>
+        <small id="subtitle"></small>
+      </div>
+      <div class="built" id="built"></div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { DATA, G, modelName } = M;
+  function wire() {
+    const msgs = Object.values(G.messages || {});
+    if (msgs.length) {
+      const ts = msgs.map(m => +m.ts).sort((a, b) => a - b);
+      const f = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      document.getElementById('subtitle').textContent = `${f(ts[0])} – ${f(ts[ts.length - 1])} · ${[...new Set(msgs.map(m => m.channel).filter(Boolean))].join(', ')}`;
+    }
+    (() => {
+      const meta = G.meta || {};
+      document.getElementById('built').textContent =
+        (DATA.author ? DATA.author + ' · ' : '')
+        + 'built ' + (meta.built_at ? meta.built_at.replace('T', ' ').slice(0, 16) : '—')
+        + (meta.model ? ' · ' + modelName(meta.model) : '');
+    })();
+  }
+  class GraphBanner extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-banner', GraphBanner);
+})();
+</script>

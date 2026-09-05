@@ -1,0 +1,492 @@
+<!-- <graph-view>: the graph in two dimensions: the force layout, labels, selection, paths and the signal -->
+<style>
+.tools .chip[aria-pressed="false"] { color: var(--line-strong); }
+.tools { position: absolute; right: 14px; top: 50px; z-index: 2;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.node.answer .mark { stroke: var(--k-opportunity); stroke-width: 4px; }
+.hint { font-size: 11px; color: var(--ink-3); max-width: 340px; text-align: right; }
+.hint .tally { color: var(--accent); font-family: var(--font-mono); font-weight: 500; }
+.hint .tally::after { content: " · "; color: var(--ink-3); }
+.empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); text-align: center; padding: 40px; }
+.node.picked .mark { stroke: var(--accent); stroke-width: 3px; }
+.link.picked { stroke: var(--accent); stroke-opacity: 1; }
+.link { cursor: pointer; }
+.link:hover { stroke-opacity: 1; }
+.link { stroke: var(--line-strong); stroke-opacity: var(--link-op); marker-end: url(#arrow); }
+/* opacity, not stroke-opacity: a marker does not inherit the stroke's alpha */
+.link.dim { opacity: .14; }
+.link.on { stroke: var(--accent); stroke-opacity: .9; }
+.arrow { fill: context-stroke; }
+.node.gone, .link.gone { display: none; }
+.node { cursor: pointer; }
+.node .hit { fill: transparent; }
+.node .mark { stroke: var(--surface); stroke-width: 2px; pointer-events: none; }
+.link.onpath { stroke: var(--accent); stroke-opacity: .95; stroke-width: 2.4; }
+/* the joining is the point of a path run, so it outranks whatever dimmed everything else */
+.link.onpath.dim { opacity: 1; }
+.hitline { stroke: transparent; stroke-width: 14; cursor: pointer; }
+.hitline.gone { display: none; }
+.node.dim .mark { opacity: .15; } .node.dim text { opacity: .1; }
+/* close to what was asked for, not it */
+.node.near .mark { opacity: .5; } .node.near text { opacity: .65; font-style: italic; }
+.node.on .mark { stroke: var(--accent); stroke-width: 3px; }
+.node text { font: 500 calc(13px * var(--label-scale, 1)) var(--font-body); fill: var(--ink-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.node.k-person text { font: 600 calc(15px * var(--label-scale, 1)) var(--font-body); fill: var(--ink); }
+.node.k-topic text { font-size: calc(12px * var(--label-scale, 1)); fill: var(--ink-3); }
+.node.on text, .node.on.k-topic text { fill: var(--ink); font-weight: 700; stroke-width: 5px; }
+.node.on text, .node.on.k-topic text, .node.k-person.on text { paint-order: stroke; stroke: var(--bg); }
+/* a label the layout pass could not place without an overlap */
+.node.hushed text { opacity: 0; }
+.graph-wrap.settling .node text, .graph-wrap.settling .elabel { opacity: 0; }
+.elabel { font: 500 calc(12px * var(--elabel-scale, 1)) var(--font-body); fill: var(--ink-3); paint-order: stroke; stroke: var(--bg);
+          stroke-width: 3px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.elabel.hushed { opacity: 0; }
+</style>
+<template>
+      <svg id="graph"></svg>
+      <div class="tools">
+        <div class="hint"><b class="tally" id="gathered-tally" hidden></b><span id="hint-text">drag to move · scroll to zoom · click to inspect</span></div>
+        <graph-history></graph-history>
+        <!--mount:tools-->
+        <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
+        <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
+        <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
+        <button id="likewise" class="chip" aria-pressed="false"
+                title="Route only through entries of the kinds being joined — people through people, rather than through whatever topic they happen to share">⇢ join like with like</button>
+        <button id="snap" class="chip" aria-pressed="true"
+                title="Move the view to a node when you click it">⊙ snap to node</button>
+      </div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { COPY, NONE, RELS, byId, color, degree, display, dropped, emit, esc, gone, hideTip, joinUp, kindFor, labelText, legBetween, linkDropped, linkGone, links, matches, minor, neighbors, nodes, nothingFound, paintRank, picked, relText, routeThrough, saveDisplay, search, served, shown, tip, toJoin, view } = M;
+  function wire() {
+    Object.assign(M, { refresh, layoutLabels, fit, applyRemoval, arrange, recenter, raiseSelected, select, bringIntoView, stopSignal, runSignal, findPaths, applyPhysics });
+    const svg = d3.select('#graph');
+    svg.append('defs').append('marker').attr('id', 'arrow').attr('viewBox', '0 0 8 8')
+      .attr('refX', 7).attr('refY', 4).attr('markerWidth', 5).attr('markerHeight', 5)
+      .attr('markerUnits', 'userSpaceOnUse').attr('orient', 'auto-start-reverse')
+      .append('path').attr('class', 'arrow').attr('d', 'M0,0 L8,4 L0,8 Z');
+    const root = svg.append('g');
+    const wrap = document.querySelector('.graph-wrap');
+    wrap.classList.add('settling');
+    let W = wrap.clientWidth, H = wrap.clientHeight;
+    const SIZE = { person: [9, 2.6], org: [5, 1.9], place: [5, 1.9], opportunity: [5, 1.9], topic: [3.5, 1.6] };
+    const radius = n => { const [base, per] = SIZE[n.kind] || SIZE.org; return base + Math.sqrt(n.mentions || 1) * per; };
+    // How much a link is worth: how many sources agree on it. Off, every link is a link, which
+    // is what you want when the shape matters more than the evidence. Defined before the
+    // simulation, which reads them the moment it is built.
+    // A link's weight is how many sources agree, and it is always drawn: thicker and shorter
+    // when more do. It used to be a toggle nobody turned off.
+    const thickness = l => Math.min(4, 0.8 + Math.sqrt(l.weight));
+    const apart = l => 90 + 20 / Math.sqrt(l.weight || 1);
+    const pull = l => 0.2 + Math.min(0.4, (l.weight || 1) / 10);
+
+    const sim = d3.forceSimulation(nodes)
+      .force('link', d3.forceLink(links).id(d => d.id).distance(apart).strength(pull))
+      .force('charge', d3.forceManyBody().strength(-420).distanceMax(500))
+      .force('collide', d3.forceCollide(n => radius(n) + (n.kind === 'person' ? 34 : 20)))
+      .force('center', d3.forceCenter(W / 2, H / 2))
+      .force('x', d3.forceX(W / 2).strength(0.03)).force('y', d3.forceY(H / 2).strength(0.03));
+    // "mentions" is the relation the model reaches for when no better one fits, and it is a third
+    // of the edges. Off to start with, the graph reads as who is interested in what, who works
+    // where, and who answered whom; the Links section switches it back on.
+    RELS.forEach(r => { if (!display.link[r]) display.link[r] = r === 'mentions' ? 'hide' : 'show'; });
+    const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link').attr('stroke-width', thickness);
+    // a one-pixel line is not something anyone can hit; the events live on a wide clear one
+    const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
+      .on('click', (e, l) => {
+        e.stopPropagation();
+        if (e.shiftKey || e.ctrlKey || e.metaKey) M.pick('link:' + links.indexOf(l)); else M.selectEdge(l);
+      })
+      .on('contextmenu', (e, l) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); M.pick('link:' + links.indexOf(l)); } })
+      .on('mousemove', (e, l) => tip(e, `${shown(l.source)} → ${shown(l.target)}`, `${l.rel.replace(/_/g, ' ')} · seen in ${l.messages.length} message${l.messages.length === 1 ? '' : 's'}`))
+      .on('mouseleave', hideTip);
+    const node = root.append('g').selectAll('g').data(nodes).join('g').attr('class', d => 'node k-' + d.kind).attr('tabindex', 0)
+      .call(d3.drag()
+        .filter(e => e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey)
+        .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
+        .on('drag', (e, d) => { d.fx = e.x; d.fy = e.y; })
+        .on('end', (e, d) => { if (!e.active) sim.alphaTarget(0); d.fx = null; d.fy = null; }));
+    node.append('circle').attr('class', 'hit').attr('r', d => radius(d) + 5);
+    node.append('path').attr('class', 'mark').attr('fill', d => color(d.kind)).attr('d', d => d3.symbol().type(kindFor(d.kind).shape).size(Math.PI * radius(d) ** 2 * 1.3)());
+    const label = node.append('text').attr('text-anchor', 'middle').attr('dy', d => radius(d) + 13).text(labelText);
+    // The travelling signal: the same light a message makes crossing an arrow, walking the
+    // whole route a path run found — through every entry in between, to the far end and back.
+    // A highlighted chain says two things are joined; watching light cross it says which way
+    // round, how far, and what it goes through, which is the thing a reader was asking.
+    const signalHalo = root.append('circle').attr('class', 'orb-halo').attr('r', 9).attr('display', 'none');
+    const signalCore = root.append('circle').attr('class', 'orb-core').attr('r', 3.5).attr('display', 'none');
+    const elabel = root.append('g').selectAll('text').data(links).join('text')
+      .attr('class', 'elabel').attr('text-anchor', 'middle').text(l => relText(l.rel));
+    const measure = () => {
+      label.each(function (d) { d.lw = this.getComputedTextLength(); });
+      elabel.each(function (l) { l.lw = this.getComputedTextLength(); });
+    };
+    measure();
+    if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
+    node.on('click', (e, d) => ((e.shiftKey || e.ctrlKey || e.metaKey)
+      ? M.pick('node:' + d.id) : (M.clearPicks(), select(d.id))))
+      // macOS folds a ctrl-click into the context menu and the click never arrives
+      .on('contextmenu', (e, d) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); M.pick('node:' + d.id); } })
+      .on('keydown', (e, d) => { if (e.key === 'Enter') select(d.id); })
+      .on('mousemove', (e, d) => tip(e, d.label, `${d.attrs.type || d.kind} · in ${d.mentions} message${d.mentions === 1 ? '' : 's'}${d.attrs.location ? ' · ' + d.attrs.location : ''}`))
+      .on('mouseleave', hideTip);
+
+    // Labels hold a constant size on screen — scale(1/k) undoes the zoom — so placement is done in
+    // screen pixels. The node that matters most claims its box first, below the mark and then above
+    // it; whatever still collides is left unlabelled rather than drawn over a neighbour, and zooming
+    // in spreads the marks apart until those labels fit.
+    const labelDy = (d, k) => radius(d) * k + 13;
+    // density 0 keeps only what fits with room to spare; 100 lets labels sit shoulder to shoulder
+    const gap = () => 14 - (view.density / 100) * 13;
+    let was2d = new Set();
+    function layoutLabels() {
+      const k = d3.zoomTransform(svg.node()).k;
+      const focus = M.selected ? new Set([M.selected, ...(neighbors.get(M.selected) || NONE)]) : null;
+      const rank = d => (d.id === M.selected ? 9 : paintRank(d.kind) - (minor(d) ? 1 : 0));
+      const queue = nodes.filter(d => d.x != null && matches(d) && (!focus || focus.has(d.id)))
+        .sort((a, b) => (was2d.has(b.id) - was2d.has(a.id))
+          || rank(b) - rank(a) || (b.mentions || 0) - (a.mentions || 0));
+      // every visible mark is an obstacle too, so a label never lands on another node's shape
+      const boxes = queue.map(d => {
+        const r = radius(d) * k;
+        return { x0: d.x * k - r, x1: d.x * k + r, y0: d.y * k - r, y1: d.y * k + r };
+      });
+      const show = new Set();
+      // A name you asked to see is never dropped for want of room. Collision decides which of the
+      // rest fit; the selected node and the ones joined to it are placed whatever they overlap.
+      const insist = d => d.id === M.selected || (focus && focus.has(d.id));
+      for (const d of queue) {
+        const half = (d.lw || 40) / 2 + gap(), cx = d.x * k, cy = d.y * k;
+        let placed = false;
+        for (const dy of [labelDy(d, k), -(radius(d) * k + 6)]) {
+          const box = { x0: cx - half, x1: cx + half, y0: cy + dy - 12, y1: cy + dy + 4 };
+          if (boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+          boxes.push(box); show.add(d.id); d.dy = dy; placed = true;
+          break;
+        }
+        if (!placed && insist(d)) { show.add(d.id); d.dy = labelDy(d, k); }
+      }
+      was2d = show;
+      node.classed('hushed', d => !show.has(d.id));
+      label.attr('transform', `scale(${1 / k})`).attr('dy', d => d.dy ?? labelDy(d, k));
+
+      // Edge names go in after the node names, so a relation never costs a person their label.
+      // With every kind switched on most of them lose; removing a relation is what frees the room.
+      const showEdge = new Set();
+      if (display.edgeLabels === 'show') {
+        const near = M.selected ? l => (l.source.id === M.selected || l.target.id === M.selected) : () => false;
+        const edges = links.filter(l => !linkGone(l) && !linkDropped(l) && l.source.x != null
+                                        && (!focus || near(l)))
+          .sort((a, b) => (near(b) - near(a)) || (b.weight || 0) - (a.weight || 0));
+        for (const l of edges) {
+          const half = (l.lw || 30) / 2 + gap();
+          const cx = (l.source.x + l.target.x) / 2 * k, cy = (l.source.y + l.target.y) / 2 * k;
+          const box = { x0: cx - half, x1: cx + half, y0: cy - 7, y1: cy + 5 };
+          const mine = M.selected && (l.source.id === M.selected || l.target.id === M.selected);
+          if (!mine && boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+          boxes.push(box); showEdge.add(l);
+        }
+      }
+      elabel.classed('hushed', l => !showEdge.has(l));
+    }
+
+    sim.on('tick', () => {
+      const k = d3.zoomTransform(svg.node()).k;
+      // where an edge sits, once it is nudged clear of anything sharing its two ends
+      const ends = l => {
+        const dx = l.target.x - l.source.x, dy = l.target.y - l.source.y;
+        const d = Math.hypot(dx, dy) || 1;
+        const off = (l.bend || 0), ox = -dy / d * off, oy = dx / d * off;
+        const head = radius(l.target) + 5 / k, tail = radius(l.source) + 1;
+        return [l.source.x + dx / d * tail + ox, l.source.y + dy / d * tail + oy,
+                l.target.x - dx / d * head + ox, l.target.y - dy / d * head + oy];
+      };
+      link.each(function (l) {
+        const [x1, y1, x2, y2] = ends(l);
+        this.setAttribute('x1', x1); this.setAttribute('y1', y1);
+        this.setAttribute('x2', x2); this.setAttribute('y2', y2);
+      });
+      hitline.each(function (l) {
+        const [x1, y1, x2, y2] = ends(l);
+        this.setAttribute('x1', x1); this.setAttribute('y1', y1);
+        this.setAttribute('x2', x2); this.setAttribute('y2', y2);
+      });
+      elabel.attr('transform', l => {
+        const [x1, y1, x2, y2] = ends(l);
+        return `translate(${(x1 + x2) / 2},${(y1 + y2) / 2}) scale(${1 / k})`;
+      });
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+      if (sim.alpha() < 0.06) layoutLabels();
+    });
+    let fitK = 1, lastK = 1;
+    const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => {
+      root.attr('transform', e.transform);
+      label.attr('transform', `scale(${1 / e.transform.k})`);
+      if (Math.abs(e.transform.k - lastK) > lastK * 0.08) { lastK = e.transform.k; layoutLabels(); }
+    });
+    svg.call(zoom).on('dblclick.zoom', null);
+    let fitted = false;
+    function fit() {
+      if (!nodes.length) return;
+      const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+      const x0 = Math.min(...xs) - 60, x1 = Math.max(...xs) + 60, y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
+      const k = Math.min(2.2, 0.92 / Math.max((x1 - x0) / W, (y1 - y0) / H));
+      const t = d3.zoomIdentity.translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2).scale(k);
+      const dur = fitted ? 400 : 0;
+      fitK = lastK = k;
+      fitted = true;
+      // the labels are placed in screen pixels, so they have to be placed against the zoom this
+      // transition lands on, not the one it starts from
+      svg.transition().duration(dur).call(zoom.transform, t)
+        .on('end interrupt', () => { lastK = d3.zoomTransform(svg.node()).k; layoutLabels(); wrap.classList.remove('settling'); });
+    }
+    sim.on('end', () => { if (!fitted || needsFit) { needsFit = false; fit(); } });
+    setTimeout(() => { if (!fitted) fit(); }, 1500);
+    svg.on('click', e => { if (e.target === svg.node()) select(null); });
+    new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
+    if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html(`<div><b>No messages yet.</b><br>${esc(COPY.empty)}</div>`);
+    function applyPhysics() {
+      if (!M.g3) return;
+      M.g3.d3Force('charge').strength(-60 * view.repel);
+      M.g3.d3Force('link').distance(l => (28 + 10 / Math.sqrt(l.weight || 1)) * view.spring);
+      sim.force('charge').strength(-420 * view.repel);
+      sim.force('link').distance(l => (90 + 20 / Math.sqrt(l.weight || 1)) * view.spring);
+    }
+    function refresh() {
+      search();
+      const vis = new Set(nodes.filter(matches).map(n => n.id));
+      const focus = M.selected ? new Set([M.selected, ...(neighbors.get(M.selected) || [])]) : null;
+      node.classed('gone', gone).classed('dim', d => !vis.has(d.id) || (focus && !focus.has(d.id)))
+          .classed('on', d => d.id === M.selected);
+      node.classed('picked', d => picked.has('node:' + d.id));
+      link.classed('picked', l => picked.has('link:' + links.indexOf(l)));
+      hitline.classed('gone', linkGone);
+      link.classed('gone', linkGone)
+          .classed('dim', l => !vis.has(l.source.id) || !vis.has(l.target.id) || (focus && l.source.id !== M.selected && l.target.id !== M.selected))
+          .classed('on', l => focus && (l.source.id === M.selected || l.target.id === M.selected));
+      emit('refresh');
+      link.classed('onpath', l => M.pathLinks.has(l));
+      node.classed('near', d => !!(M.found && M.found.near.has(d.id)))
+          .classed('answer', d => !!(M.answer && M.answer.has(d.id)));
+      // a path run or an answer put its own tally here, and the repaint that follows must
+      // not wipe it — only a search owns this line
+      if (M.found && !nothingFound()) {
+        M.setCount(`${M.found.direct.size}${M.found.near.size ? ' +' + M.found.near.size : ''}`);
+      } else if (!M.pathLinks.size && !M.answer) {
+        M.setCount('');
+      }
+      if (nothingFound()) {
+        M.openAnswers(`nothing in the graph matches “${M.askedText()}”` +
+                    (served ? ' — press enter to ask the model anyway' : ''));
+      }
+      layoutLabels();
+      if (M.g3 && M.is3d) {
+        M.g3.nodeColor(M.g3.nodeColor()); M.g3.linkColor(M.g3.linkColor());
+        M.g3.nodeVisibility(M.g3.nodeVisibility()); M.g3.linkVisibility(M.g3.linkVisibility());
+        M.g3.linkDirectionalParticles(M.g3.linkDirectionalParticles());
+      }
+    }
+    let needsFit = false;
+    function applyRemoval() {
+      const liveNodes = nodes.filter(d => !dropped(d));
+      const liveLinks = links.filter(l => !linkDropped(l));
+      sim.nodes(liveNodes);
+      sim.force('link').links(liveLinks);
+      needsFit = true;
+      sim.alpha(0.7).restart();
+      if (M.g3) M.push3d();
+    }
+    // Removing a kind restarts the simulation from where everything already was, which keeps a
+    // shape the removed nodes made. Re-arranging throws the positions away and lets the layout
+    // find the shape of what is left, ForceAtlas2-style: repulsion scaled by how well joined a
+    // node is, so hubs push out and leaves settle around them.
+    function arrange() {
+      const live = nodes.filter(d => !dropped(d));
+      const liveLinks = links.filter(l => !linkDropped(l));
+      const degree = new Map(live.map(d => [d.id, 0]));
+      for (const l of liveLinks) {
+        const a = l.source.id ?? l.source, b = l.target.id ?? l.target;
+        degree.set(a, (degree.get(a) || 0) + 1);
+        degree.set(b, (degree.get(b) || 0) + 1);
+      }
+      const R = Math.min(W, H) * 0.38;
+      live.forEach((d, i) => {
+        const t = (i / live.length) * Math.PI * 2, r = R * (0.35 + 0.65 * Math.random());
+        d.x = W / 2 + Math.cos(t) * r; d.y = H / 2 + Math.sin(t) * r;
+        d.vx = d.vy = 0; d.fx = d.fy = null;
+      });
+      sim.nodes(live);
+      sim.force('link').links(liveLinks);
+      sim.force('charge', d3.forceManyBody()
+        .strength(d => -160 * (1 + Math.sqrt(degree.get(d.id) || 0)) * view.repel)
+        .distanceMax(700));
+      needsFit = true;
+      sim.alpha(1).alphaDecay(0.018).restart();
+      if (M.g3) { M.push3d(); if (M.g3.d3ReheatSimulation) M.g3.d3ReheatSimulation(); }
+    }
+
+    // A node's name is drawn inside that node's own group, so every circle drawn after it covers
+    // the text. Placing the label was not enough; what you selected has to be drawn last.
+    function raiseSelected() {
+      if (!M.selected) return;
+      const near = neighbors.get(M.selected) || NONE;
+      link.filter(l => l.source.id === M.selected || l.target.id === M.selected).raise();
+      node.filter(d => near.has(d.id)).raise();
+      node.filter(d => d.id === M.selected).raise();
+    }
+
+    // Frame everything that is on screen, in whichever view is on screen.
+    function recenter() {
+      if (M.is3d && M.g3) { M.g3.zoomToFit(500, 70); return; }
+      fit();
+    }
+    let signalRoute = [], signalRaf = 0, signalFrom = 0;
+    function stopSignal() {
+      if (signalRaf) cancelAnimationFrame(signalRaf);
+      signalRaf = 0;
+      signalRoute = [];
+      signalHalo.attr('display', 'none');
+      signalCore.attr('display', 'none');
+      if (M.g3) M.g3.linkDirectionalParticles(0);
+    }
+    function runSignal(route) {
+      stopSignal();
+      if (route.length < 2) return;
+      signalRoute = route;
+      signalFrom = performance.now();
+      // 3d-force-graph carries its own travelling particles; asking it is better than
+      // reaching into its scene, which is a different three.js from any global here
+      if (M.g3) {
+        M.g3.linkDirectionalParticles(l => (M.pathLinks.has(l) ? 2 : 0))
+          .linkDirectionalParticleWidth(2.2)
+          .linkDirectionalParticleSpeed(0.006)
+          .linkDirectionalParticleColor(() => M.cssVar('--accent'));
+      }
+      const HOP_MS = 700;
+      const step = now => {
+        if (!signalRoute.length) return;
+        const legs = signalRoute.length - 1;
+        // out and back: the reader watches it reach the far end, then return the way it came
+        const t = ((now - signalFrom) / HOP_MS) % (legs * 2);
+        const along = t <= legs ? t : legs * 2 - t;
+        const leg = Math.min(legs - 1, Math.floor(along));
+        const f = along - leg;
+        const from = signalRoute[leg], to = signalRoute[leg + 1];
+        const seg = legBetween(from, to);
+        const a = byId.get(from), b = byId.get(to);
+        let x1 = a && a.x, y1 = a && a.y, x2 = b && b.x, y2 = b && b.y;
+        if (seg) {
+          const line = link.nodes()[links.indexOf(seg.l)];
+          if (line) {
+            const g = ['x1', 'y1', 'x2', 'y2'].map(k => +line.getAttribute(k));
+            [x1, y1, x2, y2] = seg.flip ? [g[2], g[3], g[0], g[1]] : g;
+          }
+        }
+        if (x1 != null && x2 != null && !Number.isNaN(x1)) {
+          const cx = x1 + (x2 - x1) * f, cy = y1 + (y2 - y1) * f;
+          signalHalo.attr('display', null).attr('cx', cx).attr('cy', cy);
+          signalCore.attr('display', null).attr('cx', cx).attr('cy', cy);
+        }
+        signalRaf = requestAnimationFrame(step);
+      };
+      signalRaf = requestAnimationFrame(step);
+    }
+    function findPaths() {
+      const wanted = new Set(toJoin().filter(id => byId.has(id)));
+      if (wanted.size < 2) {
+        M.setCount('shift-click two or more');
+        return;
+      }
+      const { joined, onPath, unreachable } = joinUp([...wanted]);
+      M.answer = joined;
+      M.pathLinks = onPath;
+      runSignal(routeThrough(wanted));
+      refresh();
+      M.renderFound([...joined], [...joined].map(id => (byId.get(id) || {}).label || '').join(' '),
+                  [...wanted]);
+      // after refresh(), which runs search() and writes this same readout
+      M.setCount(`${joined.size} joined` + (unreachable ? `, ${unreachable} unreachable` : ''));
+    }
+    const snapBtn = document.getElementById('snap');
+    // Clicking a node moves the view to it, which is what you want while you are following a
+    // thread and exactly what you do not want while you are shift-clicking your way around one.
+    function paintSnap() { snapBtn.setAttribute('aria-pressed', view.snap !== false); }
+    snapBtn.addEventListener('click', () => {
+      view.snap = view.snap === false;
+      paintSnap();
+      saveDisplay();
+    });
+    paintSnap();
+    // Flipping it re-joins whatever is currently shown, so the difference is visible at once
+    // rather than on the next question.
+    const likeBtn = document.getElementById('likewise');
+    function paintLikewise() { likeBtn.setAttribute('aria-pressed', !!view.likewise); }
+    likeBtn.addEventListener('click', () => {
+      view.likewise = !view.likewise;
+      paintLikewise();
+      saveDisplay();
+      if (M.fromAnswer) {
+        const ids = (M.fromAnswer.ends || M.fromAnswer.ids).filter(id => byId.has(id));
+        M.answer = ids.length ? new Set(ids) : null;
+        M.pathLinks = new Set();
+        let short = 0;
+        if (ids.length > 1) {
+          const { joined, onPath, unreachable } = joinUp(ids);
+          M.answer = joined;
+          M.pathLinks = onPath;
+          short = unreachable;
+          runSignal(routeThrough(ids));
+        }
+        refresh();
+        M.renderFound([...(M.answer || [])], M.fromAnswer.said, ids);
+        // after refresh(), which runs search() and writes this same readout
+        M.setCount(`${M.answer ? M.answer.size : 0} joined`
+          + (short ? `, ${short} unreachable` : ''));
+      } else if (picked.size) {
+        findPaths();
+      }
+    });
+    paintLikewise();
+    document.getElementById('findpath').addEventListener('click', findPaths);
+    document.getElementById('arrange').addEventListener('click', () => arrange());
+    document.getElementById('recenter').addEventListener('click', () => recenter());
+    function select(id) {
+      // An answer's highlight is a filter, and choosing is how you take it back — including
+      // choosing nothing. The guard used to read `id && answer`, so a click on empty space
+      // dropped the selection and left every other node dimmed with no way back but retyping
+      // the question. Gathered picks are deliberate and survive; only the filter goes.
+      if (M.answer || M.pathLinks.size) {
+        M.answer = null; M.pathLinks = new Set(); M.setCount(''); stopSignal();
+      }
+      M.selected = id;
+      refresh();
+      M.renderDetail(id ? byId.get(id) : null);
+      if (id) M.face('details');
+      raiseSelected();
+      if (!view.snap) return;
+      if (!id) return;
+      if (M.is3d) M.flyTo(id); else bringIntoView(byId.get(id));
+    }
+    // a node already well inside the frame is left where it is: recentring everything on every
+    // click makes the graph feel like it is fighting you. Only an edge case is pulled in, and the
+    // zoom never changes, so the labels around it keep their placement.
+    function bringIntoView(d) {
+      if (!d || d.x == null) return;
+      const t = d3.zoomTransform(svg.node()), x = t.applyX(d.x), y = t.applyY(d.y);
+      if (x > W * 0.18 && x < W * 0.82 && y > H * 0.18 && y < H * 0.82) return;
+      svg.transition().duration(450).call(zoom.transform,
+        d3.zoomIdentity.translate(W / 2 - t.k * d.x, H / 2 - t.k * d.y).scale(t.k));
+    }
+    const resized = () => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.15).restart(); layoutLabels(); };
+    const view2d = { node, link, hitline, root, svg, sim };
+    Object.assign(M, { measure, resized, view2d });
+  }
+  class GraphView extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-view', GraphView);
+})();
+</script>

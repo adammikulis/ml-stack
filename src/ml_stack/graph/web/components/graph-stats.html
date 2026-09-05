@@ -1,0 +1,27 @@
+<!-- <graph-stats>: how many messages, members, nodes and links are in the picture -->
+<style>
+.stats { display: flex; gap: 14px; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; }
+.stats b { color: var(--ink); font-weight: 600; font-family: var(--font-mono); }
+</style>
+<template>
+        <div class="stats" id="stats"></div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { DATA, counted, stats } = M;
+  function wire() {
+    Object.assign(M, { paintCounts });
+    function paintCounts() {
+      const c = counted();
+      document.getElementById('stats').innerHTML =
+        `<span><b>${stats.messages ?? 0}</b> messages${DATA.messagesLeftOut ? ` <span class="n">(${DATA.messagesLeftOut} not on this page)</span>` : ''}</span><span><b>${c.members}</b> members</span><span><b>${c.nodes}</b> nodes</span><span><b>${c.edges}</b> links</span>`;
+    }
+    paintCounts();
+  }
+  class GraphStats extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-stats', GraphStats);
+})();
+</script>

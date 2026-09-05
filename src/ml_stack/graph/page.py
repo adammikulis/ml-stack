@@ -1,15 +1,14 @@
 """A graph as one page: force layout in two dimensions and three, on a map, searchable.
 
-Every project that builds a graph then needs to look at it, and looking at it well is a lot of
-work to redo — labels that do not collide, a legend that filters, a view that re-settles when a
-kind is switched off, evidence for what is drawn. The page here does that for any graph shaped
-as ``{"nodes": [...], "edges": [...]}``; what a project calls its kinds, and what it says about
-them, are given rather than assumed.
+The page is assembled from components (`ml_stack.ui`): one file each under ``web/components``,
+a custom element apiece, sharing one model (``page-model``). ``COMPONENTS`` is the page; a
+caller may hand ``render`` a shorter list, or a longer one with components of its own. The
+graph is ``{"nodes": [...], "edges": [...]}``; what a project calls its kinds, and what it
+says about them, are given rather than assumed.
 
-Everything ships inside the file. There is no server behind it, no build step, and no request
-made once it is open, so the page can be mailed, published, or served from a laptop and behaves
-the same. That also sets the limit: the graph is in the file, so anyone who has the file has the
-graph. For anything private, serve it rather than send it.
+Everything ships inside the file: no build step, no request made once it is open, so the
+page can be mailed, published, or served from a laptop and behaves the same. Anyone who has
+the file has the graph; for anything private, serve it rather than send it.
 
     html = render(graph, title="Who works on what",
                   kinds=[{"k": "person", "label": "People", "shape": "circle"},
@@ -23,11 +22,19 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.ui import Component, assemble, load
+
 WEB = Path(__file__).parent / "web"
+COMPONENTS_DIR = WEB / "components"
+#: the page, in the order the elements wire themselves up
+COMPONENTS = ("page-model", "graph-banner", "graph-stats", "graph-search", "graph-view",
+              "graph-grips", "graph-map", "graph-history", "graph-3d", "graph-detail",
+              "ask-pane", "draft-note", "change-request", "display-panel", "refresh-button",
+              "review-queue")
 SHAPES = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
 # what a kind is drawn as, when the caller does not say
 FALLBACK = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
-# the five kinds graph.html paints itself, light and dark, in its own stylesheet
+# the five kinds the shell paints itself, light and dark, in its own stylesheet
 SHIPPED = {"person": "#2a78d6", "org": "#eb6834", "place": "#1baf7a", "topic": "#eda100",
            "opportunity": "#e87ba4"}
 # what any other kind is painted, by position, when the caller does not say
@@ -84,8 +91,8 @@ def coloured(kinds: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
 
 
 def kind_style(kinds: Sequence[Mapping[str, Any]]) -> str:
-    """A ``<style>`` painting every kind that the template does not: a given colour, and
-    the palette colour of a kind the template never heard of. Empty when there is none."""
+    """A ``<style>`` painting every kind that the shell does not: a given colour, and the
+    palette colour of a kind the shell never heard of. Empty when there is none."""
     rules = [f"--k-{k['k']}:{k['colour']}" for k in kinds
              if k.get("k") and k.get("colour") and k["colour"] != SHIPPED.get(k["k"])]
     if not rules:
@@ -120,24 +127,38 @@ def _embedded(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":")).replace("</", "<\\/")
 
 
+def components(names: Sequence[str | Component] = COMPONENTS) -> list[Component]:
+    """The named components: a bare name is one of the page's own under ``web/components``;
+    a `Component` is taken as given, wherever its file lives."""
+    return [c if isinstance(c, Component) else load(COMPONENTS_DIR, [c])[0] for c in names]
+
+
+def template(names: Sequence[str | Component] = COMPONENTS) -> str:
+    """The page with its components in place and the payload markers still in it."""
+    shell = (WEB / "shell.html").read_text(encoding="utf-8")
+    return assemble(shell, components(names))
+
+
 def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
            kinds: Sequence[Mapping[str, Any]] | None = None,
            copy: Mapping[str, str] | None = None,
            points: Sequence[Mapping[str, Any]] = (),
            world: Mapping[str, Any] | None = None,
            author: str = "", extra: Mapping[str, Any] | None = None,
-           most_messages: int | None = None) -> str:
+           most_messages: int | None = None,
+           parts: Sequence[str | Component] = COMPONENTS) -> str:
     """The whole page, as one string.
 
     ``brand`` names whatever made the page, on the bar above it; ``title`` names the graph,
-    over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to show
-    on the map; passing none leaves the map empty. ``extra`` is merged into the payload the page reads, for
-    whatever a caller's own panels need. A kind entry may carry ``colour`` (a hex string);
-    one without gets a colour of its own, so no kind paints black. ``most_messages`` keeps
-    only that many of the newest messages, and the payload's ``messagesLeftOut`` says how
-    many did not fit.
+    over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to
+    show on the map; passing none leaves the map empty. ``extra`` is merged into the payload
+    the page reads, for whatever a caller's own panels need. A kind entry may carry
+    ``colour`` (a hex string); one without gets a colour of its own, so no kind paints black.
+    ``most_messages`` keeps only that many of the newest messages, and the payload's
+    ``messagesLeftOut`` says how many did not fit. ``parts`` is the page's components,
+    `COMPONENTS` unless a caller leaves some out or adds its own.
     """
-    template = (WEB / "graph.html").read_text(encoding="utf-8")
+    page = template(parts)
     visible, left_out = shown(graph), 0
     if most_messages is not None:
         visible, left_out = newest(visible, int(most_messages))
@@ -145,7 +166,7 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
     payload = {"title": title, "graph": visible, "points": list(points),
                "kinds": kinds, "messagesLeftOut": left_out,
                "copy": dict(copy or {}), "author": author, **dict(extra or {})}
-    return (template
+    return (page
             .replace("</style>", "</style>\n" + kind_style(kinds), 1)
             .replace("__BRAND__", brand or title)
             .replace("__TITLE__", title)

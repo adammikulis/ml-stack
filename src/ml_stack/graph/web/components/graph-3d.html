@@ -1,0 +1,360 @@
+<!-- <graph-3d>: the same graph in three dimensions, with the 2D/3D switch -->
+<style>
+#spin { display: none; }
+.graph-wrap.is3d #spin { display: inline-flex; }
+#graph3d { position: absolute; inset: 0; display: none; }
+.graph-wrap.is3d #graph3d { display: block; }
+#labels3d { position: absolute; inset: 0; overflow: hidden; pointer-events: none; display: none; }
+.graph-wrap.is3d #labels3d { display: block; }
+.l3 { position: absolute; transform: translate(-50%, 0); white-space: nowrap; font: 500 calc(13px * var(--label-scale, 1)) var(--font-body);
+      color: var(--ink-2); text-shadow: 0 0 3px var(--bg), 0 0 3px var(--bg), 0 0 4px var(--bg); }
+.l3.k-person { font: 600 calc(15px * var(--label-scale, 1)) var(--font-body); color: var(--ink); }
+.l3.k-topic { font-size: calc(12px * var(--label-scale, 1)); color: var(--ink-3); }
+.l3.edge { font: 500 calc(10px * var(--elabel-scale, 1)) var(--font-body); color: var(--ink-3); }
+.graph-wrap.is3d svg#graph { visibility: hidden; }
+#labels3d .l3.picked { color: var(--accent); }
+.l3.on { color: var(--ink); font-weight: 700; }
+</style>
+<template>
+      <div id="graph3d" aria-label="Knowledge graph, 3D"></div>
+      <div id="labels3d" aria-hidden="true"></div>
+</template>
+<template mount="tools">
+        <button id="spin" class="chip" aria-pressed="false">↻ spin</button>
+</template>
+<template mount="footbar">
+        <div class="seg" role="group" aria-label="View">
+          <button id="v2d" aria-pressed="true">2D</button><button id="v3d" aria-pressed="false">3D</button>
+        </div>
+</template>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { NONE, byId, colourOf, display, dropped, gone, labelText, linkDropped, linkP2PGone, links, matches, minor, neighbors, nodes, on, paintRank, picked, relText, shown, srcGone, view } = M;
+  function wire() {
+    Object.assign(M, { setView, setSpin, flyTo, push3d, mark3dPicked, init3d });
+    const wrap = document.querySelector('.graph-wrap');
+    M.g3 = null; M.is3d = false; let fitted3d = false;
+    const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    function init3d() {
+      if (M.g3 || typeof ForceGraph3D !== 'function') return;
+      const el = document.getElementById('graph3d');
+      M.g3 = ForceGraph3D({ controlType: 'orbit' })(el)
+        .width(wrap.clientWidth).height(wrap.clientHeight)
+        .backgroundColor(cssVar('--bg'))
+        .graphData(live3d())
+        .nodeVal(val3d)
+        .nodeVisibility(n => !gone(n.ref))
+        .linkVisibility(l => !srcGone(l) && !linkP2PGone(l) && display.link[l.rel] === 'show'
+          && !gone(byId.get(l.source.id ?? l.source)) && !gone(byId.get(l.target.id ?? l.target)))
+        .linkDirectionalArrowLength(3.5)
+        .linkDirectionalArrowRelPos(1)
+        .linkDirectionalArrowColor(l => link3d(l))
+        .nodeRelSize(5)
+        .nodeColor(n => shade3d(n))
+        .nodeOpacity(0.95)
+        .nodeLabel(n => `<div style="font:12px ${cssVar('--font-body')};padding:4px 7px;border-radius:6px;background:${cssVar('--ink')};color:${cssVar('--bg')}">${shown(n.ref)}<div style="opacity:.7;font-size:11px">${n.ref.attrs.type || n.kind} · ${n.mentions}</div></div>`)
+        .linkColor(l => link3d(l))
+        .linkOpacity(0.5)
+        .linkWidth(l => 0.4 + Math.sqrt(l.weight) * 0.4)
+        .linkDirectionalParticles(l => (M.glow.has(M.key3d(l)) ? 4
+          : (M.selected && (l.source.id === M.selected || l.target.id === M.selected)) ? 2 : 0))
+        .linkDirectionalParticleSpeed(l => (M.glow.has(M.key3d(l)) ? 0.02 : 0.006))
+        .onNodeClick(n => { M.clearPicks(); M.select(n.id); })
+        .onBackgroundClick(() => M.select(null))
+        .showNavInfo(false)
+        .onEngineStop(() => { if (!fitted3d) { fitted3d = true; M.g3.zoomToFit(0, 70); setTimeout(() => M.g3.zoomToFit(500, 70), 300); } });
+      M.applyPhysics();
+      // without this the disconnected components drift apart and zoomToFit has to frame the gaps,
+      // which is what left the graph a distant speck; the 2D view gets the same pull from forceX/Y
+      M.g3.d3Force('pull', alpha => {
+        for (const n of M.g3.graphData().nodes) {
+          const k = alpha * 0.08;
+          n.vx -= n.x * k; n.vy -= n.y * k; n.vz -= n.z * k;
+        }
+      });
+      M.g3.cooldownTicks(200);
+      const controls = M.g3.controls();
+      controls.autoRotateSpeed = 0.9;
+      // Blender's scheme: middle drags the view around, shift+middle slides it, the wheel zooms,
+      // and the left button is left alone so a click still picks a node.
+      controls.mouseButtons = { LEFT: null, MIDDLE: 0, RIGHT: 2 };
+      el.addEventListener('pointerdown', e => {
+        if (e.button === 1) {
+          e.preventDefault();
+          controls.mouseButtons = { LEFT: null, MIDDLE: e.shiftKey ? 2 : 0, RIGHT: 2 };
+        }
+      }, true);
+      el.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+    }
+    // Home frames everything, "." frames what is selected — the Blender keys for the same thing
+    addEventListener('keydown', e => {
+      if (!M.is3d || !M.g3 || e.target.tagName === 'INPUT') return;
+      if (e.key === 'Home') { e.preventDefault(); M.g3.zoomToFit(500, 70); }
+      if (e.key === '.' && M.selected) { e.preventDefault(); flyTo(M.selected); }
+    });
+    // The engine resolves a link's ends from ids only while it is running. Set new data with the
+    // engine stopped — which is what switching a kind off does — and the links keep bare strings
+    // where objects should be, and the next click hit-tests one and throws inside the library.
+    // Handing it the objects directly leaves nothing to resolve.
+    function live3d() {
+      const live = nodes.filter(n => !dropped(n))
+        .map(n => ({ id: n.id, kind: n.kind, label: n.label, mentions: n.mentions, ref: n }));
+      const byId3d = new Map(live.map(n => [n.id, n]));
+      const joined = [];
+      for (const l of links) {
+        if (linkDropped(l)) continue;
+        const a = byId3d.get(l.source.id ?? l.source), b = byId3d.get(l.target.id ?? l.target);
+        if (a && b) joined.push({ source: a, target: b, rel: l.rel, weight: l.weight });
+      }
+      return { nodes: live, links: joined };
+    }
+    function push3d() { if (M.g3) { M.g3.graphData(live3d()); fitted3d = false; } }
+    const VAL3D = { person: [6, 4], org: [2, 1], place: [2, 1], opportunity: [2, 1], topic: [0.6, 0.4] };
+    function val3d(n) { const [base, per] = VAL3D[n.kind] || VAL3D.org; return base + (n.mentions || 1) * per; }
+
+    // 3D labels are DOM, projected onto the canvas every frame. A three.js text sprite would have to
+    // come from the copy of three bundled inside 3d-force-graph, and one built from a separate global
+    // three does not render; this way the labels also match the 2D type and collision rules exactly.
+    const labelLayer = document.getElementById('labels3d');
+    const els = new Map();
+    const rad3d = n => Math.cbrt(val3d(n)) * 5;
+    function build3dLabels() {
+      const add = (key, cls, text) => {
+        const el = document.createElement('span');
+        el.className = cls;
+        el.textContent = text;
+        el.hidden = true;
+        labelLayer.appendChild(el);
+        els.set(key, el);
+      };
+      nodes.forEach(n => add(n.id, 'l3 k-' + n.kind, labelText(n)));
+      mark3dPicked();
+      links.forEach(l => add('rel:' + l.source.id + '|' + l.rel + '|' + l.target.id, 'l3 edge', relText(l.rel)));
+    }
+    let was3d = new Set();
+    const slot3d = new Map();
+    function place3dLabels() {
+      if (!M.is3d || !M.g3) return;
+      const cam = M.g3.cameraPosition(), tgt = M.g3.controls().target;
+      let ax = tgt.x - cam.x, ay = tgt.y - cam.y, az = tgt.z - cam.z;
+      const len = Math.hypot(ax, ay, az) || 1; ax /= len; ay /= len; az /= len;
+      const focus = M.selected ? new Set([M.selected, ...(neighbors.get(M.selected) || NONE)]) : null;
+      const rank = d => (d.id === M.selected ? 9 : paintRank(d.kind) - (minor(d) ? 1 : 0));
+      const w = wrap.clientWidth, h = wrap.clientHeight;
+      const perPx = (h / 2) / Math.tan(M.g3.camera().fov * Math.PI / 360);
+      const boxes = [], spheres = [], queue = [], at = new Map();
+      for (const n of M.g3.graphData().nodes) {
+        const ref = n.ref;
+        if (n.x == null || !matches(ref)) continue;
+        // drop anything behind the camera; graph2ScreenCoords would mirror it into view
+        if ((n.x - cam.x) * ax + (n.y - cam.y) * ay + (n.z - cam.z) * az <= 0) continue;
+        const p = M.g3.graph2ScreenCoords(n.x, n.y, n.z);
+        const dist = Math.hypot(n.x - cam.x, n.y - cam.y, n.z - cam.z) || 1;
+        const r = rad3d(n) * perPx / dist;
+        // a name may sit beside a small sphere but never over any of them; only the big ones
+        // crowd out another node's name, so the two lists differ
+        const solid = { x0: p.x - r, x1: p.x + r, y0: p.y - r, y1: p.y + r };
+        // a node outside what you are looking at is drawn faint, so a name may sit over it.
+        // Counting it as an obstacle is what left a selected cluster with no labels at all.
+        if (focus && !focus.has(n.id)) continue;
+        spheres.push(solid);
+        if (r >= 10) boxes.push(solid);
+        queue.push({ id: n.id, ref, px: p.x, py: p.y, r });
+        at.set(n.id, p);
+      }
+      // A greedy fit redone every frame changes its mind as the camera moves, and the names blink.
+      // Whatever was up last frame is placed first, so a label keeps its slot until it truly cannot
+      // fit, and only the leftovers compete.
+      queue.sort((a, b) => (was3d.has(b.id) - was3d.has(a.id))
+        || rank(b.ref) - rank(a.ref) || (b.ref.mentions || 0) - (a.ref.mentions || 0));
+      for (const el of els.values()) el.hidden = true;
+      const nowShown = new Set();
+      for (const q of queue) {
+        const half = (q.ref.lw || 40) / 2 + 3;
+        if (q.px < half || q.px > w - half) continue;
+        const insist = q.id === M.selected || (focus && focus.has(q.id));
+        let placed = false;
+        // the slot this name used last frame is tried first, so a label that keeps its place does
+        // not hop above and below its node as the camera turns
+        const slots = [q.py + q.r + 4, q.py - q.r - 19, q.py - 7];
+        const kept = slot3d.get(q.id);
+        if (kept !== undefined) slots.unshift(slots.splice(kept, 1)[0]);
+        for (const top of slots) {
+          if (top < 2 || top + 15 > h - 2) continue;
+          const box = { x0: q.px - half, x1: q.px + half, y0: top, y1: top + 15 };
+          if (!insist && boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+          boxes.push(box);
+          const el = els.get(q.id);
+          el.style.left = q.px + 'px'; el.style.top = top + 'px'; el.hidden = false;
+          placed = true; nowShown.add(q.id);
+          slot3d.set(q.id, [q.py + q.r + 4, q.py - q.r - 19, q.py - 7].indexOf(top));
+          break;
+        }
+        if (!placed && insist) {
+          const el = els.get(q.id);
+          el.style.left = q.px + 'px'; el.style.top = (q.py - 7) + 'px'; el.hidden = false;
+          nowShown.add(q.id);
+        }
+      }
+      was3d = nowShown;
+      if (display.edgeLabels !== 'show') return;
+      for (const l of M.g3.graphData().links) {
+        const el = els.get('rel:' + (l.source.id ?? l.source) + '|' + l.rel + '|' + (l.target.id ?? l.target));
+        if (!el) continue;
+        const a = at.get(l.source.id ?? l.source), b = at.get(l.target.id ?? l.target);
+        if (!a || !b || srcGone(l) || linkP2PGone(l) || display.link[l.rel] !== 'show') continue;
+        if (focus && !focus.has(l.source.id ?? l.source) && !focus.has(l.target.id ?? l.target)) continue;
+        const px = (a.x + b.x) / 2, py = (a.y + b.y) / 2;
+        const half = el.offsetWidth / 2 + 3;
+        if (px < half || px > w - half || py < 8 || py > h - 8) continue;
+        const box = { x0: px - half, x1: px + half, y0: py - 7, y1: py + 8 };
+        const clear = r => !r.some(x => x.x0 < box.x1 && box.x0 < x.x1 && x.y0 < box.y1 && box.y0 < x.y1);
+        const mine = !!M.selected && ((l.source.id ?? l.source) === M.selected
+                                   || (l.target.id ?? l.target) === M.selected);
+        if (!mine && (!clear(boxes) || !clear(spheres))) continue;
+        boxes.push(box);
+        el.style.left = px + 'px'; el.style.top = (py - 7) + 'px'; el.hidden = false;
+      }
+    }
+    // A shift-click never reaches the library's node handler: its own pointer code throws on a
+    // modified click before the handler runs. So the hit test is done here, against the same
+    // projection the labels use, and the event is stopped before the library sees it.
+    function nodeAt(x, y) {
+      if (!M.g3) return null;
+      const box = wrap.getBoundingClientRect();
+      const cam = M.g3.cameraPosition(), tgt = M.g3.controls().target;
+      let ax = tgt.x - cam.x, ay = tgt.y - cam.y, az = tgt.z - cam.z;
+      const len = Math.hypot(ax, ay, az) || 1; ax /= len; ay /= len; az /= len;
+      const perPx = (wrap.clientHeight / 2) / Math.tan(M.g3.camera().fov * Math.PI / 360);
+      let best = null, nearest = Infinity;
+      for (const n of M.g3.graphData().nodes) {
+        if (n.x == null) continue;
+        if ((n.x - cam.x) * ax + (n.y - cam.y) * ay + (n.z - cam.z) * az <= 0) continue;
+        const p = M.g3.graph2ScreenCoords(n.x, n.y, n.z);
+        const dist = Math.hypot(n.x - cam.x, n.y - cam.y, n.z - cam.z) || 1;
+        // an honest click wobbles: the target is never smaller than 14px, plus a pad
+        const r = Math.max(14, rad3d(n) * perPx / dist + 4);
+        const away = Math.hypot(p.x - (x - box.left), p.y - (y - box.top));
+        if (away <= r && away < nearest) { nearest = away; best = n; }
+      }
+      return best;
+    }
+    for (const kind of ['pointerdown', 'pointerup', 'click', 'contextmenu']) {
+      wrap.addEventListener(kind, e => {
+        if (!M.is3d) return;
+        // the pick for a ctrl-press fires on pointerdown; the menu the OS folds it into is noise
+        if (kind === 'contextmenu') { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); } return; }
+        if ((e.shiftKey || e.ctrlKey || e.metaKey) && e.button === 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (kind !== 'pointerdown') return;
+          const n = nodeAt(e.clientX, e.clientY);
+          if (n) M.pick('node:' + n.id);
+          return;
+        }
+        // only the left button may grab a node: a middle press over one would start the
+        // library's drag, so it is stopped here and the camera keeps the gesture
+        if (kind === 'pointerdown' && e.button !== 0 && nodeAt(e.clientX, e.clientY)) e.stopPropagation();
+      }, true);
+    }
+
+    let raf = 0;
+    // after a node drag ends — and a plain press on a node is a zero-length drag — the
+    // library resets the camera controls by synthesizing a "touch" pointerup on the
+    // document; the controls then read a touch position they never stored and throw.
+    // Their real reset has already run by then, so the synthetic event is swallowed
+    document.addEventListener('pointerup', e => {
+      if (!e.isTrusted && e.pointerType === 'touch') e.stopImmediatePropagation();
+    }, true);
+    function frame3d() { place3dLabels(); raf = requestAnimationFrame(frame3d); }
+    function flyTo(id) {
+      if (!M.g3) return;
+      const all = M.g3.graphData().nodes;
+      const n = all.find(x => x.id === id);
+      if (!n || n.x == null) return;
+      // frame the node with everything joined to it: flying to the node alone puts the camera
+      // inside the cluster you were trying to look at
+      const near = neighbors.get(id) || NONE;
+      const group = all.filter(x => x.x != null && (x.id === id || near.has(x.id)));
+      let cx = 0, cy = 0, cz = 0;
+      group.forEach(x => { cx += x.x; cy += x.y; cz += x.z; });
+      cx /= group.length; cy /= group.length; cz /= group.length;
+      const spread = Math.max(60, ...group.map(x => Math.hypot(x.x - cx, x.y - cy, x.z - cz)));
+      const back = spread / Math.tan(M.g3.camera().fov * Math.PI / 360) + spread + 40;
+      const len = Math.hypot(cx - n.x, cy - n.y, cz - n.z) || 1;
+      const ux = (n.x - cx) / len, uy = (n.y - cy) / len, uz = (n.z - cz) / len;
+      M.g3.cameraPosition({ x: cx + ux * back, y: cy + uy * back, z: cz + uz * back },
+                        { x: cx, y: cy, z: cz }, 900);
+    }
+    function mark3dPicked() {
+      els.forEach((el, key) => el.classList.toggle('picked', picked.has('node:' + key)));
+    }
+    function shade3d(n) {
+      // gathering must look like something in this view too: 2D outlines the mark, and
+      // before this the same click changed nothing anyone could see
+      if (picked.has('node:' + n.id) || M.glow.has(n.id)) return cssVar('--accent');
+      const base = cssVar(`--k-${n.kind}`) || colourOf(n.kind);
+      const vis = matches(n.ref), focus = M.selected ? (n.id === M.selected || (neighbors.get(M.selected) || new Set()).has(n.id)) : true;
+      return (vis && focus) ? base : base + '22';
+    }
+    function link3d(l) {
+      const sid = l.source.id ?? l.source, tid = l.target.id ?? l.target;
+      // A path run joins things up and the joining is the answer. In 2D that is the .onpath
+      // rule; here nothing read pathLinks at all, so find paths lit its nodes and drew no
+      // route between them — the one thing it was asked for.
+      if (M.pathLinks.has(l)) return cssVar('--accent');
+      if (M.selected && (sid === M.selected || tid === M.selected)) return cssVar('--accent');
+      return cssVar('--line-strong') + (M.selected ? '33' : (M.pathLinks.size ? '33' : 'aa'));
+    }
+    function setView(three) {
+      // a run in flight stops on a view switch; the two views pulse differently, and stopping
+      // is the simplest thing that leaves neither holding stale transients
+      M.stopHistory();
+      M.is3d = three;
+      wrap.classList.toggle('is3d', M.is3d);
+      document.getElementById('v2d').setAttribute('aria-pressed', !M.is3d);
+      document.getElementById('v3d').setAttribute('aria-pressed', M.is3d);
+      document.getElementById('hint-text').textContent =
+        M.is3d ? 'middle-drag to orbit · right-drag to pan · scroll to zoom · click to inspect'
+             : 'drag to move · scroll to zoom · click to inspect';
+      if (M.is3d) {
+        init3d();
+        if (M.g3) {
+          if (!els.size) build3dLabels();
+          if (!raf) frame3d();
+          M.g3.width(wrap.clientWidth).height(wrap.clientHeight).backgroundColor(cssVar('--bg'));
+          M.g3.nodeColor(M.g3.nodeColor());
+          if (fitted3d) setTimeout(() => M.g3.zoomToFit(400, 70), 60);
+          if (!reduced) setSpin(view.spin, true);
+        }
+      } else {
+        cancelAnimationFrame(raf); raf = 0;
+        if (M.g3) setSpin(false, true);
+      }
+      try { localStorage.setItem('graph-view', M.is3d ? '3d' : '2d'); } catch (e) {}
+    }
+    let spinTouched = false;
+    function setSpin(on, quiet) {
+      if (!M.g3) return;
+      M.g3.controls().autoRotate = on;
+      document.getElementById('spin').setAttribute('aria-pressed', on);
+      if (!quiet) spinTouched = true;
+    }
+    document.getElementById('v2d').addEventListener('click', () => setView(false));
+    document.getElementById('v3d').addEventListener('click', () => setView(true));
+    document.getElementById('spin').addEventListener('click', () => setSpin(!M.g3.controls().autoRotate));
+    new ResizeObserver(() => { if (M.g3) M.g3.width(wrap.clientWidth).height(wrap.clientHeight); }).observe(wrap);
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (M.g3) { M.g3.backgroundColor(cssVar('--bg')); M.g3.nodeColor(M.g3.nodeColor()); M.g3.linkColor(M.g3.linkColor()); } });
+    let want3d = true;
+    try { want3d = (localStorage.getItem('graph-view') || '3d') === '3d'; } catch (e) {}
+    if (want3d && nodes.length && typeof ForceGraph3D === 'function') setView(true);
+    Object.assign(M, { cssVar });
+  }
+  class Graph3D extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-3d', Graph3D);
+})();
+</script>

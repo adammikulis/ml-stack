@@ -508,9 +508,9 @@ def test_the_model_route_names_what_is_serving_before_anything_is_asked(served):
 
 
 def test_the_page_shows_the_served_model_and_what_each_answer_spent():
-    import ml_stack.graph as graph_package
+    from ml_stack.graph import page
 
-    html = (Path(graph_package.__file__).parent / "web" / "graph.html").read_text(encoding="utf-8")
+    html = page.template()
     assert "fetch('/ask/model')" in html and "answered by" in html
     assert "askpane-title" in html and "ev.spent" in html
 
