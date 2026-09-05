@@ -19,7 +19,7 @@ ROOT = REPO / "src" / "ml_stack"
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("backend", "contracts", "data", "entities", "files", "geo", "jobs",
               "jsonl", "lock", "media", "paths", "platform", "redact", "scrape",
-              "telemetry", "ui")),
+              "records", "telemetry", "ui", "units")),
     ("model", ("client", "gguf", "hub", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("doctor", "fleet", "serve", "setup")),
