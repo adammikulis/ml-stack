@@ -15,14 +15,20 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-__all__ = ["Chosen", "Found", "PREFER", "advice", "aside", "beside", "builds", "card",
-           "choose_head", "draft_for", "draft_note", "fetch", "files", "find", "located",
-           "main", "mmproj_for", "DRAFT_KINDS", "held", "in_gguf", "ref", "repo_of", "room",
-           "spec_for"]
+__all__ = ["Chosen", "DRAFT_MARK", "Found", "PREFER", "WEIGHT_SUFFIXES", "advice", "aside",
+           "beside", "builds", "card", "choose_head", "default_roots", "draft_for",
+           "draft_note", "fetch", "files", "find", "located", "main", "mmproj_for",
+           "DRAFT_KINDS", "held", "in_gguf", "ref", "repo_of", "room", "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
 PREFER = ("unsloth", "ggml-org", "google", "bartowski", "lmstudio-community")
+
+WEIGHT_SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
+"""The file extensions a model's weights come in."""
+
+DRAFT_MARK = ".draft"
+"""The extra suffix a draft head carries: ``thing-Q4.draft.gguf``."""
 
 
 @dataclass(frozen=True)
@@ -431,33 +437,43 @@ def builds(repo: str, *, ending: str = ".gguf") -> list[tuple[str, int, int]]:
                   key=lambda row: -row[1])
 
 
+def default_roots(root: Path | str) -> list[Path]:
+    """Where model files live: the store's own, the llama.cpp cache, the Hub cache
+    (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
+    home = Path.home()
+    cache = home / ".cache" / "huggingface" / "hub"
+    named = os.environ.get("HF_HOME")
+    if named:
+        cache = Path(named).expanduser() / "hub"
+    return [
+        Path(root).expanduser() / "models",
+        home / ".cache" / "llama.cpp",
+        cache,
+        home / "models",
+    ]
+
+
 def held() -> dict[str, int]:
     """Every model file already on this machine, by filename, with its real size.
 
-    `ml_stack.fleet.models` has known where they are all along; this asks it, because the
-    alternative is what happened once: reaching for the Hub to fetch 87G that was already
-    on the disk. A listing that does not say what you have invites downloading it twice.
-
-    Sizes are resolved through symlinks on purpose. A Hub cache is symlinks into
-    `blobs/`, so `ls -l` reports 79 bytes for a 46G shard and reading that as "not
-    downloaded" is the same mistake wearing a different hat.
+    Sizes are resolved through symlinks: a Hub cache is symlinks into `blobs/`, so
+    `ls -l` reports 79 bytes for a 46G shard.
     """
-    from pathlib import Path
-
-    try:
-        from ml_stack.fleet.models import Models, default_roots
-
-        found = Models(roots=default_roots(Path.home() / ".ml-stack"),
-                       store=Path.home() / ".ml-stack").all()
-    except Exception:  # noqa: BLE001 - a machine with no models has no models
-        return {}
     out: dict[str, int] = {}
-    for model in found:
-        where = Path(getattr(model, "path", "") or "")
+    for root in default_roots(Path.home() / ".ml-stack"):
         try:
-            out[where.name] = where.resolve().stat().st_size
+            found = sorted(root.rglob("*")) if root.is_dir() else []
         except OSError:
             continue
+        for path in found:
+            if path.suffix.lower() not in WEIGHT_SUFFIXES or path.name in out:
+                continue
+            if DRAFT_MARK in path.suffixes:
+                continue
+            try:
+                out[path.name] = path.resolve().stat().st_size
+            except OSError:
+                continue
     return out
 
 

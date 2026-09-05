@@ -288,15 +288,13 @@ def test_the_printed_report_names_the_missing_command_and_the_line(monkeypatch, 
 def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, tmp_path):
     import os
 
-    from ml_stack.fleet import models as models_module
-
     hub = tmp_path / "hf" / "hub" / "models--maker--big-GGUF" / "snapshots" / "abc"
     hub.mkdir(parents=True)
     (hub / "big-Q4_K_M.gguf").write_bytes(b"x" * (2 * 1024 * 1024))
     mine = tmp_path / "models"
     mine.mkdir()
     (mine / "small.gguf").write_bytes(b"y" * (1024 * 1024 + 1024))
-    monkeypatch.setattr(models_module, "default_roots",
+    monkeypatch.setattr("ml_stack.hub.default_roots",
                         lambda root: [tmp_path / "hf" / "hub", mine, tmp_path / "absent"])
     monkeypatch.setenv("HF_HOME", str(tmp_path / "hf"))
     monkeypatch.setattr("sys.stdin.isatty", lambda: False)

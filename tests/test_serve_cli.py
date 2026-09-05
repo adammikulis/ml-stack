@@ -824,8 +824,6 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     cannot see; `status --every` names it, and `pgrep` by hand is what the guard refuses."""
     import psutil
 
-    from ml_stack.fleet import models as models_module
-
     hub = tmp_path / "hub" / "models--maker--big-GGUF" / "snapshots" / "abc"
     hub.mkdir(parents=True)
     (hub / "big-UD-Q4_K_XL.gguf").write_bytes(b"x" * (3 * 2**20))
@@ -833,7 +831,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     aside = tmp_path / "aside"
     aside.mkdir()
     (aside / "alone-Q8_0.gguf").write_bytes(b"z" * (4 * 2**20))
-    monkeypatch.setattr(models_module, "default_roots", lambda root: [tmp_path / "hub"])
+    monkeypatch.setattr("ml_stack.hub.default_roots", lambda root: [tmp_path / "hub"])
     fakes = [fake_process(["/opt/homebrew/bin/llama-server", "--port", "8081", "-m",
                            "/models/embeddinggemma-300M-Q8_0.gguf"], 1 * 2**30, pid=11),
              fake_process(["/x/current/llama-server", "-m", "/models/thing-UD-Q4_K_XL.gguf",

@@ -193,7 +193,8 @@ def every_server() -> list[dict]:
 def cache_of(model: str) -> tuple[Path, int] | None:
     """The model root ``model`` lies under, with its weight bytes; the file's own
     directory when it is under none; None when neither is there."""
-    from ml_stack.fleet.models import default_roots, holding
+    from ml_stack.fleet.models import holding
+    from ml_stack.hub import default_roots
 
     path = Path(str(model or "")).expanduser()
     if not str(model or "").strip():

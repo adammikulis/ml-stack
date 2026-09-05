@@ -28,7 +28,9 @@ from typing import Any
 from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
-from .models import Downloads, Models, ModelError, default_roots
+from ml_stack.hub import default_roots
+
+from .models import Downloads, Models, ModelError
 from .serving import Hosting, Serving
 from .settings import Settings
 from ml_stack.platform import (

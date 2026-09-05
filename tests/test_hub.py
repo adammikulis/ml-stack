@@ -221,15 +221,16 @@ def test_held_resolves_symlinks_because_a_cache_is_made_of_them(tmp_path, monkey
     blob = tmp_path / "blobs" / "abc123"
     blob.parent.mkdir()
     blob.write_bytes(b"x" * 5000)
-    link = tmp_path / "thing-Q4.gguf"
+    snapshot = tmp_path / "snapshots" / "abc"
+    snapshot.mkdir(parents=True)
+    link = snapshot / "thing-Q4.gguf"
     link.symlink_to(blob)
+    (snapshot / "thing-Q4.draft.gguf").write_bytes(b"y" * 100)
+    (snapshot / "README.md").write_text("words")
     assert link.lstat().st_size < 200, "the link itself is tiny, which is the trap"
 
-    class Found:
-        path = link
-
-    monkeypatch.setattr("ml_stack.fleet.models.Models.all", lambda self: [Found()])
-    assert hub.held()["thing-Q4.gguf"] == 5000
+    monkeypatch.setattr(hub, "default_roots", lambda root: [tmp_path, tmp_path / "absent"])
+    assert hub.held() == {"thing-Q4.gguf": 5000}
 
 
 def _gguf(tmp_path, pairs):

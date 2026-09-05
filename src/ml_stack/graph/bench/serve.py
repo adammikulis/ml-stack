@@ -37,7 +37,8 @@ def find_model(named: str) -> str:
     if not named or named.startswith("hf:") or "/" in named:
         return named
     try:
-        from ml_stack.fleet.models import Models, default_roots
+        from ml_stack.fleet.models import Models
+        from ml_stack.hub import default_roots
 
         home = Path("~/.ml-stack").expanduser()
         found = Models(roots=default_roots(home), store=home).find(named)

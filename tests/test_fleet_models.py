@@ -899,7 +899,6 @@ class TestOverHTTP:
 class TestCaches:
     def test_each_existing_root_is_listed_with_its_weight_files_and_bytes(self, tmp_path,
                                                                         monkeypatch):
-        from ml_stack.fleet import models as models_module
         from ml_stack.fleet.models import caches, holding, sized
 
         hub = tmp_path / "hf" / "hub"
@@ -913,7 +912,7 @@ class TestCaches:
         (snapshot / "README.md").write_text("words")
         mine = tmp_path / "models"
         a_model(mine, "small.gguf", mb=1)
-        monkeypatch.setattr(models_module, "default_roots",
+        monkeypatch.setattr("ml_stack.hub.default_roots",
                             lambda root: [tmp_path / "absent", hub, mine])
 
         assert holding(hub) == (2, 4000), "the symlink reads through to its blob"
@@ -923,7 +922,7 @@ class TestCaches:
         assert sized(int(86.2 * 2**30)) == "86.2G"
 
     def test_hf_home_names_the_hub_cache(self, tmp_path, monkeypatch):
-        from ml_stack.fleet.models import default_roots
+        from ml_stack.hub import default_roots
 
         monkeypatch.setenv("HF_HOME", str(tmp_path / "elsewhere"))
         assert tmp_path / "elsewhere" / "hub" in default_roots(tmp_path)

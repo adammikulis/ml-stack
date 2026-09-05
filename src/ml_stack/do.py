@@ -324,7 +324,7 @@ def _matches(words: str, name: str) -> bool:
 
 def gguf_files() -> list[Path]:
     """Every GGUF under the roots this machine keeps models in."""
-    from ml_stack.fleet.models import default_roots
+    from ml_stack.hub import default_roots
 
     found: list[Path] = []
     for root in default_roots(Path("~/.ml-stack")):
@@ -339,7 +339,7 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     kept beside it -- in its own directory, or in a sibling directory of the same
     repository, where a Hub snapshot keeps its ``MTP/`` folder -- the first shard standing
     for a sharded file."""
-    from ml_stack.fleet.models import DRAFT_MARK
+    from ml_stack.hub import DRAFT_MARK
 
     every = [Path(p) for p in (files if files is not None else gguf_files())]
     by_dir: dict[Path, list[Path]] = {}

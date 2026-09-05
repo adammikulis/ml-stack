@@ -400,7 +400,7 @@ class TestStartingAModelWithoutTheInterface:
 
     def test_a_draft_beside_the_model_is_served_with_it(self, tmp_path, manager, gguf):
         """A machine that fetched the draft and does not pass it paid for nothing."""
-        from ml_stack.fleet.models import DRAFT_MARK
+        from ml_stack.hub import DRAFT_MARK
         from ml_stack.fleet.serving import start_model, stop_model
 
         draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)

@@ -18,12 +18,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import hub
+
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
-           "Suggestion", "caches", "default_roots", "family_of", "holding", "is_unfiltered",
+           "Suggestion", "caches", "family_of", "holding", "is_unfiltered",
            "families", "how_many", "popular", "searched_count",
            "searched_families", "sized", "suggestions"]
 
-SUFFIXES = (".gguf", ".safetensors", ".bin", ".pt", ".onnx")
 CHUNK = 1 << 20
 MIN_SIZE = 1 << 20
 # A download in progress writes continuously, so a part file untouched for this
@@ -63,22 +64,6 @@ class Model:
         return {"name": self.name, "size": self.size, "modified": self.modified}
 
 
-def default_roots(root: Path | str) -> list[Path]:
-    """Where model files live: the store's own, the llama.cpp cache, the Hub cache
-    (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
-    home = Path.home()
-    hub = home / ".cache" / "huggingface" / "hub"
-    named = os.environ.get("HF_HOME")
-    if named:
-        hub = Path(named).expanduser() / "hub"
-    return [
-        Path(root).expanduser() / "models",
-        home / ".cache" / "llama.cpp",
-        hub,
-        home / "models",
-    ]
-
-
 WEIGHTS = (".gguf", ".safetensors")
 
 
@@ -108,7 +93,7 @@ def holding(directory: Path | str) -> tuple[int, int]:
 def caches(root: Path | str) -> list[tuple[Path, int, int]]:
     """Each model root that exists on this machine, with its weight-file count and bytes."""
     out = []
-    for where in default_roots(root):
+    for where in hub.default_roots(root):
         if where.is_dir():
             files, total = holding(where)
             out.append((where, files, total))
@@ -140,9 +125,9 @@ class Models:
             if not root.is_dir():
                 continue
             for path in sorted(root.rglob("*")):
-                if not path.is_file() or path.suffix.lower() not in SUFFIXES:
+                if not path.is_file() or path.suffix.lower() not in hub.WEIGHT_SUFFIXES:
                     continue
-                if DRAFT_MARK in path.suffixes:
+                if hub.DRAFT_MARK in path.suffixes:
                     continue
                 try:
                     stat = path.stat()
@@ -169,7 +154,7 @@ class Models:
         """A draft by its exact filename. Drafts are fetched, never listed."""
         for root in self.roots:
             path = root / Path(name).name
-            if DRAFT_MARK not in path.suffixes or not path.is_file():
+            if hub.DRAFT_MARK not in path.suffixes or not path.is_file():
                 continue
             stat = path.stat()
             return Model(path.name, path, stat.st_size, stat.st_mtime)
@@ -269,7 +254,7 @@ class Models:
         # The name that was asked for wins: saving it under whatever the URL happened
         # to call it means find() will not match it afterwards.
         wanted = Path(name).name
-        if Path(wanted).suffix.lower() not in SUFFIXES:
+        if Path(wanted).suffix.lower() not in hub.WEIGHT_SUFFIXES:
             wanted = Path(urllib.parse.urlparse(url).path).name or wanted
         target = self.store / wanted
         partial = target.with_suffix(target.suffix + ".part")
@@ -340,7 +325,7 @@ class Models:
 
         Taken from a machine on this network if one holds it, as the model itself is.
         """
-        beside = model.path.with_suffix(DRAFT_MARK + model.path.suffix)
+        beside = model.path.with_suffix(hub.DRAFT_MARK + model.path.suffix)
         if beside.is_file():
             return beside
         if key is not None and self._draft_from_peers(model, beside, key, on_progress):
@@ -460,12 +445,9 @@ UNFILTERED = ("uncensored", "abliterated", "obliterated", "unfiltered",
               "norefusal", "no-refusal", "unaligned", "unsafe")
 
 
-DRAFT_MARK = ".draft"
-
-
 def draft_beside(model: Path) -> Path | None:
     """The small model kept next to ``model`` to guess ahead with, if one was got."""
-    beside = model.with_suffix(DRAFT_MARK + model.suffix)
+    beside = model.with_suffix(hub.DRAFT_MARK + model.suffix)
     return beside if beside.is_file() else None
 
 

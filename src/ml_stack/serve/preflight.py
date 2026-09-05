@@ -133,7 +133,8 @@ def _local_index() -> dict[str, Path]:
     """Every model file this machine already holds, by filename -- the same disk scan
     ``ml_stack.hub.held()`` does, kept here with its path rather than only its size,
     because a preflight has to *open* the file to read its header."""
-    from ml_stack.fleet.models import Models, default_roots
+    from ml_stack.fleet.models import Models
+    from ml_stack.hub import default_roots
 
     try:
         found = Models(roots=default_roots(Path.home() / ".ml-stack"),
