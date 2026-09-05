@@ -35,6 +35,10 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   };
   const el = M.el;
 
+  /** The children that are there: `replaceChildren` writes the word "null" for a gap. */
+  M.kids = (...nodes) => nodes.flat()
+    .filter((n) => n !== null && n !== undefined && n !== false);
+
   M.row = (label, why) => el("span", {},
     el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
 

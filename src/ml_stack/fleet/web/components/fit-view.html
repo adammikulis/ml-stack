@@ -811,7 +811,7 @@
         s.hotRun = best && gap < 24 ? best.i : null;
         this.paintHotRun();
         if (s.hotRun === null) { tip.style.opacity = 0; return; }
-        tip.replaceChildren(
+        tip.replaceChildren(...M.kids(
           el("div", {}, el("b", {}, best.label + (best.composed ? " (composed)" : ""))),
           el("div", {}, el("span", {}, "F1 "), el("b", {}, `${(best.right * 100).toFixed(0)}%`),
              el("span", {}, "  over "), el("b", {}, `${commas(best.questions)} questions`)),
@@ -819,7 +819,7 @@
              el("b", {}, this.saidCost(best))),
           (best.front || []).includes(s.cost)
             ? el("div", {}, el("b", { style: "color:#4ad07f" }, "on the frontier")) : null,
-          best.host ? el("div", {}, el("span", {}, "measured on "), el("b", {}, best.host)) : null);
+          best.host ? el("div", {}, el("span", {}, "measured on "), el("b", {}, best.host)) : null));
         const host = svg.parentElement.getBoundingClientRect();
         tip.style.left = `${Math.max(4, Math.min(e.clientX - host.left + 14, host.width - 250))}px`;
         tip.style.top = `${e.clientY - host.top + 14}px`;

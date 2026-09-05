@@ -30,8 +30,8 @@
         const on = route === "sign-in";
         this.box.hidden = !on;
         if (!on) return;
-        this.note.replaceChildren(M.signInMessage
-          ? el("div", { class: "err" }, M.signInMessage) : null);
+        this.note.replaceChildren(...M.kids(M.signInMessage
+          ? el("div", { class: "err" }, M.signInMessage) : null));
         this.pass.focus();
       });
     }

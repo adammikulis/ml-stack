@@ -302,6 +302,21 @@ class TestTheSettingsView:
         assert sorted(got["settings"]["labels"]) == ["prep", "train"]
         assert not errors
 
+    def test_no_screen_shows_the_word_null(self, joined, open_page):
+        """`replaceChildren` writes the word "null" for a gap the way `el` never does."""
+        page, errors = open_page(joined, cookie=joined.cookie)
+        page.wait_for_selector("#cluster-joined .row")
+        for tab, ready in (("Chat", "#chat-none, #chat-askrow"),
+                           ("Models", "#models-here h2"),
+                           ("Settings", "#settings-removal label.opt"),
+                           ("Fit", "table.fit tbody tr"),
+                           ("Cluster", "#cluster-sweep .searchrow")):
+            page.click(f"nav.tabs a:has-text('{tab}')")
+            page.wait_for_selector(ready)
+            shown = page.locator("#root").inner_text()
+            assert "\nnull" not in shown and not shown.startswith("null"), tab
+        assert not errors
+
     def test_the_remove_section_lists_what_would_go(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Settings')")

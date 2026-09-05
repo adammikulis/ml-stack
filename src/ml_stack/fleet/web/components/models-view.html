@@ -166,13 +166,13 @@
       ];
       if (pop.error || !(pop.models || []).length) {
         const ref = s.typed.startsWith("hf:") || s.typed.startsWith("http");
-        this.popular.replaceChildren(...heading(),
+        this.popular.replaceChildren(...M.kids(...heading(),
           el("div", { class: "hint" },
             pop.error || (s.typed ? "Nothing on the hub matches that."
                                   : "Nothing that fits on this machine.")),
           ref ? el("button", { class: "ghost small",
             onclick: () => this.get(s.typed.split("/").pop(), s.typed) },
-            `Get ${s.typed.split("/").pop()}`) : null);
+            `Get ${s.typed.split("/").pop()}`) : null));
         if (this.hunt.value) this.hunt.focus();
         return;
       }
