@@ -2,117 +2,84 @@
 
 from __future__ import annotations
 
-from ml_stack.fleet.daemon import (
-    REPORT_GROUP,
-    DaemonError,
-    Job,
-    JobRunner,
-    device_report,
-    load_or_create_token,
-    make_handler,
-    registered_reports,
-    resolve_report,
-    safe_relpath,
-    serve_forever,
-    stdlib_device_report,
-)
-from ml_stack.fleet.discovery import (
-    Advertiser,
-    Beacon,
-    DiscoveryError,
-    DEFAULT_CLUSTER,
-    MIN_PASSPHRASE,
-    create_cluster_key,
-    derive_token,
-    discover,
-    check_passphrase,
-    cluster_group,
-    group_path,
-    in_cluster,
-    join_cluster,
-    key_from_passphrase,
-    key_path,
-    load_cluster_key,
-)
-from ml_stack.fleet.bench import BENCH_KIND, calibrate, measure
-from ml_stack.fleet.pool import (
-    Candidate,
-    Requires,
-    Score,
-    candidates,
-    choose,
-    eligible,
-    soonest,
-)
-from ml_stack.fleet.rates import Rates
-from ml_stack.fleet.remote import Peer, PeerError, sha256_file
-from ml_stack.fleet.models import (
-    Downloads, Getting, Model, ModelError, Models, default_roots)
-from ml_stack.fleet.chat import ChatError, Target, targets
-from ml_stack.fleet.conversations import Conversation, Conversations, Message
-from ml_stack.fleet.serving import Endpoint, Served, Serving, discover_serving
-from ml_stack.fleet.work import Placement, Unit, run
+from importlib import import_module
+from typing import Any
 
-__all__ = [
-    "BENCH_KIND",
-    "DEFAULT_CLUSTER",
-    "MIN_PASSPHRASE",
-    "REPORT_GROUP",
-    "Advertiser",
-    "Beacon",
-    "Candidate",
-    "DaemonError",
-    "DiscoveryError",
-    "Job",
-    "JobRunner",
-    "ChatError",
-    "Conversation",
-    "Conversations",
-    "Downloads",
-    "Endpoint",
-    "Model",
-    "ModelError",
-    "Getting",
-    "Message",
-    "Models",
-    "Peer",
-    "PeerError",
-    "Placement",
-    "Rates",
-    "Served",
-    "Serving",
-    "Target",
-    "Requires",
-    "Score",
-    "Unit",
-    "calibrate",
-    "candidates",
-    "choose",
-    "create_cluster_key",
-    "default_roots",
-    "derive_token",
-    "device_report",
-    "discover",
-    "discover_serving",
-    "targets",
-    "eligible",
-    "check_passphrase",
-    "cluster_group",
-    "group_path",
-    "in_cluster",
-    "join_cluster",
-    "key_from_passphrase",
-    "key_path",
-    "load_cluster_key",
-    "load_or_create_token",
-    "make_handler",
-    "measure",
-    "registered_reports",
-    "resolve_report",
-    "run",
-    "safe_relpath",
-    "serve_forever",
-    "sha256_file",
-    "soonest",
-    "stdlib_device_report",
-]
+_WHERE = {
+    "BENCH_KIND": "bench",
+    "calibrate": "bench",
+    "measure": "bench",
+    "ChatError": "chat",
+    "Target": "chat",
+    "targets": "chat",
+    "Conversation": "conversations",
+    "Conversations": "conversations",
+    "Message": "conversations",
+    "DaemonError": "daemon",
+    "Job": "daemon",
+    "JobRunner": "daemon",
+    "REPORT_GROUP": "daemon",
+    "device_report": "daemon",
+    "load_or_create_token": "daemon",
+    "make_handler": "daemon",
+    "registered_reports": "daemon",
+    "resolve_report": "daemon",
+    "safe_relpath": "daemon",
+    "serve_forever": "daemon",
+    "stdlib_device_report": "daemon",
+    "Advertiser": "discovery",
+    "Beacon": "discovery",
+    "DEFAULT_CLUSTER": "discovery",
+    "DiscoveryError": "discovery",
+    "MIN_PASSPHRASE": "discovery",
+    "check_passphrase": "discovery",
+    "cluster_group": "discovery",
+    "create_cluster_key": "discovery",
+    "derive_token": "discovery",
+    "discover": "discovery",
+    "group_path": "discovery",
+    "in_cluster": "discovery",
+    "join_cluster": "discovery",
+    "key_from_passphrase": "discovery",
+    "key_path": "discovery",
+    "load_cluster_key": "discovery",
+    "Downloads": "models",
+    "Getting": "models",
+    "Model": "models",
+    "ModelError": "models",
+    "Models": "models",
+    "Candidate": "pool",
+    "Requires": "pool",
+    "Score": "pool",
+    "candidates": "pool",
+    "choose": "pool",
+    "eligible": "pool",
+    "soonest": "pool",
+    "Rates": "rates",
+    "Peer": "remote",
+    "PeerError": "remote",
+    "sha256_file": "remote",
+    "Endpoint": "serving",
+    "Served": "serving",
+    "Serving": "serving",
+    "discover_serving": "serving",
+    "Placement": "work",
+    "Unit": "work",
+    "run": "work",
+}
+
+__all__ = sorted(_WHERE)
+
+
+def __getattr__(name: str) -> Any:
+    """The named export, loading the submodule that defines it."""
+    where = _WHERE.get(name)
+    if where is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"{__name__}.{where}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(__all__) | set(globals()))
