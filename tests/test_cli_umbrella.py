@@ -117,6 +117,19 @@ def test_an_uninstalled_checkout_dispatches_from_its_pyproject(monkeypatch, tmp_
     assert calls == [("medlar", ["x"])]
 
 
+def test_a_checkout_beats_a_stale_installed_entry_point(monkeypatch, tmp_path):
+    calls: list = []
+    target = _fake_target(monkeypatch, "medlar", calls)
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project.scripts]\nml-stack-medlar = "{target}"\n')
+    monkeypatch.setattr(cli, "entry_points", lambda group: [
+        EntryPoint("ml-stack-medlar", "ml_stack.gone.medlar:main", "console_scripts")])
+    monkeypatch.setattr(cli, "PYPROJECT", tmp_path / "pyproject.toml")
+    assert cli.commands()["medlar"] == target
+    assert cli.main(["medlar", "x"]) == 0
+    assert calls == [("medlar", ["x"])]
+
+
 def test_every_command_in_pyproject_resolves_to_a_main():
     table = tomllib.loads((REPO / "pyproject.toml").read_text())["project"]["scripts"]
     words = cli.commands()

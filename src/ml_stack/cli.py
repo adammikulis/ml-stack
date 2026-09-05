@@ -24,7 +24,8 @@ PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
 
 def commands() -> dict[str, str]:
-    """``word -> module:attr`` for every installed ``ml-stack-<word>``, and the checkout's."""
+    """``word -> module:attr`` for every ``ml-stack-<word>``; a checkout's ``pyproject.toml``
+    names where its own commands live, over what an install recorded."""
     found: dict[str, str] = {}
     for point in entry_points(group="console_scripts"):
         if point.name.startswith(PREFIX):
@@ -33,7 +34,7 @@ def commands() -> dict[str, str]:
         table = tomllib.loads(PYPROJECT.read_text()).get("project", {}).get("scripts", {})
         for name, target in table.items():
             if name.startswith(PREFIX):
-                found.setdefault(name[len(PREFIX):], target)
+                found[name[len(PREFIX):]] = target
     return found
 
 
