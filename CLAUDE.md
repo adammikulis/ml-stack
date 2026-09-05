@@ -40,6 +40,14 @@ The body is for detail a reader would want later: what was wrong, what the fix i
 it costs. Plain sentences. No war stories, no rhetorical questions, no lines that argue
 with a future reader.
 
+## Budgets
+
+`budgets.json` holds the highest count each shape in `scripts/gates/` is allowed.
+`scripts/budgets` prints metric, budget, actual and delta, and names every site that is over.
+`tests/test_budgets.py` fails when a number rises, and also when it falls without being recorded.
+A branch that lowers one runs `scripts/budgets --update` and commits the file.
+`scripts/budgets --show METRIC` lists the sites; `SKIP_BUDGETS=1` skips the pre-commit check.
+
 ## Anything a user reads
 
 Release notes, the README, the interface, error messages. Write for someone seeing it for

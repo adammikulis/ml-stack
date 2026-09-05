@@ -40,3 +40,28 @@ jobs:
 
       - name: tests
         run: python -m pytest tests/ -q --slow
+
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The checkers are stdlib only. pytest-xdist is here because pyproject's addopts
+      # pass -n auto to every pytest run.
+      - name: install pytest
+        run: python -m pip install pytest pytest-xdist
+
+      - name: budgets
+        run: python scripts/budgets
+
+      - name: gate tests
+        run: |
+          files=""
+          for f in tests/test_budgets.py tests/test_wiring.py tests/test_layers.py; do
+            [ -f "$f" ] && files="$files $f"
+          done
+          python -m pytest $files -q
