@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from ml_stack.testing.parity import assert_forward_parity, inputs
+from ml_stack.train.backend.registry import BackendUnavailable, get_backend
 
 Tensor = Any
 
@@ -143,7 +144,8 @@ def check_op(name: str, first: Any, second: Any, *, atol: float = ATOL) -> OpRes
     """Run one case on both backends and compare."""
     try:
         outputs = [as_numpy(CASES[name](b, b.ops)) for b in (first, second)]
-    except Exception as exc:                          # noqa: BLE001 - any raise is a failure
+    except (ArithmeticError, AttributeError, IndexError, KeyError, RuntimeError,
+            TypeError, ValueError) as exc:
         return OpResult(name, float("nan"), False, f"{type(exc).__name__}: {exc}")
 
     try:
@@ -161,7 +163,7 @@ def check_all(first: Any, second: Any, *, atol: float = ATOL) -> list[OpResult]:
 
 
 def table(results: list[OpResult], *, first: str = "torch", second: str = "mlx") -> str:
-    """The results as a plain-text table, worst difference last."""
+    """The results as a plain-text table, in case order, with a count at the end."""
     width = max([len(r.name) for r in results] + [len("operation")])
     lines = [f"{'operation':<{width}}  {'max |Δ|':>10}  result",
              f"{'-' * width}  {'-' * 10}  ------"]
@@ -177,3 +179,20 @@ def table(results: list[OpResult], *, first: str = "torch", second: str = "mlx")
     if failed:
         lines.append(f"disagreeing: {', '.join(r.name for r in failed)}")
     return "\n".join(lines)
+
+
+def report(*, say: Callable[[str], None] = print, first: str = "torch",
+           second: str = "mlx") -> int:
+    """Print the table for two named backends. 0 if all agree, 1 if any do not, 2 if one
+    of the two cannot be built here."""
+    built = []
+    for name in (first, second):
+        try:
+            built.append(get_backend(name))
+        except (BackendUnavailable, RuntimeError) as exc:
+            say(f"{name} is not usable here, so there is nothing to compare: {exc}")
+            return 2
+
+    results = check_all(*built)
+    say(table(results, first=first, second=second))
+    return 1 if any(not r.ok for r in results) else 0

@@ -317,6 +317,18 @@ def _():
     return "60 -> 120, not 60 -> 180"
 
 
+@check("Training", "the two array backends compute the same thing")
+def _():
+    from ml_stack.train.backend import available, get_backend
+    from ml_stack.train.backend.parity import CASES, check_all
+    if sorted(available()) != ["mlx", "torch"]:
+        return f"only {available()} here, so there is nothing to compare"
+    results = check_all(get_backend("torch"), get_backend("mlx"))
+    failed = [r.name for r in results if not r.ok]
+    assert not failed, f"torch and mlx disagree on {failed}"
+    return f"{len(CASES)} operations, worst |d| {max(r.diff for r in results):.1e}"
+
+
 @check("Training", "an undeclared setting is refused, not ignored")
 def _():
     from ml_stack.train.recipes import validate

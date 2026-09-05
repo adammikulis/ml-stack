@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import jobs
+from ml_stack.contracts import recipe as _recipe
 from ml_stack.train.recipes import build, known, validate
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import warmup_cosine
@@ -116,20 +117,9 @@ def parity(*, say: Callable[[str], None] = print, first: str = "torch",
     Prints one row per operation with the largest absolute difference between the two,
     and returns 1 if any of them disagree by more than the tolerance.
     """
-    from ml_stack.train.backend import BackendUnavailable, get_backend
-    from ml_stack.train.backend.parity import check_all, table
+    from ml_stack.train.backend.parity import report
 
-    built = []
-    for name in (first, second):
-        try:
-            built.append(get_backend(name))
-        except (BackendUnavailable, RuntimeError) as exc:
-            say(f"{name} is not usable here, so there is nothing to compare: {exc}")
-            return 2
-
-    results = check_all(*built)
-    say(table(results, first=first, second=second))
-    return 1 if any(not r.ok for r in results) else 0
+    return report(say=say, first=first, second=second)
 
 
 def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, dict[str, Any]]:
@@ -140,9 +130,7 @@ def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, d
     counts a wall-clock estimate needs are written down. A base the *data* names is not
     that size's model, so the size's counts are not about it and are not used for it.
     """
-    from ml_stack.contracts import recipe
-
-    spec = recipe(recipe_id)
+    spec = _recipe(recipe_id)
     sizes = spec.get("sizes", {})
     if not sizes:
         return "", {}

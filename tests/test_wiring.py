@@ -12,7 +12,6 @@ REPO = Path(__file__).resolve().parent.parent
 SRC = REPO / "src" / "ml_stack"
 
 STANDALONE = {
-    "testing": "fakes and markers the suite imports; not library code",
     "web": "loaded by name as python:ml_stack.web:tools, never imported",
 }
 

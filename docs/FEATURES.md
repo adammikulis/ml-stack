@@ -163,6 +163,9 @@ same call works on a Mac and on a CUDA box.
 - A run whose loss goes non-finite is stopped before the update reaches the weights.
 - Learning-rate schedules are plain functions returning floats.
 - Leak-safe splits: contiguous tail, by group, or stratified by label.
+- `ml-stack-train-run parity` compares this machine's two array backends operation
+  by operation and prints the largest difference for each, so "the same call" is
+  something a new machine can check rather than take on trust.
 
 ### Recipes
 
