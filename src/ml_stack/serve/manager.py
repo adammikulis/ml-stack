@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.hub import free_memory
 from ml_stack.client.health import ServingParams, serving_params
 from ml_stack.client.http import ServerError, request_json
 from ml_stack.serve.backend import (
@@ -84,15 +85,6 @@ def scaled_timeout(weights_bytes: int, *, base: float = DEFAULT_TIMEOUT_S) -> fl
     larger. ``weights_bytes`` is 0 for an `hf:` reference not yet on disk, and 0 leaves the
     floor untouched: an unknown size is not the same as an enormous one."""
     return max(base, 60.0 + 1.5 * (weights_bytes / _GB))
-
-
-def free_memory() -> int | None:
-    """Bytes this machine could still give a model, or None when it will not say."""
-    try:
-        import psutil
-    except ImportError:
-        return None
-    return int(psutil.virtual_memory().available)
 
 
 def weight_of(model: str | Path) -> int:

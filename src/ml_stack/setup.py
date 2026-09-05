@@ -121,12 +121,12 @@ def _sysctl(key: str) -> str:
 
 def look() -> list[Finding]:
     """Everything worth knowing before serving anything, without changing a thing."""
-    from ml_stack.hub import room
+    from ml_stack.hub import room, total_memory
     from ml_stack.units import human_bytes
 
     out: list[Finding] = []
 
-    total = int(_sysctl("hw.memsize") or 0)
+    total = total_memory()
     limit = room()
     if total and limit:
         share = limit / total

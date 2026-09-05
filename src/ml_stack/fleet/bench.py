@@ -21,7 +21,6 @@ Everything the bench side needs to call is `plan`, `jobs_from`, `dispatch`, `wai
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import os
@@ -240,15 +239,6 @@ def same_commit(mine: str, theirs: str) -> bool:
     ``(dirty)`` ignored. Two empty answers are not the same code -- they are no answer."""
     a, b = str(mine or "").split()[:1], str(theirs or "").split()[:1]
     return bool(a) and a == b
-
-
-@functools.lru_cache(maxsize=1)
-def machine_room() -> int:
-    """`hub.room()`: what a model may use here, in bytes, or 0 when unknown. Cached, since
-    it asks the kernel and the answer does not change while the daemon runs."""
-    from ml_stack.hub import room
-
-    return int(room() or 0)
 
 
 # -- a job ---------------------------------------------------------------------------
@@ -507,17 +497,19 @@ class BenchHost:
     machine's ``ml-stack-bench`` keeps its lock, store and logs -- always given, never
     defaulted, because the caller knows its root and this does not (`bench_home`);
     ``commit`` is what this machine runs (`installed_commit` unless given); ``room`` and
-    ``launch`` are `machine_room` and `detach_bench` unless a test hands in fakes.
+    ``launch`` are `hub.room` and `detach_bench` unless a test hands in fakes.
     """
 
     def __init__(self, runner: "JobRunner", *, home: Path | str,
-                 commit: str | None = None, room: Callable[[], int] = machine_room,
+                 commit: str | None = None, room: Callable[[], int] | None = None,
                  launch: Callable[[Sequence[str], Path], tuple[int, Path]] = detach_bench,
                  name: str = "", poll_s: float = 1.0) -> None:
+        from ml_stack.hub import room as here
+
         self.runner = runner
         self.home = Path(home).expanduser()
         self.commit = installed_commit() if commit is None else commit
-        self.room = room
+        self.room = here if room is None else room
         self.launch = launch
         self.name = name or socket.gethostname()
         self.poll_s = poll_s

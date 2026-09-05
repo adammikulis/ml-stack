@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import hashlib
 import hmac
 import json
@@ -28,7 +27,7 @@ from typing import Any
 from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
-from ml_stack.hub import default_roots
+from ml_stack.hub import default_roots, free_memory, total_memory
 
 from .models import Downloads, Models, ModelError
 from .serving import Hosting, Serving
@@ -480,45 +479,6 @@ REPORT_GROUP = "ml_stack.device_report"
 """Entry-point group a higher tier registers a richer device probe under."""
 
 
-class _MemoryStatus(ctypes.Structure):
-    """The shape GlobalMemoryStatusEx fills in. Windows has no sysconf."""
-
-    _fields_ = (("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong),
-                ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong),
-                ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong),
-                ("ullAvailVirtual", ctypes.c_ulonglong),
-                ("ullAvailExtendedVirtual", ctypes.c_ulonglong))
-
-
-def _windows_memory_gb() -> tuple[float, float] | None:
-    """Total and in-use memory on Windows, as gigabytes."""
-    if sys.platform != "win32":
-        return None
-    try:
-        status = _MemoryStatus()
-        status.dwLength = ctypes.sizeof(_MemoryStatus)
-        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
-            return None
-        total = status.ullTotalPhys / 2**30
-        used = (status.ullTotalPhys - status.ullAvailPhys) / 2**30
-        return round(total, 2), round(max(0.0, used), 2)
-    except (AttributeError, OSError, ValueError):
-        return None
-
-
-def _total_ram_gb() -> float | None:
-    """Physical RAM, from whatever this platform exposes to the standard library."""
-    try:                                    # Linux, and macOS via SC_PHYS_PAGES
-        return round(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE") / 2**30, 2)
-    except (AttributeError, ValueError, OSError):
-        pass
-    both = _windows_memory_gb()
-    return both[0] if both else None
-
-
 def _ram_used_gb(total_gb: float) -> float | None:
     """Memory in use, from whatever this platform will say without a dependency."""
     try:
@@ -526,9 +486,9 @@ def _ram_used_gb(total_gb: float) -> float | None:
         return round(psutil.virtual_memory().used / 2**30, 2)
     except Exception:                                 # noqa: BLE001
         pass
-    both = _windows_memory_gb()
-    if both is not None:
-        return both[1]
+    free = free_memory()
+    if free is not None:
+        return round(max(0.0, total_gb - free / 2**30), 2)
     try:
         if sys.platform.startswith("linux"):
             fields = {}
@@ -584,12 +544,12 @@ def stdlib_device_report() -> dict[str, Any]:
     """What this box is, and what it is doing, from the standard library."""
     out: dict[str, Any] = {"backends": [], "cpus": os.cpu_count() or 1,
                            "arch": platform.machine(), "platform": sys.platform}
-    ram = _total_ram_gb()
-    if ram is not None:
-        out["ram_gb"] = ram
-        used = _ram_used_gb(ram)
+    ram = total_memory()
+    if ram:
+        out["ram_gb"] = round(ram / 2**30, 2)
+        used = _ram_used_gb(out["ram_gb"])
         if used is not None:
-            out["ram_used_gb"] = min(used, ram)
+            out["ram_used_gb"] = min(used, out["ram_gb"])
     busy = _cpu_busy_pct()
     if busy is not None:
         out["cpu_pct"] = busy

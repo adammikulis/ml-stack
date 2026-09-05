@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import contextlib
 import os
 import platform
-import subprocess
 import pathlib
 import json
 import sys
@@ -1008,13 +1006,10 @@ def cmd_memory(args: argparse.Namespace) -> int:
     That setting is a runtime one and **goes back to the default on every reboot**, so a
     model that loaded yesterday can fail today with an error that never mentions memory.
     """
-    from ml_stack.hub import room
+    from ml_stack.hub import room, total_memory
     from ml_stack.units import human_bytes
 
-    total = 0
-    with contextlib.suppress(Exception):
-        total = int(subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True,
-                                   text=True, timeout=5).stdout.strip())
+    total = total_memory()
     now = room()
     if not now:
         print("this machine does not report a wiring limit; nothing to do here")

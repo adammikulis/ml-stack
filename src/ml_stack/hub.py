@@ -9,6 +9,7 @@ so nothing between here and a running server needs writing again.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import re
 import sys
@@ -731,6 +732,62 @@ def room() -> int:
     from ml_stack.serve.limits import read
 
     return read().room(machine_room())
+
+
+class _MemoryStatus(ctypes.Structure):
+    """The shape GlobalMemoryStatusEx fills in. Windows has no sysconf."""
+
+    _fields_ = (("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong))
+
+
+def _windows_memory() -> tuple[int, int] | None:
+    """``(installed, free)`` in bytes on Windows, or None anywhere else."""
+    if sys.platform != "win32":
+        return None
+    try:
+        status = _MemoryStatus()
+        status.dwLength = ctypes.sizeof(_MemoryStatus)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return None
+        return int(status.ullTotalPhys), int(status.ullAvailPhys)
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def total_memory() -> int:
+    """Memory installed on this machine, in bytes, or 0 when it will not say."""
+    try:
+        return int(os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, ValueError, OSError):
+        pass
+    both = _windows_memory()
+    if both is not None:
+        return both[0]
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().total)
+    except Exception:  # noqa: BLE001 - a machine that will not say has no total
+        return 0
+
+
+def free_memory() -> int | None:
+    """Bytes this machine could still give a model, or None when it will not say."""
+    try:
+        import psutil
+
+        return int(psutil.virtual_memory().available)
+    except Exception:  # noqa: BLE001 - no psutil here; ask the platform instead
+        pass
+    both = _windows_memory()
+    return both[1] if both is not None else None
 
 
 def machine_room() -> int:
