@@ -7,6 +7,7 @@ from ml_stack.graph.access import (LockError, holder, reading, release_all, writ
                                    writing)
 from ml_stack.graph.ask import (Answer, converse, look_around, look_at, look_up,
                                 path_between)
+from ml_stack.graph.asking import Asking
 from ml_stack.graph.concerns import concerns
 from ml_stack.graph.page import kinds_of, render, world_outline
 from ml_stack.graph.places import geocode, places_in, points
@@ -51,6 +52,7 @@ from ml_stack.graph.topology import (
 
 __all__ = [
     "Answer",
+    "Asking",
     "apply",
     "batch_graphs",
     "BatchedGraph",

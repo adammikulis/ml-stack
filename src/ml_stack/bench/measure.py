@@ -1239,7 +1239,7 @@ def asking(graph: Mapping[str, Any], *, run: Any = None, shortlist: int = 0,
     """
     from ml_stack.graph.ask import converse, tools_for
     from ml_stack.graph.search import hybrid
-    from ml_stack.serve.shape import Asking
+    from ml_stack.graph.asking import Asking
 
     how = run.asking if run is not None else Asking(
         tight=tight, batch=batch, single=single, few=few, kinds=kinds, summary=summary,

@@ -254,9 +254,11 @@ worth taking, in this order:
   `serve` into `bench` (1, 2, 2 and 1 files); `gguf`, `hub`, `graph` and `ingest` into
   `serve` (1, 1, 3 and 1); and `graph.data` into `train.backend` for a device handle, where
   the ops that sit under both belong below `graph` rather than in the tools layer. The
-  `graph` -> `serve` three are function-local reaches for `Asking`, `Run`, `Shape`, `seat`
-  and `held` in `graph/ask.py`, `graph/requests.py` and `graph/serve.py`; most go when
-  `Asking` moves down out of `serve/shape.py`.
+  `graph` -> `serve` three are function-local reaches: `profile_for` in
+  `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`, `seat` and `held`
+  in `graph/serve.py`. The first goes when the profile store moves below `graph`; the other
+  two are a page and a request handler leasing a server, which is what the machine layer is
+  for.
 
 ## Verifying
 

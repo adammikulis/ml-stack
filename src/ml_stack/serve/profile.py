@@ -156,9 +156,9 @@ class Profile:
                      extra_args=tuple(self.extra_args), note=note)
 
     def asked(self) -> Any:
-        """The ways this record measured, as an :class:`~ml_stack.serve.Asking`: every one
+        """The ways this record measured, as an :class:`~ml_stack.graph.Asking`: every one
         of `WAYS`, ``terse`` included, plus ``reach`` and ``rounds``."""
-        from ml_stack.serve.shape import Asking
+        from ml_stack.graph.asking import Asking
 
         return Asking(**{way: bool(getattr(self, way)) for way in WAYS},
                       reach=self.reach, rounds=self.rounds)

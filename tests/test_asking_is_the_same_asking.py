@@ -14,7 +14,7 @@ import json
 import pytest
 
 from ml_stack.graph.ask import converse, tools_for
-from ml_stack.serve.shape import Asking
+from ml_stack.graph.asking import Asking
 
 GRAPH = {
     "nodes": [

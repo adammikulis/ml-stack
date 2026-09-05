@@ -219,7 +219,8 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     """What replaced popping each way's keywords off a dict before the client was built:
     `over` knows which section owns each name, so nothing about the asking can reach the
     client at all. Mutation: send unknown names on to one of the three."""
-    from ml_stack.serve import Asking, Run, Shape
+    from ml_stack.graph.asking import Asking
+    from ml_stack.serve import Run, Shape
 
     run = Run(shape=Shape(model="weights.gguf"))
     laid = run.over(cache_type="q8_0", few=True, reach=8000, n_predict=4096,

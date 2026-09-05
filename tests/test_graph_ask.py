@@ -2331,7 +2331,7 @@ def test_over_the_cap_nothing_is_constrained_and_the_steps_say_so():
 
 
 def test_constrain_ids_is_a_way_a_profile_fills_in(monkeypatch):
-    from ml_stack.serve.shape import Asking
+    from ml_stack.graph.asking import Asking
 
     assert Asking(constrain_ids=True).converse() == {"tight": True, "constrain_ids": True}
     assert "constrain_ids" not in Asking().converse()

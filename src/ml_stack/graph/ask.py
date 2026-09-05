@@ -1448,7 +1448,8 @@ def _under(profile: Any, given: dict[str, Any]) -> dict[str, Any]:
     either -- and it does not matter: what it asked for is what it got.
     """
     from ml_stack.serve.profile import Profile, profile_for
-    from ml_stack.serve.shape import Asking, Run
+    from ml_stack.graph.asking import Asking
+    from ml_stack.serve.shape import Run
 
     if isinstance(profile, Run):
         profile = profile.asking

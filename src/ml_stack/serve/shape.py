@@ -46,7 +46,9 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-__all__ = ["Asking", "Run", "Shape", "Talking", "draft_for", "held", "projector_for",
+from ml_stack.graph.asking import Asking
+
+__all__ = ["Run", "Shape", "Talking", "draft_for", "held", "projector_for",
            "release_all", "seat"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
@@ -154,71 +156,6 @@ class Shape:
         from ml_stack.serve.manager import ServerManager
 
         return ServerManager(LlamaServerBackend(build=self.build))
-
-
-@dataclass(frozen=True)
-class Asking:
-    """One model, asked one way. :meth:`converse` is what
-    :func:`ml_stack.graph.ask.converse` takes.
-
-    Every field here changes what the model is asked, and none of them is anything a client
-    or a server has ever heard of. ``tight`` reached ``Client.__init__`` once and took an
-    87G load down with it; keeping the ways in their own record is what makes that
-    impossible rather than caught.
-    """
-
-    tight: bool = True
-    batch: bool = False
-    single: bool = False                 # one entry to a read, more turns -- batch's opposite
-    few: bool = False                    # three tools offered, not eight
-    kinds: bool = False
-    summary: bool = False                # `converse`'s summary_tool, named as the bench is
-    rich: bool = False
-    terse: bool = False                  # `tools_for`'s schemas, not `converse`'s
-    reach: int | None = None             # tokens one tool result may carry
-    rounds: int | None = None            # tool-calling turns one question may spend
-    constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
-
-    def converse(self) -> dict[str, Any]:
-        """The keyword arguments :func:`ml_stack.graph.ask.converse` takes.
-
-        Only what was asked for, so a way that asked for nothing leaves `converse` exactly
-        as it was. ``summary`` becomes ``summary_tool``: `converse`'s own ``summary`` is a
-        thread's rolling summary and passing one as the other hands a bool to something
-        that reads text. ``terse`` is not here and cannot be -- it chooses the tool
-        *schemas*, which is :func:`~ml_stack.graph.ask.tools_for`'s argument.
-        """
-        out: dict[str, Any] = {"tight": bool(self.tight)}
-        for way in ("batch", "kinds", "rich", "single", "few", "constrain_ids"):
-            if getattr(self, way):
-                out[way] = True
-        if self.summary:
-            out["summary_tool"] = True
-        if self.reach is not None:
-            out["reach"] = int(self.reach)
-        if self.rounds is not None:
-            out["rounds"] = int(self.rounds)
-        return out
-
-    def tools(self) -> dict[str, Any]:
-        """The keyword arguments :func:`~ml_stack.graph.ask.tools_for` takes about the
-        asking -- the terse set is chosen outside `converse` and handed in."""
-        return {"tight": bool(self.tight), "reach": self.reach,
-                "batch": bool(self.batch), "single": bool(self.single),
-                "few": bool(self.few), "summary": bool(self.summary)}
-
-    def said(self) -> dict[str, Any]:
-        """The way itself, in the words the bench keeps beside its rows: ``summary`` under
-        its own name, ``terse`` said outright, and nothing that was not asked for."""
-        out: dict[str, Any] = {"tight": bool(self.tight), "terse": bool(self.terse)}
-        for way in ("rich", "batch", "kinds", "summary", "single", "few", "constrain_ids"):
-            if getattr(self, way):
-                out[way] = True
-        if self.reach:
-            out["reach"] = int(self.reach)
-        if self.rounds:
-            out["rounds"] = int(self.rounds)
-        return out
 
 
 @dataclass(frozen=True)
