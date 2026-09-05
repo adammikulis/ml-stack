@@ -11,11 +11,11 @@
 # scripts/hooks/claude-bash-guard is not a git hook and is not installed here. It is a
 # Claude Code PreToolUse hook on Bash; a project wires it into its .claude/settings.json:
 #   {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command",
-#     "command": "$HOME/Documents/repos/ml-stack/scripts/hooks/claude-bash-guard"}]}]}}
+#     "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-bash-guard"}]}]}}
 #
 # scripts/hooks/claude-edit-guard is the same kind of thing on the writing tools:
 #   {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit", "hooks": [{"type": "command",
-#     "command": "$HOME/Documents/repos/ml-stack/scripts/hooks/claude-edit-guard"}]}]}}
+#     "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-edit-guard"}]}]}}
 set -e
 cd "$(git rev-parse --show-toplevel)"
 hooks="$(git rev-parse --git-common-dir)/hooks"
