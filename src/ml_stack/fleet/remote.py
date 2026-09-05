@@ -12,9 +12,12 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
+
+if TYPE_CHECKING:
+    from ml_stack.speech.protocols import Transcript
 
 CHUNK = 8 << 20          # 8MB: big enough to be fast, small enough to resume cheaply
 DIGEST_HEADER = "X-ML-Stack-SHA256"
@@ -186,6 +189,35 @@ class Peer:
             if deadline and time.time() > deadline:
                 raise PeerError(f"job {job_id} still {job['state']} after timeout")
             time.sleep(poll_s)
+
+    # -- speech ----------------------------------------------------------
+    def speech(self) -> dict:
+        """What this peer can hear and say: every engine it has, and which it would use."""
+        return self._json("GET", "/speech/providers")
+
+    def transcribe(self, audio: Path | str | bytes, *, language: str | None = None,
+                   provider: str | None = None, timeout: float = 600.0) -> "Transcript":
+        """Have this peer turn audio into text, so a machine with no speech model can still
+        transcribe. ``audio`` is a path or the bytes of an audio file."""
+        from ml_stack.speech.protocols import Segment, Transcript
+
+        data = audio if isinstance(audio, bytes) else Path(audio).expanduser().read_bytes()
+        query = urllib.parse.urlencode(
+            {k: v for k, v in (("language", language or ""), ("provider", provider or ""))
+             if v})
+        _, body, _ = self._request("POST", "/speech/transcribe" + (f"?{query}" if query else ""),
+                                   data=data,
+                                   headers={"Content-Type": "audio/wav"}, timeout=timeout)
+        got = json.loads(body or b"{}")
+        return Transcript(
+            text=str(got.get("text", "")),
+            language=got.get("language"),
+            duration_s=float(got.get("duration_s") or 0.0),
+            segments=tuple(Segment(text=str(s.get("text", "")),
+                                   start_s=float(s.get("start_s") or 0.0),
+                                   end_s=float(s.get("end_s") or 0.0))
+                           for s in got.get("segments") or ()),
+            model=got.get("model"))
 
     # -- files -----------------------------------------------------------
     def push(self, local: Path | str, remote: str, *,

@@ -838,3 +838,84 @@ def test_an_advertiser_that_raises_does_not_leave_the_others_running():
     last = Fake()
     _stop_advertisers({"alpha": Angry(), "beta": last})
     assert last.stops == 1
+
+
+# -- speech --------------------------------------------------------------
+class TestSpeechOverTheNetwork:
+    """A machine with no whisper sends audio to one that has it. The engine here is a fake,
+    because what the route has to get right is the credential, the bytes and the shape that
+    comes back -- not the model."""
+
+    @pytest.fixture(autouse=True)
+    def registered(self, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.speech import ProviderHealth, Registry, Segment, Transcript
+
+        class Ears:
+            name = "fake"
+            heard: list[int] = []
+
+            def probe(self):
+                return ProviderHealth.ok("fake")
+
+            def start(self):
+                return None
+
+            def stop(self):
+                return None
+
+            def transcribe(self, audio, *, language=None):
+                Ears.heard.append(len(audio))
+                return Transcript(text="the fleet is up", language=language or "en",
+                                  duration_s=0.1, model="fake",
+                                  segments=(Segment("the fleet is up", 0.0, 0.1),))
+
+        Ears.heard = []
+        registry: Registry = Registry(kind="asr")
+        registry.register("fake", Ears)
+        monkeypatch.setattr(package, "ASR", registry)
+        self.ears = Ears
+
+    def a_clip(self) -> bytes:
+        from ml_stack.media import wav
+
+        return wav.encode(b"\x00\x00" * 1600, sample_rate=16000)
+
+    def test_a_peer_transcribes_audio_it_is_sent(self, daemon, tmp_path):
+        client, *_ = daemon
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(self.a_clip())
+        got = client.transcribe(clip, language="en")
+        assert got.text == "the fleet is up" and got.model == "fake"
+        assert got.segments[0].end_s == 0.1
+        assert self.ears.heard == [len(self.a_clip())], "the whole file crossed the wire"
+
+    def test_raw_bytes_need_no_file(self, daemon):
+        client, *_ = daemon
+        assert client.transcribe(self.a_clip()).text == "the fleet is up"
+
+    def test_the_route_needs_the_credential(self, daemon, tmp_path):
+        client, *_ = daemon
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(self.a_clip())
+        bad = Peer(client.base_url, "not-the-token")
+        with pytest.raises(PeerError, match="401"):
+            bad.transcribe(clip)
+
+    def test_a_peer_says_which_engines_it_has(self, daemon):
+        client, *_ = daemon
+        assert client.speech()["asr"]["auto"] == "fake"
+
+    def test_listing_engines_needs_the_credential(self, daemon):
+        client, *_ = daemon
+        with pytest.raises(PeerError, match="401"):
+            Peer(client.base_url, "not-the-token").speech()
+
+    def test_a_peer_with_no_engine_answers_503_rather_than_hanging_up(self, daemon, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+
+        monkeypatch.setattr(package, "ASR", Registry(kind="asr"))
+        client, *_ = daemon
+        with pytest.raises(PeerError, match="503"):
+            client.transcribe(self.a_clip())

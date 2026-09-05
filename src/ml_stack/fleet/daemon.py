@@ -866,6 +866,10 @@ def make_handler(runner: JobRunner, files_root: Path,
             if path == "/jobs":
                 self._send(200, {"jobs": runner.snapshot()})
                 return
+            if path == "/speech/providers":
+                from ml_stack.speech.service import providers
+
+                self._send(200, providers()); return
             if path == "/bench":
                 if bench is None:
                     self._send(501, {"error": "this daemon takes no bench jobs"}); return
@@ -962,6 +966,18 @@ def make_handler(runner: JobRunner, files_root: Path,
             parsed = urllib.parse.urlparse(self.path)
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length) if length else b"{}"
+            if parsed.path == "/speech/transcribe":
+                from ml_stack.speech.protocols import ProviderError
+                from ml_stack.speech.service import as_json, transcribe
+
+                want = urllib.parse.parse_qs(parsed.query)
+                try:
+                    heard = transcribe(body,
+                                       provider=want.get("provider", [""])[0] or None,
+                                       language=want.get("language", [""])[0] or None)
+                except ProviderError as e:
+                    self._send(503, {"error": str(e)}); return
+                self._send(200, as_json(heard)); return
             if parsed.path == "/jobs":
                 try:
                     req = json.loads(body or b"{}")

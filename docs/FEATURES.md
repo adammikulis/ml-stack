@@ -141,6 +141,12 @@ Talk to a model from the interface, whichever machine is running it.
   server is downloaded the first time and checked against the digest GitHub publishes
   for it.
 
+- **A machine with no speech model sends audio to one that has it.** `Peer.transcribe`
+  posts a recording to another machine's daemon and gets back the text with the time of
+  every segment, under the credential the fleet already shares. `ml-stack-speech` does the
+  same locally: transcribe a file, say a line into a WAV, or find the seconds somebody is
+  speaking in a recording, through whichever engine is installed.
+
 The model server itself listens only on this machine. The one address exposed to the
 network is the daemon's, which already requires the shared credential.
 

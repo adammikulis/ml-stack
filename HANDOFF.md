@@ -211,6 +211,24 @@ worth taking, in this order:
   matrix `knn_edges` builds. The last one is the near-term task: `geocode --near K` is
   O(n^2) in placed entries, which is nothing at 300 and a problem at 30,000.
 
+## Speech
+
+- [ ] **The beacon does not say which machines can hear.** `refresh(b)` inside
+  `fleet/daemon.py::serve_forever` fills `b.device` with `serving` and `models`;
+  `"speech": [names that probe ok]` beside them would let `ml-stack-fleet status` and the
+  cluster view show which peer to send a recording to, and would make
+  `Peer.find_one(require="speech")` work. `ml_stack.speech.service.providers()` already
+  returns exactly that list. Left out because another branch was editing `serve_forever`.
+- [ ] **Nothing streams.** `StreamingASR` in `speech/protocols.py` is a protocol no
+  provider implements, and `POST /speech/transcribe` takes one whole file. A push-to-talk
+  button wants partial text while the person is still speaking: a provider that yields
+  `Transcript`s off a chunk iterator, and a route that streams them the way `/ask/stream`
+  does.
+- [ ] **No microphone anywhere in the interface.** The chat screen has no record button, so
+  the only way to reach any of this is the command line. The route and `Peer.transcribe`
+  are the far end; what is missing is a control that records in the browser and posts the
+  audio.
+
 ## The interface
 
 - [ ] **The fleet app as components.** `graph/page.py` assembles a page out of custom

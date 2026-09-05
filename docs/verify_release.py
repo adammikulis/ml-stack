@@ -758,6 +758,63 @@ def _():
     return "no model store, nothing serving, still answered"
 
 
+@check("Chat", "a machine with no speech model sends audio to one that has it")
+def _():
+    """The engine is a fake: what is verified is that a recording crosses the wire under
+    the fleet's own credential and comes back as text with times."""
+    import threading
+    from http.server import ThreadingHTTPServer
+
+    from ml_stack import speech as package
+    from ml_stack.fleet import JobRunner, make_handler
+    from ml_stack.fleet.daemon import load_or_create_token
+    from ml_stack.fleet.remote import Peer
+    from ml_stack.media import wav
+    from ml_stack.speech import ProviderHealth, Registry, Segment, Transcript
+
+    class Ears:
+        name = "fake"
+
+        def probe(self):
+            return ProviderHealth.ok("fake")
+
+        def start(self):
+            return None
+
+        def stop(self):
+            return None
+
+        def transcribe(self, audio, *, language=None):
+            return Transcript(text="the fleet is up", language=language or "en",
+                              duration_s=0.1, model="fake",
+                              segments=(Segment("the fleet is up", 0.0, 0.1),))
+
+    registry: Registry = Registry(kind="asr")
+    registry.register("fake", Ears)
+    was, package.ASR = package.ASR, registry
+
+    root = TMP / "speech-daemon"
+    files = root / "files"
+    files.mkdir(parents=True, exist_ok=True)
+    token = load_or_create_token(root)
+    runner = JobRunner(root)
+    port = free_port()
+    httpd = ThreadingHTTPServer(("127.0.0.1", port), make_handler(runner, files, token))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        peer = Peer(f"http://127.0.0.1:{port}", token)
+        assert peer.speech()["asr"]["auto"] == "fake"
+        heard = peer.transcribe(wav.encode(b"\x00\x00" * 1600, sample_rate=16000))
+        assert heard.text == "the fleet is up"
+        assert heard.segments[0].end_s == 0.1
+    finally:
+        package.ASR = was
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+    return "a recording posted to a peer came back as text with segment times"
+
+
 @check("Chat", "a conversation is still there after a restart")
 def _():
     from ml_stack.fleet import Conversations
@@ -1078,10 +1135,10 @@ def _():
     names = {t.name for t in TOOLS}
     need = {"serve_up", "serve_down", "serve_status", "models_find", "models_files",
             "models_fetch", "bench_run", "bench_status", "fleet_peers", "world_make",
-            "setup_look", "doctor"}
+            "setup_look", "doctor", "speech_providers", "speech_transcribe", "speech_say"}
     missing = need - names
     assert not missing, f"missing MCP tools: {sorted(missing)}"
-    return f"{len(names)} tools: serve, models, bench, fleet, world, setup, doctor"
+    return f"{len(names)} tools: serve, models, bench, fleet, world, speech, setup, doctor"
 
 
 @check("Web", "the web tools refuse the machine they run on")
