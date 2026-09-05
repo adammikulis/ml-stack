@@ -18,6 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+
 from ml_stack.fleet import join as joining
 from ml_stack.fleet.discovery import (
     Advertiser,
@@ -583,3 +584,137 @@ class TestThePage:
         for path in ("/ui/fleet", "/ui/bench/status", "/ui/bench/history"):
             status, _, _ = s.call(path)
             assert status == 401, path
+
+
+# -- the whole fleet at once -----------------------------------------------------------
+class PausableDaemon:
+    """A peer with a real `Availability` behind ``/availability``, and a beacon."""
+
+    def __init__(self, port: int, key: bytes, udp: int, name: str) -> None:
+        from ml_stack.fleet.availability import Availability
+
+        self.name = name
+        self.schedule = Availability()
+        schedule = self.schedule
+
+        class H(BaseHTTPRequestHandler):
+            def _reply(self_, code: int, payload: dict) -> None:
+                raw = json.dumps(payload).encode()
+                self_.send_response(code)
+                self_.send_header("Content-Type", "application/json")
+                self_.send_header("Content-Length", str(len(raw)))
+                self_.end_headers()
+                self_.wfile.write(raw)
+
+            def do_GET(self_) -> None:
+                if self_.path == "/availability":
+                    self_._reply(200, schedule.public())
+                    return
+                self_._reply(200 if self_.path == "/health" else 404,
+                             {"ok": True, "name": name, "busy": False, "free": 1,
+                              "slots": 1, "queued": 0})
+
+            def do_POST(self_) -> None:
+                said = json.loads(self_.rfile.read(
+                    int(self_.headers.get("Content-Length", "0"))) or b"{}")
+                if said.get("action") == "pause":
+                    schedule.pause(minutes=said.get("minutes"),
+                                   reason=str(said.get("reason") or ""))
+                else:
+                    schedule.resume()
+                self_._reply(200, schedule.public())
+
+            def log_message(self_, *a: object) -> None:
+                pass
+
+        self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.advertiser = Advertiser(Beacon(name=name, port=port, device=dict(DEVICE)),
+                                     key, port=udp, interval_s=0.2).start()
+
+    def close(self) -> None:
+        self.advertiser.stop()
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+@pytest.fixture
+def cluster(tmp_path, key, udp):
+    """Three peers on loopback in one cluster, and the root a command would keep."""
+    from ml_stack.fleet.discovery import join as join_cluster
+
+    join_cluster(WORDS, group="home", path=key)
+    made = [PausableDaemon(_free_tcp(), load_cluster_key(key), udp, name=n)
+            for n in ("harrowgate", "larch", "studio")]
+    yield made, key, udp, tmp_path / "root"
+    for one in made:
+        one.close()
+
+
+def _rows(key: Path, udp: int, made: list, self_name: str = "") -> list[dict]:
+    """The discovery rows, addressed to where these fakes actually listen."""
+    ports = {d.name: d.httpd.server_address[1] for d in made}
+    rows = joining.peers(cluster_key_path=key, port=udp, self_name=self_name)
+    for row in rows:
+        row["base_url"] = f"http://127.0.0.1:{ports[row['name']]}"
+    return rows
+
+
+class TestPauseTheFleet:
+    @pytest.mark.slow
+    def test_pause_reaches_every_machine_and_resume_puts_them_back(self, cluster):
+        from ml_stack.fleet.pausing import Fanout, pause_fleet, pause_table
+
+        made, key, udp, root = cluster
+        rows = _rows(key, udp, made, self_name="studio")
+        assert len(rows) == 3, [r["name"] for r in rows]
+
+        answers = pause_fleet(Fanout(root, minutes=120, reason="away from the desk",
+                                     cluster_key_path=key), rows)
+        assert [a.ok for a in answers] == [True] * 3
+        assert all(d.schedule.paused for d in made)
+        assert {d.schedule.paused_reason for d in made} == {"away from the desk"}
+        text = pause_table(answers, span="2h")
+        assert text.startswith("paused 3 of 3 machines for 2h")
+        assert "studio (this machine)" in text, text
+
+        back = pause_fleet(Fanout(root, resume=True, cluster_key_path=key), rows)
+        assert [a.said for a in back] == ["taking work again"] * 3
+        assert not any(d.schedule.paused for d in made)
+        assert pause_table(back, resume=True).startswith("resumed 3 of 3 machines")
+
+    @pytest.mark.slow
+    def test_a_machine_that_is_off_is_named_as_still_taking_work(self, cluster):
+        from ml_stack.fleet.pausing import UNHEARD, Fanout, pause_fleet, pause_table
+
+        made, key, udp, root = cluster
+        rows = _rows(key, udp, made)
+        asked = Fanout(root, minutes=60, cluster_key_path=key)
+        pause_fleet(asked, rows)
+
+        made[1].close()                                  # larch goes to sleep
+        answers = pause_fleet(asked, [r for r in rows if r["name"] != "larch"])
+
+        gone = [a for a in answers if not a.ok]
+        assert [a.name for a in gone] == ["larch"]
+        assert gone[0].said == UNHEARD
+        text = pause_table(answers, span="1h")
+        assert "larch" in text and UNHEARD in text
+        assert "1 machine did not hear this" in text
+
+    def test_the_length_of_the_pause_is_read_the_way_every_duration_is(self, cluster,
+                                                                      monkeypatch):
+        _, key, _, root = cluster
+        sent: list = []
+        monkeypatch.setattr(joining, "pause_fleet", lambda what, rows: sent.append(what) or [])
+        monkeypatch.setattr(joining, "peers", lambda **kw: [])
+        code = joining.main(["--cluster-key", str(key), "--root", str(root),
+                             "pause", "--for", "2h 30m", "--reason", "somebody is here"])
+        assert code == 1, "no machine answered, so the command says so"
+        assert sent[0].minutes == 150
+        assert sent[0].reason == "somebody is here"
+
+    def test_a_length_that_is_not_a_length_is_refused(self, cluster):
+        _, key, _, root = cluster
+        assert joining.main(["--cluster-key", str(key), "--root", str(root),
+                             "pause", "--for", "soon"]) == 2

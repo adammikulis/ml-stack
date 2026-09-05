@@ -28,27 +28,63 @@ from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, request_bytes
 from ml_stack.log import say, warn
+from ml_stack.units import human_bytes
 
 from .discovery import (
     DEFAULT_CLUSTER,
     Beacon,
     DiscoveryError,
     default_port,
-    derive_token,
     discover,
     in_cluster,
-    join as join_cluster,
     key_path,
-    leave as leave_cluster,
     memberships,
 )
+from .discovery import (
+    join as join_cluster,
+)
+from .discovery import (
+    leave as leave_cluster,
+)
 from .launch import HTTP_PORT, already_running, wait_for_health
-from ml_stack.units import human_bytes
+from .pausing import (
+    Answer,
+    Fanout,
+    minutes_of,
+    pause_fleet,
+    pause_table,
+    peer_clients,
+    remember_seen,
+)
+from .remote import PeerError
 
-__all__ = ["Check", "JoinError", "Joined", "DEFAULT_ROOT", "STARTED_FILE", "apply_plan",
-           "checks", "describe", "join_machine", "leave_machine", "main", "peers",
-           "remember_track", "running_code", "serving_table", "start_daemon", "sweep_argv",
-           "table", "updating"]
+__all__ = [
+    "DEFAULT_ROOT",
+    "STARTED_FILE",
+    "Answer",
+    "Check",
+    "Fanout",
+    "JoinError",
+    "Joined",
+    "apply_plan",
+    "checks",
+    "describe",
+    "join_machine",
+    "leave_machine",
+    "main",
+    "pause_fleet",
+    "pause_table",
+    "peer_clients",
+    "peers",
+    "remember_seen",
+    "remember_track",
+    "running_code",
+    "serving_table",
+    "start_daemon",
+    "sweep_argv",
+    "table",
+    "updating",
+]
 
 DEFAULT_ROOT = "~/.ml-stack/traind"
 STARTED_FILE = "fleet-daemon.json"
@@ -71,6 +107,7 @@ class Check:
 
     def public(self) -> dict[str, Any]:
         return {"name": self.name, "good": self.good, "said": self.said, "fix": self.fix}
+
 
 
 @dataclass
@@ -600,6 +637,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     if args.json:
         say(json.dumps(rows, indent=1, default=str))
         return 0 if rows else 1
+    remember_seen(rows, args.root)
     say(table(rows))
     if me is None:
         say(f"\nthis machine's daemon is not running on port {args.port}; "
@@ -615,22 +653,16 @@ def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
     Each answer is ``{"peer", "model", "seats", "status", "served" | "error", "serving"}``;
     ``serving`` is the peer's ``/health`` serving rows after the call.
     """
-    from .remote import Peer, PeerError
-
-    tokens = {m.group: derive_token(m.key) for m in memberships(cluster_key_path)}
-    by_name = {r["name"]: r for r in rows}
+    clients = peer_clients(rows, cluster_key_path=cluster_key_path, timeout=600.0)
     out: list[dict[str, Any]] = []
     for row in placement.rows:
-        peer_row = by_name.get(row.peer)
         answer: dict[str, Any] = {"peer": row.peer, "model": row.model, "seats": row.seats}
-        token = next((tokens[g] for g in (peer_row or {}).get("clusters") or []
-                      if g in tokens), "")
-        if peer_row is None or not token:
+        peer = clients.get(row.peer)
+        if peer is None:
             answer.update(status=0, error="no daemon answered for this peer")
             out.append(answer)
             say(f"{row.peer}: {row.model}: {answer['error']}")
             continue
-        peer = Peer(peer_row["base_url"], token, timeout=600.0)
         try:
             served = peer._json("POST", "/serve", {"model": row.model, "context": row.context,
                                                    "parallel": row.seats})
@@ -681,7 +713,7 @@ def _measurements() -> tuple[list[Any], list[Any]]:
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
-    from .plan import place, table as plan_table
+    from .plan import place, table as plan_table  # noqa: I001
 
     if not memberships(args.cluster_key):
         warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
@@ -707,6 +739,29 @@ def cmd_plan(args: argparse.Namespace) -> int:
             say()
             say(serving_table(applied))
     return 0 if placement.rows and not placement.unplaced else 1
+
+
+def cmd_pause(args: argparse.Namespace) -> int:
+    if not memberships(args.cluster_key):
+        warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
+             "run 'ml-stack-fleet join'")
+        return 1
+    resume = args.cmd == "resume"
+    span = str(getattr(args, "span", "") or "")
+    minutes = minutes_of(span)
+    if span and minutes is None:
+        warn(f"{span!r} is not a length of time; try '2h', '90m' or '45s'")
+        return 2
+    answers = pause_fleet(
+        Fanout(args.root, resume=resume, minutes=minutes,
+               reason=str(getattr(args, "reason", "") or ""),
+               cluster_key_path=args.cluster_key),
+        peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout))
+    if args.json:
+        say(json.dumps([a.public() for a in answers], indent=1))
+    else:
+        say(pause_table(answers, resume=resume, span=span))
+    return 0 if answers and all(a.ok for a in answers) else 1
 
 
 def cmd_leave(args: argparse.Namespace) -> int:
@@ -774,6 +829,25 @@ def main(argv: list[str] | None = None) -> int:
                         help="seconds to listen for peers (default: 2)")
     plan_p.add_argument("--json", action="store_true")
 
+    pause_p = sub.add_parser("pause", help="stop every machine in the cluster taking "
+                                           "work; each is asked in turn, and any that "
+                                           "does not answer is named")
+    pause_p.add_argument("--for", dest="span", default="", metavar="DURATION",
+                         help="how long, e.g. '2h', '90m'; without it the pause holds "
+                              "until you resume")
+    pause_p.add_argument("--reason", default="", metavar="WORDS",
+                         help="what to show anyone who asks why a machine is not "
+                              "taking work")
+    pause_p.add_argument("--timeout", type=float, default=2.0,
+                         help="seconds to listen for peers (default: 2)")
+    pause_p.add_argument("--json", action="store_true")
+
+    resume_p = sub.add_parser("resume", help="every machine in the cluster takes work "
+                                             "again")
+    resume_p.add_argument("--timeout", type=float, default=2.0,
+                          help="seconds to listen for peers (default: 2)")
+    resume_p.add_argument("--json", action="store_true")
+
     leave_p = sub.add_parser("leave", help="drop the cluster, the logon service and the "
                                            "daemon join started")
     leave_p.add_argument("--group", default="",
@@ -783,7 +857,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = ap.parse_args(argv)
     fn = {"join": cmd_join, "status": cmd_status, "plan": cmd_plan,
-          "leave": cmd_leave}[args.cmd]
+          "pause": cmd_pause, "resume": cmd_pause, "leave": cmd_leave}[args.cmd]
     try:
         return fn(args)
     except (JoinError, DiscoveryError, OSError) as exc:
