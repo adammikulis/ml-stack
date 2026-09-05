@@ -12,7 +12,10 @@ are paced and can be held to hours when somebody is meant to be awake.
 from __future__ import annotations
 
 import contextlib
+import os
 import random
+import subprocess
+import sys
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -35,6 +38,53 @@ class Window:
     headless: bool = True
     channel: str = "chrome"
     timeout_ms: int = 60_000
+    position: tuple[int, int] | None = None
+
+    def args(self) -> list[str]:
+        """The Chromium flags this window wants."""
+        at = self.position if self.position is not None else placed()
+        return [f"--window-position={at[0]},{at[1]}"] if at else []
+
+
+
+def placed() -> tuple[int, int] | None:
+    """Where a headed window opens, from ``ML_STACK_WINDOW_POSITION`` as ``X,Y``."""
+    said = os.environ.get("ML_STACK_WINDOW_POSITION", "").strip()
+    if not said:
+        return None
+    try:
+        x, y = (int(part) for part in said.split(",", 1))
+    except ValueError:
+        return None
+    return x, y
+
+
+@contextlib.contextmanager
+def keeping_focus() -> Iterator[None]:
+    """Give the screen back to whichever application had it."""
+    if sys.platform != "darwin":
+        yield
+        return
+    front = _frontmost()
+    try:
+        yield
+    finally:
+        if front:
+            with contextlib.suppress(Exception):
+                subprocess.run(["osascript", "-e", f'tell application "{front}" to activate'],
+                               capture_output=True, timeout=10, check=False)
+
+
+def _frontmost() -> str:
+    """The application holding the screen, or ""."""
+    try:
+        done = subprocess.run(
+            ["osascript", "-e",
+             "tell application \"System Events\" to name of first process whose frontmost is true"],
+            capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return done.stdout.strip()
 
 
 @contextlib.contextmanager
@@ -47,9 +97,11 @@ def browser(window: Window) -> Iterator[Any]:
     profile = Path(window.profile).expanduser()
     profile.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as play:
-        context = play.chromium.launch_persistent_context(
-            str(profile), headless=window.headless, channel=window.channel,
-            viewport={"width": window.width, "height": window.height})
+        with keeping_focus():
+            context = play.chromium.launch_persistent_context(
+                str(profile), headless=window.headless, channel=window.channel,
+                args=window.args(),
+                viewport={"width": window.width, "height": window.height})
         context.set_default_timeout(window.timeout_ms)
         page = context.pages[0] if context.pages else context.new_page()
         try:

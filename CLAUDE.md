@@ -208,6 +208,18 @@ Re-running the whole suite after every intermediate commit buys nothing: the bra
 not landed, and it will be rebased onto a moved `main` before it does, which is what the
 one pre-merge run is for.
 
+## Driving a browser
+
+A headed browser opens where `ML_STACK_WINDOW_POSITION` says (`X,Y`, set for this project
+in `.claude/settings.json`) and gives the screen back to whichever application had it.
+`ml_stack.scrape.browser.Window.args()` and `keeping_focus()` do both; go through
+`browser(window)` rather than calling `chromium.launch` yourself.
+
+Never drive the person's own browser through the claude-in-chrome tools to test this
+project's pages. That window is on their primary display and every click takes their
+screen. Drive your own Chromium through playwright instead, or run headless and read
+screenshots.
+
 ## Driving a model on this machine
 
 Never point `ml-stack-claude`, `ml-stack-agent` or `ml-stack-do` at a checkout you are

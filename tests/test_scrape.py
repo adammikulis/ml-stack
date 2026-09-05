@@ -7,10 +7,11 @@ exists, and a fake that hands back everything at once would test nothing.
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
-from ml_stack.scrape.browser import within_hours
+from ml_stack.scrape.browser import Window, within_hours
 from ml_stack.scrape.presets import DISCORD, SLACK, WEBSITE, preset
 from ml_stack.scrape.read import read_all, read_once
 from ml_stack.scrape.seen import Seen
@@ -160,3 +161,22 @@ def test_a_digest_is_stable_short_and_not_a_copy_of_what_was_read():
     assert len(digest("a message")) == 16
     assert "message" not in digest("a message")
     assert digest("") == digest(None)  # a row with no text is not a row that changed
+
+
+class TestWhereAWindowOpens:
+    def test_no_position_asks_for_no_flag(self, monkeypatch):
+        monkeypatch.delenv("ML_STACK_WINDOW_POSITION", raising=False)
+        assert Window(profile=Path("p")).args() == []
+
+    def test_the_environment_places_it(self, monkeypatch):
+        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "3460,20")
+        assert Window(profile=Path("p")).args() == ["--window-position=3460,20"]
+
+    def test_the_window_wins_over_the_environment(self, monkeypatch):
+        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "0,0")
+        window = Window(profile=Path("p"), position=(3460, 20))
+        assert window.args() == ["--window-position=3460,20"]
+
+    def test_nonsense_is_no_position_rather_than_a_crash(self, monkeypatch):
+        monkeypatch.setenv("ML_STACK_WINDOW_POSITION", "over there")
+        assert Window(profile=Path("p")).args() == []

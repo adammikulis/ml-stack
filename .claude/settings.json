@@ -4,15 +4,24 @@
       {
         "matcher": "Bash",
         "hooks": [
-          {"type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-bash-guard"}
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-bash-guard"
+          }
         ]
       },
       {
         "matcher": "Write|Edit|MultiEdit",
         "hooks": [
-          {"type": "command", "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-edit-guard"}
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/scripts/hooks/claude-edit-guard"
+          }
         ]
       }
     ]
+  },
+  "env": {
+    "ML_STACK_WINDOW_POSITION": "3460,20"
   }
 }
