@@ -19,9 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import doctor
-from ml_stack.doctor import (ahead_of, bench_of, builds_of, hooks_of, install_of, look, main,
-                             repositories, status_of, worktrees_of)
+from ml_stack import setup as doctor
+from ml_stack.setup import (ahead_of, bench_of, builds_of, doctor_main as main, hooks_of,
+                            install_of, look_checkouts as look, repositories, status_of,
+                            worktrees_of)
 
 REPO = Path(__file__).resolve().parent.parent
 AUTHOR = ("Ada Lovelace", "ada@invented.example")

@@ -2,8 +2,8 @@
 
 Each tool calls the same function the matching command calls -- `serve.cli.look`,
 `hub.find`, `bench.run.detach`, `fleet.join.join_machine`, `setup.look`,
-`doctor.look` -- so what an agent is told is what a person at the terminal would be
-told, and nothing is reimplemented here. Anything long -- a model load, a download, a
+`setup.look_checkouts` -- so what an agent is told is what a person at the terminal
+would be told, and nothing is reimplemented here. Anything long -- a model load, a download, a
 measurement -- never blocks the call: it is started in its own session, owned by no
 terminal, and the handle (log path and pid) comes back at once. ``bench_status`` and
 ``bench_history`` read the same files ``ml-stack-bench status|history`` read.
@@ -351,9 +351,9 @@ def speech_say(text: str, out: str, provider: str = "", voice: str = "") -> dict
 def doctor(repos: list[str] = []) -> list[dict[str, Any]]:
     """The checkouts, the bench store and the managed llama.cpp, each finding with its fix
     (``ml-stack-doctor``, without running any fix); ``repos`` picks the checkouts."""
-    from ml_stack.doctor import look, repositories
+    from ml_stack.setup import look_checkouts, repositories
 
-    return [_plain(f) for f in look(repositories(list(repos)) if repos else None)]
+    return [_plain(f) for f in look_checkouts(repositories(list(repos)) if repos else None)]
 
 
 TOOLS: list[Tool] = [
