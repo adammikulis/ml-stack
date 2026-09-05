@@ -29,6 +29,7 @@ from ml_stack.bench.score import derived, invented_digest
 from ml_stack.bench.speed import KIND as SPEED
 from ml_stack.paths import repo_root
 
+
 def _graph_runs(kept: Sequence[Mapping[str, Any]], label: str, *, anyway: bool = False
                 ) -> list[Mapping[str, Any]]:
     """The graph runs labelled ``label``, over the invented community unless ``anyway``."""

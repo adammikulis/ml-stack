@@ -5,10 +5,11 @@ Every fixture here is invented. Nothing reads a real store, a real graph, or a r
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from ml_stack.bench.record import Measured, Spread, prompt_digest
-
 
 SYSTEM = "Answer from the graph. Show only the entries the question is about."
 
@@ -212,14 +213,10 @@ class TestWhatAMeasuredRunKeeps:
 
         def chat(self, messages, tools=None, **_):
             self.seen.append((messages, tools))
-
-            class Reply:
-                content = "Iris fires the kilns."
-                tool_calls = ()
-                thinking = ""
-                finish_reason = "stop"
-                raw = {"usage": {"prompt_tokens": 10, "completion_tokens": 4}}
-            return Reply()
+            return SimpleNamespace(
+                content="Iris fires the kilns.", tool_calls=(), thinking="",
+                finish_reason="stop",
+                raw={"usage": {"prompt_tokens": 10, "completion_tokens": 4}})
 
     def test_the_counting_client_digests_what_the_model_was_shown(self):
         from ml_stack.bench.measure import Counting

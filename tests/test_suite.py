@@ -12,8 +12,8 @@ from dataclasses import replace
 
 import pytest
 
-from ml_stack.train import suite as suites
 from ml_stack.lock import Busy, only_one
+from ml_stack.train import suite as suites
 
 
 @pytest.fixture(autouse=True)

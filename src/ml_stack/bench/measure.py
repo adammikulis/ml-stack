@@ -30,8 +30,8 @@ from typing import Any
 # at import.
 from ml_stack import bench
 from ml_stack.bench.backends import http_of, processes, served_by, timings_of
-from ml_stack.bench.record import prompt_digest
 from ml_stack.bench.keep import SHORT, SMOKE
+from ml_stack.bench.record import prompt_digest
 from ml_stack.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
 
