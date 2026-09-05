@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import threading
 import time
 from contextlib import contextmanager
@@ -122,6 +123,16 @@ def merge_state(on_disk: dict, mine: dict, owner_pid: int) -> dict:
     return merged
 
 
+def _reap_one(held: Any, *, grace_s: float) -> None:
+    """Wait on a child this process started, so its pid leaves the table."""
+    if held is None:
+        return
+    try:
+        held.wait(timeout=grace_s)
+    except (subprocess.TimeoutExpired, ChildProcessError, OSError):
+        pass
+
+
 def orphaned(entry: dict) -> bool:
     """Whether a record's server is running on after the process that leased it has gone."""
     owner, pid = entry.get("owner_pid"), entry.get("pid")
@@ -221,6 +232,7 @@ class ServerManager:
         self.state_file = state_file or STATE_FILE
         self.say: Callable[[str], None] | None = None
         self._mine: dict[str, dict] = {}
+        self._processes: dict[int, Any] = {}
         self._lock = threading.Lock()
         self._port_locks: dict[int, threading.Lock] = {}
         self._unavailable_until: dict[int, float] = {}
@@ -629,12 +641,17 @@ class ServerManager:
         if info.adopted:
             logger.debug("not stopping %s: we adopted it", info.base_url)
             return
+        held = self._processes.pop(info.port, None)
+        if held is None:
+            held = info.process
         if info.pid:
             kill_process_tree(info.pid, grace_s=grace_s)
+        _reap_one(held, grace_s=grace_s)
         self._forget(info.port)
 
     def detach(self, info: ServerInfo) -> None:
         """Record the server under its own pid and stop tracking it in this process."""
+        self._processes.pop(info.port, None)
         entry = self._mine.pop(str(info.port), None)
         if entry is None or not info.pid:
             self._save()
@@ -651,6 +668,9 @@ class ServerManager:
             pid = entry.get("pid")
             if isinstance(pid, int) and pid_exists(pid):
                 stopped += kill_process_tree(pid, grace_s=grace_s)
+        for held in list(self._processes.values()):
+            _reap_one(held, grace_s=grace_s)
+        self._processes.clear()
         self._mine.clear()
         self._save()
         return stopped
@@ -683,9 +703,12 @@ class ServerManager:
             "load_s": info.load_s,
             "warmup_s": info.warmup_s,
         }
+        if info.process is not None:
+            self._processes[info.port] = info.process
         self._save()
 
-    def _forget(self, port: int) -> None:
+    def _forget(self, port: int, *, grace_s: float = 5.0) -> None:
+        _reap_one(self._processes.pop(port, None), grace_s=grace_s)
         self._mine.pop(str(port), None)
         self._save()
 
@@ -702,7 +725,17 @@ class ServerManager:
         tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
         os.replace(tmp, self.state_file)
 
+    def _reap(self) -> None:
+        """Drop every child of ours that has already exited, so none stays defunct."""
+        for port, held in list(self._processes.items()):
+            try:
+                if held.poll() is not None:
+                    self._processes.pop(port, None)
+            except OSError:
+                self._processes.pop(port, None)
+
     def _save(self) -> None:
+        self._reap()
         with self._lock:
             self._write(merge_state(self._load(), self._mine, os.getpid()))
 

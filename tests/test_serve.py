@@ -840,3 +840,104 @@ def test_one_seat_says_so_rather_than_leaving_it_to_the_server():
     four = LlamaServerBackend(binary="llama-server").command(
         ServerSpec(model="model.gguf", port=8080, context=32768, parallel=4))
     assert four[four.index("-np") + 1] == "4"
+
+
+FAKE_HEALTHY = """\
+import http.server
+import sys
+
+port = 8080
+for i, arg in enumerate(sys.argv):
+    if arg == "--port":
+        port = int(sys.argv[i + 1])
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = b'{"status": "ok"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+
+http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
+"""
+
+
+def healthy_binary(tmp_path):
+    """A stand-in llama-server that answers /health and runs until it is stopped."""
+    script = tmp_path / "fake_llama_server.py"
+    script.write_text(FAKE_HEALTHY)
+    path = tmp_path / "llama-server"
+    path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
+    path.chmod(0o755)
+    return path
+
+
+@pytest.fixture
+def running(tmp_path):
+    """A manager holding one real, healthy stand-in server, stopped at the end."""
+    model = tmp_path / "model.gguf"
+    model.write_bytes(b"GGUF" + b"\x00" * 64)
+    manager = ServerManager(backend=LlamaServerBackend(binary=healthy_binary(tmp_path)),
+                            state_file=tmp_path / "servers.json")
+    info = manager.lease(ServerSpec(model=model, port=free_port()), roam=False,
+                         timeout=30.0, check_flags=False, preflight=False,
+                         warmup_request=False)
+    try:
+        yield manager, info
+    finally:
+        manager.release(info)
+
+
+@pytest.mark.slow
+class TestTheStartedProcess:
+    def test_it_runs_in_a_session_of_its_own(self, running):
+        """A Ctrl-C at the terminal that leased the server must not reach the server."""
+        if os.name != "posix":
+            pytest.skip("sessions are POSIX")
+        _, info = running
+        assert os.getsid(info.pid) != os.getsid(0)
+
+    def test_the_log_is_not_held_open_while_the_load_is_waited_on(self, tmp_path, monkeypatch):
+        psutil = pytest.importorskip("psutil")
+        from ml_stack.serve import backend as backend_module
+
+        real = backend_module.wait_for_health
+        open_during: list[list[str]] = []
+
+        def watching(*args, **kwargs):
+            open_during.append([one.path for one in psutil.Process().open_files()])
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(backend_module, "wait_for_health", watching)
+        model = tmp_path / "model.gguf"
+        model.write_bytes(b"GGUF" + b"\x00" * 64)
+        manager = ServerManager(backend=LlamaServerBackend(binary=healthy_binary(tmp_path)),
+                                state_file=tmp_path / "servers.json")
+        info = manager.lease(ServerSpec(model=model, port=free_port()), roam=False,
+                             timeout=30.0, check_flags=False, preflight=False,
+                             warmup_request=False)
+        try:
+            names = [os.path.basename(one) for one in open_during[0]]
+            assert info.log_path.name not in names
+        finally:
+            manager.release(info)
+
+    def test_a_server_that_exits_on_its_own_is_reaped(self, running):
+        import signal
+
+        manager, info = running
+        os.kill(info.pid, signal.SIGKILL)
+        deadline = time.monotonic() + 10.0
+        while pid_exists(info.pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        manager._save()
+        with pytest.raises(ChildProcessError):
+            os.waitpid(info.pid, os.WNOHANG)
+

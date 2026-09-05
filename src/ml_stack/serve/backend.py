@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import logging
 import math
@@ -11,8 +12,10 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 from ml_stack.client import wait_for_health
+from ml_stack.platform import process_group_kwargs
 from ml_stack.serve.binary import CACHE_ROOT, child_env, require_binary
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
@@ -347,6 +350,9 @@ class ServerInfo:
     # shaders and allocating the KV cache happen on the first real request whether or not
     # anything measures them; this is what makes the *next* one the first that pays for it.
     warmup_s: float | None = None
+    # The ``Popen`` for a server this process started, for whoever stops it to wait on.
+    # Never serialised: it is not a value, and it is None for an adopted server.
+    process: Any = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -641,13 +647,14 @@ class LlamaServerBackend(ServerBackend):
             extra_env["LLAMA_SERVER_SLOTS_DEBUG"] = "1"
 
         started_at = time.monotonic()
-        log_handle = log_path.open("wb")
-        process = subprocess.Popen(
-            argv,
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            env=child_env(self.binary, extra_env or None),
-        )
+        with log_path.open("wb") as log_handle:
+            process = subprocess.Popen(
+                argv,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                env=child_env(self.binary, extra_env or None),
+                **process_group_kwargs(),
+            )
 
         base_url = f"http://{DEFAULT_HOST}:{spec.port}"
         healthy = wait_for_health(
@@ -659,7 +666,8 @@ class LlamaServerBackend(ServerBackend):
         if not healthy:
             code = process.poll()
             process.terminate()
-            log_handle.close()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=5.0)
             raise ServerFailed(
                 f"llama-server did not become healthy on {base_url}"
                 + (f" (exited {code})" if code is not None else f" within {timeout:.0f}s")
@@ -682,6 +690,7 @@ class LlamaServerBackend(ServerBackend):
             log_path=log_path,
             load_s=load_s,
             warmup_s=warmup_s,
+            process=process,
         )
 
     def _warm_up(self, base_url: str, *, timeout: float) -> float | None:
