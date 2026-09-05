@@ -901,3 +901,51 @@ def test_the_controls_row_sits_at_the_bottom_right_of_the_graph_and_nothing_scro
     assert not box["scrolls"]
     assert errors == []
 
+
+def a_graph_of(n):
+    """``n`` people on a ring of topics, enough that the layout spreads well past the spiral
+    d3 starts from."""
+    nodes, edges = [], []
+    for i in range(n):
+        nodes.append({"id": f"person:p{i}", "label": f"Person {i}", "kind": "person",
+                      "mentions": 1 + i % 3, "attrs": {"member": True}, "messages": []})
+        nodes.append({"id": f"topic:t{i}", "label": f"topic {i}", "kind": "topic",
+                      "mentions": 2, "attrs": {}, "messages": []})
+        edges.append({"source": f"person:p{i}", "target": f"topic:t{i}", "rel": "works_on",
+                      "weight": 1, "messages": []})
+        edges.append({"source": f"person:p{i}", "target": f"topic:t{(i + 1) % n}",
+                      "rel": "interested_in", "weight": 1, "messages": []})
+    return {"nodes": nodes, "edges": edges, "messages": {}, "stats": {"messages": 0}, "meta": {}}
+
+
+def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
+    """Driven 2026-09-05: the frame taken at 1.5 s, while d3's starting spiral is still a
+    knot, was kept as final and the settled graph ran off the corner of the view. Fails
+    when the end of the simulation no longer re-frames."""
+    page, errors = open_page(a_graph_of(160))
+    # the first frame, taken while d3's starting spiral is still a knot -- what a slow
+    # machine's 1.5 s fallback does on a graph this size; headless has spread the layout
+    # long before the page has loaded, so the knot is put back and framed by hand
+    page.evaluate("""() => {
+        const M = window.graphModel, sim = M.view2d.sim;
+        sim.stop();
+        M.nodes.forEach((n, i) => {
+            const r = 10 * Math.sqrt(0.5 + i), a = i * 2.4;
+            n.x = r * Math.cos(a); n.y = r * Math.sin(a); n.vx = n.vy = 0;
+        });
+        M.fit();
+        sim.alpha(1).restart();
+    }""")
+    settle(page)
+    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.001", timeout=30_000)
+    page.wait_for_timeout(600)
+    outside = page.evaluate("""() => {
+        const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
+        return [...document.querySelectorAll('#graph g.node path.mark')]
+            .map(el => el.getBoundingClientRect())
+            .filter(r => r.left < wrap.left || r.right > wrap.right
+                         || r.top < wrap.top || r.bottom > wrap.bottom).length;
+    }""")
+    assert outside == 0, f"{outside} nodes lie outside the view"
+    assert errors == []
+

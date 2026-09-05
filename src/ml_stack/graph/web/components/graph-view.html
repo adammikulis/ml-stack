@@ -243,7 +243,10 @@
       svg.transition().duration(dur).call(zoom.transform, t)
         .on('end interrupt', () => { lastK = d3.zoomTransform(svg.node()).k; layoutLabels(); wrap.classList.remove('settling'); });
     }
-    sim.on('end', () => { if (!fitted || needsFit) { needsFit = false; fit(); } });
+    // the frame at 1.5 s is a first look while the layout is still a spiral; the frame at
+    // the end is the one that holds everything
+    let settled = false;
+    sim.on('end', () => { if (!settled || needsFit) { needsFit = false; settled = true; fit(); } });
     setTimeout(() => { if (!fitted) fit(); }, 1500);
     svg.on('click', e => { if (e.target === svg.node()) select(null); });
     new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
