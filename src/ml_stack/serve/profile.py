@@ -24,12 +24,12 @@ typed in by hand is a remembered one, and the whole point is that this one was p
 
 from __future__ import annotations
 
-import json
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
+
+from ml_stack.records import Records
 
 __all__ = ["Profile", "add", "local_file", "package_file", "profile_for", "profiles",
            "record", "resolved", "said", "whole_context", "writable_file"]
@@ -354,95 +354,51 @@ def resolved(model: str, draft: str, mmproj: str, *, build: str = "") -> tuple[s
 
 # ---------------------------------------------------------------- the file it lives in
 
+_STORE: Records[Profile] = Records(
+    "profiles.json", env="MLSTACK_PROFILES_FILE",
+    build=Profile.from_dict, unbuild=lambda p: p.as_dict(),
+    key=lambda p: _plain(p.model), order=lambda p: p.model.lower())
+
+
 def package_file() -> Path:
-    """The profiles that ship with ml-stack. A function rather than a constant so a test
-    can point it at somewhere with nothing in it."""
-    return Path(__file__).resolve().parent.parent / "data" / "profiles.json"
+    """The profiles that ship with ml-stack."""
+    return _STORE.package_path()
 
 
 def local_file() -> Path:
     """This machine's own records, layered over the shipped ones.
-    ``$MLSTACK_PROFILES_FILE`` moves it, which is how the tests keep out of a real
-    ``~/.ml-stack``."""
-    named = os.environ.get("MLSTACK_PROFILES_FILE")
-    if named:
-        return Path(named).expanduser()
-    return Path.home() / ".ml-stack" / "profiles.json"
-
-
-def _read(path: Path) -> list[Profile]:
-    """Every record in one file. A file that is absent, unreadable or not a list of objects
-    contributes nothing: half a profile is a shape nobody measured."""
-    try:
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    if not isinstance(parsed, list):
-        return []
-    out: list[Profile] = []
-    for row in parsed:
-        if not isinstance(row, Mapping) or not row.get("model"):
-            continue
-        try:
-            out.append(Profile.from_dict(row))
-        except (TypeError, ValueError):
-            continue
-    return out
+    ``$MLSTACK_PROFILES_FILE`` moves it."""
+    return _STORE.local_path()
 
 
 def records_in(path: Path) -> list[Profile]:
     """The records one file holds -- the shipped file, this machine's, or one named by
     `--profiles` -- so a writer can see what it is about to supersede."""
-    return _read(path)
+    return _STORE.read(path)
 
 
 def profiles(*, package: Path | None = None, local: Path | None = None) -> list[Profile]:
     """Every measured shape: what ships, with this machine's own layered over it.
 
     A local record for the same model file replaces the shipped one rather than sitting
-    beside it -- two shapes for one model is a choice nobody can make from the outside, and
-    the newer measurement is the one this machine paid for.
+    beside it.
     """
-    merged: dict[str, Profile] = {}
-    for one in _read(package or package_file()) + _read(local or local_file()):
-        merged[_plain(one.model)] = one
-    return sorted(merged.values(), key=lambda p: p.model.lower())
+    return _STORE.all(package=package or package_file(), local=local or local_file())
 
 
 def writable_file() -> Path:
     """Where a new record goes: the shipped file in a checkout somebody can write to, and
-    this machine's own file otherwise -- an installed wheel is not a place to keep a
-    measurement, since the next upgrade takes it away."""
-    shipped = package_file()
-    if "site-packages" in shipped.parts or "dist-packages" in shipped.parts:
-        return local_file()
-    parent = shipped.parent
-    try:
-        parent.mkdir(parents=True, exist_ok=True)
-        if os.access(parent, os.W_OK):
-            return shipped
-    except OSError:
-        pass
-    return local_file()
+    this machine's own file otherwise."""
+    return _STORE.writable_path()
 
 
 def add(profile: Profile, *, path: Path | None = None) -> Path:
     """Write one record into the source of truth, replacing the one it supersedes.
 
-    Returns where it was written, which is what `--profile` prints: a person who measured
-    a model in a checkout and expected the record in the repository should be told when it
-    went to this machine's own file instead.
+    Returns where it was written, which is what `--profile` prints.
     """
-    where = path or writable_file()
-    held = _read(where)
-    older = next((one for one in held if _plain(one.model) == _plain(profile.model)), None)
-    kept = [one for one in held if _plain(one.model) != _plain(profile.model)]
-    kept.append(profile.carrying(older))
-    kept.sort(key=lambda p: p.model.lower())
-    where.parent.mkdir(parents=True, exist_ok=True)
-    where.write_text(json.dumps([one.as_dict() for one in kept], indent=2) + "\n",
-                     encoding="utf-8")
-    return where
+    return _STORE.add(profile, path=path or writable_file(),
+                      merge=lambda new, older: new.carrying(older))
 
 
 def record(model: str, **fields: Any) -> Profile:

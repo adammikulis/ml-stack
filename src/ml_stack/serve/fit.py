@@ -85,8 +85,6 @@ flagged, and experts against attention against table -- which answers "what is t
 
 from __future__ import annotations
 
-import json
-import os
 import re
 import struct
 from collections.abc import Callable, Iterable, Sequence
@@ -94,6 +92,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from ml_stack.hub import pretty_name
+from ml_stack.records import Records
 from ml_stack.units import human_bytes
 
 __all__ = [
@@ -672,39 +671,21 @@ class Fit:
 
 # ------------------------------------------------------------------ the file it lives in
 
+_STORE: Records[Fit] = Records(
+    "fit.json", env="MLSTACK_FIT_FILE",
+    build=Fit.from_dict, unbuild=lambda f: f.as_dict(), key=lambda f: f.key,
+    order=lambda f: (f.model.lower(), f.cache_type, f.spec))
+
+
 def package_file() -> Path:
-    """The measurements that ship with ml-stack -- the single source of truth. A function
-    rather than a constant so a test can point it somewhere with nothing in it."""
-    return Path(__file__).resolve().parent.parent / "data" / "fit.json"
+    """The measurements that ship with ml-stack -- the single source of truth."""
+    return _STORE.package_path()
 
 
 def local_file() -> Path:
     """This machine's own additions, layered over the shipped ones. `$MLSTACK_FIT_FILE`
-    moves it, which is how the tests keep out of a real `~/.ml-stack`."""
-    named = os.environ.get("MLSTACK_FIT_FILE")
-    if named:
-        return Path(named).expanduser()
-    return Path.home() / ".ml-stack" / "fit.json"
-
-
-def _read(path: Path) -> list[Fit]:
-    """Every record in one file. A file that is absent, unreadable or not a list of objects
-    contributes nothing -- there is no such thing as a half-measured model."""
-    try:
-        parsed = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    if not isinstance(parsed, list):
-        return []
-    out: list[Fit] = []
-    for row in parsed:
-        if not isinstance(row, dict) or not row.get("model"):
-            continue
-        try:
-            out.append(Fit.from_dict(row))
-        except (TypeError, ValueError):
-            continue
-    return out
+    moves it."""
+    return _STORE.local_path()
 
 
 def records(*, package: Path | None = None, local: Path | None = None,
@@ -712,53 +693,26 @@ def records(*, package: Path | None = None, local: Path | None = None,
     """Every measured model: the shipped file, with this machine's own layered over it.
 
     A local record with the same (model, cache type, speculation) key replaces the shipped
-    one rather than appearing beside it -- a machine that measured a model again means the
-    newer number, and a listing that showed both would make a person choose between two
-    facts that are not in disagreement about anything but the date.
-
-    ``room`` overrides the room every record was recorded with, which is how a 24 GB card
-    is asked about from a machine that is not one.
+    one. ``room`` overrides the room every record was recorded with.
     """
-    merged: dict[tuple[str, str, str], Fit] = {}
-    for fit in _read(package or package_file()) + _read(local or local_file()):
-        merged[fit.key] = fit
-    out = list(merged.values())
+    out = _STORE.all(package=package or package_file(), local=local or local_file())
     if room is not None:
         out = [fit.at_room(room) for fit in out]
-    return sorted(out, key=lambda f: (f.model.lower(), f.cache_type, f.spec))
+    return out
 
 
 def writable_file() -> Path:
-    """Where a new measurement goes: the shipped file when this is a checkout somebody can
-    write to, and this machine's own file otherwise. An installed wheel is not a place to
-    keep a measurement -- the next upgrade would take it away."""
-    shipped = package_file()
-    if "site-packages" in shipped.parts or "dist-packages" in shipped.parts:
-        return local_file()
-    parent = shipped.parent
-    try:
-        parent.mkdir(parents=True, exist_ok=True)
-        if os.access(parent, os.W_OK):
-            return shipped
-    except OSError:
-        pass
-    return local_file()
+    """Where a new measurement goes: the shipped file in a checkout somebody can write to,
+    this machine's own file otherwise."""
+    return _STORE.writable_path()
 
 
 def add(fit: Fit, *, path: Path | None = None) -> Path:
     """Write one measurement into the source of truth, replacing any it supersedes.
 
-    Returns where it was written, which is what `--measure` prints: a person who measured a
-    model on a laptop and expected it in the repository should be told it went elsewhere.
+    Returns where it was written, which is what `--measure` prints.
     """
-    where = path or writable_file()
-    kept = [row for row in _read(where) if row.key != fit.key]
-    kept.append(fit)
-    kept.sort(key=lambda f: (f.model.lower(), f.cache_type, f.spec))
-    where.parent.mkdir(parents=True, exist_ok=True)
-    where.write_text(json.dumps([row.as_dict() for row in kept], indent=2) + "\n",
-                     encoding="utf-8")
-    return where
+    return _STORE.add(fit, path=path or writable_file())
 
 
 # ------------------------------------------------------------------ measuring one

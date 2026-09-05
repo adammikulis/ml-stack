@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
-from ml_stack.files import write_json
+from ml_stack.records import Document
 
 __all__ = ["Rates", "default_path"]
 
@@ -14,23 +12,23 @@ ALPHA = 0.3
 """EWMA weight for a new observation. Low enough that one slow run -- a thermal blip, a"""
 
 
+_DOC: Document[dict[str, float]] = Document(
+    default=lambda: Path.home() / ".ml-stack" / "rates.json", env="ML_STACK_RATES",
+    build=lambda held: {str(k): float(v) for k, v in held.items()},
+    unbuild=lambda seen: dict(sorted(seen.items())), empty=dict)
+
+
 def default_path() -> Path:
-    return Path(os.environ.get("ML_STACK_RATES")
-                or Path.home() / ".ml-stack" / "rates.json").expanduser()
+    """Where this machine keeps its measured rates. ``ML_STACK_RATES`` moves it."""
+    return _DOC.path()
 
 
 class Rates:
     """Observed units/second, per (peer, kind of work)."""
 
     def __init__(self, path: Path | str | None = None) -> None:
-        self.path = Path(path) if path is not None else default_path()
-        self._seen: dict[str, float] = {}
-        if self.path.exists():
-            try:
-                self._seen = {k: float(v) for k, v in
-                              json.loads(self.path.read_text()).items()}
-            except (OSError, ValueError, TypeError):
-                self._seen = {}
+        self.path = _DOC.path(path)
+        self._seen: dict[str, float] = _DOC.read(self.path)
 
     @staticmethod
     def key(peer: str, kind: str) -> str:
@@ -59,10 +57,8 @@ class Rates:
         return self._seen[key]
 
     def save(self) -> Path:
-        """Write atomically. Two coordinators finishing at once must not leave a file"""
-        # Sorted so the file diffs cleanly whatever order the rates were observed in.
-        write_json(self.path, dict(sorted(self._seen.items())))
-        return self.path
+        """Write atomically, sorted, and return where they went."""
+        return _DOC.write(self._seen, self.path, atomic=True)
 
     def __len__(self) -> int:
         return len(self._seen)

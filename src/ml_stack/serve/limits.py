@@ -21,12 +21,11 @@ of ours* -- the machine's own answer stands.
 
 from __future__ import annotations
 
-import json
-import os
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack.records import Document
 from ml_stack.serve.binary import CACHE_ROOT
 
 __all__ = ["FILE", "Limits", "changed", "clear", "read", "where", "write"]
@@ -37,14 +36,7 @@ FILE = CACHE_ROOT / "limits.json"
 
 def where(path: Path | str | None = None) -> Path:
     """The file this machine's limits are kept in: ``MLSTACK_LIMITS_FILE``, else `FILE`."""
-    return _file(path)
-
-
-def _file(path: Path | str | None = None) -> Path:
-    if path is not None:
-        return Path(path)
-    named = os.environ.get("MLSTACK_LIMITS_FILE")
-    return Path(named) if named else FILE
+    return _DOC.path(path)
 
 
 @dataclass(frozen=True)
@@ -97,27 +89,21 @@ class Limits:
         return out
 
 
+_DOC: Document[Limits] = Document(
+    default=lambda: FILE, env="MLSTACK_LIMITS_FILE",
+    build=lambda held: Limits(**{f: held[f] for f in Limits.__dataclass_fields__
+                                 if f in held}),
+    unbuild=asdict, empty=Limits)
+
+
 def read(path: Path | str | None = None) -> Limits:
     """The limits on disk, or none at all. A file that will not parse is no limits."""
-    try:
-        held = json.loads(_file(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return Limits()
-    if not isinstance(held, dict):
-        return Limits()
-    fields = {f: held[f] for f in Limits.__dataclass_fields__ if f in held}
-    try:
-        return Limits(**fields)
-    except TypeError:
-        return Limits()
+    return _DOC.read(path)
 
 
 def write(limits: Limits, path: Path | str | None = None) -> Path:
     """Write ``limits`` down and return where they went."""
-    file = _file(path)
-    file.parent.mkdir(parents=True, exist_ok=True)
-    file.write_text(json.dumps(asdict(limits), indent=2, sort_keys=True), encoding="utf-8")
-    return file
+    return _DOC.write(limits, path)
 
 
 def clear(path: Path | str | None = None) -> Path:

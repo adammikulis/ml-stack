@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import subprocess
 import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.files import write_json
+from ml_stack.records import Document
 
 __all__ = ["Settings", "Suggestion", "suggest"]
 
@@ -44,25 +43,22 @@ class Settings:
 
     @classmethod
     def load(cls, path: Path | str) -> "Settings":
-        p = Path(path).expanduser()
-        if not p.exists():
-            return cls()
-        try:
-            raw = json.loads(p.read_text())
-        except (OSError, ValueError):
-            return cls()
-        known = set(cls.__dataclass_fields__)
-        return cls(**{k: v for k, v in raw.items() if k in known})
+        """What ``path`` holds, or the defaults."""
+        return _DOC.read(path)
 
     def save(self, path: Path | str) -> Path:
         """Written atomically -- a half-written settings file reads as no settings."""
-        p = Path(path).expanduser()
-        # Every field is flat, so sorting the top level is what sort_keys did.
-        write_json(p, dict(sorted(asdict(self).items())))
-        return p
+        return _DOC.write(self, path, atomic=True)
 
     def public(self) -> dict[str, Any]:
         return asdict(self)
+
+
+_DOC: Document["Settings"] = Document(
+    build=lambda raw: Settings(**{k: v for k, v in raw.items()
+                                  if k in Settings.__dataclass_fields__}),
+    unbuild=lambda one: dict(sorted(asdict(one).items())),
+    empty=Settings)
 
 
 # -- what this machine probably wants ------------------------------------
