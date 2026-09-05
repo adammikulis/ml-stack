@@ -1,6 +1,6 @@
 """Which package may import which.
 
-The layers are core, model, machine, graph, tools. A package may import a package in a
+The layers are core, model, graph, machine, tools. A package may import a package in a
 lower layer, and one in its own layer as long as the other does not import it back.
 ``KNOWN`` lists the edges that break that today; it may only shrink.
 """
@@ -21,33 +21,32 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
               "jsonl", "lock", "media", "paths", "platform", "redact", "scrape",
               "telemetry", "ui")),
     ("model", ("client", "gguf", "hub", "speech", "vision")),
-    ("machine", ("doctor", "fleet", "serve", "setup")),
     ("graph", ("graph", "ingest", "sources", "world")),
-    ("tools", ("claude", "cli", "do", "harness", "mcp", "suite", "testing", "train",
-               "web")),
+    ("machine", ("doctor", "fleet", "serve", "setup")),
+    ("tools", ("bench", "claude", "cli", "do", "harness", "mcp", "suite", "testing",
+               "train", "web")),
 )
 
 RANK = {package: height for height, (_, packages) in enumerate(LAYERS)
         for package in packages}
 
 KNOWN = {
-    ("doctor", "graph"),
-    ("fleet", "graph"),
+    ("doctor", "bench"),
+    ("fleet", "bench"),
     ("fleet", "serve"),
     ("fleet", "setup"),
     ("gguf", "serve"),
-    ("graph", "ingest"),
+    ("graph", "serve"),
     ("graph", "train"),
-    ("graph", "world"),
     ("hub", "serve"),
-    ("ingest", "graph"),
+    ("ingest", "bench"),
+    ("ingest", "serve"),
+    ("serve", "bench"),
     ("serve", "fleet"),
-    ("serve", "graph"),
     ("serve", "setup"),
     ("setup", "fleet"),
     ("setup", "serve"),
     ("sources", "world"),
-    ("world", "graph"),
     ("world", "sources"),
 }
 

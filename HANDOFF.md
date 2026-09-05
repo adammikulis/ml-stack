@@ -243,16 +243,20 @@ worth taking, in this order:
 
 ## Layers
 
-- [ ] **Eighteen imports still cross the layers `tests/test_layers.py` sets out.** The
-  layers are core, model, machine, graph, tools; a package may import downwards, and
+- [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
+  layers are core, model, graph, machine, tools; a package may import downwards, and
   sideways only when the other package does not import it back. `KNOWN` in that file lists
   every edge that breaks it, and the test fails both on a new violation and on a `KNOWN`
-  entry that is no longer one, so the set only shrinks. The three worth taking next, each
-  a two-way cycle inside one layer: `serve` <-> `fleet` (3 files one way, 7 the other),
-  `graph` <-> `ingest` (1 and 11), and `serve` <-> `setup` (2 and 1). `graph` <-> `world`
-  and `sources` <-> `world` go when `world.Message` moves down. `graph.data` reaches up
-  into `ml_stack.train.backend` for a device handle; the ops that sit under both belong
-  below `graph`, not in the tools layer.
+  entry that is no longer one, so the set only shrinks. Four are two-way cycles inside one
+  layer: `serve` <-> `fleet` (3 files one way, 7 the other), `serve` <-> `setup` (2 and 1),
+  `fleet` <-> `setup` (1 and 1), and `sources` <-> `world` (5 and 1, going when
+  `world.Message` moves down). Nine reach up a layer: `doctor`, `fleet`, `ingest` and
+  `serve` into `bench` (1, 2, 2 and 1 files); `gguf`, `hub`, `graph` and `ingest` into
+  `serve` (1, 1, 3 and 1); and `graph.data` into `train.backend` for a device handle, where
+  the ops that sit under both belong below `graph` rather than in the tools layer. The
+  `graph` -> `serve` three are function-local reaches for `Asking`, `Run`, `Shape`, `seat`
+  and `held` in `graph/ask.py`, `graph/requests.py` and `graph/serve.py`; most go when
+  `Asking` moves down out of `serve/shape.py`.
 
 ## Verifying
 
