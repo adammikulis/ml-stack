@@ -65,6 +65,7 @@ class EscalationRefused(ServerFailed):
 
 STATE_FILE = CACHE_ROOT / "servers.json"
 UNAVAILABLE_COOLDOWN_S = 3.0
+STATE_LOCK_TIMEOUT_S = 30.0
 
 # How much of what is free a second model may take before it is judged not to fit. Below 1.0
 # because a model needs its weights *and* room to work in, and a machine that fills itself
@@ -656,7 +657,7 @@ class ServerManager:
         if entry is None or not info.pid:
             self._save()
             return
-        with self._lock:
+        with self._exclusive():
             state = merge_state(self._load(), self._mine, os.getpid())
             state[str(info.port)] = {**entry, "owner_pid": info.pid}
             self._write(state)
@@ -725,6 +726,15 @@ class ServerManager:
         tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
         os.replace(tmp, self.state_file)
 
+    @contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Hold the state file against every other thread and process for the block."""
+        from ml_stack.lock import only_one
+
+        with self._lock, only_one(self.state_file.with_suffix(".lock"), wait=True,
+                                  timeout=STATE_LOCK_TIMEOUT_S, announce=logger.debug):
+            yield
+
     def _reap(self) -> None:
         """Drop every child of ours that has already exited, so none stays defunct."""
         for port, held in list(self._processes.items()):
@@ -736,7 +746,7 @@ class ServerManager:
 
     def _save(self) -> None:
         self._reap()
-        with self._lock:
+        with self._exclusive():
             self._write(merge_state(self._load(), self._mine, os.getpid()))
 
     def _recorded_pid(self, port: int) -> int | None:

@@ -941,3 +941,53 @@ class TestTheStartedProcess:
         with pytest.raises(ChildProcessError):
             os.waitpid(info.pid, os.WNOHANG)
 
+
+TWO_MANAGERS = """\
+import sys
+import time
+from pathlib import Path
+
+from ml_stack.serve.backend import ServerSpec
+from ml_stack.serve.manager import ServerManager
+
+state, port, start_at = Path(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
+
+read = ServerManager._load
+
+
+def slow_read(self):
+    found = read(self)
+    time.sleep(0.4)
+    return found
+
+
+ServerManager._load = slow_read
+manager = ServerManager(state_file=state)
+while time.time() < start_at:
+    time.sleep(0.01)
+manager._pending(ServerSpec(model="/models/quince-2b.gguf", port=port))
+time.sleep(2.0)
+"""
+
+
+@pytest.mark.slow
+def test_two_processes_recording_at_once_keep_both_records(tmp_path):
+    """Two `ml-stack-serve up` at once merge into the same file, not over each other."""
+    script = tmp_path / "record.py"
+    script.write_text(TWO_MANAGERS)
+    state = tmp_path / "servers.json"
+    start_at = time.time() + 2.0
+    ports: list[int] = []
+    while len(ports) < 2:
+        one = free_port()
+        if one not in ports:
+            ports.append(one)
+    children = [
+        subprocess.Popen([sys.executable, str(script), str(state), str(port), str(start_at)])
+        for port in ports
+    ]
+    for child in children:
+        assert child.wait(timeout=60) == 0
+
+    written = json.loads(state.read_text())
+    assert sorted(written) == sorted(str(p) for p in ports), written
