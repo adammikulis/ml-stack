@@ -33,6 +33,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ml_stack.client.http import ServerError, request_json
 from ml_stack.serve.binary import (
     CACHE_ROOT,
     MANAGED_CURRENT,
@@ -351,16 +352,12 @@ def _build_from_source_named(args) -> tuple[Path, str]:
 
 # -- downloading a release, for a machine with no compiler ----------------
 def _releases_for(repo: str, per_page: int = 5, timeout: float = 30.0) -> list[dict]:
-    import urllib.error
-    import urllib.request
-
-    req = urllib.request.Request(
-        f"https://api.github.com/repos/{repo}/releases?per_page={per_page}",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "ml-stack"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read())
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+        return request_json(
+            f"https://api.github.com/repos/{repo}/releases?per_page={per_page}",
+            method="GET", timeout=timeout, tries=3,
+            headers={"Accept": "application/vnd.github+json"})
+    except (ServerError, OSError, ValueError) as exc:
         raise BuildFailed(f"could not reach {repo}'s GitHub releases: {exc}") from None
 
 

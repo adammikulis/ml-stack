@@ -38,14 +38,14 @@ import json
 import os
 import re
 import socket
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Mapping
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+
+from ml_stack.client.http import Retry, ServerError, open_stream
 
 Engine = Callable[[str, int], list[dict[str, Any]]]
 """``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable."""
@@ -111,7 +111,7 @@ def searxng_engine(query: str, limit: int) -> list[dict[str, Any]]:
     try:
         body = _http(url, accept="application/json")
         payload = json.loads(body.decode("utf-8", "replace"))
-    except (OSError, ValueError) as exc:
+    except (ServerError, OSError, ValueError) as exc:
         raise SearchUnavailable(f"searxng at {base}: {exc}") from exc
     rows = payload.get("results") if isinstance(payload, Mapping) else None
     return [{"title": r.get("title", ""), "url": r.get("url", ""), "snippet": r.get("content", "")}
@@ -193,8 +193,9 @@ def check(url: str) -> str:
 def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
     """One GET with a size cap and no refusal: for a search backend, which is often on
     this side of the router. Pages a model chose go through ``_get``."""
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": accept})
-    with urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply:  # noqa: S310
+    with open_stream(url, headers={"User-Agent": USER_AGENT, "Accept": accept},
+                     timeout=TIMEOUT_S,
+                     retry=Retry(tries=3, when_unreachable=False)) as reply:
         return reply.read(most)
 
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import os
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from ml_stack.client.http import ServerError, ServerUnreachable, open_stream
 
 _CHUNK = 1 << 16
 _PROGRESS_INTERVAL_S = 0.25
@@ -86,12 +86,10 @@ def fetch(
     partial = target.with_suffix(target.suffix + ".part")
 
     start_at = partial.stat().st_size if (resume and partial.exists()) else 0
-    request = urllib.request.Request(url)
-    if start_at:
-        request.add_header("Range", f"bytes={start_at}-")
+    headers = {"Range": f"bytes={start_at}-"} if start_at else None
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with open_stream(url, headers=headers, timeout=timeout) as response:
             if start_at and response.status != 206:
                 start_at = 0
 
@@ -124,15 +122,17 @@ def fetch(
             if on_progress is not None:
                 on_progress(Progress(label, downloaded, total, start_at))
 
-    except urllib.error.HTTPError as exc:
-        if exc.code == 416 and partial.exists():
+    except ServerUnreachable as exc:
+        raise DownloadError(f"{label}: cannot fetch {url} ({exc})") from exc
+    except ServerError as exc:
+        if exc.status == 416 and partial.exists():
             partial.unlink(missing_ok=True)
             raise DownloadError(
                 f"{label}: server rejected the resume range; the partial file was stale "
                 "and has been removed. Retry."
             ) from exc
-        raise DownloadError(f"{label}: HTTP {exc.code} fetching {url}") from exc
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise DownloadError(f"{label}: HTTP {exc.status} fetching {url}") from exc
+    except (TimeoutError, OSError) as exc:
         raise DownloadError(f"{label}: cannot fetch {url} ({exc})") from exc
 
     _verify(partial, expect_sha256=expect_sha256, expect_bytes=expect_bytes, name=label)

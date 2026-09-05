@@ -16,6 +16,6 @@
   "process-scans": 7,
   "subprocess-spawns": 9,
   "unversioned-records": 6,
-  "urlopen-calls": 39,
+  "urlopen-calls": 2,
   "wide-signatures": 45
 }

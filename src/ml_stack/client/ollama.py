@@ -179,14 +179,20 @@ def runtime_for(format: str | None, platform: str = PLATFORM) -> str:
     return "unknown"
 
 
+def fetch(path: str, payload: dict[str, Any] | None = None, *, base_url: str,
+          timeout: float = 5.0) -> dict[str, Any]:
+    """One ``/api/...`` call, parsed; ``payload`` makes it a POST."""
+    return request_json(f"{base_url}{path}", payload=payload, timeout=timeout) or {}
+
+
 def served_by(base_url: str, model: str | None, *, timeout: float = 5.0) -> dict[str, Any]:
     """``/api/show`` + ``/api/version`` + ``/api/tags`` as one record."""
-    shown = request_json(f"{base_url}/api/show", payload={"model": model}, timeout=timeout) \
+    shown = fetch("/api/show", {"model": model}, base_url=base_url, timeout=timeout) \
         if model else {}
-    details = (shown or {}).get("details") or {}
+    details = shown.get("details") or {}
     fmt = details.get("format")
-    version = (request_json(f"{base_url}/api/version", timeout=timeout) or {}).get("version")
-    tags = (request_json(f"{base_url}/api/tags", timeout=timeout) or {}).get("models") or []
+    version = fetch("/api/version", base_url=base_url, timeout=timeout).get("version")
+    tags = fetch("/api/tags", base_url=base_url, timeout=timeout).get("models") or []
     size = next((int(t["size"]) for t in tags
                  if isinstance(t, dict) and t.get("name") == model and t.get("size")), None)
     return {"program": "ollama", "version": version, "format": fmt,

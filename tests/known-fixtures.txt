@@ -252,6 +252,9 @@ Helvetica
 Thornfell
 thornfell
 
+# not a person: the wording of a digest failure, beside "checksum mismatch" above
+sha256 mismatch
+
 # allowed with `hook allow` on 2026-09-04: not people
 Orsabel Thrane
 Thrane

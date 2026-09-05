@@ -19,13 +19,14 @@ import re
 import sys
 import textwrap
 import time
-import urllib.request
 from collections.abc import Callable, Iterable, Sequence
+from functools import partial
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack import mcp
+from ml_stack.client import ollama
 
 __all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
            "command_tools", "main", "models_on_disk", "ollama_models", "own_tools", "run",
@@ -379,21 +380,12 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     return out
 
 
-def _ollama_fetch(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    request = urllib.request.Request(f"{OLLAMA_URL}{path}", data=data,
-                                     headers={"Content-Type": "application/json"},
-                                     method="POST" if data is not None else "GET")
-    with urllib.request.urlopen(request, timeout=5) as answer:  # noqa: S310 - loopback
-        return json.loads(answer.read().decode("utf-8"))
-
-
 def ollama_models(words: str = "",
                   fetch: Callable[..., dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """The models Ollama holds whose name has every word of ``words``, each with its
     format, quantisation, family and size from ``/api/show``; one row saying so when
     Ollama is not answering."""
-    ask = fetch or _ollama_fetch
+    ask = fetch or partial(ollama.fetch, base_url=OLLAMA_URL)
     try:
         tags = ask("/api/tags")
     except Exception as exc:  # noqa: BLE001 - not running is an answer, not a failure

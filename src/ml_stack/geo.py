@@ -11,14 +11,13 @@ asked about once, at the one request per second Nominatim's usage policy allows.
 
 from __future__ import annotations
 
-import json
 import time
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from ml_stack.client.http import request_json
 from ml_stack.files import read_json, write_json
 
 __all__ = ["CACHE_VERSION", "LANGUAGE", "SHORTHAND", "URL", "USER_AGENT", "best", "expand",
@@ -103,9 +102,8 @@ def lookup(place: str, *, user_agent: str = USER_AGENT, url: str = URL, timeout:
     asked = expand(place, shorthand)
     q = urllib.parse.urlencode({"q": asked, "format": "jsonv2", "limit": 10,
                                 "accept-language": language})
-    req = urllib.request.Request(f"{url}?{q}", headers={"User-Agent": user_agent})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        rows = json.loads(r.read().decode())
+    rows = request_json(f"{url}?{q}", method="GET", timeout=timeout, tries=3,
+                        headers={"User-Agent": user_agent}) or []
     top = best(rows, asked)
     if top is None:
         return None

@@ -11,6 +11,8 @@ from http.server import BaseHTTPRequestHandler
 from pathlib import Path
 from typing import Any
 
+from ml_stack.client.http import ServerError, open_stream
+
 from .discovery import (
     DiscoveryError,
     check_passphrase,
@@ -60,15 +62,13 @@ def _scraped(source: str) -> dict[str, Any]:
     not JSON, is a note and not a 500: the view says what it could not read and keeps
     polling, because the usual reason is that the page has not been started yet.
     """
-    import urllib.request
-
     if not source.startswith(("http://", "https://")):
         return {"error": "a /metrics address starts with http:// or https://"}
     try:
-        with urllib.request.urlopen(source, timeout=SCRAPE_TIMEOUT_S) as got:
+        with open_stream(source, timeout=SCRAPE_TIMEOUT_S) as got:
             raw = got.read(1_000_000)
         return {"serving": True, "metrics": json.loads(raw or b"{}")}
-    except (OSError, ValueError) as exc:
+    except (ServerError, OSError, ValueError) as exc:
         return {"serving": False, "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
 
 
