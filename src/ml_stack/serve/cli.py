@@ -559,6 +559,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     spec = ServerSpec(model=model, port=args.port, context=args.context,
                       parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
                       spec_type=kind, cache_type_k=kv, cache_type_v=kv,
+                      kv_unified=getattr(args, "kv_unified", None),
                       embedding=bool(getattr(args, "embedding", False)),
                       spec_draft_max=getattr(args, "spec_n_max", None),
                       spec_draft_ngl=getattr(args, "draft_ngl", None),
@@ -1228,6 +1229,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="what the KV cache is stored as: q8_0 halves it (measured 2026-09-02 "
                          "on Flash-Next: F1 unchanged, faster; the recurrent state is not "
                          "the KV and stays); f16 is the server's own default")
+    up.add_argument("--kv-unified", action=argparse.BooleanOptionalAction, default=None,
+                    help="one cache pool for every slot, masked per sequence, rather than a "
+                         "cache per slot; --no-kv-unified asks for the latter outright. "
+                         "Left unset, the build decides")
     up.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
                     help="a small model to guess ahead, which the large one checks in one "
                          "pass -- a path, an hf: reference, or 'auto' to use the draft head "

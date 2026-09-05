@@ -42,6 +42,14 @@ def leases(monkeypatch):
     yield asked, servers
 
 
+def test_a_unified_cache_is_asked_for_only_when_the_shape_says():
+    from ml_stack.serve.shape import Shape
+
+    assert "kv_unified" not in Shape(model="m").lease()
+    assert Shape(model="m", kv_unified=True).lease()["kv_unified"] is True
+    assert Shape(model="m", kv_unified=False).lease()["kv_unified"] is False
+
+
 def test_a_lease_says_only_what_was_asked_for():
     plain = Shape(model="weights.gguf", port=8080, seats=2, seat_context=32768)
     assert plain.lease() == {"port": 8080, "context": 65536, "parallel": 2}

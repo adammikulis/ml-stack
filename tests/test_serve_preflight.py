@@ -541,6 +541,21 @@ def test_a_per_layer_head_count_is_summed_not_multiplied():
     assert _kv_estimate_bytes({**dense, "x.attention.head_count_kv": "nonsense"}, 100, "", "") == 0
 
 
+def test_a_sparse_attention_layer_is_charged_its_indexer_cache_as_well():
+    """Qwen3.8-Flash-Next measured 48K a token (`fit --measure`, 2026-09-02) where its twelve
+    attention layers' K/V come to 24K: the indexer keeps a second cache the same size.
+    Mutation: drop the `caches` factor."""
+    from ml_stack.serve.preflight import _kv_estimate_bytes
+
+    flash = {"general.architecture": "qwen4exp", "qwen4exp.block_count": 8,
+             "qwen4exp.attention.head_count_kv": 2, "qwen4exp.attention.key_length": 256,
+             "qwen4exp.full_attention_interval": 4}
+    # two attention layers of eight, each 2 heads x 256 x (K+V) x 2 bytes = 2K a token
+    assert _kv_estimate_bytes(flash, 1000, "f16", "f16") == 2 * 2048 * 1000
+    assert _kv_estimate_bytes({**flash, "qwen4exp.attention.indexer.key_length": 128},
+                              1000, "f16", "f16") == 2 * 2048 * 1000 * 2
+
+
 def test_an_architecture_with_a_hyphen_is_known_when_the_source_says_so(monkeypatch, tmp_path):
     """gpt-oss is written `gpt-oss` in llama-arch.cpp and the strings guess kept only
     alphanumeric words with a family prefix, so a preflight refused a model the same build

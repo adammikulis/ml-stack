@@ -67,6 +67,9 @@ class Shape:
     # How the KV cache is stored. "" leaves the server's own f16; "q8_0" halves it, which is
     # twice the seats at a context -- measure whether the answers change before taking it.
     cache_type: str = ""
+    # Whether every seat's cache is one pool the server masks per sequence, or a cache per
+    # slot. None leaves the build's own default; measure before choosing.
+    kv_unified: bool | None = None
     # A small model or a head of the same family, guessing ahead for the large one to check
     # in one pass. A path, or hf:owner/repo[/file.gguf]; "" for none. Which `--spec-type` it
     # needs is read from what it is called, so a head is never served as the wrong method.
@@ -109,6 +112,8 @@ class Shape:
                                "parallel": self.seats}
         if self.cache_type:
             out["cache_type_k"] = out["cache_type_v"] = self.cache_type
+        if self.kv_unified is not None:
+            out["kv_unified"] = bool(self.kv_unified)
         if self.draft:
             from ml_stack.hub import spec_for
 

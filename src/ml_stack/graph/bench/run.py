@@ -438,6 +438,11 @@ def _parser() -> argparse.ArgumentParser:
                             "every label ends -kv-TYPE and the table's ctx column shows "
                             "it, since a run with a quantised cache is another "
                             "configuration and not another model")
+    sweep.add_argument("--serve-kv-unified", action=argparse.BooleanOptionalAction,
+                       default=None,
+                       help="serve each --serve'd model with one cache pool for every slot "
+                            "(or, --no-serve-kv-unified, a cache per slot); unset leaves "
+                            "the build's default")
     sweep.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
                        help="serve each model in its measured shape from ml-stack's profiles "
                             "-- the head at the length that measured best, its build, cache "
@@ -1571,6 +1576,8 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
         run = bench.drafted_by(run, "")
     if getattr(args, "serve_kv", ""):
         run = run.over(cache_type=str(args.serve_kv))
+    if getattr(args, "serve_kv_unified", None) is not None:
+        run = run.over(kv_unified=bool(args.serve_kv_unified))
     if getattr(args, "reasoning_budget", None) is not None:
         run = run.over(reasoning_budget=int(args.reasoning_budget))
     length = getattr(args, "n_max", None)

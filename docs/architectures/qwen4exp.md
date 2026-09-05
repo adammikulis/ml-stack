@@ -37,9 +37,13 @@ measured on an M4 Max, 128G, wired limit 110G. Anything not marked measured is t
   is for a discrete GPU whose VRAM the table would not fit beside the weights. Capacity
   planning starts from the GPU-mapped weights plus a measured resident peak, never the
   file size (`ml-stack-serve fit --tensors`, `fit --measure`).
-- **The cache is tiny**: 48K bytes a token on the 12 attention layers at f16 (26K at q8_0),
-  plus a fixed ~257M a sequence for the recurrent state and sliding cells (~594M with the
-  MTP head's own cache). At 32k a user costs 1.8G (f16) or ~1.4G (q8_0). Users at 32k on
+- **The cache is tiny**: 48K bytes a token at f16 (26K at q8_0), measured. The 12 attention
+  layers' K/V come to 24K of that (2 KV heads x 256 x K+V x 2 bytes, x12); the other 24K
+  is the sparse indexer's cache, one per attention layer and the same size, which the
+  build keeps beside the K/V (`llama_memory_hybrid_idx`). Not the MTP head: the record
+  without it measures the same 48K. `preflight._kv_estimate_bytes` counts both. On top
+  of that a fixed ~257M a sequence for the recurrent state and sliding cells (~594M with
+  the MTP head's own cache). At 32k a user costs 1.8G (f16) or ~1.4G (q8_0). Users at 32k on
   110G: 12 at f16 when the whole file is counted; 22 at q8_0 once the table is counted on
   the CPU side where it lives, 31 at 16k a slot. (`fit`, 2026-09-02.)
 - **Take a K-quant, not an IQ quant, on Metal**: UD-Q4_K_XL answered in 44 s a question at

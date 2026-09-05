@@ -304,6 +304,9 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
     one.add_argument("--serve-port", type=int, default=8099)
     one.add_argument("--binary", default="", metavar="PATH")
     one.add_argument("--serve-kv", default="", metavar="TYPE")
+    one.add_argument("--serve-kv-unified", action=argparse.BooleanOptionalAction, default=None,
+                     help="serve with one cache pool for every slot (or, --no-serve-kv-unified, "
+                          "a cache per slot); unset leaves the build's default")
     one.add_argument("--n-max", type=int, default=None, metavar="N")
     one.add_argument("--reasoning-budget", type=int, default=None, metavar="N")
     one.add_argument("--sample", type=int, default=0, metavar="N",

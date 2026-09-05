@@ -402,13 +402,16 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
     * a **shared-KV** layer holds nothing of its own -- gemma4's `shared_kv_layers = 18`
       says the last eighteen read the cache the layers before them wrote.
 
+    * a **sparse-attention** layer (`attention.indexer.key_length` in the header:
+      Qwen3.8-Flash-Next) keeps a second cache beside its K/V for the indexer, and the
+      build allocates it at the same size -- measured 2026-09-02 by `fit --measure`: 48K a
+      token where the twelve attention layers' K/V alone are 24K, and the same 48K with
+      and without the draft head, so the head is not where the other half is.
+
     It is still an estimate, and still only the fallback: the compute buffers are not in the
-    header at all, a recurrent layer's per-sequence state is not either, and the indexer
-    key cache of a sparse-attention layer (Qwen3.8-Flash-Next: one head of
-    `attention.indexer.key_length` per attention layer) is not counted.
-    `attention.compress_ratios` is the block size that indexer scores; the cache itself
-    spans the whole context (`llama_memory_hybrid_idx`). `ml-stack-serve fit` is the
-    measured answer; this is what there is before anybody has measured one.
+    header at all, and a recurrent layer's per-sequence state is not either.
+    `ml-stack-serve fit` is the measured answer; this is what there is before anybody has
+    measured one.
     """
     try:
         arch = str(meta.get("general.architecture") or "")
@@ -449,6 +452,8 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
 
         bytes_k = _CACHE_BYTES.get(cache_type_k.lower(), 2.0) if cache_type_k else 2.0
         bytes_v = _CACHE_BYTES.get(cache_type_v.lower(), 2.0) if cache_type_v else 2.0
+        # a sparse-attention layer's indexer cache, sized like the layer's own K/V
+        caches = 2 if key("attention.indexer.key_length") else 1
 
         total = 0.0
         for il in range(n_layer):
@@ -458,7 +463,7 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
             span = min(context, window) if swa else context
             k_dim = key_swa[il] if swa else key_dim[il]
             v_dim = value_swa[il] if swa else value_dim[il]
-            total += kv_heads[il] * (k_dim * bytes_k + v_dim * bytes_v) * span
+            total += kv_heads[il] * (k_dim * bytes_k + v_dim * bytes_v) * span * caches
         return int(total)
     except Exception:  # noqa: BLE001 - an estimate that cannot be made is 0, never a crash
         return 0
