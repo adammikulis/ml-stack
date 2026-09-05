@@ -91,7 +91,7 @@ def test_the_offered_fix_installs_them_and_the_next_look_is_good(tmp_path):
     found = hooks_of(repo)
     assert found.good
     assert found.said == "installed, from scripts/hooks"
-    assert os.readlink(repo / ".git" / "hooks" / "pre-commit") == "../../scripts/hooks/no-real-names"
+    assert os.readlink(repo / ".git" / "hooks" / "pre-commit") == "../../scripts/hooks/pre-commit"
 
 
 def test_an_untracked_wrapper_that_execs_the_shipped_script_counts_as_installed(tmp_path):

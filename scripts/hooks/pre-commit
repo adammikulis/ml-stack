@@ -1,0 +1,16 @@
+#!/bin/sh
+# Every pre-commit check, in order: no person's name, then no growth in any budget.
+set -e
+
+self=$0
+while [ -L "$self" ]; do
+    link=$(readlink "$self")
+    case "$link" in
+        /*) self=$link ;;
+        *) self=$(dirname "$self")/$link ;;
+    esac
+done
+here=$(cd "$(dirname "$self")" && pwd)
+
+"$here/no-real-names" "$@"
+"$here/budgets" "$@"

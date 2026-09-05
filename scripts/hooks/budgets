@@ -1,0 +1,109 @@
+#!/usr/bin/env python3
+"""Refuse a commit whose staged files add a site to any budgeted metric.
+
+A budget only ever falls. Staged content is compared against HEAD's, file by file, so
+this reads only what is being committed.
+
+Override: SKIP_BUDGETS=1 git commit ...   only after reading what it flagged.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import tempfile
+from collections import Counter
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE.parent))
+
+import gates  # noqa: E402
+
+ROOT = HERE.parent.parent
+BUDGETS = ROOT / "budgets.json"
+
+
+def _git(*args: str) -> str:
+    done = subprocess.run(
+        ["git", *args], cwd=ROOT, capture_output=True, text=True, check=False
+    )
+    return done.stdout if done.returncode == 0 else ""
+
+
+def staged() -> list[str]:
+    """The .py files this commit adds or changes."""
+    out = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    return [name for name in out.split("\0") if name.endswith(".py")]
+
+
+def plant(base: Path, names: list[str], revision: str) -> None:
+    """Write each file's content at the given revision under base."""
+    for name in names:
+        text = _git("show", f"{revision}:{name}")
+        if not text:
+            continue
+        target = base / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+
+def counts(base: Path, names: list[str]) -> dict[str, Counter[str]]:
+    """Each metric's findings under base, counted by the file they are in."""
+    out: dict[str, Counter[str]] = {}
+    for name, found in gates.run(base).items():
+        out[name] = Counter(f.path for f in found if f.path in names)
+    return out
+
+
+def main() -> int:
+    """Compare staged content against HEAD and refuse any added site."""
+    if os.environ.get("SKIP_BUDGETS"):
+        return 0
+    if not BUDGETS.exists():
+        return 0
+    names = staged()
+    if not names:
+        return 0
+
+    has_head = bool(_git("rev-parse", "--verify", "HEAD"))
+    with tempfile.TemporaryDirectory() as tmp:
+        new_root = Path(tmp) / "staged"
+        old_root = Path(tmp) / "head"
+        new_root.mkdir()
+        old_root.mkdir()
+        plant(new_root, names, "")
+        if has_head:
+            plant(old_root, names, "HEAD")
+        after = counts(new_root, names)
+        before = counts(old_root, names)
+        sites = gates.run(new_root)
+
+    owner = {c.NAME: c.OWNER for c in gates.checkers()}
+    described = {c.NAME: c.describe() for c in gates.checkers()}
+    refused = 0
+    for metric in sorted(after):
+        added = sum(after[metric].values()) - sum(before.get(metric, Counter()).values())
+        if added <= 0:
+            continue
+        refused = 1
+        where = owner.get(metric) or "no owner"
+        print(
+            f"budgets: {metric} gains {added} site(s) -- {described[metric]}",
+            file=sys.stderr,
+        )
+        print(f"  owned by {where}", file=sys.stderr)
+        for finding in [f for f in sites[metric] if f.path in names][:10]:
+            print(f"    {finding.path}:{finding.line}  {finding.detail}", file=sys.stderr)
+    if refused:
+        print(
+            "\nA budget only falls. Use what already owns the job, or "
+            "SKIP_BUDGETS=1 git commit ... after reading the above.",
+            file=sys.stderr,
+        )
+    return refused
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
