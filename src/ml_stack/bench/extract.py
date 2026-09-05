@@ -40,7 +40,6 @@ import argparse
 import json
 import random
 import re
-import sys
 import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -50,7 +49,7 @@ from typing import Any
 
 from ml_stack.entities.spelling import close
 from ml_stack.bench import (
-    HOME,
+    home_dir,
     PER_QUESTION,
     Counting,
     RunNotKept,
@@ -66,6 +65,7 @@ from ml_stack.bench import (
     stamped,
     wants_smoke,
 )
+from ml_stack.log import say, warn
 
 __all__ = ["BUCKETS", "GUESS_SECONDS", "INSTRUCTIONS", "KIND", "MessageRow", "SAMPLE",
            "SMOKE_MESSAGES", "add_arguments", "as_extraction", "estimate", "extract_one",
@@ -827,26 +827,26 @@ def table(kept: Sequence[Mapping[str, Any]]) -> None:
     hold at least; its coverage reads high for that reason and its precision does not.
     """
     if not kept:
-        print("no extraction runs kept yet")
+        say("no extraction runs kept yet")
         return
     head = (f"{'run':28} {'model':22} {'msgs':>4} {'s/msg':>6} {'tok/msg':>7} {'t/o':>4} "
             f"{'ppl-cov':>7} {'ppl-prec':>8} {'org-cov':>7} {'org-prec':>8} "
             f"{'top-cov':>7} {'top-prec':>8} {'plc-cov':>7} {'plc-prec':>8} "
             f"{'rel-cov':>7} {'rel-prec':>8} {'n-F1':>5} {'r-F1':>5} {'invented':>10} "
             f"{'org':>5} {'place':>5} {'resident':>9}")
-    print(head)
-    print("-" * len(head))
+    say(head)
+    say("-" * len(head))
     for one in kept:
         rows = one.get("rows") or []
         scores = one.get("scores") or {}
         rss = (one.get("server") or {}).get("resident_bytes")
         exact = [r for r in rows if r.get("exact", True)]
         loose = [r for r in rows if not r.get("exact", True)]
-        print(_line(str(one.get("label", "")), str(one.get("model", "")), exact, scores, rss))
+        say(_line(str(one.get("label", "")), str(one.get("model", "")), exact, scores, rss))
         if scores.get("lower_bound") is not None:
-            print(_line("  ~ lower bound", "", loose, scores["lower_bound"], None))
+            say(_line("  ~ lower bound", "", loose, scores["lower_bound"], None))
         for line in detail(scores):
-            print(f"  {line}")
+            say(f"  {line}")
 
 
 def detail(scores: Mapping[str, Any]) -> list[str]:
@@ -920,7 +920,7 @@ def add_arguments(sub: Any) -> Any:
                     help="the most one message may take before it is recorded as timed out "
                          "-- nothing extracted, the cap as its wall clock -- and the next is "
                          "read (default: %(default)s)")
-    ap.add_argument("--kept", default=str(HOME / "runs.ladybug"),
+    ap.add_argument("--kept", default=str(home_dir() / "runs.ladybug"),
                     help="where to keep the run (default: %(default)s)")
     ap.add_argument("--smoke", action="store_true",
                     help=f"read only {SMOKE_MESSAGES} messages, to prove the whole path -- "
@@ -947,7 +947,7 @@ def add_arguments(sub: Any) -> Any:
                          "queue behind it")
     ap.add_argument("--detach", action="store_true",
                     help="run this in the background, owned by nobody's terminal, with its "
-                         f"output in a log under {HOME / 'logs'}; status, tail -f and stop "
+                         f"output in a log under {home_dir() / 'logs'}; status, tail -f and stop "
                          "as for run")
     ap.add_argument("--no-prefetch", action="store_true",
                     help="do not download an hf: model before the measuring lock is taken")
@@ -966,7 +966,7 @@ def twice(client: Any, picked: Sequence[Mapping[str, Any]], graph: Mapping[str, 
     else:
         again = client
         how = "the same settings again"
-    print(f"\n  reading the sample again with {how}")
+    say(f"\n  reading the sample again with {how}")
     rows, second = measure(again, picked, graph, per_message=per_message, log=print)
     alike = {**consistency(scores.get("folded") or {}, second.get("folded") or {}), "with": how}
     return alike, {"with": how, "sampling": dict(getattr(again, "sampling", {}) or {}),
@@ -977,14 +977,13 @@ def twice(client: Any, picked: Sequence[Mapping[str, Any]], graph: Mapping[str, 
 def main(args: Any) -> int:
     """``ml-stack-bench extract``: sample, read, fold, score, keep, and print the table."""
     if len(args.serve) > 1:
-        print("error: --serve takes one model; a comparison is one run per model",
-              file=sys.stderr)
+        warn("error: --serve takes one model; a comparison is one run per model")
         return 2
     graph, messages, note = load_world(args.world)
     if note:
-        print(note)
+        say(note)
     if not messages:
-        print(f"error: no messages in {args.world}", file=sys.stderr)
+        warn(f"error: no messages in {args.world}")
         return 2
     n = SMOKE_MESSAGES if args.smoke else args.sample
     picked = sample_messages(messages, n, seed=args.seed)
@@ -993,7 +992,7 @@ def main(args: Any) -> int:
     try:
         held = gold(graph, picked)
     except ValueError as why:
-        print(f"error: {why}", file=sys.stderr)
+        warn(f"error: {why}")
         return 2
     meta = (graph.get("meta") or {}).get("world") or {}
     world = {"kind": meta.get("kind", ""), "size": meta.get("size", ""),
@@ -1009,11 +1008,11 @@ def main(args: Any) -> int:
     if not args.serve:
         model = str(footprint(args.base_url).get("model") or "").removesuffix(".gguf") or args.label
     per, source = estimate(args.kept, model, len(picked))
-    print(f"{args.label}: {len(picked)} of {len(messages)} messages ({arcs} from arcs"
-          + (f", {loose} model-written, scored against a lower bound" if loose else "")
-          + f") over a {world['kind'] or 'small'} world; the gold holds "
-          + ", ".join(f"{v} {k}" for k, v in sample["gold"].items())
-          + f"; about {per:.0f} s/msg ({source}), so about {len(picked) * per / 60:.0f} min")
+    say(f"{args.label}: {len(picked)} of {len(messages)} messages ({arcs} from arcs"
+        + (f", {loose} model-written, scored against a lower bound" if loose else "")
+        + f") over a {world['kind'] or 'small'} world; the gold holds "
+        + ", ".join(f"{v} {k}" for k, v in sample["gold"].items())
+        + f"; about {per:.0f} s/msg ({source}), so about {len(picked) * per / 60:.0f} min")
 
     from ml_stack.client import Client
 
@@ -1029,7 +1028,7 @@ def main(args: Any) -> int:
                                                          per_message=args.per_message)
         key = save(args.kept, rows, label=args.label, model=model, world=world, scores=scores,
                    sample={**sample, "n": n}, held=held)
-        print(f"kept as {key}")
+        say(f"kept as {key}")
         table(read_back(args.kept, [key]))
         return key
 
@@ -1054,17 +1053,17 @@ def main(args: Any) -> int:
                 lease = {**lease, **{k: v for k, v in shape.lease().items()
                                      if k not in ("port", "context", "parallel")}}
                 manager = shape.manager()
-                print(f"    serving in its measured shape: {measured.said()}"
-                      if hasattr(measured, "said") else "    serving in its measured shape")
+                say(f"    serving in its measured shape: {measured.said()}"
+                    if hasattr(measured, "said") else "    serving in its measured shape")
         if getattr(args, "n_max", None) is not None:
             if not lease.get("draft"):
-                print("    --n-max: no draft head is being served, so there is no draft "
-                      "to lengthen", file=sys.stderr)
+                warn("    --n-max: no draft head is being served, so there is no draft "
+                     "to lengthen")
                 return 2
             lease["spec_draft_max"] = int(args.n_max)
-            print(f"    draft length {args.n_max} over the profile's")
+            say(f"    draft length {args.n_max} over the profile's")
         with serve(found, manager=manager, **lease) as server:
-            print(f"    up in {time.time() - began:.0f}s")
+            say(f"    up in {time.time() - began:.0f}s")
             client = Client(server.base_url, timeout=args.per_message, **sampling)
             held = {**footprint(server.base_url), "sampling": dict(client.sampling),
                     "load_s": getattr(server, "load_s", None)}
@@ -1074,10 +1073,10 @@ def main(args: Any) -> int:
                 # first, on this load: a few messages through the whole path, kept and
                 # read back, before the sample that costs the GPU
                 few = sample_messages(messages, SMOKE_MESSAGES, seed=args.seed)
-                print(f"\n  smoke: {len(few)} message(s) through the whole path first")
+                say(f"\n  smoke: {len(few)} message(s) through the whole path first")
                 key = read_and_keep(client, few, held=held, twice_over=False, n=len(few))
                 smoked(read_back(args.kept, [key]), f"{args.label} smoke")
-                print("  smoke: ok\n")
+                say("  smoke: ok\n")
             read_and_keep(client, picked, held=held, twice_over=args.twice, n=len(picked))
     else:
         if wants_smoke(args):

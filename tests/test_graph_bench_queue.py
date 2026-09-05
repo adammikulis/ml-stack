@@ -216,7 +216,7 @@ def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsy
                               "sweep --serve bellwether-12b.gguf --sample 10\n")
     fake = FakeBench()
     assert q.run_queue(where, runner=fake) == 0
-    kept = bench.HOME / "runs.ladybug"
+    kept = bench.home_dir() / "runs.ladybug"
     save(kept, [a_row("who welds?", expected=["person:iris"], shown=["person:iris"],
                       calls=2, chars=90, label="raincoat-2b.gg-plain")])
 
@@ -304,9 +304,9 @@ def test_the_whole_queue_detaches_the_way_a_run_does(tmp_path, monkeypatch, caps
     assert started["command"][3:] == ["queue", str(where), "--yes"]
     assert started["kw"]["start_new_session"] is True
     log = pathlib.Path(started["kw"]["stdout"].name)
-    assert log.parent == bench.HOME / "logs" and "evening.queue" in log.name
+    assert log.parent == bench.home_dir() / "logs" and "evening.queue" in log.name
 
-    held = json.loads((bench.HOME / "measuring.json").read_text())
+    held = json.loads((bench.home_dir() / "measuring.json").read_text())
     assert held["pid"] == 4343 and held["argv"] == ["queue", str(where), "--yes"]
 
     said = capsys.readouterr().out

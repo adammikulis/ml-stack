@@ -4,7 +4,7 @@
 commands ran, when, for how long, on which commit, how each ended, and the estimate beside
 the actual. "How much GPU time did you waste" was answered by opening logs one by one.
 
-Every detached measurement writes its log under ``HOME / "logs"`` as
+Every detached measurement writes its log under ``home_dir() / "logs"`` as
 ``<subcommand>-<label-or-model>-<YYYYmmddTHHMMSS>.log``, so the directory is the record:
 one `Entry` per file. What the log's first lines say (``argv:``, ``started:``, ``commit:``,
 with or without a leading ``#``) is preferred; the filename's stamp and `measuring.json`
@@ -24,11 +24,12 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+
+from ml_stack.log import say, warn
 
 STAMP = "%Y%m%dT%H%M%S"                    # the log's filename
 ISO = "%FT%T"                              # `measuring.json`, the header, a run's `at`
@@ -264,7 +265,7 @@ def add_arguments(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
                     help="the bench's home (default: ~/.ml-stack/bench); its logs/ and "
                          "measuring.json are read")
     ap.add_argument("--kept", default=None,
-                    help="the runs store (default: HOME/runs.ladybug)")
+                    help="the runs store (default: the bench home's runs.ladybug)")
     ap.add_argument("--since", default=None, metavar="WHEN",
                     help="only logs started since: today, 24h, 7d, or a date")
     ap.add_argument("--json", action="store_true", help="the entries as JSON, not a table")
@@ -285,8 +286,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 def run(args: argparse.Namespace) -> int:
     """`main` after the parse: what `ml-stack-bench history` dispatches to."""
     if args.home is None:
-        from ml_stack.bench import HOME
-        home = HOME
+        from ml_stack.bench import home_dir
+        home = home_dir()
     else:
         home = Path(args.home).expanduser()
     entries = history(home, args.kept)
@@ -294,13 +295,13 @@ def run(args: argparse.Namespace) -> int:
         try:
             floor = _iso(since(args.since))
         except ValueError as why:
-            print(f"error: {why}", file=sys.stderr)
+            warn(f"error: {why}")
             return 2
         entries = [e for e in entries if e.started >= floor]
     if args.json:
-        print(json.dumps([asdict(e) for e in entries], indent=1))
+        say(json.dumps([asdict(e) for e in entries], indent=1))
     else:
-        print(table(entries))
+        say(table(entries))
     return 0
 
 

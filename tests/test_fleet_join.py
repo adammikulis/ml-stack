@@ -475,10 +475,9 @@ class TestSweepLine:
             sweep_argv([])
 
     def test_the_line_parses_as_the_bench_would(self, tmp_path, monkeypatch):
-        from ml_stack import bench
         from ml_stack.bench.run import _parser
 
-        monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
         args = _parser().parse_args(sweep_argv(["quince-2b.gguf"], peers=["larch"], sample=4))
         assert args.fleet and args.serve == ["quince-2b.gguf"] and args.peers == "larch"
 
@@ -492,9 +491,8 @@ class TestThePage:
     def page(self, tmp_path, udp, monkeypatch, daemons):
         from test_fleet_ui import Serving
 
-        from ml_stack import bench
 
-        monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
         s = Serving(tmp_path, name="studio")
         s.ui.peer_port = s.port
         s.ui.discovery_port = udp

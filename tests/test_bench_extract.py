@@ -338,7 +338,7 @@ def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, mon
     import ml_stack.client
     from ml_stack import bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url, "model": "fake.gguf"})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
     monkeypatch.setattr(ml_stack.client, "Client", Reader)
@@ -361,7 +361,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
     import ml_stack.client
     from ml_stack import bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
     monkeypatch.setattr(ml_stack.client, "Client", Reader)
@@ -383,7 +383,7 @@ def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_pat
     import ml_stack.client
     from ml_stack import bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "busy", lambda url: 0)   # _idle asks bench.busy
     monkeypatch.setattr(ml_stack.client, "Client", Reader)

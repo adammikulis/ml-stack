@@ -255,11 +255,11 @@ def bench_history(since: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Every measurement the bench has run, newest first -- what ran, when, how long, how it
     ended and what it kept (``ml-stack-bench history``); ``since`` is an ISO date or a
     span like ``2d``."""
-    from ml_stack.bench import HOME
+    from ml_stack.bench import home_dir
     from ml_stack.bench.history import _iso, history
     from ml_stack.bench.history import since as since_at
 
-    rows = history(HOME)
+    rows = history(home_dir())
     if since:
         floor = _iso(since_at(since))
         rows = [e for e in rows if e.started >= floor]

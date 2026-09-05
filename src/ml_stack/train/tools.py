@@ -760,7 +760,7 @@ def _from_bench(argv: list[str]) -> int:
     from ml_stack import bench
 
     a = _from_bench_parser().parse_args(argv)
-    store = Path(a.kept).expanduser() if a.kept else bench.HOME / "runs.ladybug"
+    store = Path(a.kept).expanduser() if a.kept else bench.home_dir() / "runs.ladybug"
     if not store.exists():
         raise FileNotFoundError(f"no bench store at {store}; run ml-stack-bench first")
     kept = [r for r in bench.runs(store) if not a.label or a.label in str(r.get("label") or "")]

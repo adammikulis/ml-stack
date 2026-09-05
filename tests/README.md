@@ -51,19 +51,20 @@ Two costs are *not* marked, because marking them would move the cost rather than
 `conftest.py` has one autouse, suite-wide fixture, `_no_machine_state`. Every test gets it, so
 a test that forgets cannot reach any of these:
 
-- `bench.HOME` (and `bench.extract.HOME`, which binds it at import) and `mcp.MCP_HOME` are
-  pointed at an empty directory under the test's own `tmp_path`. The runs store is where an
-  evening of measuring lives; a test that read it would pass or fail on what the laptop had
-  been doing.
+- `ML_STACK_HOME` points the whole state root at an empty directory under the test's own
+  `tmp_path`, which moves the runs store, the fit and profile records, the job files and
+  every other home at once. The runs store is where an evening of measuring lives; a test
+  that read it would pass or fail on what the laptop had been doing.
 - `bench.run.serving_lines` and `bench.run.results_since` — what is serving on this machine
   right now, and what the last job kept — answer empty.
-- `MLSTACK_BENCH_HOME`, `MLSTACK_INGEST_HOME`, `MLSTACK_FIT_FILE` and `MLSTACK_PROFILES_FILE`
-  are set into `tmp_path`; `MLSTACK_BENCH_CEILING`, `MLSTACK_BENCH_TRACE`, `MLSTACK_LLAMA_BUILD`,
-  `MLSTACK_SEARCH`, `MLSTACK_TRAIN_CEILING` and `MLSTACK_WEB_PROFILE` are *deleted*, so a shell
-  that exports one cannot change a result.
+- Every variable that moves one corner back out of the state root
+  (`MLSTACK_BENCH_HOME`, `MLSTACK_INGEST_HOME`, `MLSTACK_FIT_FILE`, `MLSTACK_PROFILES_FILE`
+  and the rest) is *deleted*, along with `MLSTACK_BENCH_CEILING`, `MLSTACK_BENCH_TRACE`,
+  `MLSTACK_LLAMA_BUILD`, `MLSTACK_SEARCH` and `MLSTACK_TRAIN_CEILING`, so a shell that
+  exports one cannot change a result.
 
-A test that means to exercise one of these overrides it with its own `monkeypatch.setattr`,
-which runs after the autouse fixture and is undone with it.
+A test that means to exercise one of these overrides it with its own `monkeypatch.setenv`
+or `monkeypatch.setattr`, which runs after the autouse fixture and is undone with it.
 
 What still reads the real machine, on purpose:
 

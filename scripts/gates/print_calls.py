@@ -13,9 +13,7 @@ OWNER = "ml_stack.log"
 ROOTS = ("src/ml_stack",)
 OWNS = ("src/ml_stack/log.py",)
 
-COMMANDS = {
-    "src/ml_stack/bench/run.py",
-}
+COMMANDS: set[str] = set()
 """Command modules still printing straight to the console."""
 
 

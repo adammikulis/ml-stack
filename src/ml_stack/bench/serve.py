@@ -9,7 +9,6 @@ says which head to serve. Before any of it, `find_model` turns a name into a pat
 from __future__ import annotations
 
 import contextlib
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
@@ -24,6 +23,7 @@ from ml_stack.bench.keep import read_back, save
 from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
+from ml_stack.log import say, warn
 
 
 def find_model(named: str) -> str:
@@ -61,7 +61,7 @@ def references_in(args: Any) -> list[str]:
     return out
 
 
-def prefetch(references: Sequence[str], log: Callable[[str], None] = print) -> list[tuple[str, int]]:
+def prefetch(references: Sequence[str], log: Callable[[str], None] = say) -> list[tuple[str, int]]:
     """Download every reference into the Hub cache before the lock is taken, one line each.
 
     A download inside the timed window is a timing of the network: the first model of a
@@ -78,7 +78,7 @@ def prefetch(references: Sequence[str], log: Callable[[str], None] = print) -> l
         try:
             where = hub.fetch(ref)
         except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
-            print(f"could not fetch {ref}: {exc}", file=sys.stderr)
+            warn(f"could not fetch {ref}: {exc}")
             continue
         size = weight_of(where)
         log(f"fetched {ref}: {size / 2**30:.2f}G at {where}")
@@ -153,7 +153,7 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
 
         found = alongside(str(model), "auto", "mmproj-", best=True)
         if not found:
-            print("no vision projector is shipped beside that model; serving without one")
+            say("no vision projector is shipped beside that model; serving without one")
         run = run.over(mmproj=str(found or ""))
     # Every question sends the same system prompt and the same tool schemas ahead of itself.
     # Reusing that prefix by KV shifting, rather than reprocessing it twenty times a run, is
@@ -179,7 +179,7 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
             build = str(manager.backend.binary)
         except Exception as exc:  # noqa: BLE001 - said, then the default build serves
             manager = None
-            print(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
+            say(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
     build = build or str(find_binary() or "llama-server")
     report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
     if not report.ok:
@@ -199,11 +199,11 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         loaded = time.time() - began
         load_s = getattr(server, "load_s", None)
         warmup_s = getattr(server, "warmup_s", None)
-        print(f"    up in {loaded:.0f}s"
-              + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
+        say(f"    up in {loaded:.0f}s"
+            + (f" (load {float(load_s):.1f}s" + (f", warm-up {float(warmup_s):.1f}s"
                                                    if warmup_s is not None else "") + ")"
                  if load_s is not None else ""))
-        print("\n".join(f"      {line}" for line in report.said().splitlines()))
+        say("\n".join(f"      {line}" for line in report.said().splitlines()))
         # `binary` is the llama-server this ran on, so a run on a fork is told from one on
         # mainline when the ranking takes its cost; `build` is its name, for `served_by`
         held: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
@@ -300,7 +300,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
         for way in every:
             kept_as = already(labelled(way))
             if kept_as:
-                print(f"skipping {labelled(way)}: kept at {kept_as.get('at', '?')}")
+                say(f"skipping {labelled(way)}: kept at {kept_as.get('at', '?')}")
             else:
                 todo.append(way)
         if not todo:
@@ -312,7 +312,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
         with up(run, binary=binary, name=f"{name}{suffix}",
                 serve_timeout=serve_timeout) as (server, held_up):
             finder, why = finder_of(store, embed_url, embed_model)
-            print(f"      look_up by {finder}" + (f" ({why})" if why else ""))
+            say(f"      look_up by {finder}" + (f" ({why})" if why else ""))
             loaded = float(held_up.pop("loaded", 0.0))
             before_load = held_up.pop("baseline", None)
             load_s = held_up.get("load_s")
@@ -328,7 +328,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                     asked.pop("label", None)
                     first = int(asked.pop("shortlist", shortlist) or 0)
                     if len(every) > 1 or smoking:
-                        print(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
+                        say(f"\n  --- {here}" + (" (smoke)" if smoking else ""))
                     wants_card = bool(asked.pop("_card", False))
                     # The way, laid over the run: `Run.over` puts each name where it
                     # belongs -- an asking to `asking`, a sampler or a ceiling to
@@ -366,20 +366,20 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
             if smoke:
                 # first, on this load: every way through the whole path on two questions,
                 # kept and read back, before the questions that cost the GPU
-                print(f"\n  smoke: {len(smoke)} question(s) through every way first")
+                say(f"\n  smoke: {len(smoke)} question(s) through every way first")
                 proved, keys = ask_every(smoke, smoking=True)
                 smoked(read_back(kept, keys) if kept
                        else [{"rows": [asdict(r) for r in proved]}], f"{name}{suffix} smoke")
-                print("  smoke: ok")
+                say("  smoke: ok")
             rows += ask_every(questions, smoking=False)[0]
     except NotLoaded as why:
-        print(f"    preflight refused {name}{suffix}; not loaded:\n"
-              + "\n".join(f"      {line}" for line in str(why).splitlines()))
+        say(f"    preflight refused {name}{suffix}; not loaded:\n"
+            + "\n".join(f"      {line}" for line in str(why).splitlines()))
     except checks.PreflightFailed as why:
         # The backend's own preflight, which can refuse what this one passed -- a draft
         # head resolved to a file this could not size, say. Same answer: say it, move on.
-        print(f"    preflight refused {name}{suffix}; not loaded:\n"
-              + "\n".join(f"      {line}" for line in str(why).splitlines()))
+        say(f"    preflight refused {name}{suffix}; not loaded:\n"
+            + "\n".join(f"      {line}" for line in str(why).splitlines()))
     return rows
 
 
@@ -427,7 +427,7 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
             str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
         for length in (lengths if head else [None]):
             tagged = f"{name}@n{length}" if length is not None else name
-            print(f"\n--- draft: {tagged}")
+            say(f"\n--- draft: {tagged}")
             out += bench.served(drafted_by(run, head).over(draft_n_max=length),
                                 questions, graph, label=f"draft:{tagged}", binary=binary,
                           kept=kept, store=store, embed_url=embed_url,
@@ -441,5 +441,5 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
         everything = bench._kept(kept)
         mine = [r for r in everything if r.get("key") not in before
                 and len(r.get("rows") or ()) == len(questions)]
-        print("\n" + drafted(mine, among=everything))
+        say("\n" + drafted(mine, among=everything))
     return out

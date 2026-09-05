@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import platform
-import sys
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -27,6 +26,7 @@ from ml_stack.bench.backends import describe
 from ml_stack.bench.record import of
 from ml_stack.bench.score import derived, invented_digest
 from ml_stack.bench.speed import KIND as SPEED
+from ml_stack.log import say, warn
 from ml_stack.paths import repo_root
 
 
@@ -241,7 +241,7 @@ def add_arguments(sub: Any) -> Any:
     one.add_argument("--title", default="", help="the document's title")
     one.add_argument("--machine", default="", help="the machine, e.g. 'Mac (128 GB)' "
                                                    "(default: this one)")
-    one.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    one.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                      help="the store the runs are in (default: %(default)s)")
     one.add_argument("--anyway-export", action="store_true", dest="export_anyway",
                      help="include graph runs over some other community, and allow a "
@@ -268,24 +268,24 @@ def main(args: Any) -> int:
     if getattr(args, "last", 0):
         labels += [label for label in newest_labels(kept, int(args.last)) if label not in labels]
     if not labels:
-        print("error: name at least one label, or pass --last", file=sys.stderr)
+        warn("error: name at least one label, or pass --last")
         return 2
     try:
         standards = read_standards(args.standard or [])
     except (OSError, ValueError) as why:
-        print(f"error: could not read a --standard file: {why}", file=sys.stderr)
+        warn(f"error: could not read a --standard file: {why}")
         return 2
     document = assemble(kept, labels, standards=standards, title=args.title,
                         machine_name=args.machine, anyway=bool(args.export_anyway))
     try:
         where = write(document, args.export, anyway=bool(args.export_anyway))
     except ValueError as why:
-        print(f"error: {why}", file=sys.stderr)
+        warn(f"error: {why}")
         return 2
     for one in document["configs"]:
         has = [name for name in ("graph", "speed", "memory", "standard")
                if one.get(name) is not None]
-        print(f"{one['run']}: {one['label']}"
-              + (f" -- {', '.join(has)}" if has else " -- nothing kept under this label"))
-    print(where)
+        say(f"{one['run']}: {one['label']}"
+            + (f" -- {', '.join(has)}" if has else " -- nothing kept under this label"))
+    say(where)
     return 0

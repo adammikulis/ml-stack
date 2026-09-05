@@ -9,7 +9,6 @@ too, because the scorer, the parser and the runner all need the same two numbers
 from __future__ import annotations
 
 import json
-import os
 import socket
 import subprocess
 import time
@@ -18,19 +17,18 @@ from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.HOME`,
+# The package is the namespace the tests and `selfcheck` patch -- `bench.home_dir`,
 # `bench.runs` -- so anything patchable is looked up there at call time, never bound here
 # at import.
 from ml_stack import bench
+from ml_stack.home import state
 
 if TYPE_CHECKING:
     from ml_stack.bench.score import Row
 
-# Runs are worth keeping: the point of one is to compare it with another, later, and a
-# benchmark written to a temporary directory answers no question a week from now.
-# ``MLSTACK_BENCH_HOME`` moves it: a fleet daemon rooted somewhere else sets it on the
-# benches it launches, so they record under the home whose lock the daemon watches.
-HOME = Path(os.environ.get("MLSTACK_BENCH_HOME") or "~/.ml-stack/bench").expanduser()
+def home_dir() -> Path:
+    """Where every run this machine measured is kept. ``MLSTACK_BENCH_HOME`` moves it."""
+    return state("bench")
 
 
 def _plain(value: Any) -> Any:
@@ -112,7 +110,7 @@ def prepared() -> str:
     -- without being told to. Without one, the bench measures character matching alone, and
     every run recorded that way ranked something nobody runs.
     """
-    where = bench.HOME / "graph.ladybug"
+    where = bench.home_dir() / "graph.ladybug"
     return str(where) if where.exists() else ""
 
 

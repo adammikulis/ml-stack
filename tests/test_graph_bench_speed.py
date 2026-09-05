@@ -204,7 +204,7 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
     from ml_stack.bench import backends
 
     client = _Ollama()
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint",
                         lambda url, client=None: {"base_url": url, "resident_bytes": 65 * 2**30,
@@ -238,7 +238,7 @@ def test_a_speed_run_that_is_not_a_smoke_smokes_one_cell_first(tmp_path, monkeyp
     import ml_stack.bench as bench
 
     client = _Llama()
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
     monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: client)
@@ -261,7 +261,7 @@ def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monk
         def chat(self, messages, **kw):
             raise ConnectionError("nothing there")
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
     monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: Down())
@@ -305,7 +305,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
             self.settings = dict(settings)
             seen["clients"].append(self)
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(bench, "footprint",
                         lambda url, client=None: {"base_url": url, "model": "tiny.gguf"})

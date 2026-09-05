@@ -34,6 +34,7 @@ from ml_stack.bench.keep import SHORT, SMOKE
 from ml_stack.bench.record import prompt_digest
 from ml_stack.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
+from ml_stack.log import warn
 
 
 def found(store: str | Path | None, embed_url: str = "",
@@ -1142,12 +1143,11 @@ def _idle(url: str, args: Any) -> bool:
     working = bench.busy(url)
     if working <= 0:
         if working < 0:
-            print(f"note: {url} would not say whether it is busy; timings may not be alone",
-                  file=sys.stderr)
+            warn(f"note: {url} would not say whether it is busy; timings may not be alone")
         return True
-    print(f"error: {url} is already working on {working} request(s). A timing taken while "
-          f"another run has the same GPU is not a timing.\n"
-          f"       Wait for it, or pass --anyway to measure regardless.", file=sys.stderr)
+    warn(f"error: {url} is already working on {working} request(s). A timing taken while "
+         f"another run has the same GPU is not a timing.\n"
+         f"       Wait for it, or pass --anyway to measure regardless.")
     return bool(getattr(args, "anyway", False))
 
 

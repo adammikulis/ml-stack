@@ -315,7 +315,7 @@ class UI:
 
     def bench_state(self) -> dict[str, Any]:
         """What ``ml-stack-bench status`` says, for the page. The bench's home is
-        `ml_stack.bench.HOME`, the one the command reads."""
+        `ml_stack.bench.home_dir`, the one the command reads."""
         try:
             from ml_stack.bench.run import measuring, status
         except ImportError as exc:
@@ -326,10 +326,10 @@ class UI:
     def bench_history(self, limit: int = 20) -> list[dict[str, Any]]:
         from dataclasses import asdict
 
-        from ml_stack.bench import HOME
+        from ml_stack.bench import home_dir
         from ml_stack.bench.history import history
 
-        return [asdict(e) for e in history(HOME)][::-1][:limit]
+        return [asdict(e) for e in history(home_dir())][::-1][:limit]
 
     def fit(self, room: int = 0, users: int = 1) -> dict[str, Any]:
         """The measured fit records, seated in a room of this size.
@@ -380,14 +380,14 @@ class UI:
         same reason the fit records carry their two composing numbers rather than answers.
         """
         try:
-            from ml_stack.bench import HOME
+            from ml_stack.bench import home_dir
             from ml_stack.bench.keep import _kept
             from ml_stack.bench.score import COSTS, NOISE, composed, derived, host_of
             from ml_stack.bench.show import AXES, pareto
         except ImportError as exc:                       # a device-tier install has no bench
             return {"error": f"the bench is not installed here: {exc}",
                     "runs": [], "axes": {}, "keys": {}, "store": ""}
-        store = Path(HOME) / "runs.ladybug"
+        store = home_dir() / "runs.ladybug"
         kept = _kept(store)
         points = list(kept) + composed(kept)
         # by identity, the way `rates` marks them: two runs can agree on every number and

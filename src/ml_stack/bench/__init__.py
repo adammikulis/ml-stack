@@ -22,7 +22,7 @@ One package, one command (``ml-stack-bench``), six modules so that each agent is
 
 This module is the namespace: everything is imported here, and every call between the
 modules to something a test or `selfcheck` patches -- `served`, `measure`, `footprint`,
-`runs`, `HOME` -- goes through ``bench.<name>`` at call time, so patching it here patches it
+`runs`, `home_dir` -- goes through ``bench.<name>`` at call time, so patching it here patches it
 everywhere. ``python -m ml_stack.bench`` is what `detach` re-runs.
 """
 
@@ -31,7 +31,7 @@ from __future__ import annotations
 import platform  # noqa: F401 - `bench.platform.system` is what the detach tests patch
 
 from ml_stack.bench.keep import (  # noqa: F401
-    HOME,
+    home_dir,
     asked_with,
     SHORT,
     SMOKE,
@@ -231,12 +231,12 @@ from ml_stack.bench.run import (  # noqa: F401
 from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401
 
-__all__ = ["Counting", "Estimate", "HOME", "Measured", "NOISE", "PER_QUESTION",
+__all__ = ["Counting", "Estimate", "Measured", "NOISE", "PER_QUESTION",
            "QuestionTimedOut", "Row", "SHORT", "SMOKE", "SmokeFailed", "Spread",
            "prompt_digest", "baseline", "beyond_weights", "choices",
            "composed", "drafted", "drafted_by", "estimate", "export", "ranking", "ask_from", "asking",
            "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
-           "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
+           "halves", "home_dir", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
            "report", "asked_as", "band", "bands", "by_shape", "held_up", "separated",
            "shape_of", "shaped", "wired_of",
            "prefix_kept", "prepared", "read_questions", "references_in", "runs", "save",

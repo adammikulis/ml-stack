@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ml_stack import bench
+from ml_stack.log import say, warn
 
 __all__ = ["SETS", "Set", "HarnessShape", "plan", "summarise", "standard", "main"]
 
@@ -160,7 +161,7 @@ def _scored(task: str, results: dict[str, Any]) -> int:
 
 def standard(*, url: str, model: str, sets: list[str], limit: int | None, think: bool | None,
              label: str, evaluate: Callable[..., dict[str, Any]] | None = None,
-             announce: Callable[[str], None] = print) -> dict[str, Any]:
+             announce: Callable[[str], None] = say) -> dict[str, Any]:
     """Run every set and return the document; the caller holds the lock and writes it."""
     run = evaluate or _evaluate
     doc: dict[str, Any] = {
@@ -236,28 +237,28 @@ def main(argv: list[str] | None = None) -> int:
     sets = [s.strip() for s in args.tasks.split(",") if s.strip()]
     unknown = [s for s in sets if s not in SETS]
     if unknown:
-        print(f"error: unknown set(s) {', '.join(unknown)}; choose from "
-              f"{', '.join(SETS)}", file=sys.stderr)
+        warn(f"error: unknown set(s) {', '.join(unknown)}; choose from "
+             f"{', '.join(SETS)}")
         return 2
     label = args.label or args.model
     steps = plan(url=args.url, model=args.model, sets=sets, limit=args.limit, think=args.think)
     if args.dry_run:
-        print(json.dumps(steps, indent=2))
+        say(json.dumps(steps, indent=2))
         return 0
-    out = args.out or (bench.HOME / "standard" /
+    out = args.out or (bench.home_dir() / "standard" /
                        f"{_slug(label)}-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.json")
     try:
-        with only_one(bench.HOME / "measuring.lock", wait=not args.no_queue,
-                      announce=lambda line: print(line, file=sys.stderr)):
+        with only_one(bench.home_dir() / "measuring.lock", wait=not args.no_queue,
+                      announce=lambda line: warn(line)):
             doc = standard(url=args.url, model=args.model, sets=sets, limit=args.limit,
                            think=args.think, label=label)
     except Busy as why:
-        print(f"error: {why}. Another measurement is running; wait for it, or pass "
-              f"--no-queue to fail fast rather than queue.", file=sys.stderr)
+        warn(f"error: {why}. Another measurement is running; wait for it, or pass "
+             f"--no-queue to fail fast rather than queue.")
         return 3
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {out}")
+    say(f"wrote {out}")
     return 0
 
 

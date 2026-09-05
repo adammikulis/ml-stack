@@ -191,7 +191,7 @@ def bench_home(traind_root: Path | str | None = None) -> Path:
     whatever its root was told the truth about the wrong machine: a training job sent to a
     daemon under test stayed queued for as long as a real benchmark was measuring on the
     developer's box. Without a root, ``~/.ml-stack/bench``: the same path
-    `ml_stack.bench.HOME` names, written here rather than imported so a daemon that
+    `ml_stack.bench.home_dir` names, written here rather than imported so a daemon that
     never measures never loads the bench.
     """
     if traind_root is not None:

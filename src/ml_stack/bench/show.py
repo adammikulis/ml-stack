@@ -39,6 +39,7 @@ from ml_stack.bench.score import (
     speedup,
     wall_of,
 )
+from ml_stack.log import say
 
 
 # The kinds of run the answering table leaves out: each has a table of its own.
@@ -309,7 +310,7 @@ def _k(n: int | None) -> str:
 def table(kept: Sequence[dict[str, Any]]) -> None:
     """Every run, one per line. Two runs compare; more than two want seeing at once."""
     if not kept:
-        print("nothing kept yet")
+        say("nothing kept yet")
         return
     # The context each slot gets is on every line on purpose: a model measured at 8k against
     # one at 32k is not being compared with it, and the KV cache — the number that decides
@@ -370,7 +371,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # prints the mean alone invites a comparison the questions cannot support.
     kept = [one for one in kept if str(one.get("kind") or "") not in NOT_ANSWERING]
     if not kept:
-        print("nothing kept yet")
+        say("nothing kept yet")
         return
     several = len(hosts_of(kept)) > 1
     # `served` is what served the run -- program, runtime or format, quant -- so two runs
@@ -382,8 +383,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
             f"{'real':>9} {'mem':>9} {'wired':>8} {'kv+run':>8} {'per 1k':>8} {'F1':>8} "
             f"{'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling':14} {'served'}")
-    print(head)
-    print("-" * len(head))
+    say(head)
+    say("-" * len(head))
     for one in kept:
         rows = one.get("rows") or []
         server = one.get("server") or {}
@@ -404,28 +405,28 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
         rss = server.get("resident_bytes")
         load = server.get("load_s")
         cached = measured(rows, "cached_tokens")
-        print(f"{_shown(one.get('label', '')):28} "
-              + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
-              + f"{(f'{ctx // 1024}k x{slots or chr(63)}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
-              f"{len(scored):>3} "
-              f"{_shown(shaped(one, ctx_shown=True), 32):32} "
-              f"{wall_of(one):>6.0f}s "
-              f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
-              f"{_total(rows, 'calls'):>6.0f} "
-              f"{_total(rows, 'processed_tokens'):>8.0f} "
-              f"{_total(rows, 'completion_tokens'):>8.0f} "
-              f"{(f'{cached:.0f}' if cached is not None else '-'):>8} "
-              f"{_k(peak(rows)):>6} "
-              f"{prefixed(server):>4} "
-              f"{drafting(rows):>6} "
-              f"{_times(speedup(one, kept)):>6} "
-              f"{str(server.get('finder') or '-'):>7} "
-              f"{at_once(server):>5} "
-              f"{_gb(rss):>9} {_gb(server.get('footprint_peak')):>9} {wired_of(server):>8} "
-              f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
-              f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
-              f"{right:>8} {rec:>5} {prec:>5} {of(one).made:>5} {timeouts(one):>4}  "
-              f"{sampled(server):14} {short(server.get('served_by'))}")
+        say(f"{_shown(one.get('label', '')):28} "
+            + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
+            + f"{(f'{ctx // 1024}k x{slots or chr(63)}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
+            f"{len(scored):>3} "
+            f"{_shown(shaped(one, ctx_shown=True), 32):32} "
+            f"{wall_of(one):>6.0f}s "
+            f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
+            f"{_total(rows, 'calls'):>6.0f} "
+            f"{_total(rows, 'processed_tokens'):>8.0f} "
+            f"{_total(rows, 'completion_tokens'):>8.0f} "
+            f"{(f'{cached:.0f}' if cached is not None else '-'):>8} "
+            f"{_k(peak(rows)):>6} "
+            f"{prefixed(server):>4} "
+            f"{drafting(rows):>6} "
+            f"{_times(speedup(one, kept)):>6} "
+            f"{str(server.get('finder') or '-'):>7} "
+            f"{at_once(server):>5} "
+            f"{_gb(rss):>9} {_gb(server.get('footprint_peak')):>9} {wired_of(server):>8} "
+            f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
+            f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
+            f"{right:>8} {rec:>5} {prec:>5} {of(one).made:>5} {timeouts(one):>4}  "
+            f"{sampled(server):14} {short(server.get('served_by'))}")
 
 
 def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
@@ -445,7 +446,7 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
     range of their means, which is the part a band over one run cannot see.
     """
     if not kept:
-        print("nothing kept yet")
+        say("nothing kept yet")
         return
     grouped: dict[tuple[str, str, str], list[Mapping[str, Any]]] = {}
     for one in kept:
@@ -455,12 +456,12 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
         grouped.setdefault((model, shaped(one), sampled(one.get("server") or {})),
                            []).append(one)
     if not grouped:
-        print("nothing scored yet")
+        say("nothing scored yet")
         return
     head = (f"{'model':22} {'shape':40} {'sampling':14} {'runs':>4} {'n':>4} {'F1':>10} "
             f"{'spread':>8} {'rec':>5} {'prec':>5} {'s/q':>10}")
-    print(head)
-    print("-" * len(head))
+    say(head)
+    say("-" * len(head))
     for (model, form, how), group in sorted(grouped.items()):
         rows = [r for one in group for r in (one.get("rows") or []) if r.get("expected")]
         pooled = {"rows": rows}
@@ -472,14 +473,14 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
         right = f"{100 * got['right']:.0f}% {band_of(pooled)}".strip()
         each = f"{got['seconds_per_question']:.1f} " \
                + band_of(pooled, "seconds_per_question", unit="s")
-        print(f"{_shown(model, 22):22} {form:40} {_shown(how, 14):14} "
-              f"{len(group):>4} {len(rows):>4} {right:>10} {drift:>8} "
-              f"{100 * got['recall']:>4.0f}% {100 * got['precision']:>4.0f}% "
-              f"{each.strip():>10}")
-    print("\nOne line per shape: runs of the same model, server shape, asking and sampling, "
-          "read together.")
-    print("F1's ± is the 95% interval over the group's questions; spread is how far the "
-          "runs' own means lie apart, in points.")
+        say(f"{_shown(model, 22):22} {form:40} {_shown(how, 14):14} "
+            f"{len(group):>4} {len(rows):>4} {right:>10} {drift:>8} "
+            f"{100 * got['recall']:>4.0f}% {100 * got['precision']:>4.0f}% "
+            f"{each.strip():>10}")
+    say("\nOne line per shape: runs of the same model, server shape, asking and sampling, "
+        "read together.")
+    say("F1's ± is the 95% interval over the group's questions; spread is how far the "
+        "runs' own means lie apart, in points.")
 
 
 def _gb(value: Any) -> str:
@@ -548,7 +549,7 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
     against the undrafted baseline `baseline` finds there; ``kept`` alone is one label's.
     """
     if not kept:
-        print("nothing kept yet")
+        say("nothing kept yet")
         return
     for one in kept:
         base = baseline(one, among or kept)
@@ -560,37 +561,37 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
         together = at_once(server)
         load = server.get("load_s")
         late = timeouts(one)
-        print(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
-              + (f", {together} at once" if together else "")
-              + (f", load {float(load):.0f}s" if load is not None else "")
-              + (f", {late} timed out" if late else "") + ")"
-              + (f"  speedup {_times(faster)} over draft:none ({base.get('label', '')})"
+        say(f"\n{one.get('label', '')}  ({one.get('at', '')}, find {found}"
+            + (f", {together} at once" if together else "")
+            + (f", load {float(load):.0f}s" if load is not None else "")
+            + (f", {late} timed out" if late else "") + ")"
+            + (f"  speedup {_times(faster)} over draft:none ({base.get('label', '')})"
                  if faster is not None and base is not None else ""))
         # what these questions could and could not settle, before the questions themselves:
         # a reader about to explain a five-point difference should see the band first
         got = derived(one)
         if band(one) is not None:
-            print(f"  F1 {100 * got['right']:.0f}% {band_of(one)}, "
-                  f"recall {100 * got['recall']:.0f}% {band_of(one, 'recall')}, "
-                  f"precision {100 * got['precision']:.0f}% {band_of(one, 'precision')}, "
-                  f"{got['seconds_per_question']:.1f} s/q "
-                  f"{band_of(one, 'seconds_per_question', unit='s')}"
-                  f"   (95% over its own {got['questions']:.0f} questions)")
+            say(f"  F1 {100 * got['right']:.0f}% {band_of(one)}, "
+                f"recall {100 * got['recall']:.0f}% {band_of(one, 'recall')}, "
+                f"precision {100 * got['precision']:.0f}% {band_of(one, 'precision')}, "
+                f"{got['seconds_per_question']:.1f} s/q "
+                f"{band_of(one, 'seconds_per_question', unit='s')}"
+                f"   (95% over its own {got['questions']:.0f} questions)")
         if not shortfall:
-            print("  every question answered in full")
+            say("  every question answered in full")
             continue
         for r in shortfall:
             got, want = set(r.get("shown") or ()), set(r.get("expected") or ())
-            print(f"  {_hit(r) * 100:3.0f}%  {r.get('question', '')}"
-                  + (f"   [timed out at {float(r.get('seconds') or 0):.0f}s]"
+            say(f"  {_hit(r) * 100:3.0f}%  {r.get('question', '')}"
+                + (f"   [timed out at {float(r.get('seconds') or 0):.0f}s]"
                      if r.get("timed_out") else ""))
-            print(f"        wanted  {', '.join(sorted(want)) or '-'}")
-            print(f"        showed  {', '.join(sorted(got)) or '(nothing)'}")
+            say(f"        wanted  {', '.join(sorted(want)) or '-'}")
+            say(f"        showed  {', '.join(sorted(got)) or '(nothing)'}")
             if want - got:
-                print(f"        missed  {', '.join(sorted(want - got))}")
+                say(f"        missed  {', '.join(sorted(want - got))}")
             if r.get("unread"):
                 # what F1 cannot see: a name in the prose that no tool call produced
-                print(f"        made    {', '.join(r['unread'])}  (named, never found or read)")
+                say(f"        made    {', '.join(r['unread'])}  (named, never found or read)")
             turns = cache_turns(r)
             note = (f"{r.get('calls', 0)} calls, {r.get('answer_chars', 0)} chars"
                     + (f", {turns}" if turns else "")
@@ -599,7 +600,7 @@ def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
                 note += (f"; conversation {r.get('conversation', 0)} turn {r.get('turn', 0)}, "
                          f"first token {_s(r.get('first_token'))}, "
                          f"queued {_s(r.get('queued'))}")
-            print(f"        {note}")
+            say(f"        {note}")
 
 
 def _s(value: Any) -> str:
@@ -638,19 +639,19 @@ def transcript(kept: Sequence[Mapping[str, Any]], label: str = "",
                 and (not question or question.casefold() in str(r.get("question") or "").casefold())]
         for r in rows:
             shown += 1
-            print(f"\n{one.get('label', '')}  {r.get('question', '')}"
-                  f"   ({_hit(r) * 100:.0f}%, {r.get('calls', 0)} calls, "
-                  f"{float(r.get('seconds') or 0):.1f}s"
-                  + (", TIMED OUT" if r.get("timed_out") else "")
-                  + (f", ERROR {r['error']}" if r.get("error") else "") + ")")
+            say(f"\n{one.get('label', '')}  {r.get('question', '')}"
+                f"   ({_hit(r) * 100:.0f}%, {r.get('calls', 0)} calls, "
+                f"{float(r.get('seconds') or 0):.1f}s"
+                + (", TIMED OUT" if r.get("timed_out") else "")
+                + (f", ERROR {r['error']}" if r.get("error") else "") + ")")
             for entry in r.get("trace") or []:
                 for line in _trace_lines(entry):
-                    print(f"  {line}")
+                    say(f"  {line}")
     if not shown:
-        print(f"no traced question found"
-              + (f" for {label!r}" if label else "")
-              + (f" matching {question!r}" if question else "")
-              + f". A run of {bench.SHORT} questions or fewer traces by default; "
+        say(f"no traced question found"
+            + (f" for {label!r}" if label else "")
+            + (f" matching {question!r}" if question else "")
+            + f". A run of {bench.SHORT} questions or fewer traces by default; "
                 f"{TRACE_ENV}=1 traces one of any size.")
 
 
@@ -701,7 +702,7 @@ def shape(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any]) -> N
     kinds = {str(n.get("id")): str(n.get("kind") or "") for n in (graph.get("nodes") or ())}
     scored = [q for q in questions if q.get("expect")]
     if not scored:
-        print("no scored questions")
+        say("no scored questions")
         return
     counted: dict[str, int] = {}
     for q in scored:
@@ -709,18 +710,18 @@ def shape(questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any]) -> N
             counted[kind] = counted.get(kind, 0) + 1
     peopleless = sum(1 for q in scored
                      if not any(kinds.get(str(e)) == "person" for e in q["expect"]))
-    print(f"{len(questions)} questions, {len(scored)} scored, "
-          f"{len(questions) - len(scored)} whose right answer is nobody")
-    print(f"graph: {len(graph.get('nodes') or ())} entries, "
-          f"{len(graph.get('edges') or ())} links")
+    say(f"{len(questions)} questions, {len(scored)} scored, "
+        f"{len(questions) - len(scored)} whose right answer is nobody")
+    say(f"graph: {len(graph.get('nodes') or ())} entries, "
+        f"{len(graph.get('edges') or ())} links")
     for kind, n in sorted(counted.items(), key=lambda kv: -kv[1]):
-        print(f"  {n:>3} question(s) want a {kind}")
-    print(f"  {peopleless:>3} question(s) want no person at all "
-          f"({100 * peopleless / len(scored):.0f}%)")
-    print(f"mean entries expected: {sum(len(q['expect']) for q in scored) / len(scored):.1f}")
+        say(f"  {n:>3} question(s) want a {kind}")
+    say(f"  {peopleless:>3} question(s) want no person at all "
+        f"({100 * peopleless / len(scored):.0f}%)")
+    say(f"mean entries expected: {sum(len(q['expect']) for q in scored) / len(scored):.1f}")
     missing = sorted({str(e) for q in scored for e in q["expect"] if str(e) not in kinds})
     if missing:
-        print(f"\nEXPECTED IDS THAT DO NOT EXIST IN THE GRAPH: {missing}")
+        say(f"\nEXPECTED IDS THAT DO NOT EXIST IN THE GRAPH: {missing}")
 
 
 def sampled(server: Mapping[str, Any]) -> str:
@@ -850,15 +851,15 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
     as `composed` composes it, marked ``=``, so the frontier holds what a model can do at
     the speed of the configuration that held its accuracy."""
     if not kept:
-        print("nothing kept yet")
+        say("nothing kept yet")
         return
     points = list(kept) + composed(kept, noise=noise)
     on_front = {id(one) for one in pareto(points, cost=cost)}
     several = len(hosts_of(points)) > 1
     head = (f"{'run':28} {'n':>3} {'F1':>5} {'rec':>5} {'prec':>5} {'lit/q':>6} "
             f"{'F1/min':>8} {'F1/1k tok':>10} {'F1/GB':>7} {'s per':>7} {'tok per':>8}")
-    print(head)
-    print("-" * len(head))
+    say(head)
+    say("-" * len(head))
     for one in sorted(points, key=lambda o: -(derived(o).get("right") or 0)):
         d = derived(one)
         if not d:
@@ -870,16 +871,16 @@ def rates(kept: Sequence[Mapping[str, Any]], *, cost: str = "seconds",
         # another machine is on it only by name
         named = (_shown(f"{one.get('label', '')}@{host_of(one) or '?'}", 18) if several
                  else str(one.get("label", ""))[:18])
-        print(f"{named:18}{mark} {d['questions']:>3.0f} "
-              f"{100 * d['right']:>4.0f}% {100 * d['recall']:>4.0f}% "
-              f"{100 * d['precision']:>4.0f}% {d['shown_per_question']:>6.1f} "
-              f"{num('right_per_minute', '8.2f')} {num('right_per_1k', '10.4f')} "
-              f"{num('right_per_gb', '7.3f')} {num('seconds_per_right', '7.1f')} "
-              f"{num('tokens_per_right', '8.0f')}")
-    print(f"\n* on the frontier for accuracy against {AXES.get(cost, cost)}: nothing is "
-          f"both more accurate and cheaper.")
-    print(f"= a model composed: accuracy from its largest run, cost from its fastest run "
-          f"within {noise * 100:g} points of it, scaled to the same number of questions.")
+        say(f"{named:18}{mark} {d['questions']:>3.0f} "
+            f"{100 * d['right']:>4.0f}% {100 * d['recall']:>4.0f}% "
+            f"{100 * d['precision']:>4.0f}% {d['shown_per_question']:>6.1f} "
+            f"{num('right_per_minute', '8.2f')} {num('right_per_1k', '10.4f')} "
+            f"{num('right_per_gb', '7.3f')} {num('seconds_per_right', '7.1f')} "
+            f"{num('tokens_per_right', '8.0f')}")
+    say(f"\n* on the frontier for accuracy against {AXES.get(cost, cost)}: nothing is "
+        f"both more accurate and cheaper.")
+    say(f"= a model composed: accuracy from its largest run, cost from its fastest run "
+        f"within {noise * 100:g} points of it, scaled to the same number of questions.")
 
 
 AXES = {"seconds": "wall clock per question (s)",

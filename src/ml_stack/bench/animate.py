@@ -20,6 +20,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.log import say, warn
+
 NOT_MEASURED = "not measured"
 
 # Okabe & Ito's palette: distinguishable under the common forms of colour blindness.
@@ -331,21 +333,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         doc = load(args.comparison)
     except (OSError, ValueError, json.JSONDecodeError) as e:
-        print(f"{args.comparison}: {e}", file=sys.stderr)
+        warn(f"{args.comparison}: {e}")
         return 2
     only = [k.strip() for k in args.only.split(",")] if args.only else None
     scenes = plan(doc, args.seconds, only=only)
-    print(describe(doc, scenes))
+    say(describe(doc, scenes))
     if args.dry_run:
         return 0
     try:
         import manim  # noqa: F401
     except ImportError:
-        print("manim is not installed: pip install 'ml-stack[viz]'", file=sys.stderr)
+        warn("manim is not installed: pip install 'ml-stack[viz]'")
         return 2
     where = render(doc, out=args.out, png=args.png, quality=args.quality,
                    seconds=args.seconds, only=only, work=args.work)
-    print(f"wrote {where}" + (f" and {args.png}" if args.png else ""))
+    say(f"wrote {where}" + (f" and {args.png}" if args.png else ""))
     return 0
 
 

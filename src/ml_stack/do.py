@@ -260,7 +260,7 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
         from ml_stack import jobs
         from ml_stack import bench
 
-        held = jobs.held("bench", home=bench.HOME / "jobs")
+        held = jobs.held("bench", home=bench.home_dir() / "jobs")
         return {"log": str(log), "pid": held.get("pid"), "argv": [sub, *args]}
     from ml_stack.bench.run import _main
 
@@ -284,7 +284,7 @@ def _jobs_home(kind: str) -> Path | None:
     if kind == "bench":
         from ml_stack import bench
 
-        return bench.HOME / "jobs"
+        return bench.home_dir() / "jobs"
     return None
 
 
@@ -295,7 +295,7 @@ def jobs_status() -> dict[str, Any]:
     from ml_stack import bench
 
     said: list[str] = []
-    for home in (jobs.HOME, bench.HOME / "jobs"):
+    for home in (jobs.home_dir(), bench.home_dir() / "jobs"):
         jobs.status(say=said.append, home=home)
     return {"text": "\n".join(said)}
 

@@ -279,7 +279,7 @@ def test_an_empty_store_says_what_to_run(tmp_path):
 def measured_fit(fit_files, fits):
     """The fit records the subcommand reads, in ``tmp_path`` -- never ``~/.ml-stack`` and
     never the file that ships with the package. The shipped half is left empty so what the
-    subcommand prints came from `fits` alone. (``bench.HOME`` is already elsewhere: the
+    subcommand prints came from `fits` alone. (``bench.home_dir()`` is already elsewhere: the
     suite-wide `_no_machine_state` in ``conftest.py`` puts it there.)"""
     return fit_files(mine=fits, room=32 * GIB).mine
 

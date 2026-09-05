@@ -132,11 +132,6 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     import importlib
 
-    # `bench.HOME` is still bound at import; until it is not, it needs pointing by hand.
-    for path in ("ml_stack.bench", "ml_stack.bench.extract"):
-        module = sys.modules.get(path) or importlib.import_module(path)
-        monkeypatch.setattr(module, "HOME", tmp_path / "machine-state" / "bench")
-
     running = sys.modules.get("ml_stack.bench.run") or importlib.import_module(
         "ml_stack.bench.run")
     monkeypatch.setattr(running, "serving_lines", lambda: [])

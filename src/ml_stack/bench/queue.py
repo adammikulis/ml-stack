@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from ml_stack import bench
+from ml_stack.log import say
 
 #: what a summary line looks like, so the log can be read by eye and by `grep`
 SUMMARY = "=== {clock} step {n}/{total}: {words} -- {state} ({seconds:.0f}s)"
@@ -215,7 +216,7 @@ def label_of(argv: Sequence[str], *, where: str = "") -> str:
 
 def kept_since(started: str, *, store: str | Path | None = None) -> list[str]:
     """The labels of every run kept at or after ``started``, for `--resume`."""
-    where = Path(store) if store else bench.HOME / "runs.ladybug"
+    where = Path(store) if store else bench.home_dir() / "runs.ladybug"
     try:
         if not Path(str(where)).expanduser().exists():
             return []
@@ -235,7 +236,7 @@ def _already(step: Step, labels: Sequence[str]) -> bool:
 def state_file() -> Path:
     """Where the running queue writes what it is on. Beside `measuring.json`, and read the
     same way: a record whose pid has gone is a queue that ended, not one that is running."""
-    return bench.HOME / "queue.json"
+    return bench.home_dir() / "queue.json"
 
 
 def _write_state(state: dict[str, Any]) -> None:
@@ -332,9 +333,9 @@ def run_step(argv: Sequence[str]) -> int:
         reader.join(timeout=5.0)
     seconds = time.monotonic() - began
     if code != 0 and seconds < FAST_DEATH_S and kept:
-        print(f"died in {seconds:.1f}s:", flush=True)
+        say(f"died in {seconds:.1f}s:", flush=True)
         for line in kept:
-            print(f"  {line}", flush=True)
+            say(f"  {line}", flush=True)
     return code
 
 
@@ -343,8 +344,8 @@ def _stop_running(grace: float = 60.0) -> None:
     child = _running
     if child is None or child.poll() is not None:
         return
-    print("[killed] the queue was told to stop; asking the step in flight to stop too",
-          flush=True)
+    say("[killed] the queue was told to stop; asking the step in flight to stop too",
+        flush=True)
     try:
         child.terminate()
         child.wait(timeout=grace)
@@ -378,13 +379,13 @@ def run_queue(path: str | Path, *, dry_run: bool = False, resume: bool = False,
     where = str(Path(path).expanduser())
     total = len(steps)
     if dry_run:
-        print(f"{where}: {total} step(s), "
-              f"{sum(1 for s in steps if s.kind == 'smoke')} smoke/then pair(s)")
+        say(f"{where}: {total} step(s), "
+            f"{sum(1 for s in steps if s.kind == 'smoke')} smoke/then pair(s)")
         for step in steps:
             told = _for_step(step.argv, yes=yes, ceiling=ceiling)
-            print(f"  {step.n:>2}  {step.kind:<5}  ml-stack-bench {' '.join(told)}"
-                  + (f"    [label {step.label}]" if step.label else ""))
-        print("nothing ran: --dry-run")
+            say(f"  {step.n:>2}  {step.kind:<5}  ml-stack-bench {' '.join(told)}"
+                + (f"    [label {step.label}]" if step.label else ""))
+        say("nothing ran: --dry-run")
         return 0
 
     was = _state()
@@ -392,7 +393,7 @@ def run_queue(path: str | Path, *, dry_run: bool = False, resume: bool = False,
                else "") or time.strftime("%FT%T")
     labels = kept_since(started) if resume else []
     if resume:
-        print(f"resuming {where}: skipping what has been kept since {started}")
+        say(f"resuming {where}: skipping what has been kept since {started}")
     state = {"file": where, "started": started, "pid": os.getpid(), "total": total,
              "steps": [s.public() for s in steps]}
     _write_state(state)
@@ -423,8 +424,8 @@ def run_queue(path: str | Path, *, dry_run: bool = False, resume: bool = False,
                 note(step, "skipped")
                 continue
             note(step, "running")
-            print(f"--- {time.strftime('%H:%M:%S')} step {step.n}/{total}: "
-                  f"ml-stack-bench {' '.join(step.argv)}", flush=True)
+            say(f"--- {time.strftime('%H:%M:%S')} step {step.n}/{total}: "
+                f"ml-stack-bench {' '.join(step.argv)}", flush=True)
             began = time.monotonic()
             code = (runner or run_step)(_for_step(step.argv, yes=yes, ceiling=ceiling))
             step.seconds = time.monotonic() - began
@@ -441,9 +442,9 @@ def run_queue(path: str | Path, *, dry_run: bool = False, resume: bool = False,
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
     bad = [s for s in steps if s.state == "failed"]
-    print(f"=== {time.strftime('%H:%M:%S')} queue done: {total} step(s), "
-          f"{sum(1 for s in steps if s.state == 'ok')} ok, {len(bad)} failed, "
-          f"{sum(1 for s in steps if s.state == 'skipped')} skipped", flush=True)
+    say(f"=== {time.strftime('%H:%M:%S')} queue done: {total} step(s), "
+        f"{sum(1 for s in steps if s.state == 'ok')} ok, {len(bad)} failed, "
+        f"{sum(1 for s in steps if s.state == 'skipped')} skipped", flush=True)
     return 1 if bad else 0
 
 
@@ -451,4 +452,4 @@ def _say(step: Step, state: str, total: int) -> None:
     """The one line per step the log is read by."""
     line = SUMMARY.format(clock=time.strftime("%H:%M:%S"), n=step.n, total=total,
                           words=step.words, state=state, seconds=step.seconds)
-    print(line + (f": {step.why}" if step.why else ""), flush=True)
+    say(line + (f": {step.why}" if step.why else ""), flush=True)

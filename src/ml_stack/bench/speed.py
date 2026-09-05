@@ -20,7 +20,6 @@ the prompt cache reads nothing for the second.
 from __future__ import annotations
 
 import argparse
-import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -31,6 +30,7 @@ from ml_stack import bench
 from ml_stack.bench.backends import client_for, describe, http_of, timings_of
 from ml_stack.bench.keep import read_back, save
 from ml_stack.client.tokens import CHARS_PER_TOKEN
+from ml_stack.log import say, warn
 
 KIND = "speed"
 PROMPTS = (512, 4096, 16384)
@@ -293,7 +293,7 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
                      help="how many ask at once, per cell (default: %(default)s)")
     one.add_argument("--generate", type=int, default=GENERATE, metavar="N",
                      help="tokens each request writes (default: %(default)s)")
-    one.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    one.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                      help="where to keep the runs (default: %(default)s)")
     one.add_argument("--context", type=int, default=0, metavar="N",
                      help="total context for a --serve'd model (default: what the largest "
@@ -341,15 +341,15 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
         settings = {**_client_settings(args, timeout=float(args.per_question)),
                     **{k: v for k, v in sampling_from(args).items() if k != "n_predict"}}
         client = client_for(url, context=context, **settings)
-        print(f"\n{label} on {url}")
+        say(f"\n{label} on {url}")
         if smoking_first:
-            print("  smoke: one cell first")
+            say("  smoke: one cell first")
             proved = grid(client, prompts=prompts, streams=streams, generate=args.generate,
                           log=print, smoke=True)
             key = save(args.kept, proved, held=_held(url, client), kind=KIND, label=label)
             _proved(read_back(args.kept, [key]), f"{label} smoke")
             keys.append(key)
-            print("  smoke: ok")
+            say("  smoke: ok")
         cells = grid(client, prompts=prompts, streams=streams, generate=args.generate,
                      log=print, smoke=smoke, sample=int(getattr(args, "sample", 0) or 0))
         keys.append(save(args.kept, cells, held=_held(url, client), kind=KIND, label=label))
@@ -403,12 +403,12 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
 
             chosen = hub.choose_head(model, binary=args.binary or None)
             head = chosen.path
-            print(f"    draft head: {head or 'none'} -- {chosen.why}")
+            say(f"    draft head: {head or 'none'} -- {chosen.why}")
         stem = (str(getattr(args, "serve_label", "") or "")
                 or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14])
         label = (stem + ("-nodraft" if getattr(args, "no_draft", False) else "")
                  + str(getattr(args, "label_suffix", "") or "") + "-speed")
-        print(f"\n{label}: {len(prompts)} prompt size(s) x {len(streams)} stream count(s)")
+        say(f"\n{label}: {len(prompts)} prompt size(s) x {len(streams)} stream count(s)")
         args.parallel = seats
         run = swept(args, model, measured_shape(args, model, head, heads, n),
                     context=per_seat * seats, port=args.serve_port,
@@ -421,14 +421,14 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                 held_up.pop("loaded", None)
                 client = run.client(server.base_url)
                 if smoking_first:
-                    print("  smoke: one cell first, on this load")
+                    say("  smoke: one cell first, on this load")
                     proved = grid(client, prompts=prompts, streams=streams,
                                   generate=args.generate, log=print, smoke=True)
                     key = save(args.kept, proved, held={**_held(server.base_url, client),
                                                         **held_up}, kind=KIND, label=label)
                     _proved(read_back(args.kept, [key]), f"{label} smoke")
                     keys.append(key)
-                    print("  smoke: ok")
+                    say("  smoke: ok")
                 cells = grid(client, prompts=prompts, streams=streams, generate=args.generate,
                              log=print, smoke=smoke,
                              sample=int(getattr(args, "sample", 0) or 0))
@@ -436,11 +436,11 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                                  held={**_held(server.base_url, client), **held_up},
                                  kind=KIND, label=label))
         except (NotLoaded, PreflightFailed) as why:
-            print(f"    preflight refused {label}; not loaded:\n"
-                  + "\n".join(f"      {line}" for line in str(why).splitlines()))
+            say(f"    preflight refused {label}; not loaded:\n"
+                + "\n".join(f"      {line}" for line in str(why).splitlines()))
         except ServerFailed as why:
-            print(f"    {label} did not load; moving on:\n"
-                  + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
+            say(f"    {label} did not load; moving on:\n"
+                + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
     return keys
 
 
@@ -454,20 +454,20 @@ def main(args: Any) -> int:
         try:
             name, url, _ = parse_on(one)
         except ValueError as why:
-            print(f"error: {why}", file=sys.stderr)
+            warn(f"error: {why}")
             return 2
         named.append((name, url))
     if getattr(args, "model", ""):
         args.serve = [args.model, *list(args.serve or [])]
     if not named and not args.serve:
-        print("error: nothing to measure; pass --on NAME=URL for a server that is already "
-              "up, or --serve MODEL to put one up", file=sys.stderr)
+        warn("error: nothing to measure; pass --on NAME=URL for a server that is already "
+             "up, or --serve MODEL to put one up")
         return 2
     smoke = bool(getattr(args, "smoke", False))
     first = wants_smoke(args)
     keys = measure_on(args, named, smoke=smoke, smoking_first=first)
     keys += measure_served(args, smoke=smoke, smoking_first=first)
-    print()
+    say()
     kept = read_back(args.kept, keys) if keys else []
     speed_table(kept if keys else only(bench._kept(args.kept)))
     return 0 if keys or not (named or args.serve) else 1
@@ -486,33 +486,33 @@ def speed_table(kept: Sequence[Mapping[str, Any]]) -> None:
     """One table per speed run: a line per cell."""
     runs = only(kept)
     if not runs:
-        print("no speed run kept yet: ml-stack-bench speed --on NAME=URL, or --serve MODEL")
+        say("no speed run kept yet: ml-stack-bench speed --on NAME=URL, or --serve MODEL")
         return
     for one in runs:
         server = one.get("server") or {}
         served = describe(server.get("served_by"), build=str(server.get("build") or ""))
         peak = server.get("resident_peak") or server.get("resident_bytes")
-        print(f"{one.get('label', '')}  ({one.get('at', '')}"
-              + (f", {served}" if served else "")
-              + (f", peak {int(peak) / 2**30:.1f}G" if peak else "")
-              + (f", load {float(server['load_s']):.0f}s" if server.get("load_s") is not None
+        say(f"{one.get('label', '')}  ({one.get('at', '')}"
+            + (f", {served}" if served else "")
+            + (f", peak {int(peak) / 2**30:.1f}G" if peak else "")
+            + (f", load {float(server['load_s']):.0f}s" if server.get("load_s") is not None
                  else "") + ")")
         head = (f"  {'prompt':>7} {'x':>2} {'prefill':>9} {'decode':>9} {'/stream':>8} "
                 f"{'ttft':>7} {'wall':>7} {'draft':>6} {'errors':>6}")
-        print(head)
-        print("  " + "-" * (len(head) - 2))
+        say(head)
+        say("  " + "-" * (len(head) - 2))
         for c in one.get("rows") or []:
             drafted = c.get("draft_tokens")
             accept = (f"{100 * float(c.get('draft_taken') or 0) / float(drafted):.0f}%"
                       if drafted else ("none" if drafted == 0 else "-"))
             ttft = c.get("ttft_s")
-            print(f"  {int(c.get('prompt_tokens') or 0):>7} {int(c.get('streams') or 1):>2} "
-                  f"{_f(c.get('prefill_tps')):>9} {_f(c.get('decode_tps'), '.1f'):>9} "
-                  f"{_f(c.get('decode_tps_per_stream'), '.1f'):>8} "
-                  f"{(_f(ttft, '.2f', 's') + ('*' if c.get('ttft_from') == 'prompt_ms' else '')):>7} "
-                  f"{_f(c.get('wall_s'), '.1f', 's'):>7} {accept:>6} "
-                  f"{int(c.get('errors') or 0):>6}")
-        print("  prefill and decode in tokens/s over the cell; /stream is one stream's "
-              "decode; ttft is the clock to the first streamed token, * the server's "
-              "prompt clock instead")
-        print()
+            say(f"  {int(c.get('prompt_tokens') or 0):>7} {int(c.get('streams') or 1):>2} "
+                f"{_f(c.get('prefill_tps')):>9} {_f(c.get('decode_tps'), '.1f'):>9} "
+                f"{_f(c.get('decode_tps_per_stream'), '.1f'):>8} "
+                f"{(_f(ttft, '.2f', 's') + ('*' if c.get('ttft_from') == 'prompt_ms' else '')):>7} "
+                f"{_f(c.get('wall_s'), '.1f', 's'):>7} {accept:>6} "
+                f"{int(c.get('errors') or 0):>6}")
+        say("  prefill and decode in tokens/s over the cell; /stream is one stream's "
+            "decode; ttft is the clock to the first streamed token, * the server's "
+            "prompt clock instead")
+        say()

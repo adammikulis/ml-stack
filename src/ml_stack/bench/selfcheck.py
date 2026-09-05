@@ -36,6 +36,7 @@ import importlib
 import inspect
 import io
 import json
+import os
 import time
 import traceback
 from collections.abc import Callable, Mapping, Sequence
@@ -182,7 +183,7 @@ def _rewritten(args: argparse.Namespace, scratch: Path) -> argparse.Namespace:
         out.questions = ""
     # a store when the run has one: named, or `prepare`'s default on this machine (which
     # `drafts` takes without being told) -- built under the scratch home, where `prepared`
-    # finds it once HOME points there
+    # finds it once the state root points there
     wants_store = bool(getattr(args, "store", "") or bench.prepared()
                        or (args.cmd == "run" and getattr(args, "shortlist", 0)))
     if wants_store:
@@ -343,7 +344,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
 
     with contextlib.ExitStack() as patched:
         patch = patched.enter_context
-        patch(mock.patch.object(bench, "HOME", home))
+        patch(mock.patch.dict(os.environ, {"MLSTACK_BENCH_HOME": str(home)}))
         patch(mock.patch.object(bench, "find_model", lambda named: named))
         patch(mock.patch.object(bench_extract, "find_model", lambda named: named))
         patch(mock.patch.object(bench, "busy", lambda url: 0))

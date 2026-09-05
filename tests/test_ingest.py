@@ -1515,7 +1515,7 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
     monkeypatch.setattr(ml_stack.lock, "only_one", recording)
     argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
     assert ingest.main(argv) == 0
-    assert taken["path"] == bench.HOME / "measuring.lock"
+    assert taken["path"] == bench.home_dir() / "measuring.lock"
     assert taken["wait"] is True
     assert seen["lease"]["roam"] is False
     taken["announce"]("waiting for measuring.lock, held by pid 7")
@@ -1528,7 +1528,7 @@ def test_no_queue_is_refused_at_once_while_the_bench_holds_the_lock(tmp_path, mo
     from ml_stack.lock import only_one
 
     argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)
-    with only_one(bench.HOME / "measuring.lock", wait=False, announce=lambda *a: None):
+    with only_one(bench.home_dir() / "measuring.lock", wait=False, announce=lambda *a: None):
         assert ingest.main([*argv, "--no-queue"]) == 3
     err = capsys.readouterr().err
     assert "held by pid" in err and "--no-queue" in err

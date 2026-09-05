@@ -173,7 +173,7 @@ def measured_fit(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(fit_mod, "package_file", lambda: shipped)
     monkeypatch.setenv("MLSTACK_FIT_FILE", str(mine))
     monkeypatch.setattr("ml_stack.hub.room", lambda: 32 * GIB)
-    monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
 
 
 # -- reading one run ---------------------------------------------------------------------

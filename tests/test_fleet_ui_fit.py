@@ -335,19 +335,18 @@ class TestTheRatesRoute:
     """`ml-stack-bench show --rates` as data, over a store built here.
 
     Nothing measures anything: two invented runs are written into a store in ``tmp_path``
-    and `ml_stack.bench.HOME` is pointed at it, so no test can reach the runs this
+    and `ml_stack.bench.home_dir()` is pointed at it, so no test can reach the runs this
     machine has kept.
     """
 
     @pytest.fixture
     def store(self, tmp_path, monkeypatch):
-        import ml_stack.bench as bench
         from ml_stack.bench.keep import SHORT, save
         from ml_stack.bench.score import Row
 
         home = tmp_path / "bench"
         home.mkdir()
-        monkeypatch.setattr(bench, "HOME", home)
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(home))
         where = home / "runs.ladybug"
 
         def run(label: str, *, seconds: float, tokens: int, right: bool,
@@ -427,9 +426,8 @@ class TestTheRatesRoute:
         assert any(r["composed"] for r in got["runs"])
 
     def test_a_machine_that_has_measured_nothing_says_so(self, page, tmp_path, monkeypatch):
-        import ml_stack.bench as bench
 
-        monkeypatch.setattr(bench, "HOME", tmp_path / "empty")
+        monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "empty"))
         status, got, _ = page.call("/ui/rates.json")
         assert status == 200 and got["runs"] == []
 

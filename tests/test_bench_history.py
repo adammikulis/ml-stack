@@ -190,9 +190,8 @@ def test_json_dumps_the_entries(day: Path, monkeypatch, capsys):
 
 
 def test_the_default_home_is_the_benchs_and_is_faked_here(tmp_path: Path, monkeypatch, capsys):
-    import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")             # never ~/.ml-stack
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))             # never ~/.ml-stack
     assert bh.main([]) == 0
     assert capsys.readouterr().out.splitlines()[-1].startswith("0 runs")
 

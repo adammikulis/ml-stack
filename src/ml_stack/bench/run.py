@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.served`,
-# `bench.find_model`, `bench.HOME` -- so anything patchable is looked up there at call
+# `bench.find_model`, `bench.home_dir()` -- so anything patchable is looked up there at call
 # time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.keep import (
@@ -52,6 +52,7 @@ from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, missed, plot, rates, shape, table
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.vectors import MARGIN
+from ml_stack.log import say, warn
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
 # `_ways`: a neighbourhood read whole, which a 256k window does not notice.
@@ -137,8 +138,8 @@ def _ways(args: Any) -> list[dict[str, Any]]:
             out.append({"label": "few", "terse": first["terse"], "few": True,
                         **sampling_from(args)})
         elif also == "tight":
-            print("note: tight is the default asking now; --also tight measures nothing new "
-                  "(--also loose is the old asking, as a control)", file=sys.stderr)
+            warn("note: tight is the default asking now; --also tight measures nothing new "
+                 "(--also loose is the old asking, as a control)")
     # `--reach`, `--rounds`, `--batch`, `--kinds`, `--summary` and `--constrain-ids` are
     # not ways of their own: each rides on every way, so the hundred-question run of
     # "everything that held" is one way and not four.
@@ -227,8 +228,7 @@ def with_card(client: Any, args: Any) -> Any:
     asked = dict(client.card)
     asked.update(sampling_from(args))          # an explicit flag still beats the card
     if not asked:
-        print(f"note: {client.base_url} serves a model whose card names no sampler settings",
-              file=sys.stderr)
+        warn(f"note: {client.base_url} serves a model whose card names no sampler settings")
         return client
     # the program and the model the client was built for ride along, when it was built
     # for one: a card is a sampling, not a new server
@@ -284,7 +284,7 @@ def _parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", allow_abbrev=False,
                          help="ask every question once and keep what it cost")
     run.add_argument("label", help="what this run is, e.g. with-shortlist")
-    run.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    run.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                      help="where to keep the run (default: %(default)s)")
     run.add_argument("--base-url", default="http://127.0.0.1:8080",
                      help="the model answering (default: %(default)s)")
@@ -340,7 +340,7 @@ def _parser() -> argparse.ArgumentParser:
     heads.add_argument("--parallel", type=int, default=1, metavar="N",
                        help="slots for a --serve'd model (default: %(default)s)")
     heads.add_argument("--binary", default="", help="a llama-server that reads this model")
-    heads.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"))
+    heads.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"))
     heads.add_argument("--questions", default="")
     heads.add_argument("--store", default=bench.prepared(),
                        help="a graph store with the word index and vectors: look_up searches "
@@ -372,7 +372,7 @@ def _parser() -> argparse.ArgumentParser:
     conc.add_argument("--turns", type=int, default=3, metavar="T",
                       help="how many questions each conversation asks in turn, the earlier "
                            "ones carried (default: %(default)s)")
-    conc.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    conc.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                       help="where to keep the run (default: %(default)s)")
     conc.add_argument("--base-url", default="http://127.0.0.1:8080",
                       help="the model answering (default: %(default)s)")
@@ -391,7 +391,7 @@ def _parser() -> argparse.ArgumentParser:
 
     ready = sub.add_parser("prepare", allow_abbrev=False,
                            help="put a graph in a store and index and embed it")
-    ready.add_argument("--store", default=str(bench.HOME / "graph.ladybug"),
+    ready.add_argument("--store", default=str(bench.home_dir() / "graph.ladybug"),
                        help="the store to build (default: %(default)s)")
     ready.add_argument("--graph", default="",
                        help="a graph as JSON (default: the invented community)")
@@ -409,7 +409,7 @@ def _parser() -> argparse.ArgumentParser:
                            help="run every model, with and without a shortlist")
     sweep.add_argument("--on", action="append", metavar="NAME=URL", default=[],
                        help="a model to measure, e.g. e4b=http://127.0.0.1:8083; repeatable")
-    sweep.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    sweep.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                        help="where to keep the runs (default: %(default)s)")
     sweep.add_argument("--graph", default="", help="a graph as JSON (default: the invented one)")
     sweep.add_argument("--questions", default="", help="(default: the ones that go with it)")
@@ -625,7 +625,7 @@ def _parser() -> argparse.ArgumentParser:
         one.add_argument("--detach", action="store_true",
                          help="run this in the background, owned by nobody's terminal: the "
                               "command re-runs itself in a new session with its output in "
-                              f"a log under {bench.HOME / 'logs'}, prints the log's path and "
+                              f"a log under {bench.home_dir() / 'logs'}, prints the log's path and "
                               "returns at once. `status` says what is measuring, `tail -f` "
                               "follows the log, `stop` ends it and takes its server down. "
                               "Read before the rest of the line is parsed, like --no-queue")
@@ -654,7 +654,7 @@ def _parser() -> argparse.ArgumentParser:
                       help="only the newest N runs kept")
     show.add_argument("--since", default="", metavar="ISO",
                       help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
-    show.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    show.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                       help="the store the runs are in (default: %(default)s)")
     show.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), default=None)
     show.add_argument("--extract", action="store_true",
@@ -706,7 +706,7 @@ def _parser() -> argparse.ArgumentParser:
                             help="everything measured so far as one document: how each "
                                  "model was asked, what a draft head was worth, how much "
                                  "memory it wants, and what to serve")
-    report.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    report.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                         help="the store the runs are in (default: %(default)s)")
     report.add_argument("--since", default="", metavar="ISO",
                         help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
@@ -753,7 +753,7 @@ def _parser() -> argparse.ArgumentParser:
                       help="delete every run that reads back as nothing")
     gone.add_argument("--yes", action="store_true",
                       help="really delete a label's runs; without it they are only listed")
-    gone.add_argument("--kept", default=str(bench.HOME / "runs.ladybug"),
+    gone.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
                       help="the store the runs are in (default: %(default)s)")
 
     sub.add_parser("status", allow_abbrev=False,
@@ -803,7 +803,7 @@ def _parser() -> argparse.ArgumentParser:
                              "(default: each step's own)")
     queued.add_argument("--detach", action="store_true",
                         help="run the whole queue in the background the way a measurement "
-                             f"detaches: a log under {bench.HOME / 'logs'}, `status` for "
+                             f"detaches: a log under {bench.home_dir() / 'logs'}, `status` for "
                              "the step it is on and what is left, `tail -f` for the log, "
                              "`stop` to end the queue and the step inside it")
 
@@ -880,14 +880,14 @@ def smoke_first(args: Any) -> None:
     trial = argparse.Namespace(**vars(args))
     trial.smoke = True
     before = {r["key"] for r in bench._kept(args.kept)}
-    print(f"smoke: the same {args.cmd} on {SMOKE} question(s) first -- ask, score, save, "
-          f"read back -- before the run proper")
+    say(f"smoke: the same {args.cmd} on {SMOKE} question(s) first -- ask, score, save, "
+        f"read back -- before the run proper")
     code = _run(trial)
     if code != 0:
         raise SmokeFailed(f"{args.cmd} --smoke returned {code}")
     smoked([r for r in bench._kept(args.kept) if r["key"] not in before],
            f"{args.cmd} smoke")
-    print("smoke: ok\n")
+    say("smoke: ok\n")
 
 
 def _run(args: Any) -> int:
@@ -908,17 +908,17 @@ def _run(args: Any) -> int:
 
         return comparing(args)
     if args.cmd == "status":
-        print(status())
+        say(status())
         return 0
     if args.cmd == "tail":
         return tail(lines=args.n, follow=args.follow)
     if args.cmd == "stop":
-        print(stop())
+        say(stop())
         return 0
     if args.cmd == "wait":
         from ml_stack import jobs
 
-        return jobs.wait("bench", every=args.every, home=bench.HOME / "jobs")
+        return jobs.wait("bench", every=args.every, home=bench.home_dir() / "jobs")
     if args.cmd == "queue":
         # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
         # the measuring lock itself, so a step of a queue and a run started by hand still
@@ -927,33 +927,33 @@ def _run(args: Any) -> int:
 
         if args.detach:
             log = detach(getattr(args, "_argv", None) or sys.argv[1:])
-            print(f"the queue is running in the background; log: {log}\n"
-                  f"  ml-stack-bench status   -- the step it is on, and what is left\n"
-                  f"  ml-stack-bench tail -f  -- follow the log\n"
-                  f"  ml-stack-bench stop     -- end the queue and the step inside it")
+            say(f"the queue is running in the background; log: {log}\n"
+                f"  ml-stack-bench status   -- the step it is on, and what is left\n"
+                f"  ml-stack-bench tail -f  -- follow the log\n"
+                f"  ml-stack-bench stop     -- end the queue and the step inside it")
             return 0
         try:
             return run_queue(args.label, dry_run=args.dry_run, resume=args.resume,
                              yes=args.yes, ceiling=args.ceiling)
         except QueueError as why:
-            print(f"error: {why}", file=sys.stderr)
+            warn(f"error: {why}")
             return 2
     if args.cmd == "forget":
         if not args.empty and not args.label:
-            print("error: say what to forget: --empty, or a label", file=sys.stderr)
+            warn("error: say what to forget: --empty, or a label")
             return 2
         if args.empty:
             went = forget(args.kept, empty=True)
-            print(f"{len(went)} empty run(s) removed" if went else "no empty runs")
+            say(f"{len(went)} empty run(s) removed" if went else "no empty runs")
         if args.label:
             if not args.yes:
                 would = [r["key"] for r in bench.runs(args.kept, args.label)]
-                print("\n".join(would) if would else f"no run labelled {args.label!r}")
+                say("\n".join(would) if would else f"no run labelled {args.label!r}")
                 if would:
-                    print(f"{len(would)} run(s) would go; pass --yes to delete them")
+                    say(f"{len(would)} run(s) would go; pass --yes to delete them")
                 return 0
             went = forget(args.kept, label=args.label)
-            print(f"{len(went)} run(s) labelled {args.label!r} removed")
+            say(f"{len(went)} run(s) labelled {args.label!r} removed")
         return 0
     if args.cmd == "sweep":
         from ml_stack.bench.backends import client_for, http_of, parse_on
@@ -964,12 +964,12 @@ def _run(args: Any) -> int:
             try:
                 name, url, _ = parse_on(one)
             except ValueError as why:
-                print(f"error: {why}", file=sys.stderr)
+                warn(f"error: {why}")
                 return 2
             named.append((name, url))
         if not named and not getattr(args, "serve", []):
-            print("error: nothing to measure; pass --on NAME=URL for a server that is "
-                  "already up, or --serve MODEL to put one up", file=sys.stderr)
+            warn("error: nothing to measure; pass --on NAME=URL for a server that is "
+                 "already up, or --serve MODEL to put one up")
             return 2
         if getattr(args, "fleet", False):
             return _fleet_sweep(args)
@@ -1006,8 +1006,8 @@ def _run(args: Any) -> int:
 
                 chosen = hub.choose_head(model, binary=args.binary or None)
                 head = chosen.path
-                print(f"    draft head: {head or 'none'} -- {chosen.why}"
-                      + (f"\n      {chosen.note}" if chosen.note else ""))
+                say(f"    draft head: {head or 'none'} -- {chosen.why}"
+                    + (f"\n      {chosen.note}" if chosen.note else ""))
             # the label's stem: the model's file, or what --serve-label says it is; then
             # -nodraft for a model served without its head, and the suffix asked for
             stem = ((str(getattr(args, "serve_label", "") or "")
@@ -1018,7 +1018,7 @@ def _run(args: Any) -> int:
             # and every `--also` of each, asked of one load. Loading twice per model was
             # how this began, and the second load measured nothing about the asking.
             parts = halves(args, f"{wanted} {model}")
-            print(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
+            say(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
             # A port nothing answers on is exactly what --serve expects, so the
             # "would not say whether it is busy" note is noise here. Only a port
             # somebody is actually using should stop us.
@@ -1054,8 +1054,8 @@ def _run(args: Any) -> int:
                 # A model that will not load -- a head the build cannot read, a tensor it
                 # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
                 # such load took gpt-oss-120b's measurement down with it, twice.
-                print(f"    {stem} did not load; moving on:\n"
-                      + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
+                say(f"    {stem} did not load; moving on:\n"
+                    + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
                 continue
             saved += [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
 
@@ -1063,12 +1063,12 @@ def _run(args: Any) -> int:
             for suffix, shortlist in halves(args, name):
                 label = f"{name}-{suffix}"
                 if already is not None and already(label):
-                    print(f"skipping {label}: kept at {already(label).get('at', '?')}")
+                    say(f"skipping {label}: kept at {already(label).get('at', '?')}")
                     continue
                 ask = bench.asking(graph, how=asking_from(args), shortlist=shortlist,
                              store=args.store or None, embed_url=args.embed_url,
                              embed_model=args.embed_model, margin=args.margin)
-                print(f"\n{label} on {url}, look_up by {ask.finder}")
+                say(f"\n{label} on {url}, look_up by {ask.finder}")
                 if not _idle(http_of(url), args):
                     return 3
                 # the client for whatever program the URL names -- a llama-server, Ollama,
@@ -1088,7 +1088,7 @@ def _run(args: Any) -> int:
                                   held={**bench.footprint(url), "sampling": used,
                                         "graph": _which(graph), "finder": ask.finder},
                                   asking=getattr(ask, "asking", None)))
-        print()
+        say()
         table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
         return 0
     if args.cmd == "prepare":
@@ -1104,14 +1104,14 @@ def _run(args: Any) -> int:
             everything = read_questions(args.questions) if args.questions else QUESTIONS
             counts = mix(everything, graph)
             scored = sum(1 for q in everything if q.get("expect"))
-            print(f"{len(everything)} asked, {scored} scored")
+            say(f"{len(everything)} asked, {scored} scored")
             for kind, how_many in counts.items():
-                print(f"  {kind:12} {how_many:4}  {how_many / len(everything):6.1%}")
+                say(f"  {kind:12} {how_many:4}  {how_many / len(everything):6.1%}")
             return 0
         counted = replace(args.store, graph)          # writing builds the word index
-        print(f"{args.store}: {counted['nodes']} nodes, {counted['edges']} edges, word index built")
+        say(f"{args.store}: {counted['nodes']} nodes, {counted['edges']} edges, word index built")
         if not args.embed_url:
-            print("  no --embed-url, so no vectors: search will be words only")
+            say("  no --embed-url, so no vectors: search will be words only")
             return 0
         from ml_stack.graph.store import GraphStore
 
@@ -1121,7 +1121,7 @@ def _run(args: Any) -> int:
         with GraphStore(args.store) as held:
             written = remember(held, texts, base_url=args.embed_url,
                                model=args.embed_model or "embed", log=print)
-        print(f"  {written} embedded")
+        say(f"  {written} embedded")
         return 0
     if args.cmd == "drafts":
         from ml_stack.graph.community import QUESTIONS, graph as invented
@@ -1138,7 +1138,7 @@ def _run(args: Any) -> int:
                       embed_url=args.embed_url, embed_model=args.embed_model,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
                       smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
-        print()
+        say()
         if getattr(args, "smoke", False):
             saved = [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
             table(read_back(args.kept, saved))
@@ -1154,7 +1154,7 @@ def _run(args: Any) -> int:
         questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                            _how_many(args))
         if not questions:
-            print(f"error: no questions in {args.questions}", file=sys.stderr)
+            warn(f"error: no questions in {args.questions}")
             return 2
         graph = (json.loads(Path(args.graph).expanduser().read_text())
                  if args.graph else invented())
@@ -1173,23 +1173,23 @@ def _run(args: Any) -> int:
         ask = bench.asking(graph, how=asking_from(args), store=args.store or None,
                      embed_url=args.embed_url, embed_model=args.embed_model)
         where = args.graph or "the invented community"
-        print(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
-              f"look_up by {ask.finder}")
+        say(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
+            f"look_up by {ask.finder}")
         rows, held = concurrent(ask, questions, conversations=many, turns=long,
                                 label=args.label, client=client, graph=graph,
                                 base_url="" if args.client else args.base_url, log=print,
                                 per_question=args.per_question)
         at = held["concurrency"]
         slots = at.get("slots") or 0
-        print(f"  {at['seconds']:.1f}s for all of it"
-              + (f", {at['queued']:.1f}s of that queued"
+        say(f"  {at['seconds']:.1f}s for all of it"
+            + (f", {at['queued']:.1f}s of that queued"
                  if slots and many > slots and at.get("queued") is not None else "")
-              + (f", {slots} slot(s)" if slots > 0 else ""))
+            + (f", {slots} slot(s)" if slots > 0 else ""))
         key = save(args.kept, rows,
                    held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
                          "graph": _which(graph), "finder": ask.finder},
                    asking=getattr(ask, "asking", None))
-        print(f"kept as {key}")
+        say(f"kept as {key}")
         if args.smoke:
             table(read_back(args.kept, [key]))
         return 0
@@ -1232,14 +1232,14 @@ def _run(args: Any) -> int:
             bench_extract.table(extracted)
             return 0
         if args.compare:
-            print(compare(args.kept, *args.compare))
+            say(compare(args.kept, *args.compare))
             return 0
         if args.rank:
             ranking(answering, args.rank, noise=args.noise / 100)
-            print(args.rank)
+            say(args.rank)
             return 0
         if args.export:
-            print(export(answering, args.export,
+            say(export(answering, args.export,
                          anyway=getattr(args, "export_anyway", False)))
             return 0
         if args.shape:
@@ -1250,7 +1250,7 @@ def _run(args: Any) -> int:
             shape(questions, invented())
             return 0
         if args.plot:
-            print(plot(answering, args.plot, cost=args.cost, noise=args.noise / 100))
+            say(plot(answering, args.plot, cost=args.cost, noise=args.noise / 100))
             return 0
         if args.rates:
             rates(answering, cost=args.cost, noise=args.noise / 100)
@@ -1261,12 +1261,12 @@ def _run(args: Any) -> int:
             return 0
         table(answering)
         if extracted:
-            print()
+            say()
             bench_extract.table(extracted)
         hollow = empties(args.kept)
         if hollow:
-            print(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
-                  f"removes them")
+            say(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
+                f"removes them")
         return 0
 
     from ml_stack.graph.community import QUESTIONS, graph as invented
@@ -1276,7 +1276,7 @@ def _run(args: Any) -> int:
     questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
                        _how_many(args))
     if not questions:
-        print(f"error: no questions in {args.questions}", file=sys.stderr)
+        warn(f"error: no questions in {args.questions}")
         return 2
     graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
     if args.client:
@@ -1292,9 +1292,9 @@ def _run(args: Any) -> int:
         embed_url=args.embed_url, embed_model=args.embed_model, margin=args.margin)
     where = args.graph or "the invented community"
     found = getattr(ask, "finder", "")
-    print(f"{args.label}: {len(questions)} questions over {where}"
-          + (f", look_up by {found}" if found else "")
-          + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
+    say(f"{args.label}: {len(questions)} questions over {where}"
+        + (f", look_up by {found}" if found else "")
+        + (f", {args.shortlist} handed to it first" if args.shortlist else ""))
     rows = bench.measure(ask, questions, label=args.label, client=client, log=print,
                          trace=getattr(args, "trace", None),
                          graph=graph,
@@ -1303,7 +1303,7 @@ def _run(args: Any) -> int:
                held={**bench.footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found},
                asking=getattr(ask, "asking", None))
-    print(f"kept as {key}")
+    say(f"kept as {key}")
     if args.smoke:
         table(read_back(args.kept, [key]))
     return 0
@@ -1382,34 +1382,33 @@ def _fleet_sweep(args: Any) -> int:
     """
     models = [str(m) for m in (getattr(args, "serve", []) or [])]
     if not models:
-        print("error: --fleet spreads --serve models over the fleet; pass --serve MODEL for "
-              "each", file=sys.stderr)
+        warn("error: --fleet spreads --serve models over the fleet; pass --serve MODEL for "
+             "each")
         return 2
     mine = _commit()
     if not mine:
-        print("error: --fleet needs to know this checkout's commit, and git would not say",
-              file=sys.stderr)
+        warn("error: --fleet needs to know this checkout's commit, and git would not say")
         return 2
     fleet = importlib.import_module("ml_stack.fleet.bench")
     missing = [name for name in ("plan", "dispatch", "wait", "gather") if not hasattr(fleet, name)]
     if missing:
-        print(f"error: ml_stack.fleet.bench has no {', '.join(missing)}; the fleet side of "
-              f"the bench is not in this build", file=sys.stderr)
+        warn(f"error: ml_stack.fleet.bench has no {', '.join(missing)}; the fleet side of "
+             f"the bench is not in this build")
         return 2
     jobs = fleet_jobs(list(getattr(args, "_argv", None) or []), models, commit=mine)
     peers = [p.strip() for p in str(getattr(args, "peers", "") or "").split(",") if p.strip()]
     planned = _planned(fleet.plan(models, peers or None))
     sha = mine.partition(" ")[0]
-    print(f"plan: {len(jobs)} job(s) on commit {mine}" + (f" over {', '.join(peers)}" if peers
+    say(f"plan: {len(jobs)} job(s) on commit {mine}" + (f" over {', '.join(peers)}" if peers
                                                           else ""))
     for one in planned:
         theirs = str(one.get("commit") or "")
-        print(f"  {one.get('model', '?')} -> {one.get('peer') or one.get('host') or '?'}"
-              + (f" ({theirs})" if theirs else ""))
+        say(f"  {one.get('model', '?')} -> {one.get('peer') or one.get('host') or '?'}"
+            + (f" ({theirs})" if theirs else ""))
         if theirs and theirs.partition(" ")[0] != sha:
-            print(f"error: {one.get('peer') or one.get('host') or 'a peer'} is on commit "
-                  f"{theirs}, this checkout is on {mine}; a peer measuring other code is "
-                  f"refused, and its daemon would refuse too", file=sys.stderr)
+            warn(f"error: {one.get('peer') or one.get('host') or 'a peer'} is on commit "
+                 f"{theirs}, this checkout is on {mine}; a peer measuring other code is "
+                 f"refused, and its daemon would refuse too")
             return 2
     where = {str(one.get("model")): one for one in planned if one.get("model")}
     for job in jobs:
@@ -1419,7 +1418,7 @@ def _fleet_sweep(args: Any) -> int:
     handles = fleet.dispatch(jobs)
     fleet.wait(handles)
     fleet.gather(handles, into=args.kept)
-    print()
+    say()
     table(bench._kept(args.kept))
     return 0
 
@@ -1434,7 +1433,7 @@ _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DET
 
 def measuring_file() -> Path:
     """Where the detached measurement's pid, argv, log and start time are written."""
-    return bench.HOME / "measuring.json"
+    return bench.home_dir() / "measuring.json"
 
 
 def measuring() -> dict[str, Any] | None:
@@ -1474,7 +1473,7 @@ def detach(argv: Sequence[str]) -> Path:
     `tail -f` and `stop` read the same file.
     """
     rest = [a for a in argv if a != "--detach"]
-    logs = bench.HOME / "logs"
+    logs = bench.home_dir() / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     cmd = next((a for a in rest if a in MEASURING), "bench")
     log = logs / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log"
@@ -1501,7 +1500,7 @@ def detach(argv: Sequence[str]) -> Path:
     # (the child waits on `only_one`), so this never raises `Busy` the way a caller with no
     # queue of its own would want it to.
     jobs.record("bench", pid=child.pid, argv=rest, log=str(log), started=started,
-               home=bench.HOME / "jobs", refuse_if_alive=False)
+               home=bench.home_dir() / "jobs", refuse_if_alive=False)
     return log
 
 
@@ -1547,9 +1546,9 @@ def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: in
     serving = {k: v for k, v in (("extra_args", tuple(shape.extra_args)),
                                  ("mmproj", shape.mmproj)) if v}
     asking = run.asking.said()
-    print("    measured shape: " + ", ".join(f"{k}={v}" for k, v in said.items())
-          + (f"; serving {serving}" if serving else "")
-          + (f"; asking {asking}" if asking else ""))
+    say("    measured shape: " + ", ".join(f"{k}={v}" for k, v in said.items())
+        + (f"; serving {serving}" if serving else "")
+        + (f"; asking {asking}" if asking else ""))
     return run
 
 
@@ -1652,7 +1651,7 @@ def results_since(started: str, kept: str | Path | None = None) -> str:
     import contextlib
     import io
 
-    where = Path(kept) if kept else bench.HOME / "runs.ladybug"
+    where = Path(kept) if kept else bench.home_dir() / "runs.ladybug"
     if not started or not where.exists():
         return ""
     try:
@@ -1716,8 +1715,8 @@ def _latest_log() -> Path | None:
             return Path(str(last["log"]))
     except (OSError, ValueError):
         pass
-    logs = sorted((bench.HOME / "logs").glob("*.log"), key=lambda p: p.stat().st_mtime) \
-        if (bench.HOME / "logs").exists() else []
+    logs = sorted((bench.home_dir() / "logs").glob("*.log"), key=lambda p: p.stat().st_mtime) \
+        if (bench.home_dir() / "logs").exists() else []
     return logs[-1] if logs else None
 
 
@@ -1728,13 +1727,13 @@ def tail(*, lines: int = 20, follow: bool = False, every: float = 0.5) -> int:
 
     log = _latest_log()
     if log is None or not log.exists():
-        print("no log yet: nothing has been detached", file=sys.stderr)
+        warn("no log yet: nothing has been detached")
         return 1
     with log.open("rb") as fh:
         text = fh.read().decode("utf-8", "replace")
         shown = text.splitlines()[-lines:] if lines > 0 else []
         if shown:
-            print("\n".join(shown))
+            say("\n".join(shown))
         if not follow:
             return 0
         held = measuring() or {}
@@ -1743,7 +1742,7 @@ def tail(*, lines: int = 20, follow: bool = False, every: float = 0.5) -> int:
             while True:
                 more = fh.read().decode("utf-8", "replace")
                 if more:
-                    print(more, end="", flush=True)
+                    say(more, end="", flush=True)
                 elif not pid_exists(pid):
                     break
                 else:
@@ -1786,9 +1785,9 @@ def _estimated(rest: Sequence[str]) -> int:
     args = _parser().parse_args([a for a in rest if a not in ("--detach", "--no-queue")])
     guess = estimate(args, bench._kept(args.kept))
     for line in guess.lines():
-        print(line, flush=True)
+        say(line, flush=True)
     if guess.over and not getattr(args, "yes", False):
-        print(guess.refusal(), file=sys.stderr)
+        warn(guess.refusal())
         return 5
     return 0
 
@@ -1798,7 +1797,7 @@ def _stop_on_sigterm(signum: int, frame: Any) -> None:
 
     Says ``[killed]`` first, so the log tells a run that was stopped from one that crashed
     or one that finished -- `history` reads that word."""
-    print(f"[killed] SIGTERM ({signum}): stopping, taking any served model down", flush=True)
+    say(f"[killed] SIGTERM ({signum}): stopping, taking any served model down", flush=True)
     raise SystemExit(128 + signum)
 
 
@@ -1832,10 +1831,10 @@ def main(argv: list[str] | None = None) -> int:
         if refused:
             return refused
         log = detach(rest)
-        print(f"measuring in the background; log: {log}\n"
-              f"  ml-stack-bench status   -- what is measuring, and its last line\n"
-              f"  ml-stack-bench tail -f  -- follow the log\n"
-              f"  ml-stack-bench stop     -- end it, taking its server down")
+        say(f"measuring in the background; log: {log}\n"
+            f"  ml-stack-bench status   -- what is measuring, and its last line\n"
+            f"  ml-stack-bench tail -f  -- follow the log\n"
+            f"  ml-stack-bench stop     -- end it, taking its server down")
         return 0
     refuse = "--no-queue" in rest
     rest = [a for a in rest if a != "--no-queue"]
@@ -1851,12 +1850,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             proved = selfcheck(rest)
         except SelfCheckFailed as why:
-            print(f"selfcheck: FAILED -- this command would not get through with a "
-                  f"scripted model, so nothing was loaded:\n{why}", file=sys.stderr)
-            print("error: the self-check failed; fix it, or pass --no-selfcheck to "
-                  "repeat a run whose path the last one proved", file=sys.stderr)
+            warn(f"selfcheck: FAILED -- this command would not get through with a "
+                 f"scripted model, so nothing was loaded:\n{why}")
+            warn("error: the self-check failed; fix it, or pass --no-selfcheck to "
+                 "repeat a run whose path the last one proved")
             return 4
-        print(f"selfcheck: ok ({time.monotonic() - began:.1f} s) -- {proved}", flush=True)
+        say(f"selfcheck: ok ({time.monotonic() - began:.1f} s) -- {proved}", flush=True)
     # After the self-check and before the prefetch and the lock: what this will cost, from
     # what is kept, and a refusal over the ceiling before a download or a load is paid
     refused = _estimated(rest)
@@ -1872,15 +1871,15 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError:
         pass                                 # not the main thread: nothing to hand a signal
     try:
-        with only_one(bench.HOME / "measuring.lock", wait=not refuse,
-                      announce=lambda line: print(line, file=sys.stderr)):
+        with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
+                      announce=lambda line: warn(line)):
             return _main(rest)
     except Busy as why:
-        print(f"error: {why}. Another measurement is running; wait for it, or pass "
-              f"--no-queue to fail fast rather than queue.", file=sys.stderr)
+        warn(f"error: {why}. Another measurement is running; wait for it, or pass "
+             f"--no-queue to fail fast rather than queue.")
         return 3
     except SmokeFailed as why:
-        print(f"error: smoke failed, so the run did not start: {why}", file=sys.stderr)
+        warn(f"error: smoke failed, so the run did not start: {why}")
         return 1
     finally:
         if previous is not None:

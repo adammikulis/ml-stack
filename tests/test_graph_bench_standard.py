@@ -87,7 +87,7 @@ def test_dry_run_prints_the_harness_kwargs_and_writes_nothing(tmp_path, monkeypa
     assert first["gen_kwargs"]["max_gen_toks"] >= 4096
     assert first["confirm_run_unsafe_code"] is False
     assert "chat_template_kwargs" not in first["gen_kwargs"]
-    assert not (bench.HOME / "measuring.lock").exists(), "a dry run takes no lock"
+    assert not (bench.home_dir() / "measuring.lock").exists(), "a dry run takes no lock"
 
 
 # -- a run -------------------------------------------------------------------------------
@@ -227,7 +227,7 @@ def test_no_queue_is_refused_with_3_while_another_measurement_holds_the_lock(
     calls, script = faked
     script["ifeval"] = recorded("ifeval", 1, 541, **{"prompt_level_strict_acc,none": 1.0})
     out = tmp_path / "held.json"
-    with only_one(bench.HOME / "measuring.lock", wait=False):
+    with only_one(bench.home_dir() / "measuring.lock", wait=False):
         assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                               "--limit", "1", "--out", str(out), "--no-queue"]) == 3
     assert calls == [] and not out.exists()
@@ -253,7 +253,7 @@ def test_the_lock_is_let_go_after_a_run_and_after_a_harness_failure(tmp_path, fa
         standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                        "--out", str(out)])
     assert not out.exists()
-    with only_one(bench.HOME / "measuring.lock", wait=False):
+    with only_one(bench.home_dir() / "measuring.lock", wait=False):
         pass
 
 
@@ -281,6 +281,6 @@ def test_the_default_out_lives_under_the_bench_home(tmp_path, faked, capsys):
     script["ifeval"] = recorded("ifeval", 1, 541, **{"prompt_level_strict_acc,none": 1.0})
     assert standard.main(["--url", URL, "--model", "quill-2b", "--tasks", "ifeval",
                           "--limit", "1", "--label", "Quill/tight"]) == 0
-    written = list((bench.HOME / "standard").glob("*.json"))
+    written = list((bench.home_dir() / "standard").glob("*.json"))
     assert len(written) == 1 and written[0].name.startswith("quill-tight-")
     assert str(written[0]) in capsys.readouterr().out

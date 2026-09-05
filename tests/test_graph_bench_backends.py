@@ -595,7 +595,7 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
                            "eval_duration": 400_000_000}, content="a compiler person")
 
     asked = []
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "busy", lambda url: asked.append(url) or 0)
     monkeypatch.setattr("ml_stack.client.Client", Ollama)
     kept = tmp_path / "runs.ladybug"

@@ -14,7 +14,6 @@ from __future__ import annotations
 import math
 import json
 import re
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +21,7 @@ from typing import Any
 
 from ml_stack.bench.keep import SHORT
 from ml_stack.bench.record import of
+from ml_stack.log import warn
 from ml_stack.paths import repo_root
 
 
@@ -874,7 +874,7 @@ def export(kept: Sequence[Mapping[str, Any]], where: str | Path, *,
             f"not committed. Write it somewhere outside a repository.")
     target.write_text(json.dumps(out, indent=1, sort_keys=True) + "\n", encoding="utf-8")
     if skipped:
-        print(f"{skipped} run(s) left out: not measured over the community that ships with "
-              f"this package, so they may carry a real one's questions. --anyway to include "
-              f"them, but not into a repository.", file=sys.stderr)
+        warn(f"{skipped} run(s) left out: not measured over the community that ships with "
+             f"this package, so they may carry a real one's questions. --anyway to include "
+             f"them, but not into a repository.")
     return str(target)

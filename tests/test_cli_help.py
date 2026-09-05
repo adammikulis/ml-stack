@@ -94,8 +94,7 @@ SUBCOMMANDS = [(command, path) for command, parser in PARSERS.items()
 @pytest.fixture(autouse=True)
 def bench_at_home(tmp_path, monkeypatch):
     """The bench takes a lock under its home before measuring; keep that out of ~/.ml-stack."""
-    from ml_stack import bench
-    monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
 
 
 @pytest.mark.parametrize("command", sorted(SCRIPTS), ids=sorted(SCRIPTS))

@@ -3,7 +3,7 @@
 Everything here is invented: the models are named tiny.gguf and never exist, the community
 is the one that ships with the package, the world is `organisation.make`'s. Nothing reads
 ~/.ml-stack, a server or a GPU -- the self-check's own scratch is a temporary directory,
-and `bench.HOME` is pointed at `tmp_path` so `prepared()` cannot find a real store.
+and `bench.home_dir()` is pointed at `tmp_path` so `prepared()` cannot find a real store.
 """
 
 from __future__ import annotations

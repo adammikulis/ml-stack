@@ -35,12 +35,11 @@ the store is that a number in it was paid for.
 from __future__ import annotations
 
 import re
-import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.runs`, `bench.HOME`
+# The package is the namespace the tests and `selfcheck` patch -- `bench.runs`, `bench.home_dir()`
 # -- so anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.keep import SHORT
@@ -54,6 +53,7 @@ from ml_stack.bench.score import (
     per_question,
 )
 from ml_stack.bench.show import _gb, drafted, kv_short
+from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
 __all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
@@ -1011,18 +1011,18 @@ def main(args: Any) -> int:
                                  path=(Path(str(getattr(args, "profiles", "") or "")).expanduser()
                                        if getattr(args, "profiles", "") else None))
         if not written:
-            print("no model has a run to write a profile from", file=sys.stderr)
+            warn("no model has a run to write a profile from")
             return 1
         for one, where in written:
-            print(f"{one.model}: {one.label or '?'} "
-                  f"({one.questions} q, {one.right * 100:.0f}% F1, "
-                  f"{one.seconds_per_question:.1f} s/q) -> {where}")
+            say(f"{one.model}: {one.label or '?'} "
+                f"({one.questions} q, {one.right * 100:.0f}% F1, "
+                f"{one.seconds_per_question:.1f} s/q) -> {where}")
         profiled = {one.model for one, _where in written}
         for model, mine in by_model(kept).items():
             longest = max((derived(o)["questions"] for o in mine if derived(o)), default=0)
             if model not in profiled and 0 < longest < SHORT:
-                print(f"{model}: not profiled -- its longest run is {int(longest)} question(s), "
-                      f"and a record is never set from fewer than {SHORT}", file=sys.stderr)
+                warn(f"{model}: not profiled -- its longest run is {int(longest)} question(s), "
+                     f"and a record is never set from fewer than {SHORT}")
         return 0
 
     rooms: list[int] = []
@@ -1030,7 +1030,7 @@ def main(args: Any) -> int:
         try:
             rooms.append(fit_mod.parse_room(said))
         except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
 
     from ml_stack.hub import room as machine_room
@@ -1052,15 +1052,15 @@ def main(args: Any) -> int:
 
     where = str(getattr(args, "md", "") or "")
     if not where:
-        print(body, end="")
+        say(body, end="")
         return 0
     out = Path(where).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(body, encoding="utf-8")
-    print(f"wrote {out}")
+    say(f"wrote {out}")
     if getattr(args, "open", False):
         from ml_stack.platform import open_path
 
-        print(f"opened with {open_path(out)}")
+        say(f"opened with {open_path(out)}")
     return 0
 

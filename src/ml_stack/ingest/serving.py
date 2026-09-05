@@ -133,7 +133,7 @@ def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
     from ml_stack.lock import only_one
 
     run, _measured = _run(args, say=say)
-    with only_one(bench.HOME / "measuring.lock",
+    with only_one(bench.home_dir() / "measuring.lock",
                   wait=not getattr(args, "no_queue", False),
                   announce=lambda line: say(f"waiting for the bench -- {line}")):
         if not getattr(args, "model", ""):

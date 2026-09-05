@@ -789,7 +789,7 @@ def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypa
         ["run", "x", "--reach", "8000", "--rounds", "20"])) == Asking(reach=8000, rounds=20)
     assert asking_from(_parser().parse_args(["run", "x"])) == Asking()
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
     graph = tmp_path / "g.json"
@@ -823,7 +823,7 @@ def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsy
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))     # never ~/.ml-stack
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
     graph = tmp_path / "g.json"
@@ -850,7 +850,7 @@ def test_the_first_line_a_run_prints_says_which_finder(tmp_path, monkeypatch, ca
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
     graph = tmp_path / "g.json"
@@ -869,7 +869,7 @@ def test_the_store_prepare_built_is_the_default_once_it_exists(tmp_path, monkeyp
     one that has not is not pointed at a file that is not there."""
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     assert bench.prepared() == ""
     (tmp_path / "home").mkdir()
     (tmp_path / "home" / "graph.ladybug").write_bytes(b"")
@@ -1249,7 +1249,7 @@ def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
 def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path, monkeypatch, capsys):
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))     # never ~/.ml-stack
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Overlapping)
     graph = tmp_path / "g.json"
     graph.write_text(json.dumps(TINY))
@@ -1323,7 +1323,7 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
     def fake_serve(model, **kw):
         yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
@@ -1425,7 +1425,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
     def fake_serve(model, **kw):
         yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
                                                           "slots": 1, "model": "tiny.gguf"})
     monkeypatch.setattr(bench, "find_model", lambda named: named)
@@ -1457,7 +1457,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
     graph = tmp_path / "g.json"
@@ -1533,7 +1533,7 @@ def test_detach_reruns_the_command_in_its_own_session_with_a_log_of_its_own(tmp_
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
     started = {}
 
@@ -1575,7 +1575,7 @@ def test_detach_on_windows_asks_for_a_detached_process_group(tmp_path, monkeypat
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Windows")
     seen = {}
     monkeypatch.setattr(subprocess, "Popen",
@@ -1612,7 +1612,7 @@ def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch,
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     assert bench.main(["status"]) == 0
     assert capsys.readouterr().out.strip() == "nothing is measuring\nserving: nothing"
 
@@ -1635,7 +1635,7 @@ def test_tail_prints_the_end_of_the_log_and_follows_until_the_pid_is_gone(tmp_pa
                                                                          capsys):
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     assert bench.main(["tail"]) == 1
     assert "nothing has been detached" in capsys.readouterr().err
 
@@ -1659,7 +1659,7 @@ def test_stop_signals_the_measuring_pid_and_never_a_name(tmp_path, monkeypatch, 
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     assert bench.main(["stop"]) == 0
     assert capsys.readouterr().out.strip() == "nothing is measuring"
 
@@ -1703,7 +1703,7 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
         os.kill(os.getpid(), signal.SIGTERM)            # what `stop` does, from inside
         raise AssertionError("SIGTERM should have raised before this")
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(bench, "measure", fake_measure)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
@@ -1746,7 +1746,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
         served_models.append(model)
         yield type("Up", (), {"base_url": "http://127.0.0.1:1"})()
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
@@ -1838,7 +1838,7 @@ def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
         yield ServerInfo(base_url="http://127.0.0.1:1", port=1, pid=None, backend="fake",
                          load_s=load_s, warmup_s=warmup_s)
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
                                                           "slots": 1, "model": "tiny.gguf"})
     monkeypatch.setattr(bench, "find_model", lambda named: named)
@@ -2140,7 +2140,7 @@ def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
         return []
 
     monkeypatch.setattr(run_mod, "drafts", fake_drafts)
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     kept = str(tmp_path / "runs.ladybug")
     store = str(tmp_path / "graph.ladybug")
@@ -3016,7 +3016,7 @@ def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tm
             super().__init__()
             built.append(self)
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     monkeypatch.setattr(bench, "ask_from", lambda spec: Watched)
     graph = tmp_path / "g.json"
@@ -3106,7 +3106,7 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
     from ml_stack.bench import history
     from ml_stack.bench import run as running
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
     monkeypatch.setattr(subprocess, "Popen",
@@ -3145,7 +3145,7 @@ def test_detach_records_the_job_for_wait_and_status(tmp_path, monkeypatch, capsy
     import ml_stack.bench as bench
     from ml_stack import jobs
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(subprocess, "Popen",
                         lambda command, **kw: type("C", (), {"pid": 4242})())
@@ -3169,7 +3169,7 @@ def test_wait_blocks_on_the_detached_pid_and_says_when_it_has_ended(tmp_path, mo
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     assert bench.main(["wait"]) == 0
     assert "no bench job is running" in capsys.readouterr().out
 
@@ -3362,7 +3362,7 @@ def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeyp
     import ml_stack.bench as bench
     from ml_stack.bench import run as running
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3")
     calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill", "commit": "0f1e2d3"},
                                            {"model": "b.gguf", "peer": "lantern"}])
@@ -3390,7 +3390,7 @@ def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_pat
     import ml_stack.bench as bench
     from ml_stack.bench import run as running
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
     calls = _fake_fleet(monkeypatch, plan={"a.gguf": "quill", "b.gguf": "lantern"})
     kept = tmp_path / "runs.ladybug"
@@ -3687,7 +3687,7 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
 
     import ml_stack.bench as bench
 
-    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
     started = []
     monkeypatch.setattr(subprocess, "Popen",

@@ -584,6 +584,6 @@ def test_the_bench_home_moves_with_the_environment(tmp_path):
 
     env = {**os.environ, "MLSTACK_BENCH_HOME": str(tmp_path / "elsewhere")}
     said = subprocess.run([sys.executable, "-c",
-                           "from ml_stack.bench import keep; print(keep.HOME)"],
+                           "from ml_stack.bench import keep; print(keep.home_dir())"],
                           capture_output=True, text=True, env=env, check=True).stdout.strip()
     assert Path(said) == tmp_path / "elsewhere"
