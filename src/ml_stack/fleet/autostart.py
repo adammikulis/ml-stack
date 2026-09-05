@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import home
+from ml_stack.log import say, warn
 
 __all__ = ["ADOPTED", "Autostart", "CachePlan", "DEFAULT_MODEL", "IN_PLACE", "LABEL",
            "LEFT_ALONE", "SYSTEM_LABEL", "SystemService", "choose_model", "install",
@@ -784,20 +785,19 @@ def main(argv: "list[str] | None" = None) -> int:
     if a.cmd == "system":
         made = system_service(a.user, a.home)
         if a.only_print:
-            print(made.body)
+            say(made.body)
             return 0
         target = Path(made.path)
         try:
             if made.platform == "win32":
                 if _run(["cmd", "/c", made.body]) != 0:
-                    print(f"could not register the task; run as administrator:\n  {made.body}",
-                          file=sys.stderr)
+                    warn(f"could not register the task; run as administrator:\n  {made.body}")
                     return 2
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(made.body)
         except OSError as exc:
-            print(f"needs root: {exc}\n  {made.install}", file=sys.stderr)
+            warn(f"needs root: {exc}\n  {made.install}")
             return 2
         if made.platform == "darwin":
             _run(["launchctl", "unload", str(target)])
@@ -805,22 +805,22 @@ def main(argv: "list[str] | None" = None) -> int:
         elif made.platform.startswith("linux"):
             _run(["systemctl", "daemon-reload"])
             _run(["systemctl", "enable", "--now", SERVICE])
-        print(f"starts at boot as {made.user}: {made.path}")
+        say(f"starts at boot as {made.user}: {made.path}")
         return 0
 
     if a.cmd == "cache":
         shared = a.service_cache or str(Path("/opt/ml-stack/cache/huggingface"))
         got = plan_cache(a.user_cache, shared, same_user=a.same_user, adopt=a.adopt)
-        print(_json.dumps(got.public(), indent=1) if a.json else
-              f"model cache {got.decision}: {got.said or got.error}")
+        say(_json.dumps(got.public(), indent=1) if a.json else
+            f"model cache {got.decision}: {got.said or got.error}")
         return 2 if got.error else 0
 
     picked = choose_model(a.room, want=a.want)
     if picked is None:
-        print("{}" if a.json else "no measured model fits this machine; none fetched")
+        say("{}" if a.json else "no measured model fits this machine; none fetched")
         return 1
-    print(_json.dumps(picked) if a.json else
-          " ".join(x for x in (picked["model"], picked["draft"]) if x))
+    say(_json.dumps(picked) if a.json else
+        " ".join(x for x in (picked["model"], picked["draft"]) if x))
     return 0
 
 

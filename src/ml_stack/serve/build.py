@@ -35,6 +35,7 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.http import ServerError, request_json
+from ml_stack.log import say, warn
 from ml_stack.serve.binary import (
     MANAGED_CURRENT,
     MANAGED_NAMED,
@@ -168,12 +169,12 @@ def _sync_source(source: Path) -> None:
     this codebase already clones ``--depth 1``. Measured the way it was found: a first run
     against a bare repo was still cloning several minutes in and past 190MB."""
     if (source / ".git").is_dir():
-        print(f"  fetching {REPO_URL} into {source}")
+        say(f"  fetching {REPO_URL} into {source}")
         _git("fetch", "--depth", "1", "origin", "master", cwd=source)
         _git("checkout", "master", cwd=source)
         _git("reset", "--hard", "origin/master", cwd=source)
     else:
-        print(f"  cloning {REPO_URL} into {source} (--depth 1)")
+        say(f"  cloning {REPO_URL} into {source} (--depth 1)")
         source.parent.mkdir(parents=True, exist_ok=True)
         _git("clone", "--depth", "1", "--branch", "master", REPO_URL, str(source))
 
@@ -182,7 +183,7 @@ def _checkout_commit(source: Path, commit: str) -> None:
     """A shallow clone has only master's tip, so a specific commit is fetched by name
     before it can be checked out -- GitHub serves an arbitrary reachable commit SHA this
     way without needing the rest of history either."""
-    print(f"  fetching and checking out {commit}")
+    say(f"  fetching and checking out {commit}")
     _git("fetch", "--depth", "1", "origin", commit, cwd=source)
     _git("checkout", "FETCH_HEAD", cwd=source)
 
@@ -206,10 +207,10 @@ def _sync_named_source(source: Path, repo: str, ref: str) -> None:
     Left at the default branch's tip when ``ref`` is empty."""
     url = f"https://github.com/{repo}"
     if (source / ".git").is_dir():
-        print(f"  fetching {url} into {source}")
+        say(f"  fetching {url} into {source}")
         _git("fetch", "--depth", "1", "origin", cwd=source)
     else:
-        print(f"  cloning {url} into {source} (--depth 1)")
+        say(f"  cloning {url} into {source} (--depth 1)")
         source.parent.mkdir(parents=True, exist_ok=True)
         _git("clone", "--depth", "1", url, str(source))
     if ref:
@@ -313,15 +314,15 @@ def _build_from_source(args) -> tuple[Path, str]:
     commit = _short_commit(source)
     dest = BUILDS_DIR / commit
     if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
-        print(f"{commit} is already built at {dest} -- pass --force to rebuild")
+        say(f"{commit} is already built at {dest} -- pass --force to rebuild")
         return dest, commit
 
     jobs = args.jobs or (os.cpu_count() or 4)
-    print(f"configuring {commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
+    say(f"configuring {commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
     _configure(source)
-    print(f"building ({jobs} jobs) -- this takes several minutes")
+    say(f"building ({jobs} jobs) -- this takes several minutes")
     _compile(source, jobs)
-    print("installing")
+    say("installing")
     _install_source_build(source / "build", dest, commit)
     return dest, commit
 
@@ -335,15 +336,15 @@ def _build_from_source_named(args) -> tuple[Path, str]:
     commit = _short_commit(source)
     dest = _named_dest(args.name, commit)
     if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
-        print(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
+        say(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
         return dest, commit
 
     jobs = args.jobs or (os.cpu_count() or 4)
-    print(f"configuring {args.name}-{commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
+    say(f"configuring {args.name}-{commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
     _configure(source)
-    print(f"building ({jobs} jobs) -- this takes several minutes")
+    say(f"building ({jobs} jobs) -- this takes several minutes")
     _compile(source, jobs)
-    print("installing")
+    say("installing")
     _install_source_build(source / "build", dest, commit,
                           extra={"repo": args.repo, "ref": args.ref or commit,
                                  "name": args.name})
@@ -449,7 +450,7 @@ def _release_install(dest: Path, archive: Path, *, extra: Path | None = None) ->
 def _build_from_release(args) -> tuple[Path, str]:
     from ml_stack.fleet import updates as gh_updates
 
-    print("checking ggml-org/llama.cpp's releases")
+    say("checking ggml-org/llama.cpp's releases")
     releases = _llama_releases()
     globs = _platform_asset_globs()
 
@@ -462,19 +463,19 @@ def _build_from_release(args) -> tuple[Path, str]:
                 continue
             dest = BUILDS_DIR / tag
             if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
-                print(f"{tag} is already installed at {dest} -- pass --force to redo it")
+                say(f"{tag} is already installed at {dest} -- pass --force to redo it")
                 return dest, tag
 
-            print(f"downloading {match} from {tag}")
+            say(f"downloading {match} from {tag}")
             with tempfile.TemporaryDirectory(prefix="ml-stack-llama-release-") as tmp:
                 tmp_path = Path(tmp)
                 archive = gh_updates.download(assets[match], tmp_path)
                 extra = None
                 companion = _cudart_companion(match, assets)
                 if companion is not None:
-                    print(f"downloading {companion['name']} (CUDA runtime)")
+                    say(f"downloading {companion['name']} (CUDA runtime)")
                     extra = gh_updates.download(companion, tmp_path)
-                print("installing")
+                say("installing")
                 binary = _release_install(dest, archive, extra=extra)
 
             version = _version_of(binary)
@@ -495,7 +496,7 @@ def _build_from_release_named(args) -> tuple[Path, str]:
     compiler, or simply to skip a compile when a matching asset already exists."""
     from ml_stack.fleet import updates as gh_updates
 
-    print(f"checking {args.repo}'s releases")
+    say(f"checking {args.repo}'s releases")
     releases = _releases_for(args.repo)
     globs = _named_release_asset_globs()
     wanted_tag = args.tag
@@ -511,14 +512,14 @@ def _build_from_release_named(args) -> tuple[Path, str]:
                 continue
             dest = _named_dest(args.name, _slug(tag))
             if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
-                print(f"{tag} is already installed at {dest} -- pass --force to redo it")
+                say(f"{tag} is already installed at {dest} -- pass --force to redo it")
                 return dest, tag
 
-            print(f"downloading {match} from {tag}")
+            say(f"downloading {match} from {tag}")
             with tempfile.TemporaryDirectory(prefix="ml-stack-llama-release-") as tmp:
                 tmp_path = Path(tmp)
                 archive = gh_updates.download(assets[match], tmp_path)
-                print("installing")
+                say("installing")
                 binary = _release_install(dest, archive)
 
             version = _version_of(binary)
@@ -589,11 +590,11 @@ def _adopt(source_str: str) -> tuple[Path, str]:
 def _cmd_adopt(args) -> int:
     try:
         dest, commit = _adopt(args.adopt)
-        print(f"adopted {args.adopt} -> {dest} ({commit})")
-        print("verifying")
+        say(f"adopted {args.adopt} -> {dest} ({commit})")
+        say("verifying")
         _verify_and_switch(dest, commit)
     except BuildFailed as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
     return 0
 
@@ -658,13 +659,13 @@ def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> 
     missing = old_arches - new_arches
 
     if named:
-        print(f"  {binary} answers --help ({len(help_flags)} flags) and reads "
-              f"{len(new_arches)} architectures"
-              + (f"; missing {', '.join(sorted(missing))} that the current build reads"
+        say(f"  {binary} answers --help ({len(help_flags)} flags) and reads "
+            f"{len(new_arches)} architectures"
+            + (f"; missing {', '.join(sorted(missing))} that the current build reads"
                  if missing else ""))
         NAMED_DIR.mkdir(parents=True, exist_ok=True)
         _relink(NAMED_DIR / named, dest)
-        print(f"  named build {named!r} -> {dest} ({commit})")
+        say(f"  named build {named!r} -> {dest} ({commit})")
         return
 
     if missing:
@@ -672,11 +673,11 @@ def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> 
             "the new build is missing " + ", ".join(sorted(missing)) +
             ", which the current build reads; leaving current alone")
 
-    print(f"  {binary} answers --help ({len(help_flags)} flags) and reads "
-          f"{len(new_arches)} architectures"
-          + (f", a superset of the current {len(old_arches)}" if old_arches else ""))
+    say(f"  {binary} answers --help ({len(help_flags)} flags) and reads "
+        f"{len(new_arches)} architectures"
+        + (f", a superset of the current {len(old_arches)}" if old_arches else ""))
     _point_current(dest)
-    print(f"  current -> {dest} ({commit})")
+    say(f"  current -> {dest} ({commit})")
 
 
 # -- rollback and --check -------------------------------------------------
@@ -695,9 +696,9 @@ def _do_rollback() -> int:
     for _, build_dir in reversed(entries):
         if build_dir != current:
             _point_current(build_dir)
-            print(f"current -> {build_dir}")
+            say(f"current -> {build_dir}")
             return 0
-    print("no earlier build to roll back to", file=sys.stderr)
+    warn("no earlier build to roll back to")
     return 2
 
 
@@ -709,7 +710,7 @@ def _report(args) -> int:
         found = find_binary("llama-server")
         target = Path(found) if found else None
     if target is None or not target.is_file():
-        print("no llama-server build found")
+        say("no llama-server build found")
         return 1
 
     build_json = target.parent / "BUILD.json"
@@ -718,30 +719,30 @@ def _report(args) -> int:
             info = json.loads(build_json.read_text())
         except (OSError, ValueError):
             info = {}
-        print(f"{target}")
-        print(f"  commit {info.get('commit', '?')} ({info.get('source', '?')}), "
-              f"built {info.get('built_at', '?')}, {info.get('version', '?')}")
+        say(f"{target}")
+        say(f"  commit {info.get('commit', '?')} ({info.get('source', '?')}), "
+            f"built {info.get('built_at', '?')}, {info.get('version', '?')}")
     else:
-        print(f"{target}  {_version_of(target) or 'version unknown'} (not a managed build)")
+        say(f"{target}  {_version_of(target) or 'version unknown'} (not a managed build)")
 
     if SRC_DIR.is_dir():
         import ml_stack.setup as setup_module
 
         master = _arches_from_source(SRC_DIR)
         if not master:
-            print(f"could not read architecture names out of {SRC_DIR} -- "
-                  "src/llama-arch.cpp may have moved or renamed its table")
+            say(f"could not read architecture names out of {SRC_DIR} -- "
+                "src/llama-arch.cpp may have moved or renamed its table")
         else:
             mine = setup_module._arches(str(target), known=master)
             lacking = master - mine
             if lacking:
-                print("master reads architectures this build lacks: "
-                      + ", ".join(sorted(lacking)))
+                say("master reads architectures this build lacks: "
+                    + ", ".join(sorted(lacking)))
             else:
-                print("reads every architecture master's own source does")
+                say("reads every architecture master's own source does")
     else:
-        print(f"no source checkout at {SRC_DIR} to compare architectures against "
-              "-- ml-stack-serve build --from source clones one")
+        say(f"no source checkout at {SRC_DIR} to compare architectures against "
+            "-- ml-stack-serve build --from source clones one")
     return 0
 
 
@@ -780,15 +781,15 @@ def _cmd_list() -> int:
         return f"{label:14} {info.get('commit', '?'):12} {age:>4} old  {repo}"
 
     if CURRENT_LINK.is_symlink() or CURRENT_LINK.exists():
-        print(_line("current", CURRENT_LINK))
+        say(_line("current", CURRENT_LINK))
     else:
-        print("current        not built yet -- ml-stack-serve build")
+        say("current        not built yet -- ml-stack-serve build")
 
     named = _named_builds()
     for name, link in named:
-        print(_line(name, link))
+        say(_line(name, link))
     if not named:
-        print("no named builds -- ml-stack-serve build --repo OWNER/REPO --ref REF --name NAME")
+        say("no named builds -- ml-stack-serve build --repo OWNER/REPO --ref REF --name NAME")
     return 0
 
 
@@ -844,20 +845,20 @@ def _cmd_persist() -> int:
         system = platform.system()
         if system == "Windows":
             name = _install_persist_windows()
-            print(f"installed the scheduled task {name!r}")
+            say(f"installed the scheduled task {name!r}")
         elif system == "Darwin":
             path = _install_persist_macos()
-            print(f"installed {path}")
+            say(f"installed {path}")
         else:
-            print("no scheduled-refresh install for this platform yet; run "
-                  "'ml-stack-serve build' from cron or a timer of your own", file=sys.stderr)
+            warn("no scheduled-refresh install for this platform yet; run "
+                 "'ml-stack-serve build' from cron or a timer of your own")
             return 1
     except BuildFailed as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
-    print(f"  ml-stack-serve build will run every {WEEK_SECONDS // 86400} days -- a "
-          "refresh that fails verification changes nothing, which is what makes this safe "
-          "to leave unattended")
+    say(f"  ml-stack-serve build will run every {WEEK_SECONDS // 86400} days -- a "
+        "refresh that fails verification changes nothing, which is what makes this safe "
+        "to leave unattended")
     return 0
 
 
@@ -876,7 +877,7 @@ def cmd_build(args) -> int:
 
     name = getattr(args, "name", "") or ""
     if name and not getattr(args, "repo", ""):
-        print("error: --name requires --repo OWNER/REPO", file=sys.stderr)
+        warn("error: --name requires --repo OWNER/REPO")
         return 2
 
     kind = args.source_kind or ("source" if _can_build_from_source() else "release")
@@ -886,16 +887,16 @@ def cmd_build(args) -> int:
                 dest, commit = _build_from_release_named(args)
             else:
                 dest, commit = _build_from_source_named(args)
-            print("verifying")
+            say("verifying")
             _verify_and_switch(dest, commit, named=name)
         else:
             if kind == "release":
                 dest, commit = _build_from_release(args)
             else:
                 dest, commit = _build_from_source(args)
-            print("verifying")
+            say("verifying")
             _verify_and_switch(dest, commit)
     except BuildFailed as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
     return 0

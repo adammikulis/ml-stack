@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import sys
 import threading
 import time
 import webbrowser
 from typing import Any
 
 from ml_stack.http import ServerError, request_json
+from ml_stack.log import say, warn
 
 from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
 
@@ -60,15 +60,15 @@ def main(argv: list[str] | None = None) -> int:
 
     running = already_running(known.port)
     if running is not None:
-        print(f"ml-stack is already running as '{running.get('name', '?')}'.")
+        say(f"ml-stack is already running as '{running.get('name', '?')}'.")
         if not known.no_browser:
             webbrowser.open(url)
-        print(f"  {url}")
+        say(f"  {url}")
         return 0
 
     def open_when_ready() -> None:
         if wait_for_health(known.port) is None:
-            print("The daemon did not start. Its output is above.", file=sys.stderr)
+            warn("The daemon did not start. Its output is above.")
             return
         if not known.no_browser:
             webbrowser.open(url)

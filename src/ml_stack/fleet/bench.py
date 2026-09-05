@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack.log import say
 from ml_stack.units import human_bytes
 
 if TYPE_CHECKING:
@@ -108,7 +109,7 @@ def main(argv_: list[str] | None = None) -> int:
                     help="seconds to spend measuring (default 1.5)")
     a = ap.parse_args(argv_)
     result = measure(a.budget)
-    print(json.dumps(result))
+    say(json.dumps(result))
     return 0
 
 
@@ -756,7 +757,7 @@ class Plan(dict):
 
 
 def plan(models: Sequence[str], peers: Sequence[Any], *, needs: Mapping[str, int] | None = None,
-         context: int = 32768, log: Callable[[str], None] = print) -> Plan:
+         context: int = 32768, log: Callable[[str], None] = say) -> Plan:
     """Which peer serves which model.
 
     Each peer is asked ``health()`` for its name, whether it is idle (not busy, a free slot,
@@ -855,7 +856,7 @@ class Handle:
         return self.state in ("done", "failed", "stopped", "refused")
 
 
-def dispatch(jobs: Mapping[Any, Job], *, log: Callable[[str], None] = print) -> list[Handle]:
+def dispatch(jobs: Mapping[Any, Job], *, log: Callable[[str], None] = say) -> list[Handle]:
     """Send each job to its peer. A refusal is a `Handle` in state ``refused`` with the
     reason, printed, not an exception: the rest of the sweep still goes out."""
     out: list[Handle] = []
@@ -881,7 +882,7 @@ def dispatch(jobs: Mapping[Any, Job], *, log: Callable[[str], None] = print) -> 
 
 
 def wait(handles: Sequence[Handle], *, poll_s: float = 20.0, timeout_s: float | None = None,
-         log: Callable[[str], None] = print) -> list[Handle]:
+         log: Callable[[str], None] = say) -> list[Handle]:
     """Poll each peer's job until every one has ended, printing one line per change and
     the last `TAIL` lines of the log when a job ends. ``timeout_s`` bounds the whole wait;
     a job still running then is left in state ``running`` and said so."""
@@ -971,7 +972,7 @@ def _said(value: Any) -> bool:
 
 def import_runs(path_or_json: str | Path | Sequence[Mapping[str, Any]] | Mapping[str, Any],
                 into: str | Path, *, host: str, commit: str = "",
-                log: Callable[[str], None] = print) -> list[str]:
+                log: Callable[[str], None] = say) -> list[str]:
     """Put a peer's runs into ``into`` as new ``bench:`` docs with ``server["host"]`` and
     ``server["commit"]`` set. Returns the keys written.
 
@@ -1029,7 +1030,7 @@ def _records(source: Any) -> tuple[list[Mapping[str, Any]], str]:
 
 
 def gather(handles: Sequence[Handle], *, into: str | Path,
-           log: Callable[[str], None] = print) -> dict[str, list[str]]:
+           log: Callable[[str], None] = say) -> dict[str, list[str]]:
     """Bring home what each dispatched job measured: every peer's runs kept since its job
     started, imported into ``into`` by `import_runs` with the peer's name as host and the
     peer's commit. A refused or never-started job has nothing to gather. Returns the keys

@@ -14,9 +14,9 @@ from __future__ import annotations
 import argparse
 import errno
 import json
-import sys
 from pathlib import Path
 
+from ml_stack import log
 from ml_stack.speech.protocols import ProviderError
 from ml_stack.speech.service import providers, regions, say, transcribe
 
@@ -34,15 +34,15 @@ def _audio(path: str) -> Path:
 def _providers(args: argparse.Namespace) -> int:
     found = providers()
     if args.json:
-        print(json.dumps(found, ensure_ascii=False))
+        log.say(json.dumps(found, ensure_ascii=False))
         return 0
     for kind, table in found.items():
         chosen = table["auto"] or "nothing available"
-        print(f"{kind}  (auto: {chosen})")
+        log.say(f"{kind}  (auto: {chosen})")
         for one in table["providers"]:
             mark = "ok  " if one["available"] else "  ! "
             detail = one["model"] or "" if one["available"] else one["detail"]
-            print(f"  {mark}{one['name']}: {detail}")
+            log.say(f"  {mark}{one['name']}: {detail}")
     return 0
 
 
@@ -50,14 +50,14 @@ def _transcribe(args: argparse.Namespace) -> int:
     got = transcribe(_audio(args.file), provider=args.provider,
                      language=args.language)
     if args.json:
-        print(json.dumps({
+        log.say(json.dumps({
             "text": got.text, "language": got.language, "duration_s": got.duration_s,
             "model": got.model,
             "segments": [{"text": s.text, "start_s": s.start_s, "end_s": s.end_s}
                          for s in got.segments],
         }, ensure_ascii=False))
     else:
-        print(got.text)
+        log.say(got.text)
     return 0
 
 
@@ -66,7 +66,7 @@ def _say(args: argparse.Namespace) -> int:
     out = Path(args.out).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_bytes(spoken.to_wav())
-    print(f"{out}  {spoken.duration_s:.1f}s  {spoken.sample_rate} Hz  "
+    log.say(f"{out}  {spoken.duration_s:.1f}s  {spoken.sample_rate} Hz  "
           f"voice {spoken.voice or 'default'}")
     return 0
 
@@ -74,16 +74,16 @@ def _say(args: argparse.Namespace) -> int:
 def _regions(args: argparse.Namespace) -> int:
     found = regions(_audio(args.file), provider=args.provider)
     if args.json:
-        print(json.dumps({
+        log.say(json.dumps({
             "speech": found.speech, "confidence": found.confidence,
             "regions": [{"start_s": r.start_s, "end_s": r.end_s} for r in found.regions],
         }, ensure_ascii=False))
         return 0
     if not found.regions:
-        print("no speech")
+        log.say("no speech")
         return 0
     for one in found.regions:
-        print(f"{one.start_s:7.2f} -> {one.end_s:7.2f}  ({one.duration_s:.2f}s)")
+        log.say(f"{one.start_s:7.2f} -> {one.end_s:7.2f}  ({one.duration_s:.2f}s)")
     return 0
 
 
@@ -126,10 +126,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return int(args.run(args))
     except ProviderError as why:
-        print(f"ml-stack-speech: {why}", file=sys.stderr)
+        log.warn(f"ml-stack-speech: {why}")
         return 1
     except OSError as why:
-        print(f"ml-stack-speech: {why}", file=sys.stderr)
+        log.warn(f"ml-stack-speech: {why}")
         return 1
 
 

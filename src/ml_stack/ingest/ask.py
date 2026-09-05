@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from ml_stack.log import say
 
 __all__ = ["ask", "asked_f1", "asked_lines", "graph_of", "read_asked", "score_asked",
            "spent_line"]
@@ -36,7 +37,7 @@ def spent_line(spent: Any) -> str:
 
 
 def ask(graph: Mapping[str, Any], question: str, client: Any, *,
-        say: Callable[[str], None] = print, asking: Any = None) -> Any:
+        say: Callable[[str], None] = say, asking: Any = None) -> Any:
     """One question of a store's graph, through `graph.ask.converse`; the answer, printed.
 
     ``asking`` is the :class:`~ml_stack.graph.Asking` to ask with. Returns the `Answer`.

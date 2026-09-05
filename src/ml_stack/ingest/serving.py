@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
+from ml_stack.log import say
 
 __all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_find_model", "_run", "_sampling",
            "_serving", "_serving_said"]
@@ -119,7 +120,7 @@ def _run(args: Any, *, resolve: bool = True,
 
 
 @contextmanager
-def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
+def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
     """A client for the run: one lease, held throughout, in the model's measured shape,
     under the bench's measuring lock so the two never share the GPU.
 

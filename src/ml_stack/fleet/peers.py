@@ -19,6 +19,7 @@ from .discovery import (
     key_path,
     load_cluster_key,
 )
+from ml_stack.log import say, warn
 
 DEFAULT_GROUP_NAME = "ml-stack"
 """The group a passphrase belongs to. Two households that both chose the same words end"""
@@ -37,14 +38,14 @@ def _prompt_passphrase(confirm: bool) -> str:
     while True:
         first = getpass.getpass("  Passphrase: ")
         if len(first.strip()) < MIN_PASSPHRASE:
-            print(f"  Too short -- at least {MIN_PASSPHRASE} characters. "
-                  "A few words you will remember beats a short complicated one.")
+            say(f"  Too short -- at least {MIN_PASSPHRASE} characters. "
+                "A few words you will remember beats a short complicated one.")
             continue
         if not confirm:
             return first
         again = getpass.getpass("  Again:      ")
         if first != again:
-            print("  Those did not match. Try again.")
+            say("  Those did not match. Try again.")
             continue
         return first
 
@@ -57,14 +58,14 @@ def cmd_setup(args: argparse.Namespace) -> int:
     if p.exists() and not args.force:
         current = cluster_group(args.cluster_key)
         where = f" '{current}'" if current else ""
-        print(f"This machine is already in cluster{where} (key at {p}).")
-        print("Run 'ml-stack-peers ls' to see who else is in it,")
-        print("or 'ml-stack-peers setup --force' to join a different one.")
+        say(f"This machine is already in cluster{where} (key at {p}).")
+        say("Run 'ml-stack-peers ls' to see who else is in it,")
+        say("or 'ml-stack-peers setup --force' to join a different one.")
         return 0
 
-    print("Connect this machine to the others you want to train with.")
-    print("Run this on every machine, with the SAME passphrase. That is all it takes.")
-    print()
+    say("Connect this machine to the others you want to train with.")
+    say("Run this on every machine, with the SAME passphrase. That is all it takes.")
+    say()
 
     group = args.group
     if interactive and not args.group_given:
@@ -78,27 +79,27 @@ def cmd_setup(args: argparse.Namespace) -> int:
     else:
         passphrase = sys.stdin.readline()
         if not passphrase.strip():
-            print("error: no passphrase on stdin", file=sys.stderr)
+            warn("error: no passphrase on stdin")
             return 2
 
-    print()
-    print("  Deriving the key (this is deliberately slow, once)...", flush=True)
+    say()
+    say("  Deriving the key (this is deliberately slow, once)...", flush=True)
     join_cluster(passphrase, group=group, path=args.cluster_key)
 
-    print(f"  Joined '{group}'.")
-    print()
-    print("Next:")
-    print("  1. Run this same command on your other machines, same passphrase.")
-    print("  2. On each of them, start the daemon:")
-    print()
-    print("       ml-stack-traind")
-    print()
-    print("  3. Check they found each other:")
-    print()
-    print("       ml-stack-peers ls")
-    print()
-    print("Anyone who knows this passphrase can run commands on every machine in the")
-    print("group. Treat it like the password to your house, not like a wifi password.")
+    say(f"  Joined '{group}'.")
+    say()
+    say("Next:")
+    say("  1. Run this same command on your other machines, same passphrase.")
+    say("  2. On each of them, start the daemon:")
+    say()
+    say("       ml-stack-traind")
+    say()
+    say("  3. Check they found each other:")
+    say()
+    say("       ml-stack-peers ls")
+    say()
+    say("Anyone who knows this passphrase can run commands on every machine in the")
+    say("group. Treat it like the password to your house, not like a wifi password.")
     return 0
 
 
@@ -106,49 +107,49 @@ def cmd_init(args: argparse.Namespace) -> int:
     p = key_path(args.cluster_key)
     existed = p.exists()
     key = create_cluster_key(args.cluster_key)
-    print(f"cluster key {'already at' if existed else 'written to'} {p}")
-    print()
-    print("Run this on every other machine that should join:")
-    print()
-    print(f"    mkdir -p {p.parent} && printf '%s\\n' '{key}' > {p} "
-          f"&& chmod 600 {p}")
-    print()
-    print("or, on a Windows machine, in PowerShell:")
-    print()
-    print(f'    New-Item -ItemType Directory -Force "{p.parent}" | Out-Null; '
-          f'Set-Content -NoNewline -Path "{p}" -Value "{key}"')
-    print()
-    print("Then start the daemon on the box with the card:")
-    print()
-    print("    ml-stack-traind")
-    print()
-    print("Anyone holding this key can run commands on every daemon in the")
-    print("cluster. Treat it exactly like an ssh private key.")
+    say(f"cluster key {'already at' if existed else 'written to'} {p}")
+    say()
+    say("Run this on every other machine that should join:")
+    say()
+    say(f"    mkdir -p {p.parent} && printf '%s\\n' '{key}' > {p} "
+        f"&& chmod 600 {p}")
+    say()
+    say("or, on a Windows machine, in PowerShell:")
+    say()
+    say(f'    New-Item -ItemType Directory -Force "{p.parent}" | Out-Null; '
+        f'Set-Content -NoNewline -Path "{p}" -Value "{key}"')
+    say()
+    say("Then start the daemon on the box with the card:")
+    say()
+    say("    ml-stack-traind")
+    say()
+    say("Anyone holding this key can run commands on every daemon in the")
+    say("cluster. Treat it exactly like an ssh private key.")
     return 0
 
 
 def cmd_key(args: argparse.Namespace) -> int:
-    print(_require_key(args.cluster_key).decode())
+    say(_require_key(args.cluster_key).decode())
     return 0
 
 
 def cmd_token(args: argparse.Namespace) -> int:
-    print(derive_token(_require_key(args.cluster_key)))
+    say(derive_token(_require_key(args.cluster_key)))
     return 0
 
 
 def cmd_ls(args: argparse.Namespace) -> int:
     peers = discover(_require_key(args.cluster_key), timeout_s=args.timeout)
     if args.json:
-        print(json.dumps([{**p.public(), "host": p.host,
+        say(json.dumps([{**p.public(), "host": p.host,
                            "base_url": p.base_url} for p in peers], indent=2))
         return 0 if peers else 1
     if not peers:
-        print("no peers answered.")
-        print("  - is 'ml-stack-traind' running there?")
-        print("  - same LAN, and does that box hold the same cluster key?")
+        say("no peers answered.")
+        say("  - is 'ml-stack-traind' running there?")
+        say("  - same LAN, and does that box hold the same cluster key?")
         return 1
-    print(f"{'NAME':<16} {'URL':<28} {'FREE':<7} {'STATE':<10} {'ROOM':<7} DEVICE")
+    say(f"{'NAME':<16} {'URL':<28} {'FREE':<7} {'STATE':<10} {'ROOM':<7} DEVICE")
     for p in peers:
         # `measuring` before busy: a bench holds the GPU as surely as a job does, and a
         # sweep dispatched over the fleet must not land a second model on it
@@ -167,7 +168,7 @@ def cmd_ls(args: argparse.Namespace) -> int:
         # `fleet.bench.plan` fits each model against
         room = p.device.get("room_bytes")
         shown = f"{int(room) / 2**30:.0f}G" if room else "?"
-        print(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {shown:<7} {gpu}")
+        say(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {shown:<7} {gpu}")
     return 0
 
 
@@ -183,19 +184,19 @@ def cmd_pause(args: argparse.Namespace) -> int:
     """Take this machine back, now."""
     peer = _peer(args)
     out = peer.availability("pause", minutes=args.minutes, reason=args.reason)
-    print(out["unavailable_because"])
+    say(out["unavailable_because"])
     if args.minutes:
-        print(f"  it will start taking work again on its own in {args.minutes:.0f} min")
+        say(f"  it will start taking work again on its own in {args.minutes:.0f} min")
     else:
-        print("  run 'ml-stack-peers resume' when you are done with it")
+        say("  run 'ml-stack-peers resume' when you are done with it")
     return 0
 
 
 def cmd_resume(args: argparse.Namespace) -> int:
     peer = _peer(args)
     out = peer.availability("resume")
-    print("taking work again" if out["available"]
-          else f"still not taking work: {out['unavailable_because']}")
+    say("taking work again" if out["available"]
+        else f"still not taking work: {out['unavailable_because']}")
     return 0
 
 
@@ -203,14 +204,14 @@ def cmd_when(args: argparse.Namespace) -> int:
     """What this machine's schedule looks like."""
     peer = _peer(args)
     out = peer.availability()
-    print("available now" if out["available"] else f"NOT available: {out['unavailable_because']}")
+    say("available now" if out["available"] else f"NOT available: {out['unavailable_because']}")
     for window in out.get("windows", []):
-        print(f"  busy  {window}")
+        say(f"  busy  {window}")
     if out.get("reserved"):
         r = out["reserved"]
-        print(f"  held by {r['holder']} for another {r['seconds_left']:.0f}s")
+        say(f"  held by {r['holder']} for another {r['seconds_left']:.0f}s")
     if not out.get("windows") and not out.get("reserved") and out["available"]:
-        print("  no schedule set -- it will take work at any hour")
+        say("  no schedule set -- it will take work at any hour")
     return 0
 
 
@@ -219,12 +220,12 @@ def cmd_busy(args: argparse.Namespace) -> int:
     peer = _peer(args)
     if args.clear:
         peer.availability("clear_windows")
-        print("cleared; it will take work at any hour")
+        say("cleared; it will take work at any hour")
         return 0
     out = peer.availability("window", spec=args.when, busy=not args.free)
-    print("schedule now:")
+    say("schedule now:")
     for window in out.get("windows", []):
-        print(f"  busy  {window}")
+        say(f"  busy  {window}")
     return 0
 
 
@@ -281,11 +282,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return fn(args)
     except (DiscoveryError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
     except Exception as exc:                          # noqa: BLE001
-        print(f"error: {exc}", file=sys.stderr)
-        print("  is 'ml-stack-traind' running on that machine?", file=sys.stderr)
+        warn(f"error: {exc}")
+        warn("  is 'ml-stack-traind' running on that machine?")
         return 2
 
 

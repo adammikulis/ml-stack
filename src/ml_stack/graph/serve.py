@@ -73,6 +73,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from ml_stack.graph.thread import EVERY, WINDOW
+from ml_stack.log import say, warn
 
 __all__ = ["Ask", "AskRoutes", "DraftRoutes", "Handler", "History", "KEEP_ANSWERS",
            "PROXY_HEADERS", "RefreshRoutes", "RequestRoutes", "ReviewRoutes", "STARTED",
@@ -447,7 +448,7 @@ class AskRoutes:
         return Spent.totals(records)
 
     def failed(self, ask: Ask, exc: BaseException) -> None:
-        print(f"{time.strftime('%FT%T')} ask failed: {exc}", file=sys.stderr)
+        warn(f"{time.strftime('%FT%T')} ask failed: {exc}")
 
     # ------------------------------------------------------------ what it has spent
 
@@ -685,7 +686,7 @@ class AskRoutes:
                 if writer is not None:
                     summarise(held, ask.thread, writer, every=int(self.summary_every))
         except Exception as exc:  # noqa: BLE001
-            print(f"{time.strftime('%FT%T')} turn not remembered: {exc}", file=sys.stderr)
+            warn(f"{time.strftime('%FT%T')} turn not remembered: {exc}")
 
     # ---------------------------------------------------------------- plumbing
 
@@ -925,7 +926,7 @@ class DraftRoutes:
             out = self.drafter(list(ids), str(body.get("question") or ""),
                                str(body.get("answer") or ""))
         except Exception as exc:  # noqa: BLE001 - the page shows the reason
-            print(f"{time.strftime('%FT%T')} draft failed: {exc}", file=sys.stderr)
+            warn(f"{time.strftime('%FT%T')} draft failed: {exc}")
             self.send_json(500, {"error": str(exc)[:200]})
             return
         if out is None:
@@ -1124,7 +1125,7 @@ def geocode(args: argparse.Namespace) -> int:
     out = Path(args.out or args.graph)
     out.write_text(json.dumps(placed, ensure_ascii=False, indent=2), encoding="utf-8")
     near = sum(1 for e in placed.get("edges") or () if str(e.get("rel") or "") == "near")
-    print(f"{len(points(placed))} entr(ies) placed, {near} near edge(s) -> {out}")
+    say(f"{len(points(placed))} entr(ies) placed, {near} near edge(s) -> {out}")
     return 0
 
 
@@ -1150,7 +1151,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return geocode(args)
     httpd = bind(argv)
     host, port = httpd.server_address[:2]
-    print(f"serving http://{host}:{port}", flush=True)
+    say(f"serving http://{host}:{port}", flush=True)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

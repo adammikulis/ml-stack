@@ -25,6 +25,7 @@ from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at, status
 from ml_stack.ingest.reads import _read_json
 from ml_stack.ingest.run import Stopped, _read_run, _stopping
 from ml_stack.ingest.sources import show, sources
+from ml_stack.log import say, warn
 
 __all__ = ["STOP_WAIT", "detach", "home_dir", "main", "parser", "retry", "stop", "wait"]
 
@@ -100,7 +101,7 @@ def detach(argv: Sequence[str]) -> Path:
     return log
 
 
-def retry(out: str | Path, *, say: Callable[[str], None] = print) -> int:
+def retry(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest retry --out STORE``: the units given up on are read again by the
     next ``--resume`` -- for after the fix that made them fail is in."""
     where = Progress.beside(out)
@@ -119,7 +120,7 @@ def retry(out: str | Path, *, say: Callable[[str], None] = print) -> int:
     return 0
 
 
-def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
+def stop(*, say: Callable[[str], None] = say, home: Path | None = None,
          wait: float = STOP_WAIT) -> int:
     """``ml-stack-ingest stop``: end the detached run and wait for its last fold to land.
 
@@ -163,7 +164,7 @@ def stop(*, say: Callable[[str], None] = print, home: Path | None = None,
     return 0
 
 
-def wait(*, say: Callable[[str], None] = print, home: Path | None = None,
+def wait(*, say: Callable[[str], None] = say, home: Path | None = None,
          every: float = 60.0) -> int:
     """``ml-stack-ingest wait``: block until the detached run this machine records has
     ended, saying so every minute -- so the next command can follow it without a loop
@@ -366,8 +367,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         return _dispatch(args, rest)
     except Busy as why:
-        print(f"error: {why}. The bench is measuring; wait for it, or leave out --no-queue "
-              f"to queue behind it.", file=sys.stderr)
+        warn(f"error: {why}. The bench is measuring; wait for it, or leave out --no-queue "
+             f"to queue behind it.")
         return 3
 
 
@@ -381,7 +382,7 @@ def _dispatch(args: Any, rest: list[str]) -> int:
     word = args.docs[0] if args.docs[:1] and args.docs[0] in _WORDS else ""
     if word:
         if not args.out:
-            print(f"error: {word} needs --out STORE", file=sys.stderr)
+            warn(f"error: {word} needs --out STORE")
             return 2
         if word == "fold":
             return fold(args.out, source=args.source, rebuild=args.rebuild,
@@ -413,8 +414,8 @@ def _dispatch(args: Any, rest: list[str]) -> int:
                 # run that is reading, never beside it (one job on the GPU)
                 alive = _recorded_alive()
                 if alive:
-                    print(f"error: a detached ingest (pid {alive}) is still reading; "
-                          f"`ml-stack-ingest wait` first, then tidy", file=sys.stderr)
+                    warn(f"error: a detached ingest (pid {alive}) is still reading; "
+                         f"`ml-stack-ingest wait` first, then tidy")
                     return 2
                 try:
                     with _stopping(), ingest._serving(args) as client:
@@ -422,7 +423,7 @@ def _dispatch(args: Any, rest: list[str]) -> int:
                         report = hygiene(args.out, written=written_from(args.written),
                                          judge=judge, log=print)
                 except Stopped:
-                    print("stopped before the tidy finished; the store is as it was")
+                    say("stopped before the tidy finished; the store is as it was")
                     return 1
                 return 0 if report.sound else 1
             report = hygiene(args.out, dry_run=not args.apply,
@@ -430,10 +431,10 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             return 0 if report.sound else 1
         return status(args.out)
     if not args.docs and not args.gold:
-        print("error: name at least one document, or --gold FILE", file=sys.stderr)
+        warn("error: name at least one document, or --gold FILE")
         return 2
     if args.docs and not args.out:
-        print("error: reading a document needs --out STORE to write it into", file=sys.stderr)
+        warn("error: reading a document needs --out STORE to write it into")
         return 2
     if args.detach:
         alive = _recorded_alive()
@@ -442,12 +443,12 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             # that is still folding its way out adopted its server and lost it when the
             # first finished (2026-09-03). The record is the lease; it is cleared when
             # the run ends or `stop` sees it end
-            print(f"error: a detached ingest (pid {alive}) is still running or still "
-                  f"folding on its way out; `ml-stack-ingest stop` waits for it", file=sys.stderr)
+            warn(f"error: a detached ingest (pid {alive}) is still running or still "
+                 f"folding on its way out; `ml-stack-ingest stop` waits for it")
             return 2
         log = detach(rest)
-        print(f"detached; the log is {log}")
-        print(f"  ml-stack-ingest status --out {args.out}")
+        say(f"detached; the log is {log}")
+        say(f"  ml-stack-ingest status --out {args.out}")
         return 0
     if args.gold:
         return _gold_run(args)
@@ -459,16 +460,16 @@ def _ask_run(args: Any) -> int:
 
     question = " ".join(str(d) for d in args.docs[1:]).strip()
     if not question and not args.gold:
-        print("error: ask needs a question, or --gold FILE", file=sys.stderr)
+        warn("error: ask needs a question, or --gold FILE")
         return 2
     if not Path(args.out).expanduser().exists():
-        print(f"error: no store at {args.out}", file=sys.stderr)
+        warn(f"error: no store at {args.out}")
         return 2
     graph = graph_of(args.out)
     if not graph["nodes"]:
-        print(f"error: nothing in {args.out} to ask about", file=sys.stderr)
+        warn(f"error: nothing in {args.out} to ask about")
         return 2
-    print(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
+    say(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
     # the asking comes from the same profile the serving does, so a model measured with
     # one way of asking is not served in its shape and asked in somebody else's
     measured = ingest._find_model(args.model) if args.model else None
@@ -479,16 +480,16 @@ def _ask_run(args: Any) -> int:
                 ingest.ask(graph, question, client, asking=how)
                 return 0
             asked = read_asked(args.gold)
-            print(f"asking {len(asked)} question(s) from {args.gold}")
+            say(f"asking {len(asked)} question(s) from {args.gold}")
             rows = score_asked(graph, client, asked, log=print, asking=how)
     except Stopped:
-        print("stopped before the answer was finished")
+        say("stopped before the answer was finished")
         return 1
     for line in asked_lines(rows):
-        print(line)
+        say(line)
     f1 = asked_f1(rows)
     if args.fail_under is not None and f1 < args.fail_under:
-        print(f"error: F1 {f1:.2f} is under {args.fail_under:g}", file=sys.stderr)
+        warn(f"error: F1 {f1:.2f} is under {args.fail_under:g}")
         return 1
     return 0
 
@@ -497,21 +498,21 @@ def _gold_run(args: Any) -> int:
     from ml_stack import ingest
 
     passages = read_gold(args.gold)
-    print(f"gold: {len(passages)} passages from {args.gold}")
+    say(f"gold: {len(passages)} passages from {args.gold}")
     try:
         with _stopping(), ingest._serving(args) as client:
             scored = gold_score(client, passages, schema(core_only=args.core_only),
                                 per_section=args.per_section, log=print)
     except Stopped:
-        print("stopped before the gold set was scored")
+        say("stopped before the gold set was scored")
         return 1
     for line in gold_lines(scored):
-        print(line)
+        say(line)
     if scored.errors:
-        print(f"error: {len(scored.errors)} passage(s) did not reach the model; the F1 above "
-              f"is not a score", file=sys.stderr)
+        warn(f"error: {len(scored.errors)} passage(s) did not reach the model; the F1 above "
+             f"is not a score")
         return 1
     if args.fail_under is not None and scored.f1 < args.fail_under:
-        print(f"error: F1 {scored.f1:.2f} is under {args.fail_under:g}", file=sys.stderr)
+        warn(f"error: F1 {scored.f1:.2f} is under {args.fail_under:g}")
         return 1
     return 0

@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SEATS, alias_of, environment
+from ml_stack.log import say
 
 __all__ = ["Answer", "Harness", "Usage", "main", "session"]
 
@@ -198,8 +199,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     with session(args.model, port=args.port, seats=args.seats, profile=not args.no_profile,
                  offline=not args.online, say=print, **options) as agent:
         answer = agent.ask(args.prompt)
-    print(answer.text)
-    print(f"spent: {answer.spent.said()}")
+    say(answer.text)
+    say(f"spent: {answer.spent.said()}")
     return 1 if answer.is_error else 0
 
 

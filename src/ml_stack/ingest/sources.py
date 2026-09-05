@@ -11,6 +11,7 @@ from typing import Any
 from ml_stack.ingest.fold import fold_source
 from ml_stack.ingest.progress import GIVE_UP, Progress
 from ml_stack.ingest.reads import _read_json, reads_path, tokens_of, units_of
+from ml_stack.log import say
 
 __all__ = ["Source", "Sources", "show", "sources"]
 
@@ -269,7 +270,7 @@ def _decisions_in(store: Any) -> dict[str, int]:
 
 
 def show(out: str | Path, *, source: str = "", most: int = 5,
-         say: Callable[[str], None] = print) -> int:
+         say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest show --out STORE``: what each source was read as, in plain text.
 
     A sample of concepts with their kind and definition, a sample of relations with the
@@ -318,7 +319,7 @@ def show(out: str | Path, *, source: str = "", most: int = 5,
     return 0
 
 
-def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = print) -> int:
+def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest sources --out STORE``: every source at a glance, in plain text.
 
     Per source, how much of it is read and what the store holds for it; the concepts more

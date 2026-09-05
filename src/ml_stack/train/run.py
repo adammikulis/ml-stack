@@ -30,6 +30,7 @@ from typing import Any
 from ml_stack.home import state
 from ml_stack import jobs
 from ml_stack.contracts import recipe as _recipe
+from ml_stack.log import say, warn
 from ml_stack.train.recipes import build, known, validate
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import warmup_cosine
@@ -90,7 +91,7 @@ def detach(argv: Sequence[str]) -> Path:
     return log
 
 
-def wait(*, say: Callable[[str], None] = print, home: Path | None = None,
+def wait(*, say: Callable[[str], None] = say, home: Path | None = None,
          every: float = 60.0) -> int:
     """``ml-stack-train-run wait``: block until the detached run this machine records has
     ended, saying so every minute -- so what follows it is `wait && next` rather than a
@@ -98,19 +99,19 @@ def wait(*, say: Callable[[str], None] = print, home: Path | None = None,
     return jobs.wait(KIND, say=say, every=every, home=_jobs_home(home))
 
 
-def stop(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+def stop(*, say: Callable[[str], None] = say, home: Path | None = None) -> int:
     """``ml-stack-train-run stop``: end the detached run. Whatever it checkpointed stays
     where ``--out`` put it."""
     return jobs.stop(KIND, say=say, home=_jobs_home(home))
 
 
-def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+def status(*, say: Callable[[str], None] = say, home: Path | None = None) -> int:
     """``ml-stack-train-run status``: what this machine records -- the training run and any
     other long command, the same lines `ml-stack-jobs status` prints."""
     return jobs.status(say=say, home=_jobs_home(home))
 
 
-def parity(*, say: Callable[[str], None] = print, first: str = "torch",
+def parity(*, say: Callable[[str], None] = say, first: str = "torch",
            second: str = "mlx") -> int:
     """``ml-stack-train-run parity``: every array operation on two backends, side by side.
 
@@ -352,13 +353,12 @@ def main(argv: list[str] | None = None) -> int:
         if running:
             # one training run at a time: two fine-tunes on one machine share one GPU, and
             # what that costs is both of them, slower, with neither measurement believable
-            print(f"error: a training run (pid {running}) is still going; "
-                  f"`ml-stack-train-run wait` blocks until it has ended, `stop` ends it",
-                  file=sys.stderr)
+            warn(f"error: a training run (pid {running}) is still going; "
+                 f"`ml-stack-train-run wait` blocks until it has ended, `stop` ends it")
             return 2
         log = detach(rest)
-        print(f"detached; the log is {log}")
-        print("  ml-stack-train-run status")
+        say(f"detached; the log is {log}")
+        say("  ml-stack-train-run status")
         return 0
 
     config: dict[str, Any] = {}
@@ -388,15 +388,15 @@ def main(argv: list[str] | None = None) -> int:
                      export=a.export_gguf, merge=a.merge, quant=a.quant, yes=a.yes,
                      ceiling_min=a.ceiling)
     except OverCeiling as exc:
-        print(str(exc), file=sys.stderr)
+        warn(str(exc))
         return 5
     except (ValueError, FileNotFoundError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
     except RuntimeError as exc:                       # ToolNotFound, ConversionError
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
-    print(json.dumps(result, indent=2))
+    say(json.dumps(result, indent=2))
     return 0
 
 

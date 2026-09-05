@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ml_stack import home
+from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
 __all__ = ["Chosen", "DRAFT_MARK", "Found", "PREFER", "WEIGHT_SUFFIXES", "advice", "aside",
@@ -895,9 +896,9 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 shape = layout(named)
             except (OSError, ValueError, struct.error) as exc:
-                print(f"error: cannot read {args.model}: {exc}", file=sys.stderr)
+                warn(f"error: cannot read {args.model}: {exc}")
                 return 2
-            print(shape.to_json() if args.json else render(shape))
+            say(shape.to_json() if args.json else render(shape))
             return 0
 
         if args.cmd == "find":
@@ -905,28 +906,28 @@ def main(argv: list[str] | None = None) -> int:
             found = find(" ".join(args.words), prefer=prefer, gguf=not args.all,
                          limit=args.limit)
             if not found:
-                print("nothing matched", file=sys.stderr)
+                warn("nothing matched")
                 return 1
             for one in found:
-                print(f"{one.downloads:>10}  {one.repo}")
-            print(f"\nml-stack-models files {found[0].repo}")
+                say(f"{one.downloads:>10}  {one.repo}")
+            say(f"\nml-stack-models files {found[0].repo}")
             return 0
 
         if args.cmd == "card":
             text = card(args.repo)
             asked = advice(text)
             if asked:
-                print(f"{args.repo} asks for:")
+                say(f"{args.repo} asks for:")
                 for name, value in asked.items():
-                    print(f"  {name:16} {value:g}")
+                    say(f"  {name:16} {value:g}")
                 flags = " ".join(f"--{n.replace('_', '-')} {v:g}" for n, v in asked.items()
                                  if n in ("temperature", "top_p", "top_k", "min_p"))
-                print(f"\nml-stack-bench run {flags}")
+                say(f"\nml-stack-bench run {flags}")
             else:
-                print(f"{args.repo}'s card names no sampler settings. That is an answer: "
-                      f"nobody has chosen one, so the caller's default stands.")
+                say(f"{args.repo}'s card names no sampler settings. That is an answer: "
+                    f"nobody has chosen one, so the caller's default stands.")
             if args.full:
-                print("\n" + text)
+                say("\n" + text)
             return 0
 
         if args.cmd == "fetch":
@@ -938,21 +939,21 @@ def main(argv: list[str] | None = None) -> int:
                 for shard in shards_beside(path):
                     size = shard.stat().st_size if shard.exists() else 0
                     total += size
-                    print(f"{human_bytes(size):>8}  {shard}")
+                    say(f"{human_bytes(size):>8}  {shard}")
                 if _SHARD.search(path.name):
-                    print(f"{human_bytes(total):>8}  in all")
+                    say(f"{human_bytes(total):>8}  in all")
             return 0
 
         listing = files(args.repo, ending=args.ending)
         if not listing:
-            print(f"no {args.ending} in {args.repo}", file=sys.stderr)
+            warn(f"no {args.ending} in {args.repo}")
             return 1
         if not args.every:
             fits = room()
             mine = held()
             grouped = builds(args.repo, ending=args.ending)
             if fits:
-                print(f"this machine can serve about {human_bytes(fits)}\n")
+                say(f"this machine can serve about {human_bytes(fits)}\n")
             for name, size, shards in grouped:
                 on_disk = sum(1 for f, _s in held_files(args.repo, name, args.ending)
                               if f in mine)
@@ -964,25 +965,25 @@ def main(argv: list[str] | None = None) -> int:
                 # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
                 # smaller IQ file was the slower model (README, "What this measured")
                 slow = "  IQ: slower on Metal, take a K-quant" if iq_on_metal(name) else ""
-                print(f"{human_bytes(size):>8}  {name}{many}{mark}{slow}")
+                say(f"{human_bytes(size):>8}  {name}{many}{mark}{slow}")
             for name, size in listing:
                 if aside(name):
-                    print(f"{human_bytes(size):>8}  {ref(args.repo, name)}  (alongside)")
-            print(f"\nml-stack-models files {args.repo} --every  for individual files")
+                    say(f"{human_bytes(size):>8}  {ref(args.repo, name)}  (alongside)")
+            say(f"\nml-stack-models files {args.repo} --every  for individual files")
             for line in _head_lines(args.repo):
-                print(line)
+                say(line)
             return 0
         for name, size in listing:
             note = "  (alongside)" if aside(name) else ""
-            print(f"{human_bytes(size):>8}  {ref(args.repo, name)}{note}")
+            say(f"{human_bytes(size):>8}  {ref(args.repo, name)}{note}")
         lines = _head_lines(args.repo)
         if lines:
-            print("")
+            say("")
         for line in lines:
-            print(line)
+            say(line)
         return 0
     except Exception as exc:  # noqa: BLE001 - the Hub is somebody else's machine
-        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        warn(f"error: {type(exc).__name__}: {exc}")
         return 2
 
 

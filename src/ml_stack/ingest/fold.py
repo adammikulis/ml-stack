@@ -11,6 +11,7 @@ from typing import Any
 from ml_stack.ingest.extract import CORE_KINDS, VERBS
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
+from ml_stack.log import say
 
 __all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "marked", "plurals",
            "write"]
@@ -497,7 +498,7 @@ def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
 
 
 def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: bool = False,
-         say: Callable[[str], None] = print) -> int:
+         say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest fold --out STORE``: every source that has reads, upserted into the store.
 
     A source part-read is written as far as it has been read, so a run that will take days

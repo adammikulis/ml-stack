@@ -28,6 +28,7 @@ from .availability import Availability, parse_window
 from .conversations import Conversations
 from .environment import Environment
 from ml_stack.hub import default_roots, free_memory, total_memory
+from ml_stack.log import say, warn
 
 from .models import Downloads, Models, ModelError
 from .serving import Hosting, Serving
@@ -309,8 +310,8 @@ class JobRunner:
             if why == self._held_because:
                 return
             self._held_because = why
-        print(f"  holding {waiting} queued job(s): {why}" if why
-              else "  taking queued work again", flush=True)
+        say(f"  holding {waiting} queued job(s): {why}" if why
+            else "  taking queued work again", flush=True)
 
     def _run_one(self, job: Job) -> None:
         log = self.log_path(job.id)
@@ -1273,12 +1274,12 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     tracked_from = str(getattr(settings, "track_repo", "") or "") or updating.GIT_URL
     checkout = updating.checkout_here() if tracked else None
     if tracked and checkout is not None:
-        print(f"  following {tracked} on {tracked_from} in {checkout}")
+        say(f"  following {tracked} on {tracked_from} in {checkout}")
         updating.track(tracked_from, tracked, checkout, idle=nothing_running)
     else:
         if tracked:
-            print(f"  cannot follow '{tracked}': this copy is not a git checkout. "
-                  "Releases instead.")
+            say(f"  cannot follow '{tracked}': this copy is not a git checkout. "
+                "Releases instead.")
         updating.watch(wanted=lambda: bool(getattr(settings, "auto_update", False)),
                        idle=nothing_running)
 
@@ -1318,7 +1319,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
                 advertisers[group] = Advertiser(beacon, member.key,
                                                 refresh=refresh).start()
             except DiscoveryError as exc:
-                print(f"  discovery OFF for {group}: {exc}")
+                say(f"  discovery OFF for {group}: {exc}")
 
         first = next(iter(joined.values()), None)
         if first is not None:
@@ -1345,41 +1346,41 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     if announce:
         start_announcing()
-    print(f"ml-stack traind on http://{host}:{port}")
-    print(f"  name  {name}")
-    print(f"  root  {root}")
-    print(f"  bench {measuring_home}")
-    print(f"  slots {slots}")
+    say(f"ml-stack traind on http://{host}:{port}")
+    say(f"  name  {name}")
+    say(f"  root  {root}")
+    say(f"  bench {measuring_home}")
+    say(f"  slots {slots}")
     state = schedule.public()
     for window in schedule.windows:
-        print(f"  busy  {window.describe()}" if window.busy
-              else f"  free  {window.describe()}")
+        say(f"  busy  {window.describe()}" if window.busy
+            else f"  free  {window.describe()}")
     if not state["available"]:
-        print(f"  NOT TAKING WORK -- {state['unavailable_because']}")
+        say(f"  NOT TAKING WORK -- {state['unavailable_because']}")
     if labels:
-        print(f"  labels {' '.join(labels)}")
+        say(f"  labels {' '.join(labels)}")
     if advertiser is not None:
-        print(f"  peers announcing on {advertiser.group}:{advertiser.port} "
-              f"(key {key_path(cluster_key_path)})")
-        print("  token derived from the cluster key -- peers compute it themselves")
+        say(f"  peers announcing on {advertiser.group}:{advertiser.port} "
+            f"(key {key_path(cluster_key_path)})")
+        say("  token derived from the cluster key -- peers compute it themselves")
     elif key is None:
-        print(f"  token {token}")
-        print(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
+        say(f"  token {token}")
+        say(f"  discovery OFF: no cluster key at {key_path(cluster_key_path)}")
         if interface is None:
-            print("  run 'ml-stack-peers setup' to join one")
-    print(f"  device {json.dumps(report())}")
+            say("  run 'ml-stack-peers setup' to join one")
+    say(f"  device {json.dumps(report())}")
     if slots > 1:
-        print(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
-              "this makes every job slower.")
+        say(f"  {slots} jobs will run at once. Correct for CPU work; on a GPU box "
+            "this makes every job slower.")
     if interface is not None:
         shown = "127.0.0.1" if host in ("0.0.0.0", "") else host
-        print(f"  open   http://{shown}:{port}/ui/")
+        say(f"  open   http://{shown}:{port}/ui/")
         if key is None:
-            print("  this machine has not joined a cluster yet -- open the address "
-                  "above ON THIS MACHINE to set it up")
+            say("  this machine has not joined a cluster yet -- open the address "
+                "above ON THIS MACHINE to set it up")
             if setup_token:
-                print(f"  setup from the LAN with this one-time code: {setup_token}")
-    print("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
+                say(f"  setup from the LAN with this one-time code: {setup_token}")
+    say("  THIS EXECUTES COMMANDS YOU SEND IT. Trusted LAN only.", flush=True)
 
     def _quit(signum: int, _frame: Any) -> None:
         # SIGTERM (launchd, systemd, kill) and on Windows SIGBREAK take the same exit as
@@ -1397,7 +1398,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     idle_s = limits_read().idle_s
     reclaiming = ExitStack()
     if idle_s:
-        print(f"  reclaiming a server unused for {idle_s:.0f}s")
+        say(f"  reclaiming a server unused for {idle_s:.0f}s")
         reclaiming.enter_context(watching(older_than=idle_s, say=print))
     try:
         httpd.serve_forever()
@@ -1427,18 +1428,18 @@ def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -
 
     done = autostart.install("login", slots=slots, labels=labels, report=report)
     if done.installed:
-        print("installed to start at login")
+        say("installed to start at login")
         if done.path is not None:
-            print(f"  {done.path}")
+            say(f"  {done.path}")
         if done.note:
-            print(f"  {done.note}")
-        print("  starting now; 'ml-stack-peers ls' from another machine should list it")
+            say(f"  {done.note}")
+        say("  starting now; 'ml-stack-peers ls' from another machine should list it")
         return 0
-    print("not installed", file=sys.stderr)
+    warn("not installed")
     if done.note:
-        print(f"  {done.note}", file=sys.stderr)
+        warn(f"  {done.note}")
     if done.command:
-        print(f"  run this yourself: {done.command}", file=sys.stderr)
+        warn(f"  run this yourself: {done.command}")
     return 2
 
 

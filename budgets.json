@@ -12,7 +12,7 @@
   "local-imports": 649,
   "long-docstrings": 131,
   "long-functions": 23,
-  "print-calls": 248,
+  "print-calls": 127,
   "process-scans": 7,
   "pyright-errors": 2,
   "ruff-blind-except": 27,

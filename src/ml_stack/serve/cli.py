@@ -7,7 +7,6 @@ import os
 import platform
 import pathlib
 import json
-import sys
 import time
 from typing import Any
 from dataclasses import asdict, dataclass, replace
@@ -17,6 +16,7 @@ from ml_stack import home
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
+from ml_stack.log import say, warn
 from ml_stack.serve import build
 from ml_stack.serve.backend import (
     default_slot_save_path,
@@ -220,30 +220,30 @@ def cmd_status(args: argparse.Namespace) -> int:
         strays = [o for o in found if o["port"] not in records and not o.get("defunct")]
         foreign = [{"port": o["port"], "pid": o["pid"]} for o in strays]
         if args.json:
-            print(json.dumps({"serving": bool(found), "servers": found, "foreign": foreign},
+            say(json.dumps({"serving": bool(found), "servers": found, "foreign": foreign},
                              indent=2))
             return 0 if found else 1
         if not found:
-            print("no llama-server is running on this machine.")
+            say("no llama-server is running on this machine.")
             return 1
         for one in found:
             if one.get("defunct"):
                 # a zombie holds no memory and answers no port; it is waiting to be reaped
-                print(f"  pid {one['pid']}  defunct -- exited, not yet reaped; holds nothing")
+                say(f"  pid {one['pid']}  defunct -- exited, not yet reaped; holds nothing")
                 continue
             leased = "leased" if one["port"] in records else "NOT leased -- nobody records it"
             rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
-            print(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
-                  f"{rss} resident  {leased}  ({one['binary']})")
+            say(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
+                f"{rss} resident  {leased}  ({one['binary']})")
             cache = cache_of(one["model"])
             if cache is not None:
                 from ml_stack.fleet.models import sized
 
-                print(f"      cache  {cache[0]}  ({sized(cache[1])})")
+                say(f"      cache  {cache[0]}  ({sized(cache[1])})")
             if one["port"] not in records:
-                print(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
+                say(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
         if strays:
-            print(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
+            say(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
         return 0
     ports = sorted({*records, args.port})
     manager = ServerManager(state_file=lease_file())
@@ -273,34 +273,34 @@ def cmd_status(args: argparse.Namespace) -> int:
         found.append(snapshot)
 
     if args.json:
-        print(json.dumps(
+        say(json.dumps(
             {"serving": bool(found) or bool(foreign), "ports_checked": ports,
              "servers": [asdict(s) for s in found], "foreign": foreign},
             indent=2))
         return 0 if (found or foreign) else 1
 
     if not found and not foreign:
-        print("nothing is serving on port " + ", ".join(str(p) for p in ports) + ".")
-        print(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
+        say("nothing is serving on port " + ", ".join(str(p) for p in ports) + ".")
+        say(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
         return 1
 
     for snapshot in found:
         quant = f"  ({snapshot.quant})" if snapshot.quant else ""
-        print(snapshot.base_url)
-        print(f"  model    {snapshot.model or 'not reported'}{quant}")
-        print(f"  context  {snapshot.context if snapshot.context is not None else 'not reported'}"
-              " per slot")
-        print(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
-        print(f"  lease    {_lease_line(snapshot)}")
+        say(snapshot.base_url)
+        say(f"  model    {snapshot.model or 'not reported'}{quant}")
+        say(f"  context  {snapshot.context if snapshot.context is not None else 'not reported'}"
+            " per slot")
+        say(f"  slots    {snapshot.slots if snapshot.slots is not None else 'not reported'}")
+        say(f"  lease    {_lease_line(snapshot)}")
         if snapshot.load_s is not None:
             warm = f", warm-up {snapshot.warmup_s:.1f}s" if snapshot.warmup_s is not None else ""
-            print(f"  loaded   in {snapshot.load_s:.1f}s{warm}")
+            say(f"  loaded   in {snapshot.load_s:.1f}s{warm}")
         if snapshot.verdict:
-            print("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
+            say("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
                                        args.parallel))
     for held in foreign:
-        print(base_url_for(held["port"]))
-        print(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
+        say(base_url_for(held["port"]))
+        say(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
     return 0
 
 
@@ -391,7 +391,7 @@ def drafted(model: str, asked: str, *, borrows: bool | None = None,
     from ml_stack.hub import choose_head
 
     chosen = choose_head(model, binary=binary, borrows=borrows)
-    print(f"draft head: {chosen.path or 'none'} -- {chosen.why}", file=sys.stderr)
+    warn(f"draft head: {chosen.path or 'none'} -- {chosen.why}")
     return chosen.path
 
 
@@ -493,7 +493,7 @@ def _print_event(event: dict) -> None:
     """One line per step, as it happens -- ``ml-stack-serve up``'s and ``escalate``'s own
     progress, in the words ``ServerManager`` already emits them in."""
     said = _EVENT_LINES.get(str(event.get("event")))
-    print(said(event) if said else str(event.get("event")), file=sys.stderr)
+    warn(said(event) if said else str(event.get("event")))
 
 
 def cmd_up(args: argparse.Namespace) -> int:
@@ -501,20 +501,18 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     model = resolve_model(str(args.model))
     if model != str(args.model):
-        print(f"resolved {args.model} -> {model}", file=sys.stderr)
+        warn(f"resolved {args.model} -> {model}")
 
     profile = None
     if getattr(args, "profile", False):
         profile, took = from_profile(args, model)
         if profile is None:
-            print(f"no measured profile for {model.rsplit('/', 1)[-1]}; serving as asked "
-                  "-- `ml-stack-bench report --profile` writes one from the store",
-                  file=sys.stderr)
+            warn(f"no measured profile for {model.rsplit('/', 1)[-1]}; serving as asked "
+                 "-- `ml-stack-bench report --profile` writes one from the store")
         else:
-            print(f"profile {profile.model}: " + (", ".join(took) or "nothing left to fill"),
-                  file=sys.stderr)
+            warn(f"profile {profile.model}: " + (", ".join(took) or "nothing left to fill"))
             if profile.note:
-                print(f"  {profile.note}", file=sys.stderr)
+                warn(f"  {profile.note}")
 
     chosen = str(getattr(args, "binary", "") or "")
     build_name = str(getattr(args, "build", "") or "")
@@ -539,13 +537,12 @@ def cmd_up(args: argparse.Namespace) -> int:
         draft = chosen.path
         build_said = "a fork build" if chosen.borrows else "mainline"
         if draft:
-            print(f"draft head: {draft} -- {chosen.why} (serving with {build_said})",
-                  file=sys.stderr)
+            warn(f"draft head: {draft} -- {chosen.why} (serving with {build_said})")
         else:
-            print(f"no draft head served -- {chosen.why}", file=sys.stderr)
+            warn(f"no draft head served -- {chosen.why}")
         if chosen.note:
             hint = "" if chosen.borrows else " Serve with --build NAME to use one."
-            print(f"  {chosen.note}{hint}", file=sys.stderr)
+            warn(f"  {chosen.note}{hint}")
     seeing = alongside(model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
                        best=True)
     # A head implements one method and says which in its name. Serving an EAGLE3 head
@@ -556,8 +553,7 @@ def cmd_up(args: argparse.Namespace) -> int:
 
         kind = spec_for(draft)
     if str(getattr(args, "mmproj", "")).lower() == "auto" and not seeing:
-        print("no vision projector is shipped beside that model; it will not read pictures",
-              file=sys.stderr)
+        warn("no vision projector is shipped beside that model; it will not read pictures")
     kv = str(getattr(args, "kv", "") or "")
     spec = ServerSpec(model=model, port=args.port, context=args.context,
                       parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
@@ -577,7 +573,7 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     spec, yarn_said = LlamaServerBackend.resolved_context(spec)
     if yarn_said:
-        print(yarn_said, file=sys.stderr)
+        warn(yarn_said)
 
     if getattr(args, "preflight_only", False):
         from ml_stack.hub import room
@@ -586,7 +582,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         try:
             binary_path = manager.backend.binary
         except (BinaryNotFound, OSError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
         # a draft named by hf: file is fetched and served by path, exactly as start() does;
         # a preflight of the unresolved reference refused it instead (measured 2026-09-01)
@@ -594,10 +590,10 @@ def cmd_up(args: argparse.Namespace) -> int:
 
         spec = LlamaServerBackend.resolved_draft(spec)
         report = Preflight(spec, binary=binary_path, limit_bytes=room())
-        print(report.said())
+        say(report.said())
         return 0 if report.ok else 1
 
-    manager.say = lambda line: print(line, file=sys.stderr)
+    manager.say = lambda line: warn(line)
     try:
         info = manager.lease(spec, timeout=args.timeout,
                              escalate=bool(getattr(args, "escalate", False)),
@@ -605,10 +601,10 @@ def cmd_up(args: argparse.Namespace) -> int:
     except UnknownFlag as exc:
         # Refused before the load, not at the end of it: the build was asked what it
         # accepts and the answer is printed one flag per line, with the nearest it has.
-        print(exc, file=sys.stderr)
+        warn(exc)
         return 2
     except (ServerFailed, BinaryNotFound, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
 
     held = recorded_servers(lease_file()).get(info.port) or {}
@@ -620,7 +616,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     told = announce(args, spec)
 
     if args.json:
-        print(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
+        say(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
                           "adopted": info.adopted, "model": str(spec.model),
                           "context": spec.context, "parallel": spec.parallel,
                           "draft": str(spec.draft or ""),
@@ -628,17 +624,17 @@ def cmd_up(args: argparse.Namespace) -> int:
         return 0
 
     where = f" (pid {info.pid})" if info.pid else ""
-    print(f"{'adopted' if info.adopted else 'started'} {info.base_url}{where}")
+    say(f"{'adopted' if info.adopted else 'started'} {info.base_url}{where}")
     if chosen:
-        print(f"  with {chosen}")
+        say(f"  with {chosen}")
     if spec.draft:
-        print(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
+        say(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
     if spec.mmproj:
-        print(f"  reading pictures with {str(spec.mmproj).rsplit('/', 1)[-1]}")
+        say(f"  reading pictures with {str(spec.mmproj).rsplit('/', 1)[-1]}")
     if spec.spec_type:
-        print(f"  guessing ahead by {spec.spec_type}")
+        say(f"  guessing ahead by {spec.spec_type}")
     if told:
-        print(f"  {told}")
+        say(f"  {told}")
     return 0
 
 
@@ -667,13 +663,13 @@ def cmd_fit(args: argparse.Namespace) -> int:
         # "the file is 103.7G and the process holds 90G -- what is the other 13G of".
         named = [str(m) for m in (getattr(args, "model", None) or [])]
         if not named:
-            print("error: --tensors needs a model to look inside", file=sys.stderr)
+            warn("error: --tensors needs a model to look inside")
             return 2
         for one in named:
             try:
-                print(fit_mod.render_tensors(resolve_model(one)))
+                say(fit_mod.render_tensors(resolve_model(one)))
             except (OSError, ValueError, struct.error) as exc:
-                print(f"error: cannot read {one}: {exc}", file=sys.stderr)
+                warn(f"error: cannot read {one}: {exc}")
                 return 2
         return 0
 
@@ -682,7 +678,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         try:
             asked_rooms.append(fit_mod.parse_room(said))
         except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
     # The listing answers for one machine -- the first room named, or this one. The chart
     # draws every room asked for, which is the whole point of naming more than one.
@@ -693,7 +689,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     if getattr(args, "measure", False):
         if not wanted:
-            print("error: --measure needs a model to measure", file=sys.stderr)
+            warn("error: --measure needs a model to measure")
             return 2
         code = _measure_each(args, room=room)
         if code:
@@ -704,20 +700,20 @@ def cmd_fit(args: argparse.Namespace) -> int:
         rows = [r for r in rows if r.model.lower() in wanted
                 or any(w in r.model.lower() for w in wanted)]
         if not rows:
-            print("nothing measured for " + ", ".join(wanted)
-                  + " -- `ml-stack-serve fit MODEL --measure` serves it once and records "
-                    "what it allocated.", file=sys.stderr)
+            warn("nothing measured for " + ", ".join(wanted)
+                 + " -- `ml-stack-serve fit MODEL --measure` serves it once and records "
+                    "what it allocated.")
             return 1
 
     contexts = per_user or list(fit_mod.DEFAULT_PER_USER)
-    print(fit_mod.render(rows, contexts, room, bool(getattr(args, "md", False))))
+    say(fit_mod.render(rows, contexts, room, bool(getattr(args, "md", False))))
 
     parallel = int(getattr(args, "parallel", 1) or 1)
     if parallel > 1:
-        print()
+        say()
         for row in rows:
-            print(f"{row.model}: {parallel} users fit at "
-                  f"{row.longest(parallel):,} tokens each")
+            say(f"{row.model}: {parallel} users fit at "
+                f"{row.longest(parallel):,} tokens each")
 
     drawn = ""
     picture = str(getattr(args, "plot", "") or "")
@@ -730,13 +726,13 @@ def cmd_fit(args: argparse.Namespace) -> int:
                                  at=int(getattr(args, "at", 32768) or 32768),
                                  machine=platform.node() or "this machine")
         except (RuntimeError, ValueError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
-        print(f"\ndrew {drawn}", file=sys.stderr)
+        warn(f"\ndrew {drawn}")
         if getattr(args, "open", False):
             from ml_stack.platform import open_path
 
-            print(f"opened with {open_path(drawn)}", file=sys.stderr)
+            warn(f"opened with {open_path(drawn)}")
 
     where = str(getattr(args, "write", "") or "")
     if where:
@@ -769,7 +765,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
                 parts.append(f"## A machine with {human_bytes(asked)}\n\n"
                              + fit_mod.render(every, contexts, asked, True))
         Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
-        print(f"\nwrote {where}", file=sys.stderr)
+        warn(f"\nwrote {where}")
     return 0
 
 
@@ -785,12 +781,12 @@ def _fit_ui() -> int:
 
     server = serve_page(name=platform.node() or "this machine")
     where = f"http://127.0.0.1:{server.server_port}/ui/fit"
-    print(f"the fit page is at {where}\n(loopback only; Ctrl-C to stop)", file=sys.stderr)
-    print(f"opened with {open_path(where)}", file=sys.stderr)
+    warn(f"the fit page is at {where}\n(loopback only; Ctrl-C to stop)")
+    warn(f"opened with {open_path(where)}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nstopped", file=sys.stderr)
+        warn("\nstopped")
     finally:
         server.server_close()
     return 0
@@ -832,12 +828,12 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
         try:
             measured = fit_mod.measure(spec, backend=backend, timeout=args.timeout)
         except Exception as exc:  # noqa: BLE001 - whatever the load said, say it here
-            print(f"error: could not measure {Path(model).name}: {exc}", file=sys.stderr)
+            warn(f"error: could not measure {Path(model).name}: {exc}")
             return 2
         if not measured.measured:
-            print(f"error: {Path(model).name} loaded but its log said nothing about a "
-                  "cache. That is what a build too old for `-lv 4` looks like; nothing "
-                  "was recorded.", file=sys.stderr)
+            warn(f"error: {Path(model).name} loaded but its log said nothing about a "
+                 "cache. That is what a build too old for `-lv 4` looks like; nothing "
+                 "was recorded.")
             return 2
         record = fit_mod.Fit.of(
             # named as the person named it: a bare file name, the file in an hf: reference,
@@ -853,8 +849,8 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
             resident_peak=int(getattr(args, "resident_peak", 0) or 0),
             resident_after=int(getattr(args, "resident_after", 0) or 0))
         where = fit_mod.add(record)
-        print(f"measured {record.model}: {measured.said()}", file=sys.stderr)
-        print(f"  recorded in {where}", file=sys.stderr)
+        warn(f"measured {record.model}: {measured.said()}")
+        warn(f"  recorded in {where}")
     return 0
 
 
@@ -922,7 +918,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
     from ml_stack.serve.limits import changed, clear, read, where
 
     if args.clear:
-        print(f"every limit is off; {clear()} says so")
+        say(f"every limit is off; {clear()} says so")
         return 0
 
     asked: dict[str, Any] = {}
@@ -930,13 +926,12 @@ def cmd_limits(args: argparse.Namespace) -> int:
         try:
             asked["memory_bytes"] = parse_room(args.memory)
         except ValueError as why:
-            print(f"error: {why}", file=sys.stderr)
+            warn(f"error: {why}")
             return 2
     if args.idle:
         seconds = parse_duration(args.idle)
         if seconds is None:
-            print(f"error: cannot read {args.idle!r} as a length of time; try 10m",
-                  file=sys.stderr)
+            warn(f"error: cannot read {args.idle!r} as a length of time; try 10m")
             return 2
         asked["idle_s"] = seconds
     for name, value in (("servers", args.servers), ("seats", args.seats)):
@@ -949,14 +944,14 @@ def cmd_limits(args: argparse.Namespace) -> int:
     lines = limits.said()
     machine = machine_room()
     if lines:
-        print(f"what ml-stack may take here ({where()}):")
+        say(f"what ml-stack may take here ({where()}):")
         for line in lines:
-            print(f"  {line}")
+            say(f"  {line}")
     else:
-        print("nothing is limited here; ml-stack may use whatever this machine allows")
+        say("nothing is limited here; ml-stack may use whatever this machine allows")
     if machine:
-        print(f"\nthis machine allows {human_bytes(machine)}; a model may use "
-              f"{human_bytes(limits.room(machine))}")
+        say(f"\nthis machine allows {human_bytes(machine)}; a model may use "
+            f"{human_bytes(limits.room(machine))}")
     return 0
 
 
@@ -973,14 +968,14 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
 
     older = parse_duration(args.idle) if args.idle else read().idle_s
     if not older:
-        print("no idle time given and none is set; nothing to reclaim "
-              "(ml-stack-serve limits --idle 10m)", file=sys.stderr)
+        warn("no idle time given and none is set; nothing to reclaim "
+             "(ml-stack-serve limits --idle 10m)")
         return 2
     watcher = Idleness()
     if args.watch:
         every = parse_duration(args.every) or 60.0
-        print(f"watching every {every:.0f}s, reclaiming after {older:.0f}s idle; "
-              "Ctrl-C to stop", flush=True)
+        say(f"watching every {every:.0f}s, reclaiming after {older:.0f}s idle; "
+            "Ctrl-C to stop", flush=True)
         try:
             with watching(older_than=older, every=every, idleness=watcher, say=print):
                 while True:
@@ -993,7 +988,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
         time.sleep(settle)
     stopped = reclaim_idle(older_than=older, idleness=watcher, say=print)
     if not stopped:
-        print("nothing has been idle that long")
+        say("nothing has been idle that long")
     return 0
 
 
@@ -1010,18 +1005,18 @@ def cmd_memory(args: argparse.Namespace) -> int:
     total = total_memory()
     now = room()
     if not now:
-        print("this machine does not report a wiring limit; nothing to do here")
+        say("this machine does not report a wiring limit; nothing to do here")
         return 0
 
-    print(f"a model may use about {human_bytes(now)}"
-          + (f" of {human_bytes(total)} installed" if total else ""))
+    say(f"a model may use about {human_bytes(now)}"
+        + (f" of {human_bytes(total)} installed" if total else ""))
     if total:
         default = int(total * 0.75)
         if now > default * 1.02:
-            print(f"  raised from the ~{human_bytes(default)} default -- and **not** kept: this "
-                  f"resets on reboot")
+            say(f"  raised from the ~{human_bytes(default)} default -- and **not** kept: this "
+                f"resets on reboot")
         else:
-            print(f"  this is the default share; {human_bytes(total)} is installed")
+            say(f"  this is the default share; {human_bytes(total)} is installed")
 
     # What the rest of the machine holds right now, so a higher limit is chosen against
     # what it would take from the desktop rather than guessed (Adam, 2026-09-02: "take a
@@ -1029,39 +1024,39 @@ def cmd_memory(args: argparse.Namespace) -> int:
     # higher or is that our ceiling?")
     held = machine_memory()
     if held:
-        print(f"\nright now: {human_bytes(held['used'])} used of {human_bytes(held['total'])} "
-              f"({human_bytes(held['wired'])} wired, {human_bytes(held['free'])} free)")
+        say(f"\nright now: {human_bytes(held['used'])} used of {human_bytes(held['total'])} "
+            f"({human_bytes(held['wired'])} wired, {human_bytes(held['free'])} free)")
         servers = held["servers"]
         others = held["others"]
-        print(f"  llama-server(s): {human_bytes(servers)}; everything else: {human_bytes(others)}"
-              + (f" -- {', '.join(held['largest'])}" if held["largest"] else ""))
+        say(f"  llama-server(s): {human_bytes(servers)}; everything else: {human_bytes(others)}"
+            + (f" -- {', '.join(held['largest'])}" if held["largest"] else ""))
         headroom = int(total) - int(now) if total else 0
         if total:
-            print(f"  the limit leaves {human_bytes(headroom)} for everything else; the rest of "
-                  f"the machine holds {human_bytes(others)} now"
-                  + (" -- room to raise it" if others < headroom * 0.6
+            say(f"  the limit leaves {human_bytes(headroom)} for everything else; the rest of "
+                f"the machine holds {human_bytes(others)} now"
+                + (" -- room to raise it" if others < headroom * 0.6
                      else " -- close to it; raising it means swapping when a model fills it"))
         want_mb = int(getattr(args, "limit", 0) or 0)
         if want_mb and total:
             left = int(total) - want_mb * 1024 * 1024
-            print(f"  at {want_mb} MB the rest of the machine would have {human_bytes(left)}"
-                  + (" -- less than it holds now" if left < others else ""))
+            say(f"  at {want_mb} MB the rest of the machine would have {human_bytes(left)}"
+                + (" -- less than it holds now" if left < others else ""))
     want = args.persist
     if want is None:
-        print("\n  ml-stack-serve memory --persist [MB]   to write a boot-time setting")
+        say("\n  ml-stack-serve memory --persist [MB]   to write a boot-time setting")
         return 0
 
     mb = int(want) if want else now // (1024 * 1024)
     where = Path(args.write or "./stack.ml.wired-limit.plist")
     where.write_text(PLIST.format(mb=mb), encoding="utf-8")
-    print(f"\nwrote {where} -- it sets iogpu.wired_limit_mb={mb} at every boot.")
-    print("Installing it needs root, so it is left to you:")
-    print(f"  sudo cp {where} /Library/LaunchDaemons/stack.ml.wired-limit.plist")
-    print("  sudo chown root:wheel /Library/LaunchDaemons/stack.ml.wired-limit.plist")
-    print("  sudo launchctl load -w /Library/LaunchDaemons/stack.ml.wired-limit.plist")
-    print(f"\nOr for this boot only:  sudo sysctl -w iogpu.wired_limit_mb={mb}")
-    print("\nLeave headroom: everything else on the machine shares this memory, and a "
-          "machine that wires all of it stops being usable before it stops serving.")
+    say(f"\nwrote {where} -- it sets iogpu.wired_limit_mb={mb} at every boot.")
+    say("Installing it needs root, so it is left to you:")
+    say(f"  sudo cp {where} /Library/LaunchDaemons/stack.ml.wired-limit.plist")
+    say("  sudo chown root:wheel /Library/LaunchDaemons/stack.ml.wired-limit.plist")
+    say("  sudo launchctl load -w /Library/LaunchDaemons/stack.ml.wired-limit.plist")
+    say(f"\nOr for this boot only:  sudo sysctl -w iogpu.wired_limit_mb={mb}")
+    say("\nLeave headroom: everything else on the machine shares this memory, and a "
+        "machine that wires all of it stops being usable before it stops serving.")
     return 0
 
 
@@ -1080,21 +1075,21 @@ def cmd_profile(args: argparse.Namespace) -> int:
     if named:
         found = profile_for(named, records=every)
         if found is None:
-            print(f"nothing measured for {named.rsplit('/', 1)[-1]}. "
-                  "`ml-stack-bench sweep` measures it and `ml-stack-bench report --profile` "
-                  "writes the record.", file=sys.stderr)
+            warn(f"nothing measured for {named.rsplit('/', 1)[-1]}. "
+                 "`ml-stack-bench sweep` measures it and `ml-stack-bench report --profile` "
+                 "writes the record.")
             return 1
         chosen = [found]
     else:
         chosen = every
     if getattr(args, "json", False):
-        print(json.dumps([one.as_dict() for one in chosen], indent=2))
+        say(json.dumps([one.as_dict() for one in chosen], indent=2))
         return 0
     if not chosen:
-        print("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
-              "`ml-stack-bench report --profile` writes the record.")
+        say("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
+            "`ml-stack-bench report --profile` writes the record.")
         return 0
-    print("\n\n".join(said(one) for one in chosen))
+    say("\n\n".join(said(one) for one in chosen))
     return 0
 
 
@@ -1108,14 +1103,14 @@ def _withdraw(args: argparse.Namespace, port: int) -> None:
         if known is not None:
             known.unregister(port)
     except Exception as exc:  # noqa: BLE001
-        print(f"  could not withdraw it from the fleet: {exc}", file=sys.stderr)
+        warn(f"  could not withdraw it from the fleet: {exc}")
 
 
 def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
     """Stop every recorded server whose leasing process has gone; leave every other."""
     found = [(port, entry) for port, entry in sorted(records.items()) if orphaned(entry)]
     if not found:
-        print("no orphaned server on record.")
+        say("no orphaned server on record.")
         return 0
     manager = ServerManager(state_file=lease_file())
     for port, entry in found:
@@ -1124,7 +1119,7 @@ def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
         manager.release(ServerInfo(base_url=str(entry.get("base_url") or url), port=port,
                                    pid=pid, backend=str(entry.get("backend") or "")))
         _withdraw(args, port)
-        print(f"stopped {url} (pid {pid}), orphaned by pid {entry['owner_pid']}")
+        say(f"stopped {url} (pid {pid}), orphaned by pid {entry['owner_pid']}")
     return 0
 
 
@@ -1137,21 +1132,20 @@ def cmd_down(args: argparse.Namespace) -> int:
 
     if entry is None:
         if not is_healthy(url, timeout=PROBE_TIMEOUT):
-            print(f"nothing is serving on port {args.port}.")
+            say(f"nothing is serving on port {args.port}.")
             return 1
         held = server_pids_on_port(args.port)
         where = f" (pid {held[0]})" if held else ""
-        print(f"error: something is serving on {url}{where}, and this machine has no "
-              "record of starting it.", file=sys.stderr)
-        print("  stop it the way it was started.", file=sys.stderr)
+        warn(f"error: something is serving on {url}{where}, and this machine has no "
+             "record of starting it.")
+        warn("  stop it the way it was started.")
         return 2
 
     owner = _int_or_none(entry.get("owner_pid"))
     pid = _int_or_none(entry.get("pid"))
     if owner is not None and owner != pid and pid_exists(owner):
-        print(f"error: {url} is held by process {owner}, which is still running.",
-              file=sys.stderr)
-        print("  that process started it and will stop it.", file=sys.stderr)
+        warn(f"error: {url} is held by process {owner}, which is still running.")
+        warn("  that process started it and will stop it.")
         return 2
 
     running = pid_exists(pid)
@@ -1161,9 +1155,9 @@ def cmd_down(args: argparse.Namespace) -> int:
     _withdraw(args, args.port)
 
     if running:
-        print(f"stopped {url} (pid {pid})")
+        say(f"stopped {url} (pid {pid})")
     else:
-        print(f"nothing was running on port {args.port}; removed the record")
+        say(f"nothing was running on port {args.port}; removed the record")
     return 0
 
 
@@ -1173,12 +1167,12 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     manager = ServerManager(state_file=lease_file())
     base_url = f"http://{DEFAULT_HOST}:{args.port}"
     if not is_healthy(base_url, timeout=PROBE_TIMEOUT):
-        print(f"error: nothing is answering on port {args.port} to escalate", file=sys.stderr)
+        warn(f"error: nothing is answering on port {args.port} to escalate")
         return 2
     params = serving_params(base_url)
     if params is None or not params.model or params.n_ctx is None or params.total_slots is None:
-        print(f"error: port {args.port} does not say enough about its own shape to "
-              "escalate -- is /props answering, with --slots enabled?", file=sys.stderr)
+        warn(f"error: port {args.port} does not say enough about its own shape to "
+             "escalate -- is /props answering, with --slots enabled?")
         return 2
 
     save_path = (str(getattr(args, "slot_save_path", "") or "")
@@ -1194,19 +1188,19 @@ def cmd_escalate(args: argparse.Namespace) -> int:
         try:
             room = parse_room(asked_room)
         except ValueError as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
     try:
         info = manager.escalate(current, add_seats=max(1, int(args.add)), room=room,
                                 timeout=args.timeout, on_event=_print_event)
     except ServerFailed as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
 
     if args.json:
-        print(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid}))
+        say(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid}))
         return 0
-    print(f"port {args.port}: now at {info.base_url}" + (f" (pid {info.pid})" if info.pid else ""))
+    say(f"port {args.port}: now at {info.base_url}" + (f" (pid {info.pid})" if info.pid else ""))
     return 0
 
 

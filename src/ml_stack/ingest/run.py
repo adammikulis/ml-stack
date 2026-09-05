@@ -4,7 +4,6 @@ it goes, tidied at the end of each source, and stoppable."""
 from __future__ import annotations
 
 import math
-import sys
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
@@ -17,6 +16,7 @@ from ml_stack.ingest.fold import fold_into
 from ml_stack.ingest.judge import run_record, write_run
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import Read, _keep_reads, _read_json, reads_path
+from ml_stack.log import say, warn
 
 __all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit"]
 
@@ -112,14 +112,14 @@ def _read_run(args: Any) -> int:
             words.write(args.out)
         folded_seconds = float(got["seconds"])
         landed = got.get("absorbed") or {}
-        print(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
-              f"{got['nodes']} nodes, {got['edges']} edges"
-              + (" (partial)" if got["partial"] else "")
-              + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
+        say(f"  folded {slug} at unit {got['units']} in {got['seconds']:.1f}s: "
+            f"{got['nodes']} nodes, {got['edges']} edges"
+            + (" (partial)" if got["partial"] else "")
+            + (f"; {landed['same_name'] + landed['plural']} name(s) landed on existing "
                  f"nodes, judge: {landed['judged_same']} same, "
                  f"{landed['judged_different']} different, {landed['possible']} left"
                  if landed else "")
-              + (f"; the next fold is {_fold_interval(folded_seconds)} unit(s) away"
+            + (f"; the next fold is {_fold_interval(folded_seconds)} unit(s) away"
                  if _fold_interval(folded_seconds) != ingest.FOLD_EVERY else ""))
         return got
 
@@ -127,11 +127,11 @@ def _read_run(args: Any) -> int:
         with _stopping(), ingest._serving(args) as client:
             run_id = write_run(args.out,
                                run_record(args, serving=ingest._serving_said(args)))
-            print(f"  run {run_id}: units read now point at it")
+            say(f"  run {run_id}: units read now point at it")
             for path in args.docs:
                 where = Path(path).expanduser()
                 if not where.is_file():
-                    print(f"error: no such document: {where}", file=sys.stderr)
+                    warn(f"error: no such document: {where}")
                     code = 2
                     continue
                 began = time.time()
@@ -146,11 +146,11 @@ def _read_run(args: Any) -> int:
                                 sections=len(wanted))
                 banks = pdf.question_banks(document, **({"max_tokens": args.max_tokens}
                                                         if args.max_tokens else {}))
-                print(f"{document.title}: {len(document.chapters)} chapter(s), "
-                      f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
-                      f"the {document.how}" + (", OpenStax" if document.openstax else "")
-                      + (f", {banks} question-bank part(s) skipped" if banks else "")
-                      + f" -- read in {time.time() - began:.0f}s")
+                say(f"{document.title}: {len(document.chapters)} chapter(s), "
+                    f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
+                    f"the {document.how}" + (", OpenStax" if document.openstax else "")
+                    + (f", {banks} question-bank part(s) skipped" if banks else "")
+                    + f" -- read in {time.time() - began:.0f}s")
 
                 units_by_id = {unit.id: unit for unit in wanted}
                 folded_seconds = float(
@@ -189,17 +189,17 @@ def _read_run(args: Any) -> int:
                             # run folds what it has and ends; the unit is written down but
                             # not counted against, and --resume reads on once something
                             # serves again
-                            print(f"  the model server went away at {unit.id}; folding what "
-                                  f"was read and stopping -- --resume reads on")
+                            say(f"  the model server went away at {unit.id}; folding what "
+                                f"was read and stopping -- --resume reads on")
                             raise Stopped("server gone")
                         since += 1
-                        print(f"  ch {unit.chapter or '-':>3}  "
-                              f"{unit.section or unit.section_title[:12]:<8}"
-                              f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
-                              f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
-                              + (" (read again after a reset)" if row.retried else "")
-                              + (f"  coined {', '.join(fresh)}" if fresh else "")
-                              + (f"  {row.error}" if row.error else ""))
+                        say(f"  ch {unit.chapter or '-':>3}  "
+                            f"{unit.section or unit.section_title[:12]:<8}"
+                            f" {row.seconds:6.1f}s  {row.concepts:>3}c {row.relations:>3}r "
+                            f"{row.figures:>2}f" + (f" {row.images}img" if row.images else "")
+                            + (" (read again after a reset)" if row.retried else "")
+                            + (f"  coined {', '.join(fresh)}" if fresh else "")
+                            + (f"  {row.error}" if row.error else ""))
                         ahead = to_read[index + 1] if index + 1 < len(to_read) else None
                         if ahead is not None and _time_to_fold(
                                 since, ahead.chapter != unit.chapter,
@@ -218,9 +218,9 @@ def _read_run(args: Any) -> int:
                     texts = {unit.id: unit.text for unit in wanted}
                     judged = hygiene(args.out, judge=ingest._judge(
                         client, args.out, model=args.model, texts=texts), log=None)
-                    print(f"  tidied: {judged.said()}")
-                print(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
-                      f"into {args.out}")
+                    say(f"  tidied: {judged.said()}")
+                say(f"  {document.title}: {counts['nodes']} nodes, {counts['edges']} edges "
+                    f"into {args.out}")
                 if stopped:
                     break
     except Stopped:
@@ -228,15 +228,15 @@ def _read_run(args: Any) -> int:
 
     if words is not None:
         for line in words.lines():
-            print(line)
+            say(line)
     totals = progress.totals()
-    print(f"\n{totals['sections']} section(s) of {totals['sources']} source(s) in "
-          f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "
-          f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
-          + (f"; {totals['failed']} failed" if totals["failed"] else ""))
+    say(f"\n{totals['sections']} section(s) of {totals['sources']} source(s) in "
+        f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "
+        f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
+        + (f"; {totals['failed']} failed" if totals["failed"] else ""))
     if stopped:
-        print("stopped: what was read is folded into the store; "
-              f"the same command with --resume reads on ({args.out})")
+        say("stopped: what was read is folded into the store; "
+            f"the same command with --resume reads on ({args.out})")
     return code
 
 

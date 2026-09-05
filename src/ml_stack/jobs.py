@@ -20,6 +20,7 @@ from typing import Any
 
 from ml_stack.home import expand, state
 from ml_stack.lock import Busy
+from ml_stack.log import say, warn
 
 
 def home_dir() -> Path:
@@ -124,7 +125,7 @@ def record(kind: str, *, pid: int, argv: Sequence[str] = (), log: str = "", star
     return job
 
 
-def wait(kind: str, *, say: Callable[[str], None] = print, every: float = 60.0,
+def wait(kind: str, *, say: Callable[[str], None] = say, every: float = 60.0,
          home: Path | None = None) -> int:
     """Block until the ``kind`` job this machine records has ended, saying so every
     ``every`` seconds -- so the next command can follow it without a loop written by hand
@@ -144,7 +145,7 @@ def wait(kind: str, *, say: Callable[[str], None] = print, every: float = 60.0,
     return 0
 
 
-def stop(kind: str, *, say: Callable[[str], None] = print, wait: float = STOP_WAIT,
+def stop(kind: str, *, say: Callable[[str], None] = say, wait: float = STOP_WAIT,
          home: Path | None = None) -> int:
     """``SIGTERM`` to the recorded ``kind`` pid, and wait up to ``wait`` seconds for it to
     end, saying so every 30s while it has not. The record is kept while it is still ending
@@ -179,7 +180,7 @@ def stop(kind: str, *, say: Callable[[str], None] = print, wait: float = STOP_WA
     return 0
 
 
-def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
+def status(*, say: Callable[[str], None] = say, home: Path | None = None) -> int:
     """Every kind's record under ``home``: running or ended, since when, its log."""
     home = home or home_dir()
     records = sorted(home.glob("*.json")) if home.exists() else []
@@ -223,8 +224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.word == "status":
         return status(home=home)
     if not args.kind:
-        print(f"error: {args.word} needs a KIND -- `ml-stack-jobs status` names them",
-              file=sys.stderr)
+        warn(f"error: {args.word} needs a KIND -- `ml-stack-jobs status` names them")
         return 2
     if args.word == "wait":
         return wait(args.kind, home=home)

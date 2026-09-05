@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import ast
+
 from . import Finding
-from ._util import calls, exempt, parse, python_files, rel
+from ._util import calls, dotted, exempt, parse, python_files, rel
 
 NAME = "print-calls"
 OWNER = "ml_stack.log"
@@ -14,29 +16,8 @@ OWNS = ("src/ml_stack/log.py",)
 
 COMMANDS = {
     "src/ml_stack/bench/run.py",
-    "src/ml_stack/claude.py",
-    "src/ml_stack/cli.py",
-    "src/ml_stack/do.py",
-    "src/ml_stack/doctor.py",
-    "src/ml_stack/fleet/app.py",
-    "src/ml_stack/fleet/daemon.py",
-    "src/ml_stack/fleet/join.py",
-    "src/ml_stack/fleet/peers.py",
-    "src/ml_stack/graph/serve.py",
-    "src/ml_stack/graph/store_cli.py",
-    "src/ml_stack/harness.py",
-    "src/ml_stack/hub.py",
-    "src/ml_stack/ingest/__init__.py",
-    "src/ml_stack/jobs.py",
-    "src/ml_stack/mcp.py",
-    "src/ml_stack/redact/audit.py",
-    "src/ml_stack/serve/cli.py",
-    "src/ml_stack/setup.py",
-    "src/ml_stack/train/suite.py",
-    "src/ml_stack/train/run.py",
-    "src/ml_stack/train/tools.py",
-    "src/ml_stack/world/cli.py",
 }
+"""Command modules still printing straight to the console."""
 
 
 def describe() -> str:
@@ -53,6 +34,14 @@ def find(root: Path) -> list[Finding]:
         if tree is None:
             continue
         for node, name in calls(tree):
-            if name == "print":
+            if name == "print" and _to_the_console(node):
                 out.append(Finding(where, node.lineno, "print()"))
     return out
+
+
+def _to_the_console(node: ast.Call) -> bool:
+    """Whether this print writes to stdout or stderr rather than a stream it was handed."""
+    for keyword in node.keywords:
+        if keyword.arg == "file":
+            return dotted(keyword.value) in ("sys.stdout", "sys.stderr", "stdout", "stderr")
+    return True

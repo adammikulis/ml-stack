@@ -17,6 +17,7 @@ from dataclasses import replace
 
 import pytest
 from conftest import json_reply
+from ml_stack import home
 from ml_stack.serve.backend import ServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.manager import EscalationRefused, ServerManager
 
@@ -99,9 +100,8 @@ def fake_server(*, slots: list[dict], model: str = MODEL, n_ctx: int = 32768,
 
 
 def write_fit(model: str, *, per_token: int, per_seq: int = 0, room: int = 10**12) -> None:
-    """One measured record, at the path the autouse fixture already pointed
-    ``$MLSTACK_FIT_FILE`` at."""
-    path = os.environ["MLSTACK_FIT_FILE"]
+    """One measured record, under the state root the autouse fixture points at."""
+    path = home.state("fit.json")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     row = {"model": model, "weights": 0, "room": room, "per_token": per_token,
           "per_seq": per_seq, "compute": 0, "cache_type": "f16"}

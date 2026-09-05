@@ -34,6 +34,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from ml_stack.log import say, warn
 
 __all__ = ["CHAT", "Example", "SYSTEM", "examples_from", "examples_in", "from_bench",
            "load_tools", "main", "schemas_of", "split", "synthesise", "traced_rows",
@@ -764,36 +765,36 @@ def _from_bench(argv: list[str]) -> int:
     kept = [r for r in bench.runs(store) if not a.label or a.label in str(r.get("label") or "")]
     rows = from_bench(kept, model=a.model, min_f1=a.min_f1, system=a.system)
     could = would_yield(kept, model=a.model, min_f1=a.min_f1)
-    print(f"from-bench: {len(kept)} run(s) in {store}, "
-          f"{could['questions']} question(s) at or above F1 {a.min_f1:g}"
-          + (f" for {a.model!r}" if a.model else "")
-          + f", {could['traced']} of them traced")
+    say(f"from-bench: {len(kept)} run(s) in {store}, "
+        f"{could['questions']} question(s) at or above F1 {a.min_f1:g}"
+        + (f" for {a.model!r}" if a.model else "")
+        + f", {could['traced']} of them traced")
     if not rows:
-        print(f"from-bench: 0 examples. Those questions made {could['turns']} model turns "
-              f"between them, which is what a traced run of the same questions would have "
-              f"yielded (one example per turn). Trace the next run: a run of "
-              f"{bench.SHORT} questions or fewer traces by default, and "
-              f"{bench.TRACE_ENV}=1 traces one of any size.")
+        say(f"from-bench: 0 examples. Those questions made {could['turns']} model turns "
+            f"between them, which is what a traced run of the same questions would have "
+            f"yielded (one example per turn). Trace the next run: a run of "
+            f"{bench.SHORT} questions or fewer traces by default, and "
+            f"{bench.TRACE_ENV}=1 traces one of any size.")
         return 0
     train, holdout = split(rows)
     counts = _counts(rows)
-    print(f"from-bench: {len(rows)} examples from {could['traced']} traced question(s) "
-          f"({len(train)} train, {len(holdout)} held out): "
-          + ", ".join(f"{k} {v}" for k, v in counts.items()))
+    say(f"from-bench: {len(rows)} examples from {could['traced']} traced question(s) "
+        f"({len(train)} train, {len(holdout)} held out): "
+        + ", ".join(f"{k} {v}" for k, v in counts.items()))
     out = Path(a.out).expanduser()
     if a.dry_run:
-        print(f"from-bench: would write {out}")
+        say(f"from-bench: would write {out}")
         return 0
     if out.suffix == ".jsonl":
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                        encoding="utf-8")
-        print(f"from-bench: wrote {out}")
+        say(f"from-bench: wrote {out}")
     else:
         summary = write_dataset(out, rows, base=a.base, source=str(store), model=a.model,
                                 min_f1=a.min_f1, traced_questions=could["traced"])
-        print(f"from-bench: wrote {out}/train.jsonl, holdout.jsonl, manifest.json "
-              f"({summary['train']} + {summary['holdout']})")
+        say(f"from-bench: wrote {out}/train.jsonl, holdout.jsonl, manifest.json "
+            f"({summary['train']} + {summary['holdout']})")
     return 0
 
 
@@ -805,7 +806,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return _from_bench(argv[1:])
         except (ValueError, FileNotFoundError, KeyError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            warn(f"error: {exc}")
             return 2
 
     ap = argparse.ArgumentParser(
@@ -849,10 +850,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return _run(a)
     except (ValueError, FileNotFoundError, KeyError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
     except RuntimeError as exc:                       # ToolNotFound, ConversionError
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
 
 
@@ -868,7 +869,7 @@ def _run(a: Any) -> int:
     if "synth" in stages:
         if (data / "train.jsonl").exists() and not a.dry_run:
             manifest = json.loads((data / "manifest.json").read_text())
-            print(f"synth: {manifest['rows']} rows already in {data}, skipping")
+            say(f"synth: {manifest['rows']} rows already in {data}, skipping")
         else:
             tools = schemas_of(load_tools(a.tools))
             prompts = load_tools(a.prompts) if a.prompts else None
@@ -876,17 +877,17 @@ def _run(a: Any) -> int:
             rows = synthesise(tools, prompts=prompts, per_tool=a.per_tool, seed=a.seed, ask=ask)
             train, holdout = split(rows)
             counts = _counts(rows)
-            print(f"synth: {len(rows)} conversations over {len(tools)} tools "
-                  f"({len(train)} train, {len(holdout)} held out): "
-                  + ", ".join(f"{k} {v}" for k, v in counts.items()))
+            say(f"synth: {len(rows)} conversations over {len(tools)} tools "
+                f"({len(train)} train, {len(holdout)} held out): "
+                + ", ".join(f"{k} {v}" for k, v in counts.items()))
             manifest = {"rows": len(rows), "train": len(train), "holdout": len(holdout),
                         "per_tool": counts}
             if not a.dry_run:
                 manifest = write_dataset(data, rows, base=a.base, tools=a.tools,
                                          prompts=a.prompts, seed=a.seed, asked=bool(a.ask))
-                print(f"synth: wrote {data}/train.jsonl, holdout.jsonl, manifest.json")
+                say(f"synth: wrote {data}/train.jsonl, holdout.jsonl, manifest.json")
             elif a.ask:
-                print(f"synth: would also ask {a.ask} for {a.per_tool} more per tool")
+                say(f"synth: would also ask {a.ask} for {a.per_tool} more per tool")
         summary["synth"] = manifest
 
     if "train" in stages:
@@ -899,22 +900,22 @@ def _run(a: Any) -> int:
                 "batch_size": config["batch_size"], "learning_rate": config["learning_rate"],
                 "device": str(device_for()), "resumed_from": done}
         if done >= config["steps"]:
-            print(f"train: {run_dir} already at step {done}, skipping")
+            say(f"train: {run_dir} already at step {done}, skipping")
         elif a.dry_run:
-            print(f"train: would fine-tune {a.base} for {config['steps']} steps of "
-                  f"{config['batch_size']} on {plan['device']}, context {config['context']}, "
-                  f"lr {config['learning_rate']}, into {run_dir}"
-                  + (f" (resuming from {done})" if done else ""))
+            say(f"train: would fine-tune {a.base} for {config['steps']} steps of "
+                f"{config['batch_size']} on {plan['device']}, context {config['context']}, "
+                f"lr {config['learning_rate']}, into {run_dir}"
+                + (f" (resuming from {done})" if done else ""))
         else:
             from ml_stack.train.run import run
 
             if not (data / "train.jsonl").exists():
                 raise FileNotFoundError(f"no {data}/train.jsonl; run the synth stage first")
-            print(f"train: {a.base} for {config['steps']} steps on {plan['device']}"
-                  + (f", resuming from {done}" if done else ""))
+            say(f"train: {a.base} for {config['steps']} steps on {plan['device']}"
+                + (f", resuming from {done}" if done else ""))
             plan.update(run("tool-calls", config, data, run_dir))
-            print(f"train: final loss {plan['final_loss']:.3f}, best held-out "
-                  f"{plan['best_metric']}, {plan['seconds']}s")
+            say(f"train: final loss {plan['final_loss']:.3f}, best held-out "
+                f"{plan['best_metric']}, {plan['seconds']}s")
         summary["train"] = plan
 
     if "export" in stages:
@@ -925,25 +926,25 @@ def _run(a: Any) -> int:
         plan = {"quant": a.quant, "converter": str(converter or ""),
                 "quantize": str(quantizer or "")}
         if existing:
-            print(f"export: {existing[0]} already exists, skipping")
+            say(f"export: {existing[0]} already exists, skipping")
             plan["gguf"] = str(existing[0])
         elif a.dry_run:
-            print(f"export: would write {out / 'model'} in Hugging Face layout, then "
-                  f"{a.quant} GGUF via " + (str(converter) if converter else
+            say(f"export: would write {out / 'model'} in Hugging Face layout, then "
+                f"{a.quant} GGUF via " + (str(converter) if converter else
                                             "convert_hf_to_gguf.py, which is NOT installed"))
         else:
             from ml_stack.gguf import export
             from ml_stack.train.recipes.tool_calls import save_pretrained
 
             saved = save_pretrained(run_dir, a.base, out / "model")
-            print(f"export: wrote {saved}")
+            say(f"export: wrote {saved}")
             result = export(saved, out, name=f"{Path(a.base).name}-tools", quant=a.quant,
                             fix_space_prefix=None)
-            print(f"export: {result.path} ({result.size_mb:.0f} MB)")
+            say(f"export: {result.path} ({result.size_mb:.0f} MB)")
             plan["gguf"] = str(result.path)
         summary["export"] = plan
 
-    print(json.dumps(summary, indent=2))
+    say(json.dumps(summary, indent=2))
     return 0
 
 

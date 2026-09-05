@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import geo
+from ml_stack.log import say
 
 __all__ = ["EARTH_KM", "geocode", "kilometres", "places_in", "points"]
 
@@ -30,7 +31,7 @@ def places_in(graph: Mapping[str, Any]) -> dict[str, str]:
 
 def geocode(graph: Mapping[str, Any], cache_path: str | Path, *, near: int = 0,
             lookup: Callable[..., dict[str, Any] | None] | None = None,
-            log: Callable[[str], None] = print) -> dict[str, Any]:
+            log: Callable[[str], None] = say) -> dict[str, Any]:
     """The graph with ``lat`` and ``lon`` on every node whose place was found.
 
     Each distinct place goes through :func:`ml_stack.geo.geocode_all`, so the JSON cache at

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from ml_stack import home
+from ml_stack.log import say
 from ml_stack.units import human_bytes
 
 __all__ = ["BEHAVIOURS", "CHECKOUT", "HOOKS", "SPEECH_PROTOCOLS", "STALE_BUILD_DAYS",
@@ -784,13 +785,13 @@ def ask(findings: list[Finding], *, yes: bool = False) -> int:
     worst = 0
     for one in findings:
         mark = "ok  " if one.good else "  ! "
-        print(f"{mark}{one.name}: {one.said}")
+        say(f"{mark}{one.name}: {one.said}")
         if one.note:
-            print(f"      {one.note}")
+            say(f"      {one.note}")
         if one.good or not one.fix:
             continue
         worst = 1
-        print(f"      fix: {one.fix}")
+        say(f"      fix: {one.fix}")
         if not yes and not sys.stdin.isatty():
             continue
         answer = "y" if yes else input("      run it now? [y/N] ").strip().lower()
@@ -804,15 +805,15 @@ def ask(findings: list[Finding], *, yes: bool = False) -> int:
 
 def explain() -> None:
     """Print what the stack does without being asked."""
-    print("\nwhat happens on its own\n")
+    say("\nwhat happens on its own\n")
     for one in BEHAVIOURS:
-        print(f"  {one.name}")
-        print(f"      {one.does}")
+        say(f"  {one.name}")
+        say(f"      {one.does}")
         if one.why:
-            print(f"      why it matters: {one.why}")
+            say(f"      why it matters: {one.why}")
         if one.setting:
-            print(f"      change it: {one.setting}")
-        print()
+            say(f"      change it: {one.setting}")
+        say()
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -838,7 +839,7 @@ def main(argv: list[str] | None = None) -> int:
                     help="run every offered fix without asking. A fix that needs root will "
                          "still prompt for the password itself")
     args = ap.parse_args(argv)
-    print("ml-stack: what this machine can do\n")
+    say("ml-stack: what this machine can do\n")
     findings = look()
     if args.checkouts:
         findings = findings + look_checkouts(
@@ -867,7 +868,7 @@ def doctor_main(argv: list[str] | None = None) -> int:
     ap.add_argument("--yes", action="store_true",
                     help="run every offered fix without asking")
     args = ap.parse_args(argv)
-    print("ml-stack: the repositories and the working state\n")
+    say("ml-stack: the repositories and the working state\n")
     findings = look_checkouts(
         repositories(args.repo) if args.repo else None,
         bench_home=Path(args.bench_home).expanduser() if args.bench_home else None)

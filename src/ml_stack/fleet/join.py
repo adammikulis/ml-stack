@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, request_bytes
+from ml_stack.log import say, warn
 
 from .discovery import (
     DEFAULT_CLUSTER,
@@ -115,7 +116,7 @@ def _server_here() -> str:
 
 
 def checks(root: Path | str, *, ensure: Callable[[Path], Path] | None = None,
-           say: Callable[[str], None] = print) -> list[Check]:
+           say: Callable[[str], None] = say) -> list[Check]:
     """The facts serving depends on, fixed where fixing is a download and not a decision.
 
     The memory a model may use and the build's architectures come from `setup.look` and are
@@ -384,7 +385,7 @@ def join_machine(*, name: str = "", passphrase: str = "", group: str = DEFAULT_C
                  root: Path | str = DEFAULT_ROOT,
                  cluster_key_path: Path | str | None = None,
                  timeout_s: float = 2.0, wait_s: float = 20.0,
-                 say: Callable[[str], None] = print,
+                 say: Callable[[str], None] = say,
                  start: Callable[[int, Path, str], int] = start_daemon,
                  enrol: Callable[[str, str], None] | None = None,
                  ensure: Callable[[Path], Path] | None = None,
@@ -482,7 +483,7 @@ def _persist(persist_with: Callable[..., Any] | None, say: Callable[[str], None]
 
 def leave_machine(*, group: str = "", root: Path | str = DEFAULT_ROOT,
                   cluster_key_path: Path | str | None = None, stop: bool = True,
-                  say: Callable[[str], None] = print,
+                  say: Callable[[str], None] = say,
                   unpersist: Callable[[], list[Path]] | None = None) -> dict[str, Any]:
     """Undo ``join``: drop the cluster(s), the logon service, and the daemon it started."""
     before = memberships(cluster_key_path)
@@ -559,7 +560,7 @@ def _passphrase_from(args: argparse.Namespace, key: Path | str | None) -> str:
     if sys.stdin.isatty():
         from .peers import _prompt_passphrase
 
-        print("This machine is in no cluster yet. Type the passphrase every machine shares.")
+        say("This machine is in no cluster yet. Type the passphrase every machine shares.")
         return _prompt_passphrase(confirm=True)
     words = sys.stdin.readline().strip()
     return words
@@ -576,39 +577,39 @@ def cmd_join(args: argparse.Namespace) -> int:
                           root=args.root,
                           cluster_key_path=args.cluster_key, timeout_s=args.timeout)
     if args.json:
-        print(json.dumps(joined.public(), indent=1))
+        say(json.dumps(joined.public(), indent=1))
         return 0
-    print()
-    print(f"this machine is '{joined.name}' on http://127.0.0.1:{joined.port}"
-          + (", starting at logon" if joined.persisted else ""))
+    say()
+    say(f"this machine is '{joined.name}' on http://127.0.0.1:{joined.port}"
+        + (", starting at logon" if joined.persisted else ""))
     if joined.tracking:
-        print(f"  following {joined.tracking}: it updates itself when nothing is running")
-    print("  ml-stack-fleet status   -- who is in the fleet, what each serves")
-    print("  ml-stack-fleet leave    -- undo this")
+        say(f"  following {joined.tracking}: it updates itself when nothing is running")
+    say("  ml-stack-fleet status   -- who is in the fleet, what each serves")
+    say("  ml-stack-fleet leave    -- undo this")
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     if not memberships(args.cluster_key):
-        print(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-              "run 'ml-stack-fleet join'", file=sys.stderr)
+        warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
+             "run 'ml-stack-fleet join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
                  self_name=str((me or {}).get("name") or ""))
     if args.json:
-        print(json.dumps(rows, indent=1, default=str))
+        say(json.dumps(rows, indent=1, default=str))
         return 0 if rows else 1
-    print(table(rows))
+    say(table(rows))
     if me is None:
-        print(f"\nthis machine's daemon is not running on port {args.port}; "
-              "'ml-stack-fleet join' starts it")
+        say(f"\nthis machine's daemon is not running on port {args.port}; "
+            "'ml-stack-fleet join' starts it")
     return 0 if rows else 1
 
 
 def apply_plan(placement: Any, rows: Sequence[dict[str, Any]], *,
                cluster_key_path: Path | str | None = None,
-               say: Callable[[str], None] = print) -> list[dict[str, Any]]:
+               say: Callable[[str], None] = say) -> list[dict[str, Any]]:
     """``POST /serve`` on each placed peer, and what each answered.
 
     Each answer is ``{"peer", "model", "seats", "status", "served" | "error", "serving"}``;
@@ -683,8 +684,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
     from .plan import place, table as plan_table
 
     if not memberships(args.cluster_key):
-        print(f"in no cluster (no key at {key_path(args.cluster_key)}); "
-              "run 'ml-stack-fleet join'", file=sys.stderr)
+        warn(f"in no cluster (no key at {key_path(args.cluster_key)}); "
+             "run 'ml-stack-fleet join'")
         return 1
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
@@ -697,14 +698,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
         applied = apply_plan(placement, rows, cluster_key_path=args.cluster_key,
                              say=(lambda line: None) if args.json else print)
     if args.json:
-        print(json.dumps({**placement.as_dict(), "applied": applied}, indent=1))
+        say(json.dumps({**placement.as_dict(), "applied": applied}, indent=1))
     else:
         if not rows:
-            print(table(rows))
-        print(plan_table(placement))
+            say(table(rows))
+        say(plan_table(placement))
         if applied:
-            print()
-            print(serving_table(applied))
+            say()
+            say(serving_table(applied))
     return 0 if placement.rows and not placement.unplaced else 1
 
 
@@ -786,7 +787,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return fn(args)
     except (JoinError, DiscoveryError, OSError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
+        warn(f"error: {exc}")
         return 2
 
 

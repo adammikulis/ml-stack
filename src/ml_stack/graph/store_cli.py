@@ -23,6 +23,7 @@ from pathlib import Path
 
 from ml_stack import home
 from ml_stack.graph.store import GraphStore, StoreMismatch, StoreNeedsUpgrade
+from ml_stack.log import say, warn
 
 
 def _check(path: Path, fix: bool) -> int:
@@ -30,23 +31,23 @@ def _check(path: Path, fix: bool) -> int:
         findings = store.check()
         if not fix or not findings:
             for line in findings:
-                print(line)
-            print(f"{path}: {'clean' if not findings else f'{len(findings)} findings'}")
+                say(line)
+            say(f"{path}: {'clean' if not findings else f'{len(findings)} findings'}")
             return 1 if findings else 0
         for line in findings:
-            print(line)
+            say(line)
         try:
             rewrote = store.repair()
         except StoreMismatch as why:
-            print(f"rewrite refused: {why}")
+            say(f"rewrite refused: {why}")
             rewrote = []
         for line in rewrote:
-            print(line)
+            say(line)
         left = store.check()
         for line in left:
-            print(f"still: {line}")
-        print(f"{path}: rewrote {len(rewrote)}, "
-              f"{'clean' if not left else f'{len(left)} findings remain'}")
+            say(f"still: {line}")
+        say(f"{path}: rewrote {len(rewrote)}, "
+            f"{'clean' if not left else f'{len(left)} findings remain'}")
         return 1 if left else 0
 
 
@@ -59,8 +60,8 @@ def _docs(path: Path) -> int:
             by_key = len((keyed[0]["value"] if keyed else "") or "")
             by_scan = len(row["value"] or "")
             note = "" if by_scan == by_key else f"  (scan reads {by_scan})"
-            print(f"{row['key']}\t{by_key} chars{note}")
-        print(f"{len(rows)} docs")
+            say(f"{row['key']}\t{by_key} chars{note}")
+        say(f"{len(rows)} docs")
     return 0
 
 
@@ -69,12 +70,12 @@ def _doc(path: Path, key: str, drop: bool) -> int:
     with GraphStore(path, read_only=not drop) as store:
         held = store.get_doc(key, missing)
         if held is missing:
-            print(f"{path}: no doc {key!r}", file=sys.stderr)
+            warn(f"{path}: no doc {key!r}")
             return 1
-        print(json.dumps(held, indent=2, ensure_ascii=False))
+        say(json.dumps(held, indent=2, ensure_ascii=False))
         if drop:
             store.delete_doc(key)
-            print(f"dropped doc {key}")
+            say(f"dropped doc {key}")
     return 0
 
 
@@ -84,12 +85,12 @@ def _embed(path: Path, hops: int, model: str) -> int:
     with GraphStore(path, read_only=False) as store:
         held = store.embeddings(model=model)
         if not held:
-            print(f"{path}: no vectors to spread", file=sys.stderr)
+            warn(f"{path}: no vectors to spread")
             return 1
         spread = smooth(store.read(), held, hops=hops)
         for node_id, vector in spread.items():
             store.set_embedding(node_id, vector, model=model)
-    print(f"{len(spread)} vector(s) written over {len(held)} read, {hops} hop(s)")
+    say(f"{len(spread)} vector(s) written over {len(held)} read, {hops} hop(s)")
     return 0
 
 
@@ -97,15 +98,14 @@ def _gold(gold: str, base_url: str, fail_under: float) -> int:
     from ml_stack.graph.tidy import judge_gold, load_gold
 
     if not base_url:
-        print("--gold needs --base-url: a model already serving to answer the pairs",
-              file=sys.stderr)
+        warn("--gold needs --base-url: a model already serving to answer the pairs")
         return 2
     from ml_stack.client import Client
 
     scored = judge_gold(Client(base_url, n_predict=1024), load_gold(gold or None), log=print)
     if fail_under and scored.accuracy < fail_under:
-        print(f"below the bar: {scored.accuracy:.0%} of {scored.total} against "
-              f"{fail_under:.0%}", file=sys.stderr)
+        warn(f"below the bar: {scored.accuracy:.0%} of {scored.total} against "
+             f"{fail_under:.0%}")
         return 1
     return 0
 
@@ -165,7 +165,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("the store directory is needed")
     path = home.expand(args.path)
     if not path.exists():
-        print(f"{path}: no store there", file=sys.stderr)
+        warn(f"{path}: no store there")
         return 2
     try:
         if args.command == "check":
@@ -187,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0 if report.sound else 1
         return _docs(path)
     except StoreNeedsUpgrade as why:
-        print(str(why), file=sys.stderr)
+        warn(str(why))
         return 2
 
 

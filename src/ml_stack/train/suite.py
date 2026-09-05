@@ -21,6 +21,7 @@ from typing import Any
 from ml_stack import home
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.record import Measured, Spread
+from ml_stack.log import say, warn
 from ml_stack.train.backend import detect_backend, set_seeds
 
 __all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "lock_path",
@@ -283,24 +284,23 @@ def parser():
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    import sys
 
     args = parser().parse_args(argv)
     _imported(args.imports)
     if args.command == "list":
         found = known()
         if not found:
-            print("no suite is registered; name a module with --import", file=sys.stderr)
+            warn("no suite is registered; name a module with --import")
             return 1
         width = max(len(name) for name in found)
         for name, about in found.items():
-            print(f"{name:{width}}  {about}")
+            say(f"{name:{width}}  {about}")
         return 0
 
     settings: dict[str, Any] = {}
     for pair in args.settings:
         if "=" not in pair:
-            print(f"--set takes k=v, not {pair!r}", file=sys.stderr)
+            warn(f"--set takes k=v, not {pair!r}")
             return 2
         key, told = pair.split("=", 1)
         settings[key.strip()] = _value(told)
@@ -308,9 +308,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         out = run(args.name, backend=args.backend, seeds=tuple(args.seed) or (0, 1, 2),
                   out_dir=args.out or None, wait=not args.no_wait, **settings)
     except (KeyError, ValueError) as why:
-        print(f"error: {why}", file=sys.stderr)
+        warn(f"error: {why}")
         return 2
-    print(said(out))
+    say(said(out))
     return 1 if out.failures else 0
 
 

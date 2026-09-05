@@ -9,6 +9,7 @@ from typing import Any
 
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _read_json, _write_json
+from ml_stack.log import say
 
 __all__ = ["NEW_NAME", "NEW_PREFIX", "OLD_NAME", "OLD_PREFIX", "migrate", "pending",
            "reads_beside"]
@@ -57,7 +58,7 @@ def pending(out: str | Path) -> dict[str, int]:
     return found
 
 
-def migrate(out: str | Path, *, say: Callable[[str], None] = print) -> int:
+def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest migrate --out STORE``: ``book:`` node ids into ``source:``.
 
     The nodes, the ``read_from`` edges that name them, every unit document's provenance,

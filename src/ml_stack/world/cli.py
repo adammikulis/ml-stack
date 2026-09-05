@@ -28,6 +28,7 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.files import write_json
+from ml_stack.log import say, warn
 from ml_stack.world import Message
 from ml_stack.world.check import default_fixtures
 from ml_stack.world.organisation import KINDS, SIZES, load, make, summary
@@ -52,12 +53,12 @@ def _make(args: argparse.Namespace) -> int:
     made = summary(world)
     made["out"] = str(out)
     if args.json:
-        print(json.dumps(made, ensure_ascii=False))
+        say(json.dumps(made, ensure_ascii=False))
     else:
-        print(f"{made['kind']} {made['size']} (seed {made['seed']}): {made['people']} people, "
-              f"{made['units']} units, {made['nodes']} nodes, {made['edges']} edges -> {out}")
+        say(f"{made['kind']} {made['size']} (seed {made['seed']}): {made['people']} people, "
+            f"{made['units']} units, {made['nodes']} nodes, {made['edges']} edges -> {out}")
         for rel, count in made["edges_by_relation"].items():
-            print(f"  {count:>6}  {rel}")
+            say(f"  {count:>6}  {rel}")
     return 0
 
 
@@ -67,12 +68,12 @@ def _questions(args: argparse.Namespace) -> int:
     try:
         asked = questions(world, args.n, kinds=kinds or None)
     except ValueError as e:
-        print(str(e), file=sys.stderr)
+        warn(str(e))
         return 2
     lines = "".join(json.dumps(q, ensure_ascii=False) + "\n" for q in asked)
     if args.out:
         Path(args.out).expanduser().write_text(lines, encoding="utf-8")
-        print(f"{len(asked)} questions -> {args.out}", file=sys.stderr)
+        warn(f"{len(asked)} questions -> {args.out}")
     else:
         sys.stdout.write(lines)
     return 0
@@ -83,7 +84,7 @@ def _simulate(args: argparse.Namespace) -> int:
 
     counts = run(args.world, args.out, days=args.days, mix=args.mix,
                  model_url=args.model_url or None, seed=args.seed)
-    print(json.dumps(counts, ensure_ascii=False))
+    say(json.dumps(counts, ensure_ascii=False))
     return 0
 
 
@@ -130,7 +131,7 @@ def _emit(args: argparse.Namespace) -> int:
         out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                        encoding="utf-8")
         where = out
-    print(f"{len(messages)} messages -> {where}", file=sys.stderr)
+    warn(f"{len(messages)} messages -> {where}")
     return 0
 
 
@@ -141,9 +142,9 @@ def _check(args: argparse.Namespace) -> int:
         consistent = check.consistency(args.corpus, args.truth, domain=args.domain)
         private = check.privacy(args.truth, fixtures=args.fixtures, allow=args.allow)
     except (FileNotFoundError, ValueError) as e:
-        print(str(e), file=sys.stderr)
+        warn(str(e))
         return 2
-    print(check.render(consistent, private))
+    say(check.render(consistent, private))
     return 0 if consistent.ok and private.ok else 1
 
 

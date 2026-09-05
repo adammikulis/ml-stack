@@ -19,6 +19,7 @@ from typing import Any
 
 from ml_stack.http import request_json
 from ml_stack.files import read_json, write_json
+from ml_stack.log import say
 
 __all__ = ["CACHE_VERSION", "LANGUAGE", "SHORTHAND", "URL", "USER_AGENT", "best", "expand",
            "geocode_all", "lookup"]
@@ -112,7 +113,7 @@ def lookup(place: str, *, user_agent: str = USER_AGENT, url: str = URL, timeout:
 
 
 def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_AGENT,
-                url: str = URL, sleep: float = 1.1, log: Callable[[str], None] = print,
+                url: str = URL, sleep: float = 1.1, log: Callable[[str], None] = say,
                 shorthand: Mapping[str, str] | None = None,
                 ask: Callable[..., dict[str, Any] | None] = lookup) -> dict[str, Any]:
     """Every place in ``places``, from the cache at ``cache_path`` or Nominatim.

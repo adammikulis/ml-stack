@@ -27,6 +27,7 @@ from typing import Any, TextIO
 
 from ml_stack import mcp
 from ml_stack.client import ollama
+from ml_stack.log import say
 
 __all__ = ["ROUNDS", "SYSTEM", "Outcome", "Person", "bench_cli", "client_for",
            "command_tools", "main", "models_on_disk", "ollama_models", "own_tools", "run",
@@ -666,15 +667,15 @@ def client_for(args: argparse.Namespace) -> Any:
     up = already_up(found, args.port)
     if up is not None:
         # the weights are up already, in whatever shape: use them rather than reload them
-        print(f"using the server already up on {args.port}: {Path(found).name}, "
-              f"{up.get('slots') or '?'} slot(s)")
+        say(f"using the server already up on {args.port}: {Path(found).name}, "
+            f"{up.get('slots') or '?'} slot(s)")
         return Client(str(up["base_url"]), n_predict=args.n_predict, timeout=args.timeout)
     measured = profile_for(found)
     if measured is not None:
         run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
                              timeout=args.timeout)
-        print(f"serving alone, one seat of {run.shape.seat_context} tokens "
-              f"({run.shape.note}): {said(measured)}")
+        say(f"serving alone, one seat of {run.shape.seat_context} tokens "
+            f"({run.shape.note}): {said(measured)}")
     else:
         run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
                               reasoning_budget=0))

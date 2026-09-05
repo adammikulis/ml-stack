@@ -40,6 +40,7 @@ from pathlib import Path
 from typing import Any, TextIO
 
 from ml_stack.home import state
+from ml_stack.log import say
 
 __all__ = ["mcp_home", "PROTOCOL", "Tool", "TOOLS", "build_sdk_server", "detached",
            "handle", "main", "schema_of", "serve", "sdk_available"]
@@ -507,8 +508,8 @@ def main(argv: list[str] | None = None) -> int:
             required = tool.schema().get("required", [])
             props = tool.schema()["properties"]
             shown = ", ".join(f"{k}{'' if k in required else '?'}" for k in props)
-            print(f"{tool.name:<14} ({shown})\n    {tool.description}")
-        print(f"\ntransport: {'mcp SDK' if sdk_available() and not args.builtin else 'built-in'}")
+            say(f"{tool.name:<14} ({shown})\n    {tool.description}")
+        say(f"\ntransport: {'mcp SDK' if sdk_available() and not args.builtin else 'built-in'}")
         return 0
     if sdk_available() and not args.builtin:
         build_sdk_server().run("stdio")

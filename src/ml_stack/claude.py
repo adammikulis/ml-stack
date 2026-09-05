@@ -35,6 +35,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from ml_stack.log import say
 
 __all__ = ["choices", "environment", "launch", "main", "pick", "settings"]
 
@@ -123,7 +124,7 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = print,
+def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
            run_claude: Callable[..., int] | None = None) -> int:
     """Lease the model, run ``claude`` inside the lease, return its exit code."""
     words = list(sys.argv[1:] if argv is None else argv)
@@ -254,7 +255,7 @@ def choices() -> list[dict]:
     return out
 
 
-def pick(options: list[dict], *, say: Callable[[str], None] = print,
+def pick(options: list[dict], *, say: Callable[[str], None] = say,
          ask: Callable[[str], str] | None = None) -> dict | None:
     """One of ``options``, chosen by the person. None when they choose nothing."""
     if not options:

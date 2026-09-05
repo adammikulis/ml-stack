@@ -37,6 +37,7 @@ from typing import Any
 
 from ml_stack.contracts import load as _load
 from ml_stack.ingest.reads import Read, _keep_reads, _slug
+from ml_stack.log import say
 from ml_stack.sources.pdf import Unit
 
 __all__ = ["CONFIDENCE", "KINDS", "RELATIONS", "VAGUE", "Imported", "bring", "imported",
@@ -599,7 +600,7 @@ def _core() -> frozenset[str]:
 
 def bring(out: str | Path, paths: Sequence[str], *, slug: str = "", confidence: str = "medium",
           provisional: bool = True, core_only: bool = False, keep_vague: bool = False,
-          dry_run: bool = False, say: Callable[[str], None] = print) -> int:
+          dry_run: bool = False, say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest import NODES.csv EDGES.csv --out STORE``: a pair another extractor
     wrote, into this store as one source.
 

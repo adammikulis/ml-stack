@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from ml_stack.log import say
 from ml_stack.testing.parity import assert_forward_parity, inputs
 from ml_stack.train.backend.registry import BackendUnavailable, get_backend
 
@@ -181,7 +182,7 @@ def table(results: list[OpResult], *, first: str = "torch", second: str = "mlx")
     return "\n".join(lines)
 
 
-def report(*, say: Callable[[str], None] = print, first: str = "torch",
+def report(*, say: Callable[[str], None] = say, first: str = "torch",
            second: str = "mlx") -> int:
     """Print the table for two named backends. 0 if all agree, 1 if any do not, 2 if one
     of the two cannot be built here."""

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.ingest.reads import Read, _read_json, _write_json
+from ml_stack.log import say
 
 __all__ = ["GIVE_UP", "Progress", "status"]
 
@@ -104,7 +105,7 @@ class Progress:
                 "started": self.state.get("started", "")}
 
 
-def status(out: str | Path, *, say: Callable[[str], None] = print) -> int:
+def status(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     """``ml-stack-ingest status``: sections done, what failed, what is folded, and how long left.
 
     The estimate is the units still to read at the rate this store has actually measured,

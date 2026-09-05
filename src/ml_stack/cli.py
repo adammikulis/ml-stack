@@ -16,6 +16,7 @@ import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Callable
+from ml_stack.log import say, warn
 
 __all__ = ["PREFIX", "commands", "load", "main"]
 
@@ -82,7 +83,7 @@ def _unknown(words: list[str], table: dict[str, str]) -> int:
     near = difflib.get_close_matches(asked, spoken, n=5, cutoff=0.4)
     near = near or [s for s in sorted(spoken) if s.startswith(words[0][:2])]
     hint = ", ".join(near) if near else "ml-stack --list shows them all"
-    print(f"ml-stack: '{asked}' is not a command; nearest: {hint}", file=sys.stderr)
+    warn(f"ml-stack: '{asked}' is not a command; nearest: {hint}")
     return 2
 
 
@@ -123,7 +124,7 @@ def help_main(argv: list[str] | None = None) -> int:
     ap = _help_parser(table)
     words = list(ap.parse_args(argv).words)
     if not words:
-        print(ap.format_help())
+        say(ap.format_help())
         return 0
     for k in range(len(words), 0, -1):
         word = "-".join(words[:k])
@@ -149,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
 
     known, rest = _parser(table).parse_known_args(argv)
     if known.list:
-        print(listing(table))
+        say(listing(table))
         return 0
     from .fleet.launch import main as app
     return app(rest)
