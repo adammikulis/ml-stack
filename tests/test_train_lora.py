@@ -284,6 +284,30 @@ class TestTheTools:
 
         assert lora_mod.converter() == (mine / "convert_hf_to_gguf.py").resolve()
 
+    def test_the_managed_builds_own_quantizer_is_preferred(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("LLAMA_CPP_ROOT", raising=False)
+        monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
+        managed = tmp_path / "managed" / "src"
+        managed.mkdir(parents=True)
+        (managed.parent / "current").mkdir()
+        (managed.parent / "current" / "llama-quantize").write_text("# the managed build's own\n")
+        monkeypatch.setattr(lora_mod, "managed_source", lambda: managed)
+
+        assert lora_mod.quantizer() == (managed.parent / "current" / "llama-quantize").resolve()
+
+    def test_an_explicit_checkout_still_wins_for_the_quantizer(self, tmp_path, monkeypatch):
+        managed = tmp_path / "managed" / "src"
+        managed.mkdir(parents=True)
+        (managed.parent / "current").mkdir()
+        (managed.parent / "current" / "llama-quantize").write_text("# the managed build's own\n")
+        monkeypatch.setattr(lora_mod, "managed_source", lambda: managed)
+        mine = tmp_path / "mine"
+        (mine / "build" / "bin").mkdir(parents=True)
+        (mine / "build" / "bin" / "llama-quantize").write_text("# one somebody asked for\n")
+        monkeypatch.setenv("LLAMA_CPP_ROOT", str(mine))
+
+        assert lora_mod.quantizer() == (mine / "build" / "bin" / "llama-quantize").resolve()
+
 
 class TestEndToEnd:
     def test_the_command_trains_merges_exports_and_records_what_it_trained_on(

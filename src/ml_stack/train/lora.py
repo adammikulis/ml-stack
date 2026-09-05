@@ -477,13 +477,22 @@ def converter(explicit: Path | str | None = None) -> Path:
 
 
 def quantizer(explicit: Path | str | None = None) -> Path:
-    """``llama-quantize``, the managed build's own before anything on PATH."""
-    from ml_stack.gguf.tools import require_quantize
+    """``llama-quantize``: an explicit path and ``$LLAMA_CPP_ROOT``/``$LLAMA_CPP_DIR``
+    first, then the managed build's own, then anything on PATH."""
+    from ml_stack.gguf.tools import QUANTIZE_NAMES, require_quantize
 
     if explicit:
         return Path(explicit).expanduser().resolve()
-    root = managed_source().parent
-    for candidate in (root / "current" / "llama-quantize",
+    for key in ("LLAMA_CPP_ROOT", "LLAMA_CPP_DIR"):
+        if root := os.environ.get(key):
+            base = Path(root).expanduser().resolve()
+            for sub in ("", "build/bin", "bin"):
+                for name in QUANTIZE_NAMES:
+                    candidate = base / sub / name if sub else base / name
+                    if candidate.is_file():
+                        return candidate
+    managed = managed_source().parent
+    for candidate in (managed / "current" / "llama-quantize",
                       managed_source() / "build" / "bin" / "llama-quantize"):
         if candidate.is_file():
             return candidate.resolve()
