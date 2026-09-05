@@ -2,7 +2,7 @@
 
 Three records grew up separately and agreed only by construction: `client.spent.Spent`
 (what one answer cost, added up off the replies), the bench's per-call trace
-(`graph.bench.measure.Counting._reply`, the same numbers kept per call so a transcript and
+(`bench.measure.Counting._reply`, the same numbers kept per call so a transcript and
 a total are the same arithmetic twice), and `serve.fit`'s per-model fit (what a model costs
 to hold, which is the other half of what a peak in `Spent` is measured against). The first
 two count the *same reply*, field for field, and drifted apart every time a timing was

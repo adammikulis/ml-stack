@@ -88,10 +88,10 @@ def score_asked(graph: Mapping[str, Any], client: Any, asked: Sequence[Mapping[s
     """Every question through `converse`, scored as the bench scores one: a `Row` each.
 
     Recall and precision are over the ids the answer selected against the ids the set
-    expected, by `graph.bench.score` and not by a second scorer of this command's own -- a
+    expected, by `bench.score` and not by a second scorer of this command's own -- a
     number measured two ways is two numbers.
     """
-    from ml_stack.graph.bench.score import Row
+    from ml_stack.bench.score import Row
 
     rows: list[Any] = []
     for index, one in enumerate(asked, start=1):

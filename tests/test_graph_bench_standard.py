@@ -11,8 +11,8 @@ import os
 
 import pytest
 
-import ml_stack.graph.bench as bench
-from ml_stack.graph.bench import standard
+import ml_stack.bench as bench
+from ml_stack.bench import standard
 
 URL = "http://127.0.0.1:1/v1/chat/completions"
 

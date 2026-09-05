@@ -1,7 +1,7 @@
 """``ml-stack-mcp`` -- the commands as MCP tools over stdio, for an agent to drive.
 
 Each tool calls the same function the matching command calls -- `serve.cli.look`,
-`hub.find`, `graph.bench.run.detach`, `fleet.join.join_machine`, `setup.look`,
+`hub.find`, `bench.run.detach`, `fleet.join.join_machine`, `setup.look`,
 `doctor.look` -- so what an agent is told is what a person at the terminal would be
 told, and nothing is reimplemented here. Anything long -- a model load, a download, a
 measurement -- never blocks the call: it is started in its own session, owned by no
@@ -227,7 +227,7 @@ def bench_run(argv: list[str]) -> dict[str, Any]:
     """Start ``ml-stack-bench argv`` (e.g. ``["sweep", "--serve", "hf:...", "--smoke"]``)
     detached, exactly as ``--detach`` would; returns the log path, pid and argv, and
     ``bench_status`` follows it."""
-    from ml_stack.graph.bench.run import detach, measuring_file
+    from ml_stack.bench.run import detach, measuring_file
 
     log = detach(list(argv))
     try:
@@ -241,7 +241,7 @@ def bench_run(argv: list[str]) -> dict[str, Any]:
 def bench_status() -> dict[str, Any]:
     """What is measuring right now, its last log line, or that nothing is
     (``ml-stack-bench status``)."""
-    from ml_stack.graph.bench.run import measuring, status
+    from ml_stack.bench.run import measuring, status
 
     return {"text": status(), "measuring": measuring()}
 
@@ -250,9 +250,9 @@ def bench_history(since: str = "", limit: int = 20) -> list[dict[str, Any]]:
     """Every measurement the bench has run, newest first -- what ran, when, how long, how it
     ended and what it kept (``ml-stack-bench history``); ``since`` is an ISO date or a
     span like ``2d``."""
-    from ml_stack.graph.bench import HOME
-    from ml_stack.graph.bench.history import _iso, history
-    from ml_stack.graph.bench.history import since as since_at
+    from ml_stack.bench import HOME
+    from ml_stack.bench.history import _iso, history
+    from ml_stack.bench.history import since as since_at
 
     rows = history(HOME)
     if since:
@@ -265,7 +265,7 @@ def bench_show(args: list[str] = []) -> dict[str, Any]:
     """The bench's table of kept runs, as ``ml-stack-bench show args`` prints it -- pass
     ``["--rates"]`` for accuracy per second, per 1k tokens and per GB, ``["--rank",
     "FILE.md"]`` to write the ranking."""
-    from ml_stack.graph.bench.run import _main
+    from ml_stack.bench.run import _main
 
     return _captured(lambda: _main(["show", *args]))
 

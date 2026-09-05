@@ -17,8 +17,8 @@ import pathlib
 
 import pytest
 
-from ml_stack.graph import bench
-from ml_stack.graph.bench.report import (
+from ml_stack import bench
+from ml_stack.bench.report import (
     across,
     answering,
     asking_of,

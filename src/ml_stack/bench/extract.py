@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.entities.spelling import close
-from ml_stack.graph.bench import (
+from ml_stack.bench import (
     HOME,
     PER_QUESTION,
     Counting,
@@ -730,7 +730,7 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
     The same discipline as `bench.save`, for the same reason: the store once took twelve
     runs and gave back nothing, and the read-back is the only proof a run exists.
     """
-    from ml_stack.graph.bench import _plain
+    from ml_stack.bench import _plain
     from ml_stack.graph.store import GraphStore
 
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"

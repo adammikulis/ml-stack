@@ -64,7 +64,7 @@ def stated(messages):
 def test_a_stratified_sample_of_forty_messages_asserts_twenty_relations_or_more(community):
     """The bench reads forty messages; the gold it scores relations against is only what
     those forty said, so the corpus has to say enough of it in forty."""
-    from ml_stack.graph.bench.extract import gold, sample_messages
+    from ml_stack.bench.extract import gold, sample_messages
 
     graph, messages = community
     picked = sample_messages(messages, SAMPLE, seed=SEED)

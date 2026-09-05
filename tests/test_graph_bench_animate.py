@@ -11,7 +11,7 @@ import pathlib
 
 import pytest
 
-from ml_stack.graph.bench import animate as a
+from ml_stack.bench import animate as a
 
 
 def a_document() -> dict:

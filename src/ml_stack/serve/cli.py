@@ -179,7 +179,7 @@ def every_server() -> list[dict]:
             state = ""
         rss = int(getattr(mem, "rss", 0) or 0)
         if isinstance(proc, psutil.Process):
-            from ml_stack.graph.bench.measure import footprint_of
+            from ml_stack.bench.measure import footprint_of
 
             rss = footprint_of(proc) or rss
         out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
@@ -402,7 +402,7 @@ def resolve_model(named: str) -> str:
     A name copied straight out of `ml-stack-models files` -- no directory, no `hf:` prefix
     -- used to be read as a relative path and fail preflight with "shards missing" for a
     model that was on the machine the whole time: `up gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-    --preflight-only` did exactly that. `graph.bench.find_model` already solved the same
+    --preflight-only` did exactly that. `bench.find_model` already solved the same
     problem for the bench by asking `fleet.models` where a bare name lives; `hub.located`
     is the same idea, narrowed to the Hub cache and an exact filename -- what `up` is
     actually handed.
@@ -917,7 +917,7 @@ def cmd_limits(args: argparse.Namespace) -> int:
     Set nothing and it prints what is set. Every limit is off until somebody sets one, so
     a machine nobody has told anything about behaves exactly as it did.
     """
-    from ml_stack.graph.bench.history import parse_duration
+    from ml_stack.bench.history import parse_duration
     from ml_stack.hub import _human, machine_room
     from ml_stack.serve.fit import parse_room
     from ml_stack.serve.limits import changed, clear, read, where
@@ -968,7 +968,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
     `--settle` seconds of its own watching to whatever the daemon has already seen.
     `--watch` keeps looking for as long as it runs.
     """
-    from ml_stack.graph.bench.history import parse_duration
+    from ml_stack.bench.history import parse_duration
     from ml_stack.serve.limits import read
     from ml_stack.serve.reclaim import Idleness, reclaim_idle, watching
 

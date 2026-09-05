@@ -716,7 +716,7 @@ class TestTheInterfaceAndTheDaemonAgree:
         from ml_stack.fleet import models as models_mod
         from ml_stack.fleet.conversations import Conversations
         from ml_stack.fleet.models import Models
-        from ml_stack.graph import bench
+        from ml_stack import bench
         serving.ui.conversations = Conversations(serving.files.parent / "chats")
         serving.ui.models = Models([serving.files], serving.files)
         # The bench routes read the bench's home; a probe of every route reads nothing real.

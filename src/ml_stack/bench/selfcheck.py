@@ -167,8 +167,8 @@ def _rewritten(args: argparse.Namespace, scratch: Path) -> argparse.Namespace:
     """The same command, pointed at scratch: the invented community and two of its
     questions, a store under the scratch home when the run has one, runs kept in a scratch
     store. Every flag about the asking or the serving is left exactly as given."""
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench.extract import SMOKE_MESSAGES
+    from ml_stack import bench
+    from ml_stack.bench.extract import SMOKE_MESSAGES
 
     out = argparse.Namespace(**vars(args))
     home = scratch / "home"
@@ -247,8 +247,8 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     import ml_stack.serve
     import ml_stack.serve.binary
     import ml_stack.serve.preflight as preflight
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench import extract as bench_extract
+    from ml_stack import bench
+    from ml_stack.bench import extract as bench_extract
     from ml_stack.serve import ServerInfo
     from ml_stack.serve.backend import (
         LlamaServerBackend,
@@ -396,8 +396,8 @@ def selfcheck(argv: Sequence[str]) -> str:
     """
     import tempfile
 
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench import extract as bench_extract
+    from ml_stack import bench
+    from ml_stack.bench import extract as bench_extract
 
     rest = [a for a in argv if a not in ("--detach", "--no-queue", "--no-selfcheck")]
     args = bench._parser().parse_args(rest)

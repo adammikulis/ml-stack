@@ -27,8 +27,8 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.served`,
 # `bench.find_model`, `bench.HOME` -- so anything patchable is looked up there at call
 # time, never bound here at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.keep import (
+from ml_stack import bench
+from ml_stack.bench.keep import (
     SHORT,
     SMOKE,
     _commit,
@@ -38,8 +38,8 @@ from ml_stack.graph.bench.keep import (
     resumable,
     save,
 )
-from ml_stack.graph.bench.estimate import ceiling_default, estimate
-from ml_stack.graph.bench.measure import (
+from ml_stack.bench.estimate import ceiling_default, estimate
+from ml_stack.bench.measure import (
     PER_QUESTION,
     _how_many,
     _idle,
@@ -47,9 +47,9 @@ from ml_stack.graph.bench.measure import (
     read_questions,
     sample,
 )
-from ml_stack.graph.bench.score import NOISE, _which, export, ranking
-from ml_stack.graph.bench.serve import SmokeFailed, drafts, references_in, smoked
-from ml_stack.graph.bench.show import compare, missed, plot, rates, shape, table
+from ml_stack.bench.score import NOISE, _which, export, ranking
+from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
+from ml_stack.bench.show import compare, missed, plot, rates, shape, table
 from ml_stack.graph.vectors import MARGIN
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
@@ -227,7 +227,7 @@ def with_card(client: Any, args: Any) -> Any:
         return client
     # the program and the model the client was built for ride along, when it was built
     # for one: a card is a sampling, not a new server
-    from ml_stack.graph.bench.backends import _accepts
+    from ml_stack.bench.backends import _accepts
 
     kept = {name: getattr(client, name) for name in ("api", "model", "context")
             if getattr(client, name, None) is not None and _accepts(type(client), name)}
@@ -599,7 +599,7 @@ def _parser() -> argparse.ArgumentParser:
                               "measure them per model, and `report --profile` writes the "
                               "winner into that model's record. Repeatable")
 
-    from ml_stack.graph.bench.speed import add_arguments as speeding
+    from ml_stack.bench.speed import add_arguments as speeding
 
     speed = speeding(sub)
 
@@ -631,7 +631,7 @@ def _parser() -> argparse.ArgumentParser:
                               "download inside the timed window is a timing of the network")
         checking(one)
 
-    from ml_stack.graph.bench.extract import add_arguments as extracting
+    from ml_stack.bench.extract import add_arguments as extracting
 
     checking(extracting(sub))
 
@@ -802,8 +802,8 @@ def _parser() -> argparse.ArgumentParser:
                              "the step it is on and what is left, `tail -f` for the log, "
                              "`stop` to end the queue and the step inside it")
 
-    from ml_stack.graph.bench.comparison import add_arguments as comparing
-    from ml_stack.graph.bench.history import add_arguments as remembering
+    from ml_stack.bench.comparison import add_arguments as comparing
+    from ml_stack.bench.history import add_arguments as remembering
 
     comparing(sub)
     handed_over(sub)
@@ -824,7 +824,7 @@ HANDED_OVER = ("standard", "animate")
 def handed_over(sub: Any) -> None:
     """The ``standard`` and ``animate`` subcommands, each with the flags its own parser
     takes, so `--help` and the README's flags are held to them here too."""
-    from ml_stack.graph.bench import standard
+    from ml_stack.bench import standard
 
     sub.add_parser("standard", allow_abbrev=False, parents=[standard._parser()],
                    conflict_handler="resolve",
@@ -888,18 +888,18 @@ def smoke_first(args: Any) -> None:
 def _run(args: Any) -> int:
     """`_main` after the parse, so a dry run can hand in a namespace it has rewritten."""
     if args.cmd == "history":
-        from ml_stack.graph.bench.history import run as remembered
+        from ml_stack.bench.history import run as remembered
 
         return remembered(args)
     if args.cmd in HANDED_OVER:
-        module = importlib.import_module(f"ml_stack.graph.bench.{args.cmd}")
+        module = importlib.import_module(f"ml_stack.bench.{args.cmd}")
         return int(module.main(_after(list(getattr(args, "_argv", None) or []), args.cmd)))
     if args.cmd == "speed":
-        from ml_stack.graph.bench.speed import main as speeding
+        from ml_stack.bench.speed import main as speeding
 
         return speeding(args)
     if args.cmd == "compare":
-        from ml_stack.graph.bench.comparison import main as comparing
+        from ml_stack.bench.comparison import main as comparing
 
         return comparing(args)
     if args.cmd == "status":
@@ -918,7 +918,7 @@ def _run(args: Any) -> int:
         # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
         # the measuring lock itself, so a step of a queue and a run started by hand still
         # wait for each other.
-        from ml_stack.graph.bench.queue import QueueError, run_queue
+        from ml_stack.bench.queue import QueueError, run_queue
 
         if args.detach:
             log = detach(getattr(args, "_argv", None) or sys.argv[1:])
@@ -951,7 +951,7 @@ def _run(args: Any) -> int:
             print(f"{len(went)} run(s) labelled {args.label!r} removed")
         return 0
     if args.cmd == "sweep":
-        from ml_stack.graph.bench.backends import client_for, http_of, parse_on
+        from ml_stack.bench.backends import client_for, http_of, parse_on
         from ml_stack.graph.community import QUESTIONS, graph as invented
 
         named = []
@@ -1092,7 +1092,7 @@ def _run(args: Any) -> int:
 
         graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
         if getattr(args, "mix", False):
-            from ml_stack.graph.bench.measure import mix
+            from ml_stack.bench.measure import mix
             from ml_stack.graph.community import QUESTIONS
 
             everything = read_questions(args.questions) if args.questions else QUESTIONS
@@ -1188,21 +1188,21 @@ def _run(args: Any) -> int:
         return 0
 
     if args.cmd == "extract":
-        from ml_stack.graph.bench.extract import main as extracting
+        from ml_stack.bench.extract import main as extracting
 
         return extracting(args)
 
     if args.cmd == "report":
-        from ml_stack.graph.bench.report import main as reporting
+        from ml_stack.bench.report import main as reporting
 
         return reporting(args)
 
     if args.cmd == "show":
-        from ml_stack.graph.bench import extract as bench_extract
+        from ml_stack.bench import extract as bench_extract
 
         # an extraction run is kept in the same store and is not an answering run: it has
         # no questions to score, and its table is its own
-        from ml_stack.graph.bench import speed as bench_speed
+        from ml_stack.bench import speed as bench_speed
 
         everything = bench.runs(args.kept) if Path(args.kept).expanduser().exists() else []
         extracted = bench_extract.only(everything)
@@ -1470,7 +1470,7 @@ def detach(argv: Sequence[str]) -> Path:
     logs.mkdir(parents=True, exist_ok=True)
     cmd = next((a for a in rest if a in MEASURING), "bench")
     log = logs / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log"
-    command = [sys.executable, "-m", "ml_stack.graph.bench", *rest]
+    command = [sys.executable, "-m", "ml_stack.bench", *rest]
     extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
                              if platform.system() == "Windows" else {"start_new_session": True})
     started = time.strftime("%FT%T")
@@ -1653,7 +1653,7 @@ def results_since(started: str, kept: str | Path | None = None) -> str:
         return ""
     if not rows:
         return ""
-    from ml_stack.graph.bench.show import table
+    from ml_stack.bench.show import table
 
     said = io.StringIO()
     with contextlib.redirect_stdout(said):
@@ -1667,7 +1667,7 @@ def status(*, results: bool = True) -> str:
     text = _status_line()
     serving = serving_lines()
     text += "\nserving:\n" + "\n".join(serving) if serving else "\nserving: nothing"
-    from ml_stack.graph.bench.queue import queue_status
+    from ml_stack.bench.queue import queue_status
 
     text += ("\n" + queued) if (queued := queue_status()) else ""
     if results:
@@ -1837,7 +1837,7 @@ def main(argv: list[str] | None = None) -> int:
         # does not take, a way that never reaches the store -- cost an 87G load the day
         # it was left to a person to remember (2026-09-02). It needs no GPU and holds
         # nobody up.
-        from ml_stack.graph.bench.selfcheck import SelfCheckFailed, selfcheck
+        from ml_stack.bench.selfcheck import SelfCheckFailed, selfcheck
 
         began = time.monotonic()
         try:

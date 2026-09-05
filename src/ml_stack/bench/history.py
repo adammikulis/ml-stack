@@ -17,7 +17,7 @@ kept are the ones in the store whose ``at`` falls between its start and its end.
     ml-stack-bench history [--home PATH] [--kept PATH] [--since WHEN] [--json]
 
 `add_arguments` is what the bench's parser hosts the subcommand with, and `run` is what it
-dispatches to; `main` is the same two for ``python -m ml_stack.graph.bench.history``.
+dispatches to; `main` is the same two for ``python -m ml_stack.bench.history``.
 """
 from __future__ import annotations
 
@@ -101,7 +101,7 @@ def _measuring(home: Path) -> dict[str, Any]:
 def _kept_runs(kept: Path | None) -> list[dict[str, Any]]:
     if kept is None or not kept.exists():
         return []
-    from ml_stack.graph.bench import runs
+    from ml_stack.bench import runs
 
     try:
         return runs(kept)
@@ -285,7 +285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 def run(args: argparse.Namespace) -> int:
     """`main` after the parse: what `ml-stack-bench history` dispatches to."""
     if args.home is None:
-        from ml_stack.graph.bench import HOME
+        from ml_stack.bench import HOME
         home = HOME
     else:
         home = Path(args.home).expanduser()

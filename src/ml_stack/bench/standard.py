@@ -1,7 +1,7 @@
 """Standard benchmark sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through
 lm-evaluation-harness against any OpenAI-compatible chat endpoint, one JSON per configuration.
 
-``python -m ml_stack.graph.bench.standard --url URL --model NAME [--tasks ...]`` runs each set
+``python -m ml_stack.bench.standard --url URL --model NAME [--tasks ...]`` runs each set
 as its own `lm_eval.simple_evaluate` call under the bench's measuring lock, times it by wall
 clock, and writes::
 
@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from ml_stack.graph import bench
+from ml_stack import bench
 
 __all__ = ["SETS", "Set", "HarnessShape", "plan", "summarise", "standard", "main"]
 

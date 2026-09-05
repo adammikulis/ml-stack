@@ -13,7 +13,7 @@ from collections import Counter
 
 import pytest
 
-from ml_stack.graph.bench.measure import mix, sample
+from ml_stack.bench.measure import mix, sample
 from ml_stack.graph.community import QUESTIONS, _MORE_SAID, graph
 from ml_stack.graph.store import GraphStore
 

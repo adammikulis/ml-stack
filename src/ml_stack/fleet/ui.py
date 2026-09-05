@@ -341,9 +341,9 @@ class UI:
 
     def bench_state(self) -> dict[str, Any]:
         """What ``ml-stack-bench status`` says, for the page. The bench's home is
-        `ml_stack.graph.bench.HOME`, the one the command reads."""
+        `ml_stack.bench.HOME`, the one the command reads."""
         try:
-            from ml_stack.graph.bench.run import measuring, status
+            from ml_stack.bench.run import measuring, status
         except ImportError as exc:
             return {"available": False, "text": f"the bench is not installed here: {exc}",
                     "measuring": None}
@@ -352,8 +352,8 @@ class UI:
     def bench_history(self, limit: int = 20) -> list[dict[str, Any]]:
         from dataclasses import asdict
 
-        from ml_stack.graph.bench import HOME
-        from ml_stack.graph.bench.history import history
+        from ml_stack.bench import HOME
+        from ml_stack.bench.history import history
 
         return [asdict(e) for e in history(HOME)][::-1][:limit]
 
@@ -392,10 +392,10 @@ class UI:
         same reason the fit records carry their two composing numbers rather than answers.
         """
         try:
-            from ml_stack.graph.bench import HOME
-            from ml_stack.graph.bench.keep import _kept
-            from ml_stack.graph.bench.score import COSTS, NOISE, composed, derived, host_of
-            from ml_stack.graph.bench.show import AXES, pareto
+            from ml_stack.bench import HOME
+            from ml_stack.bench.keep import _kept
+            from ml_stack.bench.score import COSTS, NOISE, composed, derived, host_of
+            from ml_stack.bench.show import AXES, pareto
         except ImportError as exc:                       # a device-tier install has no bench
             return {"error": f"the bench is not installed here: {exc}",
                     "runs": [], "axes": {}, "keys": {}, "store": ""}
@@ -449,7 +449,7 @@ class UI:
         """Start ``ml-stack-bench argv`` detached and hand back its log and pid."""
         import shlex
 
-        from ml_stack.graph.bench.run import detach, measuring_file
+        from ml_stack.bench.run import detach, measuring_file
 
         log = (self.detach or detach)(argv)
         try:
@@ -461,7 +461,7 @@ class UI:
 
     def stop_sweep(self, pid: int) -> str:
         """Stop the detached measurement, but only the one the page was shown."""
-        from ml_stack.graph.bench.run import measuring, stop
+        from ml_stack.bench.run import measuring, stop
 
         held = measuring()
         if held is None or int(held.get("pid") or 0) != int(pid):

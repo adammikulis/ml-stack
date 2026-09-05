@@ -23,14 +23,14 @@ One package, one command (``ml-stack-bench``), six modules so that each agent is
 This module is the namespace: everything is imported here, and every call between the
 modules to something a test or `selfcheck` patches -- `served`, `measure`, `footprint`,
 `runs`, `HOME` -- goes through ``bench.<name>`` at call time, so patching it here patches it
-everywhere. ``python -m ml_stack.graph.bench`` is what `detach` re-runs.
+everywhere. ``python -m ml_stack.bench`` is what `detach` re-runs.
 """
 
 from __future__ import annotations
 
 import platform  # noqa: F401 - `bench.platform.system` is what the detach tests patch
 
-from ml_stack.graph.bench.keep import (  # noqa: F401
+from ml_stack.bench.keep import (  # noqa: F401
     HOME,
     asked_with,
     SHORT,
@@ -48,7 +48,7 @@ from ml_stack.graph.bench.keep import (  # noqa: F401
     save,
     stamped,
 )
-from ml_stack.graph.bench.score import (  # noqa: F401
+from ml_stack.bench.score import (  # noqa: F401
     BOOTSTRAP,
     BOOTSTRAP_SEED,
     NOISE,
@@ -89,7 +89,7 @@ from ml_stack.graph.bench.score import (  # noqa: F401
     unread_named,
     wall_of,
 )
-from ml_stack.graph.bench.estimate import (  # noqa: F401
+from ml_stack.bench.estimate import (  # noqa: F401
     CEILING_MIN,
     Estimate,
     ModelEstimate,
@@ -97,15 +97,15 @@ from ml_stack.graph.bench.estimate import (  # noqa: F401
     estimate,
     span,
 )
-from ml_stack.graph.bench import backends  # noqa: F401
-from ml_stack.graph.bench.backends import (  # noqa: F401
+from ml_stack.bench import backends  # noqa: F401
+from ml_stack.bench.backends import (  # noqa: F401
     client_for,
     describe,
     parse_on,
     served_by,
     timings_of,
 )
-from ml_stack.graph.bench.measure import (  # noqa: F401
+from ml_stack.bench.measure import (  # noqa: F401
     PER_QUESTION,
     SAMPLE_EVERY,
     TRACE_CAP,
@@ -141,7 +141,7 @@ from ml_stack.graph.bench.measure import (  # noqa: F401
     watched,
     watching,
 )
-from ml_stack.graph.bench.show import (  # noqa: F401
+from ml_stack.bench.show import (  # noqa: F401
     AXES,
     SHOWN_WAYS,
     _shown,
@@ -171,7 +171,7 @@ from ml_stack.graph.bench.show import (  # noqa: F401
     transcript,
     wired_of,
 )
-from ml_stack.graph.bench.report import (  # noqa: F401
+from ml_stack.bench.report import (  # noqa: F401
     ASKINGS,
     Doc,
     across,
@@ -187,7 +187,7 @@ from ml_stack.graph.bench.report import (  # noqa: F401
     report,
     thinking_of,
 )
-from ml_stack.graph.bench.serve import (
+from ml_stack.bench.serve import (
     EMBEDDED,  # noqa: F401
     SmokeFailed,
     drafted_by,
@@ -198,7 +198,7 @@ from ml_stack.graph.bench.serve import (
     served,
     smoked,
 )
-from ml_stack.graph.bench.run import (  # noqa: F401
+from ml_stack.bench.run import (  # noqa: F401
     MEASURING,
     _asked,
     _estimated,

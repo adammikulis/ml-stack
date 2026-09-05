@@ -27,9 +27,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph import bench
-from ml_stack.graph.bench.backends import client_for, describe, http_of, timings_of
-from ml_stack.graph.bench.keep import read_back, save
+from ml_stack import bench
+from ml_stack.bench.backends import client_for, describe, http_of, timings_of
+from ml_stack.bench.keep import read_back, save
 
 KIND = "speed"
 PROMPTS = (512, 4096, 16384)
@@ -329,8 +329,8 @@ def _client_settings(args: Any, *, timeout: float) -> dict[str, Any]:
 def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
                smoking_first: bool) -> list[str]:
     """Every ``--on`` server: the grid, kept as one run of kind ``speed`` per label."""
-    from ml_stack.graph.bench.measure import _idle
-    from ml_stack.graph.bench.run import sampling_from
+    from ml_stack.bench.measure import _idle
+    from ml_stack.bench.run import sampling_from
 
     keys = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)
@@ -359,7 +359,7 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
 
 def _held(url: str, client: Any) -> dict[str, Any]:
     """The run's ``server`` record: what serves on ``url``, and what it holds."""
-    from ml_stack.graph.bench.measure import said_by
+    from ml_stack.bench.measure import said_by
 
     held = bench.footprint(url, client)
     held.setdefault("base_url", url)
@@ -371,7 +371,7 @@ def _held(url: str, client: Any) -> dict[str, Any]:
 
 
 def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
-    from ml_stack.graph.bench.serve import SmokeFailed
+    from ml_stack.bench.serve import SmokeFailed
 
     rows = [r for one in kept for r in (one.get("rows") or ())]
     if not rows:
@@ -384,8 +384,8 @@ def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     """Every ``--serve`` model: put up in its measured shape (minus the head with
     ``--no-draft``), the grid through `up`, taken down."""
-    from ml_stack.graph.bench.run import measured_shape, swept
-    from ml_stack.graph.bench.serve import NotLoaded, up
+    from ml_stack.bench.run import measured_shape, swept
+    from ml_stack.bench.serve import NotLoaded, up
     from ml_stack.serve.backend import ServerFailed
     from ml_stack.serve.preflight import PreflightFailed
 
@@ -447,8 +447,8 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
 
 def main(args: Any) -> int:
     """The ``speed`` subcommand after the parse."""
-    from ml_stack.graph.bench.backends import parse_on
-    from ml_stack.graph.bench.run import wants_smoke
+    from ml_stack.bench.backends import parse_on
+    from ml_stack.bench.run import wants_smoke
 
     named = []
     for one in args.on:

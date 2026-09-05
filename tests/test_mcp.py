@@ -42,7 +42,7 @@ def said(reply: dict):
 
 @pytest.fixture(autouse=True)
 def bench_at_home(tmp_path, monkeypatch):
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
 
@@ -104,7 +104,7 @@ class TestTheTools:
 
     def test_bench_run_detaches_and_returns_the_handle(self, tmp_path, monkeypatch):
         """The measurement is hours; the call is milliseconds and hands back where to look."""
-        from ml_stack.graph.bench import run
+        from ml_stack.bench import run
 
         spawned: list[list[str]] = []
 
@@ -123,7 +123,7 @@ class TestTheTools:
         assert handle["pid"] == 4242 and handle["argv"] == argv
         assert Path(handle["log"]).is_file(), "the log exists before the call returns"
         assert Path(handle["log"]).parent == tmp_path / "bench" / "logs"
-        bench_line = next(c for c in spawned if "ml_stack.graph.bench" in c)
+        bench_line = next(c for c in spawned if "ml_stack.bench" in c)
         assert bench_line[-len(argv):] == argv
         assert "--detach" not in bench_line
 

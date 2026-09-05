@@ -1,10 +1,10 @@
 """The row a model's profile is written from: the fastest whose F1 held, where held is a
 claim about the difference the questions measured -- and never a smoke."""
 
-from ml_stack.graph.bench import invented_digest, runs, save
-from ml_stack.graph.bench.keep import SHORT
-from ml_stack.graph.bench.report import measured_best
-from ml_stack.graph.bench.score import held_up, separated
+from ml_stack.bench import invented_digest, runs, save
+from ml_stack.bench.keep import SHORT
+from ml_stack.bench.report import measured_best
+from ml_stack.bench.score import held_up, separated
 from tests.test_graph_bench import scored_rows
 
 
@@ -55,7 +55,7 @@ def test_a_profile_is_never_set_from_a_smoke(tmp_path):
 def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says(tmp_path):
     """The hundred-question row asked with batch, kinds and summary carried no asking
     record (it predates them), and a rewrite from it set all three to false."""
-    from ml_stack.graph.bench.report import write_profiles
+    from ml_stack.bench.report import write_profiles
     from ml_stack.serve.profile import add, profile_for, record, records_in
 
     where = tmp_path / "profiles.json"

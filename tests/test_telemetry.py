@@ -114,7 +114,7 @@ class TestOneCall:
 # -- the bench's trace, read back ----------------------------------------------------------
 class TestFromTheBenchsTrace:
     def bench_entry(self):
-        """Exactly the dict `graph.bench.measure.Counting._reply` appends, by hand: the
+        """Exactly the dict `bench.measure.Counting._reply` appends, by hand: the
         point of the mapping is that it works on what the bench already wrote, and a run
         store full of these is what it has to keep working on."""
         return {"role": "assistant", "call": 2, "model": "tiny-Q4.gguf",

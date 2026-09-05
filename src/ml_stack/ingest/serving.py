@@ -127,7 +127,7 @@ def _serving(args: Any, say: Callable[[str], None] = print) -> Any:
     when a profile measured it with a build, a head and a cache type is a different program
     from the one the measurement was about.
     """
-    from ml_stack.graph import bench
+    from ml_stack import bench
     from ml_stack.lock import only_one
 
     run, _measured = _run(args, say=say)
@@ -179,7 +179,7 @@ def _serving_said(args: Any) -> str:
 def _find_model(named: str) -> str:
     """A model by name, path or ``hf:`` reference, the way every other command finds one."""
     try:
-        from ml_stack.graph.bench.serve import find_model
+        from ml_stack.bench.serve import find_model
     except ImportError:  # pragma: no cover - the bench's extras are not required here
         return named
     return find_model(named)

@@ -31,7 +31,7 @@ relations it stated, as ``[source, rel, target]``. The template writer knows exa
 slots it filled, so its record is exact (``attrs["asserts_exact"]`` is True); the model
 writer's is the opening it was grounded in plus what its answer drew on, a lower bound on
 what the persona may have named, and is flagged False. That record is the gold an
-extraction is scored against (`ml_stack.graph.bench.extract`): nothing infers it back out
+extraction is scored against (`ml_stack.bench.extract`): nothing infers it back out
 of the text.
 """
 

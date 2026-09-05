@@ -252,15 +252,15 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
     """``ml-stack-bench sub args``: detached with a log and pid when it measures, else run
     in-process with what it printed."""
     if detach:
-        from ml_stack.graph.bench.run import detach as start
+        from ml_stack.bench.run import detach as start
 
         log = start([sub, *args])
         from ml_stack import jobs
-        from ml_stack.graph import bench
+        from ml_stack import bench
 
         held = jobs.held("bench", home=bench.HOME / "jobs")
         return {"log": str(log), "pid": held.get("pid"), "argv": [sub, *args]}
-    from ml_stack.graph.bench.run import _main
+    from ml_stack.bench.run import _main
 
     return mcp._captured(lambda: _main([sub, *list(args)]))
 
@@ -280,7 +280,7 @@ def _bench_tool(sub: str, detach: bool) -> mcp.Tool:
 # -- jobs -------------------------------------------------------------------------------
 def _jobs_home(kind: str) -> Path | None:
     if kind == "bench":
-        from ml_stack.graph import bench
+        from ml_stack import bench
 
         return bench.HOME / "jobs"
     return None
@@ -290,7 +290,7 @@ def jobs_status() -> dict[str, Any]:
     """Every long command this machine records -- the bench's and the rest -- running or
     ended, since when, with its log."""
     from ml_stack import jobs
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     said: list[str] = []
     for home in (jobs.HOME, bench.HOME / "jobs"):
@@ -644,7 +644,7 @@ def best_on_disk() -> tuple[Any, str] | None:
     measured model is here."""
     from pathlib import Path
 
-    from ml_stack.graph.bench.serve import find_model
+    from ml_stack.bench.serve import find_model
     from ml_stack.serve.profile import profiles
 
     ranked = sorted((p for p in profiles() if p.questions >= 20), key=lambda p: -p.right)
@@ -665,7 +665,7 @@ def client_for(args: argparse.Namespace) -> Any:
     from pathlib import Path
 
     from ml_stack.client import Client
-    from ml_stack.graph.bench.serve import find_model
+    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.shape import Run, Shape, seat

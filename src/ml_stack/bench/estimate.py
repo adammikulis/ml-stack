@@ -22,8 +22,8 @@ from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.find_model` -- so
 # anything patchable is looked up there at call time, never bound here at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.keep import SMOKE
+from ml_stack import bench
+from ml_stack.bench.keep import SMOKE
 
 # A model nothing is known about: no run kept and no weights on disk to size it by.
 GUESS_S = 15.0
@@ -186,8 +186,8 @@ def _one(kept: Sequence[Mapping[str, Any]], *, name: str, model: str = "",
 def _questions(args: Any) -> int:
     """How many questions each way is asked: the sample, plus the smoke a real run makes
     first."""
-    from ml_stack.graph.bench.measure import _how_many, read_questions, sample
-    from ml_stack.graph.bench.run import wants_smoke
+    from ml_stack.bench.measure import _how_many, read_questions, sample
+    from ml_stack.bench.run import wants_smoke
     from ml_stack.graph.community import QUESTIONS
 
     named = getattr(args, "questions", "") or ""
@@ -201,7 +201,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
     """What ``args`` will cost, model by model, from ``kept`` (the runs already in the
     store) -- see the module. ``ceiling_min`` defaults to ``args.ceiling``, then the
     environment's, then `CEILING_MIN`."""
-    from ml_stack.graph.bench.run import _asked, halves, wants_smoke
+    from ml_stack.bench.run import _asked, halves, wants_smoke
 
     cmd = str(getattr(args, "cmd", "") or "")
     smoke = bool(getattr(args, "smoke", False))
@@ -241,7 +241,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
                                    context=int(getattr(args, "context", 0) or 0),
                                    served=True))
     elif cmd == "speed":
-        from ml_stack.graph.bench.speed import PROMPTS, STREAMS, _ints
+        from ml_stack.bench.speed import PROMPTS, STREAMS, _ints
 
         prompts = [min(_ints(getattr(args, "prompts", ""), PROMPTS))] if smoke \
             else _ints(getattr(args, "prompts", ""), PROMPTS)
@@ -272,7 +272,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         models.append(_one(kept, name=label or "the server", labels=[label], questions=q,
                            ways=1, served=False))
     elif cmd == "extract":
-        from ml_stack.graph.bench.extract import SMOKE_MESSAGES, only
+        from ml_stack.bench.extract import SMOKE_MESSAGES, only
 
         serving = list(getattr(args, "serve", None) or [])
         model = bench.find_model(serving[0]) if serving else ""

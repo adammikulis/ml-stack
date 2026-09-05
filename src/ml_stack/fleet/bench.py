@@ -189,7 +189,7 @@ def bench_home(traind_root: Path | str | None = None) -> Path:
     whatever its root was told the truth about the wrong machine: a training job sent to a
     daemon under test stayed queued for as long as a real benchmark was measuring on the
     developer's box. Without a root, ``~/.ml-stack/bench``: the same path
-    `ml_stack.graph.bench.HOME` names, written here rather than imported so a daemon that
+    `ml_stack.bench.HOME` names, written here rather than imported so a daemon that
     never measures never loads the bench.
     """
     if traind_root is not None:
@@ -445,7 +445,7 @@ def detach_bench(line: Sequence[str], home: Path) -> tuple[int, Path]:
     under ``home/logs`` and writes the pid into ``home/measuring.json``, which is where
     this reads it back; ``--no-queue`` makes a race for the lock a failed job rather than a
     run queued behind another, since the lock was checked before this was called."""
-    done = subprocess.run([sys.executable, "-m", "ml_stack.graph.bench", *line,
+    done = subprocess.run([sys.executable, "-m", "ml_stack.bench", *line,
                            "--no-queue", "--detach"],
                           capture_output=True, text=True, timeout=120,
                           env={**os.environ, "MLSTACK_BENCH_HOME": str(home)})
@@ -653,7 +653,7 @@ class BenchHost:
                                "commit": self.commit, "store": str(store), "full": full}
         if not store.exists():
             return out
-        from ml_stack.graph import bench as measuring
+        from ml_stack import bench as measuring
 
         kept = [r for r in measuring.runs(store) if str(r.get("at", "")) >= since]
         if full:

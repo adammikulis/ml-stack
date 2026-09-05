@@ -28,10 +28,10 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.footprint`,
 # `bench.busy` -- so anything patchable is looked up there at call time, never bound here
 # at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.backends import http_of, processes, served_by, timings_of
-from ml_stack.graph.bench.keep import SHORT, SMOKE
-from ml_stack.graph.bench.score import Row, prefix_kept, unread_named
+from ml_stack import bench
+from ml_stack.bench.backends import http_of, processes, served_by, timings_of
+from ml_stack.bench.keep import SHORT, SMOKE
+from ml_stack.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
 
 
@@ -680,7 +680,7 @@ def machine_memory() -> dict[str, int]:
 def said_by(client: Any) -> dict[str, Any] | None:
     """What a client says served it (`Client.served_by`), for a program only the client
     can ask; None for a llama-server's, which `footprint` reads from ``/props`` itself."""
-    from ml_stack.graph.bench.backends import speaks_llama
+    from ml_stack.bench.backends import speaks_llama
 
     if client is None or not hasattr(client, "served_by") or speaks_llama(client):
         return None
@@ -1035,7 +1035,7 @@ def footprint(base_url: str, client: Any = None) -> dict[str, Any]:
     program can say; the resident figure is summed over the process tree the ``client``
     names (`serving_pids`), which is how Ollama's runner is counted beside its listener.
     """
-    from ml_stack.graph.bench.backends import llama_served_by, props_of
+    from ml_stack.bench.backends import llama_served_by, props_of
 
     out: dict[str, Any] = {"base_url": base_url}
     # what the sampler saw while the questions were asked, and what it learnt of the

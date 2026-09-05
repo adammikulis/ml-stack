@@ -9,9 +9,9 @@ import json
 
 import pytest
 
-from ml_stack.graph.bench import invented_digest, runs, save
-from ml_stack.graph.bench.comparison import assemble, read_standards, stem_of, write
-from ml_stack.graph.bench.speed import KIND as SPEED
+from ml_stack.bench import invented_digest, runs, save
+from ml_stack.bench.comparison import assemble, read_standards, stem_of, write
+from ml_stack.bench.speed import KIND as SPEED
 
 from conftest import scored_rows
 
@@ -142,7 +142,7 @@ def test_the_export_refuses_a_path_inside_a_repository(store, tmp_path, monkeypa
 
 
 def test_the_subcommand_writes_the_document_and_says_what_each_label_had(store, tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     out = tmp_path / "comparison.json"
     code = bench._main(["compare", "--labels", "flash-plain,flash-ollama-plain,nothing",
@@ -159,7 +159,7 @@ def test_the_subcommand_writes_the_document_and_says_what_each_label_had(store, 
 
 
 def test_the_subcommand_refuses_a_repository_path_with_exit_2(store, tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     inside = tmp_path / "repo" / "comparison.json"
     inside.parent.mkdir()

@@ -15,9 +15,9 @@ from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.runs` -- so
 # anything patchable is looked up there at call time, never bound here at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.backends import short
-from ml_stack.graph.bench.score import (
+from ml_stack import bench
+from ml_stack.bench.backends import short
+from ml_stack.bench.score import (
     COSTS,
     NOISE,
     _head_of,
@@ -638,7 +638,7 @@ def transcript(kept: Sequence[Mapping[str, Any]], label: str = "",
     ``label`` narrows to the runs whose label contains it, ``question`` to the questions
     whose text contains it. Only rows that were traced -- see `wants_trace`.
     """
-    from ml_stack.graph.bench.measure import TRACE_ENV
+    from ml_stack.bench.measure import TRACE_ENV
 
     wanted = [one for one in kept if not label or label in str(one.get("label") or "")]
     shown = 0

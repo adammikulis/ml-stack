@@ -94,7 +94,7 @@ SUBCOMMANDS = [(command, path) for command, parser in PARSERS.items()
 @pytest.fixture(autouse=True)
 def bench_at_home(tmp_path, monkeypatch):
     """The bench takes a lock under its home before measuring; keep that out of ~/.ml-stack."""
-    from ml_stack.graph import bench
+    from ml_stack import bench
     monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
 
 
@@ -247,7 +247,7 @@ def test_every_measuring_subcommand_takes_a_sample_and_no_two_define_it_twice():
     while building the parser, and ``parser_of`` would have failed before this test ran;
     what is asserted here is that each still accepts it.
     """
-    from ml_stack.graph.bench import MEASURING
+    from ml_stack.bench import MEASURING
     for sub in MEASURING:
         assert "--sample" in flags_of(PARSERS["ml-stack-bench"], sub), sub
     for sub in ("run", "sweep"):

@@ -106,8 +106,8 @@ def json_reply(payload: object, status: int = 200) -> tuple[int, bytes]:
 
 _HOMED = (
     # module path, attribute, the name it gets under the fixture's scratch home
-    ("ml_stack.graph.bench", "HOME", "bench"),
-    ("ml_stack.graph.bench.extract", "HOME", "bench"),   # bound at import, not looked up
+    ("ml_stack.bench", "HOME", "bench"),
+    ("ml_stack.bench.extract", "HOME", "bench"),   # bound at import, not looked up
     ("ml_stack.mcp", "MCP_HOME", "mcp"),
     ("ml_stack.train.run", "HOME", "train"),   # where a detached fine-tune records itself
 )
@@ -143,8 +143,8 @@ def _no_machine_state(monkeypatch, tmp_path):
         module = sys.modules.get(path) or importlib.import_module(path)
         monkeypatch.setattr(module, attr, home / leaf, raising=False)
 
-    running = sys.modules.get("ml_stack.graph.bench.run") or importlib.import_module(
-        "ml_stack.graph.bench.run")
+    running = sys.modules.get("ml_stack.bench.run") or importlib.import_module(
+        "ml_stack.bench.run")
     monkeypatch.setattr(running, "serving_lines", lambda: [])
     monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
 
@@ -315,7 +315,7 @@ def fake_memory(*, total: int, available: int, wired: int):
 def a_row(question: str, *, expected: list[str], shown: list[str], calls: int = 3,
           chars: int = 200, error: str = "", label: str = "tried"):
     """One measured question: what was wanted, what the answer showed, what it cost."""
-    from ml_stack.graph.bench import Row
+    from ml_stack.bench import Row
 
     return Row(label=label, question=question, expected=expected, shown=shown,
                calls=calls, answer_chars=chars, error=error)

@@ -22,10 +22,10 @@ import time
 
 import pytest
 
-from ml_stack.graph import bench
-from ml_stack.graph.bench import Row
-from ml_stack.graph.bench import extract as bx
-from ml_stack.graph.bench.report import (
+from ml_stack import bench
+from ml_stack.bench import Row
+from ml_stack.bench import extract as bx
+from ml_stack.bench.report import (
     MIN_MESSAGES,
     best_extractor,
     extract_model_of,

@@ -3,7 +3,7 @@
 Two measurements sharing a GPU produce timings that belong to neither, so a second run has
 to wait for the first. The obvious way to arrange that by hand is a shell loop:
 
-    until ! pgrep -f "python -m ml_stack.graph.bench"; do sleep 20; done; <the real command>
+    until ! pgrep -f "python -m ml_stack.bench"; do sleep 20; done; <the real command>
 
 which cannot work, and fails silently rather than loudly: the waiting shell's own command
 line contains the pattern, so `pgrep -f` matches the waiter itself, the condition is

@@ -233,7 +233,7 @@ def _dead_lock(home: Path) -> Finding | None:
 
 def _newest_run_at(store: Path) -> tuple[float, int]:
     """When the newest kept run was written, as epoch seconds, and how many there are."""
-    from ml_stack.graph.bench import runs
+    from ml_stack.bench import runs
 
     kept = runs(store) if store.exists() else []
     at = 0.0
@@ -263,7 +263,7 @@ def bench_of(home: Path) -> list[Finding]:
         return out
     store = home / "runs.ladybug"
     try:
-        from ml_stack.graph.bench import empties
+        from ml_stack.bench import empties
 
         hollow = empties(store)
     except Exception as exc:  # noqa: BLE001
@@ -378,7 +378,7 @@ def look(repos: list[Path] | None = None, *, bench_home: Path | None = None,
          current: Path | None = None, named: Path | None = None,
          checkout: Path | None = None) -> list[Finding]:
     """Everything about the repositories and the working state, without changing a thing."""
-    from ml_stack.graph.bench import HOME
+    from ml_stack.bench import HOME
     from ml_stack.serve.binary import MANAGED_CURRENT, MANAGED_NAMED
 
     out: list[Finding] = []

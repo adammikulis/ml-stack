@@ -405,7 +405,7 @@ def test_the_log_tail_names_what_failed():
 # -- gather --------------------------------------------------------------------------
 def _kept(store: Path, label: str, at: str, *, invented: bool = True, hits: int = 2) -> str:
     """A run in ``store`` as `save` would keep it: rows over the invented community."""
-    from ml_stack.graph.bench import invented_digest
+    from ml_stack.bench import invented_digest
     from ml_stack.graph.store import GraphStore
 
     rows = [{"label": label, "question": f"q{n}?", "expected": ["person:iris"],
@@ -426,7 +426,7 @@ def _later(seconds: float) -> str:
 
 
 def test_gather_imports_each_peers_runs_with_host_set_and_skips_duplicates(boxes, tmp_path):
-    from ml_stack.graph.bench import runs
+    from ml_stack.bench import runs
 
     roomy, small = boxes
     into = tmp_path / "home.ladybug"
@@ -486,7 +486,7 @@ def test_the_export_route_answers_the_flat_shape_show_export_writes(boxes):
 
 def test_import_runs_by_hand_from_a_flat_export_file(tmp_path):
     """A peer with no daemon: `ml-stack-bench show --export` there, copy, import here."""
-    from ml_stack.graph.bench import derived, runs
+    from ml_stack.bench import derived, runs
 
     exported = tmp_path / "attic.json"
     exported.write_text(json.dumps([
@@ -521,7 +521,7 @@ def test_import_runs_by_hand_from_a_flat_export_file(tmp_path):
 
 
 def test_import_runs_takes_the_json_text_and_the_answer_shape_too(tmp_path):
-    from ml_stack.graph.bench import runs
+    from ml_stack.bench import runs
 
     into = tmp_path / "home.ladybug"
     text = json.dumps({"runs": [{"at": "2026-09-02T09:00:00", "label": "x", "questions": 2,
@@ -584,6 +584,6 @@ def test_the_bench_home_moves_with_the_environment(tmp_path):
 
     env = {**os.environ, "MLSTACK_BENCH_HOME": str(tmp_path / "elsewhere")}
     said = subprocess.run([sys.executable, "-c",
-                           "from ml_stack.graph.bench import keep; print(keep.HOME)"],
+                           "from ml_stack.bench import keep; print(keep.HOME)"],
                           capture_output=True, text=True, env=env, check=True).stdout.strip()
     assert Path(said) == tmp_path / "elsewhere"

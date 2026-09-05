@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph.bench.keep import SHORT
+from ml_stack.bench.keep import SHORT
 from ml_stack.paths import repo_root
 
 
@@ -637,7 +637,7 @@ def _build(server: Any) -> str:
     Q4_K_XL`` from its ``served_by`` record when it has one; else the llama-server's last
     two path segments -- a managed build is ``<name>/llama-server``, so a fork's run says
     so and mainline's says current. ``server`` may be the record or the binary's path."""
-    from ml_stack.graph.bench.backends import describe
+    from ml_stack.bench.backends import describe
 
     if isinstance(server, Mapping):
         said = describe(server.get("served_by"), build=str(server.get("build") or ""))

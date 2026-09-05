@@ -475,8 +475,8 @@ class TestSweepLine:
             sweep_argv([])
 
     def test_the_line_parses_as_the_bench_would(self, tmp_path, monkeypatch):
-        from ml_stack.graph import bench
-        from ml_stack.graph.bench.run import _parser
+        from ml_stack import bench
+        from ml_stack.bench.run import _parser
 
         monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
         args = _parser().parse_args(sweep_argv(["quince-2b.gguf"], peers=["larch"], sample=4))
@@ -492,7 +492,7 @@ class TestThePage:
     def page(self, tmp_path, udp, monkeypatch, daemons):
         from test_fleet_ui import Serving
 
-        from ml_stack.graph import bench
+        from ml_stack import bench
 
         monkeypatch.setattr(bench, "HOME", tmp_path / "bench")
         s = Serving(tmp_path, name="studio")
@@ -536,7 +536,7 @@ class TestThePage:
         assert "larch" in [p["name"] for p in body["peers"]]
 
     def test_run_across_fleet_builds_the_line_and_detaches_it(self, page, tmp_path):
-        from ml_stack.graph.bench.run import measuring_file
+        from ml_stack.bench.run import measuring_file
 
         s, cookie = page
         status, body, _ = s.call("/ui/bench/sweep", method="POST", body={}, cookie=cookie)

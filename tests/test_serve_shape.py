@@ -203,7 +203,7 @@ def _bench_lease(run, monkeypatch, leased):
     """What `bench.served` hands `serve`, with everything but the lease faked away."""
     import ml_stack.hub
     import ml_stack.serve.preflight as preflight
-    from ml_stack.graph import bench
+    from ml_stack import bench
     from ml_stack.serve.preflight import Check, Report
 
     monkeypatch.setattr(preflight, "Preflight", lambda spec, *, binary, limit_bytes=0: Report(

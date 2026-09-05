@@ -42,9 +42,9 @@ from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.runs`, `bench.HOME`
 # -- so anything patchable is looked up there at call time, never bound here at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.keep import SHORT
-from ml_stack.graph.bench.score import (
+from ml_stack import bench
+from ml_stack.bench.keep import SHORT
+from ml_stack.bench.score import (
     NOISE,
     _head_of,
     derived,
@@ -53,7 +53,7 @@ from ml_stack.graph.bench.score import (
     hosts_of,
     per_question,
 )
-from ml_stack.graph.bench.show import _gb, drafted, kv_short, made
+from ml_stack.bench.show import _gb, drafted, kv_short, made
 
 __all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
            "best_extractor", "build_of", "by_model", "cache_of", "extract_model_of",
@@ -230,7 +230,7 @@ def extractions(kept: Sequence[Mapping[str, Any]], *, min_msgs: int = MIN_MESSAG
     and the suffix `save` adds when one second held two, which is the only record of which
     came second.
     """
-    from ml_stack.graph.bench.extract import only
+    from ml_stack.bench.extract import only
 
     mine = only(kept)
     long_enough = [one for one in mine if len(read_messages(one)) >= min_msgs]
@@ -337,7 +337,7 @@ def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
         out[way] = way in words
     out["constrain_ids"] = False
     if "reach" in words:
-        from ml_stack.graph.bench.run import REACH
+        from ml_stack.bench.run import REACH
 
         # the label says a run reached; it does not say how far, and `--also reach` is the
         # only thing that puts the word there, so its own figure is what was measured
@@ -352,7 +352,7 @@ def build_of(server: Mapping[str, Any]) -> str:
     *name*, because that is what `ml-stack-serve up --build` takes. A head withheld from
     mainline loads on one build and no other, so this is not decoration.
     """
-    from ml_stack.graph.bench.backends import describe
+    from ml_stack.bench.backends import describe
     from ml_stack.serve.build import NAMED_DIR
 
     record = (server or {}).get("served_by")
@@ -707,7 +707,7 @@ def _across(doc: Doc, kept: Sequence[Mapping[str, Any]], *, full_n: int) -> None
 
 
 def _extraction(doc: Doc, extracted: Sequence[Mapping[str, Any]], *, min_msgs: int) -> None:
-    from ml_stack.graph.bench.extract import detail
+    from ml_stack.bench.extract import detail
     from ml_stack.hub import pretty_name
 
     rows, short = extractions(extracted, min_msgs=min_msgs)
@@ -1014,8 +1014,8 @@ def fits_named(fits: Iterable[Any], wanted: Sequence[str]) -> list[Any]:
 
 def main(args: Any) -> int:
     """``ml-stack-bench report``. Reads the store and the fit records; serves nothing."""
-    from ml_stack.graph.bench import extract as bench_extract
-    from ml_stack.graph.bench.run import newest
+    from ml_stack.bench import extract as bench_extract
+    from ml_stack.bench.run import newest
     from ml_stack.serve import fit as fit_mod
 
     store = str(getattr(args, "kept", "") or "")

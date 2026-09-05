@@ -57,7 +57,7 @@ PEFT_MISSING = (
 )
 
 # Over this many minutes a training run is refused unless --yes. The same rule and the same
-# number as `ml_stack.graph.bench.estimate.CEILING_MIN`, kept here rather than imported so
+# number as `ml_stack.bench.estimate.CEILING_MIN`, kept here rather than imported so
 # that starting a fine-tune does not drag the whole bench package in: a training run is
 # hours where a bench run is minutes, which is exactly why it must be a decision.
 CEILING_MIN = 30.0

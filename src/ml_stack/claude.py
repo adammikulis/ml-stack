@@ -162,7 +162,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = pr
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))
         return int(runner(command, env))
 
-    from ml_stack.graph.bench.serve import find_model
+    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import serve
     from ml_stack.serve.profile import profile_for, said
 

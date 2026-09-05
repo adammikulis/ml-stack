@@ -22,10 +22,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph import bench
-from ml_stack.graph.bench.backends import describe
-from ml_stack.graph.bench.score import _head_of, derived, invented_digest
-from ml_stack.graph.bench.speed import KIND as SPEED
+from ml_stack import bench
+from ml_stack.bench.backends import describe
+from ml_stack.bench.score import _head_of, derived, invented_digest
+from ml_stack.bench.speed import KIND as SPEED
 from ml_stack.paths import repo_root
 
 # The way suffixes a graph run's label ends in, which a speed run's does not.

@@ -11,8 +11,8 @@ from dataclasses import replace
 
 import pytest
 
-from ml_stack.graph.bench import Row, _hit, missed, runs, save, table
-from ml_stack.graph.bench.selfcheck import ScriptedModel
+from ml_stack.bench import Row, _hit, missed, runs, save, table
+from ml_stack.bench.selfcheck import ScriptedModel
 
 from conftest import a_row, json_reply, scored_rows
 
@@ -37,7 +37,7 @@ def test_hit_is_how_well_what_was_shown_matched_what_was_wanted():
 def test_showing_everything_does_not_score_well():
     """The test that was missing. A model that lights the whole graph on every question had
     a perfect score under recall, which is how a gameable metric goes unnoticed for a day."""
-    from ml_stack.graph.bench import _precision, _recall
+    from ml_stack.bench import _precision, _recall
 
     graph_ids = [f"n{i}" for i in range(17)]
     everything = {"expected": ["n3", "n9"], "shown": graph_ids}
@@ -54,7 +54,7 @@ def test_showing_everything_does_not_score_well():
 
 def test_showing_nothing_does_not_score_well_either():
     """Precision alone is the opposite trap: saying nothing is perfect by it."""
-    from ml_stack.graph.bench import _precision
+    from ml_stack.bench import _precision
 
     silent = {"expected": ["n3"], "shown": []}
     assert _precision(silent) == 0.0
@@ -63,7 +63,7 @@ def test_showing_nothing_does_not_score_well_either():
 
 def test_recall_and_precision_are_kept_beside_the_score():
     """The pair is what says *how* a run was wrong; the single number cannot."""
-    from ml_stack.graph.bench import derived
+    from ml_stack.bench import derived
 
     spraying = {"rows": [{"expected": ["n1"], "shown": ["n1", "n2", "n3", "n4"],
                           "seconds": 1.0, "processed_tokens": 10, "completion_tokens": 1}],
@@ -184,7 +184,7 @@ def test_table_on_nothing(capsys):
 @pytest.mark.parametrize("scores,stands", [([0.9, 0.5], True), ([0.9, 0.89], False)])
 def test_the_bench_gate_is_the_shared_one(scores, stands):
     """`ml-stack-bench` must not grow a second copy of the margin test."""
-    from ml_stack.graph.bench import MARGIN, stands_out
+    from ml_stack.bench import MARGIN, stands_out
     from ml_stack.graph.vectors import MARGIN as SOURCE, stands_out as origin
 
     assert MARGIN is SOURCE and stands_out is origin
@@ -221,7 +221,7 @@ def test_the_table_records_the_sampling_and_the_draft_a_run_used(tmp_path, capsy
 
 
 def test_a_run_with_no_draft_and_no_recorded_sampling_says_so(tmp_path, capsys):
-    from ml_stack.graph.bench import drafting, sampled
+    from ml_stack.bench import drafting, sampled
 
     assert drafting([{"draft_tokens": 0, "draft_taken": 0}]) == "none", \
         "a llama-server that drafted nothing has no head"
@@ -238,7 +238,7 @@ def test_sampling_overrides_are_only_what_was_asked_for():
     here — which would quietly overrule a publisher."""
     from argparse import Namespace
 
-    from ml_stack.graph.bench import sampling_from
+    from ml_stack.bench import sampling_from
 
     assert sampling_from(Namespace(temperature=None, top_p=None, top_k=None, min_p=None)) == {}
     assert sampling_from(Namespace(temperature=0.0, top_p=None, top_k=None, min_p=None)) \
@@ -249,7 +249,7 @@ def test_sampling_overrides_are_only_what_was_asked_for():
 
 def test_derived_puts_accuracy_over_each_scarcity():
     """A score alone cannot choose between a model that is better and one that is cheaper."""
-    from ml_stack.graph.bench import derived
+    from ml_stack.bench import derived
 
     run = {"server": {"kv_and_run_bytes": 2 * 2**30},
            "rows": [{"expected": ["a"], "shown": ["a"], "seconds": 10.0, "calls": 2,
@@ -268,7 +268,7 @@ def test_derived_puts_accuracy_over_each_scarcity():
 
 
 def test_derived_on_a_run_that_got_nothing_right_divides_by_nothing():
-    from ml_stack.graph.bench import derived
+    from ml_stack.bench import derived
 
     d = derived({"rows": [{"expected": ["a"], "shown": [], "seconds": 5.0,
                            "processed_tokens": 100, "completion_tokens": 10}]})
@@ -279,7 +279,7 @@ def test_derived_on_a_run_that_got_nothing_right_divides_by_nothing():
 
 
 def test_the_frontier_keeps_only_what_nothing_beats_on_both_axes():
-    from ml_stack.graph.bench import pareto
+    from ml_stack.bench import pareto
 
     def run(label, right, seconds):
         rows = [{"expected": ["a"], "shown": ["a"] if n < right else [], "seconds": seconds / 10,
@@ -297,7 +297,7 @@ def test_the_frontier_keeps_only_what_nothing_beats_on_both_axes():
 
 
 def test_the_frontier_can_be_drawn_against_tokens_instead_of_time():
-    from ml_stack.graph.bench import pareto
+    from ml_stack.bench import pareto
 
     def run(label, right, tokens):
         return {"label": label, "server": {},
@@ -313,8 +313,8 @@ def test_the_frontier_can_be_drawn_against_tokens_instead_of_time():
 def test_the_frontier_compares_runs_per_question_and_not_by_their_totals(tmp_path, capsys):
     """Twenty questions at 30 s each is 600 s; a hundred at 27 s each is 2700 s. On the
     totals the short run is the cheaper; per question the long one is."""
-    from ml_stack.graph.bench import derived, pareto, plot, rates
-    from ml_stack.graph.bench.score import COSTS
+    from ml_stack.bench import derived, pareto, plot, rates
+    from ml_stack.bench.score import COSTS
 
     def run(label, questions, each, tokens, *, counted=True):
         rows = [{"expected": ["a"], "shown": ["a"] if n % 2 else [], "seconds": each,
@@ -352,7 +352,7 @@ def test_the_frontier_compares_runs_per_question_and_not_by_their_totals(tmp_pat
 
 def test_the_plot_is_self_contained_and_names_what_it_drew(tmp_path):
     """It has to open on a machine with no network and no packages."""
-    from ml_stack.graph.bench import plot
+    from ml_stack.bench import plot
 
     where = plot([{"label": "tried", "server": {"kv_and_run_bytes": 2**30},
                    "rows": [{"expected": ["a"], "shown": ["a"], "seconds": 5.0,
@@ -378,7 +378,7 @@ def slots(server):
 
 
 def test_busy_counts_the_slots_that_are_working(slots):
-    from ml_stack.graph.bench import busy
+    from ml_stack.bench import busy
 
     assert busy(slots([{"is_processing": True}, {"is_processing": False},
                        {"is_processing": True}])) == 2
@@ -387,7 +387,7 @@ def test_busy_counts_the_slots_that_are_working(slots):
 
 def test_a_server_that_will_not_say_is_not_treated_as_idle(slots):
     """Unknown is not idle. Guessing idle is how the guard would fail open."""
-    from ml_stack.graph.bench import busy
+    from ml_stack.bench import busy
 
     assert busy("http://127.0.0.1:9") == -1          # nothing listening
     assert busy(slots({"not": "a list"})) == -1
@@ -401,7 +401,7 @@ def test_a_busy_server_is_refused_and_anyway_overrides(capsys, slots):
     """
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _idle
+    from ml_stack.bench import _idle
 
     url = slots([{"is_processing": True}])
     assert _idle(url, Namespace(anyway=False)) is False
@@ -421,7 +421,7 @@ def test_a_short_run_still_asks_about_everything():
     """A shorter benchmark that has stopped asking about places is not a shorter benchmark,
     it is a different one. The first n are all of one kind because the set is written in
     groups; an even stride over a set that is two-thirds people returns two-thirds people."""
-    from ml_stack.graph.bench import SHORT, sample
+    from ml_stack.bench import SHORT, sample
     from ml_stack.graph.community import QUESTIONS, graph
 
     kind = {n["id"]: n["kind"] for n in graph()["nodes"]}
@@ -446,7 +446,7 @@ def test_a_short_run_still_asks_about_everything():
 def test_a_short_run_is_the_same_short_run_twice():
     """Two runs of a short set have to be comparable with each other, or the shortening has
     bought speed by giving up the only thing a benchmark is for."""
-    from ml_stack.graph.bench import sample
+    from ml_stack.bench import sample
     from ml_stack.graph.community import QUESTIONS
 
     assert sample(QUESTIONS, 9) == sample(QUESTIONS, 9)
@@ -459,7 +459,7 @@ def test_drafts_counts_the_client_it_is_measuring():
     closes over a client of its own is never counted: every token and call comes back zero
     while the wall clock says otherwise, and the table reads as though nothing happened.
     That shipped once."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = {}
 
@@ -515,7 +515,7 @@ def test_what_a_server_holds_is_reported_even_when_the_derived_number_is_not(tmp
 def test_the_footprint_does_not_invent_a_negative_cost(monkeypatch):
     """Clamping to zero produced a dash; the honest answer is that the subtraction does not
     apply, and that has to be distinguishable from never having looked."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     def props(url, **kw):
         return {"model_path": "/models/thing-00001-of-00003.gguf", "total_slots": 2,
@@ -541,7 +541,7 @@ def test_a_short_run_keeps_the_difficulty_and_not_only_the_variety():
     """Every kind still asked about is half of it. The other half is that the questions are
     as hard: a short run made only of one-answer questions would score higher for a reason
     that has nothing to do with the model."""
-    from ml_stack.graph.bench import SHORT, sample
+    from ml_stack.bench import SHORT, sample
     from ml_stack.graph.community import QUESTIONS
 
     whole = [q for q in QUESTIONS if q["expect"]]
@@ -559,7 +559,7 @@ def test_a_short_run_keeps_the_difficulty_and_not_only_the_variety():
 def test_how_many_prefers_an_explicit_count():
     from argparse import Namespace
 
-    from ml_stack.graph.bench import SHORT, _how_many
+    from ml_stack.bench import SHORT, _how_many
 
     assert _how_many(Namespace(sample=0, short=True)) == SHORT
     assert _how_many(Namespace(sample=12, short=True)) == 12, "--sample is the explicit one"
@@ -571,7 +571,7 @@ def test_runs_can_be_written_out_so_they_are_not_on_one_disk(tmp_path):
     one machine, and a comparison a week from now has nothing to compare against."""
     import json
 
-    from ml_stack.graph.bench import export, invented_digest
+    from ml_stack.bench import export, invented_digest
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris", "person:otto"], shown=["person:iris"])
@@ -596,7 +596,7 @@ def test_runs_can_be_written_out_so_they_are_not_on_one_disk(tmp_path):
 
 
 def test_an_export_skips_runs_with_nothing_to_score(tmp_path):
-    from ml_stack.graph.bench import export
+    from ml_stack.bench import export
 
     store = tmp_path / "runs.ladybug"
     save(store, [Row(label="chatter", question="hi", expected=[], shown=[])])
@@ -608,7 +608,7 @@ def test_only_runs_over_the_invented_community_are_exported(tmp_path, capsys):
     this file is meant for a public repository. Omitting the questions and entry ids is what
     the current field list happens to do; refusing a run that was not over the invented
     community is what stops the next field added from leaking."""
-    from ml_stack.graph.bench import export, invented_digest
+    from ml_stack.bench import export, invented_digest
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
@@ -629,7 +629,7 @@ def test_only_runs_over_the_invented_community_are_exported(tmp_path, capsys):
 
 def test_an_export_carries_no_question_and_no_entry(tmp_path):
     """Whatever else changes, the words a community said must not be in here."""
-    from ml_stack.graph.bench import export, invented_digest
+    from ml_stack.bench import export, invented_digest
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who surveys land in Calderwick?", expected=["person:iris"],
@@ -646,7 +646,7 @@ def test_a_mmapped_model_still_measures():
     """An mmapped model has no kv_and_run_bytes -- the weights are not all resident, so the
     subtraction says nothing. Reading it anyway raised at the *end* of a run, after every
     question had been answered, and threw away fourteen minutes of GPU for a summary line."""
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     got = bench.beyond_weights({"resident_bytes": 4 * 2**30, "weights_bytes": 60 * 2**30,
                                 "context": 65536, "slots": 2})
@@ -694,7 +694,7 @@ def _tiny_store(tmp_path):
 
 
 def test_finding_names_what_a_run_measured(tmp_path):
-    from ml_stack.graph.bench import finding
+    from ml_stack.bench import finding
 
     assert finding(None) == "chars"
     assert finding("") == "chars"
@@ -707,8 +707,8 @@ def test_finding_says_meaning_only_when_the_store_holds_vectors(tmp_path):
     """An embedder named on the command line is not a vector search: the store has to hold
     vectors for that model, or `hybrid` reads the word index and the label is a lie."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    from ml_stack.graph.bench import finding
-    from ml_stack.graph.bench.measure import found
+    from ml_stack.bench import finding
+    from ml_stack.bench.measure import found
     from ml_stack.graph.store import GraphStore
 
     where = _tiny_store(tmp_path)
@@ -730,7 +730,7 @@ def test_a_run_given_an_embedder_and_no_vectors_measures_words_and_says_why(tmp_
                                                                           monkeypatch,
                                                                           capsys):
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     # `_serving`'s common flags name no store; the last --store given wins
@@ -747,7 +747,7 @@ def test_a_run_given_a_store_looks_up_as_the_application_does(tmp_path):
     the hybrid -- characters, the word index and vectors fused -- so every ranking it wrote
     ranked a look_up nobody ran. Given a store, the model's look_up is the shipped one."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     where = _tiny_store(tmp_path)
 
@@ -769,7 +769,7 @@ def test_the_terse_tools_look_up_through_the_store_too(tmp_path):
     """`tools_for(terse=True)` is built here rather than inside converse, so the finder has
     to be handed to it as well or the terse run measures a different look_up again."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     terse = _Scripted()
     asking(TINY, store=_tiny_store(tmp_path), terse=True)("who?", terse)
@@ -780,7 +780,7 @@ def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsy
     """Like `ctx`: a run with one finder against a run with another is two measurements,
     and the only way to know later is to write it down now."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
@@ -807,7 +807,7 @@ def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsy
 
 def test_the_first_line_a_run_prints_says_which_finder(tmp_path, monkeypatch, capsys):
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
@@ -826,7 +826,7 @@ def test_the_first_line_a_run_prints_says_which_finder(tmp_path, monkeypatch, ca
 def test_the_store_prepare_built_is_the_default_once_it_exists(tmp_path, monkeypatch):
     """A machine that has run `prepare` measures the shipped finder without another flag;
     one that has not is not pointed at a file that is not there."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.prepared() == ""
@@ -836,7 +836,7 @@ def test_the_store_prepare_built_is_the_default_once_it_exists(tmp_path, monkeyp
 
 
 def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_path, capsys):
-    from ml_stack.graph.bench import missed
+    from ml_stack.bench import missed
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
@@ -859,7 +859,7 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
 
 
 def test_an_export_and_the_ranking_carry_the_finder(tmp_path):
-    from ml_stack.graph.bench import SHORT, export, invented_digest, ranking
+    from ml_stack.bench import SHORT, export, invented_digest, ranking
 
     store = tmp_path / "runs.ladybug"
     rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
@@ -889,7 +889,7 @@ def test_an_answer_naming_an_entry_that_was_never_read_counts_one():
     """F1 scores what was lit. An answer can light the right people and still name one the
     model never found, read or showed -- a plausible name it made up -- and F1 is none
     the wiser."""
-    from ml_stack.graph.bench import unread_named
+    from ml_stack.bench import unread_named
 
     said = "Iris Tamsin welds; ask Otto Brayfield about the rest."
     assert unread_named(said, NAMED, touched=["person:iris"]) == ["Otto Brayfield"]
@@ -897,7 +897,7 @@ def test_an_answer_naming_an_entry_that_was_never_read_counts_one():
 
 
 def test_an_answer_naming_only_what_it_read_counts_nothing():
-    from ml_stack.graph.bench import unread_named
+    from ml_stack.bench import unread_named
 
     said = "Iris Tamsin welds, and Pellard hires."
     assert unread_named(said, NAMED, touched=["person:iris", "org:pellard"]) == []
@@ -907,7 +907,7 @@ def test_an_answer_naming_only_what_it_read_counts_nothing():
 
 def test_a_label_inside_a_longer_word_does_not_count():
     """Whole words, as the page's `namedIn` matches: "Pellard" is not in "Pellardsville"."""
-    from ml_stack.graph.bench import unread_named
+    from ml_stack.bench import unread_named
 
     assert unread_named("the Pellardsville fair", NAMED) == []
     assert unread_named("the Pellard fair", NAMED) == ["Pellard"]
@@ -918,7 +918,7 @@ def test_a_label_inside_a_longer_word_does_not_count():
 
 
 def test_measure_counts_what_the_answer_named_but_never_touched():
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     class Model:
         def chat(self, messages, **kw):
@@ -939,7 +939,7 @@ def test_measure_counts_what_the_answer_named_but_never_touched():
 
 
 def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, capsys):
-    from ml_stack.graph.bench import SHORT, export, invented_digest, missed, ranking
+    from ml_stack.bench import SHORT, export, invented_digest, missed, ranking
     from ml_stack.graph.store import GraphStore
 
     store = tmp_path / "runs.ladybug"
@@ -990,7 +990,7 @@ def test_the_ranking_breaks_an_accuracy_tie_by_what_was_made_up():
     """Two runs of one model, the same size and the same F1: the one whose answers named
     fewer entries they never read is the more faithful, and its accuracy is the one ranked
     -- however old. A run from before the count was kept has no say in the tie."""
-    from ml_stack.graph.bench import choices, invented_digest, ranking
+    from ml_stack.bench import choices, invented_digest, ranking
 
     def run(label, at, made, *, counted=True):
         rows = [{"expected": ["a"], "shown": ["a"] if n < 12 else [], "seconds": 5.0,
@@ -1016,7 +1016,7 @@ def test_the_ranking_breaks_an_accuracy_tie_by_what_was_made_up():
 def test_rich_is_asked_for_the_way_terse_is():
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _ways
+    from ml_stack.bench import _ways
 
     ways = _ways(Namespace(also=["rich"], terse=False, temperature=0.0))
     assert ways[1]["label"] == "rich" and ways[1]["rich"] is True
@@ -1027,7 +1027,7 @@ def test_rich_is_asked_for_the_way_terse_is():
 def test_rich_reaches_converse_as_a_keyword(monkeypatch):
     """`converse(..., rich=True)` is another agent's keyword; this only has to hand it on."""
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     reached = {}
 
@@ -1087,7 +1087,7 @@ class _Overlapping:
 
 
 def test_conversations_really_run_at_the_same_time():
-    from ml_stack.graph.bench import asking, concurrent
+    from ml_stack.bench import asking, concurrent
 
     model = _Overlapping()
     rows, held = concurrent(asking(TINY), [{"q": f"q{n}?", "expect": ["person:ada"]}
@@ -1101,7 +1101,7 @@ def test_conversations_really_run_at_the_same_time():
 
 
 def test_a_conversation_carries_its_earlier_turns():
-    from ml_stack.graph.bench import asking, concurrent
+    from ml_stack.bench import asking, concurrent
 
     model = _Overlapping(pause=0.0)
     rows, _ = concurrent(asking(TINY), [{"q": "first?"}, {"q": "second?"}, {"q": "third?"}],
@@ -1117,7 +1117,7 @@ def test_a_conversation_carries_its_earlier_turns():
 
 
 def test_each_conversation_asks_its_own_stretch_of_the_questions():
-    from ml_stack.graph.bench import asking, concurrent
+    from ml_stack.bench import asking, concurrent
 
     rows, _ = concurrent(asking(TINY), [{"q": f"q{n}?"} for n in range(4)],
                          conversations=2, turns=2, label="t", client=_Overlapping(0.0))
@@ -1132,7 +1132,7 @@ def test_each_conversation_asks_its_own_stretch_of_the_questions():
 def test_a_turn_records_its_first_token_and_what_it_spent_waiting():
     """The server says what it spent reading and generating; the wall clock less that is
     the waiting, which is the queueing once there are more conversations than slots."""
-    from ml_stack.graph.bench import asking, concurrent
+    from ml_stack.bench import asking, concurrent
 
     rows, held = concurrent(asking(TINY), [{"q": "q?", "expect": ["person:ada"]}],
                             conversations=1, turns=1, label="t", client=_Overlapping(0.1),
@@ -1152,7 +1152,7 @@ def test_a_turn_records_its_first_token_and_what_it_spent_waiting():
 
 
 def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch, slots):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = iter([{"base_url": "u", "resident_bytes": 3 * 2**30, "weights_bytes": 2**30},
                  {"base_url": "u", "resident_bytes": 2**30, "weights_bytes": 2**30}])
@@ -1169,7 +1169,7 @@ def test_the_run_reads_the_slots_and_keeps_the_most_the_server_held(monkeypatch,
 
 
 def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
-    from ml_stack.graph.bench import asking, concurrent, missed
+    from ml_stack.bench import asking, concurrent, missed
 
     store = tmp_path / "runs.ladybug"
     rows, held = concurrent(asking(TINY), [{"q": f"q{n}?", "expect": ["person:ada"]}
@@ -1206,7 +1206,7 @@ def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
 
 
 def test_the_concurrent_subcommand_smokes_two_conversations_of_one_turn(tmp_path, monkeypatch, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")     # never ~/.ml-stack
     monkeypatch.setattr(bench, "ask_from", lambda spec: _Overlapping)
@@ -1276,7 +1276,7 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     @contextmanager
     def fake_serve(model, **kw):
@@ -1313,7 +1313,7 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
 def test_plain_makes_a_record_the_store_can_keep_without_dropping_anything():
     from dataclasses import dataclass
 
-    from ml_stack.graph.bench import _plain
+    from ml_stack.bench import _plain
 
     @dataclass
     class Held:
@@ -1347,7 +1347,7 @@ def test_a_run_with_a_field_the_store_could_not_take_is_kept_whole(tmp_path):
 def test_save_refuses_to_return_a_run_that_did_not_come_back(tmp_path, monkeypatch):
     """The store took twelve runs and gave back nothing for each. What `save` returns is a
     key that `runs` reads, or it is an error."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
@@ -1378,7 +1378,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     @contextmanager
     def fake_serve(model, **kw):
@@ -1414,7 +1414,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
 
 
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
@@ -1437,7 +1437,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
 
 
 def test_empty_runs_are_skipped_named_and_forgotten(tmp_path, capsys):
-    from ml_stack.graph.bench import empties, forget
+    from ml_stack.bench import empties, forget
     from ml_stack.graph.store import GraphStore
 
     store = tmp_path / "runs.ladybug"
@@ -1449,7 +1449,7 @@ def test_empty_runs_are_skipped_named_and_forgotten(tmp_path, capsys):
     assert [r["label"] for r in runs(store)] == ["tried"], "an empty doc is not a run"
     assert empties(store) == ["bench:hollow:20260901T174747", "bench:hollow:20260901T180039"]
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     assert bench._main(["show", "--kept", str(store)]) == 0
     assert "2 empty run(s) skipped -- ml-stack-bench forget --empty removes them" \
@@ -1462,7 +1462,7 @@ def test_empty_runs_are_skipped_named_and_forgotten(tmp_path, capsys):
 
 
 def test_forgetting_a_label_lists_first_and_deletes_only_with_yes(tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     store = tmp_path / "runs.ladybug"
     save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])])
@@ -1490,7 +1490,7 @@ def test_detach_reruns_the_command_in_its_own_session_with_a_log_of_its_own(tmp_
     import subprocess
     import sys
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
@@ -1507,7 +1507,7 @@ def test_detach_reruns_the_command_in_its_own_session_with_a_log_of_its_own(tmp_
     argv = ["sweep", "--serve", "models/tiny.gguf", "--detach", "--also", "terse", "--smoke"]
     assert bench.main(argv) == 0
 
-    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.graph.bench"]
+    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.bench"]
     assert started["command"][3:] == [a for a in argv if a != "--detach"]
     kw = started["kw"]
     assert kw["start_new_session"] is True and "creationflags" not in kw
@@ -1532,7 +1532,7 @@ def test_detach_reruns_the_command_in_its_own_session_with_a_log_of_its_own(tmp_
 def test_detach_on_windows_asks_for_a_detached_process_group(tmp_path, monkeypatch):
     import subprocess
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench.platform, "system", lambda: "Windows")
@@ -1545,7 +1545,7 @@ def test_detach_on_windows_asks_for_a_detached_process_group(tmp_path, monkeypat
 
 
 def test_the_log_is_named_after_the_label_or_the_first_model():
-    from ml_stack.graph.bench import _named_in
+    from ml_stack.bench import _named_in
 
     assert _named_in(["run", "with-shortlist", "--smoke"]) == "with-shortlist"
     assert _named_in(["concurrent", "e2b-4x3"]) == "e2b-4x3"
@@ -1569,7 +1569,7 @@ def _measuring(tmp_path, pid, *, log_lines=("first", "second", "third")):
 def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch, capsys):
     import os
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.main(["status"]) == 0
@@ -1592,7 +1592,7 @@ def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch,
 
 def test_tail_prints_the_end_of_the_log_and_follows_until_the_pid_is_gone(tmp_path, monkeypatch,
                                                                          capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.main(["tail"]) == 1
@@ -1616,7 +1616,7 @@ def test_stop_signals_the_measuring_pid_and_never_a_name(tmp_path, monkeypatch, 
     import subprocess
     import sys
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.main(["stop"]) == 0
@@ -1647,7 +1647,7 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     came_down = []
 
@@ -1696,7 +1696,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     served_models = []
 
@@ -1763,7 +1763,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
 def test_a_long_label_keeps_its_end_in_the_table():
     """The end of a label is the variant (`-terse`, `-card`); cutting it made three runs
     print as one. Mutation: cut from the end instead of the front."""
-    from ml_stack.graph.bench import _shown
+    from ml_stack.bench import _shown
 
     assert _shown("gemma-4-E2B-it-plain-terse", 20).endswith("plain-terse")
     assert _shown("short") == "short"
@@ -1782,7 +1782,7 @@ def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack.serve import ServerInfo
     from ml_stack.serve.preflight import PreflightFailed
 
@@ -1821,7 +1821,7 @@ def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(
     """A download inside the timed window is a timing of the network. The fetch is also
     before the *lock*: minutes of Hub and no GPU are not a reason to make the next run wait."""
     import ml_stack.hub
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack.lock import only_one
 
     seen = _serving(monkeypatch, tmp_path)
@@ -1858,7 +1858,7 @@ def test_every_hf_reference_is_fetched_before_the_lock_and_no_prefetch_skips_it(
 def test_references_are_read_from_every_measuring_subcommand():
     from argparse import Namespace
 
-    from ml_stack.graph.bench import references_in
+    from ml_stack.bench import references_in
 
     assert references_in(Namespace(serve=["hf:a/b/c.gguf", "d.gguf"], serve_draft=["auto", ""])) \
         == ["hf:a/b/c.gguf"]
@@ -1870,7 +1870,7 @@ def test_references_are_read_from_every_measuring_subcommand():
 
 def test_a_fetch_that_fails_is_said_and_the_rest_still_come_down(capsys):
     import ml_stack.hub
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     def flaky(reference):
         if "gone" in reference:
@@ -1889,7 +1889,7 @@ def test_the_preflight_is_printed_under_the_up_line_and_kept_beside_the_measured
         tmp_path, monkeypatch, capsys):
     """The estimate and the measurement on adjacent lines is the point: a KV estimate that
     reads 3G against a `kv+run` that measures 9G is a model whose runtime is not the cache."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
@@ -1911,7 +1911,7 @@ def test_a_refused_preflight_skips_the_model_and_the_sweep_goes_on(tmp_path, mon
                                                                     capsys):
     """A sweep of five must not end on the one that does not fit. Two refusals, both
     caught per model: this preflight's own, and the backend's raised out of the lease."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path, fail_for=("wrongbuild",))
     _preflight_ok(monkeypatch, refuse=("toobig",))
@@ -1928,7 +1928,7 @@ def test_a_refused_preflight_skips_the_model_and_the_sweep_goes_on(tmp_path, mon
 
 
 def test_a_sweep_refused_everywhere_still_prints_its_table(tmp_path, monkeypatch, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     _preflight_ok(monkeypatch, refuse=("tiny",))
@@ -1942,8 +1942,8 @@ def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_pa
     """Not a stopwatch around `serve()`: that also holds an adopted server's nothing and a
     warm-up's something. Blank for a run kept before the lease recorded it, and `n` stays
     the fourth word of every row, old or new."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import SHORT, export, invented_digest, missed, ranking
+    import ml_stack.bench as bench
+    from ml_stack.bench import SHORT, export, invented_digest, missed, ranking
 
     seen = _serving(monkeypatch, tmp_path, load_s=41.6, warmup_s=None)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"]]) == 0
@@ -1982,7 +1982,7 @@ def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, 
                                                                      capsys):
     """`--spec-draft-n-max` is bound at start like the head, so N lengths is N servers --
     labelled so the table shows acceptance and wall per (head, n-max)."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
@@ -2026,8 +2026,8 @@ def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path,
                                                                        capsys):
     """A run with a q8 cache against one at f16 is two configurations. The label carries it
     where the variant lives, at the end, and `ctx` shows it beside the context it sizes."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import kv_short
+    import ml_stack.bench as bench
+    from ml_stack.bench import kv_short
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
@@ -2058,7 +2058,7 @@ def test_shortlist_for_gives_both_halves_to_the_models_named_in_one_load(tmp_pat
                                                                          capsys):
     """One load per model, whatever it is asked: the shortlist half used to cost a second
     load that measured nothing about the asking. `--shortlist-for` narrows who gets it."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--serve", "other.gguf",
@@ -2089,8 +2089,8 @@ def test_shortlist_for_gives_both_halves_to_the_models_named_in_one_load(tmp_pat
 def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
     """A head is measured against the look_up the ranking measures: `drafts` takes
     `--store`, `--embed-url` and `--embed-model` and gives all three to `drafts()`."""
-    import ml_stack.graph.bench as bench
-    import ml_stack.graph.bench.run as run_mod
+    import ml_stack.bench as bench
+    import ml_stack.bench.run as run_mod
 
     seen = {}
 
@@ -2120,7 +2120,7 @@ def test_a_resumed_sweep_with_shortlist_for_measures_only_the_half_not_kept(tmp_
                                                                             capsys):
     """The plain half kept today and the shortlist half not: one load, the plain half
     skipped by name, the shortlist half measured."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"],
@@ -2147,7 +2147,7 @@ def test_a_resumed_sweep_with_shortlist_for_measures_only_the_half_not_kept(tmp_
 def test_halves_and_the_ways_they_cross():
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _asked, halves
+    from ml_stack.bench import _asked, halves
 
     args = Namespace(plain_only=False, shortlist_for="e2b,E4B", shortlist=8, also=["terse"],
                      terse=False)
@@ -2174,7 +2174,7 @@ def test_halves_and_the_ways_they_cross():
 def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **server):
     """A run of ``questions`` over the invented community, ``hits`` of them answered in
     full, taking ``seconds`` altogether, served by ``binary``."""
-    from ml_stack.graph.bench import invented_digest
+    from ml_stack.bench import invented_digest
 
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
     return save(store, rows, held={"graph": invented_digest(), "model": model,
@@ -2184,7 +2184,7 @@ def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **ser
 def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_path):
     """A 34-question undrafted run on mainline says how well flash answers; a 20-question
     drafted run on a fork, F1 held, says what it costs -- per question, so the two compare."""
-    from ml_stack.graph.bench import ranking
+    from ml_stack.bench import ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
@@ -2208,7 +2208,7 @@ def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_pat
 def test_a_drafted_run_whose_f1_fell_is_rejected_and_named(tmp_path):
     """A fall these questions really did measure -- 59% against 10%, the two 95% intervals
     nowhere near each other -- and the cost stays with the accuracy run."""
-    from ml_stack.graph.bench import ranking
+    from ml_stack.bench import ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
@@ -2228,7 +2228,7 @@ def test_a_drafted_run_whose_f1_fell_is_rejected_and_named(tmp_path):
 
 
 def test_a_model_with_one_run_uses_it_and_says_so(tmp_path):
-    from ml_stack.graph.bench import ranking
+    from ml_stack.bench import ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "only", model="one.gguf", questions=20, hits=10, seconds=100.0,
@@ -2240,7 +2240,7 @@ def test_a_model_with_one_run_uses_it_and_says_so(tmp_path):
 
 
 def test_a_smoke_run_never_supplies_cost_and_the_footnote_counts_it(tmp_path):
-    from ml_stack.graph.bench import SHORT, ranking
+    from ml_stack.bench import SHORT, ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
@@ -2253,7 +2253,7 @@ def test_a_smoke_run_never_supplies_cost_and_the_footnote_counts_it(tmp_path):
 
 
 def test_accuracy_is_the_largest_run_then_the_best_then_the_newest():
-    from ml_stack.graph.bench import choices, invented_digest
+    from ml_stack.bench import choices, invented_digest
 
     def run(label, at, hits, seconds):
         rows = [{"expected": ["a"], "shown": ["a"] if n < hits else [], "seconds": seconds / 20}
@@ -2277,7 +2277,7 @@ def test_accuracy_is_the_largest_run_then_the_best_then_the_newest():
 
 
 def test_the_composed_frontier_holds_the_composed_point(tmp_path, capsys):
-    from ml_stack.graph.bench import composed, pareto, plot, rates
+    from ml_stack.bench import composed, pareto, plot, rates
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0)
@@ -2307,7 +2307,7 @@ def test_the_composed_frontier_holds_the_composed_point(tmp_path, capsys):
 
 
 def test_an_export_carries_the_binary_and_the_timeouts(tmp_path):
-    from ml_stack.graph.bench import export
+    from ml_stack.bench import export
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "only", model="one.gguf", questions=20, hits=10, seconds=100.0,
@@ -2344,7 +2344,7 @@ class _Stalling:
 
 
 def test_a_question_past_the_cap_is_kept_as_timed_out_and_the_run_moves_on(capsys):
-    from ml_stack.graph.bench import measure
+    from ml_stack.bench import measure
 
     client = _Stalling(stall=0.3)
 
@@ -2364,7 +2364,7 @@ def test_a_question_past_the_cap_is_kept_as_timed_out_and_the_run_moves_on(capsy
 
 def test_a_deadline_already_spent_stops_the_next_call_before_it_is_made():
     """Three calls get one cap between them, not three."""
-    from ml_stack.graph.bench import Counting, QuestionTimedOut
+    from ml_stack.bench import Counting, QuestionTimedOut
 
     class Prompt:
         def chat(self, messages, **kw):
@@ -2379,7 +2379,7 @@ def test_a_deadline_already_spent_stops_the_next_call_before_it_is_made():
 
 
 def test_an_ask_that_swallows_the_timeout_is_still_scored_wrong():
-    from ml_stack.graph.bench import measure
+    from ml_stack.bench import measure
 
     client = _Stalling(stall=0.3)
 
@@ -2396,7 +2396,7 @@ def test_an_ask_that_swallows_the_timeout_is_still_scored_wrong():
 
 
 def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
-    from ml_stack.graph.bench import missed
+    from ml_stack.bench import missed
 
     store = tmp_path / "runs.ladybug"
     rows = [a_row("who?", expected=["person:iris"], shown=[]),
@@ -2416,7 +2416,7 @@ def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
 
 
 def test_per_question_reaches_the_client_and_the_measuring(tmp_path, monkeypatch, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--per-question", "42",
@@ -2434,7 +2434,7 @@ def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path
                                                                        capsys):
     """A ceiling cuts the answer; a budget stops the thinking. Bound at start like the cache
     type, so it is on the label and beside the context it was served with."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
@@ -2466,7 +2466,7 @@ def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path
 def test_a_model_that_will_not_load_ends_that_model_and_not_the_sweep(monkeypatch, tmp_path, capsys):
     """Measured 2026-09-01: Flash-Next's head failed to load on mainline and the crash took
     gpt-oss-120b's measurement down with it, twice. Mutation: drop the except."""
-    from ml_stack.graph import bench
+    from ml_stack import bench
     from ml_stack.serve.backend import ServerFailed
 
     calls = []
@@ -2515,7 +2515,7 @@ def _measured(label, *, model="flash.gguf", questions=20, hits=12, seconds=200.0
 def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_over_this_one():
     """A drafted run at 7.04 s/question against its baseline's 10.0 is 1.42x -- against
     the *newest* undrafted run of the same model, build and size, and none other."""
-    from ml_stack.graph.bench import baseline, speedup
+    from ml_stack.bench import baseline, speedup
 
     older = _measured("draft:none", seconds=300.0, at="2026-09-01T10:00:00")
     newest = _measured("draft:none", seconds=200.0, at="2026-09-01T11:00:00")
@@ -2543,7 +2543,7 @@ def test_speedup_is_the_newest_same_model_same_build_same_size_undrafted_run_ove
 
 def test_the_table_prints_speed_after_draft_and_leaves_it_blank_without_a_baseline(tmp_path,
                                                                                     capsys):
-    from ml_stack.graph.bench import invented_digest
+    from ml_stack.bench import invented_digest
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=200.0,
@@ -2567,7 +2567,7 @@ def test_the_table_prints_speed_after_draft_and_leaves_it_blank_without_a_baseli
 
 
 def test_the_detail_says_the_speedup_on_the_run_line(tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=200.0)
@@ -2593,7 +2593,7 @@ def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that
     Every F1 carries the interval its own questions leave it: 55% ±22 against a baseline's
     60% ±22 is not a five-point regression, it is twenty questions.
     """
-    from ml_stack.graph.bench import drafted
+    from ml_stack.bench import drafted
 
     base = _measured("draft:none", hits=12, seconds=200.0, at="2026-09-01T11:00:00")
     slow = _measured("draft:mtp-a@n4", hits=12, seconds=140.0, draft="mtp-a.gguf",
@@ -2629,7 +2629,7 @@ def test_the_drafts_summary_is_sorted_by_speedup_and_recommends_the_fastest_that
 
 def test_the_ranking_and_the_export_carry_the_speedup(tmp_path):
     """The cost row names the drafted run, its size, and what the head was worth."""
-    from ml_stack.graph.bench import export, ranking
+    from ml_stack.bench import export, ranking
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
@@ -2656,7 +2656,7 @@ def test_loose_is_asked_for_the_way_rich_is_and_tight_asks_for_nothing_new(capsy
     and says so rather than paying for the same run twice."""
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _parser, _ways
+    from ml_stack.bench import _parser, _ways
 
     ways = _ways(Namespace(also=["loose"], terse=False, temperature=0.0))
     assert ways[1]["label"] == "loose" and ways[1]["tight"] is False
@@ -2676,7 +2676,7 @@ def test_also_loose_reaches_the_serving_seam_as_tight_false(tmp_path, monkeypatc
     """What `--also loose` is *for*: a second way through the same load, labelled `loose`,
     asked with `tight=False` where `served` builds the asking -- while the first way, asked
     for nothing, is the tight default. Mutation: pop `tight` with a False default."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     asked_tight = []
@@ -2709,7 +2709,7 @@ def test_tight_reaches_converse_as_a_keyword(monkeypatch):
     and the loose control measures the tight default twice."""
     import ml_stack.graph.ask as ask_module
     from ml_stack.graph.ask import TERSE, TIGHT_SHOW_TERSE
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     reached = {}
 
@@ -2744,7 +2744,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     the real `Client.__init__`, so it stays strict as the client changes."""
     import ml_stack.client
     import ml_stack.serve
-    from ml_stack.graph import bench
+    from ml_stack import bench
     from ml_stack.serve import Run, Shape
 
     built = []
@@ -2789,8 +2789,8 @@ def test_reach_is_a_way_of_its_own_and_also_a_setting_on_every_way(capsys):
     `--reach N` is "how fat", which is not a variant at all: it rides on every way asked."""
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _parser, _ways
-    from ml_stack.graph.bench.run import REACH
+    from ml_stack.bench import _parser, _ways
+    from ml_stack.bench.run import REACH
 
     ways = _ways(Namespace(also=["reach"], terse=False, temperature=0.0, reach=0))
     assert "reach" not in ways[0], "the first way is what was asked for, unchanged"
@@ -2811,8 +2811,8 @@ def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeyp
     `reach`, building the asking with a budget in tokens -- while the first way, asked for
     nothing, has none at all. Mutation: default the pop to `REACH` and every run measures
     fat results, including the ones the ranking was written from."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench.run import REACH
+    import ml_stack.bench as bench
+    from ml_stack.bench.run import REACH
 
     seen = _serving(monkeypatch, tmp_path)
     asked_reach = []
@@ -2842,7 +2842,7 @@ def test_reach_reaches_converse_as_a_keyword_and_is_absent_without_one(monkeypat
     Mutation: send `reach=None` rather than leaving it out, and a run that asked for nothing
     is no longer byte for byte the run the ranking was written from."""
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     reached = {}
 
@@ -2894,7 +2894,7 @@ def test_a_served_sweep_smokes_every_way_first_on_the_one_load(tmp_path, monkeyp
     way as soon as the model is up -- kept, read back -- and only then its own questions,
     on the same server, so the load is paid once. The smoke used to be a step in a plan,
     and the day it was left out of one a bad way cost an 87G load."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     built = _watching(monkeypatch)
@@ -2933,7 +2933,7 @@ def test_a_smoke_that_fails_ends_the_run_with_exit_1_and_nothing_else_starts(tmp
     nothing: every smoke question fails, the run stops there with the reason, and the
     questions that cost the GPU are never asked."""
     import ml_stack.client
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     built = _watching(monkeypatch)
@@ -2960,7 +2960,7 @@ def test_a_smoke_that_fails_ends_the_run_with_exit_1_and_nothing_else_starts(tmp
 def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tmp_path,
                                                                              monkeypatch,
                                                                              capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     built = []
 
@@ -3002,8 +3002,8 @@ def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tm
 def test_patching_the_package_reaches_every_module(monkeypatch):
     """The package is the one namespace: `bench.runs` patched here is what `read_back` in
     `keep` and `compare` in `show` see, or a test's fake store would be read by nobody."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import keep, show
+    import ml_stack.bench as bench
+    from ml_stack.bench import keep, show
 
     monkeypatch.setattr(bench, "runs",
                         lambda store, label="": [{"key": "k", "label": label, "rows": []}])
@@ -3016,7 +3016,7 @@ def test_serve_draft_auto_asks_the_one_resolver_and_says_why(tmp_path, monkeypat
     serve, so a head that borrows is withheld from mainline. The bench had its own, which
     chose a BF16 MTP head for mainline twice (2026-09-01), 87G each time."""
     import ml_stack.hub
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     asked = []
 
@@ -3055,9 +3055,9 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
     import pathlib
     import subprocess
 
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import history
-    from ml_stack.graph.bench import run as running
+    import ml_stack.bench as bench
+    from ml_stack.bench import history
+    from ml_stack.bench import run as running
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
@@ -3095,7 +3095,7 @@ def test_detach_records_the_job_for_wait_and_status(tmp_path, monkeypatch, capsy
     without refusing a second `--detach` -- the queue behind the lock is bench's own."""
     import subprocess
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack import jobs
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
@@ -3120,7 +3120,7 @@ def test_wait_blocks_on_the_detached_pid_and_says_when_it_has_ended(tmp_path, mo
     import subprocess
     import sys
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     assert bench.main(["wait"]) == 0
@@ -3145,7 +3145,7 @@ def test_commit_reads_the_short_sha_and_marks_a_dirty_tree(tmp_path):
     uncommitted, and "" where there is no repository at all."""
     import subprocess
 
-    from ml_stack.graph.bench.run import _commit
+    from ml_stack.bench.run import _commit
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -3168,8 +3168,8 @@ def test_a_sigterm_says_killed_before_it_raises(capsys):
     """`history` tells a stopped run from a crashed one by that word in its log."""
     import signal
 
-    from ml_stack.graph.bench import history
-    from ml_stack.graph.bench.run import _stop_on_sigterm
+    from ml_stack.bench import history
+    from ml_stack.bench.run import _stop_on_sigterm
 
     with pytest.raises(SystemExit) as left:
         _stop_on_sigterm(signal.SIGTERM, None)
@@ -3184,7 +3184,7 @@ def test_every_run_carries_the_host_and_the_commit(tmp_path, monkeypatch):
     from a peer names the peer, not the machine that gathered it."""
     import socket
 
-    from ml_stack.graph.bench import keep
+    from ml_stack.bench import keep
 
     store = tmp_path / "runs.ladybug"
     monkeypatch.setattr(keep, "_commit", lambda root=None: "0f1e2d3 (dirty)")
@@ -3219,7 +3219,7 @@ def test_the_table_names_the_host_only_when_more_than_one_measured(tmp_path, cap
 def test_a_cost_run_from_another_host_is_never_taken_and_is_named(tmp_path, capsys):
     """A different machine is a different clock: however well its F1 held, a run from
     another host supplies no cost, and the ranking says so rather than skipping it."""
-    from ml_stack.graph.bench import choices, composed, plot, ranking, rates
+    from ml_stack.bench import choices, composed, plot, ranking, rates
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
@@ -3263,7 +3263,7 @@ def test_a_cost_run_from_another_host_is_never_taken_and_is_named(tmp_path, caps
 # -- sweep --fleet ----------------------------------------------------------------------------------
 
 def test_fleet_jobs_are_the_same_line_with_one_serve_each():
-    from ml_stack.graph.bench.run import fleet_jobs
+    from ml_stack.bench.run import fleet_jobs
 
     argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
             "b.gguf", "--serve-draft", "ha.gguf", "--also", "terse", "--kept", "/k",
@@ -3312,8 +3312,8 @@ def _fake_fleet(monkeypatch, *, plan):
 
 
 def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeypatch, capsys):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import run as running
+    import ml_stack.bench as bench
+    from ml_stack.bench import run as running
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3")
@@ -3340,8 +3340,8 @@ def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeyp
 
 def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_path, monkeypatch,
                                                                          capsys):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import run as running
+    import ml_stack.bench as bench
+    from ml_stack.bench import run as running
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
@@ -3391,7 +3391,7 @@ def _asking_calls(n):
 
 
 def _cache_row(script, label="cached"):
-    from ml_stack.graph.bench import _ask_once
+    from ml_stack.bench import _ask_once
 
     row, _ = _ask_once(_asking_calls(len(script)), {"q": "who?", "expect": ["topic:compiler"]},
                        label=label, client=_Reporting(script))
@@ -3403,7 +3403,7 @@ def test_a_prefix_that_survives_and_one_that_breaks_are_told_apart_per_turn():
     nothing before them. Cached tokens that grow past the previous call's whole prompt
     say the prefix was kept; cached tokens that fall back say the system prompt and the
     tool schemas were read again -- which the run's totals cannot see."""
-    from ml_stack.graph.bench import prefix_kept
+    from ml_stack.bench import prefix_kept
 
     grew = _cache_row([(0, 900), (900, 120), (1025, 80), (1100, 60)])
     assert grew.cache_calls == [[0, 900], [900, 120], [1025, 80], [1100, 60]]
@@ -3427,7 +3427,7 @@ def test_a_prefix_that_survives_and_one_that_breaks_are_told_apart_per_turn():
 
 
 def test_the_run_the_table_the_detail_and_the_export_carry_the_cache_per_turn(tmp_path, capsys):
-    from ml_stack.graph.bench import _flat, cache_turns, missed, prefixed
+    from ml_stack.bench import _flat, cache_turns, missed, prefixed
 
     store = tmp_path / "runs.ladybug"
     grew = _cache_row([(0, 900), (900, 120), (1025, 80), (1100, 60)])
@@ -3490,8 +3490,8 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
     """The newest run of that model at this context, over a newer one at another: a model
     at 8k answers faster than the same model at 32k, and the `ctx` column exists because
     the two are not the same measurement. Times the questions, the ways and a load."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import estimate, history
+    import ml_stack.bench as bench
+    from ml_stack.bench import estimate, history
 
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     kept = [_stamped_run("quill-plain", model="quill.gguf", per_question=65.0, load_s=41.6,
@@ -3532,8 +3532,8 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
 
 def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_so(tmp_path,
                                                                                    monkeypatch):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import estimate
+    import ml_stack.bench as bench
+    from ml_stack.bench import estimate
 
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     sized = tmp_path / "sized.gguf"
@@ -3558,8 +3558,8 @@ def test_every_measuring_subcommand_estimates_its_own_shape(tmp_path, monkeypatc
     """`drafts` is a load per (head, n-max) and one for the baseline; `concurrent` asks
     conversations times turns; `extract` reads messages, twice with --twice; `run` is one
     way of one server. A --smoke is two questions and is never over the ceiling."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import estimate
+    import ml_stack.bench as bench
+    from ml_stack.bench import estimate
 
     monkeypatch.setattr(bench, "find_model", lambda named: named)
     parse = bench._parser().parse_args
@@ -3595,7 +3595,7 @@ def test_main_refuses_over_the_ceiling_with_exit_5_and_serves_nothing_unless_yes
     """Adam, 2026-09-02: no more eight-hour tests. The rule is in the tool: over the
     ceiling, said and refused before a download, a lock or a load; --yes runs it; a
     --smoke is never refused."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     argv = ["sweep", "--serve", "tiny.gguf", "--plain-only", *seen["common"],
@@ -3638,7 +3638,7 @@ def test_a_detached_run_is_estimated_in_the_terminal_and_a_refusal_never_detache
     """A refusal at the top of a log nobody is watching is not a refusal."""
     import subprocess
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
@@ -3666,7 +3666,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     "we need to test the mtp of the newest 27b"). Mutation: drop the EMBEDDED branch."""
     import ml_stack.client
     import ml_stack.serve
-    from ml_stack.graph import bench
+    from ml_stack import bench
     from ml_stack.serve import Run, Shape
     from ml_stack.testing import FakeClient, FakeServe
 
@@ -3698,7 +3698,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
 def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
     """gpt-oss's eagle3 head: 65% accepted, F1 unchanged, 0.82x -- the summary recommended
     it (2026-09-02). Serving a head is only worth it when it is faster than no head."""
-    from ml_stack.graph.bench import drafted
+    from ml_stack.bench import drafted
 
     base = _measured("draft:none", hits=12, seconds=120.0, at="2026-09-01T11:00:00")
     slower = _measured("draft:eagle3@n2", hits=12, seconds=146.0, draft="eagle3.gguf",
@@ -3717,7 +3717,7 @@ def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():
 def test_drafts_measures_every_arm_under_the_same_reasoning_budget(tmp_path, monkeypatch):
     """A head and no thinking is the serving shape worth measuring together; the budget
     binds at start on every arm, baseline included, and every label says so."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
@@ -3733,7 +3733,7 @@ def test_drafts_measures_every_arm_under_the_same_reasoning_budget(tmp_path, mon
 
 
 def test_newest_narrows_to_since_and_then_to_the_last_n():
-    from ml_stack.graph.bench.run import newest
+    from ml_stack.bench.run import newest
 
     kept = [{"at": "2026-09-02T10:00:00", "label": "a"}, {"at": "2026-09-02T12:00:00", "label": "b"},
             {"at": "2026-09-02T14:00:00", "label": "c"}]
@@ -3746,8 +3746,8 @@ def test_newest_narrows_to_since_and_then_to_the_last_n():
 def test_status_says_what_is_serving_and_what_the_job_kept(tmp_path, monkeypatch, capsys):
     """One command answers 'is anything benching, what is serving, what did it produce'
     -- Adam: 'you shouldn't have to write so much code to check bench status'."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import run as running
+    import ml_stack.bench as bench
+    from ml_stack.bench import run as running
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
@@ -3776,7 +3776,7 @@ def test_status_says_what_is_serving_and_what_the_job_kept(tmp_path, monkeypatch
 
 
 def test_show_last_lists_only_the_newest_runs(tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     store = tmp_path / "runs.ladybug"
     for label in ("first", "second", "third"):
@@ -3790,7 +3790,7 @@ def test_show_last_lists_only_the_newest_runs(tmp_path, capsys):
 def test_the_table_shows_the_most_a_slot_held_in_any_one_call():
     """With a rolling window the conversation's length says nothing about the cache; the
     peak of cached-plus-read over every call is what a slot's context must hold."""
-    from ml_stack.graph.bench.show import peak
+    from ml_stack.bench.show import peak
 
     rows = [{"cache_calls": [[0, 3000], [3000, 900], [3900, 2500]]},
             {"cache_calls": [[0, 2800], [2800, 11000]]},
@@ -3801,7 +3801,7 @@ def test_the_table_shows_the_most_a_slot_held_in_any_one_call():
 
 
 def test_show_prints_the_peak_column(tmp_path, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
     row.cache_calls = [[0, 4000], [4000, 9000]]
@@ -3812,7 +3812,7 @@ def test_show_prints_the_peak_column(tmp_path, capsys):
 
 
 def test_sweep_n_max_reaches_the_served_head(tmp_path, monkeypatch):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
@@ -3827,8 +3827,8 @@ def test_sweep_n_max_reaches_the_served_head(tmp_path, monkeypatch):
 def test_sweep_serve_flags_reach_the_spec_by_field_name(tmp_path, monkeypatch):
     """--serve-arg, --serve-mlock, --serve-no-flash-attn, --serve-mmproj: the serving knobs a
     run varies to find out what each is worth, reaching the ServerSpec as its own fields."""
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench.run import serving_fields
+    import ml_stack.bench as bench
+    from ml_stack.bench.run import serving_fields
 
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
@@ -3869,7 +3869,7 @@ class _Talkative:
         self.sampling: dict = {}
 
     def chat(self, messages, tools=None, **kw):
-        from ml_stack.graph.bench.selfcheck import _Reply
+        from ml_stack.bench.selfcheck import _Reply
 
         self.seen.append([dict(m) for m in messages])
         offered = {str((t.get("function") or {}).get("name")) for t in (tools or [])}
@@ -3897,7 +3897,7 @@ class _Talkative:
 
 def _one_traced_row():
     """One question asked of `_Talkative` through the ordinary asking, traced."""
-    from ml_stack.graph.bench import asking, measure
+    from ml_stack.bench import asking, measure
 
     model = _Talkative()
     rows = measure(asking(TINY), [{"q": "who works on compilers?",
@@ -3911,7 +3911,7 @@ def test_a_sampled_run_traces_and_the_hundred_does_not(monkeypatch):
     only thing that knows -- how many questions are being asked -- rather than by a flag
     somebody has to remember. The day's sweep scored thousands of tool calls and kept none
     of them, and there is no way to get those back but to spend the GPU again."""
-    from ml_stack.graph.bench import SHORT, TRACE_ENV, wants_trace
+    from ml_stack.bench import SHORT, TRACE_ENV, wants_trace
 
     monkeypatch.delenv(TRACE_ENV, raising=False)
     assert wants_trace(2) and wants_trace(SHORT)
@@ -3963,7 +3963,7 @@ def test_a_traced_question_keeps_every_call_with_its_arguments_and_timings():
 def test_a_question_asked_without_a_trace_keeps_none_of_it():
     """The default for a hundred questions, and what every run kept before today: the
     totals, and nothing measured in kilobytes."""
-    from ml_stack.graph.bench import asking, measure
+    from ml_stack.bench import asking, measure
 
     rows = measure(asking(TINY), [{"q": "who works on compilers?",
                                    "expect": ["topic:compiler"]}],
@@ -3975,8 +3975,8 @@ def test_a_tool_result_is_cut_at_two_thousand_characters_and_says_how_long_it_wa
     """A tool result is the largest thing in a conversation and the least of what is being
     taught -- the lesson is the call, not the graph's answer. The whole length is kept
     beside the cut text, so what it cost is not lost with the bytes."""
-    from ml_stack.graph.bench import TRACE_CAP, Counting
-    from ml_stack.graph.bench.selfcheck import _Reply
+    from ml_stack.bench import TRACE_CAP, Counting
+    from ml_stack.bench.selfcheck import _Reply
 
     class Once:
         def chat(self, messages, **kw):
@@ -4021,7 +4021,7 @@ def test_show_trace_prints_one_line_per_call_with_what_it_called_and_what_it_cos
     example is read before thousands of them are written from the same rows."""
     from dataclasses import asdict
 
-    from ml_stack.graph.bench import transcript
+    from ml_stack.bench import transcript
 
     row, _ = _one_traced_row()
     kept = [{"label": "e4b-shortlist", "at": "2026-09-02T19:00:00",
@@ -4049,7 +4049,7 @@ def test_the_three_askings_of_2026_09_02_are_ways_and_not_loads():
     one model load and not four -- which is the whole point of `--also`."""
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _parser, _ways
+    from ml_stack.bench import _parser, _ways
 
     ways = _ways(Namespace(also=["batch", "kinds", "summary"], terse=False,
                            temperature=0.0, reach=0))
@@ -4077,7 +4077,7 @@ def test_the_three_askings_reach_the_serving_seam_and_never_the_client(tmp_path,
     """
     import inspect
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     asked = []
@@ -4114,7 +4114,7 @@ def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_witho
     and a run that asked for none is no longer byte for byte the run the ranking was
     written from."""
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     reached = {}
 
@@ -4139,7 +4139,7 @@ def test_batch_kinds_and_summary_reach_converse_as_keywords_and_are_absent_witho
 
 
 def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypatch):
-    from ml_stack.graph.bench.run import _ways as ways
+    from ml_stack.bench.run import _ways as ways
 
     args = type("A", (), {"also": ["rich"], "terse": False, "batch": True, "kinds": True,
                           "summary": False, "reach": 0, "temperature": None, "top_p": None,
@@ -4159,7 +4159,7 @@ def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypa
 def test_single_and_few_are_ways_and_rounds_rides_on_every_one_of_them():
     from argparse import Namespace
 
-    from ml_stack.graph.bench import _parser, _ways
+    from ml_stack.bench import _parser, _ways
 
     ways = _ways(Namespace(also=["batch", "single", "few"], terse=False,
                            temperature=0.0, reach=0, rounds=0))
@@ -4188,7 +4188,7 @@ def test_single_few_and_rounds_reach_the_serving_seam_and_never_the_client(tmp_p
     which is what `tight` was not."""
     import inspect
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
     asked = []
@@ -4218,7 +4218,7 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
     it. Mutation: send them as `False`/`ROUNDS` rather than leaving them out, and a run
     that asked for none is no longer byte for byte the run the ranking was written from."""
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     reached = {}
 
@@ -4257,7 +4257,7 @@ def test_single_few_and_rounds_reach_converse_and_are_absent_without_one(monkeyp
 
 def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=None, **server):
     """A run kept with a full server record and, given one, an asking record."""
-    from ml_stack.graph.bench import invented_digest
+    from ml_stack.bench import invented_digest
 
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds,
                        miss=["person:wren"])
@@ -4269,7 +4269,7 @@ def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=No
 
 def test_the_shape_says_what_the_label_only_hinted_at(tmp_path):
     """Everything that decided a run and had nowhere to live, on one field."""
-    from ml_stack.graph.bench import asked_as, shape_of, shaped
+    from ml_stack.bench import asked_as, shape_of, shaped
 
     one = {"server": {"cache_type": "q8_0", "reasoning_budget": 0,
                       "extra_args": ["-ub", "2048", "--draft-p-min", "0.5"],
@@ -4287,7 +4287,7 @@ def test_the_shape_says_what_the_label_only_hinted_at(tmp_path):
 
 def test_a_run_that_recorded_none_of_it_still_reads(tmp_path):
     """Missing records show `-`, and `-` is not the same as "asked plainly"."""
-    from ml_stack.graph.bench import asked_as, shape_of, shaped
+    from ml_stack.bench import asked_as, shape_of, shaped
 
     assert shape_of({}) == "-" and asked_as({}) == "-" and shaped({}) == "-"
     assert shaped({"server": {"cache_type": "q8_0"}}) == "q8", "served shape, asking unknown"
@@ -4312,7 +4312,7 @@ def test_the_asking_is_kept_beside_the_rows_and_reads_back(tmp_path):
 
 def test_asking_records_what_it_handed_converse(tmp_path):
     """`asking` writes down the way it asked, so nothing has to read it off a label."""
-    from ml_stack.graph.bench import asking
+    from ml_stack.bench import asking
 
     graph = {"nodes": [{"id": "person:iris", "label": "Iris Calloway", "kind": "person"}],
              "edges": []}
@@ -4326,7 +4326,7 @@ def test_asking_records_what_it_handed_converse(tmp_path):
 
 def test_the_table_carries_the_shape_and_the_old_runs_still_read(tmp_path, capsys):
     """The table leaves out what `ctx` already says, so the field prints whole."""
-    from ml_stack.graph.bench import shape_of
+    from ml_stack.bench import shape_of
 
     store = tmp_path / "runs.ladybug"
     _shaped_run(store, "flash-batch", cache_type="q8_0", reasoning_budget=0,
@@ -4345,7 +4345,7 @@ def test_the_table_carries_the_shape_and_the_old_runs_still_read(tmp_path, capsy
 
 def test_runs_of_the_same_shape_are_one_line(tmp_path, capsys):
     """Four lines that are the same thing measured four times is a table of noise."""
-    from ml_stack.graph.bench import by_shape
+    from ml_stack.bench import by_shape
 
     store = tmp_path / "runs.ladybug"
     shape = {"cache_type": "q8_0", "reasoning_budget": 0}
@@ -4371,7 +4371,7 @@ def test_the_band_shrinks_as_the_questions_are_added(tmp_path):
     is the same and the interval around it is not, because five questions cannot tell a
     seventy from a fifty and eighty can.
     """
-    from ml_stack.graph.bench import band, derived, half_band
+    from ml_stack.bench import band, derived, half_band
 
     def run(n):
         rows = [{"expected": ["a"], "shown": ["a"] if i % 5 < 3 else ["b"], "seconds": 10.0}
@@ -4390,7 +4390,7 @@ def test_the_band_shrinks_as_the_questions_are_added(tmp_path):
 
 def test_the_band_is_the_same_band_twice(tmp_path):
     """Seeded: a band that moves when nothing was measured is a band nobody can quote."""
-    from ml_stack.graph.bench import bands
+    from ml_stack.bench import bands
 
     rows = [{"expected": ["a"], "shown": ["a"] if i % 3 else ["b"], "seconds": i / 10}
             for i in range(30)]
@@ -4405,7 +4405,7 @@ def test_a_difference_inside_the_band_is_not_called(tmp_path):
     head that cost five points of accuracy, when the interval on each is twenty points
     wide. `separated` says so, and the ranking stops rejecting on it.
     """
-    from ml_stack.graph.bench import held_up, ranking, separated
+    from ml_stack.bench import held_up, ranking, separated
 
     store = tmp_path / "runs.ladybug"
     _shaped_run(store, "flash-plain", questions=20, hits=12, seconds=300.0)
@@ -4430,7 +4430,7 @@ def test_a_difference_inside_the_band_is_not_called(tmp_path):
 
 
 def test_the_score_carries_its_interval_wherever_it_is_printed(tmp_path, capsys):
-    from ml_stack.graph.bench import export, missed, ranking
+    from ml_stack.bench import export, missed, ranking
 
     store = tmp_path / "runs.ladybug"
     _shaped_run(store, "flash-plain", questions=20, hits=14, seconds=200.0)
@@ -4509,7 +4509,7 @@ def test_the_sampler_keeps_the_worst_of_a_rising_series(monkeypatch):
     """
     import sys
 
-    import ml_stack.graph.bench as measuring
+    import ml_stack.bench as measuring
 
     footprints = iter([40 * G, 62 * G, 71 * G, 68 * G])
     monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: next(footprints))
@@ -4538,7 +4538,7 @@ def test_a_run_against_someone_elses_server_samples_nothing_and_says_so(monkeypa
     read, and a row of 0.00G would read as a model that costs nothing."""
     import sys
 
-    import ml_stack.graph.bench as measuring
+    import ml_stack.bench as measuring
 
     monkeypatch.setattr(measuring, "_rusage_footprint", lambda pid: 0)
     monkeypatch.setitem(sys.modules, "psutil",
@@ -4554,7 +4554,7 @@ def test_a_run_against_someone_elses_server_samples_nothing_and_says_so(monkeypa
 def test_the_footprint_takes_the_peak_and_the_kv_follows_it(monkeypatch, tmp_path, capsys):
     """A reading after the last answer is the trough. `footprint` folds in what was sampled
     while the questions were being asked, and `kv+run` is computed from that."""
-    from ml_stack.graph.bench import beyond_weights, watched
+    from ml_stack.bench import beyond_weights, watched
 
     watched("http://127.0.0.1:8099", {"resident_peak": 91 * G, "footprint_peak": 71 * G,
                                       "wired_peak": 96 * G, "wired_baseline": 41 * G,
@@ -4592,7 +4592,7 @@ def test_the_table_says_nothing_rather_than_zero_for_a_run_that_sampled_none(tmp
 def test_the_kernel_read_is_behind_a_seam_and_never_raises(monkeypatch):
     """The one ctypes call in the package. It may fail on any machine, and a memory reading
     is never worth a run not finishing."""
-    import ml_stack.graph.bench as measuring
+    import ml_stack.bench as measuring
 
     class _Boom:
         pid = 7
@@ -4618,7 +4618,7 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     """Adam: 'if a model has a drafting head that speeds it up at some config, always use it
     at that config (be sure to report it).' The profile fills every flag the sweep left
     unset; an explicit flag wins; --no-profile serves bare."""
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack.serve.profile import record
 
     measured = record("tiny.gguf", seat_context=4096, cache_type="q8_0",
@@ -4651,8 +4651,8 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
     from argparse import Namespace
 
     import ml_stack.graph.ask as ask_module
-    from ml_stack.graph.bench import _parser, _ways, asked_as, asking
-    from ml_stack.graph.bench.run import _ways as ways
+    from ml_stack.bench import _parser, _ways, asked_as, asking
+    from ml_stack.bench.run import _ways as ways
 
     assert _parser().parse_args(["sweep", "--serve", "x", "--constrain-ids"]).constrain_ids
     assert not _parser().parse_args(["sweep", "--serve", "x"]).constrain_ids

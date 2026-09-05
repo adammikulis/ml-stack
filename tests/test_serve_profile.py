@@ -435,8 +435,8 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
     without changing what it got right: which of two rows a record is written from is a
     question about both at once.
     """
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench import Row
+    from ml_stack import bench
+    from ml_stack.bench import Row
 
     rows = []
     for question in range(n):
@@ -451,7 +451,7 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
 
 
 def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
-    from ml_stack.graph.bench.report import main as reporting
+    from ml_stack.bench.report import main as reporting
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", right=0.4, cache_type="q8_0")
@@ -480,7 +480,7 @@ def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):
 
 
 def test_the_asking_a_run_recorded_is_taken_over_the_words_in_its_label():
-    from ml_stack.graph.bench.report import ways_of
+    from ml_stack.bench.report import ways_of
 
     said = {"tight": True, "terse": False, "batch": True, "reach": 8000}
     assert ways_of({"label": "thornfield--plain", "asking": said}) == {
@@ -511,8 +511,8 @@ def test_constrain_ids_is_kept_on_the_record_and_read_out(tmp_path):
     assert "constrain-ids" in line
     assert "constrain-ids" not in said(record(OTHER))
 
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench.report import write_profiles
+    from ml_stack import bench
+    from ml_stack.bench.report import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain", asking={"tight": True, "constrain_ids": True})
@@ -536,8 +536,8 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
     Mutation: rank by F1 alone and the slow row wins; drop the `held_up` guard and the
     cheap wrong one does.
     """
-    from ml_stack.graph import bench
-    from ml_stack.graph.bench.report import measured_best, write_profiles
+    from ml_stack import bench
+    from ml_stack.bench.report import measured_best, write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-batch", right=0.75, n=20, seconds=6.0,
@@ -548,7 +548,7 @@ def test_the_record_takes_the_fastest_row_its_questions_cannot_tell_apart(tmp_pa
              asking={"tight": True, "single": True})
 
     kept = bench.runs(store)
-    from ml_stack.graph.bench.score import band, separated
+    from ml_stack.bench.score import band, separated
 
     slow = next(o for o in kept if o["label"].endswith("batch"))
     quick = next(o for o in kept if o["label"].endswith("few"))
@@ -607,11 +607,11 @@ def test_the_shape_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
 
 
 def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
-    from ml_stack.graph.bench.report import write_profiles
+    from ml_stack.bench.report import write_profiles
 
     store = str(tmp_path / "runs.ladybug")
     keep_run(store, "thornfield--plain-kv-q8_0-rb0", cache_type="q8_0")
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     where = tmp_path / "written.json"
     add(measured(), path=where)             # -ub 2048 and the projector, measured by hand
@@ -624,7 +624,7 @@ def test_rewriting_a_record_keeps_what_a_kept_run_cannot_see(tmp_path):
 
 
 def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_path, capsys):
-    from ml_stack.graph.bench.report import main as reporting
+    from ml_stack.bench.report import main as reporting
 
     assert reporting(SimpleNamespace(kept=str(tmp_path / "nothing.ladybug"), profile=True,
                                      profiles=str(tmp_path / "none.json"),
@@ -633,7 +633,7 @@ def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_pat
 
 
 def test_the_named_build_is_read_off_the_binary_a_run_started(tmp_path):
-    from ml_stack.graph.bench.report import build_of
+    from ml_stack.bench.report import build_of
     from ml_stack.serve.build import NAMED_DIR
 
     assert build_of({"binary": str(Path(NAMED_DIR) / "thornfell" / "bin" / "llama-server")}) \

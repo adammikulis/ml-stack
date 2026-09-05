@@ -13,8 +13,8 @@ import pathlib
 
 import pytest
 
-import ml_stack.graph.bench as bench
-from ml_stack.graph.bench import queue as q
+import ml_stack.bench as bench
+from ml_stack.bench import queue as q
 
 from conftest import a_row
 
@@ -210,7 +210,7 @@ def test_dry_run_prints_the_steps_expanded_and_runs_none_of_them(tmp_path, capsy
 def test_resume_skips_a_step_whose_label_the_store_already_holds(tmp_path, capsys):
     """A queue stopped half-way does not measure the first half again -- and what counts as
     done is a run in the store since this queue started, not a line in a log."""
-    from ml_stack.graph.bench import save
+    from ml_stack.bench import save
 
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n")
@@ -234,7 +234,7 @@ def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatc
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n"
                               "show --rank ranking.md\n")
-    from ml_stack.graph.bench import run as running
+    from ml_stack.bench import run as running
 
     seen = []
 
@@ -259,7 +259,7 @@ def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatc
 
 def test_the_queue_runs_each_step_as_its_own_bench_so_each_takes_the_lock_itself(
         tmp_path, monkeypatch):
-    """Not one process running four sweeps: a step is `python -m ml_stack.graph.bench ...`,
+    """Not one process running four sweeps: a step is `python -m ml_stack.bench ...`,
     which is what puts it through the self-check, the estimate, the smoke and the measuring
     lock that already exist. Two steps therefore never share the GPU."""
     import subprocess
@@ -280,7 +280,7 @@ def test_the_queue_runs_each_step_as_its_own_bench_so_each_takes_the_lock_itself
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     assert q.run_step(["sweep", "--serve", "raincoat-2b.gguf"]) == 0
-    assert started["command"] == [sys.executable, "-m", "ml_stack.graph.bench",
+    assert started["command"] == [sys.executable, "-m", "ml_stack.bench",
                                   "sweep", "--serve", "raincoat-2b.gguf"]
     assert started["kw"]["env"]["PYTHONUNBUFFERED"] == "1"
     assert "stdout" not in started["kw"]                     # the queue's log, unredirected
@@ -300,7 +300,7 @@ def test_the_whole_queue_detaches_the_way_a_run_does(tmp_path, monkeypatch, caps
     argv = ["queue", str(where), "--detach", "--yes"]
     assert bench.main(argv) == 0
 
-    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.graph.bench"]
+    assert started["command"][:3] == [sys.executable, "-m", "ml_stack.bench"]
     assert started["command"][3:] == ["queue", str(where), "--yes"]
     assert started["kw"]["start_new_session"] is True
     log = pathlib.Path(started["kw"]["stdout"].name)
@@ -343,7 +343,7 @@ def test_the_shipped_example_reads_as_the_evening_it_replaces(monkeypatch):
 
 
 def _bench_swapped_for(monkeypatch, program: str):
-    """`run_step`'s `python -m ml_stack.graph.bench ...` replaced by `python -c program`,
+    """`run_step`'s `python -m ml_stack.bench ...` replaced by `python -c program`,
     with every other argument to Popen kept -- so the real pipe and reader are exercised."""
     import subprocess
     import sys
@@ -351,7 +351,7 @@ def _bench_swapped_for(monkeypatch, program: str):
     real = subprocess.Popen
 
     def swapped(command, **kw):
-        assert command[:3] == [sys.executable, "-m", "ml_stack.graph.bench"]
+        assert command[:3] == [sys.executable, "-m", "ml_stack.bench"]
         return real([sys.executable, "-c", program], **kw)
 
     monkeypatch.setattr(subprocess, "Popen", swapped)

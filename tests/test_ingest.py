@@ -1502,7 +1502,7 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
     bench left there."""
     import contextlib
 
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     import ml_stack.lock
 
     taken = {}
@@ -1524,7 +1524,7 @@ def test_the_ingest_takes_the_benchs_measuring_lock_and_never_roams(tmp_path, mo
 
 def test_no_queue_is_refused_at_once_while_the_bench_holds_the_lock(tmp_path, monkeypatch,
                                                                     capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack.lock import only_one
 
     argv, seen = _gold_with_a_fake_model(tmp_path, monkeypatch)

@@ -21,7 +21,7 @@ def _args(tmp_path, **over):
 
 
 def _serving_seam(monkeypatch, seen, *, draft):
-    from ml_stack.graph.bench import extract as ex
+    from ml_stack.bench import extract as ex
     from ml_stack.serve import Shape
 
     class Found:
@@ -43,7 +43,7 @@ def _serving_seam(monkeypatch, seen, *, draft):
 
 
 def test_n_max_lengthens_the_profiles_draft(monkeypatch, tmp_path):
-    from ml_stack.graph.bench import extract as ex
+    from ml_stack.bench import extract as ex
 
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="mtp.gguf")
@@ -57,7 +57,7 @@ def test_n_max_lengthens_the_profiles_draft(monkeypatch, tmp_path):
 
 
 def test_n_max_without_a_head_is_refused_rather_than_ignored(monkeypatch, tmp_path, capsys):
-    from ml_stack.graph.bench import extract as ex
+    from ml_stack.bench import extract as ex
 
     seen: dict = {}
     _serving_seam(monkeypatch, seen, draft="")
@@ -67,7 +67,7 @@ def test_n_max_without_a_head_is_refused_rather_than_ignored(monkeypatch, tmp_pa
 
 
 def test_the_subcommand_parses_n_max():
-    from ml_stack.graph.bench import _parser
+    from ml_stack.bench import _parser
 
     args = _parser().parse_args(["extract", "x", "--world", "w", "--n-max", "6"])
     assert args.n_max == 6

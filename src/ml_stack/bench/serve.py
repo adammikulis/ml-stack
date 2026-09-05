@@ -19,11 +19,11 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.measure`,
 # `bench.footprint`, `bench.served` -- so anything patchable is looked up there at call
 # time, never bound here at import.
-from ml_stack.graph import bench
-from ml_stack.graph.bench.keep import read_back, save
-from ml_stack.graph.bench.measure import found as finder_of
-from ml_stack.graph.bench.score import Row, _which
-from ml_stack.graph.bench.show import drafted
+from ml_stack import bench
+from ml_stack.bench.keep import read_back, save
+from ml_stack.bench.measure import found as finder_of
+from ml_stack.bench.score import Row, _which
+from ml_stack.bench.show import drafted
 
 
 def find_model(named: str) -> str:

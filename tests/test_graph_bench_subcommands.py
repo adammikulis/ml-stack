@@ -10,12 +10,12 @@ import json
 
 import pytest
 
-from ml_stack.graph.bench import _parser
+from ml_stack.bench import _parser
 
 
 def test_standard_and_animate_hand_their_words_to_their_own_mains(monkeypatch):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import animate, standard
+    import ml_stack.bench as bench
+    from ml_stack.bench import animate, standard
 
     seen = {}
     monkeypatch.setattr(standard, "main", lambda argv: seen.setdefault("standard", list(argv)) and 0)
@@ -31,8 +31,8 @@ def test_standard_and_animate_hand_their_words_to_their_own_mains(monkeypatch):
 def test_standard_and_animate_are_not_measuring_commands_here():
     """`standard` takes the measuring lock itself and `animate` needs none; neither is sent
     through this parser's lock, its self-check or its estimate."""
-    from ml_stack.graph.bench import MEASURING
-    from ml_stack.graph.bench.run import HANDED_OVER
+    from ml_stack.bench import MEASURING
+    from ml_stack.bench.run import HANDED_OVER
 
     assert set(HANDED_OVER) == {"standard", "animate"}
     assert not set(HANDED_OVER) & set(MEASURING)
@@ -51,9 +51,9 @@ def test_the_bench_parser_knows_the_flags_standard_and_animate_take():
 
 
 def test_compare_takes_positional_labels_and_last(tmp_path, monkeypatch):
-    from ml_stack.graph.bench import invented_digest, save
-    from ml_stack.graph.bench.comparison import newest_labels
-    import ml_stack.graph.bench as bench
+    from ml_stack.bench import invented_digest, save
+    from ml_stack.bench.comparison import newest_labels
+    import ml_stack.bench as bench
 
     from conftest import scored_rows
 

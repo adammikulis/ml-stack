@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from ml_stack.graph import bench
+from ml_stack import bench
 
 #: what a summary line looks like, so the log can be read by eye and by `grep`
 SUMMARY = "=== {clock} step {n}/{total}: {words} -- {state} ({seconds:.0f}s)"
@@ -179,7 +179,7 @@ def _parsed(argv: Sequence[str], *, where: str = "") -> Any:
     import contextlib
     import io
 
-    from ml_stack.graph.bench.run import _parser
+    from ml_stack.bench.run import _parser
 
     said = io.StringIO()
     try:
@@ -313,7 +313,7 @@ def run_step(argv: Sequence[str]) -> int:
     have its last lines printed under "died in Ns:".
     """
     global _running
-    command = [sys.executable, "-m", "ml_stack.graph.bench", *argv]
+    command = [sys.executable, "-m", "ml_stack.bench", *argv]
     sys.stdout.flush()
     began = time.monotonic()
     _running = subprocess.Popen(command, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE,

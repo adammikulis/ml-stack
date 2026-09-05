@@ -217,7 +217,7 @@ def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
 @pytest.mark.parametrize("kind", KINDS)
 def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
     from ml_stack.graph.ask import list_kind, look_up, path_between, tools_for
-    from ml_stack.graph.bench import SHORT, read_questions, sample
+    from ml_stack.bench import SHORT, read_questions, sample
 
     from ml_stack.world.cli import main
 
@@ -250,7 +250,7 @@ def test_the_graph_and_the_questions_are_what_the_bench_reads(tmp_path, kind):
 
 
 def test_shape_finds_no_expected_id_missing_from_the_graph(capsys):
-    from ml_stack.graph.bench import shape
+    from ml_stack.bench import shape
 
     world = make("community", "small", 3)
     shape(questions(world, 40), world.graph)

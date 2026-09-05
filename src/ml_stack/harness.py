@@ -137,7 +137,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
     """Lease ``model`` in its measured shape and yield a :class:`Harness` on it; the server
     goes when the block ends. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
-    from ml_stack.graph.bench.serve import find_model
+    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import serve
     from ml_stack.serve.profile import profile_for, said
 

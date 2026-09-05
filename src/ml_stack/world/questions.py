@@ -3,7 +3,7 @@
 `ml_stack.graph.community.QUESTIONS` was written by hand against a graph small enough to
 check by eye. A world of five thousand people cannot be, so its questions are generated from
 the truth that made it: who reports to whom, who works on what, who is where. Each is
-``{"q": ..., "expect": [ids], "kind": ...}``, the shape `ml_stack.graph.bench` reads (it
+``{"q": ..., "expect": [ids], "kind": ...}``, the shape `ml_stack.bench` reads (it
 ignores the tag), and the set is spread across the kinds of answer the bench's own set
 covers -- people mostly, but organisations, places, subjects, work, events, paths between
 two people, and a few whose right answer is nobody -- so a model measured on it is measured

@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from ml_stack.graph import bench
-from ml_stack.graph.bench.selfcheck import (
+from ml_stack import bench
+from ml_stack.bench.selfcheck import (
     ScriptedModel,
     ScriptedReader,
     SelfCheckFailed,
@@ -152,7 +152,7 @@ def test_no_selfcheck_skips_it_and_a_passing_one_is_said_before_the_lock(monkeyp
     """The lock is faked to record its call and refuse, so `main` stops right after the
     check either way: with the flag no check ran, without it the ok line came first."""
     import ml_stack.lock
-    from ml_stack.graph.bench import selfcheck as bench_selfcheck
+    from ml_stack.bench import selfcheck as bench_selfcheck
 
     checked = []
     real = bench_selfcheck.selfcheck
@@ -188,7 +188,7 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
 
     import ml_stack.client
     import ml_stack.serve
-    from ml_stack.graph.bench import extract as bx
+    from ml_stack.bench import extract as bx
     from ml_stack.serve import ServerInfo
 
     loads, readers = [], []
@@ -344,7 +344,7 @@ def test_a_raw_serve_arg_passes_the_self_check_for_the_real_preflight_to_judge(t
     """`--serve-arg=-ub --serve-arg=2048`: the stand-in build cannot know a raw flag, so the
     self-check takes the person's word for it and the real preflight checks it against the
     real binary. Every knob sweep failed here before (2026-09-02)."""
-    from ml_stack.graph.bench.selfcheck import selfcheck
+    from ml_stack.bench.selfcheck import selfcheck
 
     said = selfcheck(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke",
                       "--serve-arg=-ub", "--serve-arg=2048", "--serve-mlock",

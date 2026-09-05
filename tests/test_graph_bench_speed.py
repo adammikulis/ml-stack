@@ -11,8 +11,8 @@ import time
 
 import pytest
 
-from ml_stack.graph.bench import runs
-from ml_stack.graph.bench.speed import (
+from ml_stack.bench import runs
+from ml_stack.bench.speed import (
     KIND,
     calibrated,
     cell,
@@ -199,8 +199,8 @@ def test_a_smoke_grid_is_one_cell_and_a_full_grid_is_every_pair():
 
 def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_path, monkeypatch,
                                                                         capsys):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench import backends
+    import ml_stack.bench as bench
+    from ml_stack.bench import backends
 
     client = _Ollama()
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
@@ -214,7 +214,7 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
         seen.update(url=url, **kw)
         return client
 
-    monkeypatch.setattr("ml_stack.graph.bench.speed.client_for", fake_client_for)
+    monkeypatch.setattr("ml_stack.bench.speed.client_for", fake_client_for)
     kept = tmp_path / "runs.ladybug"
     code = bench._main(["speed", "--on", "flash-ollama=ollama://127.0.0.1:11434/thornfell:125b-mlx",
                         "--prompts", "64,128", "--streams", "1,2", "--generate", "8",
@@ -234,13 +234,13 @@ def test_the_speed_subcommand_on_a_standing_server_keeps_one_run_per_label(tmp_p
 
 
 def test_a_speed_run_that_is_not_a_smoke_smokes_one_cell_first(tmp_path, monkeypatch, capsys):
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
 
     client = _Llama()
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
-    monkeypatch.setattr("ml_stack.graph.bench.speed.client_for", lambda url, **kw: client)
+    monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: client)
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["speed", "--on", "flash=http://127.0.0.1:1", "--prompts", "64,128",
                         "--streams", "1", "--generate", "8", "--kept", str(kept)]) == 0
@@ -250,8 +250,8 @@ def test_a_speed_run_that_is_not_a_smoke_smokes_one_cell_first(tmp_path, monkeyp
 
 
 def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monkeypatch):
-    import ml_stack.graph.bench as bench
-    from ml_stack.graph.bench.serve import SmokeFailed
+    import ml_stack.bench as bench
+    from ml_stack.bench.serve import SmokeFailed
 
     class Down:
         base_url = "http://127.0.0.1:1"
@@ -263,7 +263,7 @@ def test_a_speed_run_whose_every_request_fails_stops_at_the_smoke(tmp_path, monk
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bench, "busy", lambda url: 0)
     monkeypatch.setattr(bench, "footprint", lambda url, client=None: {"base_url": url})
-    monkeypatch.setattr("ml_stack.graph.bench.speed.client_for", lambda url, **kw: Down())
+    monkeypatch.setattr("ml_stack.bench.speed.client_for", lambda url, **kw: Down())
     with pytest.raises(SmokeFailed, match="every request failed"):
         bench._main(["speed", "--on", "flash=http://127.0.0.1:1", "--prompts", "64",
                      "--streams", "1", "--generate", "8", "--kept", str(tmp_path / "r.ladybug")])
@@ -279,7 +279,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
 
     import ml_stack.client
     import ml_stack.serve
-    import ml_stack.graph.bench as bench
+    import ml_stack.bench as bench
     from ml_stack.serve import ServerInfo
     from ml_stack.serve.profile import record
 
@@ -335,7 +335,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
 
 def test_show_speed_prints_the_speed_runs_and_the_answering_table_leaves_them_out(tmp_path,
                                                                                 capsys):
-    from ml_stack.graph.bench import save, table
+    from ml_stack.bench import save, table
 
     kept = tmp_path / "runs.ladybug"
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 900.0, "decode_tps": 31.5,
@@ -359,7 +359,7 @@ def test_show_speed_prints_the_speed_runs_and_the_answering_table_leaves_them_ou
 
 
 def test_the_selfcheck_drives_speed_through_the_whole_path():
-    from ml_stack.graph.bench.selfcheck import selfcheck
+    from ml_stack.bench.selfcheck import selfcheck
 
     said = selfcheck(["speed", "--serve", "tiny.gguf", "--serve-label", "tiny"])
     assert said.startswith("speed: ") and "tiny-speed" in said and "read back" in said

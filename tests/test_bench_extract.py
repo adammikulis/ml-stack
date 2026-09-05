@@ -15,8 +15,8 @@ import random
 import pytest
 
 from ml_stack.client.families import GENERIC
-from ml_stack.graph.bench import extract as bx
-from ml_stack.graph.bench import MEASURING, RunNotKept, _parser, runs
+from ml_stack.bench import extract as bx
+from ml_stack.bench import MEASURING, RunNotKept, _parser, runs
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import simulate
 
@@ -336,7 +336,7 @@ def test_a_world_without_messages_is_simulated_and_said_so(tmp_path):
 def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, monkeypatch, capsys):
     pytest.importorskip("ladybug")
     import ml_stack.client
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url, "model": "fake.gguf"})
@@ -359,7 +359,7 @@ def test_the_smoke_run_reads_three_messages_and_reads_the_run_back(tmp_path, mon
 def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
     pytest.importorskip("ladybug")
     import ml_stack.client
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
@@ -381,7 +381,7 @@ def test_a_smoke_run_whose_run_does_not_come_back_raises(tmp_path, monkeypatch):
 def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_path, monkeypatch, capsys):
     pytest.importorskip("ladybug")
     import ml_stack.client
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     monkeypatch.setattr(bench, "HOME", tmp_path / "home")
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url})
@@ -400,7 +400,7 @@ def test_twice_reads_the_sample_again_and_reports_how_alike_the_two_were(tmp_pat
 
 def test_show_prints_extraction_runs_under_the_answering_table_or_alone(tmp_path, capsys):
     pytest.importorskip("ladybug")
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     graph, messages = talked()
     rows, scores = bx.measure(Reader(), bx.sample_messages(messages, 3, seed=0), graph)
@@ -434,7 +434,7 @@ def test_the_instructions_say_what_a_topic_is_and_name_the_relation_vocabulary()
     topics at under 20% precision and named relations outside the world's vocabulary: the
     instructions had defined neither. They do now, and the words are held here so a
     rewording that drops them is noticed."""
-    from ml_stack.graph.bench.extract import INSTRUCTIONS
+    from ml_stack.bench.extract import INSTRUCTIONS
 
     assert "at most three" in INSTRUCTIONS and "is not a topic" in INSTRUCTIONS
     for rel in ("works_with", "reports_to", "part_of", "works_on", "advises", "attended"):
@@ -446,7 +446,7 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
     """The first extraction run of Flash-Next (2026-09-02) went up on mainline without its
     head: a different program from the one that answers. --profile (the default) takes the
     model's measured shape; --no-profile serves it bare."""
-    from ml_stack.graph.bench import extract as ex
+    from ml_stack.bench import extract as ex
     from ml_stack.serve import Shape
 
     seen = {}

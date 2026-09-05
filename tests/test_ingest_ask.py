@@ -175,8 +175,8 @@ def test_a_perfect_answer_scores_one_and_a_wrong_one_is_named(tmp_path, capsys):
 
 
 def test_the_score_is_the_benchs_own_and_not_a_second_one(tmp_path):
-    """A number measured two ways is two numbers: `graph.bench.score.Row` scores both."""
-    from ml_stack.graph.bench.score import Row
+    """A number measured two ways is two numbers: `bench.score.Row` scores both."""
+    from ml_stack.bench.score import Row
 
     graph = ingest.graph_of(a_store(tmp_path))
     asked = [{"question": "what is in the vault?",

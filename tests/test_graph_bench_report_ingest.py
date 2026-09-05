@@ -22,7 +22,7 @@ import pytest
 from test_ingest import a_part_read_source, a_read
 
 from ml_stack import ingest
-from ml_stack.graph.bench.report import report
+from ml_stack.bench.report import report
 
 pytest.importorskip("ladybug")
 
@@ -204,7 +204,7 @@ def test_one_empty_store_beside_one_real_one_only_tables_the_real_one(tmp_path):
 
 def test_ingest_sits_beside_answering_runs_in_the_same_document(tmp_path):
     pytest.importorskip("ladybug")
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     answering_store = str(tmp_path / "runs.ladybug")
     rows = [bench.Row(label="kestrel-plain", question=f"who runs the vault, q{n}?",

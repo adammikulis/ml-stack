@@ -494,7 +494,7 @@ def located(name: str, *, cache: Path | None = None) -> Path | None:
     A name copied out of `ml-stack-models files` -- no directory, no `hf:` -- names a file
     already downloaded, but `ml-stack-serve up` used to read anything without a `/` or an
     `hf:` prefix as a relative path and report "shards missing" for a model that was on the
-    machine the whole time. `graph.bench.find_model` already solved this for the bench by
+    machine the whole time. `bench.find_model` already solved this for the bench by
     asking `fleet.models` where the file is; this is the same idea narrowed to the Hub cache
     itself and to an *exact* filename match, which is what a preflight is actually handed.
 

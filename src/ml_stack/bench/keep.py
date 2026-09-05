@@ -21,10 +21,10 @@ from typing import TYPE_CHECKING, Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.HOME`,
 # `bench.runs` -- so anything patchable is looked up there at call time, never bound here
 # at import.
-from ml_stack.graph import bench
+from ml_stack import bench
 
 if TYPE_CHECKING:
-    from ml_stack.graph.bench.score import Row
+    from ml_stack.bench.score import Row
 
 # Runs are worth keeping: the point of one is to compare it with another, later, and a
 # benchmark written to a temporary directory answers no question a week from now.
@@ -202,7 +202,7 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
     carries no label of its own. The answering table leaves those out and each kind has
     a table of its own.
     """
-    from ml_stack.graph.bench.score import prefix_hits
+    from ml_stack.bench.score import prefix_hits
     from ml_stack.graph.store import GraphStore
 
     rows = [r if is_dataclass(r) else _Cell(**{"label": label or "", **dict(r)})

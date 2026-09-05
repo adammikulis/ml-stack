@@ -334,15 +334,15 @@ class TestTheRatesRoute:
     """`ml-stack-bench show --rates` as data, over a store built here.
 
     Nothing measures anything: two invented runs are written into a store in ``tmp_path``
-    and `ml_stack.graph.bench.HOME` is pointed at it, so no test can reach the runs this
+    and `ml_stack.bench.HOME` is pointed at it, so no test can reach the runs this
     machine has kept.
     """
 
     @pytest.fixture
     def store(self, tmp_path, monkeypatch):
-        import ml_stack.graph.bench as bench
-        from ml_stack.graph.bench.keep import SHORT, save
-        from ml_stack.graph.bench.score import Row
+        import ml_stack.bench as bench
+        from ml_stack.bench.keep import SHORT, save
+        from ml_stack.bench.score import Row
 
         home = tmp_path / "bench"
         home.mkdir()
@@ -381,8 +381,8 @@ class TestTheRatesRoute:
 
     def test_the_rates_are_the_ones_the_command_prints(self, page, store):
         """Not recomputed here: `score.derived` is what both read."""
-        from ml_stack.graph.bench.keep import _kept
-        from ml_stack.graph.bench.score import derived
+        from ml_stack.bench.keep import _kept
+        from ml_stack.bench.score import derived
 
         _, got, _ = page.call("/ui/rates.json")
         by_label = {r["label"]: r for r in got["runs"] if not r["composed"]}
@@ -395,7 +395,7 @@ class TestTheRatesRoute:
 
     def test_the_frontier_is_marked_for_every_cost(self, page, store):
         """Worked out for all three, so switching the axis on the page fetches nothing."""
-        from ml_stack.graph.bench.show import AXES
+        from ml_stack.bench.show import AXES
 
         _, got, _ = page.call("/ui/rates.json")
         assert set(got["axes"]) == set(AXES)
@@ -408,7 +408,7 @@ class TestTheRatesRoute:
     def test_the_page_draws_the_key_the_frontier_was_worked_out_on(self, page, store):
         """Per question for time and tokens, a total for memory: the same map the command
         uses, sent with the axes so the point and its frontier mark agree."""
-        from ml_stack.graph.bench.score import COSTS
+        from ml_stack.bench.score import COSTS
 
         _, got, _ = page.call("/ui/rates.json")
         assert got["keys"] == dict(COSTS)
@@ -426,7 +426,7 @@ class TestTheRatesRoute:
         assert any(r["composed"] for r in got["runs"])
 
     def test_a_machine_that_has_measured_nothing_says_so(self, page, tmp_path, monkeypatch):
-        import ml_stack.graph.bench as bench
+        import ml_stack.bench as bench
 
         monkeypatch.setattr(bench, "HOME", tmp_path / "empty")
         status, got, _ = page.call("/ui/rates.json")

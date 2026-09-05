@@ -496,7 +496,7 @@ def write_dataset(out: Path, rows: Sequence[Mapping[str, Any]], *, base: str,
 
 def _scored(row: Mapping[str, Any]) -> float:
     """F1 for one kept bench row, as the bench scores it."""
-    from ml_stack.graph.bench.score import _hit
+    from ml_stack.bench.score import _hit
 
     return float(_hit(row))
 
@@ -755,7 +755,7 @@ def _from_bench_parser() -> Any:
 
 def _from_bench(argv: list[str]) -> int:
     """``ml-stack-train-tools from-bench``: kept bench traces into a training file."""
-    from ml_stack.graph import bench
+    from ml_stack import bench
 
     a = _from_bench_parser().parse_args(argv)
     store = Path(a.kept).expanduser() if a.kept else bench.HOME / "runs.ladybug"
