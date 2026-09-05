@@ -17,6 +17,8 @@ __all__ = ["Settings", "Suggestion", "suggest"]
 class Settings:
     """Per-machine preferences. Every field is something a person chose."""
 
+    name: str = ""
+    """What this machine calls itself to the others. Empty means the hostname."""
     slots: int = 1
     labels: list[str] = field(default_factory=list)
     on_paused: str = "stop"

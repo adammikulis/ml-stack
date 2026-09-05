@@ -132,6 +132,11 @@ ml-stack-help = "ml_stack.cli:help_main"
 # every tracked file read for a person's details, reported and never blocked
 ml-stack-audit = "ml_stack.redact.audit:main"
 
+# What the daemon reports about this box beyond what the standard library can see: the
+# card, its vendor and its memory. Without it every machine reports no accelerator.
+[project.entry-points."ml_stack.device_report"]
+accelerator = "ml_stack.train.accelerator:report"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/ml_stack"]
 

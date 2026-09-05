@@ -91,6 +91,8 @@ class UI:
         which is most of them -- the Telemetry view is then pointed at a page that does."""
         self.discovery_port: int | None = None
         self.persist_with: Any = None
+        self.rename: Any = None
+        """``(str) -> str``: renames this machine now. Set by the daemon that owns it."""
         self.name = name
         self.on_join = on_join
         self.cluster_key_path = cluster_key_path
@@ -212,6 +214,11 @@ class UI:
         if "slots" in req and self.runner is not None:
             settings.slots = self.runner.set_slots(1)
             out["applied"].append("one job at a time")
+        if "name" in req and str(req["name"]).strip():
+            called = str(req["name"]).strip()[:64]
+            settings.name = self.rename(called) if callable(self.rename) else called
+            self.name = settings.name
+            out["applied"].append(f"this machine is called {settings.name}")
         if "labels" in req:
             settings.labels = [str(s) for s in req["labels"] if str(s).strip()]
             out["applied"].append("this machine is for " + (

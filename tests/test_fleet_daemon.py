@@ -657,6 +657,45 @@ def test_the_daemon_advertises_what_the_probe_reports(tmp_path):
     assert health["slots"] == 1
 
 
+def test_the_package_registers_a_probe_that_can_see_the_card():
+    """Without this entry point the daemon reports only what the standard library sees,
+    and the first-run wizard tells every machine it has no GPU."""
+    import tomllib
+
+    repo = Path(__file__).resolve().parent.parent
+    table = tomllib.loads((repo / "pyproject.toml").read_text(encoding="utf-8"))
+    spec = table["project"]["entry-points"]["ml_stack.device_report"]["accelerator"]
+
+    assert spec == "ml_stack.train.accelerator:report"
+    assert "accelerator" in resolve_report(spec)()
+
+
+def test_health_answers_with_the_name_the_machine_has_now(tmp_path):
+    """Renaming a running machine changes what /health says, without a restart."""
+    root = tmp_path / "traind"
+    (root / "files").mkdir(parents=True)
+    token = load_or_create_token(root)
+    runner = JobRunner(root)
+    port = _free_port()
+    called = ["hollowbrook"]
+    httpd = ThreadingHTTPServer(
+        ("127.0.0.1", port),
+        make_handler(runner, root / "files", token, lambda: called[0]))
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    client = Peer(f"http://127.0.0.1:{port}", token)
+    try:
+        before = client.health()["name"]
+        called[0] = "quillhaven"
+        after = client.health()["name"]
+    finally:
+        runner.shutdown()
+        httpd.shutdown()
+        httpd.server_close()
+
+    assert before == "hollowbrook"
+    assert after == "quillhaven"
+
+
 def test_a_job_can_write_something_the_coordinator_can_actually_pull(daemon):
     """The README's own example -- pull("jobs/<id>/ckpt/...") -- used to 404, because
     job directories sat BESIDE the file root rather than under it. A checkpoint you

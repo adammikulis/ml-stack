@@ -497,6 +497,36 @@ class TestPreferences:
         assert joined.runner.slots == 1
         assert joined.call("/health")[1]["slots"] == 1
 
+    def test_the_name_the_wizard_asked_for_reaches_the_machine(self, joined, tmp_path):
+        from ml_stack.fleet.settings import Settings
+
+        _, _, headers = joined.call("/ui/session", method="POST",
+                                    body={"passphrase": WORDS})
+        cookie = headers["Set-Cookie"].split(";")[0]
+        joined.ui.settings_path = tmp_path / "named.json"
+        renamed: list[str] = []
+        joined.ui.rename = lambda called: (renamed.append(called), called)[1]
+
+        status, body, _ = joined.call("/ui/setup/prefs", method="POST", cookie=cookie,
+                                      body={"name": "  quillhaven  ",
+                                            "autostart": "manual"})
+
+        assert status == 200, body
+        assert renamed == ["quillhaven"]
+        assert joined.ui.name == "quillhaven"
+        assert Settings.load(tmp_path / "named.json").name == "quillhaven"
+
+    def test_a_blank_name_leaves_the_machine_called_what_it_was(self, joined):
+        _, _, headers = joined.call("/ui/session", method="POST",
+                                    body={"passphrase": WORDS})
+        cookie = headers["Set-Cookie"].split(";")[0]
+        before = joined.ui.name
+
+        joined.call("/ui/setup/prefs", method="POST", cookie=cookie,
+                    body={"name": "   ", "autostart": "manual"})
+
+        assert joined.ui.name == before
+
     def test_saving_a_preference_does_not_interrupt_running_work(self, joined):
         _, _, headers = joined.call("/ui/session", method="POST",
                                     body={"passphrase": WORDS})

@@ -158,6 +158,24 @@ class TestFirstRun:
         assert page.locator("#first-run button:has-text('Join')").is_enabled()
         assert not errors
 
+    def test_the_reason_sits_beside_the_job_the_machine_was_given(self, daemon,
+                                                                  open_page):
+        """The daemon reports no accelerator, so 'Prepare data' is picked -- and the
+        reason for picking it belongs to that option, not to the one above it."""
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#first-run:not([hidden])")
+        page.fill("#n", "quillhaven")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#first-run h1:has-text('Clusters')")
+        page.click("#first-run button:has-text('Continue')")
+        page.wait_for_selector("#labels-prep")
+
+        assert page.locator("#labels-prep").is_checked()
+        assert "no GPU found" in page.locator("label[for=labels-prep] .why").inner_text()
+        assert "no GPU found" not in page.locator(
+            "label[for=labels-train] .why").inner_text()
+        assert not errors
+
 
 # -- signing in --------------------------------------------------------------------------
 class TestSigningIn:

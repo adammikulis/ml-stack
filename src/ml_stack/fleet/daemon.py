@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -557,6 +558,7 @@ def stdlib_device_report() -> dict[str, Any]:
     return out
 
 
+@functools.cache
 def registered_reports() -> list[Callable[[], dict[str, Any]]]:
     """Every device probe a higher tier has registered under ``REPORT_GROUP``."""
     try:
@@ -614,7 +616,7 @@ def _range(header: str) -> tuple[int, int | None]:
 
 def make_handler(runner: JobRunner, files_root: Path,
                  token: "str | Callable[[], str]",
-                 name: str = "",
+                 name: str | Callable[[], str] = "",
                  report: Callable[[], dict[str, Any]] = device_report,
                  fetcher: "Fetcher | None" = None,
                  ui: "Any | None" = None,
@@ -642,6 +644,10 @@ def make_handler(runner: JobRunner, files_root: Path,
         def _token(self) -> str:
             """Read at request time, not captured at startup."""
             return token() if callable(token) else token
+
+        def _name(self) -> str:
+            """This machine's name, read at request time."""
+            return name() if callable(name) else name
 
         def _authed(self) -> bool:
             got = self.headers.get("Authorization", "")
@@ -797,7 +803,7 @@ def make_handler(runner: JobRunner, files_root: Path,
                 sched = schedule.public() if schedule is not None else None
                 if sched is not None and not sched["available"]:
                     status = {**status, "free": 0}
-                self._send(200, {"ok": True, "name": name, **status, **report(),
+                self._send(200, {"ok": True, "name": self._name(), **status, **report(),
                                  **({"availability": sched} if sched else {}),
                                  **({"serving": serving.public()} if serving is not None
                                     else {})})
@@ -834,7 +840,7 @@ def make_handler(runner: JobRunner, files_root: Path,
             if path == "/bench":
                 if bench is None:
                     self._send(501, {"error": "this daemon takes no bench jobs"}); return
-                self._send(200, {"ok": True, "name": name, **bench.report(),
+                self._send(200, {"ok": True, "name": self._name(), **bench.report(),
                                  "jobs": bench.snapshot()})
                 return
             if path == "/bench/export":
@@ -847,7 +853,7 @@ def make_handler(runner: JobRunner, files_root: Path,
                                        anyway=q.get("anyway", ["0"])[0] not in ("", "0"))
                 except DaemonError as e:
                     self._send(400, {"error": str(e)}); return
-                self._send(200, {**out, "host": name})
+                self._send(200, {**out, "host": self._name()})
                 return
             m = re.match(r"^/jobs/([^/]+)(/log|/metrics)?$", path)
             if m:
@@ -1176,12 +1182,14 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     live_token: list[str] = [""]
     files_root = root / "files"
     files_root.mkdir(exist_ok=True)
-    name = name or os.environ.get("ML_STACK_PEER_NAME") or socket.gethostname()
     key = load_cluster_key(cluster_key_path)
     token = load_or_create_token(root, key)
     live_token[0] = token
     settings_path = root / "settings.json"
     settings = Settings.load(settings_path)
+    name = (name or os.environ.get("ML_STACK_PEER_NAME") or settings.name
+            or socket.gethostname())
+    live_name = [name]
     if slots == 1 and settings.slots != 1:
         slots = settings.slots
     if not labels and settings.labels:
@@ -1257,7 +1265,8 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
 
     httpd = ThreadingHTTPServer((host, port),
                                 make_handler(runner, files_root,
-                                             lambda: live_token[0], name, report,
+                                             lambda: live_token[0],
+                                             lambda: live_name[0], report,
                                              fetcher, interface, schedule, on_paused,
                                              schedule_path, serving, models,
                                              cluster_key_path, every_token,
@@ -1311,7 +1320,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         for group, member in joined.items():
             if group in advertisers:
                 continue
-            beacon = Beacon(name=name, port=port, device=report(),
+            beacon = Beacon(name=live_name[0], port=port, device=report(),
                             slots=runner.slots, free=runner.slots)
             try:
                 # Not group=: that is the multicast address every cluster shares.
@@ -1328,7 +1337,21 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
             live_token[0] = load_or_create_token(root, first.key)
             advertiser = advertisers.get(first.group)
 
+    def rename(called: str) -> str:
+        """Give this machine a new name now, on the page and on the network."""
+        called = called.strip()
+        if not called or called == live_name[0]:
+            return live_name[0]
+        live_name[0] = called
+        bench_host[0].name = called
+        if interface is not None:
+            interface.name = called
+        for one in advertisers.values():
+            one.beacon.name = called
+        return called
+
     if interface is not None:
+        interface.rename = rename
         interface.on_join = start_announcing
         interface.runner = runner
         interface.schedule = schedule

@@ -169,7 +169,10 @@
     }
 
     async jobStep() {
-      const { s, machine, spec, radio, check } = await this.asked();
+      const { s, machine, pick, spec, radio, check } = await this.asked();
+      // The reason belongs to the option the suggestion names, not to the first one.
+      const suggested = (s.labels?.value || []).join(",");
+      const why = (value, plain) => (value === suggested && s.labels?.why) || plain;
       this.show(
         this.steps(2, () => this.go(1)),
         el("h1", {}, "What should this machine do?"),
@@ -178,13 +181,16 @@
                       : "These are set from what this machine is — change either."),
         el("div", { class: "group" },
           el("h2", {}, "Its job"),
-          radio("labels", "train", "Train models", s.labels?.why),
-          radio("labels", "prep", "Prepare data", "tokenizing and packing, while others train"),
-          radio("labels", "train,prep", "Both", "")),
+          radio("labels", "train", "Train models",
+            why("train", "fine-tuning and training runs, on a machine with a GPU")),
+          radio("labels", "prep", "Prepare data",
+            why("prep", "tokenizing and packing, while others train")),
+          radio("labels", "train,prep", "Both", why("train,prep", ""))),
         el("div", { class: "group" },
           el("h2", {}, "When I need the machine"),
           check("work_hours", "Don't take work on weekdays, 9 to 5",
-            s.work_hours?.why || "for a machine somebody works on"),
+            pick.work_hours && s.work_hours?.why
+              ? s.work_hours.why : "for a machine somebody works on"),
           el("label", { class: "opt" },
             el("input", { type: "checkbox", checked: "1", disabled: "1" }),
             spec("Pausing stops what is running", s.on_paused?.why))),
@@ -199,7 +205,8 @@
         go.disabled = true;
         go.innerHTML = '<span class="spin"></span> Applying…';
         const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
-          ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
+          ...pick, name: this.state.name,
+          labels: pick.labels ? pick.labels.split(",") : [] }) });
         if (res.manual) {
           go.disabled = false;
           go.textContent = "Continue";
@@ -413,7 +420,7 @@
         el("p", { class: "sub" }, "Now add your other machines. On each one:"),
         el("ol", { class: "howto" },
           step(1, "Install ml-stack", "The same installer you used here."),
-          step(2, "Open it", "It opens in your browser and asks the same questions."),
+          step(2, "Open it", "It asks the same questions there."),
           step(3, "Type the same passphrase",
             `The words you chose${joined.group !== "ml-stack"
               ? `, and the cluster name “${joined.group}”` : ""}.`)),
