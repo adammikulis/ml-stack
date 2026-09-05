@@ -94,6 +94,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from ml_stack.hub import pretty_name
+from ml_stack.units import human_bytes
 
 __all__ = [
     "DEFAULT_PER_USER", "Fit", "Measured", "PLOT_CONTEXTS", "Segment", "Tensor", "add",
@@ -315,9 +316,9 @@ class Measured:
     def said(self) -> str:
         """One line per fact, for a person reading a `--measure` that surprised them."""
         parts = [
-            f"per token {_human(self.per_token)}",
-            f"per sequence {_human(self.per_seq)}",
-            f"compute {_human(self.compute)}",
+            f"per token {human_bytes(self.per_token)}",
+            f"per sequence {human_bytes(self.per_seq)}",
+            f"compute {human_bytes(self.compute)}",
             f"{self.kv_layers} layers with a cache",
         ]
         if self.recurrent_layers:
@@ -327,8 +328,8 @@ class Measured:
         if self.cache_type:
             parts.append(f"cache {self.cache_type}")
         if self.segments:
-            parts.append(f"weights {_human(self.weights_gpu)} on the GPU, "
-                         f"{_human(self.weights_cpu)} mapped on the CPU")
+            parts.append(f"weights {human_bytes(self.weights_gpu)} on the GPU, "
+                         f"{human_bytes(self.weights_cpu)} mapped on the CPU")
         return ", ".join(parts)
 
 
@@ -803,15 +804,6 @@ def measure(spec, *, backend=None, timeout: float | None = None,
 
 # ------------------------------------------------------------------ saying it
 
-def _human(size: float) -> str:
-    value = float(size)
-    for unit in ("B", "K", "M", "G", "T"):
-        if value < 1024 or unit == "T":
-            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
-        value /= 1024.0
-    return f"{value:.1f}T"
-
-
 _ROOM = re.compile(r"^\s*([\d.]+)\s*([KMGT]?)(?:i?B?)?\s*$", re.IGNORECASE)
 _SCALE = {"": 1, "K": 1024, "M": 1024 ** 2, "G": 1024 ** 3, "T": 1024 ** 4}
 
@@ -883,19 +875,19 @@ def _where_it_went(fit: Fit) -> list[str]:
     """
     if not (fit.weights_gpu or fit.weights_cpu or fit.weights_resident):
         return []
-    said = [f"{_human(fit.weights_file)} on disk: {_human(fit.weights_gpu)} in GPU memory, "
-            f"{_human(fit.weights_cpu)} mapped on the CPU"
+    said = [f"{human_bytes(fit.weights_file)} on disk: {human_bytes(fit.weights_gpu)} in GPU memory, "
+            f"{human_bytes(fit.weights_cpu)} mapped on the CPU"
             + (f" ({fit.cpu_tensors})" if fit.cpu_tensors
                else " (`fit MODEL --tensors` says what of)")]
     after = []
     if fit.table_bytes:
-        after.append(f"a {_human(fit.table_bytes)} lookup table is paged on demand, a row "
+        after.append(f"a {human_bytes(fit.table_bytes)} lookup table is paged on demand, a row "
                      "at a time")
     if fit.weights_resident:
         after.append(f"resident after {_tokens(fit.resident_after)} questions "
-                     f"{_human(fit.weights_resident)} (measured)"
+                     f"{human_bytes(fit.weights_resident)} (measured)"
                      if fit.resident_after
-                     else f"resident {_human(fit.weights_resident)} (measured)")
+                     else f"resident {human_bytes(fit.weights_resident)} (measured)")
     if after:
         said.append("of which " + "; ".join(after) if fit.table_bytes
                     else "; ".join(after))
@@ -906,13 +898,13 @@ def _block(fit: Fit, contexts: list[int]) -> str:
 
     lines = [f"{pretty_name(fit.model)}", f"  {_headline(fit)}"]
     lines.append(
-        f"  weights {_human(fit.weights)}"
-        + (f", draft {_human(fit.draft)}" if fit.draft else "")
-        + f", compute {_human(fit.compute)}"
-        + f" -- of {_human(fit.room)} room, {_human(fit.free())} is left for caches")
+        f"  weights {human_bytes(fit.weights)}"
+        + (f", draft {human_bytes(fit.draft)}" if fit.draft else "")
+        + f", compute {human_bytes(fit.compute)}"
+        + f" -- of {human_bytes(fit.room)} room, {human_bytes(fit.free())} is left for caches")
     lines += [f"  {said}" for said in _where_it_went(fit)]
-    lines.append(f"  {_human(fit.per_token)} per token of context, "
-                 f"{_human(fit.per_seq)} fixed per sequence")
+    lines.append(f"  {human_bytes(fit.per_token)} per token of context, "
+                 f"{human_bytes(fit.per_seq)} fixed per sequence")
     shape = _shape(fit)
     if shape:
         lines.append(f"  {shape}")
@@ -920,7 +912,7 @@ def _block(fit: Fit, contexts: list[int]) -> str:
     lines.append("  per user context   users that fit   each costs")
     for context in contexts:
         lines.append(f"  {_tokens(context):>16}   {fit.users(context):>14}   "
-                     f"{_human(fit.cost(context)):>10}")
+                     f"{human_bytes(fit.cost(context)):>10}")
     lines.append(f"  one user, longest context: {_tokens(fit.longest(1))} tokens")
     return "\n".join(lines)
 
@@ -928,14 +920,14 @@ def _block(fit: Fit, contexts: list[int]) -> str:
 def _block_md(fit: Fit, contexts: list[int]) -> str:
     lines = [f"### {pretty_name(fit.model)}", "", f"{_headline(fit)}.", ""]
     lines.append(
-        f"- weights {_human(fit.weights)}"
-        + (f", draft {_human(fit.draft)}" if fit.draft else "")
-        + f", compute {_human(fit.compute)}")
+        f"- weights {human_bytes(fit.weights)}"
+        + (f", draft {human_bytes(fit.draft)}" if fit.draft else "")
+        + f", compute {human_bytes(fit.compute)}")
     lines += [f"- {said}" for said in _where_it_went(fit)]
-    lines.append(f"- room {_human(fit.room)}, of which {_human(fit.free())} is left for "
+    lines.append(f"- room {human_bytes(fit.room)}, of which {human_bytes(fit.free())} is left for "
                  f"caches")
-    lines.append(f"- **{_human(fit.per_token)} per token of context**, "
-                 f"**{_human(fit.per_seq)} fixed per sequence**")
+    lines.append(f"- **{human_bytes(fit.per_token)} per token of context**, "
+                 f"**{human_bytes(fit.per_seq)} fixed per sequence**")
     shape = _shape(fit)
     if shape:
         lines.append(f"- {shape}")
@@ -943,7 +935,7 @@ def _block_md(fit: Fit, contexts: list[int]) -> str:
               "| --- | --- | --- |"]
     for context in contexts:
         lines.append(f"| {_tokens(context)} | {fit.users(context)} | "
-                     f"{_human(fit.cost(context))} |")
+                     f"{human_bytes(fit.cost(context))} |")
     lines += ["", f"One user, longest context: **{_tokens(fit.longest(1))} tokens**."]
     return "\n".join(lines)
 
@@ -1140,22 +1132,22 @@ def render_tensors(model: str | Path, *, top: int = 12) -> str:
 
     lines = [f"{pretty_name(Path(model).name)}"
              + (f"  ({len(shards)} shards)" if len(shards) > 1 else ""),
-             f"  {len(found):,} tensors, {_human(total)} of weights in the header"]
+             f"  {len(found):,} tensors, {human_bytes(total)} of weights in the header"]
     table = sum(one.bytes for one in found if one.role == "table")
     if table:
-        lines.append(f"  {_human(table)} of that is a gathered lookup table: paged a row "
+        lines.append(f"  {human_bytes(table)} of that is a gathered lookup table: paged a row "
                      "at a time, so most of it never becomes resident")
     lines += ["", f"  the {min(top, len(found))} largest tensors", ""]
     for one in found[:top]:
-        lines.append(f"  {_human(one.bytes):>8}  {one.type:<8} {one.name:<40} "
+        lines.append(f"  {human_bytes(one.bytes):>8}  {one.type:<8} {one.name:<40} "
                      f"{_dims(one.shape)}"
                      + ("   <- gathered table" if one.role == "table" else ""))
     lines += ["", "  by type", ""]
     for name, count, size in totals_by_type(found):
-        lines.append(f"  {_human(size):>8}  {name:<8} {count:>5} tensors")
+        lines.append(f"  {human_bytes(size):>8}  {name:<8} {count:>5} tensors")
     lines += ["", "  by what it is for", ""]
     for name, count, size in totals_by_role(found):
-        lines.append(f"  {_human(size):>8}  {name:<10} {count:>5} tensors")
+        lines.append(f"  {human_bytes(size):>8}  {name:<10} {count:>5} tensors")
     return "\n".join(lines)
 
 
@@ -1280,11 +1272,11 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
             drew = True
             left.plot([c for c, _ in points], [n for _, n in points], style, color=colour,
                       marker="o", markersize=3.5,
-                      label=(f"{label_of(fit)} ({_human(fit.loaded())} loaded)"
+                      label=(f"{label_of(fit)} ({human_bytes(fit.loaded())} loaded)"
                              if style == _ROOM_STYLES[0] else None))
         if not drew:
             left.plot([], [], "-", color=colour,
-                      label=f"{label_of(fit)} ({_human(fit.loaded())}) -- does not fit")
+                      label=f"{label_of(fit)} ({human_bytes(fit.loaded())}) -- does not fit")
 
     left.set_xscale("log", base=2)
     left.set_yscale("log")
@@ -1298,7 +1290,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
     if len(drawn_rooms) > 1:
         left.add_artist(people)
         left.legend(handles=[plt.Line2D([], [], color="0.35", linestyle=style,
-                                        label=f"{_human(room)} of room")
+                                        label=f"{human_bytes(room)} of room")
                              for style, room in zip(_ROOM_STYLES, drawn_rooms)],
                     fontsize=8, loc="lower left")
 
@@ -1321,7 +1313,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
         heights = [(intercept + n * each) / gb for n in people_axis]
         reach = max(reach, heights[-1])
         right.plot(people_axis, heights, "-", color=colour, linewidth=1.8,
-                   label=f"{label_of(fit)}: {_human(intercept)} + "
+                   label=f"{label_of(fit)}: {human_bytes(intercept)} + "
                          f"{each / gb:.2f}G/user at {_k(at)}")
 
     # A little above whichever is higher: the rooms actually being asked about, or the
@@ -1341,7 +1333,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
                        va="bottom", ha="right", zorder=0)
     for style, room in zip(_ROOM_STYLES, drawn_rooms):
         right.axhline(room / gb, color="#b0413e", linestyle=style, linewidth=1.4)
-        right.annotate(f"{_human(room)} of room", xy=(0, room / gb), xytext=(4, 3),
+        right.annotate(f"{human_bytes(room)} of room", xy=(0, room / gb), xytext=(4, 3),
                        textcoords="offset points", fontsize=8, color="#b0413e",
                        va="bottom", ha="left")
 
@@ -1353,7 +1345,7 @@ def plot(fits: Iterable[Fit], where: str | Path, *, rooms: Sequence[int] = (),
 
     builds = sorted({f.build for f in rows if f.build})
     figure.suptitle(
-        (machine or "this machine") + f" -- {_human(drawn_rooms[0])} of room"
+        (machine or "this machine") + f" -- {human_bytes(drawn_rooms[0])} of room"
         + (f", measured on llama.cpp {', '.join(builds)}" if builds else ""),
         fontsize=11)
     figure.tight_layout()

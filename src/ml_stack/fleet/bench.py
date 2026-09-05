@@ -37,6 +37,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack.units import human_bytes
+
 if TYPE_CHECKING:
     from .daemon import Job as DaemonJob, JobRunner
     from .rates import Rates
@@ -247,10 +249,6 @@ def machine_room() -> int:
     from ml_stack.hub import room
 
     return int(room() or 0)
-
-
-def _human(size: int | float) -> str:
-    return f"{size / 2**30:.1f}G"
 
 
 # -- a job ---------------------------------------------------------------------------
@@ -603,8 +601,8 @@ class BenchHost:
             for model in job.models:
                 need = int(job.needs.get(model, 0))
                 if need > room:
-                    raise Refused("room", f"{model} needs {_human(need)} and {self.name} may "
-                                          f"use {_human(room)}")
+                    raise Refused("room", f"{model} needs {human_bytes(need)} and {self.name} may "
+                                          f"use {human_bytes(room)}")
         try:
             pid, log = self.launch(job.argv, self.home)
         except Exception as exc:  # noqa: BLE001 - said in the answer, not swallowed
@@ -802,17 +800,17 @@ def plan(models: Sequence[str], peers: Sequence[Any], *, needs: Mapping[str, int
             if why:
                 reasons.append(f"{name}: {why}")
             elif room and need and need > room:
-                reasons.append(f"{name}: room {_human(room)} < {_human(need)}")
+                reasons.append(f"{name}: room {human_bytes(room)} < {human_bytes(need)}")
             else:
                 fitting.append((peer, name, room))
         if not fitting:
             said = "; ".join(reasons) or "no peers answered"
             out.unplaced.append((model, said))
-            log(f"  {model:<40} {_human(need):>7} fits nowhere: {said}")
+            log(f"  {model:<40} {human_bytes(need):>7} fits nowhere: {said}")
             continue
         peer, name, room = min(fitting, key=lambda f: (len(out[f[0]]), -f[2]))
         out[peer].append(model)
-        log(f"  {model:<40} {_human(need):>7} -> {name} (room {_human(room) if room else '?'})"
+        log(f"  {model:<40} {human_bytes(need):>7} -> {name} (room {human_bytes(room) if room else '?'})"
             + ("" if need else "  [size unknown; the peer's preflight decides]"))
     return out
 

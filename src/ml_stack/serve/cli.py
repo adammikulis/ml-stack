@@ -658,6 +658,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
+    from ml_stack.units import human_bytes
 
     if getattr(args, "ui", False):
         return _fit_ui()
@@ -762,11 +763,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
             # The chart sits beside the file it is named in, so the Markdown refers to it
             # by name alone and the pair can be moved together.
             head += f"\n![How many fit, and what it costs]({Path(drawn).name})\n"
-        parts = [head + f"\n## This machine ({fit_mod._human(machine_room())})\n\n"
+        parts = [head + f"\n## This machine ({human_bytes(machine_room())})\n\n"
                  + fit_mod.render(every, contexts, machine_room(), True)]
         for asked in asked_rooms:
             if asked != machine_room():
-                parts.append(f"## A machine with {fit_mod._human(asked)}\n\n"
+                parts.append(f"## A machine with {human_bytes(asked)}\n\n"
                              + fit_mod.render(every, contexts, asked, True))
         Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
         print(f"\nwrote {where}", file=sys.stderr)
@@ -880,7 +881,7 @@ def machine_memory() -> dict | None:
     """What the machine holds: total, used, wired, free, the llama-servers' resident total,
     everything else's, and the five largest non-server processes -- from psutil, or None
     without it."""
-    from ml_stack.hub import _human
+    from ml_stack.units import human_bytes
 
     try:
         import psutil
@@ -908,7 +909,7 @@ def machine_memory() -> dict | None:
     return {"total": int(vm.total), "used": int(vm.total - vm.available),
             "wired": int(getattr(vm, "wired", 0) or 0), "free": int(vm.available),
             "servers": servers, "others": sum(r for r, _ in rest),
-            "largest": [f"{name} {_human(r)}" for r, name in rest[:5]]}
+            "largest": [f"{name} {human_bytes(r)}" for r, name in rest[:5]]}
 
 
 def cmd_limits(args: argparse.Namespace) -> int:
@@ -918,7 +919,8 @@ def cmd_limits(args: argparse.Namespace) -> int:
     a machine nobody has told anything about behaves exactly as it did.
     """
     from ml_stack.bench.history import parse_duration
-    from ml_stack.hub import _human, machine_room
+    from ml_stack.hub import machine_room
+    from ml_stack.units import human_bytes
     from ml_stack.serve.fit import parse_room
     from ml_stack.serve.limits import changed, clear, read, where
 
@@ -956,8 +958,8 @@ def cmd_limits(args: argparse.Namespace) -> int:
     else:
         print("nothing is limited here; ml-stack may use whatever this machine allows")
     if machine:
-        print(f"\nthis machine allows {_human(machine)}; a model may use "
-              f"{_human(limits.room(machine))}")
+        print(f"\nthis machine allows {human_bytes(machine)}; a model may use "
+              f"{human_bytes(limits.room(machine))}")
     return 0
 
 
@@ -1006,7 +1008,8 @@ def cmd_memory(args: argparse.Namespace) -> int:
     That setting is a runtime one and **goes back to the default on every reboot**, so a
     model that loaded yesterday can fail today with an error that never mentions memory.
     """
-    from ml_stack.hub import _human, room
+    from ml_stack.hub import room
+    from ml_stack.units import human_bytes
 
     total = 0
     with contextlib.suppress(Exception):
@@ -1017,15 +1020,15 @@ def cmd_memory(args: argparse.Namespace) -> int:
         print("this machine does not report a wiring limit; nothing to do here")
         return 0
 
-    print(f"a model may use about {_human(now)}"
-          + (f" of {_human(total)} installed" if total else ""))
+    print(f"a model may use about {human_bytes(now)}"
+          + (f" of {human_bytes(total)} installed" if total else ""))
     if total:
         default = int(total * 0.75)
         if now > default * 1.02:
-            print(f"  raised from the ~{_human(default)} default -- and **not** kept: this "
+            print(f"  raised from the ~{human_bytes(default)} default -- and **not** kept: this "
                   f"resets on reboot")
         else:
-            print(f"  this is the default share; {_human(total)} is installed")
+            print(f"  this is the default share; {human_bytes(total)} is installed")
 
     # What the rest of the machine holds right now, so a higher limit is chosen against
     # what it would take from the desktop rather than guessed (Adam, 2026-09-02: "take a
@@ -1033,22 +1036,22 @@ def cmd_memory(args: argparse.Namespace) -> int:
     # higher or is that our ceiling?")
     held = machine_memory()
     if held:
-        print(f"\nright now: {_human(held['used'])} used of {_human(held['total'])} "
-              f"({_human(held['wired'])} wired, {_human(held['free'])} free)")
+        print(f"\nright now: {human_bytes(held['used'])} used of {human_bytes(held['total'])} "
+              f"({human_bytes(held['wired'])} wired, {human_bytes(held['free'])} free)")
         servers = held["servers"]
         others = held["others"]
-        print(f"  llama-server(s): {_human(servers)}; everything else: {_human(others)}"
+        print(f"  llama-server(s): {human_bytes(servers)}; everything else: {human_bytes(others)}"
               + (f" -- {', '.join(held['largest'])}" if held["largest"] else ""))
         headroom = int(total) - int(now) if total else 0
         if total:
-            print(f"  the limit leaves {_human(headroom)} for everything else; the rest of "
-                  f"the machine holds {_human(others)} now"
+            print(f"  the limit leaves {human_bytes(headroom)} for everything else; the rest of "
+                  f"the machine holds {human_bytes(others)} now"
                   + (" -- room to raise it" if others < headroom * 0.6
                      else " -- close to it; raising it means swapping when a model fills it"))
         want_mb = int(getattr(args, "limit", 0) or 0)
         if want_mb and total:
             left = int(total) - want_mb * 1024 * 1024
-            print(f"  at {want_mb} MB the rest of the machine would have {_human(left)}"
+            print(f"  at {want_mb} MB the rest of the machine would have {human_bytes(left)}"
                   + (" -- less than it holds now" if left < others else ""))
     want = args.persist
     if want is None:

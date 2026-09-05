@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.units import human_bytes
+
 __all__ = ["Check", "Preflight", "PreflightFailed", "Report", "read_gguf_header",
            "shard_names"]
 
@@ -470,29 +472,20 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
         return 0
 
 
-def _human(size: int) -> str:
-    value = float(size)
-    for unit in ("B", "K", "M", "G"):
-        if value < 1024 or unit == "G":
-            return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
-        value /= 1024.0
-    return f"{value:.1f}G"
-
-
 def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes: int,
               limit_bytes: int) -> Check:
     total = weights_bytes + draft_bytes + mmproj_bytes + kv_bytes + RUNTIME_ALLOWANCE_BYTES
-    pieces = (f"weights {_human(weights_bytes)}"
-              + (f", draft {_human(draft_bytes)}" if draft_bytes else "")
-              + (f", mmproj {_human(mmproj_bytes)}" if mmproj_bytes else "")
-              + f", kv+runtime est {_human(kv_bytes + RUNTIME_ALLOWANCE_BYTES)}")
+    pieces = (f"weights {human_bytes(weights_bytes)}"
+              + (f", draft {human_bytes(draft_bytes)}" if draft_bytes else "")
+              + (f", mmproj {human_bytes(mmproj_bytes)}" if mmproj_bytes else "")
+              + f", kv+runtime est {human_bytes(kv_bytes + RUNTIME_ALLOWANCE_BYTES)}")
     if not limit_bytes:
-        return Check("fit", True, f"{_human(total)} estimated ({pieces}); "
+        return Check("fit", True, f"{human_bytes(total)} estimated ({pieces}); "
                                   "no machine memory limit is known to compare against")
     ok = total <= limit_bytes
     verb = "fits under" if ok else "exceeds"
     return Check("fit", ok,
-                f"{_human(total)} estimated {verb} the {_human(limit_bytes)} this machine "
+                f"{human_bytes(total)} estimated {verb} the {human_bytes(limit_bytes)} this machine "
                 f"may use ({pieces})")
 
 
@@ -524,17 +517,17 @@ def _measured_fit_check(spec, limit_bytes: int,
     total = loaded + per_seat * seats
     pieces = (f"measured on {found.model} ({found.cache_type}"
               + (f", {found.spec}" if found.spec else "") + "): "
-              f"loaded {_human(loaded)}, +{_human(per_seat)} a seat at "
+              f"loaded {human_bytes(loaded)}, +{human_bytes(per_seat)} a seat at "
               f"{per_seat_context:,} tokens ({at.per_token:,} B/token)"
               + (f" x {seats}" if seats > 1 else ""))
     if not limit_bytes:
         return Check("fit (measured)", True,
-                     f"{_human(total)} {pieces}; no machine memory limit is known to "
+                     f"{human_bytes(total)} {pieces}; no machine memory limit is known to "
                      "compare against")
     ok = total <= limit_bytes
     verb = "fits under" if ok else "exceeds"
     return Check("fit (measured)", ok,
-                f"{_human(total)} {verb} the {_human(limit_bytes)} this machine may use "
+                f"{human_bytes(total)} {verb} the {human_bytes(limit_bytes)} this machine may use "
                 f"({pieces})")
 
 

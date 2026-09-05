@@ -83,11 +83,11 @@ class Limits:
 
     def said(self) -> list[str]:
         """One line per limit, for a person; empty when nothing is limited."""
-        from ml_stack.hub import _human
+        from ml_stack.units import human_bytes
 
         out = []
         if self.memory_bytes:
-            out.append(f"memory   a model may use {_human(self.memory_bytes)}")
+            out.append(f"memory   a model may use {human_bytes(self.memory_bytes)}")
         if self.servers:
             out.append(f"servers  {self.servers} at once")
         if self.seats:

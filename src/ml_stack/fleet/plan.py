@@ -133,15 +133,15 @@ def _note(out: Placement, peer: str, model: str, reason: str) -> None:
 def _seats_on(peer: Room, fit: Fit, context: int, left: int) -> tuple[int, int, str]:
     """Seats for at most ``left`` users on ``peer``, the bytes that uses, and the reason
     when there are none."""
-    from ml_stack.hub import _human
+    from ml_stack.units import human_bytes
 
     here = fit.at_room(peer.room)
     loaded, each = here.line(context)
     if loaded > peer.room:
-        return 0, 0, f"room {_human(peer.room)} < {_human(loaded)} loaded"
+        return 0, 0, f"room {human_bytes(peer.room)} < {human_bytes(loaded)} loaded"
     seats = min(left, here.free() // each) if each > 0 else left
     if seats < 1:
-        return 0, 0, (f"room {_human(peer.room)} < {_human(loaded + each)} "
+        return 0, 0, (f"room {human_bytes(peer.room)} < {human_bytes(loaded + each)} "
                       f"for one seat at {context}")
     return seats, loaded + seats * each, ""
 
@@ -158,7 +158,7 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
     waiting, ties going to the better-ranked one. A peer serves one model. Stops when
     every user has a seat; ``unplaced`` is how many did not get one.
     """
-    from ml_stack.hub import _human
+    from ml_stack.units import human_bytes
 
     say = log or (lambda line: None)
     want = prefer if prefer in PREFERENCES else "quality"
@@ -194,7 +194,7 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
                             context=int(context), used=used, room=peer.room,
                             base_url=peer.base_url))
         say(f"  {profile.model:<48} -> {peer.name}: {seats} seat(s), "
-            f"{_human(used)} of {_human(peer.room)}")
+            f"{human_bytes(used)} of {human_bytes(peer.room)}")
         left -= seats
         open_peers.remove(peer)
 
@@ -238,12 +238,12 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
 
 def table(placement: Placement) -> str:
     """The placement, as text."""
-    from ml_stack.hub import _human
+    from ml_stack.units import human_bytes
 
     lines = [f"{'PEER':<16} {'MODEL':<48} {'SEATS':>5} {'CONTEXT':>8} {'USED':>8} {'ROOM':>8}"]
     for r in placement.rows:
         lines.append(f"{r.peer:<16} {r.model:<48} {r.seats:>5} {r.context:>8} "
-                     f"{_human(r.used):>8} {_human(r.room):>8}")
+                     f"{human_bytes(r.used):>8} {human_bytes(r.room):>8}")
     if not placement.rows:
         lines.append("nobody seated")
     lines.append(f"{placement.seated} of {placement.users} user(s) seated at "

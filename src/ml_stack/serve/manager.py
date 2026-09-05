@@ -461,7 +461,7 @@ class ServerManager:
         summarising it did not rescue that.
         """
         from ml_stack.client.chat import Client
-        from ml_stack.hub import _human
+        from ml_stack.units import human_bytes
         from ml_stack.hub import room as machine_room
 
         told = say or self.say or logger.info
@@ -506,8 +506,8 @@ class ServerManager:
             need = loaded + new_slots * each
             if need <= room_bytes:
                 mode = "grow"
-                reason = (f"{new_slots} seats of {per_seat:,} tokens need {_human(need)}, "
-                          f"which fits in {_human(room_bytes)} of room")
+                reason = (f"{new_slots} seats of {per_seat:,} tokens need {human_bytes(need)}, "
+                          f"which fits in {human_bytes(room_bytes)} of room")
 
         too_long: list[tuple[int, int]] = []
         if mode != "grow":

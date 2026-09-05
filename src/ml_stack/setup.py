@@ -121,7 +121,8 @@ def _sysctl(key: str) -> str:
 
 def look() -> list[Finding]:
     """Everything worth knowing before serving anything, without changing a thing."""
-    from ml_stack.hub import _human, room
+    from ml_stack.hub import room
+    from ml_stack.units import human_bytes
 
     out: list[Finding] = []
 
@@ -134,7 +135,7 @@ def look() -> list[Finding]:
         out.append(Finding(
             name="memory a model may use",
             good=bool(raised and kept) or not raised,
-            said=f"{_human(limit)} of {_human(total)} installed ({share:.0%})",
+            said=f"{human_bytes(limit)} of {human_bytes(total)} installed ({share:.0%})",
             note=("raised above the default, but nothing sets it at boot -- it goes back "
                   "to about 75% on the next restart, and a model that fits today will not"
                   if raised and not kept else

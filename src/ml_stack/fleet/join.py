@@ -258,9 +258,9 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
     # the device probe, and its card's memory is the next best answer.
     vram_total, vram_free = d.get("vram_total_gb"), d.get("vram_free_gb")
     if d.get("room_bytes"):
-        from ml_stack.hub import _human
+        from ml_stack.units import human_bytes
 
-        room = _human(int(d["room_bytes"]))
+        room = human_bytes(int(d["room_bytes"]))
     elif vram_total:
         room = f"{vram_free if vram_free is not None else '?'}/{vram_total} GB"
     elif d.get("ram_gb"):

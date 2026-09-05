@@ -171,7 +171,7 @@ class Hosting:
     def fits_in(self, name: str, *, context: int, parallel: int, room: int) -> str:
         """"" when the model with ``parallel`` seats fits in ``room`` bytes by its memory
         record, or a line saying what it needs. A model with no record passes."""
-        from ml_stack.hub import _human
+        from ml_stack.units import human_bytes
         from ml_stack.serve.fit import records
         from .plan import fit_for
 
@@ -184,8 +184,8 @@ class Hosting:
         need = loaded + max(1, int(parallel)) * each
         if need <= room:
             return ""
-        return (f"{_human(need)} for {parallel} seat(s) at {context} tokens; "
-                f"this machine has {_human(room)}")
+        return (f"{human_bytes(need)} for {parallel} seat(s) at {context} tokens; "
+                f"this machine has {human_bytes(room)}")
 
     def start(self, model_path: Path | str, *, name: str = "", context: int = 8192,
               parallel: int = 1, room: int = 0, escalate: bool = True) -> Served:

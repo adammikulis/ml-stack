@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ml_stack.hub import pretty_name
+from ml_stack.units import human_bytes
 from ml_stack.serve.fit import _shard_paths, tensors_of, totals_by_role
 from ml_stack.serve.preflight import (_per_layer, _recurrent_layers, _sliding_layers,
                                       read_gguf_header)
@@ -176,14 +177,6 @@ def _ranges(layers: list[int]) -> str:
     return ", ".join(out)
 
 
-def _human(size: float) -> str:
-    for unit in ("B", "K", "M", "G"):
-        if size < 1024 or unit == "G":
-            return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
-        size /= 1024.0
-    return f"{size:.1f}G"
-
-
 def _count(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
@@ -234,7 +227,7 @@ def _paragraph(lay: Layout) -> str:
         said.append(f"{lay.expert_count} experts, {lay.expert_used_count} used{wide}{plus}.")
     for name, kind, shape, size in lay.tables:
         cells = " x ".join(f"{d:,}" for d in shape)
-        said.append(f"A lookup table in one tensor: {name}, {cells}, {kind}, {_human(size)}, "
+        said.append(f"A lookup table in one tensor: {name}, {cells}, {kind}, {human_bytes(size)}, "
                     "gathered a row at a time.")
     return " ".join(said)
 
@@ -278,9 +271,9 @@ def render(lay: Layout) -> str:
                         if lay.expert_shared_feed_forward_length else ""))
     for name, kind, shape, size in lay.tables:
         cells = " x ".join(f"{d:,}" for d in shape)
-        lines.append(f"- table: {name}  {kind}  ({cells})  {_human(size)}")
+        lines.append(f"- table: {name}  {kind}  ({cells})  {human_bytes(size)}")
     if lay.by_role:
-        roles = ", ".join(f"{name} {n} ({_human(size)})" for name, n, size in lay.by_role)
+        roles = ", ".join(f"{name} {n} ({human_bytes(size)})" for name, n, size in lay.by_role)
         lines.append(f"- tensors by role: {roles}"
                      + (f"; {lay.shards} shards" if lay.shards > 1 else ""))
     return "\n".join(lines)

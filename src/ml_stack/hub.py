@@ -15,6 +15,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack.units import human_bytes
+
 __all__ = ["Chosen", "DRAFT_MARK", "Found", "PREFER", "WEIGHT_SUFFIXES", "advice", "aside",
            "beside", "builds", "card", "choose_head", "default_roots", "draft_for",
            "draft_note", "fetch", "files", "find", "located", "main", "mmproj_for",
@@ -755,14 +757,6 @@ def machine_room() -> int:
     return 0
 
 
-def _human(size: int) -> str:
-    for unit in ("B", "K", "M", "G"):
-        if size < 1024 or unit == "G":
-            return f"{size:.0f}{unit}" if unit == "B" else f"{size:.1f}{unit}"
-        size /= 1024.0
-    return f"{size:.1f}G"
-
-
 def _head_lines(repo: str) -> list[str]:
     """What `ml-stack-models files` says about a draft head: that one exists, what its
     README warns, and what `choose_head` would serve through the default build and through
@@ -886,9 +880,9 @@ def main(argv: list[str] | None = None) -> int:
                 for shard in shards_beside(path):
                     size = shard.stat().st_size if shard.exists() else 0
                     total += size
-                    print(f"{_human(size):>8}  {shard}")
+                    print(f"{human_bytes(size):>8}  {shard}")
                 if _SHARD.search(path.name):
-                    print(f"{_human(total):>8}  in all")
+                    print(f"{human_bytes(total):>8}  in all")
             return 0
 
         listing = files(args.repo, ending=args.ending)
@@ -900,7 +894,7 @@ def main(argv: list[str] | None = None) -> int:
             mine = held()
             grouped = builds(args.repo, ending=args.ending)
             if fits:
-                print(f"this machine can serve about {_human(fits)}\n")
+                print(f"this machine can serve about {human_bytes(fits)}\n")
             for name, size, shards in grouped:
                 on_disk = sum(1 for f, _s in held_files(args.repo, name, args.ending)
                               if f in mine)
@@ -912,17 +906,17 @@ def main(argv: list[str] | None = None) -> int:
                 # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
                 # smaller IQ file was the slower model (README, "What this measured")
                 slow = "  IQ: slower on Metal, take a K-quant" if iq_on_metal(name) else ""
-                print(f"{_human(size):>8}  {name}{many}{mark}{slow}")
+                print(f"{human_bytes(size):>8}  {name}{many}{mark}{slow}")
             for name, size in listing:
                 if aside(name):
-                    print(f"{_human(size):>8}  {ref(args.repo, name)}  (alongside)")
+                    print(f"{human_bytes(size):>8}  {ref(args.repo, name)}  (alongside)")
             print(f"\nml-stack-models files {args.repo} --every  for individual files")
             for line in _head_lines(args.repo):
                 print(line)
             return 0
         for name, size in listing:
             note = "  (alongside)" if aside(name) else ""
-            print(f"{_human(size):>8}  {ref(args.repo, name)}{note}")
+            print(f"{human_bytes(size):>8}  {ref(args.repo, name)}{note}")
         lines = _head_lines(args.repo)
         if lines:
             print("")

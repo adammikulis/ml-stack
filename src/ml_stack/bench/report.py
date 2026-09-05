@@ -54,6 +54,7 @@ from ml_stack.bench.score import (
     per_question,
 )
 from ml_stack.bench.show import _gb, drafted, kv_short, made
+from ml_stack.units import human_bytes
 
 __all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
            "best_extractor", "build_of", "by_model", "cache_of", "extract_model_of",
@@ -938,8 +939,8 @@ def _memory(doc: Doc, fits: Sequence[Any],
                   [(f"`{one.model}`" if doc.md else one.model,
                     one.cache_type,
                     one.spec or "-",
-                    fit_mod._human(one.loaded()),
-                    fit_mod._human(one.cost(at)),
+                    human_bytes(one.loaded()),
+                    human_bytes(one.cost(at)),
                     str(one.users(at)),
                     f"{one.longest(1):,}") for one in fits],
                   best=-1)
@@ -1076,7 +1077,7 @@ def main(args: Any) -> int:
 
     here = machine_room()
     fits = fits_named(fit_mod.records(room=here), wanted)
-    elsewhere = [(fit_mod._human(size),
+    elsewhere = [(human_bytes(size),
                   [f.at_room(size) for f in fits]) for size in rooms if size != here]
 
     body = report(kept, fits=fits, elsewhere=elsewhere,
@@ -1085,7 +1086,7 @@ def main(args: Any) -> int:
                   full_n=int(getattr(args, "full_n", 0) or 0),
                   md=not bool(getattr(args, "text", False)),
                   noise=float(getattr(args, "noise", NOISE * 100) or 0) / 100,
-                  room=fit_mod._human(here) if here else "", store=store,
+                  room=human_bytes(here) if here else "", store=store,
                   extracted=extracted, ingested=list(getattr(args, "sources", None) or ()),
                   min_msgs=int(getattr(args, "min_msgs", MIN_MESSAGES) or MIN_MESSAGES))
 
