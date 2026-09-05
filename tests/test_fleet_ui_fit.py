@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 
 import pytest
-from ml_stack.fleet.ui import ASSETS, asset_bytes, serve_page
+from ml_stack.fleet.ui import asset_bytes, serve_page
 from ml_stack.serve import fit as fit_mod
 from ml_stack.serve.fit import Fit
 

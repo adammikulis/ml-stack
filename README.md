@@ -1145,9 +1145,10 @@ serves on loopback and opens a browser at it:
 ml-stack-serve fit --ui
 ```
 
-The fleet app shows the same page under **Fit**, at `/ui/fit`, from the same two routes --
-`/ui/fit.json` hands over the records with this machine's room, and the page does the
-arithmetic itself so a slider costs no round trip. A sibling tab, **What it cost to be
+The fleet app shows the same view under **Fit**, at `/ui/fit`, from the same two routes --
+`/ui/fit.json` hands over the records seated for the room and the head count the sliders
+stand at, so every number on the screen is the one `ml-stack-serve fit` prints. A sibling
+tab, **What it cost to be
 right**, draws `ml-stack-bench show --rates` the same way: accuracy against wall clock,
 tokens paid for, or KV and runtime, with the Pareto frontier joined -- nothing on it is both
 more accurate and cheaper, so choosing among those points is choosing a budget. Both pages
