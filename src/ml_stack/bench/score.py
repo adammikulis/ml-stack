@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.bench.keep import SHORT
+from ml_stack.bench.record import of
 from ml_stack.paths import repo_root
 
 
@@ -481,12 +482,6 @@ def per_question(one: Mapping[str, Any]) -> float:
     return got["seconds"] / got["questions"] if got.get("questions") else 0.0
 
 
-def _head_of(one: Mapping[str, Any]) -> str:
-    """The draft head a run was served with, "" for none."""
-    server = one.get("server") or {}
-    return str(server.get("draft_model") or server.get("draft") or "")
-
-
 def baseline(one: Mapping[str, Any],
              kept: Sequence[Mapping[str, Any]]) -> Mapping[str, Any] | None:
     """The undrafted run a drafted one is measured against, or None.
@@ -498,7 +493,7 @@ def baseline(one: Mapping[str, Any],
     None for a run with no head: it is its own baseline, and a speedup of 1.00x would say
     nothing.
     """
-    if not _head_of(one):
+    if not of(one).head:
         return None
     server = one.get("server") or {}
     mine = derived(one)
@@ -507,7 +502,7 @@ def baseline(one: Mapping[str, Any],
     wanted = (str(server.get("model") or ""), str(server.get("binary") or ""),
               mine["questions"])
     found = [(n, o) for n, o in enumerate(kept)
-             if o is not one and not _head_of(o)
+             if o is not one and not of(o).head
              and (str((o.get("server") or {}).get("model") or ""),
                   str((o.get("server") or {}).get("binary") or ""),
                   derived(o).get("questions")) == wanted]
@@ -629,30 +624,6 @@ def composed(kept: Sequence[Mapping[str, Any]], *, noise: float = NOISE) -> list
     return out
 
 
-def _made(one: Mapping[str, Any]) -> str:
-    """Entries made up per question, one decimal; "-" for a run from before the count."""
-    made = derived(one).get("made_per_question")
-    return "-" if made is None else f"{float(made):.1f}"
-
-
-def _build(server: Any) -> str:
-    """What served a run, for the ranking's last column: ``llama.cpp (unsloth) · gguf ·
-    Q4_K_XL`` from its ``served_by`` record when it has one; else the llama-server's last
-    two path segments -- a managed build is ``<name>/llama-server``, so a fork's run says
-    so and mainline's says current. ``server`` may be the record or the binary's path."""
-    from ml_stack.bench.backends import describe
-
-    if isinstance(server, Mapping):
-        said = describe(server.get("served_by"), build=str(server.get("build") or ""))
-        if said:
-            return said
-        binary = server.get("binary")
-    else:
-        binary = server
-    parts = Path(str(binary)).parts if binary else ()
-    return "/".join(parts[-2:])
-
-
 def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, *,
             noise: float = NOISE) -> str:
     """Which model to choose, as a conclusion rather than as evidence.
@@ -699,7 +670,7 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
         a, c = _flat(choice.accuracy, over), _flat(choice.cost, over)
         gb, kv, load = c.get("resident_bytes"), c.get("kv_and_run_bytes"), c.get("load_s")
         temp = (a.get("sampling") or {}).get("temperature")
-        build = _build(c)
+        build = str(c.get("build") or "")
         source = ("its own run" if choice.own
                   else f"`{c.get('label')}`") + (f" on {build}" if build else "")
         if not choice.own:
@@ -724,7 +695,7 @@ def ranking(kept: Sequence[Mapping[str, Any]], where: str | Path | None = None, 
             f"| {f'{kv / 2**30:.1f}G' if kv else '-'} "
             f"| {'greedy' if temp == 0 else (f'temp {temp}' if temp is not None else '-')} "
             f"| {a.get('finder') or '-'} "
-            f"| {_made(choice.accuracy)} "
+            f"| {of(choice.accuracy).made} "
             + (f"| {a.get('host') or '-'} " if several else "")
             + f"| {source} |")
     refused = [(choice, run, fell) for choice in chosen for run, fell in choice.rejected]
@@ -799,6 +770,7 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
     rows = [r for r in (one.get("rows") or []) if r.get("expected")]
     got = derived(one)
     server = one.get("server") or {}
+    kept = of(one)
     faster = speedup(one, among)
     return {
         "at": one.get("at", ""), "label": one.get("label", ""),
@@ -835,7 +807,10 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         # None for a run kept before it was recorded
         "served_by": dict(server["served_by"]) if isinstance(server.get("served_by"), Mapping)
         else None,
-        "build": _build(server) or None,
+        "build": kept.build or None,
+        # a digest of the system prompt and the tool schemas -- see `record.prompt_digest`;
+        # "" for a run kept before it was recorded
+        "prompts": kept.prompts,
         # which machine and which code measured it; "" for a run from before either was
         "host": str(server.get("host") or ""),
         "commit": str(server.get("commit") or ""),

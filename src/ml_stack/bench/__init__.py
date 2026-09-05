@@ -51,6 +51,7 @@ from ml_stack.bench.keep import (  # noqa: F401
 from ml_stack.bench.record import (  # noqa: F401
     Measured,
     Spread,
+    of,
     prompt_digest,
 )
 from ml_stack.bench.score import (  # noqa: F401
@@ -59,10 +60,8 @@ from ml_stack.bench.score import (  # noqa: F401
     NOISE,
     Choice,
     Row,
-    _build,
     _exportable,
     _flat,
-    _head_of,
     _hit,
     _over_invented,
     _precision,
@@ -160,7 +159,6 @@ from ml_stack.bench.show import (  # noqa: F401
     drafting,
     head_short,
     kv_short,
-    made,
     measured,
     missed,
     pareto,
@@ -186,7 +184,6 @@ from ml_stack.bench.report import (  # noqa: F401
     cache_of,
     fit_for,
     fits_named,
-    head_of,
     model_of,
     recommended_head,
     report,

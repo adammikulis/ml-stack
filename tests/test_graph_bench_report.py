@@ -23,7 +23,6 @@ from ml_stack.bench.report import (
     answering,
     asking_of,
     cache_of,
-    head_of,
     model_of,
     recommended_head,
     report,
@@ -111,9 +110,11 @@ def test_the_cache_column_is_blank_at_f16_and_short_otherwise():
 
 
 def test_a_head_carries_how_far_it_guessed():
-    assert head_of({"server": {}}) == "-"
-    assert head_of({"server": {"draft_model": "mtp-alder.gguf",
-                               "spec_draft_max": 4}}) == "mtp-alder.gguf@n4"
+    from ml_stack.bench.record import of
+
+    assert of({"server": {}}).head_said == "-"
+    assert of({"server": {"draft_model": "mtp-alder.gguf",
+                          "spec_draft_max": 4}}).head_said == "mtp-alder.gguf@n4"
 
 
 def test_a_run_is_grouped_by_the_model_it_was_served_from():

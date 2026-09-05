@@ -1004,10 +1004,10 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     assert head.split().index("made") == head.split().index("prec") + 1, "beside the scores"
     by_label = {ln.split()[0]: ln for ln in said.splitlines() if ln.startswith(("tried", "older"))}
     # made, then t/o (blank: nothing timed out), then the sampling
-    assert by_label["tried"].split()[-3:] == ["4", "-", "-"], \
-        "the total over the run, then the sampling and what served it"
-    assert by_label["older"].rstrip().endswith("100%" + " " * 13 + "-" + " " * 14 + "-"), \
-        "blank for a run from before, not 0; then the sampling and what served it"
+    assert by_label["tried"].split()[-3:] == ["0.2", "-", "-"], \
+        "per question, then the sampling and what served it"
+    assert by_label["older"].split()[-3:] == ["-", "-", "-"], \
+        "a dash for a run from before the count, not 0; then the sampling and what served it"
 
     missed(runs(store, "tried"), everything=True)
     said = capsys.readouterr().out
@@ -2232,14 +2232,15 @@ def test_a_models_cost_comes_from_its_fastest_run_that_held_its_accuracy(tmp_pat
               binary="/builds/current/llama-server", resident_bytes=8 * 2**30,
               kv_and_run_bytes=3 * 2**30, load_s=30.0)
     _kept_run(store, "draft:mtp-tiny@n4", model="flash.gguf", questions=20, hits=12,
-              seconds=200.0, binary="/builds/brayfork/llama-server", resident_bytes=9 * 2**30,
+              seconds=200.0, binary="/builds/brayfork/llama-server", build="brayfork",
+              resident_bytes=9 * 2**30,
               kv_and_run_bytes=4 * 2**30, load_s=40.0)
     said = ranking(runs(store))
     row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
     assert "| 59% |" in row, "accuracy is the 34-question run's (20 of 34), not the drafted 60%"
     assert "| 34 |" in row and "| 10.0 |" in row, "cost is the drafted run's, per question"
     assert "| 40s | 9.0G | 4.0G |" in row, "load, resident and kv+run from the same run"
-    assert row.endswith("| `draft:mtp-tiny@n4` on brayfork/llama-server (20 q) |")
+    assert row.endswith("| `draft:mtp-tiny@n4` on brayfork (20 q) |")
     assert "rejected" not in said
     assert "| s/question |" in said and "| cost from |" in said
     assert said.startswith("# Which model answers best\n")
@@ -2273,11 +2274,12 @@ def test_a_model_with_one_run_uses_it_and_says_so(tmp_path):
 
     store = tmp_path / "runs.ladybug"
     _kept_run(store, "only", model="one.gguf", questions=20, hits=10, seconds=100.0,
-              binary="/builds/current/llama-server")
+              binary="/builds/current/llama-server", build="thornfell")
     said = ranking(runs(store))
     row = next(ln for ln in said.splitlines() if ln.startswith("| `one.gguf`"))
     assert "| 50% |" in row and "| 5.0 |" in row
-    assert row.endswith("| its own run on current/llama-server |")
+    assert row.endswith("| its own run on thornfell |"), \
+        "the build name `ml-stack-serve up --build` takes, not the binary's path"
 
 
 def test_a_smoke_run_never_supplies_cost_and_the_footnote_counts_it(tmp_path):
@@ -2676,13 +2678,13 @@ def test_the_ranking_and_the_export_carry_the_speedup(tmp_path):
     _kept_run(store, "flash-plain", model="flash.gguf", questions=34, hits=20, seconds=500.0,
               binary="/builds/current/llama-server")
     _kept_run(store, "draft:none", model="flash.gguf", questions=20, hits=12, seconds=300.0,
-              binary="/builds/unsloth/llama-server")
+              binary="/builds/unsloth/llama-server", build="unsloth")
     _kept_run(store, "draft:mtp-flash@n4", model="flash.gguf", questions=20, hits=12,
-              seconds=200.0, binary="/builds/unsloth/llama-server",
+              seconds=200.0, binary="/builds/unsloth/llama-server", build="unsloth",
               draft_model="mtp-flash.gguf")
     said = ranking(runs(store))
     row = next(ln for ln in said.splitlines() if ln.startswith("| `flash.gguf`"))
-    assert row.endswith("| `draft:mtp-flash@n4` on unsloth/llama-server (20 q, 1.50x) |")
+    assert row.endswith("| `draft:mtp-flash@n4` on unsloth (20 q, 1.50x) |")
     got = {r["label"]: r for r in
            json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())}
     assert got["draft:mtp-flash@n4"]["speedup"] == 1.5

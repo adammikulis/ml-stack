@@ -3,7 +3,7 @@
   "argument-parsers": 32,
   "atomic-writes": 20,
   "broad-excepts": 220,
-  "deep-files": 21,
+  "deep-files": 20,
   "duplicate-bodies": 18,
   "entry-points": 34,
   "file-locks": 11,

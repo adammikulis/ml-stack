@@ -24,7 +24,8 @@ from typing import Any
 
 from ml_stack import bench
 from ml_stack.bench.backends import describe
-from ml_stack.bench.score import _head_of, derived, invented_digest
+from ml_stack.bench.record import of
+from ml_stack.bench.score import derived, invented_digest
 from ml_stack.bench.speed import KIND as SPEED
 from ml_stack.paths import repo_root
 
@@ -89,7 +90,7 @@ def _standard_for(standards: Sequence[Mapping[str, Any]], label: str) -> dict[st
 def _drafted(server: Mapping[str, Any]) -> bool | None:
     """Whether a head was served: True with one on the record, False for a llama-server
     served without one, None for a run that cannot say."""
-    if _head_of({"server": server}):
+    if of({"server": server}).head:
         return True
     said = server.get("served_by") or {}
     if isinstance(said, Mapping) and said.get("draft") is not None:

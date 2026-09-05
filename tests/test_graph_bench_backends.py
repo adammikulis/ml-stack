@@ -179,24 +179,24 @@ def test_the_short_form_is_one_word_for_a_table_column():
     assert " " not in short({"program": "llama server", "format": "gguf", "quant": "Q4"})
 
 
-def test_build_of_and_the_rankings_build_read_served_by_first():
+def test_the_build_reads_what_served_a_run_before_the_binary_it_started():
     """An Ollama run has no llama-server binary, and read from the binary alone it was
     the default build. The record says what served it, and that is what is read."""
-    from ml_stack.bench.report import build_of
-    from ml_stack.bench.score import _build
+    from ml_stack.bench.record import of
+
+    def build(server):
+        return of({"server": server}).build
 
     ollama = {"served_by": {"program": "ollama", "version": "0.33.3", "format": "safetensors",
                             "runtime": "mlx", "quant": "nvfp4"}}
-    assert build_of(ollama) == "ollama 0.33.3 · mlx · nvfp4"
-    assert _build(ollama) == "ollama 0.33.3 · mlx · nvfp4"
+    assert build(ollama) == "ollama 0.33.3 · mlx · nvfp4"
     llama = {"binary": "/opt/builds/unsloth/bin/llama-server",
              "served_by": {"program": "llama.cpp", "build": "unsloth", "format": "gguf",
                            "quant": "Q4_K_XL"}}
-    assert build_of(llama) == "unsloth", "a llama.cpp profile still names the build"
-    assert _build(llama) == "llama.cpp (unsloth) · gguf · Q4_K_XL"
-    assert _build({"binary": "/opt/builds/thornfell/llama-server"}) == "thornfell/llama-server", \
-        "a run kept before served_by reads as it did"
-    assert _build("/opt/builds/thornfell/llama-server") == "thornfell/llama-server"
+    assert build(llama) == "unsloth", "a llama.cpp profile names the build, not its path"
+    assert build({"build": "thornfell"}) == "thornfell"
+    assert build({"binary": "/opt/builds/thornfell/llama-server"}) == "", \
+        "a binary under no managed build directory is a name nothing could be asked for"
 
 
 def test_the_table_tells_two_runs_of_one_model_apart_by_what_served_them(tmp_path, capsys):

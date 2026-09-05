@@ -624,14 +624,17 @@ def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_pat
 
 
 def test_the_named_build_is_read_off_the_binary_a_run_started(tmp_path):
-    from ml_stack.bench.report import build_of
+    from ml_stack.bench.record import of
     from ml_stack.serve.build import NAMED_DIR
 
-    assert build_of({"binary": str(Path(NAMED_DIR) / "thornfell" / "bin" / "llama-server")}) \
+    def build(server):
+        return of({"server": server}).build
+
+    assert build({"binary": str(Path(NAMED_DIR) / "thornfell" / "bin" / "llama-server")}) \
         == "thornfell"
-    assert build_of({"binary": "/usr/local/bin/llama-server"}) == "", \
+    assert build({"binary": "/usr/local/bin/llama-server"}) == "", \
         "the managed current build has no name to be asked for"
-    assert build_of({}) == ""
+    assert build({}) == ""
 
 
 def test_the_shape_a_person_reads_names_the_flags_and_the_ways(capsys):

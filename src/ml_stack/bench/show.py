@@ -17,10 +17,10 @@ from typing import Any
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.backends import short
+from ml_stack.bench.record import of
 from ml_stack.bench.score import (
     COSTS,
     NOISE,
-    _head_of,
     _hit,
     _precision,
     _recall,
@@ -424,7 +424,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
               f"{_gb(rss):>9} {_gb(server.get('footprint_peak')):>9} {wired_of(server):>8} "
               f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
               f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
-              f"{right:>8} {rec:>5} {prec:>5} {made(one):>5} {timeouts(one):>4}  "
+              f"{right:>8} {rec:>5} {prec:>5} {of(one).made:>5} {timeouts(one):>4}  "
               f"{sampled(server):14} {short(server.get('served_by'))}")
 
 
@@ -533,15 +533,6 @@ def at_once(server: Mapping[str, Any]) -> str:
     if not isinstance(held, Mapping) or not held.get("conversations"):
         return ""
     return f"{held['conversations']}x{held.get('turns') or 1}"
-
-
-def made(one: Mapping[str, Any]) -> str:
-    """How many entries a run's answers named without ever finding or reading them, over
-    the scored questions; "" for a run from before this was counted."""
-    rows = [r for r in (one.get("rows") or []) if r.get("expected")]
-    if not any("unread_named" in r for r in rows):
-        return ""
-    return str(int(_total(rows, "unread_named")))
 
 
 def missed(kept: Sequence[Mapping[str, Any]], *, everything: bool = False,
@@ -794,7 +785,7 @@ def drafted(kept: Sequence[Mapping[str, Any]], *, among: Sequence[Mapping[str, A
     pool = list(among) or list(kept)
     rows = []
     for one in kept:
-        if not _head_of(one):
+        if not of(one).head:
             continue
         base = baseline(one, pool)
         mine = derived(one)

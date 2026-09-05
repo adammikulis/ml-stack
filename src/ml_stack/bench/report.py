@@ -44,21 +44,21 @@ from typing import Any
 # -- so anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import bench
 from ml_stack.bench.keep import SHORT
+from ml_stack.bench.record import of
 from ml_stack.bench.score import (
     NOISE,
-    _head_of,
     derived,
     held_up,
     host_of,
     hosts_of,
     per_question,
 )
-from ml_stack.bench.show import _gb, drafted, kv_short, made
+from ml_stack.bench.show import _gb, drafted, kv_short
 from ml_stack.units import human_bytes
 
 __all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
-           "best_extractor", "build_of", "by_model", "cache_of", "extract_model_of",
-           "extractions", "fit_for", "fits_named", "head_of", "measured_best", "model_of",
+           "best_extractor", "by_model", "cache_of", "extract_model_of",
+           "extractions", "fit_for", "fits_named", "measured_best", "model_of",
            "profile_of", "read_messages", "recommended_head", "report", "thinking_of",
            "ways_of", "write_profiles"]
 
@@ -108,16 +108,6 @@ def cache_of(server: Mapping[str, Any]) -> str:
     f16 one is two configurations, not two models."""
     kind = str((server or {}).get("cache_type") or "")
     return kv_short(kind) if kind and kind != "f16" else "-"
-
-
-def head_of(one: Mapping[str, Any]) -> str:
-    """The draft head a run was served with and how far it guessed -- ``mtp-a.gguf@n4`` --
-    or "-" for none."""
-    head = _head_of(one)
-    if not head:
-        return "-"
-    ahead = (one.get("server") or {}).get("spec_draft_max")
-    return f"{head}@n{int(ahead)}" if ahead is not None else head
 
 
 def _pct(value: float | None) -> str:
@@ -271,7 +261,7 @@ def recommended_head(mine: Sequence[Mapping[str, Any]],
     keep in step. A summary that stops saying "serve LABEL" makes this return None, which
     reads as "not measured" rather than as a wrong recommendation.
     """
-    if not any(_head_of(o) for o in mine):
+    if not any(of(o).head for o in mine):
         return None
     said = _RECOMMENDED.match(drafted(mine, among=among).splitlines()[-1])
     if not said:
@@ -346,37 +336,6 @@ def ways_of(one: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def build_of(server: Mapping[str, Any]) -> str:
-    """The named llama.cpp build a run was served on, "" for the managed current one.
-
-    A run records the binary's path, because that is what it started; a profile records the
-    *name*, because that is what `ml-stack-serve up --build` takes. A head withheld from
-    mainline loads on one build and no other, so this is not decoration.
-    """
-    from ml_stack.bench.backends import describe
-    from ml_stack.serve.build import NAMED_DIR
-
-    record = (server or {}).get("served_by")
-    if isinstance(record, Mapping) and record.get("program"):
-        # a run on another program has no llama.cpp build: it is named as what served it,
-        # so an Ollama run never reads as the default build
-        if str(record.get("program")).lower() not in ("llama.cpp", "llama-server"):
-            return describe(record)
-        if record.get("build"):
-            return str(record["build"])
-    binary = Path(str((server or {}).get("binary") or ""))
-    try:
-        named = binary.resolve().relative_to(Path(NAMED_DIR).resolve())
-    except (OSError, ValueError):
-        # not under the named builds: `current`, a hand-named binary, or a path that no
-        # longer exists -- none of which is a build name anything could be asked for
-        try:
-            named = binary.relative_to(Path(NAMED_DIR))
-        except ValueError:
-            return ""
-    return named.parts[0] if named.parts else ""
-
-
 def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
                   ) -> Mapping[str, Any] | None:
     """The run one model's record should be written from: the fastest whose F1 held.
@@ -427,14 +386,15 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
 
     server = one.get("server") or {}
     got = derived(one)
-    head = str(server.get("draft_model") or server.get("draft") or "")
+    kept = of(one)
+    head = kept.head
     slots = int(server.get("slots") or 0) or 1
     context = int(server.get("context") or 0)
     asked = one.get("asking") if isinstance(one.get("asking"), Mapping) else {}
     sampling = asked.get("sampling") or server.get("sampling")
     return record(
         model,
-        build=build_of(server),
+        build=kept.build,
         draft=head,
         spec_type=spec_for(head) if head else "",
         spec_draft_max=(int(server["spec_draft_max"])
@@ -663,13 +623,13 @@ def _answering(doc: Doc, tables: Mapping[str, tuple[list[Mapping[str, Any]], int
                 [(asking_of(one.get("label")),
                   thinking_of(one.get("server") or {}),
                   cache_of(one.get("server") or {}),
-                  head_of(one),
+                  of(one).head_said,
                   f"{derived(one)['questions']:.0f}",
                   f"{per_question(one):.1f}",
                   _pct(derived(one)["right"]),
                   _pct(derived(one)["recall"]),
                   _pct(derived(one)["precision"]),
-                  made(one) or "-") for one in rows],
+                  of(one).made) for one in rows],
                 best=0)
         if short:
             doc.note(f"{short} smoke and short run(s) of {model} left out: fewer than "
@@ -695,7 +655,7 @@ def _across(doc: Doc, kept: Sequence[Mapping[str, Any]], *, full_n: int) -> None
         [(f"`{model}`" if doc.md else model,
           asking_of(one.get("label")),
           thinking_of(one.get("server") or {}),
-          head_of(one),
+          of(one).head_said,
           f"{derived(one)['questions']:.0f}",
           _pct(derived(one)["right"]),
           _pct(derived(one)["recall"]),
@@ -903,7 +863,7 @@ def _ingest(doc: Doc, ingested: Sequence[str]) -> None:
 def _drafts(doc: Doc, kept: Sequence[Mapping[str, Any]], *, noise: float) -> None:
     grouped = by_model(kept)
     with_heads = {model: mine for model, mine in grouped.items()
-                  if any(_head_of(one) for one in mine)}
+                  if any(of(one).head for one in mine)}
     doc.head(2, "Draft heads, per model")
     if not with_heads:
         doc.para("No draft head measured. `ml-stack-bench drafts MODEL --draft HEAD` "
@@ -980,12 +940,12 @@ def _serving(doc: Doc, kept: Sequence[Mapping[str, Any]],
         # three different states, and only one of them is a head: nothing measured at all,
         # measured and none worth serving, and one to serve. Printing the first two the
         # same way would read as "no head is best" when nothing had been tried
-        if not any(_head_of(one) for one in mine):
+        if not any(of(one).head for one in mine):
             head = "not measured"
         elif head_run is None:
             head = "none -- no head held its baseline's F1 and beat serving none"
         else:
-            head = head_of(head_run)
+            head = of(head_run).head_said
         cost = head_run if head_run is not None else best
         fit = fit_for(model, fits)
         got = derived(best)
