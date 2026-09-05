@@ -28,7 +28,7 @@ ten questions, unconfirmed.
   --images --resume --serve-port 8080`, one book at a time, and it tidies itself at the
   book's end. Two answers before that: what a question over the shelf scores
   (`ml-stack-ingest ask --out ... --gold FILE`, no gold questions written yet), and what
-  `ml-stack-ingest shelf` says once a second full book is in.
+  `ml-stack-ingest sources` says once a second full book is in.
 - [ ] **Watch for units that still run to the ceiling.** The document schema caps every
   list (`maxItems`), so the grammar closes the array; a unit that still fails is read once
   more, then given up on; `status` counts those, its whole reply is `raw` in the reads
@@ -43,7 +43,7 @@ ten questions, unconfirmed.
   a misreading ("Larynx part_of trachea" beside "Larynx precedes trachea") -- the
   instructions now say keep both only when the passages support both (2026-09-03); the
   shelf's verdicts predate that and are worth a `tidy --rejudge` over the shelf, ~an hour.
-- [ ] **Fill the shelf's "between books" log.** `ml-stack-ingest shelf` reads
+- [ ] **Fill the shelf's "between books" log.** `ml-stack-ingest sources` reads
   `tidy:merges`, written by every fold and tidy from 2026-09-04 on; the shelf's 210 shared
   concepts were joined before it existed, so the section is empty. `ml-stack-ingest fold
   --out ~/.ml-stack/shelf.ladybug` re-folds every book from its reads (no model, minutes)
