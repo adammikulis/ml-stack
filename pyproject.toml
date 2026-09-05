@@ -159,18 +159,19 @@ select = [
     "B",       # bugbear
     "BLE",     # blind except
     "C4",      # comprehensions
+    "E4", "E7", "E9",  # pycodestyle, ruff's own default
     "ERA",     # commented-out code
+    "F",       # pyflakes, ruff's own default
     "I",       # import sorting
     "PLR0913", # too many arguments
     "PLR0915", # too many statements
     "PTH",     # os.path where pathlib reads better
     "RUF",     # ruff's own, including RUF100 for a noqa that suppresses nothing
+    # T20 is scripts/gates/print_calls.py, which exempts the console-script modules
     "S",       # bandit
     "SIM",     # simplifications
     "UP",      # syntax the minimum Python already has
 ]
-# T20 is off: scripts/gates/print_calls.py counts print() with the console-script
-# modules exempt, which is the same metric with the exemption ruff cannot express.
 # S603 and S607 fire on every subprocess call and every argv[0] without a full path.
 ignore = ["S603", "S607"]
 
@@ -182,3 +183,18 @@ ignore = ["S603", "S607"]
     "S107",
     "S108",  # /tmp paths in fixtures
 ]
+
+# Checks that read the source alone. A check that reads a type out of an installed package
+# counts differently on every machine.
+[tool.pyright]
+include = ["src/ml_stack"]
+typeCheckingMode = "off"
+reportAssertAlwaysTrue = "error"
+reportInvalidStringEscapeSequence = "error"
+reportNoOverloadImplementation = "error"
+reportSelfClsParameterName = "error"
+reportUnboundVariable = "error"
+reportUndefinedVariable = "error"
+reportUnsupportedDunderAll = "error"
+reportUnusedCoroutine = "error"
+reportUnusedExcept = "error"

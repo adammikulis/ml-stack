@@ -32,9 +32,21 @@ def checkers() -> list[ModuleType]:
     return found
 
 
+def skipped(checker: ModuleType) -> str:
+    """Why this checker cannot run here, empty when it can."""
+    reason = getattr(checker, "skip", None)
+    return reason() if reason is not None else ""
+
+
+def unrunnable() -> dict[str, str]:
+    """Metric name -> why it cannot be counted here."""
+    return {c.NAME: r for c in checkers() if (r := skipped(c))}
+
+
 def run(root: Path) -> dict[str, list[Finding]]:
-    """Every checker's findings over the tree at root, keyed by metric name."""
+    """Every runnable checker's findings over the tree at root, keyed by metric name."""
     return {
         c.NAME: sorted(c.find(root), key=lambda f: (f.path, f.line, f.detail))
         for c in checkers()
+        if not skipped(c)
     }

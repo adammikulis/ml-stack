@@ -42,8 +42,9 @@ def write_budgets(counts: dict[str, int]) -> None:
 def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int:
     """Print every metric worst first; return 1 if any is over budget."""
     owner = owners()
+    absent = gates.unrunnable()
     rows = []
-    for name in sorted(set(found) | set(allowed)):
+    for name in sorted((set(found) | set(allowed)) - set(absent)):
         actual = len(found.get(name, []))
         budget = allowed.get(name)
         delta = actual - budget if budget is not None else actual
@@ -56,6 +57,9 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
         shown = "-" if budget is None else str(budget)
         mark = "+" if delta > 0 else ""
         print(f"{name.ljust(width)}  {shown:>6}  {actual:>6}  {mark}{delta}")
+
+    for name in sorted(absent):
+        print(f"{name.ljust(width)}  {str(allowed.get(name, '-')):>6}  {'?':>6}  {absent[name]}")
 
     over = [r for r in rows if r[0] > 0]
     if not over:
@@ -72,6 +76,10 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
 
 def show(found: dict[str, list[gates.Finding]], metric: str) -> int:
     """Print every site for one metric."""
+    absent = gates.unrunnable()
+    if metric in absent:
+        print(f"{metric}: {absent[metric]}", file=sys.stderr)
+        return 2
     if metric not in found:
         print(f"no such metric: {metric}", file=sys.stderr)
         print("known: " + ", ".join(sorted(found)), file=sys.stderr)
@@ -102,6 +110,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.update:
         counts = {name: len(sites) for name, sites in found.items()}
+        for name in gates.unrunnable():
+            if name in allowed:
+                counts[name] = allowed[name]
         risen = {n: (allowed[n], counts[n]) for n in counts
                  if n in allowed and counts[n] > allowed[n]}
         if risen and not args.allow_increase:

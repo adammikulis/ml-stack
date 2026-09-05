@@ -22,8 +22,15 @@ def _sites(name: str) -> str:
     return "\n".join(f"    {f.path}:{f.line}  {f.detail}" for f in FOUND[name][:10])
 
 
+def _runnable(checker) -> None:
+    reason = gates.skipped(checker)
+    if reason:
+        pytest.skip(f"{checker.NAME}: {reason}")
+
+
 @pytest.mark.parametrize("checker", gates.checkers(), ids=lambda c: c.NAME)
 def test_metric_is_within_its_budget(checker) -> None:
+    _runnable(checker)
     name = checker.NAME
     budget = ALLOWED[name]
     actual = len(FOUND[name])
@@ -37,6 +44,7 @@ def test_metric_is_within_its_budget(checker) -> None:
 
 @pytest.mark.parametrize("checker", gates.checkers(), ids=lambda c: c.NAME)
 def test_budget_matches_the_tree(checker) -> None:
+    _runnable(checker)
     name = checker.NAME
     budget = ALLOWED[name]
     actual = len(FOUND[name])
@@ -60,6 +68,12 @@ def test_no_budget_without_a_checker() -> None:
     assert not extra, (
         f"budgets.json names {', '.join(extra)} with no checker -- run scripts/budgets --update"
     )
+
+
+def test_a_checker_that_cannot_run_here_names_a_metric_with_a_budget() -> None:
+    for name, reason in gates.unrunnable().items():
+        assert name in ALLOWED, f"{name} has no budget"
+        assert reason, f"{name} skipped with no reason"
 
 
 def test_the_hook_counts_what_a_commit_deletes(tmp_path):

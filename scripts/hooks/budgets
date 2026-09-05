@@ -38,6 +38,9 @@ def staged() -> list[str]:
     return [name for name in out.split("\0") if name.endswith(".py")]
 
 
+CONFIG = "pyproject.toml"
+
+
 def plant(base: Path, names: list[str], revision: str) -> None:
     """Write each file's content at the given revision under base."""
     for name in names:
@@ -73,9 +76,13 @@ def main() -> int:
         old_root = Path(tmp) / "head"
         new_root.mkdir()
         old_root.mkdir()
-        plant(new_root, names, "")
+        plant(new_root, [*names, CONFIG], "")
         if has_head:
-            plant(old_root, names, "HEAD")
+            plant(old_root, [*names, CONFIG], "HEAD")
+        for base in (new_root, old_root):
+            if not (base / CONFIG).exists():
+                (base / CONFIG).write_text((ROOT / CONFIG).read_text(encoding="utf-8"),
+                                           encoding="utf-8")
         after = counts(new_root, names)
         before = counts(old_root, names)
         sites = gates.run(new_root)
