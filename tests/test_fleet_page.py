@@ -426,3 +426,32 @@ class TestTheFitView:
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+class TestClosingTheWindow:
+    """The question the native window asks, drawn by the page behind it."""
+
+    def test_a_machine_on_its_own_is_not_told_it_belongs_to_a_cluster(self, daemon,
+                                                                     open_page):
+        daemon.call("/ui/setup/done", method="POST")
+        page, errors = open_page(daemon)
+        page.wait_for_selector("#cluster:not([hidden])")
+
+        page.evaluate("window.mlStackAskOnClose()")
+        page.wait_for_selector("#close-sheet:not([hidden])")
+
+        assert "part of your cluster" not in page.locator("#close-why").inner_text()
+        assert "Stays reachable" in page.locator("#close-background-d").inner_text()
+        assert not errors
+
+    def test_a_machine_in_a_cluster_is_told_what_the_others_lose(self, joined,
+                                                                 open_page):
+        page, errors = open_page(joined, cookie=joined.cookie)
+        page.wait_for_selector("#cluster:not([hidden])")
+
+        page.evaluate("window.mlStackAskOnClose()")
+        page.wait_for_selector("#close-sheet:not([hidden])")
+
+        assert "part of your cluster" in page.locator("#close-why").inner_text()
+        assert "Leaves the cluster" in page.locator("#close-quit-d").inner_text()
+        assert not errors

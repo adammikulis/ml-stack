@@ -100,6 +100,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
   const watchers = [];
   M.route = "";
   M.group = "";
+  M.inCluster = false;
   M.signInMessage = "";
 
   /** Show one screen by name, and tell every component that is watching. */
@@ -140,6 +141,7 @@ cluster-view, chat-view, models-view, settings-view, fit-view { display: content
     const opened = document.querySelector(`${asked}-view`) ? asked
       : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
     const setup = await M.api("/ui/setup");
+    M.inCluster = !!setup.needs_password;
     if (setup.needs_setup && document.querySelector("first-run")) return M.go("first-run");
     if (!setup.needs_password) return M.go(opened);
     const s = await M.api("/ui/session");

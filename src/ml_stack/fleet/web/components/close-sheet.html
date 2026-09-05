@@ -3,18 +3,15 @@
   <div class="sheet" id="close-sheet" hidden>
     <div class="sheet-card">
       <h1>Close ml-stack?</h1>
-      <p class="sub">
-        This machine is part of your cluster. Keeping it running lets the others send it
-        work while the window is shut.
-      </p>
+      <p class="sub" id="close-why"></p>
       <div class="choices">
         <button class="choice" id="close-background">
           <span class="t">Keep running in the background</span>
-          <span class="d">Stays in the cluster. Open it again any time.</span>
+          <span class="d" id="close-background-d"></span>
         </button>
         <button class="choice" id="close-quit">
           <span class="t">Quit</span>
-          <span class="d">Leaves the cluster until you open it again.</span>
+          <span class="d" id="close-quit-d"></span>
         </button>
       </div>
       <label class="opt" for="remember" style="margin-top:16px">
@@ -32,6 +29,7 @@
       if (this.wired) return;
       this.wired = true;
       this.sheet = this.querySelector("#close-sheet");
+      this.why = this.querySelector("#close-why");
       this.remember = this.querySelector("#remember");
       const choose = (mode) => async () => {
         this.sheet.hidden = true;
@@ -45,6 +43,18 @@
       // Asked once, by the native window, when someone clicks the close button.
       window.mlStackAskOnClose = () => {
         this.remember.checked = true;
+        const clustered = !!(window.fleetModel && window.fleetModel.inCluster);
+        this.why.textContent = clustered
+          ? "This machine is part of your cluster. Keeping it running lets the others "
+            + "send it work while the window is shut."
+          : "Keeping it running lets this machine answer, and lets the machines you add "
+            + "later send it work while the window is shut.";
+        this.querySelector("#close-background-d").textContent = clustered
+          ? "Stays in the cluster. Open it again any time."
+          : "Stays reachable. Open it again any time.";
+        this.querySelector("#close-quit-d").textContent = clustered
+          ? "Leaves the cluster until you open it again."
+          : "Stops answering until you open it again.";
         this.sheet.hidden = false;
       };
     }
