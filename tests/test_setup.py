@@ -305,3 +305,72 @@ def test_the_models_finding_names_each_cache_and_its_size(monkeypatch, capsys, t
     assert "absent" not in line
     assert f"HF_HOME={os.environ['HF_HOME']} names the Hub cache" in out
 
+
+
+def _speech(monkeypatch, *, asr=(), tts=(), vad=()):
+    """Stand named providers on the three speech registries; each entry is (name, health)."""
+    from ml_stack import speech as package
+    from ml_stack.speech import Registry
+
+    def stub(name, health):
+        class One:
+            def __init__(self):
+                self.name = name
+
+            def probe(self):
+                return health
+
+            def start(self):
+                return None
+
+            def stop(self):
+                return None
+
+        return One
+
+    for attr, entries in (("ASR", asr), ("TTS", tts), ("VAD", vad)):
+        registry: Registry = Registry(kind=attr.lower())
+        for name, health in entries:
+            registry.register(name, stub(name, health))
+        monkeypatch.setattr(package, attr, registry)
+
+
+def test_the_speech_findings_name_the_engine_and_the_one_that_would_be_used(monkeypatch):
+    from ml_stack.speech import ProviderHealth
+
+    _speech(monkeypatch,
+            asr=[("faster-whisper", ProviderHealth.ok("small.en")),
+                 ("transformers-whisper", ProviderHealth.missing("torch not installed"))],
+            vad=[("energy", ProviderHealth.ok("energy"))])
+    found = {f.name: f for f in look()}
+    heard = found["speech recognition"]
+    assert heard.good and "faster-whisper (small.en)" in heard.said
+    assert "uses faster-whisper" in heard.note
+    assert "torch not installed" in heard.note, "what the other one still wants"
+    assert not heard.fix, "nothing to install when one already works"
+
+
+def test_a_machine_with_no_speech_engine_is_told_what_would_add_one(monkeypatch):
+    from ml_stack.speech import ProviderHealth
+
+    _speech(monkeypatch,
+            asr=[("faster-whisper", ProviderHealth.missing("faster-whisper is not installed"))],
+            tts=[("system", ProviderHealth.missing("no system speech binary"))],
+            vad=[("energy", ProviderHealth.ok("energy"))])
+    found = {f.name: f for f in look()}
+    assert not found["speech recognition"].good
+    assert found["speech recognition"].fix == "pip install 'ml-stack[speech]'"
+    assert "faster-whisper is not installed" in found["speech recognition"].note
+    assert not found["speech synthesis"].good
+    assert found["voice activity"].good, "the energy detector needs nothing installed"
+
+
+def test_the_speech_findings_are_printed_with_the_rest(monkeypatch, capsys):
+    from ml_stack.speech import ProviderHealth
+
+    _speech(monkeypatch, vad=[("energy", ProviderHealth.ok("energy"))])
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    main(["--quiet"])
+    out = capsys.readouterr().out
+    assert "voice activity: energy (energy)" in out
+    assert "speech recognition: nothing on this machine" in out

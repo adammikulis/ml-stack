@@ -25,7 +25,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-__all__ = ["BEHAVIOURS", "CHECKOUT", "Behaviour", "Finding", "ask", "look", "main"]
+__all__ = ["BEHAVIOURS", "CHECKOUT", "SPEECH_PROTOCOLS", "Behaviour", "Finding", "ask",
+           "look", "main"]
 
 CHECKOUT = Path("~/Documents/repos/ml-stack").expanduser()
 """Where the editable install must point: the checkout, not a copy of it."""
@@ -213,12 +214,46 @@ def look() -> list[Finding]:
     except Exception:  # noqa: BLE001
         pass
 
+    out.extend(_speech_findings())
     out.append(_commands_finding())
 
     from ml_stack.platform import is_windows
 
     if is_windows():
         out.append(_firewall_finding())
+    return out
+
+
+SPEECH_PROTOCOLS = (
+    ("speech recognition", "asr", "pip install 'ml-stack[speech]'"),
+    ("speech synthesis", "tts", "pip install 'ml-stack[speech]'"),
+    ("voice activity", "vad", ""),
+)
+
+
+def _speech_findings() -> list[Finding]:
+    """One finding per speech protocol: which engines probe here, which `auto` picks, and
+    what would add one where none does."""
+    from ml_stack.speech.service import providers
+
+    found = providers()
+    out: list[Finding] = []
+    for label, kind, fix in SPEECH_PROTOCOLS:
+        table = found.get(kind, {"auto": None, "providers": []})
+        working = [one for one in table["providers"] if one["available"]]
+        missing = [one for one in table["providers"] if not one["available"]]
+        out.append(Finding(
+            name=label,
+            good=bool(working),
+            said=(", ".join(f"{one['name']}" + (f" ({one['model']})" if one["model"] else "")
+                            for one in working) if working
+                  else "nothing on this machine"),
+            fix="" if working else fix,
+            note=(f"ml-stack-speech uses {table['auto']} unless told otherwise"
+                  + ("; " + "; ".join(f"{one['name']}: {one['detail']}" for one in missing)
+                     if missing else "")
+                  if working
+                  else "; ".join(f"{one['name']}: {one['detail']}" for one in missing))))
     return out
 
 
