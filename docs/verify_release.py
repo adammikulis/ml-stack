@@ -849,7 +849,8 @@ def _():
     with GraphStore(path) as reopened:
         back = reopened.read()
     assert back["nodes"][0]["messages"] == ["m1"], "a node lost what it carried"
-    assert back["stats"] == {"nodes": 2}
+    assert back["stats"] == {"nodes": 2, "edges": 1}, \
+        f"the stats document does not count what the store holds: {back['stats']}"
     assert back["edges"][0]["messages"] == ["m1"]
     return "nodes, edges and documents round-trip"
 
@@ -942,6 +943,103 @@ def _():
     out = converse("who?", graph, Model())
     assert out.ids == ["p:a"], f"an invented id got through: {out.ids}"
     return "one real id kept, one invented id refused"
+
+
+# -- reading documents into a graph ---------------------------------------
+@check("Documents", "a gold set of passages turns the reading into a number")
+def _():
+    import pytest
+    pytest.importorskip("ladybug")
+    from ml_stack.ingest import gold
+    root = Path(__file__).resolve().parent.parent
+    passages = gold.read_gold(root / "tests" / "fixtures" / "extraction-gold.json")
+    shape = json.loads((root / "contracts" / "extraction-document.schema.json").read_text())
+
+    class SaysNothing:
+        def extract(self, text, schema, **_):
+            return {"concepts": [], "relations": []}
+
+    got = gold.gold_score(SaysNothing(), passages, shape)
+    assert len(passages) >= 20 and got.wanted >= 100, (len(passages), got.wanted)
+    assert got.matched == 0 and len(got.misses) == got.wanted, "the scorer missed nothing to miss"
+    return (f"{len(passages)} passages, {got.wanted} triples: an extractor that says "
+            f"nothing misses every one, each named")
+
+
+# -- measuring models ------------------------------------------------------
+@check("Measuring", "a model's measured shape is on file, not remembered")
+def _():
+    from ml_stack.serve import profile_for
+    found = profile_for("Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf")
+    assert found is not None, "no shipped profile for the flagship"
+    assert found.right > 0 and found.questions > 0, "the record does not say what measured it"
+    return (f"one seat at {found.seat_context}, F1 {found.right:.0%} over "
+            f"{found.questions} questions, on {found.host or 'a measured host'}")
+
+
+@check("Measuring", "an evening of measurement is a file checked before the first model loads")
+def _():
+    from ml_stack.graph.bench import queue
+    steps = queue.read(Path(__file__).resolve().parent / "examples" / "flash-next-restart.queue")
+    assert steps and all(s.argv for s in steps), "the shipped queue parsed to nothing"
+    try:
+        queue.parse("sweep --serve x.gguf --sampel 3\n")
+    except queue.QueueError:
+        pass
+    else:
+        raise AssertionError("a misspelled flag parsed as a step")
+    return f"{len(steps)} steps parse; a misspelled flag is refused before anything loads"
+
+
+# -- seating a fleet -------------------------------------------------------
+@check("Fleet", "a plan seats the wanted conversations and names what fits nowhere")
+def _():
+    from ml_stack.fleet.plan import Room, place
+    from ml_stack.serve.fit import Fit
+    from ml_stack.serve.profile import Profile
+    gb, kb = 2**30, 2**10
+    big = Profile(model="big-120b-UD-Q4_K_XL.gguf", right=0.85, questions=100,
+                  seconds_per_question=26.0)
+    small = Profile(model="small-2b-UD-Q4_K_XL.gguf", right=0.40, questions=100,
+                    seconds_per_question=3.0)
+    fits = [Fit(model="big-120b-UD-Q4_K_XL.gguf", weights=70 * gb, per_token=150 * kb,
+                per_seq=200 * kb, compute=gb),
+            Fit(model="small-2b-UD-Q4_K_XL.gguf", weights=2 * gb, per_token=12 * kb,
+                per_seq=100 * kb, compute=gb // 4)]
+    peers = [Room(name="studio", room=110 * gb), Room(name="larch", room=20 * gb)]
+    got = place(30, 16384, peers, [big, small], fits)
+    assert got.seated == 30 and got.unplaced == 0, got.as_dict()
+    assert got.rows[0].model == big.model, "the better model did not reach the roomiest peer"
+    tight = place(400, 16384, [Room(name="pi", room=4 * gb)], [big, small], fits)
+    assert tight.unplaced > 0 and any(p == "pi" and m == big.model for p, m, _ in tight.why), \
+        "the model that fits nowhere was not named"
+    return "30 seated over two peers; on a 4 GB peer the big model is refused by name"
+
+
+# -- agents and the web ----------------------------------------------------
+@check("Agents", "the same functions are MCP tools an agent can call")
+def _():
+    from ml_stack.mcp import TOOLS
+    names = {t.name for t in TOOLS}
+    need = {"serve_up", "serve_down", "serve_status", "models_find", "models_files",
+            "models_fetch", "bench_run", "bench_status", "fleet_peers", "world_make",
+            "setup_look", "doctor"}
+    missing = need - names
+    assert not missing, f"missing MCP tools: {sorted(missing)}"
+    return f"{len(names)} tools: serve, models, bench, fleet, world, setup, doctor"
+
+
+@check("Web", "the web tools refuse the machine they run on")
+def _():
+    from ml_stack.web import Refused, check
+    for url in ("file:///etc/passwd", "http://localhost/x", "http://127.0.0.1:8080/v1/chat",
+                "http://10.1.2.3/x", "http://192.168.2.44:8770/", "http://[::1]:8080/"):
+        try:
+            check(url)
+        except Refused:
+            continue
+        raise AssertionError(f"{url} was not refused")
+    return "file:, loopback and private hosts refused before a byte is fetched"
 
 
 # -- reading a site ------------------------------------------------------

@@ -167,8 +167,11 @@ needs and what it requires from a machine; a builder turns the answers into a mo
 |---|---|
 | `text-lm` | Continues a pile of writing — a house style, a character voice, a domain's jargon |
 | `classify-text` | Sorts labelled documents into their categories |
+| `tool-calls` | Teaches a model you bring to call the tools you give it, trained on synthetic conversations or on the traces of a benchmark run that scored — `--lora` fits an 8B on one machine |
 
-Both are byte-level, so any text works with no vocabulary file.
+The first two are byte-level, so any text works with no vocabulary file. `tool-calls`
+renders each conversation through the model's own chat template and puts the loss on the
+assistant tokens only.
 
 - A setting the recipe does not declare is refused rather than ignored, so a config
   cannot quietly disagree with what was trained.
@@ -274,9 +277,11 @@ memory — and says nothing about accelerators rather than guessing.
 
 ## Installing
 
-Twelve packages, installed separately. Four have no dependencies at all: `fleet`,
-`client`, `media` and `contracts`, so the daemon installs on a small board as fast as on
-a workstation.
+One package, `pip install ml-stack`, with no dependencies at all: finding the other
+machines, passing work between them and moving files needs nothing beyond the standard
+library, so the daemon installs on a small board as fast as on a workstation. The extras
+add what a part needs to do its own job — `train`, `serve`, `store`, `graph`, `scrape`,
+`vision`, `web`, `claude` and the rest — and `[all]` takes what a workstation can use.
 
 ```
 python packaging/build.py            # wheels
@@ -316,16 +321,95 @@ anyone pretending a cosine similarity and a BM25 score are the same kind of numb
 is unavailable simply does not vote.
 
 **Asking a model about it.** Handing a model the whole graph does not scale, and handing it a
-pre-chosen slice makes the choosing the answer. It gets three things it can do instead — find
-entries by name, read what is held on them, trace how two connect — and what it touched comes
-back with the words, so a caller can show the working rather than a second guess at it. An id
-the model invents is refused in one place.
+pre-chosen slice makes the choosing the answer. It gets six things it can do instead — find
+entries by name or by the words attached to them, read what is held on them, read a whole
+neighbourhood at once, trace how two connect, read out everything of one kind, and say which
+entries the answer is about — and what it touched comes back with the words, so a caller can
+show the working rather than a second guess at it. An id the model invents is refused in one
+place. The way it is asked is per model, not one size: what a model measured best is kept as
+its **profile**, and asking through the profile asks that way.
 
 **Looking at it.** One self-contained page: force layout in two dimensions and three, labels
 that do not collide and that hold their place as the camera turns, a legend that filters, a
 layout that re-settles when a kind is switched off, a map, and evidence for everything drawn.
 Everything ships inside the file, which is what makes it mailable and also what limits it —
 whoever has the file has the graph, so anything private is served rather than sent.
+
+## Reading documents into a graph
+
+A book, a mailbox and a Slack export are one kind of thing: a source that is read into the
+graph and can be asked about afterwards.
+
+- **A PDF is read section by section**, because a section is the unit the book itself
+  decided was one idea: chapters, sections, figures and key terms come out, each through a
+  schema asking for concepts with a one-line definition in the book's own words. A
+  publisher's outline is believed when there is one; otherwise headings are found by the
+  way they are set.
+- **Every claim points at a page.** A concept carries the sections it was read from, and
+  those carry the source, chapter and pages, and the run that read them — model, build,
+  sampling, when. A claim in the graph can be audited back to the page and the model that
+  said it.
+- **A source is readable while it is still being read.** Each section's extraction lands
+  the moment it comes back and folds into the store as the run goes, and questions can be
+  asked of what is in so far.
+- **Reading quality is a gate, not an opinion.** A gold set of passages with every relation
+  they state written down scores the reading — recall, precision, every miss named — and a
+  gold set of questions scores the answering. Either can fail a run below a chosen F1.
+- **An extraction somebody else wrote comes in as a source**: a pair of node and edge
+  files joins the store with the same shape and the same provenance behind every claim, its
+  free vocabulary marked as the extractor's own.
+
+## Measuring models
+
+Serving and asking a model well is a measurement per model, not a habit.
+
+- **One load, asked several ways.** A sweep puts a model up once and answers the same
+  questions under each asking worth trying, so the comparison is of askings rather than of
+  cold loads.
+- **A profile is the shape a model measured best in** — the cache, the draft head, the
+  thinking budget, the asking, the sampling — kept with the run that set it. Serving,
+  benching and answering read the same record, so what was measured is what is used.
+- **A night of measurement is a file**, checked line by line before the first model loads:
+  a smoke guards the run under it, resuming skips what the store already holds, and one
+  background log says what is running and what is left.
+- **Speed is measured apart from accuracy**: prefill and decode tokens a second, per stream
+  and summed, and the time to the first token, at each prompt size. A comparison of
+  configurations assembles the graph scores, the speed grids and the measured memory into
+  one document, and can render it as a graphic; anything never measured is a blank, never
+  a zero.
+
+## Seating a fleet
+
+A plan says which model each peer should serve, and with how many seats, for a number of
+conversations at once. Models are taken best-measured first, and each goes to every machine
+with room for its weights and at least one seat's cache at the chosen context — or, asked
+the other way, each machine serves whichever model seats the most of the people still
+waiting, so a fleet seats everyone rather than seating the lucky ones on the best model. A
+user left without a seat is counted, with every machine's reason.
+
+## An agent drives it
+
+The commands are also tools an agent can call.
+
+- **As MCP tools** over stdio: serve, models, bench, fleet, world, setup and doctor — the
+  same functions the commands call. Anything long detaches and hands back its log and pid
+  rather than holding the call.
+- **A task in words** — "benchmark this model both ways" — is taken by a served model that
+  asks what the task leaves open, confirms the models it found on this disk, prints a plan,
+  asks go, runs the tools, waits for what detached, and reports what was measured and
+  where.
+- **Claude Code itself** runs on a model this machine serves, in its measured shape, on a
+  lease taken for it and dropped on the way out.
+
+## Searching the web
+
+The graph's tools see the graph and nothing else; three more see the web beside it: a
+search, a page read as text, and a full-page screenshot with the page's largest pictures,
+offered to the same asking loop. They refuse the machine they run on — anything that is not
+http(s), and any host that resolves to a loopback or private address — before a byte is
+fetched, and the browser uses its own profile, never the scraper's signed-in one. The
+search engine is a setting: a keyless public one by default, a self-hosted one when the
+questions are many.
 
 ## Reading a site
 
