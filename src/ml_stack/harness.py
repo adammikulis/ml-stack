@@ -150,8 +150,14 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
         from ml_stack.serve.shape import Run, Shape
 
         run = Run(shape=Shape(model=found, port=port, seats=seats))
+    from ml_stack.serve.chat_template import written_beside
+
+    patched = written_beside(found)
+    if patched is not None:
+        say("this model's template refuses a system message after the first; serving with "
+            f"one that renders it instead ({patched.name})")
     with serve(run.model, manager=run.shape.manager(), **run.lease(), timeout=900.0,
-               cache_reuse=256, warmup=False) as server:
+               cache_reuse=256, warmup=False, chat_template_file=patched) as server:
         alias = alias_of(server.base_url, found)
         say(f"the harness on {server.base_url} as {alias!r}")
         yield Harness(server.base_url, alias, offline=offline, options=options)

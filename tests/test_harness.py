@@ -2,6 +2,7 @@
 with a Python face and what each task spent."""
 
 import contextlib
+import pathlib
 import sys
 import types
 
@@ -88,10 +89,15 @@ def test_session_leases_the_measured_shape_and_the_command_prints_the_answer(fak
                         lambda m: record("kestrel-8B-UD-Q4_K_XL.gguf", cache_type="q8_0"))
     monkeypatch.setattr("ml_stack.graph.bench.serve.find_model", lambda m: "/m/kestrel-8B-UD-Q4_K_XL.gguf")
     monkeypatch.setattr(harness, "alias_of", lambda url, model: "kestrel-8B")
+    # the model's template refuses a late system message; the lease carries a forgiving one
+    monkeypatch.setattr("ml_stack.serve.chat_template.written_beside",
+                        lambda model: pathlib.Path("/tmp/kestrel-8B.jinja"))
     assert on_a_fresh_thread(harness.main, ["what is this?", "--model", "kestrel", "--port", "8899",
                                             "--allow", "Read", "--max-turns", "2"]) == 0
-    out = capsys.readouterr().out
-    assert "It is a lattice." in out and "spent: 2 turn(s)" in out
+    out = capsys.readouterr()
+    assert "It is a lattice." in out.out and "spent: 2 turn(s)" in out.out
+    assert "renders it instead (kestrel-8B.jinja)" in out.err
     assert seen["lease"]["port"] == 8899 and seen["lease"]["cache_type_k"] == "q8_0"
+    assert seen["lease"]["chat_template_file"] == pathlib.Path("/tmp/kestrel-8B.jinja")
     assert seen["released"]
     assert fake_sdk["options"]["allowed_tools"] == ["Read"] and fake_sdk["options"]["max_turns"] == 2
