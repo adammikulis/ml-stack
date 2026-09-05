@@ -180,6 +180,9 @@ class Counting:
         self.tracing = bool(trace)
         self.trace: list[dict[str, Any]] = []
         self._traced = 0        # how many of `messages` are already in it
+        # A digest of the system prompt and the tool schemas the model was shown, taken on
+        # the first call -- see `bench.record.prompt_digest`.
+        self.prompts = ""
 
     def _message(self, one: Mapping[str, Any]) -> dict[str, Any]:
         """One message the model was sent, as the trace keeps it."""
@@ -253,6 +256,12 @@ class Counting:
     def chat(self, messages: Any, **kw: Any) -> Any:
         self.calls += 1
         sent = time.time()
+        if not self.prompts:
+            from ml_stack.bench.record import prompt_digest
+
+            system = next((str(m.get("content") or "") for m in (messages or ())
+                           if isinstance(m, Mapping) and m.get("role") == "system"), "")
+            self.prompts = prompt_digest(system, kw.get("tools") or ())
         if self.tracing:
             self._sent(messages, kw.get("tools"))
         if self.deadline is not None:
@@ -492,6 +501,7 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     row.draft_tokens = counting.draft_tokens
     row.draft_taken = counting.draft_taken
     row.cache_calls = [[c, p] for c, p in counting.per_call]
+    row.prompts = counting.prompts
     row.trace = counting.trace
     if any(c is not None for c, _ in counting.per_call):
         row.prefix_kept, row.prefix_turns = prefix_kept(counting.per_call)

@@ -156,10 +156,12 @@ def _told(row: dict[str, Any]) -> dict[str, Any]:
     is the field a fine-tune is built from and the only one measured in kilobytes. An
     untraced row carries an empty list, and an empty list in every row of every run is a
     key that says nothing -- so it is dropped, and a run kept before tracing existed and a
-    run kept without it read back identically.
+    run kept without it read back identically. The prompt digest is the run's, not the
+    row's, and is lifted onto the record by `save`.
     """
     if not row.get("trace"):
         row.pop("trace", None)
+    row.pop("prompts", None)
     return row
 
 
@@ -215,6 +217,8 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
         hits = prefix_hits([asdict(r) for r in rows if is_dataclass(r)])
         if hits is not None:
             server["prefix_hits"] = hits
+    shown = next((str(getattr(r, "prompts", "") or "") for r in rows
+                  if str(getattr(r, "prompts", "") or "")), "")
     named = label or (rows[0].label if rows else "")
     stem = f"bench:{named}:{time.strftime('%Y%m%dT%H%M%S')}" if rows else "bench:empty"
     kept_rows = [_told(r.kept()) if isinstance(r, _Cell) else _told(asdict(r)) for r in rows]
@@ -222,6 +226,8 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
     record = _plain({"at": time.strftime("%FT%T"), "label": named,
                      **({"kind": kind} if kind else {}),
                      "server": server, **({"asking": asked} if asked else {}),
+                     # what the model was shown, so an edited prompt is a different run
+                     **({"prompts": shown} if shown else {}),
                      "rows": kept_rows,
                      # how many of the rows carry their transcript, so `show` and
                      # `train-tools from-bench` can say "this run kept none" rather than

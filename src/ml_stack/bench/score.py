@@ -66,6 +66,9 @@ class Row:
     # Measured 2026-09-01: gemma-4-26B-A4B took 252 s and 505 s on two questions, all of it
     # in the thinking channel under a 16k ceiling; a run that waits for that is not a run.
     timed_out: bool = False
+    # A digest of the system prompt and the tool schemas this question was asked under --
+    # see `bench.record.prompt_digest`. `keep.save` lifts it onto the run and drops it here.
+    prompts: str = ""
     # What was said, call by call -- see `bench.measure.Counting.trace`. Every other field
     # here is a total; this is the transcript those totals are of, and the only field a
     # fine-tune can be built from: the conversation up to each model turn, and the call the

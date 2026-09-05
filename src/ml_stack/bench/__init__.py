@@ -48,6 +48,11 @@ from ml_stack.bench.keep import (  # noqa: F401
     save,
     stamped,
 )
+from ml_stack.bench.record import (  # noqa: F401
+    Measured,
+    Spread,
+    prompt_digest,
+)
 from ml_stack.bench.score import (  # noqa: F401
     BOOTSTRAP,
     BOOTSTRAP_SEED,
@@ -229,8 +234,9 @@ from ml_stack.bench.run import (  # noqa: F401
 from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401
 
-__all__ = ["Counting", "Estimate", "HOME", "NOISE", "PER_QUESTION", "QuestionTimedOut",
-           "Row", "SHORT", "SMOKE", "SmokeFailed", "baseline", "beyond_weights", "choices",
+__all__ = ["Counting", "Estimate", "HOME", "Measured", "NOISE", "PER_QUESTION",
+           "QuestionTimedOut", "Row", "SHORT", "SMOKE", "SmokeFailed", "Spread",
+           "prompt_digest", "baseline", "beyond_weights", "choices",
            "composed", "drafted", "drafted_by", "estimate", "export", "ranking", "ask_from", "asking",
            "compare", "concurrent", "detach", "empties", "finding", "footprint", "forget",
            "halves", "kv_short", "main", "measure", "measuring", "prefetch", "prefix_hits",
