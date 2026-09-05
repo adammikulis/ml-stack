@@ -245,11 +245,11 @@ class TestChattingThroughTheInterface:
     def test_a_machine_that_cannot_run_a_model_says_so_rather_than_breaking(
             self, bare, monkeypatch):
         """The install that cannot serve is the common one. It must still answer."""
-        from ml_stack.fleet import ui as ui_mod
+        from ml_stack.fleet import routes as routes_mod
 
         ui, cookie = bare
         ui.ui.serving = Serving(tmp_path_of(ui) / "serving.json")
-        monkeypatch.setattr(ui_mod, "_can_serve", lambda: False)
+        monkeypatch.setattr(routes_mod, "_can_serve", lambda: False)
 
         status, body, _ = ui.call("/ui/serving", cookie=cookie)
         assert status == 200
