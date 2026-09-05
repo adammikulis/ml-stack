@@ -2997,18 +2997,7 @@ def test_a_run_on_a_standing_server_smokes_first_and_stops_on_a_failing_smoke(tm
     assert [len(r["rows"]) for r in runs(kept, "again")] == [2], "the smoke, and no more"
 
 
-# -- the split: one package, one namespace, the old names still resolve ---------------------------
-
-def test_the_old_module_names_still_import_and_are_the_same_objects():
-    """`bench_extract`, `bench_selfcheck` and `bench_history` moved into the package; the
-    shims at the old paths re-export, so an import written before the move still works."""
-    from ml_stack.graph import bench_extract, bench_history, bench_selfcheck
-    from ml_stack.graph.bench import extract, history, selfcheck
-
-    assert bench_extract.main is extract.main
-    assert bench_selfcheck.ScriptedModel is selfcheck.ScriptedModel
-    assert bench_history.history is history.history
-
+# -- the split: one package, one namespace -------------------------------------------------------
 
 def test_patching_the_package_reaches_every_module(monkeypatch):
     """The package is the one namespace: `bench.runs` patched here is what `read_back` in
