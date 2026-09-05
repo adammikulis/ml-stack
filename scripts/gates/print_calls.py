@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import ast
+from pathlib import Path
 
 from . import Finding
 from ._util import calls, dotted, exempt, parse, python_files, rel

@@ -88,7 +88,6 @@ class TestRedirection:
 
     def test_die_reaches_the_listener_too(self, tmp_path):
         where = tmp_path / "daemon.log"
-        with pytest.raises(SystemExit):
-            with log.to_file(where):
-                log.die("stopping")
+        with pytest.raises(SystemExit), log.to_file(where):
+            log.die("stopping")
         assert where.read_text(encoding="utf-8") == "stopping\n"

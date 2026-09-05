@@ -35,6 +35,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+
 from ml_stack.log import say
 
 __all__ = ["choices", "environment", "launch", "main", "pick", "settings"]
@@ -181,9 +182,8 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         if whole:
             say(f"  with the model's whole {whole:,}-token window, not the measured cache")
     else:
-        from ml_stack.serve.shape import Run, Shape
-
         from ml_stack.serve.chat_template import trained_context
+        from ml_stack.serve.shape import Run, Shape
 
         seat = trained_context(found) or BARE_CONTEXT
         run = Run(shape=Shape(model=found, port=args.port, seats=args.seats,

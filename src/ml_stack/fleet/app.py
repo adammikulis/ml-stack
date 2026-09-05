@@ -7,9 +7,10 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from ml_stack.log import die
+
 from .launch import HTTP_PORT, already_running, wait_for_health
 from .settings import Settings
-from ml_stack.log import die
 
 __all__ = ["Bridge", "main", "run_app"]
 

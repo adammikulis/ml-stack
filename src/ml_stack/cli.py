@@ -16,6 +16,7 @@ import tomllib
 from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Callable
+
 from ml_stack.log import say, warn
 
 __all__ = ["PREFIX", "commands", "load", "main"]

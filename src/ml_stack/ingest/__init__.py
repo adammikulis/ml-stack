@@ -226,13 +226,14 @@ from ml_stack.ingest.vocabulary import (
     Vocabulary as Vocabulary,
 )
 
-__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS", "HOME",
+__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS",
            "INSTRUCTIONS", "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
            "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "Vocabulary",
            "ask", "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs",
            "detach", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
-           "gold_score", "graph_of", "import_lines", "imported", "instructions", "main",
-           "marked", "migrate", "read_asked", "read_gold", "sayable", "schema",
+           "gold_score", "graph_of", "home_dir", "import_lines", "imported",
+           "instructions", "main", "marked", "migrate", "read_asked", "read_gold",
+           "sayable", "schema",
            "score_asked", "show", "sources", "status", "unit_of", "units_of", "vague",
            "verb_for",
            "write"]

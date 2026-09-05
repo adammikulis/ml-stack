@@ -34,6 +34,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
 from ml_stack.log import say, warn
 
 __all__ = ["CHAT", "Example", "SYSTEM", "examples_from", "examples_in", "from_bench",
