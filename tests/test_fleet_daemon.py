@@ -800,3 +800,41 @@ class TestWhatAMachineIsDoing:
 
         got = stdlib_device_report()
         assert got["ram_used_gb"] <= got["ram_gb"]
+
+
+def test_every_cluster_advertiser_is_stopped_at_shutdown():
+    """A machine in three clusters runs three advertisers; leaving stops all of them."""
+    from ml_stack.fleet.daemon import _stop_advertisers
+
+    class Fake:
+        def __init__(self) -> None:
+            self.stops = 0
+
+        def stop(self) -> None:
+            self.stops += 1
+
+    first, second, third = Fake(), Fake(), Fake()
+    advertisers = {"alpha": first, "beta": second, "gamma": third}
+    _stop_advertisers(advertisers)
+
+    assert [first.stops, second.stops, third.stops] == [1, 1, 1]
+    assert advertisers == {}
+
+
+def test_an_advertiser_that_raises_does_not_leave_the_others_running():
+    from ml_stack.fleet.daemon import _stop_advertisers
+
+    class Angry:
+        def stop(self) -> None:
+            raise RuntimeError("socket already gone")
+
+    class Fake:
+        def __init__(self) -> None:
+            self.stops = 0
+
+        def stop(self) -> None:
+            self.stops += 1
+
+    last = Fake()
+    _stop_advertisers({"alpha": Angry(), "beta": last})
+    assert last.stops == 1

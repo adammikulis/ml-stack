@@ -1427,10 +1427,19 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         pass
     finally:
         reclaiming.close()
+        _stop_advertisers(advertisers)
         if advertiser is not None:
             advertiser.stop()
         runner.shutdown()
         httpd.server_close()
+
+
+def _stop_advertisers(advertisers: dict[str, Any]) -> None:
+    """Stop every cluster's advertiser and empty the mapping."""
+    for one in list(advertisers.values()):
+        with contextlib.suppress(Exception):
+            one.stop()
+    advertisers.clear()
 
 
 def persist(*, slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> int:
