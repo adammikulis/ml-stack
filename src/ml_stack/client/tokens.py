@@ -5,7 +5,8 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-_CHARS_PER_TOKEN = 3.3
+CHARS_PER_TOKEN = 3.3
+"""Characters a token is worth, before anything is counted for real."""
 
 _PUNCT_RUN = re.compile(r"[^\w\s]{2,}")
 _WORD = re.compile(r"\w+")
@@ -14,7 +15,7 @@ _WORD = re.compile(r"\w+")
 def _heuristic(text: str) -> int:
     if not text:
         return 0
-    base = len(text) / _CHARS_PER_TOKEN
+    base = len(text) / CHARS_PER_TOKEN
     base += text.count("\n") * 0.5
     base += sum(len(m.group(0)) * 0.4 for m in _PUNCT_RUN.finditer(text))
     base += sum(1 for m in _WORD.finditer(text) if len(m.group(0)) > 12)

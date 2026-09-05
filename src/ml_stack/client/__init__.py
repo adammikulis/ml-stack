@@ -23,9 +23,15 @@ from ml_stack.client.health import (
     wait_for_health,
 )
 from ml_stack.client.http import ServerError, ServerUnreachable, request_json, request_stream
-from ml_stack.client.tokens import estimate_tokens, heuristic_tokens, set_token_counter
+from ml_stack.client.tokens import (
+    CHARS_PER_TOKEN,
+    estimate_tokens,
+    heuristic_tokens,
+    set_token_counter,
+)
 
 __all__ = [
+    "CHARS_PER_TOKEN",
     "HEALTH_PATHS",
     "Client",
     "EmbeddingError",

@@ -30,6 +30,7 @@ from typing import Any
 from ml_stack import bench
 from ml_stack.bench.backends import client_for, describe, http_of, timings_of
 from ml_stack.bench.keep import read_back, save
+from ml_stack.client.tokens import CHARS_PER_TOKEN
 
 KIND = "speed"
 PROMPTS = (512, 4096, 16384)
@@ -39,8 +40,6 @@ GENERATE = 256
 # times it is scaled and measured again before the miss is recorded as it is.
 TOLERANCE = 0.02
 TRIES = 4
-# The first guess at how many characters a token is, before anything is measured.
-CHARS_PER_TOKEN = 4.0
 
 _WORDS = ("ledger", "crate", "copper", "harbour", "signal", "quarter", "meadow", "winter",
           "lantern", "furnace", "orchard", "compass", "granite", "willow", "ferry", "anvil")

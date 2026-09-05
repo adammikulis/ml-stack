@@ -125,11 +125,12 @@ def test_the_count_comes_from_tokenize_when_the_server_has_it_and_the_reply_when
 
 
 def test_the_prompt_is_scaled_until_it_lands_within_tolerance():
-    """At four characters a token the first guess is right; at five it is a fifth short,
-    and the text is scaled by the miss and counted again."""
+    """The first guess is a guess: the text is counted by the server, scaled by the miss
+    and counted again until it lands inside the tolerance."""
     text, measured, built = calibrated(_Llama(), 512, seed=3)
     assert measured == 512 and built["method"] == "tokenize"
-    assert len(built["steps"]) == 1
+    assert abs(measured - 512) <= 512 * 0.02
+    assert built["steps"][-1][1] == measured
     client = _Ollama()
     text, measured, built = calibrated(client, 1000, seed=3)
     assert built["method"] == "reply"
