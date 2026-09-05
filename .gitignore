@@ -9,5 +9,9 @@ dist/
 .build-venv/
 .build-work/
 packaging/build/
+app/src-tauri/target/
+app/src-tauri/binaries/
+app/src-tauri/gen/
+node_modules/
 *.spec.bak
 tests/support/vendor/

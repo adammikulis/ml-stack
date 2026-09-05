@@ -1,0 +1,12 @@
+{
+  "name": "ml-stack-app",
+  "private": true,
+  "description": "The Tauri CLI that bundles the window. There is no frontend here: the window opens on the interface the daemon serves.",
+  "scripts": {
+    "build": "tauri build",
+    "dev": "tauri dev"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

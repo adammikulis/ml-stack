@@ -1,9 +1,0 @@
-"""Entry point for the bundled app: a native window on the interface."""
-
-import multiprocessing
-import sys
-
-if __name__ == "__main__":
-    multiprocessing.freeze_support()
-    from ml_stack.fleet.app import main
-    sys.exit(main())

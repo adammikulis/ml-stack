@@ -30,7 +30,7 @@ dependencies = []
 [project.optional-dependencies]
 privacy = ["presidio-analyzer>=2.2", "spacy>=3.7"]
 test = ["pytest>=8", "pytest-xdist>=3.5"]
-app = ["pywebview>=5.0"]
+
 claude = ["claude-agent-sdk>=0.1"]
 arrays = ["numpy>=1.24"]
 torch = ["torch>=2.2"]
@@ -75,7 +75,7 @@ mcp = ["mcp>=1.0"]
 # `ifeval` brings langdetect, immutabledict and nltk
 standard = ["lm-eval[ifeval]>=0.4"]
 all = [
-    "ml-stack[app,train,serve,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
+    "ml-stack[train,serve,gguf,graph,store,scrape,vision,pdf,testing,telemetry,plot]",
 ]
 
 [project.urls]
@@ -92,7 +92,6 @@ Changelog = "https://github.com/adammikulis/ml-stack/blob/main/CHANGELOG.md"
 # `ml-stack <command>` runs any `ml-stack-<command>` below; bare, it starts the daemon and
 # opens the browser on it (`ml_stack.fleet.launch`).
 ml-stack = "ml_stack.cli:main"
-ml-stack-app = "ml_stack.fleet.app:main"
 ml-stack-traind = "ml_stack.fleet.daemon:main"
 ml-stack-peers = "ml_stack.fleet.peers:main"
 # one command makes this machine a peer: checks, llama-server, passphrase, daemon, announce

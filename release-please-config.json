@@ -15,7 +15,7 @@
         },
         {
           "type": "generic",
-          "path": "packaging/ml-stack-app.spec"
+          "path": "app/src-tauri/Cargo.toml"
         }
       ]
     }

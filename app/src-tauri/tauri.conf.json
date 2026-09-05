@@ -1,0 +1,30 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "ml-stack",
+  "identifier": "com.ml-stack.app",
+  "build": {},
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "nsis", "appimage"],
+    "category": "DeveloperTool",
+    "shortDescription": "Train, serve and ask across every machine on your network.",
+    "longDescription": "ml-stack makes the machines you already own one pool: it trains across them, serves models on the ones with room, and answers questions over a knowledge graph you build.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": ["binaries/ml-stack-headless"],
+    "macOS": {
+      "minimumSystemVersion": "12.0"
+    }
+  }
+}

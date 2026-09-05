@@ -24,6 +24,15 @@
 </template>
 <script>
 (function () {
+  // The native window around this page, or null when it is served to a browser.
+  window.mlStackNative = function () {
+    const core = window.__TAURI__ && window.__TAURI__.core;
+    if (!core || typeof core.invoke !== "function") return null;
+    return {
+      closeChoice: (mode, remember) => core.invoke("close_choice", { mode, remember }),
+    };
+  };
+
   class CloseSheet extends HTMLElement {
     connectedCallback() {
       if (this.wired) return;
@@ -33,9 +42,8 @@
       this.remember = this.querySelector("#remember");
       const choose = (mode) => async () => {
         this.sheet.hidden = true;
-        if (window.pywebview) {
-          await window.pywebview.api.close_choice(mode, this.remember.checked);
-        }
+        const native = window.mlStackNative();
+        if (native) await native.closeChoice(mode, this.remember.checked);
       };
       this.querySelector("#close-background").onclick = choose("background");
       this.querySelector("#close-quit").onclick = choose("quit");

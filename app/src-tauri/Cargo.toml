@@ -1,0 +1,22 @@
+[package]
+name = "ml-stack-app"
+version = "0.1.7"  # x-release-please-version
+description = "A native window on the ml-stack interface."
+edition = "2021"
+rust-version = "1.82"
+publish = false
+
+[build-dependencies]
+tauri-build = "=2.6.3"
+
+[dependencies]
+tauri = "=2.11.5"
+tauri-plugin-shell = "=2.3.6"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
