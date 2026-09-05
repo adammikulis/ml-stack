@@ -21,11 +21,15 @@ from .discovery import (
     join_cluster,
     load_cluster_key,
 )
+from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
 
 __all__ = ["ASSETS", "UI", "UI_HEADER", "asset_bytes", "routes", "serve_page"]
 
+
+FALLBACK_ROOM = 24 * 1024 ** 3
+"""What the fit view is drawn for when nothing said how much room this machine has."""
 
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 DISCOVER_CACHE_S = 3.0
@@ -65,6 +69,8 @@ class UI:
                  peer_port: int = 8770, setup_token: str = "",
                  on_join: "Any | None" = None) -> None:
         self.runner: Any = None
+        self.parts: Any = None
+        """The page's components, `page.COMPONENTS` unless a caller leaves some out."""
         self.schedule: Any = None
         self.settings: Any = None
         self.settings_path: Any = None
@@ -325,27 +331,41 @@ class UI:
 
         return [asdict(e) for e in history(HOME)][::-1][:limit]
 
-    def fit(self) -> dict[str, Any]:
-        """The measured fit records, this machine's room, and the rooms worth drawing.
+    def fit(self, room: int = 0, users: int = 1) -> dict[str, Any]:
+        """The measured fit records, seated in a room of this size.
 
-        Everything the Fit view needs in one answer: `fit.records()` as it comes off disk
-        -- measured at load, never estimated -- plus `hub.room()`, which is what a model
-        may actually use here rather than the installed RAM. The page does the arithmetic
-        itself, from the same two numbers per record that `Fit.line` composes, so moving
-        the room slider costs no round trip.
+        Everything the Fit view draws, worked out here: `fit.records()` as it comes off
+        disk -- measured at load, never estimated -- each with what `Fit.loaded`, `Fit.cost`,
+        `Fit.users` and `Fit.longest` say about a machine with ``room`` bytes and ``users``
+        on it. ``room`` defaults to `hub.room()`, which is what a model may actually use
+        here rather than the installed RAM.
         """
         try:
-            from ml_stack.hub import room
+            from ml_stack.hub import room as room_here
             from ml_stack.serve import fit as fit_mod
         except ImportError as exc:                        # a device-tier install has no serve
             return {"error": f"this install cannot measure or read fits: {exc}",
-                    "records": [], "room": 0, "name": self.name}
+                    "records": [], "room": 0, "at_room": 0, "name": self.name}
+        here = room_here()
+        asked = int(room) or here or FALLBACK_ROOM
+        people = max(1, int(users))
+        rows = []
+        for one in fit_mod.records():
+            at = one.at_room(asked)
+            rows.append({**one.as_dict(), "loaded": at.loaded(), "free": at.free(),
+                         "longest": at.longest(people),
+                         "seats": [at.users(c) for c in fit_mod.READ_CONTEXTS],
+                         "costs": [at.cost(c) for c in fit_mod.READ_CONTEXTS]})
         return {
-            "records": [f.as_dict() for f in fit_mod.records()],
-            "room": room(),
+            "records": rows,
+            "room": here,
+            "at_room": asked,
+            "users": people,
             "name": self.name,
             "vram_gb": list(fit_mod.COMMON_VRAM_GB),
             "contexts": list(fit_mod.PLOT_CONTEXTS),
+            "steps": list(fit_mod.SLIDER_CONTEXTS),
+            "ladder": list(fit_mod.READ_CONTEXTS),
         }
 
     def rates(self) -> dict[str, Any]:
@@ -532,5 +552,6 @@ def serve_page(*, port: int = 0, name: str = "", host: str = "127.0.0.1") -> Any
 
     ui = UI(name=name or _platform.node() or "this machine",
             cluster_key_path=Path(tempfile.gettempdir()) / "ml-stack-fit-no-cluster")
+    ui.parts = FIT_ONLY
     handler = type("FitHandler", (_Loopback,), {"ui": ui})
     return ThreadingHTTPServer((host, port), handler)

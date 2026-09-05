@@ -1,0 +1,54 @@
+<!-- close-sheet: the question the native window asks when the close button is clicked -->
+<template>
+  <div class="sheet" id="close-sheet" hidden>
+    <div class="sheet-card">
+      <h1>Close ml-stack?</h1>
+      <p class="sub">
+        This machine is part of your cluster. Keeping it running lets the others send it
+        work while the window is shut.
+      </p>
+      <div class="choices">
+        <button class="choice" id="close-background">
+          <span class="t">Keep running in the background</span>
+          <span class="d">Stays in the cluster. Open it again any time.</span>
+        </button>
+        <button class="choice" id="close-quit">
+          <span class="t">Quit</span>
+          <span class="d">Leaves the cluster until you open it again.</span>
+        </button>
+      </div>
+      <label class="opt" for="remember" style="margin-top:16px">
+        <input type="checkbox" id="remember" checked="1">
+        <span><b>Save my setting and don't ask again</b><span class="why">You can change it later under this machine's settings.</span></span>
+      </label>
+      <button class="ghost" id="close-cancel">Cancel</button>
+    </div>
+  </div>
+</template>
+<script>
+(function () {
+  class CloseSheet extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.sheet = this.querySelector("#close-sheet");
+      this.remember = this.querySelector("#remember");
+      const choose = (mode) => async () => {
+        this.sheet.hidden = true;
+        if (window.pywebview) {
+          await window.pywebview.api.close_choice(mode, this.remember.checked);
+        }
+      };
+      this.querySelector("#close-background").onclick = choose("background");
+      this.querySelector("#close-quit").onclick = choose("quit");
+      this.querySelector("#close-cancel").onclick = () => { this.sheet.hidden = true; };
+      // Asked once, by the native window, when someone clicks the close button.
+      window.mlStackAskOnClose = () => {
+        this.remember.checked = true;
+        this.sheet.hidden = false;
+      };
+    }
+  }
+  customElements.define("close-sheet", CloseSheet);
+})();
+</script>

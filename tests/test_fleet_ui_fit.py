@@ -97,50 +97,64 @@ def page():
 # -- the page ----------------------------------------------------------------------------
 class TestThePage:
     def test_it_ships_with_the_package(self):
-        assert asset_bytes("fit.html") is not None, "fit.html is missing from web/"
+        from ml_stack.fleet.page import COMPONENTS_DIR
+
+        assert (COMPONENTS_DIR / "fit-view.html").is_file(), "fit-view is missing"
 
     def test_it_is_served_as_html(self, page):
         status, got, kind = page.call("/ui/fit")
-        assert status == 200 and kind == "text/html", (status, kind)
+        assert status == 200 and kind.startswith("text/html"), (status, kind)
         assert "What fits" in got["raw"]
 
     def test_a_link_lands_on_it_without_the_ui_header(self, page):
         """The nav is an ordinary link, and a link cannot set a custom header. The page
         carries no data; the route behind it does, and that one is guarded."""
         status, _, kind = page.call("/ui/fit", ui_header=False)
-        assert status == 200 and kind == "text/html"
+        assert status == 200 and kind.startswith("text/html")
 
-    def test_every_asset_it_asks_for_exists(self):
-        html = asset_bytes("fit.html")[0].decode()
-        refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html)
+    def test_a_machine_running_no_daemon_gets_the_fit_view_alone(self, page):
+        """`ml-stack-serve fit --ui` puts up the page with no cluster behind it, so it is
+        assembled without the screens that would ask one questions."""
+        _, got, _ = page.call("/ui/fit")
+        assert "<fit-view>" in got["raw"]
+        for gone in ("<cluster-view>", "<chat-view>", "<models-view>", "<settings-view>"):
+            assert gone not in got["raw"], f"{gone} has no daemon to talk to here"
+
+    def test_every_asset_it_asks_for_exists(self, page):
+        _, got, _ = page.call("/ui/fit")
+        refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', got["raw"])
         assert refs, "a page that references nothing would pass the loop below"
         for ref in refs:
-            assert asset_bytes(ref) is not None, f"fit.html references missing {ref}"
+            assert asset_bytes(ref) is not None, f"the page references missing {ref}"
 
-    def test_nothing_is_loaded_over_a_network(self):
+    def test_nothing_is_loaded_over_a_network(self, page):
         """This has to open on a machine that has never been online, so there is no d3 and
         no CDN: both panels are hand-drawn SVG."""
-        html = asset_bytes("fit.html")[0].decode()
-        assert not re.search(r'(?:src|href)="https?://', html), "the page fetches a library"
+        _, got, _ = page.call("/ui/fit")
+        assert not re.search(r'(?:src|href)="https?://', got["raw"]), \
+            "the page fetches a library"
 
-    def test_the_script_parses(self):
-        """A duplicate declaration anywhere in it stops the whole page loading, and the
-        page is one script -- the same guard app.js is under."""
+    def test_the_script_parses(self, tmp_path):
+        """A duplicate declaration anywhere in it stops the whole page loading."""
+        from ml_stack.fleet.page import COMPONENTS_DIR
+        from ml_stack.ui import load
+
         node = shutil.which("node")
         if node is None:
             pytest.skip("no node to parse with")
-        html = asset_bytes("fit.html")[0].decode()
-        script = re.search(r"<script>\n(.*)</script>", html, re.S)
-        assert script, "the page has no script"
-        done = subprocess.run([node, "--check", "-"], input=script.group(1),
-                              capture_output=True, text=True)
+        script = load(COMPONENTS_DIR, ["fit-view"])[0].read().script
+        path = tmp_path / "fit-view.js"
+        path.write_text(script, encoding="utf-8")
+        done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
         assert done.returncode == 0, done.stderr[-500:]
 
     def test_the_app_offers_it_beside_the_cluster_view(self):
-        js = asset_bytes("app.js")[0].decode()
-        tabs = re.search(r"const TABS = \[(.+?)\];", js, re.S)
+        from ml_stack.fleet.page import COMPONENTS_DIR
+
+        nav = (COMPONENTS_DIR / "fleet-nav.html").read_text(encoding="utf-8")
+        tabs = re.search(r"const TABS = \[(.+?)\];", nav, re.S)
         assert tabs, "the nav has no TABS"
-        assert '"Fit"' in tabs.group(1) and "/ui/fit" in tabs.group(1)
+        assert '"Fit"' in tabs.group(1) and '"fit"' in tabs.group(1)
 
 
 # -- the data ----------------------------------------------------------------------------
@@ -185,82 +199,69 @@ class TestTheDataRoute:
 
 # -- the arithmetic ----------------------------------------------------------------------
 
-BEGIN = "// BEGIN FIT ARITHMETIC"
-END = "// END FIT ARITHMETIC"
+class TestTheSeatingIsWorkedOutOnce:
+    """One formula, in one language.
 
-
-def _arithmetic() -> str:
-    """The page's own formula, lifted out between its markers."""
-    html = (ASSETS / "fit.html").read_text(encoding="utf-8")
-    start, stop = html.index(BEGIN), html.index(END)
-    return html[start:stop]
-
-
-class TestThePageAndFitPyAgree:
-    """One formula, written twice -- so it is tested as one.
-
-    The page cannot call `Fit.users`: a slider that asked the daemon on every pixel would
-    be unusable, and the whole point of the two composing numbers is that the arithmetic
-    over them is trivial. What is not trivial is keeping the two copies equal, which is
-    what this does: the marked block out of the page, run over the records the route
-    serves, against fit.py's own answers.
+    The page draws; `serve.fit` counts. Every seating the view shows -- what a model costs
+    loaded, what one more user costs, how many fit at a context, the longest context this
+    many could each be given -- arrives worked out on the route, so there is no second copy
+    to keep equal.
     """
 
     ROOMS = [6 * GIB, 24 * GIB, ROOM, 128 * GIB]
-    CONTEXTS = [1024, 4096, 32768, 131072, 262144]
     PEOPLE = [1, 2, 7, 64, 1000]
 
-    def test_the_room_sizes_are_not_typed_twice(self):
-        """The page falls back to a list of its own when the route says nothing; that
-        fallback is fit.py's list, or the fallback is a second opinion."""
-        html = (ASSETS / "fit.html").read_text(encoding="utf-8")
-        said = re.search(r"const DEFAULT_ROOMS_GB = \[([^\]]+)\]", html)
-        assert said, "the page has no room presets"
-        assert [int(n) for n in said.group(1).split(",")] == list(fit_mod.COMMON_VRAM_GB)
+    def component(self) -> str:
+        from ml_stack.fleet.page import COMPONENTS_DIR
 
-    def test_the_page_and_fit_py_answer_the_same(self, page, tmp_path):
-        node = shutil.which("node")
-        if node is None:
-            pytest.skip("no node to run the page's own code with")
+        return (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
 
+    def test_the_view_works_out_no_seating_of_its_own(self):
+        """The measured per-user numbers never reach the browser as something to divide by:
+        a copy of the formula there is a copy that can disagree."""
+        html = self.component()
+        for said in ("per_token", "per_seq", "weights_resident", "Math.floor(a / b)"):
+            assert said not in html, f"{said} is the page doing fit.py's arithmetic again"
+
+    def test_the_rooms_it_draws_come_off_the_route(self):
+        """A fallback list on the page would be a second opinion about `COMMON_VRAM_GB`."""
+        html = self.component()
+        assert "vram_gb" in html, "the view reads the rooms from somewhere else"
+        assert not re.search(r"\[\s*6,\s*8,\s*12,", html), "the rooms are typed twice"
+
+    def test_the_route_seats_exactly_as_fit_py_does(self, page):
+        for room in self.ROOMS:
+            for people in self.PEOPLE:
+                _, got, _ = page.call(f"/ui/fit.json?room={room}&users={people}")
+                assert got["records"], "an empty route would pass the loop below"
+                ladder = got["ladder"]
+                for row in got["records"]:
+                    here = Fit.from_dict(row).at_room(room)
+                    assert row["loaded"] == here.loaded()
+                    assert row["free"] == here.free()
+                    assert row["longest"] == here.longest(people)
+                    assert row["seats"] == [here.users(c) for c in ladder]
+                    assert row["costs"] == [here.cost(c) for c in ladder]
+
+    def test_the_ladder_holds_every_step_the_slider_stops_at(self, page):
+        """The view reads a seating off the ladder; a step missing from it would be read at
+        the wrong context."""
         _, got, _ = page.call("/ui/fit.json")
-        asked = {"records": got["records"], "rooms": self.ROOMS,
-                 "contexts": self.CONTEXTS, "people": self.PEOPLE}
-        script = tmp_path / "check.js"
-        script.write_text(_arithmetic() + """
-const asked = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
-const out = [];
-for (const f of asked.records) {
-  for (const room of asked.rooms) {
-    for (const ctx of asked.contexts) out.push(Fit.users(f, room, ctx));
-    for (const ctx of asked.contexts) out.push(Fit.line(f, ctx)[0], Fit.line(f, ctx)[1]);
-    for (const n of asked.people) out.push(Fit.longest(f, room, n));
-  }
-}
-console.log(JSON.stringify(out));
-""", encoding="utf-8")
-        asked_file = tmp_path / "asked.json"
-        asked_file.write_text(json.dumps(asked), encoding="utf-8")
-        done = subprocess.run([node, str(script), str(asked_file)],
-                              capture_output=True, text=True)
-        assert done.returncode == 0, done.stderr[-500:]
-        theirs = json.loads(done.stdout)
+        assert set(got["steps"]) <= set(got["ladder"])
+        assert got["steps"] == list(fit_mod.SLIDER_CONTEXTS)
 
-        mine: list[int] = []
-        for row in got["records"]:
-            for room in self.ROOMS:
-                here = Fit.from_dict(row).at_room(room)
-                mine += [here.users(c) for c in self.CONTEXTS]
-                for context in self.CONTEXTS:
-                    mine += list(here.line(context))
-                mine += [here.longest(n) for n in self.PEOPLE]
+    def test_a_room_that_was_not_asked_for_is_this_machines_own(self, page):
+        _, got, _ = page.call("/ui/fit.json")
+        assert got["room"] == ROOM and got["at_room"] == ROOM
 
-        assert len(theirs) == len(mine)
-        for i, (a, b) in enumerate(zip(theirs, mine)):
-            assert a == b, f"answer {i}: the page says {a}, fit.py says {b}"
+    def test_asking_for_a_smaller_room_seats_fewer(self, page):
+        _, big, _ = page.call(f"/ui/fit.json?room={128 * GIB}")
+        _, small, _ = page.call(f"/ui/fit.json?room={8 * GIB}")
+        at = big["ladder"].index(32768)
+        assert sum(r["seats"][at] for r in big["records"]) \
+            > sum(r["seats"][at] for r in small["records"])
 
 
-# -- the flag ----------------------------------------------------------------------------
 class TestTheCliFlag:
     def test_fit_ui_serves_the_page_opens_it_and_waits(self, monkeypatch, capsys):
         """`--ui` puts the app's own routes up on loopback and hands the browser at it.
@@ -489,7 +490,9 @@ def answering():
 
 class TestTheTelemetryView:
     def test_it_is_offered_beside_what_fits_and_what_it_cost(self):
-        html = asset_bytes("fit.html")[0].decode()
+        from ml_stack.fleet.page import COMPONENTS_DIR
+
+        html = (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
         views = re.search(r"const VIEWS = \[(.+?)\];", html, re.S)
         assert views and '"telemetry"' in views.group(1)
         assert "/ui/telemetry.json" in html, "the view reads no route"

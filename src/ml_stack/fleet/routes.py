@@ -14,6 +14,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from .page import COMPONENTS, render
 from .discovery import (
     DiscoveryError,
     cluster_group,
@@ -54,6 +55,14 @@ def app_location() -> Path | None:
 def _can_serve() -> bool:
     """Whether this install has the code to run a model server itself."""
     return find_spec("ml_stack.serve") is not None
+
+
+def _whole(text: str) -> int:
+    """A query parameter as a non-negative integer; 0 for anything else."""
+    try:
+        return max(0, int(float(text)))
+    except (TypeError, ValueError):
+        return 0
 
 
 def write(handler: Any, code: int, raw: bytes, content_type: str,
@@ -124,17 +133,19 @@ class Base:
 
 
 class PageRoutes:
-    """The page and the files it loads: ``/ui``, ``/ui/fit``, ``/ui/static/*``."""
+    """The page and the files it loads: ``/ui``, ``/ui/fit``, ``/ui/static/*``.
+
+    Both paths serve the same page; ``/ui/fit`` opens it on the fit view.
+    """
 
     def open_route(self) -> bool:
-        page = {"/ui": "index.html", "/ui/": "index.html",
-                "/ui/fit": "fit.html", "/ui/fit/": "fit.html"}.get(self.path)
-        if page:
-            asset = asset_bytes(page)
-            if asset is None:
+        if self.path in ("/ui", "/ui/", "/ui/fit", "/ui/fit/"):
+            try:
+                page = render(getattr(self.ui, "parts", None) or COMPONENTS)
+            except OSError:
                 self.send(500, {"error": "the UI assets are missing from this install"})
                 return True
-            write(self.handler, 200, asset[0], asset[1])
+            write(self.handler, 200, page.encode("utf-8"), "text/html; charset=utf-8")
             return True
         if self.path.startswith("/ui/static/"):
             asset = asset_bytes(self.path[len("/ui/static/"):])
@@ -270,7 +281,8 @@ class MeasureRoutes:
 
     def route(self) -> bool:
         if self.path == "/ui/fit.json" and self.method == "GET":
-            self.send(200, self.ui.fit())
+            self.send(200, self.ui.fit(room=_whole(self.asked("room")),
+                                       users=_whole(self.asked("users", "1")) or 1))
             return True
         if self.path == "/ui/rates.json" and self.method == "GET":
             self.send(200, self.ui.rates())

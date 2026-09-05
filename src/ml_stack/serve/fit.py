@@ -1111,6 +1111,14 @@ def render_tensors(model: str | Path, *, top: int = 12) -> str:
 # conversation kept open, and everything interesting about a cache happens between them.
 PLOT_CONTEXTS: tuple[int, ...] = (2048, 4096, 8192, 16384, 32768, 65536, 131072)
 
+# Where the fit view's context slider stands, 1k to 256k by doubling.
+SLIDER_CONTEXTS: tuple[int, ...] = tuple(1024 * 2 ** k for k in range(9))
+
+# The contexts a seating is worked out at, eight to the octave over the same range, so a
+# reader dragging across the chart reads a measured answer rather than one worked out again
+# in the browser.
+READ_CONTEXTS: tuple[int, ...] = tuple(round(1024 * 2 ** (k / 8)) for k in range(65))
+
 # One line style per room asked about, so a model keeps its colour across all of them and
 # the rooms are told apart by the line rather than by a second set of colours.
 _ROOM_STYLES = ("-", "--", ":", "-.")

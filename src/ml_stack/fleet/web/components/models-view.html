@@ -1,0 +1,267 @@
+<!-- models-view: the models on this machine and on the others, and what can still be had -->
+<template>
+  <main id="models" hidden>
+    <h1>Models</h1>
+    <p class="sub" id="models-free"></p>
+    <div class="group" id="models-here"></div>
+    <div class="group" id="models-elsewhere" hidden></div>
+    <div class="group" id="models-getting" hidden></div>
+    <div class="group" id="models-unfinished" hidden></div>
+    <div class="group" id="models-popular"></div>
+    <div id="models-note"></div>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+  const fileSize = M.fileSize;
+
+  class ModelsView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#models");
+      this.note = this.querySelector("#models-note");
+      this.popular = this.querySelector("#models-popular");
+      this.search = { rude: false, page: 0, families: null, typed: "" };
+      this.hunt = el("input", { type: "search", id: "hunt",
+        placeholder: "Search models, or paste hf:owner/repo" });
+      let waiting = null;
+      this.hunt.oninput = () => {
+        clearTimeout(waiting);
+        waiting = setTimeout(() => {
+          this.search.typed = this.hunt.value.trim();
+          this.search.page = 0;
+          this.search.families = null;
+          this.loadPopular();
+        }, 350);
+      };
+      M.onRoute((route) => {
+        const on = route === "models";
+        this.box.hidden = !on;
+        clearTimeout(this.timer);
+        if (on) this.draw();
+      });
+    }
+
+    async draw() {
+      const m = await api("/ui/models");
+      if (M.refused(m)) return;
+      if (this.box.hidden) return;
+      const run = await api("/ui/serving");
+      const running = new Set((run.running || []).flatMap((x) => x.models || []));
+      const portOf = (name) =>
+        (run.running || []).find((x) => (x.models || []).includes(name))?.port;
+
+      this.querySelector("#models-free").textContent =
+        `${m.free_gb} GB free on this machine.`;
+
+      const here = (m.here || []).map((x) =>
+        el("div", { class: "row" },
+          el("span", {}, el("b", {}, x.name),
+            el("span", { class: "why" },
+              running.has(x.name) ? `${fileSize(x.size)} · running` : fileSize(x.size))),
+          run.can_serve
+            ? (running.has(x.name)
+                ? el("button", { class: "ghost small",
+                    onclick: () => this.halt(portOf(x.name)) }, "Stop")
+                : el("button", { class: "ghost small",
+                    onclick: () => this.serve(x.name) }, "Run"))
+            : el("span", { class: "label" }, "here")));
+      this.querySelector("#models-here").replaceChildren(
+        el("h2", {}, "On this machine"),
+        ...(here.length ? here : [el("div", { class: "hint" }, "None yet.")]));
+
+      const elsewhere = this.querySelector("#models-elsewhere");
+      elsewhere.hidden = !(m.elsewhere || []).length;
+      elsewhere.replaceChildren(
+        el("h2", {}, "On your other machines"),
+        el("div", { class: "hint" },
+          "Copied over your network rather than downloaded again."),
+        ...(m.elsewhere || []).map((x) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, x.name),
+              el("span", { class: "why" }, `on ${x.peers.join(", ")}`)),
+            el("button", { class: "ghost small",
+              onclick: () => this.get(x.name, "") }, "Copy here"))));
+
+      const coming = (m.getting || []).filter((g) => g.state !== "done");
+      const getting = this.querySelector("#models-getting");
+      getting.hidden = !coming.length;
+      getting.replaceChildren(el("h2", {}, "Coming in"), ...coming.map(bar));
+
+      const unfinished = this.querySelector("#models-unfinished");
+      unfinished.hidden = !(m.unfinished || []).length;
+      unfinished.replaceChildren(
+        el("h2", {}, "Started, not finished"),
+        el("div", { class: "hint" },
+          "Asking for the same model again picks up where it stopped."),
+        ...(m.unfinished || []).map((x) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, x.name.replace(/\.part$/, "")),
+              el("span", { class: "why" }, `${fileSize(x.size)} copied, then stopped`)),
+            el("button", { class: "ghost small",
+              onclick: async () => {
+                await api("/ui/models", { method: "DELETE",
+                  body: JSON.stringify({ name: x.name }) });
+                this.draw();
+              } }, "Discard"))));
+
+      clearTimeout(this.timer);
+      if ((m.getting || []).some((g) => g.state === "getting")) {
+        this.timer = setTimeout(() => this.draw(), 1000);
+      }
+      this.loadPopular();
+    }
+
+    async serve(name) {
+      this.note.replaceChildren(el("div", { class: "hint" },
+        el("span", { class: "spin" }), ` Starting ${name}…`));
+      const r = await api("/ui/serving", { method: "POST",
+        body: JSON.stringify({ name }) });
+      this.note.replaceChildren(r.error
+        ? el("div", { class: "err" }, r.error)
+        : el("div", { class: "ok" }, `${name} is running. Open Chat to use it.`));
+      if (!r.error) setTimeout(() => this.draw(), 600);
+    }
+
+    async halt(port) {
+      await api("/ui/serving", { method: "DELETE", body: JSON.stringify({ port }) });
+      this.draw();
+    }
+
+    async get(name, source, draft) {
+      this.note.replaceChildren(el("div", { class: "hint" },
+        el("span", { class: "spin" }), ` Getting ${name}…`));
+      const r = await api("/ui/models", { method: "POST",
+        body: JSON.stringify({ name, source, draft: draft || "" }) });
+      if (r.error) {
+        this.note.replaceChildren(el("div", { class: "err" }, r.error));
+        return;
+      }
+      this.note.replaceChildren();
+      this.draw();
+    }
+
+    // Its own request: the hub is asked about every repository, and a slow answer
+    // must not hold up the rest of the screen.
+    async loadPopular() {
+      const s = this.search;
+      this.popular.replaceChildren(
+        el("h2", {}, "Popular models"),
+        el("div", { class: "hint" }, el("span", { class: "spin" }),
+          " Asking Hugging Face what people are running…"));
+      const pop = await api(`/ui/models/popular?page=${s.page}&rude=${s.rude ? 1 : 0}`
+        + `&q=${encodeURIComponent(s.typed)}`);
+      const heading = () => [
+        el("h2", {}, s.typed ? `Models matching “${s.typed}”` : "Popular models"),
+        el("div", { class: "searchrow" }, this.hunt,
+          s.typed ? el("button", { class: "ghost small",
+            onclick: () => {
+              this.hunt.value = ""; s.typed = ""; s.page = 0; s.families = null;
+              this.loadPopular();
+            } }, "Clear") : null),
+      ];
+      if (pop.error || !(pop.models || []).length) {
+        const ref = s.typed.startsWith("hf:") || s.typed.startsWith("http");
+        this.popular.replaceChildren(...heading(),
+          el("div", { class: "hint" },
+            pop.error || (s.typed ? "Nothing on the hub matches that."
+                                  : "Nothing that fits on this machine.")),
+          ref ? el("button", { class: "ghost small",
+            onclick: () => this.get(s.typed.split("/").pop(), s.typed) },
+            `Get ${s.typed.split("/").pop()}`) : null);
+        if (this.hunt.value) this.hunt.focus();
+        return;
+      }
+      // Families come from the whole list, so ticking one off survives paging.
+      if (s.families === null) s.families = new Set(pop.families || []);
+      this.paintPopular(pop, heading);
+    }
+
+    paintPopular(pop, heading) {
+      const s = this.search;
+      const rows = pop.models.filter((x) => s.families.has(x.family));
+      this.popular.replaceChildren(
+        ...heading(),
+        el("div", { class: "hint" },
+          (s.typed ? "From Hugging Face" : "Most downloaded and trending now")
+          + ", in a Q4 build that fits this machine. "
+          + "💬 text · 🖼 images · 🔊 audio · 🎬 video."),
+        el("div", { class: "chips" }, (pop.families || []).map((f) => {
+          const box = el("input", { type: "checkbox", id: `fam_${f}`,
+                                    ...(s.families.has(f) ? { checked: "1" } : {}) });
+          box.onchange = () => {
+            if (box.checked) s.families.add(f); else s.families.delete(f);
+            this.paintPopular(pop, heading);
+          };
+          return el("label", { class: "opt inline", for: `fam_${f}` }, box, f);
+        })),
+        (() => {
+          const box = el("input", { type: "checkbox", id: "rude",
+                                    ...(s.rude ? { checked: "1" } : {}) });
+          box.onchange = () => {
+            s.rude = box.checked; s.page = 0; s.families = null; this.loadPopular();
+          };
+          return el("label", { class: "opt", for: "rude" }, box,
+            M.row("Show uncensored builds",
+              "abliterated, heretic and uncensored variants, which are "
+              + "published with their refusals removed"));
+        })(),
+        ...(rows.length
+          ? rows.map((x) => {
+              const bits = [`${x.gb} GB`];
+              if (x.params_b) bits.push(`${x.params_b}B`);
+              if (x.moe) bits.push(`${x.active_b}B active`);
+              if (x.draft_ref) bits.push(`+${x.draft_gb} GB draft`);
+              bits.push(`${x.takes.join("")} → ${x.gives.join("")}`);
+              bits.push(x.what);
+              return el("div", { class: "row" },
+                el("span", {}, el("b", {}, x.name),
+                  el("span", { class: "why" }, bits.join(" · "))),
+                el("button", { class: "ghost small",
+                  onclick: () => this.get(x.file, x.ref, x.draft_ref) }, "Get"));
+            })
+          : [el("div", { class: "hint" }, "No family is ticked.")]),
+        el("div", { class: "pager" },
+          (() => {
+            const back = el("button", { class: "ghost small" }, "← Newer");
+            back.disabled = pop.page <= 0;
+            back.onclick = () => { s.page = pop.page - 1; this.loadPopular(); };
+            return back;
+          })(),
+          el("span", { class: "why" },
+            `Page ${pop.page + 1} of ${pop.pages} · ${pop.total} models`),
+          (() => {
+            const on = el("button", { class: "ghost small" }, "More →");
+            on.disabled = pop.page + 1 >= pop.pages;
+            on.onclick = () => { s.page = pop.page + 1; this.loadPopular(); };
+            return on;
+          })()));
+    }
+  }
+
+  /** How far a download has got. */
+  function bar(g) {
+    const pct = g.total ? Math.min(100, Math.round((g.done / g.total) * 100)) : 0;
+    return el("div", { class: "row" },
+      el("span", { class: "grow" },
+        el("b", {}, g.name),
+        el("span", { class: "why" },
+          g.state === "failed" ? g.error
+            : g.total ? `${fileSize(g.done)} of ${fileSize(g.total)} — ${pct}%`
+            : (g.note || "Starting…")),
+        g.state === "getting"
+          ? el("div", { class: "track" },
+              el("div", { class: "fill vram", style: `width:${g.total ? pct : 0}%` }))
+          : null),
+      g.state === "failed"
+        ? el("span", { class: "label bad" }, "failed")
+        : el("span", { class: "spin" }));
+  }
+
+  customElements.define("models-view", ModelsView);
+})();
+</script>

@@ -1,0 +1,52 @@
+<!-- sign-in: the passphrase this cluster was set up with -->
+<template>
+  <div class="centre" id="signin" hidden>
+    <div class="card">
+      <h1>Sign in</h1>
+      <p class="sub">Type the passphrase this cluster was set up with.</p>
+      <label for="p">Passphrase</label>
+      <input type="password" id="p" placeholder="the words you chose">
+      <button id="signin-go">Sign in</button>
+      <div id="signin-note"></div>
+    </div>
+  </div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+
+  class SignIn extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#signin");
+      this.pass = this.querySelector("#p");
+      this.go = this.querySelector("#signin-go");
+      this.note = this.querySelector("#signin-note");
+      this.go.onclick = () => this.submit();
+      this.pass.onkeydown = (e) => { if (e.key === "Enter") this.submit(); };
+      M.onRoute((route) => {
+        const on = route === "sign-in";
+        this.box.hidden = !on;
+        if (!on) return;
+        this.note.replaceChildren(M.signInMessage
+          ? el("div", { class: "err" }, M.signInMessage) : null);
+        this.pass.focus();
+      });
+    }
+
+    async submit() {
+      this.go.disabled = true;
+      this.go.textContent = "Checking…";
+      const r = await M.api("/ui/session", { method: "POST",
+        body: JSON.stringify({ passphrase: this.pass.value }) });
+      this.go.disabled = false;
+      this.go.textContent = "Sign in";
+      if (r.ok) { this.pass.value = ""; M.signInMessage = ""; return M.go("cluster"); }
+      M.signIn(r.error || "That did not match.");
+    }
+  }
+  customElements.define("sign-in", SignIn);
+})();
+</script>

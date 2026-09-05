@@ -99,27 +99,46 @@ WORDS = "correct horse battery"
 
 # -- assets --------------------------------------------------------------
 class TestAssets:
-    def test_the_page_and_its_assets_ship_with_the_package(self):
-        for name in ("index.html", "style.css", "app.js"):
-            assert asset_bytes(name) is not None, f"{name} is missing from web/"
+    def test_the_stylesheet_ships_with_the_package(self):
+        assert asset_bytes("style.css") is not None, "style.css is missing from web/"
+
+    def test_every_component_the_page_lists_is_on_disk(self):
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+
+        assert COMPONENTS, "a page of no components would pass the loop below"
+        for name in COMPONENTS:
+            assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
+
+    def test_every_component_defines_the_element_the_shell_holds(self):
+        from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+
+        for name in COMPONENTS:
+            text = (COMPONENTS_DIR / f"{name}.html").read_text(encoding="utf-8")
+            assert f"customElements.define('{name}'" in text \
+                or f'customElements.define("{name}"' in text, \
+                f"{name}.html defines no <{name}>"
 
     def test_every_asset_the_page_asks_for_exists(self):
         """A stylesheet that 404s is a UI that looks broken rather than one that is."""
         import re
 
-        html = asset_bytes("index.html")[0].decode()
+        from ml_stack.fleet.page import render
+
+        html = render()
         refs = re.findall(r'(?:src|href)="/ui/static/([^"]+)"', html)
         assert refs, "a page that references nothing would pass the loop below"
         for ref in refs:
-            assert asset_bytes(ref) is not None, f"index.html references missing {ref}"
+            assert asset_bytes(ref) is not None, f"the page references missing {ref}"
 
     def test_every_screen_the_wizard_moves_to_is_defined(self):
         """node --check parses the file; it does not notice a screen that is gone."""
         import re
 
-        js = asset_bytes("app.js")[0].decode()
-        defined = set(re.findall(r"^(?:async )?function (\w+)", js, re.M))
-        called = set(re.findall(r"return (\w+Step)\(", js))
+        from ml_stack.fleet.page import COMPONENTS_DIR
+
+        js = (COMPONENTS_DIR / "first-run.html").read_text(encoding="utf-8")
+        defined = set(re.findall(r"^    (?:async )?(\w+)\(", js, re.M))
+        called = set(re.findall(r"return this\.(\w+Step)\(", js))
         assert called, "the wizard moves to no screen at all"
         assert called <= defined, f"screens that are gone: {sorted(called - defined)}"
 
@@ -132,7 +151,7 @@ class TestAssets:
         announced second arrives as a download rather than a page."""
         status, _, headers = serving.call("/ui/")
         assert status == 200
-        assert headers["Content-Type"] == "text/html"
+        assert headers["Content-Type"] == "text/html; charset=utf-8"
 
 
 # -- the setup guard -----------------------------------------------------
@@ -605,12 +624,12 @@ class TestClosingTheWindow:
 
     def test_the_page_offers_the_question(self):
         """The native window calls this by name when the close button is clicked."""
-        from ml_stack.fleet.ui import asset_bytes
+        from ml_stack.fleet.page import render
 
-        js = asset_bytes("app.js")[0].decode()
-        assert "mlStackAskOnClose" in js
-        assert "close_choice" in js
-        assert 'id: "remember", checked: "1"' in js, "the box must start ticked"
+        html = render()
+        assert "mlStackAskOnClose" in html
+        assert "close_choice" in html
+        assert 'id="remember" checked="1"' in html, "the box must start ticked"
 
 
 class TestSettingsScreen:
@@ -691,9 +710,9 @@ class TestTheInterfaceAndTheDaemonAgree:
     def called_paths(self):
         import re
 
-        asset = asset_bytes("app.js")
-        assert asset is not None
-        source = asset[0].decode()
+        from ml_stack.fleet.page import render
+
+        source = render()
         found = set(re.findall(r"""api\(\s*[`"']([^`"']+)""", source))
         found |= set(re.findall(r"""fetch\(\s*[`"']([^`"']+)""", source))
         # Only the path matters here. A query string carries template holes, and
@@ -888,19 +907,23 @@ class TestUpdates:
         assert not got["ok"] and "pip" in got["error"]
 
 
-def test_the_interface_script_parses():
-    """A duplicate declaration anywhere in this file stops the whole page loading."""
+def test_every_components_script_parses(tmp_path):
+    """A duplicate declaration anywhere in one component stops the whole page loading."""
     import shutil
     import subprocess
 
-    from ml_stack.fleet.ui import ASSETS
+    from ml_stack.fleet.page import COMPONENTS, COMPONENTS_DIR
+    from ml_stack.ui import load
 
     node = shutil.which("node")
     if node is None:
         pytest.skip("no node to parse with")
-    done = subprocess.run([node, "--check", str(ASSETS / "app.js")],
-                          capture_output=True, text=True)
-    assert done.returncode == 0, done.stderr[-400:]
+    for name in COMPONENTS:
+        script = load(COMPONENTS_DIR, [name])[0].read().script
+        path = tmp_path / f"{name}.js"
+        path.write_text(script, encoding="utf-8")
+        done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        assert done.returncode == 0, f"{name}: {done.stderr[-400:]}"
 
 
 

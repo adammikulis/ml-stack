@@ -1,0 +1,297 @@
+<!-- settings-view: what this machine does, what it can train with, and taking it off again -->
+<template>
+  <main id="settings" hidden>
+    <h1>Settings</h1>
+    <p class="sub" id="settings-sub"></p>
+    <div class="two">
+      <div id="settings-left"></div>
+      <div id="settings-right">
+        <div class="group" id="settings-libs"></div>
+        <div class="group" id="settings-chatting"></div>
+        <div class="group" id="settings-updates"></div>
+        <div id="settings-when"></div>
+      </div>
+    </div>
+    <button id="settings-save">Save</button>
+    <div class="group" id="settings-again"></div>
+    <div class="group" id="settings-removal"></div>
+    <div id="settings-note"></div>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+  const fileSize = M.fileSize;
+
+  class SettingsView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#settings");
+      this.note = this.querySelector("#settings-note");
+      this.save = this.querySelector("#settings-save");
+      this.save.onclick = () => this.apply();
+      M.onRoute((route) => {
+        const on = route === "settings";
+        this.box.hidden = !on;
+        if (on) this.draw();
+      });
+    }
+
+    radio(group, value, label, why) {
+      const id = `${group}-${value}`;
+      const input = el("input", { type: "radio", name: group, id,
+                                  ...(this.pick[group] === value ? { checked: "1" } : {}) });
+      input.onchange = () => { this.pick[group] = value; };
+      return el("label", { class: "opt", for: id }, input, M.row(label, why));
+    }
+
+    check(key, label, why) {
+      const input = el("input", { type: "checkbox", id: key,
+                                  ...(this.pick[key] ? { checked: "1" } : {}) });
+      input.onchange = () => { this.pick[key] = input.checked; };
+      return el("label", { class: "opt", for: key }, input, M.row(label, why));
+    }
+
+    async draw() {
+      const s = await api("/ui/settings");
+      if (M.refused(s)) return;
+      const cur = s.settings || {};
+      M.group = s.group || "";
+      this.pick = {
+        labels: (cur.labels || []).join(","),
+        autostart: (s.autostart || {}).mode || cur.autostart || "manual",
+        on_paused: cur.on_paused || "stop",
+        on_close: cur.on_close || "",
+        auto_update: cur.auto_update !== false,
+        autodownload_models: cur.autodownload_models !== false,
+        context: cur.context || 8192,
+      };
+      this.querySelector("#settings-sub").textContent =
+        `${s.name}${s.machine?.gpu ? " — " + s.machine.gpu : ""}`;
+      const nav = document.querySelector("fleet-nav");
+      if (nav && nav.paint) nav.paint("settings");
+
+      this.querySelector("#settings-left").replaceChildren(
+        el("div", { class: "group" },
+          el("h2", {}, "What this machine does"),
+          this.radio("labels", "train", "Train models", ""),
+          this.radio("labels", "prep", "Prepare data", ""),
+          this.radio("labels", "train,prep", "Both", "")),
+        el("div", { class: "group" },
+          el("h2", {}, "Starting up"),
+          this.radio("autostart", "login", "When I log in", ""),
+          this.radio("autostart", "boot", "When the computer starts",
+            "your computer will ask for your password"),
+          this.radio("autostart", "manual", "Only when I open it", "")));
+
+      this.querySelector("#settings-chatting").replaceChildren(
+        el("h2", {}, "Chatting"),
+        M.contextPicker(cur.context || 8192, (n) => { this.pick.context = n; }));
+
+      const status = el("div", { class: "hint", style: "margin-top:10px" },
+        el("span", { class: "spin" }), " Checking for updates…");
+      this.querySelector("#settings-updates").replaceChildren(
+        el("h2", {}, "Updates"),
+        el("div", { class: "hint" }, `You have version ${s.version || "?"}.`),
+        this.check("autodownload_models", "Get models automatically",
+          "from another machine on your network if one has it, otherwise the internet"),
+        this.check("auto_update", "Download and install updates automatically",
+          "checked once a day, put on when no job is running, and it restarts itself"),
+        status);
+
+      this.querySelector("#settings-when").replaceChildren(
+        el("div", { class: "group" },
+          el("h2", {}, "When you need the machine"),
+          this.radio("on_paused", "stop", "Pausing stops what is running",
+            "the run picks up from its last checkpoint"),
+          this.radio("on_paused", "finish", "Pausing lets the current job finish", "")),
+        el("div", { class: "group" },
+          el("h2", {}, "Closing the window"),
+          this.radio("on_close", "", "Ask me each time", ""),
+          this.radio("on_close", "background", "Keep running in the background",
+            "stays in the cluster"),
+          this.radio("on_close", "quit", "Quit", "leaves the cluster")),
+        (s.schedule?.windows || []).length
+          ? el("div", { class: "group" },
+              el("h2", {}, "Not available"),
+              ...s.schedule.windows.map((w) =>
+                el("div", { class: "label", style: "display:block;margin-bottom:4px" }, w)))
+          : null);
+
+      this.querySelector("#settings-again").replaceChildren(
+        el("h2", {}, "Set this machine up again"),
+        el("div", { class: "hint" },
+          "Walks through naming it and choosing a passphrase, as it did the first time. "
+          + "The clusters it is already in are left alone."),
+        el("button", { class: "ghost small",
+          onclick: () => M.go("first-run") }, "Run setup again"));
+
+      this.drawLibraries();
+      this.drawUpdates(status);
+      this.drawRemoval();
+    }
+
+    async apply() {
+      const save = this.save;
+      save.disabled = true;
+      save.innerHTML = '<span class="spin"></span> Saving…';
+      const r = await api("/ui/settings", { method: "POST", body: JSON.stringify({
+        ...this.pick, labels: this.pick.labels ? this.pick.labels.split(",") : [] }) });
+      save.disabled = false;
+      save.textContent = "Save";
+      this.note.replaceChildren(r.manual
+        ? el("div", {}, el("div", { class: "err" }, r.manual_why || "Needs permission."),
+            el("pre", { class: "cmd" }, r.manual))
+        : el("div", { class: "ok" }, "Saved."));
+    }
+
+    async drawLibraries() {
+      const libs = this.querySelector("#settings-libs");
+      libs.hidden = false;
+      libs.replaceChildren(
+        el("h2", {}, "What this machine can train with"),
+        el("div", { class: "hint" }, el("span", { class: "spin" }), " Looking…"));
+      const L = await api("/ui/libraries");
+      if (L.status === 501) { libs.hidden = true; return; }
+      const want = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
+      const boxes = (L.libraries || []).map((lib) => {
+        const input = el("input", { type: "checkbox", id: `lib-${lib.name}`,
+                                    ...(lib.installed || (!L.ready && lib.default)
+                                        ? { checked: "1" } : {}) });
+        if (!lib.installed && !L.ready && lib.default) want.add(lib.name);
+        input.onchange = () => {
+          if (input.checked) want.add(lib.name); else want.delete(lib.name);
+        };
+        return el("label", { class: "opt", for: `lib-${lib.name}` }, input,
+          el("span", {},
+            el("b", {}, lib.title),
+            el("span", { class: "why" },
+              `${lib.blurb} · ${lib.size_mb >= 1000
+                ? (lib.size_mb / 1000).toFixed(1) + " GB" : lib.size_mb + " MB"}`
+              + (lib.version ? ` · installed ${lib.version}` : ""))));
+      });
+
+      const apply = el("button", { class: "ghost" }, "Apply");
+      const out = el("div");
+      apply.onclick = async () => {
+        const before = new Set((L.libraries || []).filter((x) => x.installed).map((x) => x.name));
+        const install = [...want].filter((n) => !before.has(n));
+        const remove = [...before].filter((n) => !want.has(n));
+        if (!install.length && !remove.length) {
+          out.replaceChildren(el("div", { class: "hint" }, "Nothing to change."));
+          return;
+        }
+        apply.disabled = true;
+        apply.innerHTML = '<span class="spin"></span> This can take a while…';
+        const r = await api("/ui/libraries", { method: "POST",
+          body: JSON.stringify({ install, remove }) });
+        apply.disabled = false;
+        apply.textContent = "Apply";
+        const failed = Object.entries(r.changed || {}).filter(([, v]) => !v.ok);
+        out.replaceChildren(failed.length
+          ? el("div", { class: "err" },
+              failed.map(([k, v]) => `${k}: ${v.error}`).join("; "))
+          : el("div", { class: "ok" }, "Done."));
+      };
+
+      libs.replaceChildren(
+        el("h2", {}, "What this machine can train with"),
+        el("div", { class: "hint" },
+          L.ready ? "Installed alongside ml-stack, not in your system Python."
+                  : "Nothing installed yet. Tick what this machine should be able to do."),
+        ...boxes, apply, out);
+    }
+
+    async drawUpdates(status) {
+      const u = await api("/ui/updates");
+      if (!u.checked) {
+        status.replaceChildren(document.createTextNode(
+          "Could not check for updates right now."));
+        return;
+      }
+      if (!u.known) {
+        status.replaceChildren(document.createTextNode(
+          "This copy does not say which version it is, so it will not update itself. "
+          + `The newest is ${u.latest}.`));
+        return;
+      }
+      if (!u.newer) {
+        status.replaceChildren(document.createTextNode("This is the newest version."));
+        return;
+      }
+      const go = el("button", {}, `Update to ${u.latest}`);
+      go.onclick = async () => {
+        go.disabled = true;
+        go.innerHTML = '<span class="spin"></span> Downloading…';
+        const r = await api("/ui/updates/install", { method: "POST" });
+        status.replaceChildren(r.ok
+          ? el("div", { class: "ok" },
+              !r.installed ? "Already up to date."
+                : r.restarting ? `Updated to ${r.version}. Starting it now…`
+                : `Updated to ${r.version}. Open it again to use it.`)
+          : el("div", { class: "err" }, r.error || "Could not install the update."));
+      };
+      status.replaceChildren(
+        el("div", {}, `Version ${u.latest} is available`
+          + (u.size ? ` (${(u.size / 1e6).toFixed(0)} MB)` : "") + "."),
+        go);
+    }
+
+    async drawRemoval() {
+      const removal = this.querySelector("#settings-removal");
+      removal.replaceChildren(
+        el("h2", {}, "Remove ml-stack"),
+        el("div", { class: "hint" }, "Loading what is on this machine…"));
+      const u = await api("/ui/uninstall");
+      if (u.error) {
+        removal.replaceChildren(el("h2", {}, "Remove ml-stack"),
+          el("div", { class: "err" }, u.error));
+        return;
+      }
+      const want = {};
+      for (const it of u.items || []) want[it.key] = it.default;
+      const boxes = (u.items || []).map((it) => {
+        const box = el("input", { type: "checkbox", id: `rm_${it.key}`,
+                                  ...(it.default ? { checked: "1" } : {}) });
+        box.onchange = () => { want[it.key] = box.checked; };
+        return el("label", { class: "opt", for: `rm_${it.key}` }, box,
+          M.row(`${it.name} — ${fileSize(it.bytes)}`, it.why));
+      });
+      const out = el("div");
+      const go = el("button", { class: "danger" }, "Remove");
+      let armed = false;
+      go.onclick = async () => {
+        const chosen = Object.keys(want).filter((k) => want[k]);
+        if (!armed) {
+          armed = true;
+          go.textContent = `Remove ${chosen.length} of these — click again`;
+          out.replaceChildren(el("div", { class: "hint" }, "This cannot be undone."));
+          return;
+        }
+        go.disabled = true;
+        const r = await api("/ui/uninstall", { method: "POST",
+          body: JSON.stringify({ remove: chosen }) });
+        out.replaceChildren(
+          el("div", { class: "ok" },
+            `Removed ${(r.removed || []).length} of ${chosen.length}, freeing `
+            + `${fileSize(r.freed || 0)}.`),
+          r.app ? el("div", { class: "hint" },
+            `Drag ${r.app} to the bin to finish.`) : null,
+          Object.keys(r.failed || {}).length
+            ? el("div", { class: "err" }, Object.values(r.failed).join("; "))
+            : null);
+      };
+      removal.replaceChildren(
+        el("h2", {}, "Remove ml-stack"),
+        el("div", { class: "hint" },
+          "Ticked items go. Your models and your own files are left unless you say "
+          + "otherwise."),
+        ...boxes, go, out);
+    }
+  }
+  customElements.define("settings-view", SettingsView);
+})();
+</script>

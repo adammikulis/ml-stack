@@ -1,0 +1,352 @@
+<!-- cluster-view: the machines on this network, the clusters this one is in, and a sweep across them -->
+<template>
+  <main id="cluster" hidden>
+    <h1>Cluster</h1>
+    <p class="sub" id="cluster-sub"></p>
+    <div class="stat" id="cluster-stat"></div>
+    <div id="cluster-cards"></div>
+    <div class="group" id="cluster-joined"></div>
+    <div class="group" id="cluster-sweep"></div>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+  const gb = M.gb;
+
+  /** One machine: what it is, what it is doing, and how hard. */
+  function peerCard(p) {
+    const d = p.device || {};
+    const v = M.vendorOf(d);
+    const slots = p.slots || 1;
+    const free = p.free === undefined ? (p.busy ? 0 : slots) : p.free;
+    const running = slots - free;
+    const queued = p.queued || 0;
+
+    const pips = el("div", { class: "slots" },
+      Array.from({ length: Math.min(slots, 16) }, (_, i) =>
+        el("i", { class: `slot${i < running ? " on" : ""}` })));
+
+    const meters = [
+      el("div", { class: "meter" },
+        el("div", { class: "cap" },
+          el("span", {}, "jobs"),
+          // Spelled out: "0/4" beside the word "idle" reads as "none of four
+          // available", which is the opposite of what it means.
+          el("b", {}, running === 0
+            ? `none running · ${slots} slot${slots === 1 ? "" : "s"} free`
+            : `${running} running of ${slots}${queued ? ` · ${queued} waiting` : ""}`)),
+        pips),
+    ];
+
+    if (d.ram_gb) {
+      const used = d.ram_used_gb;
+      const pct = used === undefined ? null
+        : Math.max(0, Math.min(100, (used / d.ram_gb) * 100));
+      meters.push(el("div", { class: "meter" },
+        el("div", { class: "cap" },
+          el("span", {}, "memory"),
+          el("b", {}, used === undefined ? `${gb(d.ram_gb)} total`
+            : `${gb(used)} of ${gb(d.ram_gb)} in use`)),
+        pct === null ? null
+          : el("div", { class: "track" },
+              el("div", { class: "fill", style: `width:${pct}%` }))));
+    }
+
+    if (d.cpu_pct !== undefined) {
+      meters.push(el("div", { class: "meter" },
+        el("div", { class: "cap" },
+          el("span", {}, "processors"),
+          el("b", {}, `${Math.round(d.cpu_pct)}% busy`)),
+        el("div", { class: "track" },
+          el("div", { class: "fill util",
+                      style: `width:${Math.min(100, d.cpu_pct)}%` }))));
+    }
+
+    if (d.vram_total_gb) {
+      const used = d.vram_total_gb - (d.vram_free_gb ?? d.vram_total_gb);
+      const pct = Math.max(0, Math.min(100, (used / d.vram_total_gb) * 100));
+      meters.push(el("div", { class: "meter" },
+        el("div", { class: "cap" },
+          el("span", {}, d.vendor === "apple" ? "unified memory" : "video memory"),
+          el("b", {}, `${gb(d.vram_free_gb)} free of ${gb(d.vram_total_gb)}`)),
+        el("div", { class: "track" },
+          el("div", { class: "fill vram", style: `width:${pct}%` }))));
+    }
+
+    // Temperature, clock and power, when a vendor tool or darwin-perf reported them.
+    // A card clocking down looks exactly like a bad hyperparameter from a loss curve,
+    // and the measured rates would record the box as slow and send it less work.
+    const chips = [];
+    if (d.temp_c !== undefined) {
+      const hot = d.temp_c >= 85 ? " hot" : d.temp_c >= 75 ? " warm" : "";
+      chips.push(el("span", { class: `label temp${hot}` }, `${Math.round(d.temp_c)}°C`));
+    }
+    if (d.clock_mhz) chips.push(el("span", { class: "label" }, `${Math.round(d.clock_mhz)} MHz`));
+    if (d.power_w !== undefined) chips.push(el("span", { class: "label" }, `${d.power_w.toFixed(1)} W`));
+    if (d.throttled) chips.push(el("span", { class: "label bad" }, "▼ throttled"));
+    if (chips.length) meters.push(el("div", { class: "chips" }, chips));
+
+    if (d.gpu_util_pct !== undefined) {
+      meters.push(el("div", { class: "meter" },
+        el("div", { class: "cap" },
+          el("span", {}, "gpu"),
+          el("b", {}, `${Math.round(d.gpu_util_pct)}% busy`)),
+        el("div", { class: "track" },
+          el("div", { class: "fill util", style: `width:${Math.min(100, d.gpu_util_pct)}%` }))));
+    }
+
+    const state = free === 0
+      ? { cls: "busy", text: queued ? `working · ${queued} waiting` : "working" }
+      : { cls: "", text: running ? `${running} running · ${free} free` : "idle" };
+
+    return el("div", { class: `peer${p.is_self ? " self" : ""}` },
+      el("div", { class: "row" },
+        el("div", {},
+          el("div", { class: "name" }, p.name),
+          el("div", { class: "url" }, p.base_url || p.host || ""))),
+      el("div", { class: "row", style: "margin-top:10px;gap:6px;flex-wrap:wrap" },
+        el("span", { class: `badge ${v.key}` }, el("span", { class: "chip" }), v.text),
+        d.gpu ? el("span", { class: "label" }, d.gpu) : null,
+        d.ram_gb ? el("span", { class: "label" }, `${Math.round(d.ram_gb)} GB RAM`) : null),
+      (p.clusters || []).length > 1
+        ? el("div", { class: "labels" },
+            p.clusters.map((c) => el("span", { class: "label" }, c)))
+        : null,
+      (d.labels || []).length
+        ? el("div", { class: "labels" }, d.labels.map((l) => el("span", { class: "label" }, l)))
+        : null,
+      (p.serving || []).length
+        ? el("div", { class: "labels" },
+            el("span", { class: "why" }, "serving"),
+            p.serving.map((s) => el("span", { class: "label" }, s)))
+        : null,
+      ...meters,
+      el("div", { class: "state" },
+        el("span", { class: `pulse ${state.cls}` }),
+        p.lock ? `measuring · ${p.lock}` : state.text,
+        p.commit && p.commit !== "?" ? el("span", { class: "why" }, ` · ${p.commit}`) : null));
+  }
+
+  class ClusterView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#cluster");
+      // What the sweep form holds, kept across the 4s redraw so a tick is not lost to it.
+      this.sweep = { models: new Set(), peers: new Set(), sample: "", label: "", note: "" };
+      M.onRoute((route) => {
+        const on = route === "cluster";
+        this.box.hidden = !on;
+        clearTimeout(this.timer);
+        if (on) this.draw();
+      });
+    }
+
+    async draw() {
+      const r = await api("/ui/fleet");
+      if (M.refused(r)) return;
+      if (this.box.hidden) return;
+      M.group = r.group || "";
+      const peers = r.peers || [];
+      this.peers = peers;
+      const totalSlots = peers.reduce((a, p) => a + (p.slots || 1), 0);
+      const busy = peers.reduce((a, p) => a + ((p.slots || 1) - (p.free ?? 0)), 0);
+
+      this.querySelector("#cluster-sub").textContent =
+        peers.length === 1 ? "One machine." : `${peers.length} machines on this network.`;
+      this.querySelector("#cluster-stat").replaceChildren(
+        el("div", {}, el("div", { class: "n" }, peers.length),
+           el("div", { class: "k" }, "machines")),
+        el("div", {}, el("div", { class: "n" }, `${busy}/${totalSlots}`),
+           el("div", { class: "k" }, "slots in use")),
+        el("div", {}, el("div", { class: "n" },
+             peers.filter((p) => M.vendorOf(p.device || {}).key !== "cpu").length),
+           el("div", { class: "k" }, "with a GPU")));
+
+      this.querySelector("#cluster-cards").replaceChildren(peers.length
+        ? el("div", { class: "grid" }, peers.map(peerCard))
+        : el("div", { class: "empty" },
+            el("div", { class: "big" }, "Just this machine so far"),
+            el("div", {}, "Install ml-stack on another machine and open it."),
+            el("div", {}, "Type the same passphrase, and it appears here on its own.")));
+
+      const nav = document.querySelector("fleet-nav");
+      if (nav && nav.paint) nav.paint("cluster");
+
+      api("/ui/clusters").then((c) => this.drawClusters(c.clusters || []));
+      this.drawSweep(r);
+
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.draw(), 4000);
+    }
+
+    // Which clusters this machine is in, and the way in and out of one.
+    drawClusters(rows) {
+      const joined = this.querySelector("#cluster-joined");
+      const words = el("input", { type: "password", id: "words", placeholder: "passphrase" });
+      const named = el("input", { type: "text", id: "cname", placeholder: "name (optional)" });
+      const note = el("div");
+      const persist = el("input", { type: "checkbox", id: "persist" });
+      const add = el("button", { class: "ghost small" }, "Join");
+      // The same `join` as `ml-stack-fleet join`: the checks, the cluster, the daemon
+      // (this one), at logon if ticked, and then what the fleet sees.
+      add.onclick = async () => {
+        const said = words.value.trim();
+        if (said && said.length < M.MIN_PASS) {
+          note.replaceChildren(el("div", { class: "err" },
+            `A passphrase needs at least ${M.MIN_PASS} characters.`));
+          return;
+        }
+        add.disabled = true;
+        note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
+          " Joining…"));
+        const got = await api("/ui/fleet/join", { method: "POST",
+          body: JSON.stringify({ passphrase: said, group: named.value.trim(),
+                                 persist: persist.checked }) });
+        add.disabled = false;
+        if (got.error) {
+          note.replaceChildren(el("div", { class: "err" }, got.error));
+          return;
+        }
+        words.value = ""; named.value = "";
+        note.replaceChildren(
+          el("div", { class: "ok" }, `Joined ${got.group}`
+            + (got.persisted ? ", and it starts at logon." : ".")),
+          el("pre", { class: "cmd" }, (got.said || []).join("\n")));
+        api("/ui/clusters").then((c) => this.drawClusters(c.clusters || []));
+        this.draw();
+      };
+
+      joined.replaceChildren(
+        el("h2", {}, "Clusters"),
+        el("div", { class: "hint" },
+          "This machine answers to every cluster listed. Machines find each other by "
+          + "sharing a passphrase."),
+        ...(rows.length
+          ? rows.map((c, i) =>
+              el("div", { class: "row" },
+                el("span", {}, el("b", {}, c.group),
+                  el("span", { class: "why" },
+                    i === 0 ? "this machine answers as this one" : "also in this one")),
+                el("button", { class: "ghost small",
+                  onclick: async () => {
+                    const left = await api("/ui/clusters", { method: "DELETE",
+                      body: JSON.stringify({ group: c.group }) });
+                    this.drawClusters(left.clusters || []);
+                    this.draw();
+                  } }, "Leave")))
+          : [el("div", { class: "hint" }, "In no cluster. Join one below.")]),
+        el("div", { class: "searchrow" }, words, named, add),
+        el("label", { class: "opt", for: "persist" }, persist,
+          el("span", {}, el("b", {}, "Start at logon"),
+            el("span", { class: "why" },
+              "so this machine is back in the fleet after a restart"))),
+        note);
+    }
+
+    // A sweep across the fleet: the models the peers hold, one job each, detached.
+    drawSweep(r) {
+      const sweep = this.sweep;
+      const bench = r.bench || {};
+      const held = r.models || [];
+      const peers = r.peers || [];
+      const names = peers.map((p) => p.name);
+      const command = () => {
+        const parts = ["ml-stack-bench sweep --fleet"];
+        for (const m of held) if (sweep.models.has(m)) parts.push(`--serve ${m}`);
+        const chosen = names.filter((n) => sweep.peers.has(n));
+        if (chosen.length && chosen.length < names.length) parts.push(`--peers ${chosen.join(",")}`);
+        if (sweep.sample) parts.push(`--sample ${sweep.sample}`);
+        if (sweep.label) parts.push(`--label ${sweep.label}`);
+        return parts.join(" ");
+      };
+      const shown = el("pre", { class: "cmd" }, command());
+      const tick = (set, key, on) => {
+        if (on) set.add(key); else set.delete(key);
+        shown.textContent = command();
+      };
+      const box = (set, key, label, why) => {
+        const input = el("input", { type: "checkbox", id: `tick-${key}` });
+        input.checked = set.has(key);
+        input.onchange = () => tick(set, key, input.checked);
+        return el("label", { class: "opt", for: `tick-${key}` }, input,
+          el("span", {}, el("b", {}, label), why ? el("span", { class: "why" }, why) : null));
+      };
+      const heldBy = (m) => peers.filter((p) => (p.models || []).includes(m)).map((p) => p.name);
+      const sampleBox = el("input", { type: "text", id: "sample",
+        placeholder: "questions (all)", value: sweep.sample });
+      sampleBox.oninput = () => {
+        sweep.sample = sampleBox.value.replace(/\D/g, "");
+        shown.textContent = command();
+      };
+      const labelBox = el("input", { type: "text", id: "label",
+        placeholder: "label (optional)", value: sweep.label });
+      labelBox.oninput = () => { sweep.label = labelBox.value.trim(); shown.textContent = command(); };
+      const sweepNote = el("div", {}, sweep.note ? el("div", { class: "hint" }, sweep.note) : null);
+      const start = el("button", { class: "ghost small" }, "Run across fleet");
+      start.disabled = !held.some((m) => sweep.models.has(m)) || !!(bench.measuring);
+      start.onclick = async () => {
+        start.disabled = true;
+        const got = await api("/ui/bench/sweep", { method: "POST",
+          body: JSON.stringify({ models: held.filter((m) => sweep.models.has(m)),
+                                 peers: names.filter((n) => sweep.peers.has(n)),
+                                 sample: Number(sweep.sample || 0), label: sweep.label }) });
+        if (got.error) {
+          sweep.note = "";
+          sweepNote.replaceChildren(el("div", { class: "err" }, got.error));
+          start.disabled = false;
+          return;
+        }
+        sweep.note = `Started (pid ${got.pid}); log ${got.log}`;
+        this.draw();
+      };
+      const stop = bench.measuring
+        ? el("button", { class: "ghost small", onclick: async () => {
+            const got = await api("/ui/bench/stop", { method: "POST",
+              body: JSON.stringify({ pid: bench.measuring.pid }) });
+            sweep.note = got.error || got.stopped || "";
+            this.draw();
+          } }, "Stop")
+        : null;
+      const history = el("div", { class: "hint" }, "Loading…");
+      api("/ui/bench/history").then((h) => {
+        const rows = (h.history || []).slice(0, 8);
+        history.replaceChildren(...(rows.length
+          ? rows.map((e) => el("div", { class: "row" },
+              el("span", {}, el("b", {}, `${e.subcommand} ${e.name}`),
+                el("span", { class: "why" },
+                  `${e.started} · ${e.exit}${e.seconds ? ` · ${Math.round(e.seconds)}s` : ""}`
+                  + `${e.questions ? ` · ${e.questions} questions` : ""}`))))
+          : [el("div", { class: "hint" }, h.error || "Nothing has been measured yet.")]));
+      });
+
+      this.querySelector("#cluster-sweep").replaceChildren(
+        el("h2", {}, "Run across the fleet"),
+        el("div", { class: "hint" },
+          bench.available === false ? bench.text
+          : "Each model is measured on a machine that holds it, one job per model, and the "
+            + "runs are gathered here. Every machine must be on this checkout's commit."),
+        held.length
+          ? el("div", { class: "two" },
+              el("div", {}, el("h2", {}, "models"),
+                held.map((m) => box(sweep.models, m, m, `on ${heldBy(m).join(", ")}`))),
+              el("div", {}, el("h2", {}, "machines"),
+                peers.map((p) => box(sweep.peers, p.name, p.name,
+                  p.commit && p.commit !== "?" ? p.commit : "")),
+                el("div", { class: "hint" },
+                  "None ticked means whichever the fleet plans over.")))
+          : el("div", { class: "hint" }, "No machine has a model yet. Get one under Models."),
+        el("div", { class: "searchrow" }, sampleBox, labelBox, start, stop),
+        shown,
+        el("pre", { class: "cmd" }, bench.text || ""),
+        sweepNote,
+        el("h2", {}, "History"),
+        history);
+    }
+  }
+  customElements.define("cluster-view", ClusterView);
+})();
+</script>

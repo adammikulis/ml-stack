@@ -1,0 +1,427 @@
+<!-- first-run: naming this machine, joining a cluster, and what it should be able to do -->
+<template>
+  <div class="centre" id="first-run" hidden><div class="card" id="first-run-card"></div></div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+
+  const STEPS = 7;
+
+  class FirstRun extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#first-run");
+      this.card = this.querySelector("#first-run-card");
+      this.state = { step: 0, name: "", group: "", pass: "", clusters: [],
+                     libraries: null, suggest: null, prefs: null, install: null };
+      M.onRoute((route) => {
+        const on = route === "first-run";
+        this.box.hidden = !on;
+        if (on) this.open();
+      });
+    }
+
+    async open() {
+      this.setup = await api("/ui/setup");
+      this.state.step = 0;
+      this.paint();
+    }
+
+    show(...nodes) { this.card.replaceChildren(...nodes); }
+
+    go(n) { this.state.step = n; this.paint(); }
+
+    steps(n, back) {
+      return el("div", {},
+        back ? el("button", { class: "back", onclick: back }, "← Back") : null,
+        el("div", { class: "steps" },
+          Array.from({ length: STEPS }, (_, i) => el("i", { class: i <= n ? "on" : "" }))));
+    }
+
+    paint() {
+      const s = this.state.step;
+      if (s === 0) return this.nameStep();
+      if (s === 1) return this.clustersStep();
+      if (s === 2) return this.jobStep();
+      if (s === 3) return this.startStep();
+      if (s === 4) return this.runStep();
+      if (s === 5) return this.awayStep();
+      return this.doneStep();
+    }
+
+    nameStep() {
+      const st = this.state;
+      st.name = st.name || this.setup.name || "";
+      const name = el("input", { type: "text", value: st.name, id: "n" });
+      this.show(
+        this.steps(0),
+        el("h1", {}, "Set up this machine"),
+        el("p", { class: "sub" },
+          "A few questions, and every answer can be changed afterwards."),
+        el("label", { for: "n" }, "What should this machine be called?"),
+        name,
+        el("div", { class: "hint" }, "Other machines will show it under this name."),
+        el("button", { onclick: () => {
+          st.name = name.value.trim() || this.setup.name;
+          this.go(1);
+        } }, "Continue"));
+    }
+
+    // Step 1: the clusters this machine belongs to. Skippable: a machine on its own is a
+    // working machine, and one that belongs to three is the same row three times over.
+    async clustersStep() {
+      const st = this.state;
+      const rows = el("div");
+      const note = el("div", { class: "hint" });
+      const pass = el("input", { type: "password", id: "p1", value: st.pass,
+                                 placeholder: "passphrase" });
+      const grp = el("input", { type: "text", id: "g", value: st.group,
+                                placeholder: "name (optional)" });
+      const add = el("button", { class: "ghost small" }, "Join");
+
+      const remember = () => { st.pass = pass.value; st.group = grp.value.trim(); };
+      const draw = (list) => {
+        st.clusters = list;
+        rows.replaceChildren(...list.map((c, i) =>
+          el("div", { class: "row" },
+            el("span", {}, el("b", {}, c.group),
+              el("span", { class: "why" },
+                i === 0 ? "this machine answers as this one" : "also in this one")),
+            el("button", { class: "ghost small",
+              onclick: async () => {
+                const left = await api("/ui/clusters", { method: "DELETE",
+                  body: JSON.stringify({ group: c.group }) });
+                draw(left.clusters || []);
+              } }, "Leave"))));
+      };
+      const check = () => { add.disabled = pass.value.trim().length < M.MIN_PASS; };
+      pass.oninput = check;
+
+      add.onclick = async () => {
+        add.disabled = true;
+        note.replaceChildren(el("span", { class: "spin" }), " Joining…");
+        const named = grp.value.trim() || "ml-stack";
+        const r = await api("/ui/setup/join", { method: "POST",
+          body: JSON.stringify({ passphrase: pass.value, group: named }) });
+        if (!r.ok) {
+          note.replaceChildren(el("div", { class: "err" }, r.error || "Could not join."));
+          check();
+          return;
+        }
+        pass.value = grp.value = "";
+        st.pass = st.group = "";
+        check();
+        note.textContent = "Type the same passphrase on your other machines. If you "
+          + "mistyped it, leave and join again.";
+        draw((await api("/ui/clusters")).clusters || []);
+      };
+
+      this.show(
+        this.steps(1, () => { remember(); this.go(0); }),
+        el("h1", {}, "Clusters"),
+        el("p", { class: "sub" },
+          "Machines that share a passphrase find each other and send each other work. "
+          + "You can do this later instead — this one works on its own until you do."),
+        rows,
+        el("div", { class: "searchrow" }, pass, grp, add),
+        note,
+        el("button", { onclick: () => { remember(); this.go(2); } }, "Continue"));
+
+      draw((await api("/ui/clusters")).clusters || []);
+      check();
+      note.textContent = "A few words you will remember. Everyone who knows them can run "
+        + "commands on every machine in the cluster.";
+    }
+
+    // Steps 2 and 3: what work this machine takes, and when it runs. Every box is
+    // pre-ticked from what the machine actually is, and every one shows why.
+    async asked() {
+      const st = this.state;
+      if (!st.suggest) st.suggest = await api("/ui/setup/suggest");
+      const r = st.suggest;
+      const s = r.suggest || {};
+      const pick = st.prefs || (st.prefs = {
+        labels: (s.labels?.value || []).join(","),
+        autostart: s.autostart?.value || "manual",
+        work_hours: !!s.work_hours?.value,
+        on_paused: s.on_paused?.value || "stop",
+      });
+      const spec = (label, why) => el("span", {},
+        el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+      const radio = (group, value, label, why) => {
+        const id = `${group}-${value}`;
+        const input = el("input", { type: "radio", name: group, id,
+                                    ...(pick[group] === value ? { checked: "1" } : {}) });
+        input.onchange = () => { pick[group] = value; };
+        return el("label", { class: "opt", for: id }, input, spec(label, why));
+      };
+      const check = (key, label, why) => {
+        const input = el("input", { type: "checkbox", id: key,
+                                    ...(pick[key] ? { checked: "1" } : {}) });
+        input.onchange = () => { pick[key] = input.checked; };
+        return el("label", { class: "opt", for: key }, input, spec(label, why));
+      };
+      return { s, machine: r.machine || {}, pick, spec, radio, check };
+    }
+
+    async jobStep() {
+      const { s, machine, spec, radio, check } = await this.asked();
+      this.show(
+        this.steps(2, () => this.go(1)),
+        el("h1", {}, "What should this machine do?"),
+        el("p", { class: "sub" },
+          machine.gpu ? `Found ${machine.gpu}. These are set from that — change either.`
+                      : "These are set from what this machine is — change either."),
+        el("div", { class: "group" },
+          el("h2", {}, "Its job"),
+          radio("labels", "train", "Train models", s.labels?.why),
+          radio("labels", "prep", "Prepare data", "tokenizing and packing, while others train"),
+          radio("labels", "train,prep", "Both", "")),
+        el("div", { class: "group" },
+          el("h2", {}, "When I need the machine"),
+          check("work_hours", "Don't take work on weekdays, 9 to 5",
+            s.work_hours?.why || "for a machine somebody works on"),
+          el("label", { class: "opt" },
+            el("input", { type: "checkbox", checked: "1", disabled: "1" }),
+            spec("Pausing stops what is running", s.on_paused?.why))),
+        el("button", { onclick: () => this.go(3) }, "Continue"));
+    }
+
+    async startStep() {
+      const { s, pick, radio } = await this.asked();
+      const go = el("button", {}, "Continue");
+      const outcome = el("div");
+      go.onclick = async () => {
+        go.disabled = true;
+        go.innerHTML = '<span class="spin"></span> Applying…';
+        const res = await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+          ...pick, labels: pick.labels ? pick.labels.split(",") : [] }) });
+        if (res.manual) {
+          go.disabled = false;
+          go.textContent = "Continue";
+          outcome.replaceChildren(
+            el("div", { class: "err" },
+              res.manual_why || "This part needs administrator rights."),
+            el("pre", { class: "cmd" }, res.manual),
+            el("button", { class: "ghost", onclick: () => this.go(4) },
+              "Skip this — continue"));
+          return;
+        }
+        this.go(4);
+      };
+      this.show(
+        this.steps(3, () => this.go(2)),
+        el("h1", {}, "When should it start?"),
+        el("p", { class: "sub" },
+          "It keeps running after you close the window, so the other machines can still "
+          + "send it work."),
+        radio("autostart", "login", "When I log in",
+          s.autostart?.value === "login" ? s.autostart.why : ""),
+        radio("autostart", "boot", "When the computer starts",
+          "even before anyone logs in — your computer will ask for your password"),
+        radio("autostart", "manual", "Only when I open it", ""),
+        go, outcome);
+    }
+
+    // Step 4: what this machine should be able to run. Asked here rather than left in
+    // Settings, because a machine that can do nothing yet is the state everyone starts in.
+    chosen() {
+      const st = this.state;
+      return st.install || (st.install = {
+        want: [], chat: true, context: 8192, updates: true, getModels: true, onClose: "",
+      });
+    }
+
+    optBox(id, on, label, why, flip) {
+      const input = el("input", { type: "checkbox", id, ...(on ? { checked: "1" } : {}) });
+      input.onchange = () => flip(input.checked);
+      return el("label", { class: "opt", for: id }, input, M.row(label, why));
+    }
+
+    async runStep() {
+      const st = this.state;
+      if (!st.libraries) st.libraries = await api("/ui/libraries");
+      const offered = st.libraries.libraries || [];
+      const kept = this.chosen();
+      if (!kept.picked) {
+        kept.picked = true;
+        kept.want = offered.filter((x) => x.default || x.installed).map((x) => x.name);
+      }
+      const want = new Set(kept.want);
+      const note = el("div");
+      const size = el("div", { class: "hint" });
+      const go = el("button", {}, "Install and continue");
+      const later = el("button", { class: "ghost", onclick: () => this.go(5) }, "Not now");
+
+      const paint = () => {
+        const mb = offered.filter((x) => want.has(x.name))
+                          .reduce((a, x) => a + (x.size_mb || 0), 0);
+        size.textContent = mb
+          ? `About ${mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`} to download, `
+            + "alongside ml-stack rather than into your system Python."
+          : "Installed alongside ml-stack, not into your system Python.";
+      };
+
+      go.onclick = async () => {
+        go.disabled = true; later.disabled = true;
+        const doing = (what) => note.replaceChildren(
+          el("div", { class: "hint" }, el("span", { class: "spin" }), " " + what));
+        const stop = (why) => {
+          note.replaceChildren(el("div", { class: "err" }, why));
+          go.disabled = false; later.disabled = false;
+        };
+        try {
+          if (kept.chat) {
+            doing("Getting the model server…");
+            const got = await api("/ui/serving/install", { method: "POST" });
+            if (got.error) return stop(got.error);
+          }
+          const add = [...want];
+          if (add.length) {
+            doing(`Installing ${add.join(", ")}… this can take a few minutes.`);
+            const r = await api("/ui/libraries", { method: "POST",
+              body: JSON.stringify({ install: add }) });
+            if (r.error) return stop(r.error);
+          }
+        } catch (e) {
+          return stop(String(e));
+        }
+        this.go(5);
+      };
+
+      paint();
+      this.card.className = "card wide";
+      this.show(
+        this.steps(4, () => this.go(3)),
+        el("h1", {}, "What should it be able to do?"),
+        el("p", { class: "sub" },
+          "Ticked from what this machine is. Anything here can be changed later in "
+          + "Settings."),
+        el("div", { class: "cap" }, el("span", {}, "CHATTING")),
+        this.optBox("chat", kept.chat, "Run models and chat with them",
+          "downloads llama.cpp, about 20 MB; models come later and are your choice",
+          (on) => { kept.chat = on; }),
+        M.contextPicker(kept.context, (n) => { kept.context = n; }),
+        offered.length ? el("div", { class: "cap" }, el("span", {}, "TRAINING")) : null,
+        ...offered.map((lib) =>
+          this.optBox(`lib_${lib.name}`, want.has(lib.name), lib.title,
+            `${lib.blurb || ""}${lib.size_mb ? ` — about ${lib.size_mb} MB` : ""}`,
+            (on) => {
+              if (on) want.add(lib.name); else want.delete(lib.name);
+              kept.want = [...want];
+              paint();
+            })),
+        size, go, later, note);
+    }
+
+    // Step 5: what it does while nobody is looking at it.
+    awayStep() {
+      const kept = this.chosen();
+      const st = this.state;
+      const go = el("button", {}, "Continue");
+      go.onclick = async () => {
+        go.disabled = true;
+        go.innerHTML = '<span class="spin"></span> Saving…';
+        await api("/ui/setup/prefs", { method: "POST", body: JSON.stringify({
+          context: kept.context, auto_update: kept.updates,
+          autodownload_models: kept.getModels, on_close: kept.onClose,
+          autostart: (st.prefs || {}).autostart || "manual" }) });
+        this.go(6);
+      };
+      this.card.className = "card";
+      this.show(
+        this.steps(5, () => this.go(4)),
+        el("h1", {}, "When you are not using it"),
+        el("p", { class: "sub" },
+          "It keeps itself current, and stays reachable while the window is shut."),
+        el("div", { class: "cap" }, el("span", {}, "KEEPING UP TO DATE")),
+        this.optBox("upd", kept.updates, "Download and install updates automatically",
+          "checked once a day, put on when no job is running, and it restarts itself",
+          (on) => { kept.updates = on; }),
+        this.optBox("getm", kept.getModels, "Get models automatically",
+          "from another machine on your network if one has it, otherwise the internet",
+          (on) => { kept.getModels = on; }),
+        el("div", { class: "cap" }, el("span", {}, "CLOSING THE WINDOW")),
+        ...[["", "Ask me each time"],
+            ["background", "Keep running so the others can still reach it"],
+            ["quit", "Quit and leave the cluster"]].map(([value, label]) => {
+          const id = `close_${value || "ask"}`;
+          const input = el("input", { type: "radio", name: "onclose", id,
+                                      ...(value === kept.onClose ? { checked: "1" } : {}) });
+          input.onchange = () => { if (input.checked) kept.onClose = value; };
+          return el("label", { class: "opt", for: id }, input, M.row(label, ""));
+        }),
+        go);
+    }
+
+    // The last step. Not a command: telling someone to open a terminal is the same wall
+    // as telling them to paste a 32-byte key, one layer up.
+    doneStep() {
+      const st = this.state;
+      api("/ui/setup/done", { method: "POST" });
+      const joined = st.clusters[0];
+      const open = el("button", { onclick: () => location.reload() },
+        joined ? "Open the cluster" : "Open ml-stack");
+      const ssh = el("div", { class: "aside" },
+        el("div", { class: "hint" },
+          "A machine with no screen — a server, a Pi — is set up over ssh instead:"),
+        el("pre", { class: "cmd" }, "ml-stack-peers setup"));
+
+      if (!joined) {
+        return this.show(
+          this.steps(6),
+          el("h1", {}, `“${st.name}” is ready`),
+          el("p", { class: "sub" },
+            "It is on its own: it will run models and train here, and nothing else on your "
+            + "network can see it."),
+          el("p", { class: "hint" },
+            "Join a cluster whenever you like, from the Cluster screen."),
+          open, ssh);
+      }
+
+      const looking = el("div", { class: "watching" },
+        el("span", { class: "spin" }), " Watching for other machines…");
+      const found = el("div");
+      const poll = async () => {
+        const r = await api("/ui/setup/peers");
+        const others = (r.peers || []).filter((p) => !p.is_self);
+        if (others.length) {
+          looking.remove();
+          // Replaces the skip button rather than sitting above it: two buttons that do
+          // the same thing is a choice the reader has to stop and make, about nothing.
+          open.remove();
+          found.replaceChildren(
+            el("div", { class: "ok" }, `Found ${others.map((p) => p.name).join(", ")}.`),
+            el("button", { onclick: () => location.reload() }, "Open the cluster"));
+          return;
+        }
+        setTimeout(poll, 3000);
+      };
+      poll();
+
+      const step = (n, title, body) =>
+        el("li", {}, el("span", { class: "num" }, n),
+          el("div", {}, el("b", {}, title), body ? el("div", { class: "d" }, body) : null));
+
+      this.show(
+        this.steps(6),
+        el("h1", {}, `Joined “${joined.group}”`),
+        el("p", { class: "sub" }, "Now add your other machines. On each one:"),
+        el("ol", { class: "howto" },
+          step(1, "Install ml-stack", "The same installer you used here."),
+          step(2, "Open it", "It opens in your browser and asks the same questions."),
+          step(3, "Type the same passphrase",
+            `The words you chose${joined.group !== "ml-stack"
+              ? `, and the cluster name “${joined.group}”` : ""}.`)),
+        el("p", { class: "hint" },
+          "They find each other on their own. Nothing else to configure."),
+        looking, found, ssh, open);
+    }
+  }
+  customElements.define("first-run", FirstRun);
+})();
+</script>

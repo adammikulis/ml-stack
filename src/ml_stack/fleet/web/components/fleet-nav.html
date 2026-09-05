@@ -1,0 +1,41 @@
+<!-- fleet-nav: the bar across the top, and the way between screens -->
+<style>
+fleet-nav { display: contents; }
+</style>
+<template>
+      <header class="top">
+        <div class="brand"><span class="dot"></span>ml-stack<span class="group" id="nav-group"></span></div>
+        <nav class="tabs" id="nav-tabs"></nav>
+      </header>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const TABS = [["Chat", "chat"], ["Cluster", "cluster"], ["Fit", "fit"],
+                ["Models", "models"], ["Settings", "settings"]];
+  // a screen the page was assembled without has no tab
+  const here = ([, name]) => !!document.querySelector(`${name}-view`);
+
+  class FleetNav extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.tabs = this.querySelector("#nav-tabs");
+      this.group = this.querySelector("#nav-group");
+      M.onRoute((route) => this.paint(route));
+    }
+
+    paint(route) {
+      this.group.textContent = M.group ? `· ${M.group}` : "";
+      this.tabs.replaceChildren(
+        ...TABS.filter(here).map(([label, name]) => (name === route
+          ? el("a", { class: "on", href: "#" }, label)
+          : el("a", { href: "#", onclick: (e) => { e.preventDefault(); M.go(name); } },
+               label))),
+        el("a", { href: "#", onclick: M.signOut }, "Sign out"));
+    }
+  }
+  customElements.define("fleet-nav", FleetNav);
+})();
+</script>

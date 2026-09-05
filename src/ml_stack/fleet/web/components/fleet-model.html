@@ -1,0 +1,154 @@
+<!-- fleet-model: the daemon's routes, the pieces every screen builds out of, and which screen is showing -->
+<style>
+cluster-view, chat-view, models-view, settings-view, fit-view { display: contents; }
+[hidden] { display: none !important; }
+</style>
+<script>
+(function () {
+  const M = window.fleetModel = {};
+  const H = M.headers = { "X-ML-Stack-UI": "1", "Content-Type": "application/json" };
+
+  M.MIN_PASS = 5;
+
+  /** One call to the daemon: `{ok, status, ...body}`. */
+  M.api = async function (path, opts = {}) {
+    const r = await fetch(path, { ...opts, headers: { ...H, ...(opts.headers || {}) } });
+    let body = {};
+    try { body = await r.json(); } catch { /* an empty body is fine */ }
+    return { ok: r.ok, status: r.status, ...body };
+  };
+
+  /** One element, its attributes and its children. */
+  M.el = function (tag, attrs = {}, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "class") n.className = v;
+      else if (k === "html") n.innerHTML = v;
+      else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+      else if (v !== null && v !== undefined) n.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) {
+      if (kid === null || kid === undefined || kid === false) continue;
+      n.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+    }
+    return n;
+  };
+  const el = M.el;
+
+  M.row = (label, why) => el("span", {},
+    el("b", {}, label), why ? el("span", { class: "why" }, why) : null);
+
+  M.gb = (n) => (n === undefined || n === null ? null : `${Number(n).toFixed(1)} GB`);
+
+  M.fileSize = (n) => {
+    if (n >= 1e9) return `${(n / 1e9).toFixed(1)} GB`;
+    if (n >= 1e6) return `${Math.round(n / 1e6)} MB`;
+    if (n >= 1e3) return `${Math.round(n / 1e3)} KB`;
+    return `${n || 0} bytes`;
+  };
+
+  // The badge has to be right: torch's ROCm build answers True to every CUDA question,
+  // so the daemon reports vendor separately and this only renders what it is told.
+  M.vendorOf = function (d = {}) {
+    if (d.rocm || d.vendor === "amd") return { key: "amd", text: "AMD · ROCm" };
+    if (d.cuda || d.vendor === "nvidia") return { key: "nvidia", text: "NVIDIA · CUDA" };
+    if (d.vendor === "apple") return { key: "apple", text: "Apple · Metal" };
+    return { key: "cpu", text: `${d.cpus || "?"} CPU` };
+  };
+
+  // What a conversation costs to keep in memory. Two tensors per layer, per token, at
+  // two bytes each; the shape below is a 27B-class model, which is what most people end
+  // up running. A smaller model costs proportionally less.
+  const CTX_STEPS = M.CTX_STEPS = [2048, 4096, 8192, 16384, 32768, 65536, 131072];
+  const KV_MB_PER_TOKEN = 2 * 48 * 8 * 128 * 2 / (1024 * 1024);
+
+  M.ctxRam = (tokens) => {
+    const mb = tokens * KV_MB_PER_TOKEN;
+    return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
+  };
+
+  M.ctxWords = (n) => (n >= 1024 ? `${Math.round(n / 1024)}k tokens` : `${n} tokens`);
+
+  /** The slider for how much a conversation reads, and what it costs. */
+  M.contextPicker = function (start, onPick) {
+    let at = Math.max(0, CTX_STEPS.indexOf(start));
+    if (at < 0) at = 2;
+    const out = el("b", {});
+    const slider = el("input", { type: "range", min: "0",
+      max: String(CTX_STEPS.length - 1), value: String(at), id: "ctx" });
+    const paint = () => {
+      const n = CTX_STEPS[Number(slider.value)];
+      out.textContent = `${M.ctxWords(n)} · about ${M.ctxRam(n)} of memory`;
+      onPick(n);
+    };
+    slider.oninput = paint;
+    paint();
+    return el("div", { class: "meter" },
+      el("div", { class: "cap" }, el("span", {}, "how much it reads"), out),
+      slider,
+      el("div", { class: "hint" },
+        "Roughly a page of text per 500 tokens. The memory is for a 27B model; a "
+        + "smaller one costs less."));
+  };
+
+  // ------------------------------------------------------------- which screen is showing
+  const IN_APP = ["cluster", "chat", "models", "settings", "fit"];
+  const watchers = [];
+  M.route = "";
+  M.group = "";
+  M.signInMessage = "";
+
+  /** Show one screen by name, and tell every component that is watching. */
+  M.go = function (name) {
+    M.route = name;
+    const app = document.getElementById("app");
+    if (app) app.hidden = !IN_APP.includes(name);
+    for (const fn of watchers) fn(name);
+  };
+
+  /** Run `fn` whenever the screen changes, and now if one is already showing. */
+  M.onRoute = function (fn) {
+    watchers.push(fn);
+    if (M.route) fn(M.route);
+  };
+
+  /** Ask for the passphrase, saying why. */
+  M.signIn = function (message) {
+    M.signInMessage = message || "";
+    M.go("sign-in");
+  };
+
+  /** True when the route refused for want of a session, and the screen has been changed. */
+  M.refused = function (r) {
+    if (r && r.status === 401) { M.signIn(); return true; }
+    return false;
+  };
+
+  M.signOut = async function (e) {
+    if (e) e.preventDefault();
+    await M.api("/ui/session", { method: "DELETE" });
+    M.signIn();
+  };
+
+  /** What to show when the page opens: setup, sign in, or a screen. */
+  M.boot = async function () {
+    const asked = location.pathname.replace(/\/$/, "") === "/ui/fit" ? "fit" : "cluster";
+    const opened = document.querySelector(`${asked}-view`) ? asked
+      : (IN_APP.find((n) => document.querySelector(`${n}-view`)) || asked);
+    const setup = await M.api("/ui/setup");
+    if (setup.needs_setup) return M.go("first-run");
+    if (!setup.needs_password) return M.go(opened);
+    const s = await M.api("/ui/session");
+    return s.signed_in ? M.go(opened) : M.signIn();
+  };
+
+  class FleetModel extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      M.boot();
+    }
+  }
+  customElements.define("fleet-model", FleetModel);
+})();
+</script>

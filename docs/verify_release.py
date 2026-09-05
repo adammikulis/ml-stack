@@ -344,12 +344,12 @@ def _():
 def _():
     box = Box("ui")
     try:
-        for path, kind in (("/ui/", "text/html"), ("/ui/static/app.js", "text/javascript"),
+        for path, kind in (("/ui/", "text/html; charset=utf-8"),
                            ("/ui/static/style.css", "text/css")):
             req = urllib.request.Request(f"http://127.0.0.1:{box.port}{path}")
             with urllib.request.urlopen(req, timeout=5) as r:
                 assert r.status == 200 and r.headers["Content-Type"] == kind, path
-        return "index, script and stylesheet"
+        return "the page and its stylesheet"
     finally:
         box.close()
 
@@ -475,9 +475,12 @@ def _():
         capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-200:]
     names = zipfile.ZipFile(sorted(out.glob("*.whl"))[-1]).namelist()
-    for asset in ("index.html", "style.css", "app.js"):
+    from ml_stack.fleet.page import COMPONENTS
+    for asset in ("shell.html", "style.css"):
         assert f"ml_stack/fleet/web/{asset}" in names, asset
-    return "index.html, style.css, app.js"
+    for name in COMPONENTS:
+        assert f"ml_stack/fleet/web/components/{name}.html" in names, name
+    return f"shell.html, style.css and {len(COMPONENTS)} components"
 
 
 @check("Packaging", "installing it brings in nothing")

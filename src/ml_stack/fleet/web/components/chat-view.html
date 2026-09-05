@@ -1,0 +1,166 @@
+<!-- chat-view: the kept conversations, and one put to whatever is serving a model -->
+<template>
+  <main class="chatmain" id="chat" hidden>
+    <div class="chats" id="chat-list"></div>
+    <div class="talk">
+      <div class="pickrow" id="chat-pickrow" hidden>
+        <label for="model">Model</label>
+        <select id="model"></select>
+      </div>
+      <div class="hint" id="chat-none" hidden>
+        No model is running yet. Start one on the Models screen, or leave another
+        machine on your network serving one.
+      </div>
+      <div class="messages" id="chat-messages"></div>
+      <div id="chat-note"></div>
+      <div class="askrow" id="chat-askrow" hidden>
+        <textarea id="ask" rows="3" placeholder="Ask it something"></textarea>
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </main>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const el = M.el;
+  const api = M.api;
+
+  class ChatView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#chat");
+      this.sidebar = this.querySelector("#chat-list");
+      this.picker = this.querySelector("#model");
+      this.pickrow = this.querySelector("#chat-pickrow");
+      this.none = this.querySelector("#chat-none");
+      this.list = this.querySelector("#chat-messages");
+      this.note = this.querySelector("#chat-note");
+      this.askrow = this.querySelector("#chat-askrow");
+      this.input = this.querySelector("#ask");
+      this.send = this.querySelector("#chat-send");
+      this.open = null;
+      this.send.onclick = () => this.ask();
+      this.input.onkeydown = (e) => {
+        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); this.ask(); }
+      };
+      M.onRoute((route) => {
+        const on = route === "chat";
+        this.box.hidden = !on;
+        if (on) this.draw();
+      });
+    }
+
+    /** One message in the transcript; returns the node the reply streams into. */
+    say(role, text) {
+      const node = el("div", { class: `msg ${role}` }, text);
+      this.list.append(node);
+      this.list.scrollTop = this.list.scrollHeight;
+      return node;
+    }
+
+    async draw() {
+      const where = await api("/ui/chat");
+      if (M.refused(where)) return;
+      const available = where.models || [];
+      this.picker.replaceChildren(...available.map((m) =>
+        el("option", { value: m.model }, m.local ? m.model : `${m.model} — on ${m.peer}`)));
+      this.pickrow.hidden = !available.length;
+      this.askrow.hidden = !available.length;
+      this.none.hidden = !!available.length;
+      await this.paintList();
+      if (this.open) this.load(this.open);
+    }
+
+    async paintList() {
+      const saved = await api("/ui/conversations");
+      const rows = saved.conversations || [];
+      this.sidebar.replaceChildren(
+        el("button", { class: "ghost small",
+          onclick: () => { this.open = null; this.list.replaceChildren(); this.paintList(); } },
+          "New chat"),
+        ...rows.map((c) =>
+          el("div", { class: `chatrow${c.id === this.open ? " on" : ""}` },
+            el("a", { href: "#",
+              onclick: (e) => { e.preventDefault(); this.load(c.id).then(() => this.paintList()); } },
+              c.title || "New chat"),
+            el("button", { class: "ghost small",
+              onclick: async () => {
+                await api(`/ui/conversations/${c.id}`, { method: "DELETE" });
+                if (this.open === c.id) { this.open = null; this.list.replaceChildren(); }
+                this.paintList();
+              } }, "Delete"))));
+    }
+
+    async load(id) {
+      this.open = id;
+      const one = await api(`/ui/conversations/${id}`);
+      this.list.replaceChildren();
+      for (const m of one.messages || []) this.say(m.role, m.content);
+      if (one.model) this.picker.value = one.model;
+    }
+
+    async ask() {
+      const text = this.input.value.trim();
+      if (!text) return;
+      this.input.value = "";
+      this.note.replaceChildren();
+      if (!this.open) {
+        const made = await api("/ui/conversations", { method: "POST",
+          body: JSON.stringify({ model: this.picker.value }) });
+        this.open = made.id;
+      }
+      this.say("user", text);
+      const reply = this.say("assistant", "");
+      this.send.disabled = true;
+      try {
+        const r = await fetch("/ui/chat", { method: "POST", headers: M.headers,
+          body: JSON.stringify({ conversation: this.open, model: this.picker.value,
+            messages: [{ role: "user", content: text }] }) });
+        if (!r.ok) {
+          const why = await r.json().catch(() => ({}));
+          reply.remove();
+          this.note.replaceChildren(el("div", { class: "err" },
+            why.error || "That did not go through."));
+          return;
+        }
+        await this.stream(r, reply);
+      } finally {
+        this.send.disabled = false;
+        this.paintList();
+      }
+    }
+
+    /** Put each piece of the answer on the screen as it arrives. */
+    async stream(r, reply) {
+      const reader = r.body.getReader();
+      const decode = new TextDecoder();
+      let pending = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        pending += decode.decode(value, { stream: true });
+        const lines = pending.split("\n");
+        pending = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data:")) continue;
+          const frame = line.slice(5).trim();
+          if (!frame || frame === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(frame);
+            for (const c of parsed.choices || []) {
+              const piece = c.delta?.content || c.message?.content;
+              if (piece) {
+                reply.append(document.createTextNode(piece));
+                this.list.scrollTop = this.list.scrollHeight;
+              }
+            }
+          } catch { /* a half-arrived frame catches up next read */ }
+        }
+      }
+    }
+  }
+  customElements.define("chat-view", ChatView);
+})();
+</script>
