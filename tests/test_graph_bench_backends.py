@@ -554,13 +554,13 @@ def test_a_sweep_serves_without_the_head_and_labels_the_runs_so(tmp_path, monkey
     kw = seen["kwargs"][0]
     assert not kw.get("draft") and not kw.get("spec_type"), "the head is left out"
     assert kw.get("cache_type_k") == "q8_0", "the rest of the measured shape is kept"
-    assert [r["label"] for r in runs(seen["kept"])] == ["flash-nodraft-plain-kv-q8_0"], \
+    assert [r["label"] for r in runs(seen["kept"])] == ["flash-nodraft-plain"], \
         "the stem, -nodraft, the way, and the cache type the profile measured with"
     assert "draft_model" not in runs(seen["kept"])[0]["server"]
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--serve-label", "flash",
                         "--plain-only", "--smoke", *seen["common"]]) == 0
     assert seen["kwargs"][-1].get("draft") == "/models/mtp-tiny.gguf"
-    assert [r["label"] for r in runs(seen["kept"])][-1] == "flash-plain-kv-q8_0"
+    assert [r["label"] for r in runs(seen["kept"])][-1] == "flash-plain"
 
 
 def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_served(tmp_path,

@@ -88,7 +88,7 @@ def test_the_flags_about_the_serving_and_the_asking_ride_along():
                       "--shortlist", "3", "--serve-kv", "q8_0", "--reasoning-budget", "512",
                       "--per-question", "7", "--n-predict", "64", "--embed-url",
                       "http://127.0.0.1:1"])
-    assert "tiny-plain-kv-q8_0-rb512" in said and "tiny-shortlist-kv-q8_0-rb512" in said
+    assert "tiny-plain-rb512" in said and "tiny-shortlist-rb512" in said
     assert selfcheck(["run", "plain", "--shortlist", "3", "--store", "named.ladybug"]) \
         .startswith("run: ")
 
@@ -334,7 +334,7 @@ def test_the_shapes_that_died_in_the_preflight_pass_and_read_nothing(monkeypatch
     assert "draft:head@n2" in said and "draft:head@n8" in said
     said = selfcheck(["sweep", "--serve", "tiny.gguf", "--serve-draft", "auto",
                       "--serve-kv", "q8_0", "--reasoning-budget", "4096"])
-    assert "tiny-plain-kv-q8_0-rb4096" in said and "tiny-shortlist-kv-q8_0-rb4096" in said
+    assert "tiny-plain-rb4096" in said and "tiny-shortlist-rb4096" in said
     assert selfcheck(["sweep", "--serve", "/nowhere/at/all/absent.gguf"]).startswith("sweep: ")
     assert selfcheck(["sweep", "--serve", "hf:someone/absent-GGUF/absent-Q4_K_M.gguf"]) \
         .startswith("sweep: ")
