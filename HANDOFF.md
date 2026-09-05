@@ -241,28 +241,6 @@ worth taking, in this order:
   nodes. `ml-stack-world make --size 5000` gives one to try, and `most_messages` already
   trims the quotes; nothing trims the drawing.
 
-## One command for "is this machine ready"
-
-- [ ] **`ml-stack-setup` and `ml-stack-doctor` are one command wearing two names.**
-  `doctor.py` imports `Finding` and `ask` from `setup.py`, so `setup.py` is both a command
-  and the library the other command is built on. Both print a banner, build a list of
-  `Finding` about this machine and hand it to `ask`, which prints each and offers its fix.
-  They already overlap: `setup.look` checks the llama-server binary and the architectures
-  it reads, `doctor.builds_of` checks the managed builds' age and whether they answer
-  `--help`. And they disagree about what the answer means -- `setup.main` returns `ask`'s
-  exit code (1 only when a not-good finding carries a fix), while `doctor.main` throws
-  `ask`'s answer away and returns 1 when any finding is not good, so the same list of
-  findings exits 0 from one command and 1 from the other.
-  The shape is one command, not two subcommands: a person asking whether this machine is
-  ready should not have to know which half of the answer lives where, and the two halves
-  already check the same llama.cpp. `Finding` and `ask` belong to neither and move into a
-  module of their own (which also takes away one of the two `serve` <-> `setup` edges
-  below); `setup.look` and `doctor.look` become two groups behind `ml-stack-doctor`, run
-  together by default and selectable with `--machine` / `--checkouts`; `explain()` stays
-  where `--quiet` turns it off. One rule for the exit code, chosen: 1 when any finding is
-  not good. The visible part is that `ml-stack-setup` goes as an entry point, which is
-  Adam's call -- it is what the README, `docs/` and this file tell people to type.
-
 ## Layers
 
 - [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
@@ -272,7 +250,7 @@ worth taking, in this order:
   entry that is no longer one, so the set only shrinks. Four are two-way cycles inside one
   layer: `serve` <-> `fleet` (3 files one way, 7 the other), `serve` <-> `setup` (2 and 1),
   `fleet` <-> `setup` (1 and 1), and `sources` <-> `world` (5 and 1, going when
-  `world.Message` moves down). Nine reach up a layer: `doctor`, `fleet`, `ingest` and
+  `world.Message` moves down). Nine reach up a layer: `setup`, `fleet`, `ingest` and
   `serve` into `bench` (1, 2, 2 and 1 files); `gguf`, `hub`, `graph` and `ingest` into
   `serve` (1, 1, 3 and 1); and `graph.data` into `train.backend` for a device handle, where
   the ops that sit under both belong below `graph` rather than in the tools layer. The
