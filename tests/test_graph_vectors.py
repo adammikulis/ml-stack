@@ -175,3 +175,105 @@ def test_stands_out_on_nothing_and_with_the_gate_off():
     assert stands_out([], margin=0)                # off means everything passes, even nothing
     assert stands_out([0.7, 0.7, 0.7], margin=-1)
     assert not stands_out([0.9])                   # one result is its own mean: no margin
+
+
+# a graph where the fitter has no words of their own: they are joined to the two people who do
+SMOOTHED = {
+    "nodes": [{"id": "person:ada", "label": "Ada of Turin", "kind": "person"},
+              {"id": "person:bea", "label": "Bea of Turin", "kind": "person"},
+              {"id": "person:cyd", "label": "Cyd Marek", "kind": "person"},
+              {"id": "topic:robotics", "label": "robotics", "kind": "topic"}],
+    "edges": [{"source": "person:cyd", "target": "person:ada", "rel": "works_with"},
+              {"source": "person:cyd", "target": "person:bea", "rel": "works_with"}],
+    "messages": {},
+}
+
+
+def _cosine(one, other):
+    top = sum(a * b for a, b in zip(one, other))
+    size = (sum(a * a for a in one) ** 0.5) * (sum(b * b for b in other) ** 0.5)
+    return top / size if size else 0.0
+
+
+class TestSmoothing:
+    def test_a_node_with_no_vector_ends_where_its_neighbours_mean(self):
+        """Cyd wrote nothing; one hop leaves them pointing at the mean of Ada and Bea."""
+        from ml_stack.graph.vectors import smooth
+
+        spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=1)
+        assert _cosine(spread["person:cyd"], [0.5, 0.5]) == pytest.approx(1.0, abs=1e-6)
+
+    def test_a_node_nothing_reaches_and_nothing_wrote_is_left_out(self):
+        from ml_stack.graph.vectors import smooth
+
+        spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=2)
+        assert "topic:robotics" not in spread
+        assert set(spread) == {"person:ada", "person:bea", "person:cyd"}
+
+    def test_every_vector_comes_back_the_width_it_went_in_and_unit_long(self):
+        from ml_stack.graph.vectors import smooth
+
+        spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=2)
+        for vector in spread.values():
+            assert len(vector) == 2
+            assert sum(v * v for v in vector) ** 0.5 == pytest.approx(1.0, abs=1e-6)
+
+    def test_no_vectors_at_all_is_nothing_to_spread(self):
+        from ml_stack.graph.vectors import smooth
+
+        assert smooth(SMOOTHED, {}) == {}
+        assert smooth({"nodes": [], "edges": []}, {"person:ada": [1.0, 0.0]}) == {}
+
+
+class TestSmoothingAStore:
+    def test_the_smoothed_vectors_round_trip_and_find_the_one_that_wrote_nothing(
+            self, server, tmp_path):
+        """Cyd is embedded by nobody and is still found by "who fixes machines"."""
+        from ml_stack.graph.store_cli import main
+
+        instance = server(embeddings())
+        path = tmp_path / "g.ladybug"
+        with GraphStore(path) as store:
+            store.write(SMOOTHED)
+            remember(store, {"person:ada": SAID["person:ada"]},
+                     base_url=instance.base_url, model="gemma")
+
+        assert main(["embed", str(path), "--smooth", "1", "--model", "gemma"]) == 0
+
+        with GraphStore(path, read_only=True) as reader:
+            held = reader.embeddings(model="gemma")
+            assert "person:cyd" in held, "the textless node was written a vector"
+            near = [r["id"] for r in reader.similar([1.0, 0.0], model="gemma", limit=4)]
+            assert "person:cyd" in near, near
+
+    def test_remember_can_spread_what_it_wrote_as_it_writes_it(self, server, tmp_path):
+        instance = server(embeddings())
+        path = tmp_path / "g.ladybug"
+        with GraphStore(path) as store:
+            store.write(SMOOTHED)
+            written = remember(store, {i: SAID[i] for i in ("person:ada", "person:bea")},
+                               base_url=instance.base_url, model="gemma", smooth_hops=1)
+        assert written == 3, "the two who wrote, and the one they reach"
+        with GraphStore(path, read_only=True) as reader:
+            assert set(reader.embeddings(model="gemma")) == {
+                "person:ada", "person:bea", "person:cyd"}
+
+    def test_without_smooth_hops_only_what_was_embedded_is_stored(self, server, tmp_path):
+        instance = server(embeddings())
+        path = tmp_path / "g.ladybug"
+        with GraphStore(path) as store:
+            store.write(SMOOTHED)
+            remember(store, {"person:ada": SAID["person:ada"]},
+                     base_url=instance.base_url, model="gemma")
+        with GraphStore(path, read_only=True) as reader:
+            assert set(reader.embeddings(model="gemma")) == {"person:ada"}
+
+
+def test_embed_over_a_store_with_no_vectors_says_so(tmp_path, capsys):
+    from ml_stack.graph.store_cli import main
+
+    path = tmp_path / "g.ladybug"
+    with GraphStore(path) as store:
+        store.write(SMOOTHED)
+    assert main(["embed", str(path)]) == 1
+    assert "no vectors" in capsys.readouterr().err

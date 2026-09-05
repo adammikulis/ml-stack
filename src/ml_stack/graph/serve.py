@@ -1097,7 +1097,34 @@ def parser() -> argparse.ArgumentParser:
                        help="the graph questions are answered over, as JSON")
     serve.add_argument("--store", type=Path,
                        help="a GraphStore path conversations are kept in")
+    placed = subs.add_parser(
+        "geocode", help="give every entry that names a place a point, and optionally join "
+                        "the nearest of them",
+        description="Each distinct place in the graph's node attributes goes through "
+                    "Nominatim, cached, and comes back as lat/lon on the node, which is "
+                    "what the page's map draws.")
+    placed.add_argument("--graph", required=True, type=Path, help="the graph, as JSON")
+    placed.add_argument("--cache", required=True, type=Path,
+                        help="the JSON cache of place -> point, asked before Nominatim is")
+    placed.add_argument("--near", type=int, default=0, metavar="K",
+                        help="join each placed entry to its K closest with a `near` edge, "
+                             "weighted 1/(1+km)")
+    placed.add_argument("--out", type=Path,
+                        help="where the graph is written (--graph itself by default)")
     return top
+
+
+def geocode(args: argparse.Namespace) -> int:
+    """`graph.places.geocode` over a graph file, written back as JSON."""
+    from ml_stack.graph.places import geocode as place, points
+
+    graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
+    placed = place(graph, args.cache, near=int(args.near))
+    out = Path(args.out or args.graph)
+    out.write_text(json.dumps(placed, ensure_ascii=False, indent=2), encoding="utf-8")
+    near = sum(1 for e in placed.get("edges") or () if str(e.get("rel") or "") == "near")
+    print(f"{len(points(placed))} entr(ies) placed, {near} near edge(s) -> {out}")
+    return 0
 
 
 def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
@@ -1117,6 +1144,9 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    if args.command == "geocode":
+        return geocode(args)
     httpd = bind(argv)
     host, port = httpd.server_address[:2]
     print(f"serving http://{host}:{port}", flush=True)

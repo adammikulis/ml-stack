@@ -989,3 +989,29 @@ def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
     assert outside == 0, f"{outside} nodes lie outside the view"
     assert errors == []
 
+
+
+def test_the_map_draws_one_marker_for_every_geocoded_entry(open_page, tmp_path):
+    """The two who said where they are become two dots; the other two do not.
+
+    Fails when `render` stops reading `lat`/`lon` off the nodes for the map's points.
+    """
+    from ml_stack.graph.places import geocode
+
+    where = {"Turin": (45.07, 7.69), "Lyon": (45.76, 4.84)}
+
+    def lookup(place, **_kwargs):
+        found = where.get(place)
+        return None if found is None else {"lat": found[0], "lon": found[1],
+                                           "display": place, "type": "city"}
+
+    graph = sample_graph()
+    graph["nodes"][0]["attrs"]["place"] = "Turin"
+    graph["nodes"][1]["attrs"]["place"] = "Lyon"
+    placed = geocode(graph, tmp_path / "cache.json", lookup=lookup, log=lambda _line: None)
+
+    page, errors = open_page(placed)
+    page.wait_for_selector("#map circle.dot")
+    assert page.locator("#map circle.dot").count() == 2
+    assert page.locator("#located").inner_text() == "2"
+    assert errors == []

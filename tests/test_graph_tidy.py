@@ -271,3 +271,65 @@ def test_the_pass_reports_the_soundness_a_fresh_reader_finds(tmp_path):
 
     assert report.findings == [], "what the store on disk says, not what the writer's handle did"
     assert "NOT SOUND" not in report.lines[-1]
+
+
+class TestHierarchyCycles:
+    def test_a_ring_of_part_of_is_reported_with_the_nodes_on_it(self, tmp_path, capsys):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit"), _node("u:c", "gamma unit")]
+        edges = [_edge("u:a", "part_of", "u:b"), _edge("u:b", "part_of", "u:c"),
+                 _edge("u:c", "part_of", "u:a")]
+        report = tidy(_store(tmp_path, nodes, edges), log=print)
+        assert [rel for rel, _ in report.cycles] == ["part_of"]
+        assert set(report.cycles[0][1]) == {"u:a", "u:b", "u:c"}
+        said = capsys.readouterr().out
+        assert "cycle: part_of runs round" in said
+        for label in ("alpha unit", "beta unit", "gamma unit"):
+            assert label in said
+
+    def test_a_hierarchy_that_is_a_dag_is_not_reported(self, tmp_path):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit"), _node("u:c", "gamma unit")]
+        edges = [_edge("u:a", "part_of", "u:b"), _edge("u:c", "part_of", "u:b")]
+        assert tidy(_store(tmp_path, nodes, edges)).cycles == []
+
+    def test_a_ring_in_a_relation_that_is_not_a_hierarchy_is_left_to_the_other_checks(
+            self, tmp_path):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit")]
+        edges = [_edge("u:a", "mentions", "u:b"), _edge("u:b", "mentions", "u:a")]
+        assert tidy(_store(tmp_path, nodes, edges)).cycles == []
+
+    def test_each_relation_is_read_on_its_own(self, tmp_path):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit")]
+        # a ring only if part_of and reports_to are read as one graph, which they are not
+        edges = [_edge("u:a", "part_of", "u:b"), _edge("u:b", "reports_to", "u:a")]
+        assert tidy(_store(tmp_path, nodes, edges)).cycles == []
+
+    def test_apply_never_breaks_a_cycle(self, tmp_path):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit")]
+        edges = [_edge("u:a", "reports_to", "u:b"), _edge("u:b", "reports_to", "u:a")]
+        path = _store(tmp_path, nodes, edges)
+        report = tidy(path, dry_run=False)
+        assert len(report.cycles) == 1
+        _, kept = _ids(path)
+        assert ("u:a", "reports_to", "u:b") in kept
+        assert ("u:b", "reports_to", "u:a") in kept
+
+    def test_the_relations_checked_can_be_named(self, tmp_path):
+        nodes = [_node("u:a", "alpha unit"), _node("u:b", "beta unit")]
+        edges = [_edge("u:a", "answers_to", "u:b"), _edge("u:b", "answers_to", "u:a")]
+        path = _store(tmp_path, nodes, edges)
+        assert tidy(path).cycles == []
+        assert len(tidy(path, hierarchy=("answers_to",)).cycles) == 1
+
+    def test_a_node_that_is_part_of_itself_is_a_cycle_of_one(self, tmp_path):
+        nodes = [_node("u:a", "alpha unit")]
+        report = tidy(_store(tmp_path, nodes, [_edge("u:a", "part_of", "u:a")]))
+        assert report.cycles == [("part_of", ["u:a"])]
+
+    def test_two_separate_rings_are_two_lines(self, tmp_path):
+        nodes = [_node(f"u:{k}", f"{k} unit") for k in "abcd"]
+        edges = [_edge("u:a", "part_of", "u:b"), _edge("u:b", "part_of", "u:a"),
+                 _edge("u:c", "part_of", "u:d"), _edge("u:d", "part_of", "u:c")]
+        rings = tidy(_store(tmp_path, nodes, edges)).cycles
+        assert len(rings) == 2
+        assert {frozenset(ring) for _, ring in rings} == {
+            frozenset({"u:a", "u:b"}), frozenset({"u:c", "u:d"})}

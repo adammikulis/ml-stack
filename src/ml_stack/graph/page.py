@@ -142,7 +142,7 @@ def template(names: Sequence[str | Component] = COMPONENTS) -> str:
 def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
            kinds: Sequence[Mapping[str, Any]] | None = None,
            copy: Mapping[str, str] | None = None,
-           points: Sequence[Mapping[str, Any]] = (),
+           points: Sequence[Mapping[str, Any]] | None = None,
            world: Mapping[str, Any] | None = None,
            author: str = "", extra: Mapping[str, Any] | None = None,
            most_messages: int | None = None,
@@ -151,19 +151,23 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
 
     ``brand`` names whatever made the page, on the bar above it; ``title`` names the graph,
     over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to
-    show on the map; passing none leaves the map empty. ``extra`` is merged into the payload
+    show on the map, and default to every node whose attributes carry ``lat`` and ``lon``
+    (`graph.geocode` writes them); ``points=()`` leaves the map empty. ``extra`` is merged into the payload
     the page reads, for whatever a caller's own panels need. A kind entry may carry
     ``colour`` (a hex string); one without gets a colour of its own, so no kind paints black.
     ``most_messages`` keeps only that many of the newest messages, and the payload's
     ``messagesLeftOut`` says how many did not fit. ``parts`` is the page's components,
     `COMPONENTS` unless a caller leaves some out or adds its own.
     """
+    from ml_stack.graph.places import points as placed
+
     page = template(parts)
     visible, left_out = shown(graph), 0
     if most_messages is not None:
         visible, left_out = newest(visible, int(most_messages))
     kinds = coloured(list(kinds) if kinds is not None else kinds_of(graph))
-    payload = {"title": title, "graph": visible, "points": list(points),
+    payload = {"title": title, "graph": visible,
+               "points": placed(visible) if points is None else list(points),
                "kinds": kinds, "messagesLeftOut": left_out,
                "copy": dict(copy or {}), "author": author, **dict(extra or {})}
     return (page

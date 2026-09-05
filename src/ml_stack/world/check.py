@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.graph.tidy import cycles
 from ml_stack.redact.hook import FLOOR, from_database, permitted, recogniser, shapes
 from ml_stack.world import Message
 from ml_stack.world.story import ORG_KINDS, OUTCOMES, kind_of
@@ -113,17 +114,26 @@ def consistency(corpus: Sequence[str | Path], where: str | Path, *,
     stating, where the record is exact) and ``asserted_found``. Misses: a person the corpus
     never carries, an outcome whose message the corpus lacks or whose thread does not name
     both ends, an asserted relation the message's text does not name, a sender or
-    recipient the graph does not hold, and a name-shaped phrase that is nobody in the
-    graph.
+    recipient the graph does not hold, a hierarchical relation that runs in a ring, and a
+    name-shaped phrase that is nobody in the graph.
     """
     graph = truth(where)
     labels = _labels(graph)
     people = {i: label for i, (label, kind) in labels.items() if kind == "person"}
     said = _read(corpus, {i: {"label": label} for i, label in people.items()}, domain)
     report = Report(counts={"corpora": len(corpus), "messages": len(said),
-                            "people": len(people), "spoken": 0, "spoken_found": 0})
+                            "people": len(people), "spoken": 0, "spoken_found": 0,
+                            "cycles": 0})
     blob = "\n".join(m.text for _, m in said)
     words = {w for w in WORD.findall(blob)}
+
+    # nobody reports to somebody who reports to them, and nothing is part of itself
+    for rel, ring in cycles(graph.get("edges") or ()):
+        report.counts["cycles"] += 1
+        report.misses.append(
+            f"{rel} runs round "
+            + " -> ".join(labels.get(i, (i, ""))[0] for i in ring)
+            + f" -> {labels.get(ring[0], (ring[0], ''))[0]}")
 
     # every person is an author, a recipient, or named
     reached: set[str] = set()
@@ -302,7 +312,8 @@ def render(consistent: Report | None, private: Report | None) -> str:
         lines.append(f"consistency: {c['corpora']} corpora, {c['messages']} messages, "
                      f"{c['people']} people, {c['spoken']} outcomes spoken "
                      f"({c['spoken_found']} found), {c['asserted']} relations asserted "
-                     f"({c['asserted_found']} found), {len(consistent.misses)} misses")
+                     f"({c['asserted_found']} found), {c['cycles']} hierarchy cycles, "
+                     f"{len(consistent.misses)} misses")
         lines.extend(f"  {miss}" for miss in consistent.misses[:SHOWN])
         if len(consistent.misses) > SHOWN:
             lines.append(f"  ...and {len(consistent.misses) - SHOWN} more")

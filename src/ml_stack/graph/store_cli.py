@@ -7,6 +7,7 @@
     ml-stack-store tidy PATH --apply   # the hygiene pass over a whole store
     ml-stack-store tidy PATH --base-url URL --rejudge   # every held verdict asked again
     ml-stack-store tidy --gold --base-url URL --fail-under 0.8   # score the judge
+    ml-stack-store embed PATH --smooth 2   # every vector spread over its neighbourhood
 
 Measured 2026-09-01: twelve bench runs read back empty through a full scan of ``Doc.value``
 while a lookup by key returned them whole, and nothing in the store said so. ``check``
@@ -76,6 +77,21 @@ def _doc(path: Path, key: str, drop: bool) -> int:
     return 0
 
 
+def _embed(path: Path, hops: int, model: str) -> int:
+    from ml_stack.graph.vectors import smooth
+
+    with GraphStore(path, read_only=False) as store:
+        held = store.embeddings(model=model)
+        if not held:
+            print(f"{path}: no vectors to spread", file=sys.stderr)
+            return 1
+        spread = smooth(store.read(), held, hops=hops)
+        for node_id, vector in spread.items():
+            store.set_embedding(node_id, vector, model=model)
+    print(f"{len(spread)} vector(s) written over {len(held)} read, {hops} hop(s)")
+    return 0
+
+
 def _gold(gold: str, base_url: str, fail_under: float) -> int:
     from ml_stack.graph.tidy import judge_gold, load_gold
 
@@ -109,6 +125,14 @@ def main(argv: list[str] | None = None) -> int:
     doc.add_argument("path", type=Path, help="the store directory")
     doc.add_argument("key", help="the document's key, as `docs` lists it")
     doc.add_argument("--drop", action="store_true", help="and take it out of the store")
+    embed = sub.add_parser(
+        "embed", help="spread the vectors the store already holds over the graph, so a node "
+                      "with no text of its own is found by what its neighbours mean")
+    embed.add_argument("path", type=Path, help="the store directory")
+    embed.add_argument("--smooth", type=int, default=2, metavar="N",
+                       help="rounds of neighbourhood smoothing (default 2)")
+    embed.add_argument("--model", default="", metavar="NAME",
+                       help="only the vectors filed under this model, and where they go back")
     hygiene = sub.add_parser(
         "tidy", help="the hygiene pass: merge duplicate nodes and edges, fold inverse pairs, "
                      "flag doubtful labels, report conflicts and orphans -- dry unless --apply")
@@ -147,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
             return _check(path, args.fix)
         if args.command == "doc":
             return _doc(path, args.key, args.drop)
+        if args.command == "embed":
+            return _embed(path, args.smooth, args.model)
         if args.command == "tidy":
             from ml_stack.graph.tidy import ModelJudge, tidy, written_from
 

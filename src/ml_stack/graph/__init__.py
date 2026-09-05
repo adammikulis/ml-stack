@@ -9,10 +9,13 @@ from ml_stack.graph.ask import (Answer, converse, look_around, look_at, look_up,
                                 path_between)
 from ml_stack.graph.concerns import concerns
 from ml_stack.graph.page import kinds_of, render, world_outline
+from ml_stack.graph.places import geocode, places_in, points
 from ml_stack.graph.propose import Change, apply, proposing, tools_for
 from ml_stack.graph.search import hybrid, lexical, rrf
 from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
-from ml_stack.graph.vectors import DOCUMENT, QUERY, TASK, embedded, remember
+from ml_stack.graph.tensors import tensors
+from ml_stack.graph.tidy import HIERARCHY, cycles
+from ml_stack.graph.vectors import DOCUMENT, QUERY, TASK, embedded, remember, smooth
 from ml_stack.graph.store import (GraphStore, GraphStoreUnavailable, StoreNeedsUpgrade,
                                   WouldLoseTooMuch, count_store, replace, roll_back, snapshot)
 from ml_stack.graph.dag import (
@@ -57,14 +60,17 @@ __all__ = [
     "concerns",
     "converse",
     "count_store",
+    "cycles",
     "decompose_to_dags",
     "degree",
     "Edges",
     "embedded",
     "gather",
+    "geocode",
     "Graph",
     "GraphStore",
     "GraphStoreUnavailable",
+    "HIERARCHY",
     "holder",
     "hybrid",
     "kinds_of",
@@ -79,6 +85,8 @@ __all__ = [
     "normalize_by_degree",
     "NotADAG",
     "pairwise_distances",
+    "places_in",
+    "points",
     "path_between",
     "propagate",
     "proposing",
@@ -98,10 +106,12 @@ __all__ = [
     "snapshot",
     "Snapshot",
     "SnapshotError",
+    "smooth",
     "snapshots",
     "spatial_window_edges",
     "StoreNeedsUpgrade",
     "take",
+    "tensors",
     "DOCUMENT",
     "QUERY",
     "TASK",

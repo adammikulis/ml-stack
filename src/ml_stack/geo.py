@@ -106,13 +106,15 @@ def lookup(place: str, *, user_agent: str = USER_AGENT, url: str = URL, timeout:
 
 def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_AGENT,
                 url: str = URL, sleep: float = 1.1, log: Callable[[str], None] = print,
-                shorthand: Mapping[str, str] | None = None) -> dict[str, Any]:
+                shorthand: Mapping[str, str] | None = None,
+                ask: Callable[..., dict[str, Any] | None] = lookup) -> dict[str, Any]:
     """Every place in ``places``, from the cache at ``cache_path`` or Nominatim.
 
     The cache is a JSON mapping of place -> :func:`lookup` result (None when nothing was
     found, so it is not asked again), written after each answer so a run cut short keeps
     what it got. A cache from an older :data:`CACHE_VERSION` is discarded whole. ``sleep``
-    is the pause between requests; Nominatim allows one per second.
+    is the pause between requests; Nominatim allows one per second. ``ask`` is what answers
+    one place, :func:`lookup` unless a caller has its own.
     """
     cache: dict[str, Any] = read_json(cache_path, {})
     if cache.get("_v") != CACHE_VERSION:
@@ -120,7 +122,7 @@ def geocode_all(places: list[str], cache_path: Path, *, user_agent: str = USER_A
     pending = [p for p in places if p and p not in cache]
     for i, place in enumerate(pending):
         try:
-            cache[place] = lookup(place, user_agent=user_agent, url=url, shorthand=shorthand)
+            cache[place] = ask(place, user_agent=user_agent, url=url, shorthand=shorthand)
         except Exception as exc:  # noqa: BLE001
             log(f"geocode failed for {place!r}: {exc}")
             continue

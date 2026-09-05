@@ -136,6 +136,30 @@ def test_a_sender_the_truth_never_listed_fails_consistency(tmp_path):
     assert [m for m in report.misses if "U0STRANGER" in m or "Joan Clarke" in m]
 
 
+def test_a_made_world_reports_to_nobody_in_a_ring(tmp_path):
+    """An invented organisation has a chain of command, so it has a top."""
+    _, talk = _world(tmp_path)
+    report = check.consistency(_corpus(tmp_path, talk), talk, domain=DOMAIN)
+    assert report.counts["cycles"] == 0
+
+
+def test_a_truth_whose_reports_to_runs_in_a_ring_fails_consistency(tmp_path):
+    _, talk = _world(tmp_path)
+    corpus = _corpus(tmp_path, talk)
+    graph = json.loads((talk / "graph.json").read_text(encoding="utf-8"))
+    chain = [e for e in graph["edges"] if e.get("rel") == "reports_to"]
+    assert chain, "the world has a chain of command to bend"
+    top = next(e["target"] for e in chain
+               if not any(o["source"] == e["target"] for o in chain))
+    graph["edges"].append({"source": top, "target": chain[0]["source"], "rel": "reports_to",
+                           "weight": 1})
+    (talk / "graph.json").write_text(json.dumps(graph), encoding="utf-8")
+    report = check.consistency(corpus, talk, domain=DOMAIN)
+    assert report.counts["cycles"] == 1
+    assert [m for m in report.misses if m.startswith("reports_to runs round")], report.misses
+    assert "hierarchy cycles" in check.render(report, None)
+
+
 def test_a_person_the_corpus_never_carries_is_a_miss(tmp_path):
     _, talk = _world(tmp_path)
     corpus = _corpus(tmp_path, talk)

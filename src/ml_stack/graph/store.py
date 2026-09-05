@@ -797,6 +797,17 @@ class GraphStore:
         self._index("vector", "CALL CREATE_VECTOR_INDEX('Embedding', 'embedding_index', "
                               "'vector', metric := 'cosine')")
 
+    def embeddings(self, *, model: str = "") -> dict[str, list[float]]:
+        """Every vector the store holds, as ``{node id: vector}``. Empty when there are none."""
+        try:
+            rows = self.query(
+                "MATCH (e:Embedding) WHERE $m = '' OR e.model = $m "
+                "RETURN e.node_id AS id, e.vector AS vector ORDER BY e.node_id",
+                {"m": str(model)})
+        except RuntimeError:
+            return {}                 # no Embedding table yet, which is no vectors
+        return {str(row["id"]): [float(x) for x in row["vector"] or ()] for row in rows}
+
     def similar(self, vector: Sequence[float], *, model: str = "", limit: int = 10
                 ) -> list[dict[str, Any]]:
         """The nodes closest in meaning to a vector, nearest first."""

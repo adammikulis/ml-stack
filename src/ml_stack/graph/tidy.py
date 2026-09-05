@@ -56,6 +56,9 @@ What it does, in order:
    goes, its weight and provenance folded into the kept one.
 6. **Orphans** reported: nodes with no edge but their source link. Left alone.
 7. **Self-loops** reported. Left alone.
+8. **Hierarchy cycles**: each of `HIERARCHY`'s relations read on its own as a directed
+   graph, and a ring among them -- A part_of B part_of A -- reported as one line naming
+   the nodes round it. Left alone, `--apply` and all.
 
 A merge keeps both definitions: the longer one that is not a clause fragment becomes
 ``attrs.definition`` and the other joins ``attrs.definitions_also``; with a judge, and only
@@ -78,8 +81,8 @@ from typing import Any
 
 from ml_stack.entities.fold import ESTABLISHED, fold_edges
 
-__all__ = ["INVERSES", "ModelJudge", "Report", "Scored", "VERDICTS", "absorb",
-           "canonical_direction", "excerpts", "gold_file", "judge_gold", "load_gold",
+__all__ = ["HIERARCHY", "INVERSES", "ModelJudge", "Report", "Scored", "VERDICTS", "absorb",
+           "canonical_direction", "cycles", "excerpts", "gold_file", "judge_gold", "load_gold",
            "plurals", "same_name", "suspect", "tidy", "written_from"]
 
 # The direction a fact is kept in, and the verbs that say the same thing the other way.
@@ -93,6 +96,10 @@ INVERSES: dict[str, frozenset[str]] = {
 }
 """``{canonical verb: the verbs that state it with the ends swapped}``. ``X has_part Y`` is
 ``Y part_of X``; the pass keeps the left-hand form."""
+
+#: The relations that say one thing is under another, each of which must be a DAG: nothing
+#: is part of itself at one remove, and nobody reports to somebody who reports to them.
+HIERARCHY: tuple[str, ...] = ("part_of", "reports_to", "contains", "member_of")
 
 # What is kept off the "no edge but its source" count: the links that say where a node came
 # from rather than what it stands in relation to.
@@ -432,6 +439,7 @@ class Report:
     stale: int = 0         # verdicts naming a node the store no longer holds
     unjudged: int = 0      # verb pairs met with no verdict and no judge to ask
     conflicts: list[tuple[str, str, str, str]] = field(default_factory=list)
+    cycles: list[tuple[str, list[str]]] = field(default_factory=list)
     orphans: list[str] = field(default_factory=list)
     self_loops: list[tuple[str, str]] = field(default_factory=list)
     lines: list[str] = field(default_factory=list)
@@ -469,7 +477,8 @@ class Report:
                 f"judged {self.judged_same} pair(s) the same and {self.judged_different} "
                 f"different; {len(self.possible)} possible duplicate(s) by spelling left for a "
                 f"person, "
-                f"{len(self.conflicts)} verb conflict(s), {len(self.orphans)} orphan(s), "
+                f"{len(self.conflicts)} verb conflict(s), {len(self.cycles)} hierarchy "
+                f"cycle(s), {len(self.orphans)} orphan(s), "
                 f"{len(self.self_loops)} self-loop(s) reported; "
                 f"put {self.conflicts_judged} conflicting verb pair(s) to the judge "
                 f"({self.conflict_edges_dropped} edge(s) dropped) and "
@@ -648,8 +657,85 @@ def same_name(label: str) -> str:
     return re.sub(r"[\s_\-]+", "", str(label or "").casefold())
 
 
+def cycles(edges: Iterable[Mapping[str, Any]], *,
+           relations: Iterable[str] = HIERARCHY) -> list[tuple[str, list[str]]]:
+    """Every cycle among the hierarchical relations: ``(relation, the ids round it)``.
+
+    Each relation is taken on its own, since ``part_of`` running in a ring is a fault
+    whether or not ``reports_to`` does.
+    """
+    from ml_stack.graph.dag import topological_order
+
+    wanted = list(dict.fromkeys(str(r) for r in relations))
+    by_rel: dict[str, list[tuple[str, str]]] = {}
+    for edge in edges:
+        rel = str(edge.get("rel") or "")
+        if rel in wanted:
+            by_rel.setdefault(rel, []).append((str(edge.get("source")), str(edge.get("target"))))
+
+    found: list[tuple[str, list[str]]] = []
+    for rel in wanted:
+        pairs = by_rel.get(rel) or []
+        ids: list[str] = []
+        at: dict[str, int] = {}
+        for ends in pairs:
+            for node_id in ends:
+                if node_id not in at:
+                    at[node_id] = len(ids)
+                    ids.append(node_id)
+        src = [at[a] for a, _ in pairs]
+        dst = [at[b] for _, b in pairs]
+        if not ids or topological_order(len(ids), src, dst) is not None:
+            continue
+        found += [(rel, [ids[i] for i in ring]) for ring in _rings(len(ids), src, dst)]
+    return found
+
+
+def _rings(n: int, src: list[int], dst: list[int]) -> list[list[int]]:
+    """One cycle per tangle, as node indices in the order the edges run round it."""
+    from collections import deque
+
+    outgoing: list[list[int]] = [[] for _ in range(n)]
+    incoming: list[list[int]] = [[] for _ in range(n)]
+    for u, v in zip(src, dst):
+        outgoing[u].append(v)
+        incoming[v].append(u)
+
+    left = [len(row) for row in outgoing]
+    alive = [True] * n
+    queue = deque(u for u in range(n) if left[u] == 0)
+    while queue:
+        u = queue.popleft()
+        alive[u] = False
+        for p in incoming[u]:
+            left[p] -= 1
+            if left[p] == 0:
+                queue.append(p)
+
+    rings: list[list[int]] = []
+    held: set[frozenset[int]] = set()
+    walked = [False] * n
+    for start in range(n):
+        if not alive[start] or walked[start]:
+            continue
+        walk: list[int] = []
+        seen: dict[int, int] = {}
+        u = start
+        while u not in seen:
+            seen[u] = len(walk)
+            walk.append(u)
+            walked[u] = True
+            u = next(v for v in outgoing[u] if alive[v])
+        ring = walk[seen[u]:]
+        if frozenset(ring) not in held:
+            held.add(frozenset(ring))
+            rings.append(ring)
+    return rings
+
+
 def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
          written: Mapping[str, str] | None = None, judge: Any = None,
+         hierarchy: Iterable[str] = HIERARCHY,
          log: Callable[[str], None] | None = None, rejudge: bool = False) -> Report:
     """The pass, over a `GraphStore` or the path to one. Dry by default. ``written`` is
     the map of duplicates a person settled (``{name: the name it is}``), applied as given.
@@ -658,7 +744,9 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     with its reason (Adam: "record the mergers but don't defer them to a human"). A pair
     once judged different is not asked again; a pair the judge cannot settle even after
     reading the source is the one thing left for a person, as ``written``. ``rejudge``
-    asks the judge again about every verdict the store holds and writes the new ones."""
+    asks the judge again about every verdict the store holds and writes the new ones.
+    ``hierarchy`` names the relations that must form a DAG; a cycle in one is reported and
+    never broken."""
     from ml_stack.entities.spelling import close
     from ml_stack.graph.store import GraphStore
 
@@ -667,7 +755,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if isinstance(store, (str, Path)):
         with GraphStore(store, read_only=dry_run) as opened:
             report = tidy(opened, dry_run=dry_run, established=established, written=written,
-                          judge=judge, log=log, rejudge=rejudge)
+                          judge=judge, hierarchy=hierarchy, log=log, rejudge=rejudge)
         if not dry_run:
             _recheck(store, report, log)
         return report
@@ -865,6 +953,13 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     if report.orphans:
         note(f"orphans: {len(report.orphans)} node(s) with no relation, e.g. "
              + ", ".join(_label(nodes, n) for n in report.orphans[:5]))
+
+    # 8. hierarchy cycles, reported and never broken
+    for rel, ring in cycles(edges, relations=hierarchy):
+        report.cycles.append((rel, ring))
+        note(f"cycle: {rel} runs round "
+             + " -> ".join(_label(nodes, node_id) for node_id in ring)
+             + f" -> {_label(nodes, ring[0])}")
     if not dry_run:
         _recount(store)
     if not dry_run and hasattr(store, "check"):
