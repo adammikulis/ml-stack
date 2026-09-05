@@ -762,23 +762,20 @@ class TestPrettyName:
         import json
         import shutil
         import subprocess
-        from pathlib import Path
 
-        import ml_stack.fleet as fleet
-        import ml_stack.graph as graph
+        from ml_stack.fleet.page import COMPONENTS_DIR
+        from ml_stack.graph.page import template
         from ml_stack.hub import pretty_name
 
-        from ml_stack.graph.page import template
-
-        pages = [Path(fleet.__file__).parent / "web" / "fit.html"]
-        for text in (pages[0].read_text(), template()):
+        fit_view = (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
+        for text in (fit_view, template()):
             assert "(?:UD-)?((?:IQ|Q)\\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)" in text
         node = shutil.which("node")
         if not node:
             pytest.skip("no node to run the page's copy")
         names = ["a/b/thing-Flash-UD-IQ4_XS-00001-of-00003.gguf", "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
                  "gpt-oss-120b-mxfp4-00001-of-00003.gguf", "mtp-thing-shared-Q8_0.gguf", "plain.gguf"]
-        text = pages[0].read_text()
+        text = fit_view
         start = text.index("function prettyName")
         end = text.index("\n  }\n", start) + 4
         script = text[start:end] + "\nconsole.log(JSON.stringify(" + json.dumps(names) + ".map(prettyName)))"
