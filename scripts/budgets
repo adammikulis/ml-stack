@@ -1,0 +1,137 @@
+#!/usr/bin/env python3
+"""The scoreboard: what each metric is allowed, what it is, and where it is over."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import gates  # noqa: E402
+
+ROOT = Path(__file__).resolve().parent.parent
+BUDGETS = ROOT / "budgets.json"
+
+
+def budgets() -> dict[str, int]:
+    """The allowed count for each metric."""
+    if not BUDGETS.exists():
+        return {}
+    return json.loads(BUDGETS.read_text(encoding="utf-8"))
+
+
+def owners() -> dict[str, str]:
+    """The module that owns each metric's job."""
+    return {c.NAME: c.OWNER for c in gates.checkers()}
+
+
+def descriptions() -> dict[str, str]:
+    """One line per metric saying what a violation means."""
+    return {c.NAME: c.describe() for c in gates.checkers()}
+
+
+def write_budgets(counts: dict[str, int]) -> None:
+    """Replace budgets.json with these counts."""
+    ordered = {name: counts[name] for name in sorted(counts)}
+    BUDGETS.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
+
+
+def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int:
+    """Print every metric worst first; return 1 if any is over budget."""
+    owner = owners()
+    rows = []
+    for name in sorted(set(found) | set(allowed)):
+        actual = len(found.get(name, []))
+        budget = allowed.get(name)
+        delta = actual - budget if budget is not None else actual
+        rows.append((delta, name, budget, actual))
+    rows.sort(key=lambda r: (-r[0], r[1]))
+
+    width = max((len(r[1]) for r in rows), default=6)
+    print(f"{'metric'.ljust(width)}  {'budget':>6}  {'actual':>6}  delta")
+    for delta, name, budget, actual in rows:
+        shown = "-" if budget is None else str(budget)
+        mark = "+" if delta > 0 else ""
+        print(f"{name.ljust(width)}  {shown:>6}  {actual:>6}  {mark}{delta}")
+
+    over = [r for r in rows if r[0] > 0]
+    if not over:
+        return 0
+    print()
+    for delta, name, budget, actual in over:
+        where = owner.get(name) or "no owner"
+        print(f"{name}: {actual} sites, {budget} allowed ({delta} over) -- {where}")
+        for finding in found.get(name, [])[:10]:
+            print(f"    {finding.path}:{finding.line}  {finding.detail}")
+        print(f"    scripts/budgets --show {name}")
+    return 1
+
+
+def show(found: dict[str, list[gates.Finding]], metric: str) -> int:
+    """Print every site for one metric."""
+    if metric not in found:
+        print(f"no such metric: {metric}", file=sys.stderr)
+        print("known: " + ", ".join(sorted(found)), file=sys.stderr)
+        return 2
+    print(descriptions()[metric])
+    owner = owners()[metric]
+    if owner:
+        print(f"owner: {owner}")
+    print()
+    for finding in found[metric]:
+        print(f"{finding.path}:{finding.line}  {finding.detail}")
+    print(f"\n{len(found[metric])} sites")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Run the scoreboard."""
+    parser = argparse.ArgumentParser(prog="scripts/budgets", description=__doc__)
+    parser.add_argument("--update", action="store_true", help="rewrite budgets.json")
+    parser.add_argument("--show", metavar="METRIC", help="list every site for one metric")
+    parser.add_argument("--json", action="store_true", help="machine-readable output")
+    args = parser.parse_args(argv)
+
+    found = gates.run(ROOT)
+    allowed = budgets()
+
+    if args.update:
+        counts = {name: len(sites) for name, sites in found.items()}
+        write_budgets(counts)
+        changed = [n for n in counts if allowed.get(n) != counts[n]]
+        for name in sorted(changed):
+            print(f"{name}: {allowed.get(name, '-')} -> {counts[name]}")
+        if not changed:
+            print("budgets already match the tree")
+        return 0
+
+    if args.json:
+        payload = {
+            "version": 1,
+            "metrics": {
+                name: {
+                    "budget": allowed.get(name),
+                    "actual": len(sites),
+                    "owner": owners()[name],
+                    "sites": [
+                        {"path": f.path, "line": f.line, "detail": f.detail} for f in sites
+                    ],
+                }
+                for name, sites in sorted(found.items())
+            },
+        }
+        json.dump(payload, sys.stdout, indent=2)
+        print()
+        return 0
+
+    if args.show:
+        return show(found, args.show)
+
+    return table(found, allowed)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

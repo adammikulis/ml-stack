@@ -1,3 +1,21 @@
 {
-  "duplicate-bodies": 28
+  "ad-hoc-fakes": 88,
+  "argument-parsers": 31,
+  "atomic-writes": 20,
+  "broad-excepts": 218,
+  "deep-files": 21,
+  "duplicate-bodies": 28,
+  "entry-points": 34,
+  "file-locks": 11,
+  "home-paths": 37,
+  "http-servers": 2,
+  "local-imports": 637,
+  "long-docstrings": 136,
+  "long-functions": 24,
+  "print-calls": 237,
+  "process-scans": 7,
+  "subprocess-spawns": 9,
+  "unversioned-records": 6,
+  "urlopen-calls": 41,
+  "wide-signatures": 45
 }
