@@ -14,7 +14,6 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from .page import COMPONENTS, render
 from .discovery import (
     DiscoveryError,
     cluster_group,
@@ -22,6 +21,7 @@ from .discovery import (
     in_cluster,
     load_cluster_key,
 )
+from .page import COMPONENTS, render
 from .session import parse_cookie
 
 ASSETS = Path(__file__).parent / "web"
@@ -349,7 +349,7 @@ class SettingsRoutes:
                 out.update(self.ui.environment.uninstall(drop))
             if add:
                 out.update(self.ui.environment.install(add))
-        except EnvironmentError as exc:
+        except OSError as exc:
             self.send(400, {"error": str(exc)})
             return True
         self.send(200, {"changed": out, **self.ui.environment.state(vendor)})
@@ -394,9 +394,7 @@ class ModelRoutes:
         if ui.models is None:
             self.send(501, {"error": "no model store on this daemon"})
             return True
-        from .models import (
-            PER_PAGE, families, how_many, popular, searched_count,
-            searched_families)
+        from .models import PER_PAGE, families, how_many, popular, searched_count, searched_families
         page = max(0, int(self.asked("page", "0")))
         rude = self.asked("rude", "0") in ("1", "true", "yes")
         query = self.asked("q").strip()
