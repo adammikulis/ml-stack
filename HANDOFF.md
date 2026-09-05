@@ -50,11 +50,6 @@ ten questions, unconfirmed.
   concepts were joined before it existed, so the section is empty. `ml-stack-ingest fold
   --out ~/.ml-stack/sources.ladybug` re-folds every source from its reads (no model,
   minutes) and writes the log; it rewrites the store, so take a copy beside it first.
-- [ ] **Run the shipped extraction gate on a model** (`ml-stack-ingest --gold
-  tests/fixtures/extraction-gold.json --model <flash-next> --fail-under 0.7`, ~10 min):
-  twenty invented passages with every triple written down, so the number is precision as
-  well as recall. Then E4B and E2B the same way, and the numbers into
-  `docs/model-ranking.md`.
 
 ## Measurements queued (each needs the GPU; sample first)
 
@@ -71,19 +66,15 @@ plan` names them as unplaceable rather than guessing.
   --sample 20` against the kept plain runs: precision up, recall held. A profile records
   `constrain_ids` and the answer cache keys on it, so `report --profile` can set it.
 - [ ] **Thinking off on the gemma family** (`--reasoning-budget 0` on a sampled sweep each).
-- [ ] **Is a unified cache slower than one slot?** (Adam, 2026-09-04: "still serve one by
-  default, but we need to test down the line whether unified cache is slower".) Every
-  command now serves one seat, so this decides whether more seats cost speed as well as
-  room. A unified cache holds every sequence in one pool and masks out the tokens
-  belonging to the others, so attention may pay over the whole pool even when one
-  conversation is live -- if it does, four slots is slower than one at a single stream,
-  not merely wastier. Measure on a small model, since the shape is what is under test and
-  not the model: serve `gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf` on a scratch port four ways --
-  one slot and four slots, each with `--kv-unified` and without -- at the same total
-  cache, and run `ml-stack-bench speed` at one stream against each. Generation tokens a
-  second is the number; prompt reading is the second one to watch. Minutes, and it wants a
-  quiet machine. The page ran four unified slots all through 2026-09-04, so a difference
-  here also says what that cost.
+- [ ] **Four unified slots decoded slower at one stream; say whether the head is why.**
+  Measured 2026-09-05 on E2B (`ml-stack-bench speed --serve gemma-4-E2B... --streams 1
+  --prompts 4096 --context 65536 --parallel N --serve-kv-unified|--no-serve-kv-unified`, two
+  runs each): one slot 125/153 tok/s, one slot unified 143/152, four slots 152/156, four
+  slots unified 121/122 -- and the draft head's acceptance on the four unified slots was 44%
+  where every other shape reported 70%. Prefill ~2,600 tok/s in every shape. So one seat
+  by default costs nothing at one stream, and the page's 2026-09-04 shape (four unified
+  slots) was ~20% slower to decode, but whether the cache or the head under it is the
+  reason is one more run: the same four shapes with `--no-draft`.
 - [ ] **The stable prefix: reading fell, calls rose; measure again on a quiet machine.**
   Nine sampled questions on the page's Flash-Next against `Qwen3.8-Flash--all-plain-kv-q8_0-rb0`
   (kept as `flashprefix-plain`): the last call of a question reads ~50 tokens with the whole
@@ -99,13 +90,8 @@ plan` names them as unplaceable rather than guessing.
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
   here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
-- [ ] **`docs/architectures/qwen4exp.md` says 48K bytes a token on the 12 attention layers
-  at f16; the header says 12 x 2 KV heads x 256 x (K+V) x 2 bytes = 24K.** The difference
-  may be the indexer key cache (one head of `indexer.key_length` 128 per attention layer)
-  or the MTP head; `ml-stack-serve fit` at two contexts on Flash-Next says which, and the
-  note and `preflight._kv_estimate_bytes` follow the measurement.
-- [ ] **Watch ggml-org/llama.cpp#27836** (open, last touched 2026-09-02, checked
-  2026-09-04). When the qwen4exp MTP graph merges, `ml-stack-serve build` and
+- [ ] **Watch ggml-org/llama.cpp#27836** (a draft, last touched 2026-09-04, checked
+  2026-09-05). When the qwen4exp MTP graph merges, `ml-stack-serve build` and
   `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance on an
   M3 Max against the fork's 73–79%. Then the profile's build field can go.
 
