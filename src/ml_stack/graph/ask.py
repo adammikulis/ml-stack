@@ -2318,3 +2318,45 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *,
     if emit is not None:
         emit({"event": "done"})
     return out
+
+
+DRAFT_SYSTEM = (
+    "You write a short note introducing people to each other, for the person who runs "
+    "this group to send. You are given what the graph holds on each of them, in their own "
+    "words.\n\n"
+    "Write the message itself and nothing else — no preamble, no subject line, no sign-off, "
+    "no explanation of what you are doing. Address them by name. Say in one sentence each "
+    "what the other should know about them, using what they actually said rather than "
+    "adjectives, then say plainly why they are being introduced and suggest one concrete "
+    "first step. Three to five sentences. Warm and ordinary, the way a person writes to "
+    "people they know — not a press release.\n\n"
+    "Everything you say comes from what you were given. Never invent a fact about anyone. If "
+    "what you were given does not support an introduction, say so in one sentence instead of "
+    "writing one."
+)
+#: the most entries one note introduces
+DRAFTED = 6
+
+
+def draft(ids: Sequence[str], question: str, answer: str, graph: Mapping[str, Any],
+          client: Any, *, system: str = DRAFT_SYSTEM, most: int = DRAFTED) -> dict[str, Any]:
+    """A note introducing ``ids`` to each other, for a person to send.
+
+    Returns ``{"text": note, "ids": [the ones written about]}``, or ``{"text": "", "why":
+    reason}`` when fewer than two of the ids are in the graph or the model did not finish
+    a note. The model is given the entries the answer was about, not the whole graph.
+    """
+    known = {str(n["id"]) for n in graph.get("nodes") or ()}
+    wanted = [i for i in ids if i in known][:most]
+    if len(wanted) < 2:
+        return {"text": "", "why": "an introduction needs at least two entries"}
+    material = look_at(graph, wanted) or ""
+    said = [{"role": "system", "content": system},
+            {"role": "user", "content":
+             f"The question was: {question}\n\nWhat was said in reply:\n{answer}\n\n"
+             f"What the graph holds on each of them:\n{material}\n\n"
+             "Write the note."}]
+    out = (getattr(client.chat(said, think=False), "content", "") or "").strip()
+    if is_working(out):
+        return {"text": "", "why": "the model did not finish a note"}
+    return {"text": without_notes(out), "ids": wanted}
