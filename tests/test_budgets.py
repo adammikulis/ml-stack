@@ -60,3 +60,32 @@ def test_no_budget_without_a_checker() -> None:
     assert not extra, (
         f"budgets.json names {', '.join(extra)} with no checker -- run scripts/budgets --update"
     )
+
+
+def test_the_hook_counts_what_a_commit_deletes(tmp_path):
+    """A commit that moves code out of one file and into another is not read as addition."""
+    import subprocess
+
+    def run(*a):
+        return subprocess.run(["git", *a], cwd=tmp_path, capture_output=True,
+                              text=True, check=True)
+
+    hook = REPO / "scripts" / "hooks" / "budgets"
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    run("config", "user.email", "nobody@example.invalid")
+    run("config", "user.name", "A Tester")
+    src = tmp_path / "src" / "ml_stack"
+    src.mkdir(parents=True)
+    (src / "leaving.py").write_text('def a():\n    print("one")\n    print("two")\n')
+    (src / "staying.py").write_text("def b():\n    return 1\n")
+    (tmp_path / "budgets.json").write_text('{"print-calls": 2}\n')
+    run("add", "-A")
+    run("commit", "-qm", "before")
+
+    run("rm", "-q", "src/ml_stack/leaving.py")
+    (src / "staying.py").write_text('def b():\n    print("moved")\n    return 1\n')
+    run("add", "src/ml_stack/staying.py")
+
+    done = subprocess.run([sys.executable, str(hook)], cwd=tmp_path,
+                          capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
