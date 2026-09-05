@@ -49,12 +49,13 @@ def find(root: Path) -> list[Finding]:
                           capture_output=True, text=True, check=False)
     if not done.stdout.strip():
         raise RuntimeError(f"pyright exited {done.returncode}: {done.stderr.strip()}")
+    here = root.resolve()
     out = []
     for item in json.loads(done.stdout).get("generalDiagnostics", []):
         if item.get("severity") != "error":
             continue
         line = ((item.get("range") or {}).get("start") or {}).get("line", 0) + 1
         rule = item.get("rule") or "error"
-        out.append(Finding(rel(Path(item["file"]), root), line,
+        out.append(Finding(rel(Path(item["file"]).resolve(), here), line,
                            f"{rule} {item['message'].splitlines()[0]}"))
     return out

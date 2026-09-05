@@ -76,6 +76,20 @@ def test_a_checker_that_cannot_run_here_names_a_metric_with_a_budget() -> None:
         assert reason, f"{name} skipped with no reason"
 
 
+def test_findings_are_named_relative_to_the_tree_they_were_found_in(tmp_path) -> None:
+    """The hook plants staged files under a temporary root and matches paths by name."""
+    where = tmp_path / "src" / "ml_stack"
+    where.mkdir(parents=True)
+    (where / "sample.py").write_text(
+        "def f():\n    try:\n        return 1\n    except Exception:\n        return 2\n",
+        encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        (REPO / "pyproject.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    for name, found in gates.run(tmp_path).items():
+        for finding in found:
+            assert not finding.path.startswith("/"), f"{name} named an absolute path"
+
+
 def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     """A commit that moves code out of one file and into another is not read as addition."""
     import subprocess

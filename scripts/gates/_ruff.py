@@ -46,10 +46,11 @@ def report(root: Path) -> tuple[tuple[str, int, str, str], ...]:
                           cwd=root, capture_output=True, text=True, check=False)
     if done.returncode not in (0, 1):
         raise RuntimeError(f"ruff exited {done.returncode}: {done.stderr.strip()}")
+    here = root.resolve()
     out = []
     for item in json.loads(done.stdout):
         line = (item.get("location") or {}).get("row") or 0
-        out.append((rel(Path(item["filename"]), root), line,
+        out.append((rel(Path(item["filename"]).resolve(), here), line,
                     item["code"] or "", item["message"]))
     return tuple(out)
 
