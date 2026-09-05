@@ -39,11 +39,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-__all__ = ["MCP_HOME", "PROTOCOL", "Tool", "TOOLS", "build_sdk_server", "detached",
+from ml_stack.home import state
+
+__all__ = ["mcp_home", "PROTOCOL", "Tool", "TOOLS", "build_sdk_server", "detached",
            "handle", "main", "schema_of", "serve", "sdk_available"]
 
 PROTOCOL = "2024-11-05"
-MCP_HOME = Path("~/.ml-stack/mcp")
+def mcp_home() -> Path:
+    """Where a detached command run through MCP keeps its logs."""
+    return state("mcp")
 """Where detached commands that are not the bench's keep their logs. The bench keeps its
 own, under its own home, because ``ml-stack-bench status`` reads them from there."""
 
@@ -106,7 +110,7 @@ def detached(module: str, argv: list[str], *, name: str,
     ``--detach`` of their own: a server coming up, a download. The first line of the log
     is the command, so a log found later says what it was.
     """
-    logs = (home or MCP_HOME).expanduser() / "logs"
+    logs = (home or mcp_home()) / "logs"
     logs.mkdir(parents=True, exist_ok=True)
     log = logs / f"{name}-{time.strftime('%Y%m%dT%H%M%S')}.log"
     from ml_stack.platform import process_group_kwargs
@@ -153,7 +157,7 @@ def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     model, context, slots and lease -- what ``ml-stack-serve status`` prints."""
     from ml_stack.serve import cli
 
-    records = cli.recorded_servers(cli.STATE_FILE)
+    records = cli.recorded_servers(cli.lease_file())
     found = []
     for one in sorted({*records, int(port)}):
         snapshot = cli.look(one, records)

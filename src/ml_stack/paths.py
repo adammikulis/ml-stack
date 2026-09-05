@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ml_stack.home import expand
+
 
 def repo_root(path: str | Path) -> Path | None:
     """The git working tree `path` sits in -- the nearest ancestor holding `.git` -- or None.
@@ -19,7 +21,7 @@ def repo_root(path: str | Path) -> Path | None:
     existing ancestor, which is what matters for a file about to be written. Named in a
     refusal so the person can see which repository they were about to write into.
     """
-    where = Path(path).expanduser().resolve()
+    where = expand(path).resolve()
     while not where.exists() and where.parent != where:
         where = where.parent
     for parent in (where, *where.parents):

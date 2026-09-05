@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from ml_stack import home
 from ml_stack.units import human_bytes
 
 __all__ = ["BEHAVIOURS", "CHECKOUT", "HOOKS", "SPEECH_PROTOCOLS", "STALE_BUILD_DAYS",
@@ -189,7 +190,7 @@ def look() -> list[Finding]:
 
         mine = held()
         where = ", ".join(f"{_tilde(path)} {sized(total)}"
-                          for path, files, total in caches(Path.home() / ".ml-stack")
+                          for path, files, total in caches(home.home())
                           if files)
         hf_home = os.environ.get("HF_HOME", "")
         out.append(Finding(name="models on this machine", good=bool(mine),
@@ -245,7 +246,7 @@ def _speech_findings() -> list[Finding]:
 def _tilde(path: Path) -> str:
     """A path with the home directory written as ``~``."""
     try:
-        return "~/" + str(Path(path).relative_to(Path.home()))
+        return "~/" + str(Path(path).relative_to(home.user_home()))
     except ValueError:
         return str(path)
 

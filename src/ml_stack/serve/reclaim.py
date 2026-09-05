@@ -41,20 +41,30 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from ml_stack.serve.binary import CACHE_ROOT
+from ml_stack import home
 
-__all__ = ["Idleness", "STATE", "TRUST_S", "busy_now", "ports_idle",
+
+__all__ = ["Idleness", "TRUST_S", "busy_now", "ports_idle", "state_path",
            "reclaim_idle", "watching"]
 
 #: How often the watcher looks, unless told otherwise.
 EVERY_S = 60.0
 
-#: Where the looks are kept, so a later pass is not starting from nothing.
-STATE = CACHE_ROOT / "idle.json"
-
 #: The longest gap between two looks that still counts as having watched. Anything longer
 #: is time nobody observed, and starts the clock again.
 TRUST_S = 300.0
+
+
+class _Default:
+    """Stands for "the usual file", so ``state=None`` can mean "keep nothing"."""
+
+
+DEFAULT = _Default()
+
+
+def state_path() -> Path:
+    """Where the looks are kept, so a later pass is not starting from nothing."""
+    return home.cache("idle.json")
 
 
 def busy_now(base_url: str, *, timeout: float = 2.0) -> bool | None:
@@ -94,10 +104,13 @@ class Idleness:
 
     def __init__(self, *, clock: Callable[[], float] = time.time,
                  probe: Callable[[str], bool | None] = busy_now,
-                 state: Path | str | None = STATE, trust: float = TRUST_S) -> None:
+                 state: Path | str | None | _Default = DEFAULT,
+                 trust: float = TRUST_S) -> None:
         self.clock = clock
         self.probe = probe
         self.trust = trust
+        if isinstance(state, _Default):
+            state = state_path()
         self.state = Path(state) if state is not None else None
         self.seen: dict[int, dict[str, float]] = self._read()
 

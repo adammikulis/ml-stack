@@ -21,6 +21,7 @@ import json
 import sys
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.graph.store import GraphStore, StoreMismatch, StoreNeedsUpgrade
 
 
@@ -162,7 +163,7 @@ def main(argv: list[str] | None = None) -> int:
         return _gold(args.gold, args.base_url, args.fail_under)
     if args.path is None:
         parser.error("the store directory is needed")
-    path = args.path.expanduser()
+    path = home.expand(args.path)
     if not path.exists():
         print(f"{path}: no store there", file=sys.stderr)
         return 2

@@ -18,13 +18,13 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.record import Measured, Spread
-from ml_stack.serve.binary import CACHE_ROOT
 from ml_stack.train.backend import detect_backend, set_seeds
 
-__all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "peak_memory_bytes",
-           "register", "registered", "run", "said", "suite_lock"]
+__all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "lock_path",
+           "peak_memory_bytes", "register", "registered", "run", "said", "suite_lock"]
 
 #: What one seed of a suite hands back: a flat mapping of numbers.
 Metrics = Mapping[str, float]
@@ -35,8 +35,11 @@ _SUITES: dict[str, Suite] = {}
 #: What a suite run is marked with, so it is never read as an answering run.
 KIND = "suite"
 
-#: Where two runs wait for each other, so neither times the other's work.
-LOCK = CACHE_ROOT / "suite.lock"
+
+def lock_path() -> Path:
+    """Where two runs wait for each other, so neither times the other's work."""
+    return home.cache("suite.lock")
+
 
 # Above this much of the card in use when a run starts, its wall clock is somebody else's
 # as much as its own, and the result says so.
@@ -114,10 +117,10 @@ def busy_pct() -> float:
 
 
 def suite_lock(path: Path | str | None = None, *, wait: bool = True):
-    """The lock two runs take turns on -- `ml_stack.lock.only_one` over `LOCK`."""
+    """The lock two runs take turns on -- `ml_stack.lock.only_one` over `lock_path`."""
     from ml_stack.lock import only_one
 
-    return only_one(path or LOCK, wait=wait)
+    return only_one(path or lock_path(), wait=wait)
 
 
 def file_name(name: str, backend: str, commit: str, config: Mapping[str, Any],
@@ -186,8 +189,8 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
 
     ``backend`` is a name `ml_stack.train.backend` knows; left out, the detected default.
     ``arguments`` reach the suite's own function. ``lock`` is the file runs take turns on,
-    `LOCK` unless said. Returns the record; a seed that raised is recorded in ``failures``
-    and left out of every mean rather than averaged away.
+    `lock_path` unless said. Returns the record; a seed that raised is recorded in
+    ``failures`` and left out of every mean rather than averaged away.
     """
     suite = registered(name)
     if not seeds:

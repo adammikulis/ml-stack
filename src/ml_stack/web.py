@@ -45,6 +45,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import state
 from ml_stack.http import Retry, ServerError, open_stream
 
 Engine = Callable[[str, int], list[dict[str, Any]]]
@@ -63,7 +64,9 @@ TIMEOUT_S = 20.0
 USER_AGENT = "Mozilla/5.0 (compatible; ml-stack)"
 # its own profile, not the scraper's: the scraper's profile is signed in to the community's
 # workspace, and a page a model chose to open must never carry those cookies
-PROFILE = Path(os.environ.get("MLSTACK_WEB_PROFILE") or "~/.ml-stack/web")
+def profile_dir() -> Path:
+    """Where the window this library opens keeps its own browser profile."""
+    return state("web")
 
 
 class SearchUnavailable(RuntimeError):
@@ -312,7 +315,7 @@ def _browse() -> Any:
     """A page in a real browser, as a context manager; ``BrowserUnavailable`` without playwright."""
     from ml_stack.scrape.browser import Window, browser
 
-    return browser(Window(profile=PROFILE))
+    return browser(Window(profile=profile_dir()))
 
 
 def _rendered(url: str, browse: Callable[[], Any]) -> str:

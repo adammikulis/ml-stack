@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.records import Document
 
 __all__ = ["Rates", "default_path"]
@@ -13,7 +14,7 @@ ALPHA = 0.3
 
 
 _DOC: Document[dict[str, float]] = Document(
-    default=lambda: Path.home() / ".ml-stack" / "rates.json", env="ML_STACK_RATES",
+    default=lambda: home.state("rates.json"), env="ML_STACK_RATES",
     build=lambda held: {str(k): float(v) for k, v in held.items()},
     unbuild=lambda seen: dict(sorted(seen.items())), empty=dict)
 

@@ -293,7 +293,7 @@ class TestCommand:
 def fake_llama_server(tmp_path, monkeypatch):
     from ml_stack.serve import backend as backend_module
 
-    monkeypatch.setattr(backend_module, "LOG_DIR", tmp_path / "logs")
+    monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
     script = tmp_path / "server.py"
     script.write_text(FAKE_SERVER)
     binary = tmp_path / "llama-server"

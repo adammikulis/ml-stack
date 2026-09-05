@@ -22,6 +22,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
+
 __all__ = ["ADOPTED", "Autostart", "CachePlan", "DEFAULT_MODEL", "IN_PLACE", "LABEL",
            "LEFT_ALONE", "SYSTEM_LABEL", "SystemService", "choose_model", "install",
            "main", "models_in", "plan", "plan_cache", "restart", "service_environment",
@@ -75,7 +77,7 @@ def _args(slots: int = 1, labels: tuple[str, ...] = (), report: str = "") -> lis
 def _mac_path(mode: str) -> Path:
     if mode == "boot":
         return Path("/Library/LaunchDaemons") / f"{LABEL}.plist"
-    return Path.home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
+    return home.user_home() / "Library" / "LaunchAgents" / f"{LABEL}.plist"
 
 
 def _ask_and_run(command: str, prompt: str) -> tuple[bool, str]:
@@ -104,7 +106,7 @@ def _mac_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
         "KeepAlive": {"SuccessfulExit": False},
         "StandardOutPath": str(log_dir / "traind.log"),
         "StandardErrorPath": str(log_dir / "traind.log"),
-        "WorkingDirectory": str(Path.home()),
+        "WorkingDirectory": str(home.user_home()),
         "EnvironmentVariables": {"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
     }
     body = plistlib.dumps(plist)
@@ -167,7 +169,7 @@ def _systemd_install(mode: str, argv: list[str], log_dir: Path) -> Autostart:
             mode, installed=False, path=target, command=f"sudo sh -c \"{command}\"",
             note=why or "Permission was not given, so it will not start at boot yet.")
 
-    path = Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service"
+    path = home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(body)
     subprocess.run(["systemctl", "--user", "daemon-reload"],
@@ -194,7 +196,7 @@ LOGIN_TASK = f"{LABEL}.login"
 
 
 def _windows_startup() -> Path:
-    return (Path(os.environ.get("APPDATA", Path.home()))
+    return (Path(os.environ.get("APPDATA", home.user_home()))
             / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
             / f"{SERVICE}.cmd")
 
@@ -376,7 +378,7 @@ def install(mode: str, *, slots: int = 1, labels: tuple[str, ...] = (),
         return Autostart("manual", installed=True,
                          note="Nothing installed. Start it yourself with "
                               "'ml-stack-traind'.")
-    logs = Path(log_dir).expanduser() if log_dir else Path.home() / ".ml-stack"
+    logs = home.expand(log_dir) if log_dir else home.home()
     logs.mkdir(parents=True, exist_ok=True)
     argv = plan(mode, slots=slots, labels=labels, report=report)
     if not _runs(argv):
@@ -398,7 +400,7 @@ def uninstall(mode: str = "") -> list[Path]:
     if sys.platform == "darwin":
         candidates = [_mac_path("login"), _mac_path("boot")]
     elif sys.platform == "win32":
-        candidates = [_windows_startup(), _windows_wrapper(Path.home() / ".ml-stack")]
+        candidates = [_windows_startup(), _windows_wrapper(home.home())]
         if _windows_login_task_exists():
             subprocess.run(["schtasks", "/End", "/TN", LOGIN_TASK],
                            capture_output=True, check=False)
@@ -408,7 +410,7 @@ def uninstall(mode: str = "") -> list[Path]:
             subprocess.run(["schtasks", "/Delete", "/F", "/TN", LABEL],
                            capture_output=True, check=False)
     else:
-        candidates = [Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
+        candidates = [home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
                       Path("/etc/systemd/system") / f"{SERVICE}.service"]
     for path in candidates:
         if not path.exists():
@@ -725,7 +727,7 @@ def status() -> dict[str, object]:
         "darwin": {"login": _mac_path("login"), "boot": _mac_path("boot")},
         "win32": {"login": _windows_startup()},
     }.get(sys.platform, {
-        "login": Path.home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
+        "login": home.user_home() / ".config" / "systemd" / "user" / f"{SERVICE}.service",
         "boot": Path("/etc/systemd/system") / f"{SERVICE}.service",
     })
     for mode, path in checks.items():

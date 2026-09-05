@@ -27,6 +27,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import state
 from ml_stack import jobs
 from ml_stack.contracts import recipe as _recipe
 from ml_stack.train.recipes import build, known, validate
@@ -37,9 +38,9 @@ from ml_stack.train.trainer import Trainer
 ADAPTER_DIR = "adapter"
 MERGED_DIR = "merged"
 
-HOME = Path(os.environ.get("MLSTACK_TRAIN_HOME") or "~/.ml-stack/train").expanduser()
-"""Where a detached run's log and its record of itself live. Not the checkpoints: those are
-the caller's, named by ``--out``."""
+def home_dir() -> Path:
+    """Where a detached run's log and its record of itself live, not its checkpoints."""
+    return state("train")
 
 KIND = "train"
 """The kind of job a detached run is recorded as, in `ml_stack.jobs`."""
@@ -51,9 +52,8 @@ _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DET
 
 
 def _home() -> Path:
-    """Where a detached run's log and its record of itself live. Read at call time, so a
-    test points `HOME` into ``tmp_path`` and never touches a real ``~/.ml-stack``."""
-    return Path(HOME)
+    """Where a detached run's log and its record of itself live."""
+    return home_dir()
 
 
 def _jobs_home(home: Path | None = None) -> Path:

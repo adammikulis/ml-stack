@@ -78,7 +78,7 @@ from ml_stack.ingest.ask import (
     _ids_for as _ids_for,
 )
 from ml_stack.ingest.cli import (
-    HOME as HOME,
+    home_dir as home_dir,
     KIND as KIND,
     STOP_WAIT as STOP_WAIT,
     detach as detach,

@@ -724,7 +724,7 @@ def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
     every other caller leases through, so a spec that a load would refuse is refused the
     same way, by the same preflight, before anything is spawned.
     """
-    from ml_stack.serve.backend import LOG_DIR, LlamaServerBackend, ServerFailed
+    from ml_stack.serve.backend import LlamaServerBackend, ServerFailed, log_dir
     from ml_stack.serve.manager import ServerManager
 
     manager = ServerManager(backend or LlamaServerBackend())
@@ -735,7 +735,7 @@ def _load_log(spec, *, backend=None, timeout: float | None = None) -> str:
                 f"{info.base_url} was already serving that model, and an adopted server's "
                 "log is from a load that may not have been asked for -lv 4. Stop it "
                 "(`ml-stack-serve down --port %d`) and measure again." % info.port)
-        where = info.log_path or LOG_DIR / f"llama-server-{info.port}.log"
+        where = info.log_path or log_dir() / f"llama-server-{info.port}.log"
         return Path(where).read_text(encoding="utf-8", errors="replace")
     finally:
         manager.release(info)

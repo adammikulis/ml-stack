@@ -10,14 +10,14 @@ from ml_stack.gguf.convert import (
     quantize,
 )
 from ml_stack.gguf.tools import (
-    LLAMA_CPP_SRC,
-    SOURCE_DIRS,
     ToolNotFound,
     ensure_converter,
     find_converter,
     find_quantize,
+    llama_cpp_src,
     require_converter,
     require_quantize,
+    source_dirs,
 )
 from ml_stack.gguf.vocab import (
     ADD_SPACE_PREFIX,
@@ -29,8 +29,6 @@ from ml_stack.gguf.vocab import (
 
 __all__ = [
     "ADD_SPACE_PREFIX",
-    "LLAMA_CPP_SRC",
-    "SOURCE_DIRS",
     "ConversionError",
     "ConversionResult",
     "ToolNotFound",
@@ -41,10 +39,12 @@ __all__ = [
     "find_converter",
     "find_quantize",
     "fix_space_prefix",
+    "llama_cpp_src",
     "quantize",
     "read_metadata",
     "require_converter",
     "require_quantize",
+    "source_dirs",
     "set_metadata",
     "Check", "FidelityReport", "verify_metadata", "verify_tokenizer_fidelity",
 ]

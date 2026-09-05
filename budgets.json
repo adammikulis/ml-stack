@@ -7,7 +7,7 @@
   "duplicate-bodies": 16,
   "entry-points": 34,
   "file-locks": 11,
-  "home-paths": 35,
+  "home-paths": 0,
   "http-servers": 2,
   "local-imports": 649,
   "long-docstrings": 131,

@@ -15,7 +15,7 @@ from ml_stack.gguf import tools
 
 #: Captured before any test patches it, so the fixture below cannot hide
 #: what the shipped default actually is.
-REAL_SOURCE_DIRS = tools.SOURCE_DIRS
+REAL_SOURCE_DIRS = tools.source_dirs()
 
 from ml_stack.gguf import (  # noqa: E402  -- after REAL_SOURCE_DIRS, on purpose
     ADD_SPACE_PREFIX,
@@ -56,16 +56,15 @@ def sample_gguf(tmp_path):
 class TestToolDiscovery:
     @pytest.fixture(autouse=True)
     def _isolate_search_path(self, monkeypatch):
-        """Empty SOURCE_DIRS for every discovery test.
+        """Empty the search path for every discovery test.
 
         Without this, "not found" tests pass or fail depending on whether the
         machine running them happens to have a llama.cpp checkout in one of the
         default locations -- so they assert something about the developer's home
-        directory rather than about the code. Adding a single common path to
-        SOURCE_DIRS turned three of them red, which is how this was noticed.
-        Tests that need a directory searched put one there explicitly.
+        directory rather than about the code. Tests that need a directory searched
+        put one there explicitly.
         """
-        monkeypatch.setattr(tools, "SOURCE_DIRS", ())
+        monkeypatch.setattr(tools, "source_dirs", tuple)
 
     def test_the_unsloth_checkout_is_searched(self):
         """unsloth vendors llama.cpp, so many machines have the converter without

@@ -26,6 +26,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.files import write_json
 from ml_stack.world import Message
 from ml_stack.world.check import default_fixtures
@@ -205,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     checked.add_argument("--fixtures", default=default_fixtures(),
                          help="the allow-list of invented names (default: the repository's "
                               "tests/known-fixtures.txt when there is one)")
-    checked.add_argument("--allow", default=str(Path.home() / ".config" / "pii-allow.txt"),
+    checked.add_argument("--allow", default=str(home.user_home() / ".config" / "pii-allow.txt"),
                          help="a second allow-list (default: ~/.config/pii-allow.txt)")
     checked.add_argument("--domain", default="example.com",
                          help="the domain the corpus was emitted at")

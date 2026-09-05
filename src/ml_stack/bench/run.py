@@ -1628,11 +1628,11 @@ def serving_lines() -> list[str]:
     for `status` here, so what is measuring and what it is measuring against are read
     together and nobody polls ports by hand."""
     try:
-        from ml_stack.serve.cli import STATE_FILE, look, recorded_servers
+        from ml_stack.serve.cli import lease_file, look, recorded_servers
     except Exception:  # noqa: BLE001 - no serving side installed is no servers
         return []
     try:
-        records = recorded_servers(STATE_FILE)
+        records = recorded_servers(lease_file())
     except Exception:  # noqa: BLE001
         records = {}
     out = []

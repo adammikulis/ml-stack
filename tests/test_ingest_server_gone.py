@@ -53,7 +53,7 @@ def test_detach_records_the_run_as_this_machines_ingest_job(tmp_path, monkeypatc
     import subprocess
     import sys
 
-    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
     started = {}
     popen = subprocess.Popen
 
@@ -83,7 +83,7 @@ def test_a_second_detach_is_refused_while_the_recorded_run_is_still_ending(tmp_p
     import subprocess
     import sys
 
-    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
@@ -137,7 +137,7 @@ def test_a_judged_tidy_refuses_beside_a_live_run(tmp_path, monkeypatch, capsys):
     import subprocess
     import sys
 
-    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
     try:
         jobs.record("ingest", pid=child.pid, argv=[], home=tmp_path / "jobs")
@@ -195,7 +195,7 @@ def _ask(tmp_path, monkeypatch):
 
 
 def _tidy(tmp_path, monkeypatch):
-    monkeypatch.setattr(ingest, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(tmp_path))
     monkeypatch.setattr(ingest, "_judge", lambda *a, **k: None)
     return ["tidy", "--out", str(tmp_path / "s"), "--model", "x"]
 

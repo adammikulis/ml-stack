@@ -67,7 +67,7 @@ which runs after the autouse fixture and is undone with it.
 
 What still reads the real machine, on purpose:
 
-- `test_gguf.py` compares the shipped `SOURCE_DIRS` against `Path.home() / ".unsloth"`, which
+- `test_gguf.py` compares the shipped `source_dirs()` against `Path.home() / ".unsloth"`, which
   is the value under test — it asserts what the default *is*, and never opens the path.
 - `test_web.py`'s one live search is skipped unless `MLSTACK_NET` is set on purpose.
 - `test_fleet_install.py` asserts the `HF_HOME` an installer *writes* into a plist or unit

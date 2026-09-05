@@ -104,44 +104,38 @@ def json_reply(payload: object, status: int = 200) -> tuple[int, bytes]:
 # autouse and suite-wide so a test that forgets cannot reach any of them; a test that means
 # to exercise one overrides it with its own `monkeypatch.setattr`, which runs after this.
 
-_HOMED = (
-    # module path, attribute, the name it gets under the fixture's scratch home
-    ("ml_stack.bench", "HOME", "bench"),
-    ("ml_stack.bench.extract", "HOME", "bench"),   # bound at import, not looked up
-    ("ml_stack.mcp", "MCP_HOME", "mcp"),
-    ("ml_stack.train.run", "HOME", "train"),   # where a detached fine-tune records itself
-)
-
-#: Environment a developer's shell may carry that would otherwise steer a test.
-_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_TRACE", "MLSTACK_KOKORO_MODEL",
-             "MLSTACK_KOKORO_VOICES", "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE",
-             "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_WEB_PROFILE",
-             "MLSTACK_WHISPER_CPP_MODEL")
+#: Environment a developer's shell may carry that would otherwise steer a test: the
+#: variables that move one corner of the state root, and the ones that pick a model or a
+#: ceiling.
+_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE",
+             "MLSTACK_FIT_FILE", "MLSTACK_INGEST_HOME", "MLSTACK_JOBS_HOME",
+             "MLSTACK_KOKORO_MODEL", "MLSTACK_KOKORO_VOICES", "MLSTACK_LIMITS_FILE",
+             "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE", "MLSTACK_PROFILES_FILE",
+             "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_TRAIN_HOME",
+             "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_RATES")
 
 
 @pytest.fixture(autouse=True)
 def _no_machine_state(monkeypatch, tmp_path):
-    """Point every home, record file and machine reading at an empty temporary directory.
+    """Point the whole state root at an empty temporary directory, and stop machine reads.
 
-    ``bench.HOME`` is the runs store a whole evening of measuring sits in; ``serving_lines``
-    and ``results_since`` read what is serving on this machine right now and what the last
-    job kept; the speech registries probe for whisper and speak out loud. A test that saw either would pass or fail on what the laptop happened to be
-    doing. The `MLSTACK_*` variables are deleted rather than set, so a shell that exports
-    one cannot change a result either.
+    ``ML_STACK_HOME`` moves every home and record file at once, so the runs store a whole
+    evening of measuring sits in, the fit and profile records and the job files are all in
+    ``tmp_path``. ``serving_lines`` and ``results_since`` read what is serving on this
+    machine right now and what the last job kept; the speech registries probe for whisper
+    and speak out loud. The `MLSTACK_*` variables are deleted rather than set, so a shell
+    that exports one cannot move a corner back out.
     """
-    home = tmp_path / "machine-state"
-    monkeypatch.setenv("MLSTACK_BENCH_HOME", str(home / "bench"))
-    monkeypatch.setenv("MLSTACK_INGEST_HOME", str(home / "ingest"))
-    monkeypatch.setenv("MLSTACK_FIT_FILE", str(home / "fit.json"))
-    monkeypatch.setenv("MLSTACK_PROFILES_FILE", str(home / "profiles.json"))
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "machine-state"))
     for name in _STEERING:
         monkeypatch.delenv(name, raising=False)
 
     import importlib
 
-    for path, attr, leaf in _HOMED:
+    # `bench.HOME` is still bound at import; until it is not, it needs pointing by hand.
+    for path in ("ml_stack.bench", "ml_stack.bench.extract"):
         module = sys.modules.get(path) or importlib.import_module(path)
-        monkeypatch.setattr(module, attr, home / leaf, raising=False)
+        monkeypatch.setattr(module, "HOME", tmp_path / "machine-state" / "bench")
 
     running = sys.modules.get("ml_stack.bench.run") or importlib.import_module(
         "ml_stack.bench.run")
@@ -385,13 +379,7 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     directory was truncated. The backend no longer kills a server it did not record; this
     keeps the cache and logs in tmp_path as well, so a test that reaches them fails here.
     """
-    from ml_stack.serve import backend, binary
-
-    cache = tmp_path / "cache"
-    monkeypatch.setattr(binary, "CACHE_ROOT", cache)
-    monkeypatch.setattr(backend, "CACHE_ROOT", cache)
-    monkeypatch.setattr(backend, "LOG_DIR", cache / "logs")
-    monkeypatch.setenv("ML_STACK_CACHE", str(cache))
+    monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
 
 
 # -- the fixtures above are trusted; these fail the run if that trust is misplaced ------
@@ -481,25 +469,27 @@ def truncated_logs(before: dict[str, tuple[int, int]],
 def _real_cache_and_state_untouched():
     """Fails the run if a test wrote into the real ml_stack cache or server state.
 
-    Snapshots ``LOG_DIR`` and ``STATE_FILE`` -- the paths ``backend.py`` and
-    ``manager.py`` compute from the real ``$HOME``/``$ML_STACK_CACHE`` at import,
-    before any per-test fixture repoints them -- and compares again once every test in
-    the session has run. Safe when neither path exists.
+    Snapshots the log directory and the lease file -- resolved once at session start,
+    before any per-test fixture moves the state or cache root -- and compares again once
+    every test in the session has run. Safe when neither path exists.
 
-    ``LOG_DIR`` holds one append-only file per server this machine is running, so a file
-    that got *shorter* is a truncation and nothing but a test does that; a file that grew
-    is a live server, and a new name is any server this machine started while the suite
-    ran. ``STATE_FILE`` is a single record touched only by a lease or a release, so its
-    mtime and size are compared directly.
+    The log directory holds one append-only file per server this machine is running, so a
+    file that got *shorter* is a truncation and nothing but a test does that; a file that
+    grew is a live server, and a new name is any server this machine started while the
+    suite ran. The lease file is a single record touched only by a lease or a release, so
+    its entries are compared directly.
     """
-    from ml_stack.serve.backend import LOG_DIR
-    from ml_stack.serve.manager import STATE_FILE
+    from ml_stack.home import cache, state
+
+    log_dir = cache("logs")
+    lease_file = state("servers.json")
+    older_lease = cache("servers.json")
 
     def log_sizes() -> dict[str, tuple[int, int]]:
-        if not LOG_DIR.is_dir():
+        if not log_dir.is_dir():
             return {}
         out = {}
-        for one in LOG_DIR.iterdir():
+        for one in log_dir.iterdir():
             try:
                 stat = one.stat()
             except OSError:
@@ -508,14 +498,15 @@ def _real_cache_and_state_untouched():
         return out
 
     def state_entries() -> dict | None:
-        """The state file's entries by port, or None when there is no file. A file that
+        """The lease file's entries by port, or None when there is no file. A file that
         is not the manager's JSON reads as {"?": bytes} so any rewrite of it still shows."""
-        if not STATE_FILE.exists():
+        where = lease_file if lease_file.exists() else older_lease
+        if not where.exists():
             return None
         try:
-            held = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+            held = json.loads(where.read_text(encoding="utf-8"))
         except (OSError, ValueError):
-            return {"?": STATE_FILE.read_bytes() if STATE_FILE.exists() else b""}
+            return {"?": where.read_bytes() if where.exists() else b""}
         return held if isinstance(held, dict) else {"?": held}
 
     def ours(entry) -> bool:
@@ -543,7 +534,7 @@ def _real_cache_and_state_untouched():
     problems = []
     cut = truncated_logs(before_logs, after_logs)
     if cut:
-        problems.append(f"{LOG_DIR}: truncated {cut}")
+        problems.append(f"{log_dir}: truncated {cut}")
     if after_state != before_state:
         changed = {k: v for k, v in (after_state or {}).items()
                    if (before_state or {}).get(k) != v}
@@ -554,7 +545,7 @@ def _real_cache_and_state_untouched():
         # first server starting or their last one ending, which `ours` already excuses
         appeared = (before_state is None) != (after_state is None)
         if mine or (appeared and not touched):
-            problems.append(f"{STATE_FILE}: changed (entries {sorted(mine) or 'created/removed'})")
+            problems.append(f"{lease_file}: changed (entries {sorted(mine) or 'created/removed'})")
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
                     pytrace=False)

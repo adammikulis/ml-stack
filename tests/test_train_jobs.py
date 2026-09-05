@@ -27,7 +27,7 @@ def _argv(tmp_path: Path) -> list[str]:
 def test_detach_records_the_run_as_this_machines_train_job(tmp_path, monkeypatch, capsys):
     """`detach` writes the pid, the argv and the log through `ml_stack.jobs` under the kind
     `train`, and that record is what `wait`, `stop` and `ml-stack-jobs status` read."""
-    monkeypatch.setattr(train_run, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_TRAIN_HOME", str(tmp_path))
     started = {}
     popen = subprocess.Popen
 
@@ -58,7 +58,7 @@ def test_a_second_detach_is_refused_while_one_is_still_training(tmp_path, monkey
                                                                 capsys):
     """Two fine-tunes on one machine share one GPU: both are slower and neither
     measurement is believable, so the second is refused rather than queued."""
-    monkeypatch.setattr(train_run, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_TRAIN_HOME", str(tmp_path))
     child = _sleeper()
     try:
         jobs.record("train", pid=child.pid, argv=[], home=tmp_path / "jobs")
@@ -74,7 +74,7 @@ def test_a_second_detach_is_refused_while_one_is_still_training(tmp_path, monkey
 
 
 def test_status_names_the_recorded_training_run(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(train_run, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_TRAIN_HOME", str(tmp_path))
     assert train_run.main(["status"]) == 0
     assert "no job is recorded" in capsys.readouterr().out
 
@@ -92,7 +92,7 @@ def test_status_names_the_recorded_training_run(tmp_path, monkeypatch, capsys):
 
 
 def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(train_run, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_TRAIN_HOME", str(tmp_path))
     assert train_run.main(["wait"]) == 0
     assert "no train job is running" in capsys.readouterr().out
 
@@ -109,7 +109,7 @@ def test_wait_blocks_until_the_recorded_run_has_ended(tmp_path, monkeypatch, cap
 
 
 def test_stop_ends_the_recorded_run_and_clears_the_record(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(train_run, "HOME", tmp_path)
+    monkeypatch.setenv("MLSTACK_TRAIN_HOME", str(tmp_path))
     assert train_run.main(["stop"]) == 1
     assert "no train job is recorded" in capsys.readouterr().out
 

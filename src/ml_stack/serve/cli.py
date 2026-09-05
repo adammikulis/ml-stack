@@ -13,12 +13,13 @@ from typing import Any
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.serve import build
 from ml_stack.serve.backend import (
-    DEFAULT_SLOT_SAVE_PATH,
+    default_slot_save_path,
     LlamaServerBackend,
     ServerFailed,
     ServerInfo,
@@ -28,7 +29,7 @@ from ml_stack.serve.backend import (
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import (
     DEFAULT_TIMEOUT_S,
-    STATE_FILE,
+    lease_file,
     ServerManager,
     orphaned,
     recorded_servers,
@@ -195,10 +196,10 @@ def cache_of(model: str) -> tuple[Path, int] | None:
     from ml_stack.fleet.models import holding
     from ml_stack.hub import default_roots
 
-    path = Path(str(model or "")).expanduser()
+    path = home.expand(str(model or ""))
     if not str(model or "").strip():
         return None
-    for root in default_roots(Path.home() / ".ml-stack"):
+    for root in default_roots(home.home()):
         try:
             path.relative_to(root)
         except ValueError:
@@ -211,7 +212,7 @@ def cache_of(model: str) -> tuple[Path, int] | None:
 
 
 def cmd_status(args: argparse.Namespace) -> int:
-    records = recorded_servers(STATE_FILE)
+    records = recorded_servers(lease_file())
     if getattr(args, "every", False):
         from ml_stack.hub import pretty_name
 
@@ -245,7 +246,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             print(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
         return 0
     ports = sorted({*records, args.port})
-    manager = ServerManager(state_file=STATE_FILE)
+    manager = ServerManager(state_file=lease_file())
 
     found: list[Snapshot] = []
     foreign: list[dict[str, int]] = []
@@ -520,7 +521,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     manager = ServerManager(
         LlamaServerBackend(binary=chosen or None, build=build_name or None)
         if (chosen or build_name) else None,
-        state_file=STATE_FILE)
+        state_file=lease_file())
     asked = str(getattr(args, "draft", "") or "")
     draft = asked
     if asked.lower() == "auto":
@@ -610,7 +611,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    held = recorded_servers(STATE_FILE).get(info.port) or {}
+    held = recorded_servers(lease_file()).get(info.port) or {}
     if not info.adopted or held.get("owner_pid") == os.getpid():
         # a server this process started, or an orphan it took over: on the record under
         # the server's own pid once this command has exited
@@ -986,7 +987,7 @@ def cmd_reclaim(args: argparse.Namespace) -> int:
                     time.sleep(3600)
         except KeyboardInterrupt:
             return 0
-    watcher.look(dict(recorded_servers(STATE_FILE)))
+    watcher.look(dict(recorded_servers(lease_file())))
     settle = parse_duration(args.settle) or 0.0
     if settle:
         time.sleep(settle)
@@ -1116,7 +1117,7 @@ def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
     if not found:
         print("no orphaned server on record.")
         return 0
-    manager = ServerManager(state_file=STATE_FILE)
+    manager = ServerManager(state_file=lease_file())
     for port, entry in found:
         url = base_url_for(port)
         pid = int(entry["pid"])
@@ -1128,7 +1129,7 @@ def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
 
 
 def cmd_down(args: argparse.Namespace) -> int:
-    records = recorded_servers(STATE_FILE)
+    records = recorded_servers(lease_file())
     if getattr(args, "orphans", False):
         return cmd_down_orphans(args, records)
     entry = records.get(args.port)
@@ -1154,7 +1155,7 @@ def cmd_down(args: argparse.Namespace) -> int:
         return 2
 
     running = pid_exists(pid)
-    ServerManager(state_file=STATE_FILE).release(
+    ServerManager(state_file=lease_file()).release(
         ServerInfo(base_url=str(entry.get("base_url") or url), port=args.port, pid=pid,
                    backend=str(entry.get("backend") or "")))
     _withdraw(args, args.port)
@@ -1169,7 +1170,7 @@ def cmd_down(args: argparse.Namespace) -> int:
 def cmd_escalate(args: argparse.Namespace) -> int:
     """``ml-stack-serve escalate`` -- grow a running server's seats in place, keeping
     every live conversation."""
-    manager = ServerManager(state_file=STATE_FILE)
+    manager = ServerManager(state_file=lease_file())
     base_url = f"http://{DEFAULT_HOST}:{args.port}"
     if not is_healthy(base_url, timeout=PROBE_TIMEOUT):
         print(f"error: nothing is answering on port {args.port} to escalate", file=sys.stderr)
@@ -1180,7 +1181,8 @@ def cmd_escalate(args: argparse.Namespace) -> int:
               "escalate -- is /props answering, with --slots enabled?", file=sys.stderr)
         return 2
 
-    save_path = str(getattr(args, "slot_save_path", "") or "") or str(DEFAULT_SLOT_SAVE_PATH)
+    save_path = (str(getattr(args, "slot_save_path", "") or "")
+                 or str(default_slot_save_path()))
     current = ServerSpec(model=params.model, port=args.port,
                          context=int(params.n_ctx) * int(params.total_slots),
                          parallel=int(params.total_slots), slot_save_path=save_path)

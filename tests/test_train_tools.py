@@ -469,7 +469,7 @@ class TestCommandLine:
         (out / "data").symlink_to(data)
         for key in ("LLAMA_CPP_ROOT", "LLAMA_CPP_DIR"):
             monkeypatch.delenv(key, raising=False)
-        monkeypatch.setattr(gguf_tools, "SOURCE_DIRS", ())
+        monkeypatch.setattr(gguf_tools, "source_dirs", tuple)
         monkeypatch.setenv("PATH", str(tmp_path))
         main(["--tools", "unused.json", "--out", str(out), "--base", str(base),
               "--only", "train", "--set", "steps=20", "--set", "batch_size=2"])

@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any, Generic, TypeVar
 
+from ml_stack import home
 from ml_stack.files import write_json
 
 __all__ = ["Document", "Records"]
@@ -51,7 +52,7 @@ class Records(Generic[R]):
     def local_path(self) -> Path:
         """This machine's own file. The environment variable moves it."""
         named = os.environ.get(self.env)
-        return Path(named).expanduser() if named else Path.home() / ".ml-stack" / self.name
+        return home.expand(named) if named else home.state(self.name)
 
     def writable_path(self) -> Path:
         """Where a new record goes: the shipped file in a checkout somebody can write to,
@@ -134,10 +135,10 @@ class Document(Generic[R]):
         """Where this record is kept: what was asked for, else the environment variable,
         else the default."""
         if path is not None:
-            return Path(path).expanduser()
+            return home.expand(path)
         named = os.environ.get(self.env) if self.env else None
         if named:
-            return Path(named).expanduser()
+            return home.expand(named)
         if self.default is None:
             raise ValueError("this record has no default path; name one")
         return self.default()

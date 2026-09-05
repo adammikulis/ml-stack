@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import state
 from ml_stack import jobs
 from ml_stack.graph.asking import Asking
 from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
@@ -25,10 +26,12 @@ from ml_stack.ingest.reads import _read_json
 from ml_stack.ingest.run import Stopped, _read_run, _stopping
 from ml_stack.ingest.sources import show, sources
 
-__all__ = ["HOME", "STOP_WAIT", "detach", "main", "parser", "retry", "stop", "wait"]
+__all__ = ["STOP_WAIT", "detach", "home_dir", "main", "parser", "retry", "stop", "wait"]
 
 
-HOME = Path(os.environ.get("MLSTACK_INGEST_HOME") or "~/.ml-stack/ingest").expanduser()
+def home_dir() -> Path:
+    """Where a detached run's log and its record of itself live."""
+    return state("ingest")
 """Where a detached run's log and its record of itself live. Not the store: the store is
 the caller's, named by ``--out``."""
 
@@ -46,7 +49,7 @@ def _home() -> Path:
     """Where a detached run's log and its record of itself live."""
     from ml_stack import ingest
 
-    return Path(ingest.HOME)
+    return ingest.home_dir()
 
 
 def _jobs_home(home: Path | None = None) -> Path:

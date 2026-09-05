@@ -35,7 +35,7 @@ MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 def state(tmp_path, monkeypatch):
     """Point the CLI at a lease file of its own."""
     path = tmp_path / "servers.json"
-    monkeypatch.setattr(cli, "STATE_FILE", path)
+    monkeypatch.setattr(cli, "lease_file", lambda: path)
     return path
 
 
@@ -445,7 +445,7 @@ def test_up_withholds_a_fork_only_head_from_mainline_and_says_why(monkeypatch, t
     preflight = FakePreflight()
     monkeypatch.setattr("ml_stack.serve.preflight.Preflight", preflight)
     monkeypatch.setattr("ml_stack.hub.room", lambda: 0)
-    monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+    monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
     binary = tmp_path / "current" / "llama-server"
     binary.parent.mkdir()
     binary.write_text("#!/bin/sh\necho usage: llama-server\n")
@@ -558,7 +558,7 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     from ml_stack.serve import backend
     from ml_stack.serve.backend import flags_of
 
-    monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+    monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
     monkeypatch.setattr(backend, "_FLAGS", {})
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
@@ -604,7 +604,7 @@ class TestPreflightOnly:
     def test_a_passing_preflight_exits_zero_and_never_leases(self, tmp_path, monkeypatch, capsys):
         import ml_stack.setup as setup_module
 
-        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
 
         def lease(self, spec, *, timeout=None, roam=True, **kw):
@@ -628,7 +628,7 @@ class TestPreflightOnly:
         monkeypatch.setattr("ml_stack.serve.preflight.source_dir", lambda: tmp_path / "no-src")
         import ml_stack.setup as setup_module
 
-        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"gemma4"})  # not llama
 
         gguf = write_gguf(tmp_path / MODEL, {
@@ -676,7 +676,7 @@ class TestResolveModel:
         import ml_stack.hub as hub_module
         import ml_stack.setup as setup_module
 
-        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
         cache = tmp_path / "hub"
         snapshot = cache / "models--maker--thing-GGUF" / "snapshots" / "abc123"
         snapshot.mkdir(parents=True)
@@ -718,7 +718,7 @@ class TestBuildFlag:
         """
         from ml_stack.serve import backend as backend_module
 
-        monkeypatch.setattr(cli, "STATE_FILE", tmp_path / "servers.json")
+        monkeypatch.setattr(cli, "lease_file", lambda: tmp_path / "servers.json")
         calls: list[dict] = []
 
         class Spy(backend_module.LlamaServerBackend):

@@ -14,13 +14,11 @@ from ml_stack.serve.backend import (
 )
 from ml_stack.serve.binary import (
     BinaryNotFound,
-    CACHE_ROOT,
     child_env,
     find_binary,
     require_binary,
 )
 from ml_stack.serve.manager import (
-    STATE_FILE,
     EscalationRefused,
     ServerManager,
     merge_state,
@@ -49,9 +47,7 @@ from ml_stack.serve.shape import (
 )
 
 __all__ = [
-    "CACHE_ROOT",
     "DEFAULT_HOST",
-    "STATE_FILE",
     "BinaryNotFound",
     "EscalationRefused",
     "LlamaServerBackend",

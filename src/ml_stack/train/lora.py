@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.train.step import TorchStep
 
 __all__ = ["CEILING_ENV", "CEILING_MIN", "DEFAULT_TARGETS", "Fit", "Lora", "LoraStep",
@@ -250,7 +251,7 @@ def managed_source() -> Path:
 
         return Path(SRC_DIR)
     except Exception:                                       # noqa: BLE001 - a bare install
-        return Path.home() / ".ml-stack" / "llama.cpp" / "src"
+        return home.state("llama.cpp", "src")
 
 
 def ceiling_default() -> float:

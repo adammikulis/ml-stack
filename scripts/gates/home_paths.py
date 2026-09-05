@@ -8,13 +8,13 @@ from . import Finding
 from ._util import calls, dotted, exempt, parse, python_files, rel
 
 NAME = "home-paths"
-OWNER = "ml_stack.paths"
+OWNER = "ml_stack.home"
 ROOTS = ("src/ml_stack",)
-OWNS = ("src/ml_stack/paths.py", "src/ml_stack/home.py")
+OWNS = ("src/ml_stack/home.py",)
 
 
 def describe() -> str:
-    return "A home directory resolved in place; ml_stack.paths names every directory once."
+    return "A home directory resolved in place; ml_stack.home names every directory once."
 
 
 def find(root: Path) -> list[Finding]:

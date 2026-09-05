@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.units import human_bytes
 
 __all__ = ["Check", "Preflight", "PreflightFailed", "Report", "read_gguf_header",
@@ -139,8 +140,7 @@ def _local_index() -> dict[str, Path]:
     from ml_stack.hub import default_roots
 
     try:
-        found = Models(roots=default_roots(Path.home() / ".ml-stack"),
-                       store=Path.home() / ".ml-stack").all()
+        found = Models(roots=default_roots(home.home()), store=home.home()).all()
     except Exception:  # noqa: BLE001 - a machine with no models has no models
         return {}
     return {m.path.name: m.path for m in found}

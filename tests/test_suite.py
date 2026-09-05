@@ -234,7 +234,7 @@ def test_list_with_nothing_registered_says_how_to_register_one(capsys):
 def test_run_takes_its_seeds_and_its_settings_and_writes_the_result(tmp_path, monkeypatch,
                                                                     capsys):
     name = a_module(tmp_path, monkeypatch, MODULE)
-    monkeypatch.setattr(suites, "LOCK", tmp_path / "suite.lock")
+    monkeypatch.setattr(suites, "lock_path", lambda: tmp_path / "suite.lock")
     code = suites.main(["--import", name, "run", "weighing", "--backend", "counting",
                         "--seed", "0", "--seed", "1", "--out", str(tmp_path / "out"),
                         "--set", "width=512", "--set", "tight=true"])
@@ -249,7 +249,7 @@ def test_run_takes_its_seeds_and_its_settings_and_writes_the_result(tmp_path, mo
 
 def test_run_says_what_went_wrong_rather_than_raising(tmp_path, monkeypatch, capsys):
     name = a_module(tmp_path, monkeypatch, MODULE)
-    monkeypatch.setattr(suites, "LOCK", tmp_path / "suite.lock")
+    monkeypatch.setattr(suites, "lock_path", lambda: tmp_path / "suite.lock")
     assert suites.main(["--import", name, "run", "nothing-like-it"]) == 2
     assert "no suite called" in capsys.readouterr().err
     assert suites.main(["--import", name, "run", "weighing", "--set", "width"]) == 2
@@ -266,7 +266,7 @@ def flaky(*, backend, seed):
         raise RuntimeError("this seed is unlucky")
     return {"value": 1.0}
 ''')
-    monkeypatch.setattr(suites, "LOCK", tmp_path / "suite.lock")
+    monkeypatch.setattr(suites, "lock_path", lambda: tmp_path / "suite.lock")
     code = suites.main(["--import", name, "run", "flaky", "--backend", "counting",
                         "--seed", "0", "--seed", "1"])
     assert code == 1 and "FAILED seed 1" in capsys.readouterr().out

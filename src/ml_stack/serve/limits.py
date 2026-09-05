@@ -25,18 +25,15 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.records import Document
-from ml_stack.serve.binary import CACHE_ROOT
 from ml_stack.units import human_bytes
 
-__all__ = ["FILE", "Limits", "changed", "clear", "read", "where", "write"]
-
-#: Where this machine's limits are kept. ``MLSTACK_LIMITS_FILE`` moves it.
-FILE = CACHE_ROOT / "limits.json"
+__all__ = ["Limits", "changed", "clear", "read", "where", "write"]
 
 
 def where(path: Path | str | None = None) -> Path:
-    """The file this machine's limits are kept in: ``MLSTACK_LIMITS_FILE``, else `FILE`."""
+    """The file this machine's limits are kept in. ``MLSTACK_LIMITS_FILE`` moves it."""
     return _DOC.path(path)
 
 
@@ -90,7 +87,7 @@ class Limits:
 
 
 _DOC: Document[Limits] = Document(
-    default=lambda: FILE, env="MLSTACK_LIMITS_FILE",
+    default=lambda: home.cache("limits.json"), env="MLSTACK_LIMITS_FILE",
     build=lambda held: Limits(**{f: held[f] for f in Limits.__dataclass_fields__
                                  if f in held}),
     unbuild=asdict, empty=Limits)

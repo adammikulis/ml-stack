@@ -8,19 +8,17 @@ import platform
 import shutil
 from pathlib import Path
 
+from ml_stack import home
+
 logger = logging.getLogger(__name__)
 
 SERVER_NAMES = ("llama-server", "llama-server.exe")
-
-CACHE_ROOT = Path(
-    os.environ.get("ML_STACK_CACHE", Path.home() / ".cache" / "ml_stack")
-).expanduser()
 
 # Where `ml-stack-serve build` installs what it builds or downloads, and which build is
 # trusted right now. `build.py` only repoints MANAGED_CURRENT once a new build answers
 # --help and reads every architecture the old one did -- so finding it here is finding
 # something already verified, never a build in progress.
-MANAGED_ROOT = Path.home() / ".ml-stack" / "llama.cpp"
+MANAGED_ROOT = home.state("llama.cpp")
 MANAGED_CURRENT = MANAGED_ROOT / "current"
 
 # A build kept beside `current` rather than replacing it -- a fork whose fixes have not
@@ -35,8 +33,8 @@ MAINLINE = "ggml-org/llama.cpp"
 
 # Directories that are on PATH only in a login shell, so a subprocess never sees them.
 _LOGIN_SHELL_DIRS = (
-    Path.home() / "bin",
-    Path.home() / ".local" / "bin",
+    home.user_home() / "bin",
+    home.user_home() / ".local" / "bin",
     Path("/opt/homebrew/bin"),
     Path("/usr/local/bin"),
 )
@@ -68,20 +66,20 @@ def find_binary(
     candidates = _name_variants(name)
 
     if explicit:
-        path = Path(explicit).expanduser()
+        path = home.expand(explicit)
         if path.is_file():
             return path.resolve()
         logger.debug("explicit binary %s does not exist; falling through", path)
 
     env_key = "LLAMA_CPP_SERVER" if name == "llama-server" else None
     if env_key and (value := os.environ.get(env_key)):
-        path = Path(value).expanduser()
+        path = home.expand(value)
         if path.is_file():
             return path.resolve()
 
     if env_dir := os.environ.get("LLAMA_CPP_DIR"):
         for candidate in candidates:
-            path = Path(env_dir).expanduser() / candidate
+            path = home.expand(env_dir) / candidate
             if path.is_file():
                 return path.resolve()
 
@@ -102,11 +100,11 @@ def find_binary(
             if path.is_file():
                 return path.resolve()
 
-    for directory in (vendor_dir, CACHE_ROOT, *_LOGIN_SHELL_DIRS):
+    for directory in (vendor_dir, home.cache(), *_LOGIN_SHELL_DIRS):
         if directory is None:
             continue
         for candidate in candidates:
-            path = Path(directory).expanduser() / candidate
+            path = home.expand(directory) / candidate
             if path.is_file():
                 return path.resolve()
 
@@ -124,7 +122,7 @@ def require_binary(name: str = "llama-server", **kwargs: object) -> Path:
     raise BinaryNotFound(
         f"{name} not found. Looked at: $LLAMA_CPP_SERVER, $LLAMA_CPP_DIR, a named build "
         f"($MLSTACK_LLAMA_BUILD or build=) under {MANAGED_NAMED}, {MANAGED_CURRENT}, "
-        f"a vendor dir, PATH, {CACHE_ROOT}, and "
+        f"a vendor dir, PATH, {home.cache()}, and "
         f"{', '.join(str(d) for d in _LOGIN_SHELL_DIRS)}.\n"
         f"ml-stack-serve build   builds llama.cpp's own master (or downloads the newest "
         f"release, on a machine with no compiler) -- usually what you want, since a "
@@ -145,7 +143,7 @@ def manifest_of(binary: str | Path | None) -> dict:
         return {}
     import json
 
-    path = Path(binary).expanduser()
+    path = home.expand(binary)
     for where in (path.parent, path.resolve().parent):
         manifest = where / "BUILD.json"
         if not manifest.is_file():
@@ -174,7 +172,7 @@ def borrows(binary: str | Path | None) -> bool:
     """
     if not binary:
         return False
-    path = Path(binary).expanduser()
+    path = home.expand(binary)
     try:
         path.relative_to(MANAGED_NAMED)
         return True

@@ -8,8 +8,9 @@ from . import Finding
 from ._util import calls, exempt, parse, python_files, rel
 
 NAME = "print-calls"
-OWNER = ""
+OWNER = "ml_stack.log"
 ROOTS = ("src/ml_stack",)
+OWNS = ("src/ml_stack/log.py",)
 
 COMMANDS = {
     "src/ml_stack/bench/run.py",
@@ -39,14 +40,14 @@ COMMANDS = {
 
 
 def describe() -> str:
-    return "A print() in library code; return the text or log it, a caller cannot silence this."
+    return "A print() in library code; `ml_stack.log` says it, so a caller can redirect it."
 
 
 def find(root: Path) -> list[Finding]:
     out = []
     for path in python_files(root, ROOTS):
         where = rel(path, root)
-        if where in COMMANDS or exempt(where, tuple(COMMANDS)):
+        if where in OWNS or where in COMMANDS or exempt(where, tuple(COMMANDS)):
             continue
         tree = parse(path)
         if tree is None:

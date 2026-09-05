@@ -14,12 +14,13 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.hub import free_memory
 from ml_stack.client.health import ServingParams, serving_params
 from ml_stack.http import ServerError, request_json
 from ml_stack.serve.backend import (
-    DEFAULT_SLOT_SAVE_PATH,
+    default_slot_save_path,
     Lease,
     LlamaServerBackend,
     ServerBackend,
@@ -27,7 +28,6 @@ from ml_stack.serve.backend import (
     ServerInfo,
     ServerSpec,
 )
-from ml_stack.serve.binary import CACHE_ROOT
 from ml_stack.serve.ports import free_port, port_is_free
 from ml_stack.serve.process import kill_process_tree, pid_exists
 from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
@@ -65,7 +65,24 @@ class EscalationRefused(ServerFailed):
     """Growing or splitting a server's seats would drop a live conversation's cache, and
     summarising it did not rescue that. The saved cache named in the message is kept."""
 
-STATE_FILE = CACHE_ROOT / "servers.json"
+def lease_file() -> Path:
+    """The file recording which model servers this machine is running.
+
+    A record left at the older `~/.cache/ml_stack/servers.json` is moved under the state
+    root the first time this is asked for, and read where it is if the move fails.
+    """
+    current = home.state("servers.json")
+    if current.exists():
+        return current
+    older = home.cache("servers.json")
+    if not older.exists():
+        return current
+    try:
+        current.parent.mkdir(parents=True, exist_ok=True)
+        older.replace(current)
+    except OSError:
+        return older
+    return current
 UNAVAILABLE_COOLDOWN_S = 3.0
 STATE_LOCK_TIMEOUT_S = 30.0
 
@@ -196,7 +213,7 @@ def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict
 def recorded_servers(state_file: Path | None = None) -> dict[int, dict]:
     """Every server in the lease file, keyed by port."""
     try:
-        parsed = json.loads((state_file or STATE_FILE).read_text(encoding="utf-8"))
+        parsed = json.loads((state_file or lease_file()).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
     if not isinstance(parsed, dict):
@@ -223,7 +240,7 @@ class ServerManager:
         state_file: Path | None = None,
     ) -> None:
         self.backend = backend or LlamaServerBackend()
-        self.state_file = state_file or STATE_FILE
+        self.state_file = state_file or lease_file()
         self.say: Callable[[str], None] | None = None
         self._mine: dict[str, dict] = {}
         self._processes: dict[int, Any] = {}
@@ -270,7 +287,7 @@ class ServerManager:
             # buffer throughout, seat count or no. A lease that may later escalate is
             # kv_unified from its first launch, not only from the relaunch.
             if not spec.slot_save_path:
-                spec = replace(spec, slot_save_path=str(DEFAULT_SLOT_SAVE_PATH))
+                spec = replace(spec, slot_save_path=str(default_slot_save_path()))
             if not spec.kv_unified:
                 spec = replace(spec, kv_unified=True)
 
@@ -809,8 +826,9 @@ def serve(
 def stop_all_servers() -> list[int]:
     """Stop every model server recorded on this machine by any live owner."""
     stopped: list[int] = []
+    held = lease_file()
     try:
-        state = json.loads(STATE_FILE.read_text(encoding="utf-8"))
+        state = json.loads(held.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return stopped
 
@@ -821,5 +839,5 @@ def stop_all_servers() -> list[int]:
         if isinstance(pid, int) and pid_exists(pid):
             stopped += kill_process_tree(pid)
 
-    STATE_FILE.unlink(missing_ok=True)
+    held.unlink(missing_ok=True)
     return stopped

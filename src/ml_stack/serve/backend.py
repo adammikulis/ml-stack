@@ -14,17 +14,23 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.client import wait_for_health
 from ml_stack.platform import process_group_kwargs
-from ml_stack.serve.binary import CACHE_ROOT, child_env, require_binary
+from ml_stack.serve.binary import child_env, require_binary
 from ml_stack.serve.ports import DEFAULT_HOST, port_is_free, reclaim_port
 
 logger = logging.getLogger(__name__)
 
-LOG_DIR = CACHE_ROOT / "logs"
 
-# Where a slot's KV cache is saved when a lease asks to escalate seats without one named.
-DEFAULT_SLOT_SAVE_PATH = CACHE_ROOT / "slots"
+def log_dir() -> Path:
+    """Where each model server this machine started appends its log."""
+    return home.cache("logs")
+
+
+def default_slot_save_path() -> Path:
+    """Where a slot's KV cache is saved when a lease escalates seats without naming one."""
+    return home.cache("slots")
 
 
 class ServerFailed(RuntimeError):
@@ -630,12 +636,13 @@ class LlamaServerBackend(ServerBackend):
             if not report.ok:
                 raise PreflightFailed(report.said())
 
-        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        logs = log_dir()
+        logs.mkdir(parents=True, exist_ok=True)
         if spec.slot_save_path:
             # llama-server refuses to start rather than create this itself: "not a
             # directory" is its whole complaint.
             Path(spec.slot_save_path).mkdir(parents=True, exist_ok=True)
-        log_path = LOG_DIR / f"llama-server-{spec.port}.log"
+        log_path = logs / f"llama-server-{spec.port}.log"
         logger.info("starting: %s", " ".join(argv))
 
         extra_env = {}

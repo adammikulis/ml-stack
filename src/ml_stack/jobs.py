@@ -18,16 +18,19 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.home import expand, state
 from ml_stack.lock import Busy
 
-HOME = Path(os.environ.get("MLSTACK_JOBS_HOME") or "~/.ml-stack/jobs").expanduser()
-"""Where a record lives when a caller names no ``home`` of its own: ``HOME/<kind>.json``."""
+
+def home_dir() -> Path:
+    """Where a record lives when a caller names no ``home`` of its own: ``<kind>.json``."""
+    return state("jobs")
 
 STOP_WAIT = 60.0
 """How long `stop` waits for the pid to end before saying it is still going."""
 
 __all__ = ["Job", "record", "alive", "held", "wait", "stop", "status", "main",
-           "HOME", "STOP_WAIT"]
+           "home_dir", "STOP_WAIT"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +42,7 @@ class Job:
     argv: tuple[str, ...] = field(default_factory=tuple)
     log: str = ""
     started: str = ""
-    home: Path = HOME
+    home: Path = field(default_factory=home_dir)
 
     def as_dict(self) -> dict[str, Any]:
         return {"pid": self.pid, "argv": list(self.argv), "log": self.log,
@@ -47,7 +50,7 @@ class Job:
 
 
 def _path(kind: str, home: Path | None) -> Path:
-    return (home or HOME) / f"{kind}.json"
+    return (home or home_dir()) / f"{kind}.json"
 
 
 def _read(path: Path) -> dict[str, Any]:
@@ -109,7 +112,7 @@ def record(kind: str, *, pid: int, argv: Sequence[str] = (), log: str = "", star
     whose own concurrency is handled elsewhere (the bench queues a second `--detach` behind
     a file lock rather than refusing it) passes ``refuse_if_alive=False``.
     """
-    home = home or HOME
+    home = home or home_dir()
     if refuse_if_alive:
         held = alive(kind, home=home)
         if held:
@@ -147,7 +150,7 @@ def stop(kind: str, *, say: Callable[[str], None] = print, wait: float = STOP_WA
     end, saying so every 30s while it has not. The record is kept while it is still ending
     -- so a caller checking `alive` first never starts a second one beside it -- and removed
     once it has, or once the pid was already gone."""
-    home = home or HOME
+    home = home or home_dir()
     path = _path(kind, home)
     held = _read(path)
     pid = int(held.get("pid") or 0)
@@ -178,7 +181,7 @@ def stop(kind: str, *, say: Callable[[str], None] = print, wait: float = STOP_WA
 
 def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> int:
     """Every kind's record under ``home``: running or ended, since when, its log."""
-    home = home or HOME
+    home = home or home_dir()
     records = sorted(home.glob("*.json")) if home.exists() else []
     if not records:
         say("no job is recorded")
@@ -188,8 +191,8 @@ def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> i
         held = _read(path)
         pid = int(held.get("pid") or 0)
         running = bool(pid) and not _ended(pid)
-        state = f"running (pid {pid})" if running else (f"ended (pid {pid})" if pid else "unknown")
-        say(f"{kind}: {state} since {held.get('started', '?')}")
+        said = f"running (pid {pid})" if running else (f"ended (pid {pid})" if pid else "unknown")
+        say(f"{kind}: {said} since {held.get('started', '?')}")
         argv = " ".join(str(a) for a in (held.get("argv") or ()))
         if argv:
             say(f"  argv: {argv}")
@@ -214,9 +217,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     help="which job -- `bench`, `ingest`, whatever wrote the record; "
                          "`status` names them all")
     ap.add_argument("--home", default="", metavar="DIR",
-                    help=f"where the records are (default: {HOME})")
+                    help=f"where the records are (default: {home_dir()})")
     args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
-    home = Path(args.home).expanduser() if args.home else None
+    home = expand(args.home) if args.home else None
     if args.word == "status":
         return status(home=home)
     if not args.kind:

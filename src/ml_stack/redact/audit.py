@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, TextIO
 
+from ml_stack import home
 from ml_stack.redact import hook
 from ml_stack.redact.hook import DEFAULT_FIXTURES, FLOOR, from_database, permitted, recogniser
 
@@ -59,8 +60,8 @@ def audit(root: str, *, env: Mapping[str, str] | None = None, kinds: frozenset[s
     env = os.environ if env is None else env
     rules = hook._rules(env)
     fixtures = fixtures or env.get("NAMES_FIXTURES", DEFAULT_FIXTURES)
-    home = env.get("HOME") or os.path.expanduser("~")
-    allowed = permitted(root, fixtures, f"{home}/.config/pii-allow.txt")
+    account = env.get("HOME") or str(home.user_home())
+    allowed = permitted(root, fixtures, f"{account}/.config/pii-allow.txt")
     known = {n for n in from_database(env.get("NAMES_GRAPH", ""), env.get("NAMES_SCRAPE", ""))
              if n.casefold() not in allowed}
     found: list[Finding] = []

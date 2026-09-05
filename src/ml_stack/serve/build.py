@@ -33,9 +33,9 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.http import ServerError, request_json
 from ml_stack.serve.binary import (
-    CACHE_ROOT,
     MANAGED_CURRENT,
     MANAGED_NAMED,
     MANAGED_ROOT,
@@ -65,7 +65,7 @@ NAMED_SRC_DIR = ROOT / "named-src"
 LIB_GLOBS = ("lib*.dylib", "lib*.so", "*.dll")
 
 PERSIST_LABEL = "com.ml-stack.llama-build"
-PERSIST_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{PERSIST_LABEL}.plist"
+PERSIST_PLIST = home.user_home() / "Library" / "LaunchAgents" / f"{PERSIST_LABEL}.plist"
 PERSIST_TASK = "MLStackLlamaBuild"
 WEEK_SECONDS = 7 * 24 * 60 * 60
 

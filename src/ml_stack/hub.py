@@ -16,6 +16,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack import home
 from ml_stack.units import human_bytes
 
 __all__ = ["Chosen", "DRAFT_MARK", "Found", "PREFER", "WEIGHT_SUFFIXES", "advice", "aside",
@@ -443,16 +444,16 @@ def builds(repo: str, *, ending: str = ".gguf") -> list[tuple[str, int, int]]:
 def default_roots(root: Path | str) -> list[Path]:
     """Where model files live: the store's own, the llama.cpp cache, the Hub cache
     (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
-    home = Path.home()
-    cache = home / ".cache" / "huggingface" / "hub"
+    account = home.user_home()
+    cache = account / ".cache" / "huggingface" / "hub"
     named = os.environ.get("HF_HOME")
     if named:
-        cache = Path(named).expanduser() / "hub"
+        cache = home.expand(named) / "hub"
     return [
-        Path(root).expanduser() / "models",
-        home / ".cache" / "llama.cpp",
+        home.expand(root) / "models",
+        account / ".cache" / "llama.cpp",
         cache,
-        home / "models",
+        account / "models",
     ]
 
 
@@ -463,7 +464,7 @@ def held() -> dict[str, int]:
     `ls -l` reports 79 bytes for a 46G shard.
     """
     out: dict[str, int] = {}
-    for root in default_roots(Path.home() / ".ml-stack"):
+    for root in default_roots(home.home()):
         try:
             found = sorted(root.rglob("*")) if root.is_dir() else []
         except OSError:
@@ -487,8 +488,8 @@ def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, 
                                     or name.rsplit("/", 1)[-1] == build)]
 
 
-HUB_CACHE = (Path(os.environ["HF_HOME"]).expanduser() if os.environ.get("HF_HOME")
-             else Path.home() / ".cache" / "huggingface") / "hub"
+HUB_CACHE = (home.expand(os.environ["HF_HOME"]) if os.environ.get("HF_HOME")
+             else home.user_home() / ".cache" / "huggingface") / "hub"
 
 
 def located(name: str, *, cache: Path | None = None) -> Path | None:

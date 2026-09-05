@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
+
 
 def digest(text: str) -> str:
     """A short stable mark for a row's content, to compare against the last sighting.
@@ -43,9 +45,9 @@ class Seen:
         return cls(path=where, marks=marks)
 
     def save(self) -> None:
-        self.path.expanduser().parent.mkdir(parents=True, exist_ok=True)
-        self.path.expanduser().write_text(json.dumps(self.marks, indent=1, sort_keys=True),
-                                          encoding="utf-8")
+        where = home.expand(self.path)
+        where.parent.mkdir(parents=True, exist_ok=True)
+        where.write_text(json.dumps(self.marks, indent=1, sort_keys=True), encoding="utf-8")
 
     def mark(self, source: str) -> str:
         return str(self.marks.get(source, {}).get("mark") or "")

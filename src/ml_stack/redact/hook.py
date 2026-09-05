@@ -36,6 +36,7 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any, TextIO
 
+from ml_stack import home
 from ml_stack.contracts import ContractError, load
 
 __all__ = ["Shapes", "main", "recogniser", "shapes"]
@@ -490,8 +491,8 @@ def main(argv: list[str] | None = None, *, env: Mapping[str, str] | None = None,
         return 0
 
     fixtures = env.get("NAMES_FIXTURES", DEFAULT_FIXTURES)
-    home = env.get("HOME") or os.path.expanduser("~")
-    allowed = permitted(where, fixtures, f"{home}/.config/pii-allow.txt")
+    account = env.get("HOME") or str(home.user_home())
+    allowed = permitted(where, fixtures, f"{account}/.config/pii-allow.txt")
     known = {n for n in from_database(env.get("NAMES_GRAPH", ""), env.get("NAMES_SCRAPE", ""))
              if n.casefold() not in allowed}
     engine = recogniser()

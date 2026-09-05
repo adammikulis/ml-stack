@@ -19,6 +19,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from ml_stack import home
 from ml_stack.files import write_json
 from ml_stack.platform import private_file
 
@@ -34,7 +35,6 @@ DEFAULT_HTTP_PORT = 8770
 #: What a cluster is called when nobody names one. Two machines that type the same
 #: passphrase derive the same key only if they also agree on this.
 DEFAULT_CLUSTER = "ml-stack"
-DEFAULT_KEY_PATH = Path("~/.ml-stack/cluster.key")
 
 
 def default_group() -> str:
@@ -59,9 +59,9 @@ class DiscoveryError(RuntimeError):
 def key_path(path: Path | str | None = None) -> Path:
     """Where the cluster key lives. ``$ML_STACK_CLUSTER_KEY`` wins if set."""
     if path is not None:
-        return Path(path).expanduser()
+        return home.expand(path)
     env = os.environ.get("ML_STACK_CLUSTER_KEY")
-    return Path(env).expanduser() if env else DEFAULT_KEY_PATH.expanduser()
+    return home.expand(env) if env else home.state("cluster.key")
 
 
 def create_cluster_key(path: Path | str | None = None, *,

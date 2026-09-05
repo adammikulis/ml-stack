@@ -6,22 +6,27 @@ import os
 import shutil
 from pathlib import Path
 
-CACHE_ROOT = Path(
-    os.environ.get("ML_STACK_CACHE", Path.home() / ".cache" / "ml_stack")
-).expanduser()
-
-LLAMA_CPP_SRC = CACHE_ROOT / "llama.cpp-src"
+from ml_stack import home
 
 CONVERTER_NAME = "convert_hf_to_gguf.py"
 
-SOURCE_DIRS = (
-    LLAMA_CPP_SRC,
-    Path.home() / ".local" / "opt" / "llama.cpp-src",
-    Path.home() / "llama.cpp",
-    Path.home() / ".unsloth" / "llama.cpp",
-    Path("/opt/homebrew/share/llama.cpp"),
-    Path("/usr/local/share/llama.cpp"),
-)
+
+def llama_cpp_src() -> Path:
+    """Where `ensure_converter` clones llama.cpp."""
+    return home.cache("llama.cpp-src")
+
+
+def source_dirs() -> tuple[Path, ...]:
+    """Every directory a llama.cpp checkout is looked for in, in order."""
+    account = home.user_home()
+    return (
+        llama_cpp_src(),
+        account / ".local" / "opt" / "llama.cpp-src",
+        account / "llama.cpp",
+        account / ".unsloth" / "llama.cpp",
+        Path("/opt/homebrew/share/llama.cpp"),
+        Path("/usr/local/share/llama.cpp"),
+    )
 
 QUANTIZE_NAMES = ("llama-quantize", "llama-quantize.exe")
 
@@ -43,7 +48,7 @@ def find_converter(explicit: str | Path | None = None) -> Path | None:
             if candidate.is_file():
                 return candidate.resolve()
 
-    for directory in SOURCE_DIRS:
+    for directory in source_dirs():
         candidate = directory / CONVERTER_NAME
         if candidate.is_file():
             return candidate.resolve()
@@ -58,10 +63,10 @@ def require_converter(explicit: str | Path | None = None) -> Path:
         return found
     raise ToolNotFound(
         f"{CONVERTER_NAME} not found. Looked at $LLAMA_CPP_ROOT, $LLAMA_CPP_DIR and:\n"
-        + "\n".join(f"  {d}" for d in SOURCE_DIRS)
+        + "\n".join(f"  {d}" for d in source_dirs())
         + "\n\nIt ships only with the llama.cpp *source*, not with a release binary or a "
         "brew install. Either clone it:\n"
-        f"  git clone --depth 1 https://github.com/ggml-org/llama.cpp {LLAMA_CPP_SRC}\n"
+        f"  git clone --depth 1 https://github.com/ggml-org/llama.cpp {llama_cpp_src()}\n"
         "or call ensure_converter(), which does exactly that."
     )
 
@@ -77,10 +82,11 @@ def ensure_converter(*, ref: str = "master") -> Path:
 
     import subprocess
 
-    LLAMA_CPP_SRC.parent.mkdir(parents=True, exist_ok=True)
+    source = llama_cpp_src()
+    source.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(
         [git, "clone", "--depth", "1", "--branch", ref,
-         "https://github.com/ggml-org/llama.cpp", str(LLAMA_CPP_SRC)],
+         "https://github.com/ggml-org/llama.cpp", str(source)],
         check=True,
     )
     return require_converter()
@@ -106,7 +112,7 @@ def find_quantize(explicit: str | Path | None = None) -> Path | None:
         if found := shutil.which(name):
             return Path(found).resolve()
 
-    for directory in SOURCE_DIRS:
+    for directory in source_dirs():
         for sub in ("build/bin", "bin", ""):
             for name in QUANTIZE_NAMES:
                 candidate = directory / sub / name if sub else directory / name
@@ -122,5 +128,5 @@ def require_quantize(explicit: str | Path | None = None) -> Path:
         return found
     raise ToolNotFound(
         "llama-quantize not found on PATH, in $LLAMA_CPP_ROOT/$LLAMA_CPP_DIR, or in "
-        f"{', '.join(str(d) for d in SOURCE_DIRS)}.\nOn macOS: brew install llama.cpp"
+        f"{', '.join(str(d) for d in source_dirs())}.\nOn macOS: brew install llama.cpp"
     )
