@@ -81,6 +81,23 @@ graph keeps its pointers, its copy and kinds handed to our page. When an app nee
 than that, the missing piece is a command or a parameter here. (Adam, 2026-09-03: "that's
 a great divider line, write that down".)
 
+## The main session and its agents
+
+The main session runs on the most expensive model. It plans, writes the briefs, lands
+branches, and does what an agent cannot: a decision that needs the whole conversation, a
+conflict between two agents' work, a check on a claim before it is relayed. Everything
+else -- reading a subsystem, writing the code and its tests, running the suite, merging
+its own branch -- goes to a subagent on Opus or a smaller model, one per branch, in its own
+worktree.
+
+The main session does a piece of work itself only when handing it off would cost more than
+doing it: a one-line edit, a change that needs what only this conversation knows, a thing
+a smaller model has already failed at twice. Never a subagent on the main session's model.
+
+(Adam, 2026-09-05: "main thread is for planning, integrating, and handling things that
+subagents can't ... make sure subagents are opus or lower"; "if it's something that is best
+for fable, you can do it on main".)
+
 ## Worktrees
 
 Every agent works in its own worktree on its own branch. That means the main session as
