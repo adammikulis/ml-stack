@@ -1,0 +1,276 @@
+#!/usr/bin/env python3
+"""Refuse an edit under src/ml_stack that writes a routine the tree already has.
+
+Claude Code runs this before every Write, Edit and MultiEdit. An exit code of 2 blocks
+the edit and hands the message back; a rule that is a suggestion rather than a certainty
+prints on stdout and lets the edit through. MLSTACK_GUARD=off disables it for a session.
+
+Wire it in as a PreToolUse hook on Write|Edit|MultiEdit in a project's
+`.claude/settings.json`:
+
+    {"hooks": {"PreToolUse": [{"matcher": "Write|Edit|MultiEdit", "hooks": [
+        {"type": "command", "command": "$HOME/Documents/repos/ml-stack/scripts/hooks/claude-edit-guard"}]}]}}
+"""
+
+from __future__ import annotations
+
+import ast
+import difflib
+import hashlib
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+TOOLS = {"Write", "Edit", "MultiEdit"}
+BLOCKED, ALLOWED = 2, 0
+DOCSTRING_LINES = 12
+MAX_PARAMS = 8
+
+# (what it calls, the pattern, the module that owns it, what to use instead)
+OWNED = [
+    ("urllib.request.urlopen", r"urllib\.request\.urlopen", "src/ml_stack/client/http.py",
+     "use `ml_stack.client.http.request_json` -- it carries the timeout, the JSON decode "
+     "and the error type this tree already agrees on."),
+    ("psutil.process_iter", r"psutil\.process_iter", "src/ml_stack/serve/process.py",
+     "use the helpers in `ml_stack.serve.process`; a fresh process scan is the seventh "
+     "copy of one loop."),
+]
+
+
+def cache_path(root: Path) -> Path:
+    """Where this tree's function index is kept."""
+    home = Path(os.environ.get("MLSTACK_GUARD_CACHE") or "~/.ml-stack/guard").expanduser()
+    return home / (hashlib.sha256(str(root).encode()).hexdigest()[:16] + ".json")
+
+
+def tree_key(root: Path, dup) -> str:
+    """A fingerprint of src/ml_stack: the commit it sits on and what has been edited since."""
+    try:
+        head = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                              capture_output=True, text=True, timeout=5).stdout.strip()
+    except Exception:
+        head = ""
+    newest, count = 0.0, 0
+    for path in dup.python_files(root):
+        try:
+            newest = max(newest, path.stat().st_mtime)
+        except OSError:
+            continue
+        count += 1
+    return f"{head}:{count}:{newest:.3f}"
+
+
+def build_index(root: Path, dup) -> dict:
+    """`{"bodies": {signature: [entry...]}, "defs": {name: [where...]}}` for the tree."""
+    bodies: dict[str, list] = {}
+    defs: dict[str, list] = {}
+    for path in dup.python_files(root):
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        where = str(path.relative_to(root))
+        for entry, sig in dup.functions_in(text, where):
+            bodies.setdefault(sig, []).append([entry.path, entry.line, entry.name,
+                                               entry.statements])
+        try:
+            tree = ast.parse(text)
+        except SyntaxError:
+            continue
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                defs.setdefault(node.name, []).append([where, node.lineno, params(node)])
+    return {"bodies": bodies, "defs": defs}
+
+
+def index_for(root: Path, dup) -> dict:
+    """The tree's index, rebuilt when the tree has moved under it."""
+    key, path = tree_key(root, dup), cache_path(root)
+    try:
+        held = json.loads(path.read_text(encoding="utf-8"))
+        if held.get("key") == key:
+            return held
+    except (OSError, ValueError, AttributeError):
+        pass
+    built = build_index(root, dup)
+    built["key"] = key
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(built), encoding="utf-8")
+    except OSError:
+        pass
+    return built
+
+
+def params(fn) -> int:
+    """How many parameters a function takes."""
+    args = fn.args
+    return (len(args.posonlyargs) + len(args.args) + len(args.kwonlyargs)
+            + bool(args.vararg) + bool(args.kwarg))
+
+
+def proposed_text(tool: str, given: dict, current: str) -> str | None:
+    """The file as the edit would leave it, or None when the edit does not apply."""
+    if tool == "Write":
+        return given.get("content") or ""
+    edits = given.get("edits") or [given]
+    text = current
+    for edit in edits:
+        old, new = edit.get("old_string") or "", edit.get("new_string") or ""
+        if old and old not in text:
+            return None
+        text = text.replace(old, new) if edit.get("replace_all") else text.replace(old, new, 1)
+    return text
+
+
+def changed_ranges(current: str, proposed: str) -> list[tuple[int, int]]:
+    """The 1-based line spans of `proposed` that `current` does not already hold."""
+    before, after = current.splitlines(), proposed.splitlines()
+    spans = []
+    for tag, _, _, start, end in difflib.SequenceMatcher(None, before, after).get_opcodes():
+        if tag in ("replace", "insert"):
+            spans.append((start + 1, end))
+    return spans
+
+
+def added_text(current: str, proposed: str) -> str:
+    """Only the lines the edit adds."""
+    lines = proposed.splitlines()
+    return "\n".join("\n".join(lines[start - 1:end])
+                     for start, end in changed_ranges(current, proposed))
+
+
+def touched(node, spans: list[tuple[int, int]]) -> bool:
+    first, last = node.lineno, getattr(node, "end_lineno", node.lineno)
+    return any(start <= last and first <= end for start, end in spans)
+
+
+def docstring_lines(node) -> int:
+    text = ast.get_docstring(node, clean=False)
+    return len(text.splitlines()) if text else 0
+
+
+def refuse(message: str) -> int:
+    print(f"blocked: {message}\n\n(ml-stack scripts/hooks/claude-edit-guard. If this is "
+          f"genuinely the right code, say so and a person can write it, or set "
+          f"MLSTACK_GUARD=off.)", file=sys.stderr)
+    return BLOCKED
+
+
+def library_root(path: Path) -> Path | None:
+    """The checkout a src/ml_stack file sits in."""
+    parts = path.parts
+    for i in range(len(parts) - 1):
+        if parts[i] == "src" and parts[i + 1] == "ml_stack":
+            return Path(*parts[:i]) if i else Path("/")
+    return None
+
+
+def load_duplicates():
+    """The duplicate detector from scripts/gates, loaded without importing the package."""
+    where = Path(__file__).resolve().parent.parent / "gates" / "duplicates.py"
+    spec = importlib.util.spec_from_file_location("_ml_stack_duplicates", where)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def check(tool: str, given: dict) -> int:
+    path = Path(given.get("file_path") or "")
+    if path.suffix != ".py" or path.name.startswith("test_"):
+        return ALLOWED
+    root = library_root(path)
+    if root is None:
+        return ALLOWED
+    here = "/".join(path.parts[len(root.parts):])
+    current = path.read_text(encoding="utf-8") if path.exists() else ""
+    proposed = proposed_text(tool, given, current)
+    if proposed is None or proposed == current:
+        return ALLOWED
+
+    dup = load_duplicates()
+    known = index_for(root, dup)
+    fresh = added_text(current, proposed)
+
+    for called, pattern, owner, instead in OWNED:
+        if here != owner and re.search(pattern, fresh):
+            return refuse(f"`{called}` belongs to {owner}: {instead}")
+
+    if re.search(r"\bos\.(replace|rename)\s*\(", fresh) and re.search(r"json|\.json", fresh) \
+            and here not in ("src/ml_stack/files.py", "src/ml_stack/jsonl/__init__.py"):
+        return refuse("a JSON file is written through `ml_stack.files.write_json`, which "
+                      "already does the temp file and the atomic os.replace.")
+
+    if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) and ".ml-stack" in fresh \
+            and here != "src/ml_stack/paths.py":
+        return refuse("do not build `~/.ml-stack` again. Each package keeps one `HOME` "
+                      "constant (`ml_stack.jobs.HOME`, `ml_stack.graph.bench.keep.HOME`); "
+                      "use that package's, or add one to the package that owns this file.")
+
+    try:
+        tree = ast.parse(proposed)
+    except SyntaxError:
+        return ALLOWED
+    spans = changed_ranges(current, proposed)
+    imports = dup.module_imports(tree)
+    advisory: list[str] = []
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or not touched(node, spans):
+            continue
+        if docstring_lines(node) > DOCSTRING_LINES:
+            return refuse(f"`{node.name}` has a {docstring_lines(node)}-line docstring. "
+                          f"CLAUDE.md allows one line saying what it returns; the rest "
+                          f"belongs in the commit message.")
+        if params(node) > MAX_PARAMS:
+            return refuse(f"`{node.name}` takes {params(node)} parameters. Group them into "
+                          f"a dataclass, or the callers will each get their own order wrong.")
+        if node.name in dup.SKIP_NAMES or dup._dull(node) or dup.statements(node) < dup.FLOOR:
+            continue
+        sig = dup.signature(node, imports)
+        elsewhere = [one for one in known["bodies"].get(sig, [])
+                     if not (one[0] == here and one[2] == node.name)]
+        if elsewhere:
+            first = elsewhere[0]
+            return refuse(f"`{node.name}` has the same body as `{first[2]}` at "
+                          f"{first[0]}:{first[1]}. Call that one, or move it somewhere "
+                          f"both callers can reach.")
+        same_name = [one for one in known["defs"].get(node.name, [])
+                     if one[0] != here and abs(one[2] - params(node)) <= 1]
+        if same_name:
+            advisory.append(f"`{node.name}` already exists at "
+                            f"{same_name[0][0]}:{same_name[0][1]} with a similar signature.")
+
+    if "ArgumentParser(" in fresh and "ArgumentParser(" not in current and current:
+        advisory.append(f"{here} is gaining an ArgumentParser it did not have. A command "
+                        f"belongs in its package's cli module, reached from ml_stack.cli.")
+
+    for note in advisory:
+        print(f"note: {note}")
+    return ALLOWED
+
+
+def main() -> int:
+    if os.environ.get("MLSTACK_GUARD") == "off":
+        return ALLOWED
+    try:
+        event = json.load(sys.stdin)
+    except Exception:
+        return ALLOWED
+    tool = event.get("tool_name")
+    if tool not in TOOLS:
+        return ALLOWED
+    try:
+        return check(tool, event.get("tool_input") or {})
+    except Exception as bad:
+        print(f"note: claude-edit-guard did not run ({bad.__class__.__name__}: {bad})")
+        return ALLOWED
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
