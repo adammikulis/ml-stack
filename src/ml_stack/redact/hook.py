@@ -390,7 +390,8 @@ def recogniser() -> Any:
 
 
 def _git(root: str | None, *args: str) -> str:
-    done = subprocess.run(("git", *args), cwd=root or None, capture_output=True, text=True)
+    done = subprocess.run(("git", *args), cwd=root or None, capture_output=True,
+                          text=True, errors="replace")
     return done.stdout
 
 
