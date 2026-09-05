@@ -170,6 +170,25 @@ time with the page's server down for the Ollama half.
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
 
+## From beehavior
+
+`~/Documents/repos/beehavior` is the other repository that grew these shapes, and its own
+`ML_STACK_MIGRATION.md` lists what it should now delete rather than keep. Two pieces came
+here on 2026-09-05 (`ml-stack-suite`, `ml-stack-serve limits|reclaim`); three are still
+worth taking, in this order:
+
+- [ ] **A runtime redactor** (`tooling/compliance/{text_sanitizer,llm_sanitization}.py`,
+  ~380 lines): a Presidio sanitizer built once per configuration and applied to prompts,
+  model output and the turns a page stores. `ml_stack.redact` audits a repository at commit
+  time and has nothing for the ask path, which is where a graph page sends real text.
+- [ ] **The copyright carve-out gate** (`tooling/graph/ingestion/copyright_carveout.py`,
+  183 lines): refuses a verbatim provenance snippet taken from a source that embeds
+  third-party material under a permission granted to somebody else. Every ingested node
+  keeps a snippet, so this is the same problem here.
+- [ ] **A terminal command centre** (`tooling/daemon/tui.py`, 477 lines, Textual): the
+  facts the fleet app's cluster view already shows, in a terminal. Worth it only if a
+  headless machine wants one.
+
 ## The interface
 
 - [ ] **The fleet app as components.** `graph/page.py` assembles a page out of custom
