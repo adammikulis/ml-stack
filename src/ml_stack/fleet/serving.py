@@ -5,8 +5,6 @@ from __future__ import annotations
 import json
 import socket
 import time
-import urllib.error
-import urllib.request
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from collections.abc import Callable, Sequence
@@ -21,7 +19,6 @@ __all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
 PROBE_TIMEOUT = 1.0
 CONNECT_TIMEOUT = 0.25
 LIVE_CACHE_S = 5.0
-HEALTH_PATHS = ("/health", "/v1/models", "/props")
 
 
 @dataclass
@@ -230,21 +227,16 @@ def stop_model(started: Started, serving: Serving | None = None) -> None:
 
 
 def answers(port: int, *, timeout: float = PROBE_TIMEOUT) -> bool:
+    """Whether a model server on ``port`` of this machine is up."""
+    from ml_stack.client.health import is_healthy
+
     try:
         with socket.create_connection(("127.0.0.1", port),
                                       timeout=min(timeout, CONNECT_TIMEOUT)):
             pass
     except OSError:
         return False
-    for path in HEALTH_PATHS:
-        try:
-            with urllib.request.urlopen(
-                    f"http://127.0.0.1:{port}{path}", timeout=timeout) as r:
-                if r.status < 400:
-                    return True
-        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
-            continue
-    return False
+    return is_healthy(f"http://127.0.0.1:{port}", timeout=timeout)
 
 
 def _name(model: str) -> str:

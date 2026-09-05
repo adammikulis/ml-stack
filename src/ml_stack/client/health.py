@@ -9,7 +9,7 @@ from typing import Any
 
 from ml_stack.client.http import ServerError, request_json
 
-HEALTH_PATHS = ("/health", "/v1/models", "/models")
+HEALTH_PATHS = ("/health", "/v1/models", "/models", "/props")
 
 _SENTINEL_SEEDS = frozenset({-1, 0xFFFFFFFF, 4294967295})
 
@@ -28,7 +28,7 @@ class ServingParams:
 
 
 def is_healthy(base_url: str, *, timeout: float = 2.0, path: str | None = None) -> bool:
-    """One probe. ``True`` if the server answers on any known health path."""
+    """One probe. ``True`` if the server answers on any of `HEALTH_PATHS`."""
     for candidate in (path,) if path else HEALTH_PATHS:
         try:
             request_json(f"{base_url.rstrip('/')}{candidate}", timeout=timeout)

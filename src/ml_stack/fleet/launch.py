@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 import webbrowser
 from typing import Any
+
+from ml_stack.client.http import ServerError, request_json
 
 from .discovery import DEFAULT_PORT as DISCOVERY_PORT  # noqa: F401  (keeps ports in view)
 
@@ -19,12 +18,12 @@ HTTP_PORT = 8770
 
 
 def _health(port: int, timeout: float = 1.0) -> dict[str, Any] | None:
+    """What the ml-stack daemon on ``port`` says about itself, or None."""
     try:
-        with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/health", timeout=timeout) as r:
-            return json.loads(r.read() or b"{}")
-    except (urllib.error.URLError, OSError, ValueError):
+        said = request_json(f"http://127.0.0.1:{port}/health", timeout=timeout)
+    except ServerError:
         return None
+    return said if isinstance(said, dict) else {}
 
 
 def already_running(port: int = HTTP_PORT) -> dict[str, Any] | None:

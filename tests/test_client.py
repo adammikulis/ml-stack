@@ -494,6 +494,16 @@ class TestHealth:
     def test_dead_port_is_not(self):
         assert not is_healthy("http://127.0.0.1:1", timeout=0.5)
 
+    def test_a_server_answering_only_props_is_healthy(self, server):
+        instance = server(lambda m, p, b: json_reply({"n_ctx": 8192})
+                          if p == "/props" else (404, b"no such route"))
+        assert is_healthy(instance.base_url)
+
+    def test_a_server_answering_only_models_is_healthy(self, server):
+        instance = server(lambda m, p, b: json_reply({"data": []})
+                          if p == "/models" else (404, b"no such route"))
+        assert is_healthy(instance.base_url)
+
     def test_wait_returns_as_soon_as_the_server_answers(self, server):
         ready_at = time.monotonic() + 0.5
 

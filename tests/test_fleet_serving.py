@@ -287,6 +287,14 @@ def test_a_probe_reports_a_port_nothing_is_on(tmp_path):
     assert not answers(free_port(), timeout=1.0)
 
 
+def test_a_probe_takes_a_server_that_only_lists_models(server):
+    from conftest import json_reply
+
+    instance = server(lambda m, p, b: json_reply({"data": []})
+                      if p == "/models" else (404, b"no such route"))
+    assert answers(instance.port, timeout=2.0)
+
+
 FAKE_SERVER = '''
 import json, sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
