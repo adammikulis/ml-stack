@@ -257,3 +257,52 @@ def test_divergent_gradients_are_caught_rather_than_averaged_away():
     first = {"w": 1.0, "b": 2.0}
     with pytest.raises(ParityError, match="'b'"):
         assert_grad_parity(first, {"w": 1.0, "b": 2.4}, rtol=1e-4)
+
+
+# --------------------------------------------------------------------------- the command
+
+
+@needs_both
+def test_the_command_prints_a_row_per_operation_and_exits_zero():
+    from ml_stack.train.run import parity
+
+    said: list[str] = []
+    code = parity(say=said.append)
+
+    printed = "\n".join(said)
+    assert code == 0, printed
+    assert "operation" in printed and "max |Δ|" in printed
+    for name in CASES:
+        assert name in printed
+    assert f"{len(CASES)}/{len(CASES)} agree" in printed
+
+
+@needs_both
+def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
+    from ml_stack.train.backend import parity as checks
+    from ml_stack.train.run import parity
+
+    monkeypatch.setitem(checks.CASES, "invented",
+                        lambda b, o: o.array(np.zeros(2, dtype=np.float32) if b.name == "torch"
+                                             else np.ones(2, dtype=np.float32)))
+    said: list[str] = []
+
+    assert parity(say=said.append) == 1
+    printed = "\n".join(said)
+    assert "invented" in printed and "FAIL" in printed
+    assert "disagreeing: invented" in printed
+
+
+def test_the_command_says_so_when_a_backend_is_missing():
+    """One framework installed means the parity claim is untested, not proven."""
+    from ml_stack.train.run import parity
+
+    said: list[str] = []
+    assert parity(say=said.append, second="jax") == 2
+    assert "jax is not usable here" in "\n".join(said)
+
+
+def test_parity_is_one_of_the_words_the_command_takes_instead_of_flags():
+    from ml_stack.train.run import WORDS
+
+    assert "parity" in WORDS

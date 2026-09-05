@@ -43,7 +43,7 @@ the caller's, named by ``--out``."""
 KIND = "train"
 """The kind of job a detached run is recorded as, in `ml_stack.jobs`."""
 
-WORDS = ("wait", "stop", "status")
+WORDS = ("wait", "stop", "status", "parity")
 """What the command does instead of training, when one is written where the flags go."""
 
 _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
@@ -107,6 +107,29 @@ def status(*, say: Callable[[str], None] = print, home: Path | None = None) -> i
     """``ml-stack-train-run status``: what this machine records -- the training run and any
     other long command, the same lines `ml-stack-jobs status` prints."""
     return jobs.status(say=say, home=_jobs_home(home))
+
+
+def parity(*, say: Callable[[str], None] = print, first: str = "torch",
+           second: str = "mlx") -> int:
+    """``ml-stack-train-run parity``: every array operation on two backends, side by side.
+
+    Prints one row per operation with the largest absolute difference between the two,
+    and returns 1 if any of them disagree by more than the tolerance.
+    """
+    from ml_stack.train.backend import BackendUnavailable, get_backend
+    from ml_stack.train.backend.parity import check_all, table
+
+    built = []
+    for name in (first, second):
+        try:
+            built.append(get_backend(name))
+        except (BackendUnavailable, RuntimeError) as exc:
+            say(f"{name} is not usable here, so there is nothing to compare: {exc}")
+            return 2
+
+    results = check_all(*built)
+    say(table(results, first=first, second=second))
+    return 1 if any(not r.ok for r in results) else 0
 
 
 def _base_of(recipe_id: str, config: dict[str, Any], data: Path) -> tuple[str, dict[str, Any]]:
@@ -290,13 +313,17 @@ def main(argv: list[str] | None = None) -> int:
         return stop()
     if rest[:1] == ["status"]:
         return status()
+    if rest[:1] == ["parity"]:
+        return parity()
 
     ap = argparse.ArgumentParser(
         prog="ml-stack-train-run", formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Instead of the flags, one of these words:\n"
                "  status   what long runs this machine records -- pid, argv, log\n"
                "  wait     block until the detached training run has ended\n"
-               "  stop     end the detached training run\n")
+               "  stop     end the detached training run\n"
+               "  parity   compare this machine's two array backends, operation by "
+               "operation\n")
     ap.add_argument("--recipe", required=True, choices=known())
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
