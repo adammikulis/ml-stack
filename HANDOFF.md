@@ -121,7 +121,7 @@ time with the page's server down for the Ollama half.
   ml-stack-bench standard --url http://127.0.0.1:8080/v1 --model flash --label flash-plain --no-think --limit 200 --out ~/.ml-stack/bench/standard/flash-plain.json
   # then
   ml-stack-bench show --speed
-  ml-stack-bench compare flash-plain flash-nodraft-plain-kv-q8_0 flash-ollama-plain --standard ~/.ml-stack/bench/standard/*.json --export ~/flash-comparison.json --title "Flash-Next three ways"
+  ml-stack-bench compare flash-plain flash-nodraft-plain flash-ollama-plain --standard ~/.ml-stack/bench/standard/*.json --export ~/flash-comparison.json --title "Flash-Next three ways"
   ml-stack-bench animate ~/flash-comparison.json --out ~/flash-comparison.mp4 --png ~/flash-comparison.png
   ```
   Memory is sampled over the serving process tree every second (Ollama: the listener's
@@ -137,19 +137,13 @@ time with the page's server down for the Ollama half.
 
 ## Driving what is built (each needs the served model; minutes)
 
-- [ ] **`ml-stack-do` against a served model, the acceptance prompt.** Driven once bare
-  (2026-09-03): with no `--model` it chose Flash-Next from the profiles, used the page's
-  server as it stood, called `serve_status` and answered. Untried: `ml-stack-do "benchmark
-  qwen3.8-flash-next with llama.cpp (both with draft head and no draft head) and with
-  ollama, make some animations"`: it must look both backends up, ask to confirm the files,
-  ask the bench kind and the animation, plan, then act. Tested on a scripted model only.
-- [ ] **First real `ml-stack-claude` and `ml-stack-agent`.** Built and tested against fakes
-  only. `ml-stack-claude <flash-next> -- --print "say hello"`; one `ml-stack-agent "read
-  README.md and say what this is" --model <flash-next> --allow Read`; watch the served
-  alias the model variables carry, the stream-idle watchdog (five minutes of silence
-  aborts -- `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the
-  server's own `/metrics`; then measure a small task set the bench's way so the local
-  harness has a number beside the page's.
+- [ ] **A number for the local harness beside the page's.** `ml-stack-claude <flash-next>
+  -- --print "say hello"` and `ml-stack-agent "read README.md and say in two sentences what
+  this is" --model <flash-next> --allow Read` both ran for real on 2026-09-05 (the agent: 5
+  turns in 382 s, 79k tokens read with 185k from the cache, 1.2k written, a right answer).
+  Untried: the stream-idle watchdog (five minutes of silence aborts --
+  `CLAUDE_STREAM_IDLE_TIMEOUT_MS`), and what `Usage` reports against the server's own
+  `/metrics`. Then a small task set measured the bench's way.
 
 ## Store integrity
 

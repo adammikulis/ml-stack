@@ -1762,9 +1762,10 @@ one of those; the rest are measured plain. Either way both halves of a model are
 loading the model twice to answer it measured nothing about the asking. `--plain-only`
 still means no shortlist half for anyone.
 
-`--serve-kv q8_0` quantises the KV cache of every served model. The label ends `-kv-q8_0`
-and the `ctx` column reads `32k x1/q8`, because a run with a quantised cache against one at
-f16 is a comparison of configurations, and the column is what stops it being read as a
+Every served model's KV cache is stored as q8_0 unless `--serve-kv` says otherwise; a run
+served with another type has a label ending `-kv-TYPE`, and the `ctx` column reads
+`32k x1/q8` or `32k x1/f16`, because a run with one cache type against one with another
+is a comparison of configurations, and the column is what stops it being read as a
 comparison of models. `drafts --n-max N`, repeated, serves each head once per value --
 `--spec-draft-n-max` is bound when the server starts, like the head itself -- labelled
 `draft:<head>@n8`, so the table shows acceptance and wall clock per (head, n-max). Without
