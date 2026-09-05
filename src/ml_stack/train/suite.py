@@ -1,18 +1,10 @@
-"""A measurement run over several seeds, as a `record.Measured`.
+"""A measurement run over several seeds, as a `bench.record.Measured`.
 
 A `Suite` is a name, a line saying what it measures, and a function that runs one seed on
 one backend and returns a flat mapping of numbers. `run` seeds each one, takes the lock,
 records the commit, the host, the wall clock, the peak memory and how busy the card was
-when it started, and folds the seeds into a `record.Spread` per metric. `said` reads one
-back out.
-
-    from ml_stack.bench.suite import register, run, said
-
-    @register("attention", "one forward pass, per backend")
-    def attention(*, backend, seed, width=512):
-        return {"seconds": timed(width), "loss": measured(width)}
-
-    print(said(run("attention", backend="torch", seeds=(0, 1, 2), out_dir=here)))
+when it started, and folds the seeds into a `Spread` per metric. `said` reads one back
+out; `register` adds one; `ml-stack-suite` is the command.
 """
 
 from __future__ import annotations
@@ -29,6 +21,7 @@ from typing import Any
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.record import Measured, Spread
 from ml_stack.serve.binary import CACHE_ROOT
+from ml_stack.train.backend import detect_backend, set_seeds
 
 __all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "peak_memory_bytes",
            "register", "registered", "run", "said", "suite_lock"]
@@ -200,13 +193,9 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
     if not seeds:
         raise ValueError(f"{name} needs at least one seed: one run measures no spread")
     if not backend:
-        from ml_stack.train.backend import detect_backend
-
         backend = detect_backend()
     if suite.backends and backend not in suite.backends:
         raise ValueError(f"{name} runs on {', '.join(suite.backends)}, not {backend!r}")
-
-    from ml_stack.train.backend import set_seeds
 
     under = _Under(name, backend, _commit(Path(where) if where is not None else None),
                    tuple(int(s) for s in seeds), dict(arguments))

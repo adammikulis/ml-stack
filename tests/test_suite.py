@@ -1,4 +1,4 @@
-"""`ml_stack.bench.suite`: a measurement run over several seeds, and what its record carries.
+"""`ml_stack.train.suite`: a measurement run over several seeds, and what its record carries.
 
 Every suite here is invented and counts rather than computes, so the tests measure the
 harness and not a model. Nothing reads or writes outside ``tmp_path``.
@@ -12,7 +12,7 @@ from dataclasses import replace
 
 import pytest
 
-from ml_stack.bench import suite as suites
+from ml_stack.train import suite as suites
 from ml_stack.lock import Busy, only_one
 
 
@@ -212,7 +212,7 @@ def a_module(tmp_path, monkeypatch, text):
 
 
 MODULE = '''
-from ml_stack.bench.suite import register
+from ml_stack.train.suite import register
 
 @register("weighing", "the width it was given")
 def weighing(*, backend, seed, width=10, tight=False):
@@ -258,7 +258,7 @@ def test_run_says_what_went_wrong_rather_than_raising(tmp_path, monkeypatch, cap
 
 def test_a_failed_seed_makes_the_command_exit_nonzero(tmp_path, monkeypatch, capsys):
     name = a_module(tmp_path, monkeypatch, '''
-from ml_stack.bench.suite import register
+from ml_stack.train.suite import register
 
 @register("flaky", "fails on the second seed")
 def flaky(*, backend, seed):
