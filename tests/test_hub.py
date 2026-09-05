@@ -767,10 +767,11 @@ class TestPrettyName:
         import ml_stack.graph as graph
         from ml_stack.hub import pretty_name
 
-        pages = [Path(fleet.__file__).parent / "web" / "fit.html",
-                 Path(graph.__file__).parent / "web" / "graph.html"]
-        for page in pages:
-            assert "(?:UD-)?((?:IQ|Q)\\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)" in page.read_text()
+        from ml_stack.graph.page import template
+
+        pages = [Path(fleet.__file__).parent / "web" / "fit.html"]
+        for text in (pages[0].read_text(), template()):
+            assert "(?:UD-)?((?:IQ|Q)\\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)" in text
         node = shutil.which("node")
         if not node:
             pytest.skip("no node to run the page's copy")
