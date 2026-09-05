@@ -163,6 +163,15 @@ def shape_mismatch(
     if params.n_ctx is not None and params.n_ctx < per_slot:
         out.append(f"context: asked for {per_slot} per slot, serving {params.n_ctx}")
 
+    # a spec that brings its own template wants one that renders a late system message;
+    # a server still on the model's own, which refuses one, is not the shape asked for
+    if spec.chat_template_file and params.chat_template:
+        from ml_stack.serve.chat_template import needs_forgiving
+
+        if needs_forgiving(params.chat_template):
+            out.append("chat template: asked for one that renders a late system message, "
+                       "serving one that refuses it")
+
     return out
 
 

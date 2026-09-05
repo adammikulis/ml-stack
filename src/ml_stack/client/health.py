@@ -23,6 +23,7 @@ class ServingParams:
     quant: str | None = None
     seed: int | None = None
     total_slots: int | None = None
+    chat_template: str | None = None
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -85,6 +86,8 @@ def serving_params(base_url: str, *, timeout: float = 5.0) -> ServingParams | No
         quant=quant_from_model_path(model) if isinstance(model, str) else None,
         seed=seed if isinstance(seed, int) else None,
         total_slots=props.get("total_slots"),
+        chat_template=(props.get("chat_template")
+                       if isinstance(props.get("chat_template"), str) else None),
         raw=props,
     )
 

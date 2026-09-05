@@ -476,6 +476,23 @@ class TestShapeMismatch:
         spec = ServerSpec(model="a-model.gguf", context=32768, parallel=4)
         assert shape_mismatch(spec, [], None) == []
 
+    def test_a_server_on_a_refusing_template_is_not_the_shape_a_patched_one_asks_for(self):
+        """Driven 2026-09-05: ml-stack-claude adopted a server up on the model's own
+        template and every Claude Code turn after the first was a 500. Mutation: drop
+        the template check."""
+        refusing = "{%- if x %}{{- raise_exception('System message must be at the beginning') }}{%- endif %}"
+        params = ServingParams(n_ctx=4096, total_slots=1, chat_template=refusing)
+        plain = ServerSpec(model="a-model.gguf", context=4096, parallel=1)
+        patched = ServerSpec(model="a-model.gguf", context=4096, parallel=1,
+                             chat_template_file="a-model.jinja")
+        assert shape_mismatch(plain, ["a-model.gguf"], params) == []
+        assert shape_mismatch(patched, ["a-model.gguf"], params) == [
+            "chat template: asked for one that renders a late system message, "
+            "serving one that refuses it"]
+        rendering = ServingParams(n_ctx=4096, total_slots=1,
+                                  chat_template="{{ '<|im_start|>system' + content }}")
+        assert shape_mismatch(patched, ["a-model.gguf"], rendering) == []
+
 
 class TestAdoptingTheWrongShape:
     """The right model in the wrong shape is still the wrong server."""
