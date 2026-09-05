@@ -42,7 +42,7 @@ with a future reader.
 
 ## The gates
 
-Five checks refuse a change rather than describing what it should have been. Run them
+Six checks refuse a change rather than describing what it should have been. Run them
 before you ask whether the suite passes.
 
 `budgets.json` holds the highest count each shape in `scripts/gates/` is allowed.
@@ -64,6 +64,11 @@ never a reason to delete.
 `scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
 that quietly tightens is caught.
+
+`pyproject.toml` selects ruff's rules and pyright's checks, and `scripts/gates/` budgets
+both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyright-errors`.
+Neither tool is a dependency, so a checker that cannot find its tool prints why and its
+metric is left out rather than counted as zero.
 
 `scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
 raw HTTP call, a docstring over twelve lines and a signature over eight parameters, at the

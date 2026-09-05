@@ -50,11 +50,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      # The checkers are stdlib only. pytest-xdist is here because pyproject's addopts
-      # pass -n auto to every pytest run, and numpy because tests/conftest.py imports
-      # ml_stack.graph.topology at collection.
-      - name: install pytest
-        run: python -m pip install pytest pytest-xdist numpy
+      # The checkers are stdlib only apart from the two they shell out to. pytest-xdist is
+      # here because pyproject's addopts pass -n auto to every pytest run, and numpy because
+      # tests/conftest.py imports ml_stack.graph.topology at collection.
+      - name: install pytest, ruff and pyright
+        run: python -m pip install pytest pytest-xdist numpy ruff pyright
 
       - name: budgets
         run: python scripts/budgets
