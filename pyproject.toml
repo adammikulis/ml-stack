@@ -41,6 +41,10 @@ train = ["numpy>=1.24", "safetensors>=0.4"]
 # fine-tune of it would need ~128G of optimizer state.
 train-lora = ["ml-stack[train,torch]", "peft>=0.11", "transformers>=4.40"]
 serve = ["psutil>=5.9"]
+# `ml-stack-speech`: faster-whisper transcribes, piper speaks. A piper voice is a
+# pair of files named by MLSTACK_PIPER_VOICE; `ml-stack-speech providers` says what
+# each engine still wants
+speech = ["faster-whisper>=1.0", "piper-tts>=1.2"]
 gguf = ["gguf>=0.10", "numpy>=1.24"]
 graph = ["numpy>=1.24"]
 # an embedded property graph: one directory on disk, native Cypher, no server
@@ -101,6 +105,8 @@ ml-stack-train-tools = "ml_stack.train.tools:main"
 # what this machine can do, and what it does without being asked
 ml-stack-setup = "ml_stack.setup:main"
 ml-stack-doctor = "ml_stack.doctor:main"
+# what this machine can hear and say: transcribe a file, say a line, find the speech in it
+ml-stack-speech = "ml_stack.speech.cli:main"
 ml-stack-serve = "ml_stack.serve.cli:main"
 # what a change to the asking costs, and whether it was worth it
 ml-stack-bench = "ml_stack.graph.bench.run:main"

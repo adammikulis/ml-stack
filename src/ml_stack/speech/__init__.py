@@ -32,8 +32,31 @@ ASR: Registry = Registry(kind="asr")
 TTS: Registry = Registry(kind="tts")
 VAD: Registry = Registry(kind="vad")
 
-VAD.register("energy", EnergyVAD)
-TTS.register("system", SystemTTS)
+
+def register_defaults() -> None:
+    """Put every provider that needs no arguments on its registry, ahead of them the ones
+    named by ``MLSTACK_WHISPER_CPP_MODEL``, ``MLSTACK_PIPER_VOICE``, and
+    ``MLSTACK_KOKORO_MODEL`` with ``MLSTACK_KOKORO_VOICES``."""
+    import os
+
+    ASR.register("faster-whisper", FasterWhisperASR)
+    ASR.register("transformers-whisper", TransformersWhisperASR)
+    if model := os.environ.get("MLSTACK_WHISPER_CPP_MODEL", ""):
+        ASR.register("whisper.cpp", lambda: WhisperCppASR(model), prefer=True)
+
+    TTS.register("system", SystemTTS)
+    if voice := os.environ.get("MLSTACK_PIPER_VOICE", ""):
+        TTS.register("piper", lambda: PiperTTS(voice), prefer=True)
+    kokoro = os.environ.get("MLSTACK_KOKORO_MODEL", "")
+    voices = os.environ.get("MLSTACK_KOKORO_VOICES", "")
+    if kokoro and voices:
+        TTS.register("kokoro-onnx", lambda: KokoroOnnxTTS(kokoro, voices), prefer=True)
+
+    VAD.register("energy", EnergyVAD)
+    VAD.register("silero", SileroVAD)
+
+
+register_defaults()
 
 __all__ = [
     "ASR",
@@ -50,6 +73,7 @@ __all__ = [
     "ProviderError",
     "ProviderHealth",
     "Registry",
+    "register_defaults",
     "Segment",
     "SileroVAD",
     "Speech",

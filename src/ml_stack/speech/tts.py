@@ -120,7 +120,11 @@ class PiperTTS:
     def synthesize(self, text: str, *, voice: str | None = None) -> Speech:
         binary = self._resolve_binary()
         if binary is not None:
-            return self._synthesize_binary(binary, text)
+            try:
+                return self._synthesize_binary(binary, text)
+            except OSError:
+                # A shim on PATH with nothing behind it resolves and then will not run.
+                pass
         return self._synthesize_module(text)
 
     def _synthesize_binary(self, binary: str, text: str) -> Speech:

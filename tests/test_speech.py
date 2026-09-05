@@ -8,6 +8,7 @@ engine, but because the resolver's job is precisely to be indifferent to which o
 
 from __future__ import annotations
 
+import json
 import math
 import struct
 
@@ -307,3 +308,225 @@ class TestSystemTTS:
         speech = SystemTTS().synthesize("testing one two three")
         assert speech.duration_s > 0.2
         assert wav.decode(speech.to_wav())[1].sample_rate > 0
+
+
+class FakeTTS:
+    """A voice stand-in: half a second of a tone, whatever it is asked to say."""
+
+    name = "fake-voice"
+
+    def __init__(self, *, seconds: float = 0.5):
+        self.seconds = seconds
+        self.said: list[str] = []
+
+    def probe(self):
+        return ProviderHealth.ok("fake-voice")
+
+    def start(self):
+        return None
+
+    def stop(self):
+        return None
+
+    def synthesize(self, text, *, voice=None):
+        self.said.append(text)
+        return Speech(pcm=tone(self.seconds), sample_rate=16000, voice=voice or "fake-voice")
+
+
+def a_recording() -> bytes:
+    """A WAV holding silence, a burst of noise and silence -- one speech region."""
+    return wav.encode(silence(0.3) + tone(0.5) + silence(0.3), sample_rate=16000)
+
+
+@pytest.fixture
+def registered(monkeypatch):
+    """A fake on each registry, since no engine is installed where the suite runs."""
+    from ml_stack import speech as package
+    from ml_stack.speech import Registry
+
+    asr, tts, vad = Registry(kind="asr"), Registry(kind="tts"), Registry(kind="vad")
+    asr.register("fake", lambda: FakeASR(text="a machine that can hear"))
+    tts.register("fake-voice", FakeTTS)
+    vad.register("energy", EnergyVAD)
+    for name, registry in (("ASR", asr), ("TTS", tts), ("VAD", vad)):
+        monkeypatch.setattr(package, name, registry)
+    return asr, tts, vad
+
+
+class TestTheLibraryFunctions:
+    def test_providers_names_every_engine_and_the_one_auto_picks(self, registered):
+        from ml_stack.speech.service import providers
+
+        found = providers()
+        assert found["asr"]["auto"] == "fake"
+        assert [one["name"] for one in found["vad"]["providers"]] == ["energy"]
+        assert found["asr"]["providers"][0]["available"]
+
+    def test_providers_says_why_when_nothing_is_installed(self, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+        from ml_stack.speech.service import providers
+
+        registry: Registry = Registry(kind="asr")
+        registry.register("broken", lambda: FakeASR("broken", fail_on="probe"))
+        monkeypatch.setattr(package, "ASR", registry)
+        asr = providers()["asr"]
+        assert asr["auto"] is None
+        assert asr["providers"][0]["detail"] == "probe says no"
+
+    def test_transcribe_goes_through_the_registry(self, registered, tmp_path):
+        from ml_stack.speech.service import transcribe
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        assert transcribe(clip).text == "a machine that can hear"
+
+    def test_say_returns_audio_that_decodes(self, registered):
+        from ml_stack.speech.service import say
+
+        spoken = say("anything")
+        assert spoken.duration_s == pytest.approx(0.5, abs=0.01)
+        assert wav.decode(spoken.to_wav())[1].sample_rate == 16000
+
+    def test_regions_reads_a_wav_without_ffmpeg(self, registered, tmp_path):
+        """A mono 16-bit WAV is already what a VAD wants; converting it would need ffmpeg
+        on a machine that may not have it."""
+        from ml_stack.speech.service import regions
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        found = regions(clip)
+        assert found.speech
+        assert found.regions[0].start_s == pytest.approx(0.3, abs=0.1)
+        assert found.regions[0].end_s == pytest.approx(0.8, abs=0.15)
+
+    def test_nothing_registered_says_so_rather_than_returning_nothing(self, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+        from ml_stack.speech.service import say
+
+        monkeypatch.setattr(package, "TTS", Registry(kind="tts"))
+        with pytest.raises(NoProviderAvailable):
+            say("hello")
+
+
+class TestTheDefaultRegistrations:
+    def test_every_engine_that_needs_no_arguments_is_a_candidate(self, monkeypatch):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry, register_defaults
+
+        for attr in ("ASR", "TTS", "VAD"):
+            monkeypatch.setattr(package, attr, Registry(kind=attr.lower()))
+        register_defaults()
+        assert package.ASR.names() == ["faster-whisper", "transformers-whisper"]
+        assert package.TTS.names() == ["system"]
+        assert package.VAD.names() == ["energy", "silero"]
+
+    def test_a_named_whisper_cpp_model_and_piper_voice_go_in_front(self, monkeypatch, tmp_path):
+        """Neither takes a default path, so an engine that needs a file on disk is a
+        candidate only once it has been told where the file is."""
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry, register_defaults
+
+        for attr in ("ASR", "TTS", "VAD"):
+            monkeypatch.setattr(package, attr, Registry(kind=attr.lower()))
+        monkeypatch.setenv("MLSTACK_WHISPER_CPP_MODEL", str(tmp_path / "ggml-base.bin"))
+        monkeypatch.setenv("MLSTACK_PIPER_VOICE", str(tmp_path / "voice.onnx"))
+        register_defaults()
+        assert package.ASR.names()[0] == "whisper.cpp"
+        assert package.TTS.names() == ["piper", "system"]
+
+
+class TestTheCommand:
+    def test_providers_prints_a_line_for_each(self, registered, capsys):
+        from ml_stack.speech.cli import main
+
+        assert main(["providers"]) == 0
+        printed = capsys.readouterr().out
+        assert "asr  (auto: fake)" in printed
+        assert "fake-voice" in printed
+
+    def test_providers_as_json(self, registered, capsys):
+        from ml_stack.speech.cli import main
+
+        assert main(["providers", "--json"]) == 0
+        found = json.loads(capsys.readouterr().out)
+        assert found["tts"]["auto"] == "fake-voice"
+
+    def test_transcribe_prints_the_text(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        assert main(["transcribe", str(clip)]) == 0
+        assert capsys.readouterr().out.strip() == "a machine that can hear"
+
+    def test_transcribe_json_carries_the_segments(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        assert main(["transcribe", str(clip), "--json", "--language", "en"]) == 0
+        got = json.loads(capsys.readouterr().out)
+        assert got["text"] == "a machine that can hear" and got["model"] == "fake"
+
+    def test_say_writes_a_wav_that_decodes(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        out = tmp_path / "spoken" / "said.wav"
+        assert main(["say", "the fleet is up", "--out", str(out)]) == 0
+        pcm, info = wav.decode(out.read_bytes())
+        assert info.sample_rate == 16000 and len(pcm) > 0
+        assert str(out) in capsys.readouterr().out
+
+    def test_regions_prints_start_and_end_seconds(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        assert main(["regions", str(clip), "--json"]) == 0
+        found = json.loads(capsys.readouterr().out)
+        assert found["speech"] and len(found["regions"]) == 1
+        assert found["regions"][0]["start_s"] == pytest.approx(0.3, abs=0.1)
+
+    def test_silence_is_no_speech_rather_than_an_error(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        clip = tmp_path / "quiet.wav"
+        clip.write_bytes(wav.encode(silence(0.5), sample_rate=16000))
+        assert main(["regions", str(clip)]) == 0
+        assert capsys.readouterr().out.strip() == "no speech"
+
+    def test_an_unknown_provider_is_one_line_and_exit_1(self, registered, tmp_path, capsys):
+        from ml_stack.speech.cli import main
+
+        clip = tmp_path / "clip.wav"
+        clip.write_bytes(a_recording())
+        assert main(["transcribe", str(clip), "--provider", "nonexistent"]) == 1
+        said = capsys.readouterr()
+        assert said.out == ""
+        assert said.err.startswith("ml-stack-speech: ") and len(said.err.splitlines()) == 1
+
+    def test_a_file_that_is_not_there_is_one_line_and_exit_1(self, registered, capsys):
+        from ml_stack.speech.cli import main
+
+        assert main(["transcribe", "/no/such/clip.wav"]) == 1
+        assert len(capsys.readouterr().err.splitlines()) == 1
+
+    def test_nothing_registered_is_one_line_and_exit_1(self, monkeypatch, capsys):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+        from ml_stack.speech.cli import main
+
+        monkeypatch.setattr(package, "TTS", Registry(kind="tts"))
+        assert main(["say", "hello", "--out", "/tmp/never-written.wav"]) == 1
+        assert "no tts provider" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("command", ["providers", "transcribe", "say", "regions"])
+    def test_each_subcommand_has_help(self, command, capsys):
+        from ml_stack.speech.cli import main
+
+        with pytest.raises(SystemExit) as left:
+            main([command, "--help"])
+        assert left.value.code == 0
+        assert capsys.readouterr().out.strip()

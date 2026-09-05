@@ -113,8 +113,10 @@ _HOMED = (
 )
 
 #: Environment a developer's shell may carry that would otherwise steer a test.
-_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_TRACE", "MLSTACK_LLAMA_BUILD",
-             "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_WEB_PROFILE")
+_STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_TRACE", "MLSTACK_KOKORO_MODEL",
+             "MLSTACK_KOKORO_VOICES", "MLSTACK_LLAMA_BUILD", "MLSTACK_PIPER_VOICE",
+             "MLSTACK_SEARCH", "MLSTACK_TRAIN_CEILING", "MLSTACK_WEB_PROFILE",
+             "MLSTACK_WHISPER_CPP_MODEL")
 
 
 @pytest.fixture(autouse=True)
@@ -123,7 +125,7 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     ``bench.HOME`` is the runs store a whole evening of measuring sits in; ``serving_lines``
     and ``results_since`` read what is serving on this machine right now and what the last
-    job kept. A test that saw either would pass or fail on what the laptop happened to be
+    job kept; the speech registries probe for whisper and speak out loud. A test that saw either would pass or fail on what the laptop happened to be
     doing. The `MLSTACK_*` variables are deleted rather than set, so a shell that exports
     one cannot change a result either.
     """
@@ -145,6 +147,12 @@ def _no_machine_state(monkeypatch, tmp_path):
         "ml_stack.graph.bench.run")
     monkeypatch.setattr(running, "serving_lines", lambda: [])
     monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
+
+    # An empty speech registry per test: probing the real ones loads whisper and runs the
+    # machine's own voice. A test that wants a provider registers its own.
+    speech = sys.modules.get("ml_stack.speech") or importlib.import_module("ml_stack.speech")
+    for attr in ("ASR", "TTS", "VAD"):
+        monkeypatch.setattr(speech, attr, speech.Registry(kind=attr.lower()))
 
 
 # -- awaiting a coroutine without depending on who ran first ----------------------------

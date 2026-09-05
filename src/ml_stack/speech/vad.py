@@ -104,10 +104,12 @@ class SileroVAD:
         self._lock = threading.Lock()
 
     def probe(self) -> ProviderHealth:
-        try:
-            import torch  # noqa: F401
-        except ImportError as exc:
-            return ProviderHealth.missing(f"torch is not installed ({exc})")
+        for module, why in (("torch", "torch is not installed"),
+                            ("torchaudio", "silero's own package imports torchaudio")):
+            try:
+                __import__(module)
+            except ImportError as exc:
+                return ProviderHealth.missing(f"{why} ({exc})")
         return ProviderHealth.ok("silero_vad")
 
     def start(self) -> None:
@@ -117,9 +119,12 @@ class SileroVAD:
             if self._model is None:
                 import torch
 
-                model, _utils = torch.hub.load(
-                    "snakers4/silero-vad", "silero_vad", trust_repo=True
-                )
+                try:
+                    model, _utils = torch.hub.load(
+                        "snakers4/silero-vad", "silero_vad", trust_repo=True
+                    )
+                except Exception as exc:  # noqa: BLE001 - a hub load fails many ways
+                    raise ProviderError(f"silero VAD would not load: {exc}") from exc
                 self._model = model
 
     def stop(self) -> None:
