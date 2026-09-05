@@ -12,6 +12,7 @@ OWNER = ""
 ROOTS = ("src/ml_stack",)
 
 COMMANDS = {
+    "src/ml_stack/bench/run.py",
     "src/ml_stack/claude.py",
     "src/ml_stack/cli.py",
     "src/ml_stack/do.py",
@@ -20,7 +21,6 @@ COMMANDS = {
     "src/ml_stack/fleet/daemon.py",
     "src/ml_stack/fleet/join.py",
     "src/ml_stack/fleet/peers.py",
-    "src/ml_stack/graph/bench/run.py",
     "src/ml_stack/graph/serve.py",
     "src/ml_stack/graph/store_cli.py",
     "src/ml_stack/harness.py",
