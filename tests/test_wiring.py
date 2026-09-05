@@ -13,8 +13,6 @@ SRC = REPO / "src" / "ml_stack"
 
 STANDALONE = {
     "testing": "fakes and markers the suite imports; not library code",
-    "geo": "reached only through its own tests; no library caller yet",
-    "speech": "reached only through its own tests; no library caller yet",
     "web": "loaded by name as python:ml_stack.web:tools, never imported",
 }
 
