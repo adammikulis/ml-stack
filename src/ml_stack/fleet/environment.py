@@ -10,10 +10,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.client.http import ServerError, open_stream, request_json
 
 __all__ = ["Environment", "Library", "CATALOG", "catalog_for"]
 
@@ -155,9 +156,10 @@ class Environment:
         if on_progress:
             on_progress("Downloading Python")
 
-        req = urllib.request.Request(STANDALONE, headers={"User-Agent": "ml-stack"})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            release = json.loads(r.read())
+        try:
+            release = request_json(STANDALONE, method="GET", timeout=60, tries=3) or {}
+        except (ServerError, ValueError) as exc:
+            raise EnvironmentError(f"could not reach the Python builds: {exc}") from None
         want = self._asset_name()
         assets = [a for a in release.get("assets", ())
                   if want in a["name"] and a["name"].endswith(".tar.gz")
@@ -170,11 +172,12 @@ class Environment:
         base.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory() as tmp:
             archive = Path(tmp) / "python.tar.gz"
-            with urllib.request.urlopen(
-                    urllib.request.Request(assets[0]["browser_download_url"],
-                                           headers={"User-Agent": "ml-stack"}),
-                    timeout=600) as r, archive.open("wb") as fh:
-                shutil.copyfileobj(r, fh)
+            try:
+                with open_stream(assets[0]["browser_download_url"], timeout=600) as r, \
+                        archive.open("wb") as fh:
+                    shutil.copyfileobj(r, fh)
+            except ServerError as exc:
+                raise EnvironmentError(f"could not download Python: {exc}") from None
             if on_progress:
                 on_progress("Unpacking Python")
             with tarfile.open(archive) as tf:

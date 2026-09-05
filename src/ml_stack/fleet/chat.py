@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import urllib.error
-import urllib.parse
-import urllib.request
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
+
+from ml_stack.client.http import ServerError, ServerUnreachable, open_stream
 
 __all__ = ["ChatError", "Target", "find", "reply_text", "stream", "targets"]
 
@@ -16,8 +15,8 @@ CHUNK = 1 << 12
 CHAT_PATH = "/v1/chat/completions"
 
 
-class ChatError(RuntimeError):
-    pass
+class ChatError(ServerError):
+    """The model server a conversation was sent to did not answer with a reply."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,21 +80,18 @@ def stream(target: Target, payload: dict[str, Any], *,
            timeout: float = 600.0) -> Iterator[bytes]:
     """The model server's reply, in the pieces it arrives in."""
     data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        target.url, data=data, method="POST",
-        headers={"Content-Type": "application/json",
-                 "Accept": "text/event-stream" if payload.get("stream") else "*/*"})
-    if target.token:
-        req.add_header("Authorization", f"Bearer {target.token}")
     try:
-        response = urllib.request.urlopen(req, timeout=timeout)
-    except urllib.error.HTTPError as exc:
-        raise ChatError(
-            f"{target.peer or 'this machine'} answered {exc.code}: "
-            f"{exc.read().decode(errors='replace')[:400]}") from None
-    except (urllib.error.URLError, OSError) as exc:
+        response = open_stream(
+            target.url, data=data, method="POST", token=target.token, timeout=timeout,
+            headers={"Content-Type": "application/json",
+                     "Accept": "text/event-stream" if payload.get("stream") else "*/*"})
+    except ServerUnreachable as exc:
         raise ChatError(
             f"{target.peer or 'this machine'} did not answer: {exc}") from None
+    except ServerError as exc:
+        raise ChatError(
+            f"{target.peer or 'this machine'} answered {exc.status}: "
+            f"{exc.body[:400]}", status=exc.status, body=exc.body) from None
     with response:
         while True:
             # read1, not read: read(n) waits for n bytes and delivers a whole

@@ -25,13 +25,13 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.error
-import urllib.request
 import zipfile
 from dataclasses import dataclass
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+from ml_stack.client.http import ServerError, ServerUnreachable, open_stream, request_json
 
 __all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
            "checkout_here", "current_version", "in_the_way", "quiet", "state", "track",
@@ -127,15 +127,14 @@ def platform_key() -> str:
 
 def check(repo: str = REPO, *, timeout: float = TIMEOUT) -> Release:
     """Ask GitHub for the newest release."""
-    req = urllib.request.Request(API.format(repo=repo),
-                                 headers={"Accept": "application/vnd.github+json",
-                                          "User-Agent": "ml-stack"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            body = json.loads(r.read())
-    except urllib.error.HTTPError as exc:
-        raise UpdateError(f"could not reach GitHub: {exc.code}") from None
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+        body = request_json(API.format(repo=repo), method="GET", timeout=timeout, tries=3,
+                            headers={"Accept": "application/vnd.github+json"})
+    except ServerUnreachable as exc:
+        raise UpdateError(f"could not reach GitHub: {exc}") from None
+    except ServerError as exc:
+        raise UpdateError(f"could not reach GitHub: {exc.status}") from None
+    except (OSError, ValueError) as exc:
         raise UpdateError(f"could not reach GitHub: {exc}") from None
     return Release(
         version=str(body.get("tag_name") or "").lstrip("v"),
@@ -169,12 +168,11 @@ def download(asset: dict[str, Any], into: Path | str,
     url = str(asset["browser_download_url"])
     total = int(asset.get("size") or 0)
 
-    req = urllib.request.Request(url, headers={"User-Agent": "ml-stack"})
     digest = hashlib.sha256()
     done = 0
     partial = target.with_suffix(target.suffix + ".part")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r, partial.open("wb") as fh:
+        with open_stream(url, timeout=timeout) as r, partial.open("wb") as fh:
             while True:
                 block = r.read(CHUNK)
                 if not block:
@@ -184,7 +182,7 @@ def download(asset: dict[str, Any], into: Path | str,
                 done += len(block)
                 if on_progress:
                     on_progress(done, total)
-    except (urllib.error.URLError, OSError) as exc:
+    except (ServerError, OSError) as exc:
         partial.unlink(missing_ok=True)
         raise UpdateError(f"download failed: {exc}") from None
 

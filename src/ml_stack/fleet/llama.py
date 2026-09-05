@@ -8,11 +8,11 @@ import shutil
 import sys
 import tarfile
 import tempfile
-import urllib.error
-import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
+
+from ml_stack.client.http import ServerError, request_json
 
 __all__ = ["LlamaError", "asset_for_this_machine", "cache_dir",
            "ensure_server", "find_server"]
@@ -72,13 +72,11 @@ def asset_for_this_machine(release: dict[str, Any]) -> dict[str, Any] | None:
 def latest(repo: str = REPO, *, timeout: float = TIMEOUT,
            count: int = LOOK_BACK) -> dict[str, Any]:
     """The newest release carrying a build for this machine."""
-    req = urllib.request.Request(API.format(repo=repo, count=count),
-                                 headers={"User-Agent": "ml-stack",
-                                          "Accept": "application/vnd.github+json"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            found = json.loads(r.read())
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+        found = request_json(API.format(repo=repo, count=count), method="GET",
+                             timeout=timeout, tries=3,
+                             headers={"Accept": "application/vnd.github+json"})
+    except (ServerError, OSError, ValueError) as exc:
         raise LlamaError(f"could not reach the llama.cpp releases: {exc}") from None
 
     releases = found if isinstance(found, list) else [found]

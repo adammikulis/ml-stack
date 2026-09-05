@@ -7,12 +7,19 @@ import hmac
 import json
 import os
 import time
-import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from ml_stack.client.http import (
+    ONCE,
+    Retry,
+    ServerError,
+    ServerUnreachable,
+    open_stream,
+    request_bytes,
+)
 
 from .discovery import Beacon, DiscoveryError, derive_token, discover, key_path, load_cluster_key
 
@@ -21,6 +28,9 @@ if TYPE_CHECKING:
 
 CHUNK = 8 << 20          # 8MB: big enough to be fast, small enough to resume cheaply
 DIGEST_HEADER = "X-ML-Stack-SHA256"
+
+# A read is safe to send again; an unreachable peer is not worth waiting on twice.
+READS = Retry(tries=3, when_unreachable=False)
 
 
 def sha256_file(path: Path, chunk: int = CHUNK) -> str:
@@ -43,8 +53,16 @@ def range_total(content_range: str) -> int | None:
         return None
 
 
-class PeerError(RuntimeError):
-    pass
+class PeerError(ServerError):
+    """One request to one peer did not work."""
+
+
+def _peer_error(where: str, exc: ServerError) -> PeerError:
+    """One peer's failure, said the way its callers read it."""
+    if isinstance(exc, ServerUnreachable):
+        return PeerError(f"{where} -> unreachable: {exc}")
+    return PeerError(f"{where} -> {exc.status}: {exc.body[:400]}",
+                     status=exc.status, body=exc.body, headers=exc.headers)
 
 
 class Peer:
@@ -110,32 +128,27 @@ class Peer:
     # -- plumbing --------------------------------------------------------
     def _request(self, method: str, path: str, *, data: bytes | None = None,
                  headers: dict[str, str] | None = None,
-                 timeout: float | None = None) -> tuple[int, bytes, Any]:
-        req = urllib.request.Request(f"{self.base_url}{path}", data=data,
-                                     method=method)
-        req.add_header("Authorization", f"Bearer {self.token}")
-        for k, v in (headers or {}).items():
-            req.add_header(k, v)
+                 timeout: float | None = None,
+                 retry: Retry = ONCE) -> tuple[int, bytes, Any]:
         try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as r:
-                return r.status, r.read(), dict(r.headers)
-        except urllib.error.HTTPError as e:
-            body = e.read().decode(errors="replace")
-            raise PeerError(f"{method} {path} -> {e.code}: {body[:400]}") from None
-        except urllib.error.URLError as e:
-            raise PeerError(f"{method} {path} -> unreachable: {e.reason}") from None
+            reply = request_bytes(f"{self.base_url}{path}", data=data, method=method,
+                                  headers=headers, token=self.token,
+                                  timeout=timeout or self.timeout, retry=retry)
+        except ServerError as exc:
+            raise _peer_error(f"{method} {path}", exc) from None
+        return reply.status, reply.body, reply.headers
 
     def _json(self, method: str, path: str, payload: Any = None) -> Any:
         data = json.dumps(payload).encode() if payload is not None else None
         headers = {"Content-Type": "application/json"} if data else {}
-        _, body, _ = self._request(method, path, data=data, headers=headers)
+        _, body, _ = self._request(method, path, data=data, headers=headers,
+                                   retry=READS if method == "GET" else ONCE)
         return json.loads(body or b"{}")
 
     # -- status ----------------------------------------------------------
     def health(self) -> dict:
-        req = urllib.request.Request(f"{self.base_url}/health")
-        with urllib.request.urlopen(req, timeout=10) as r:
-            return json.loads(r.read())
+        _, body, _ = self._request("GET", "/health", timeout=10, retry=READS)
+        return json.loads(body or b"{}")
 
     def availability(self, action: str = "", **fields: Any) -> dict:
         """Read or change when this peer takes work."""
@@ -258,26 +271,20 @@ class Peer:
         partial = local.with_suffix(local.suffix + ".part")
         start = partial.stat().st_size if partial.exists() else 0
 
-        req = urllib.request.Request(f"{self.base_url}{route}{remote}",
-                                     method="GET")
-        req.add_header("Authorization", f"Bearer {self.token}")
-        if start:
-            req.add_header("Range", f"bytes={start}-")
         try:
-            resp = urllib.request.urlopen(req, timeout=timeout)
-        except urllib.error.HTTPError as e:
-            if e.code == 416:
-                size = range_total(e.headers.get("Content-Range", ""))
+            resp = open_stream(f"{self.base_url}{route}{remote}", method="GET",
+                               headers={"Range": f"bytes={start}-"} if start else None,
+                               token=self.token, timeout=timeout)
+        except ServerError as exc:
+            if exc.status == 416:
+                size = range_total(exc.headers.get("Content-Range", ""))
                 if size is not None and start == size:
                     os.replace(partial, local)
                     return local
                 raise PeerError(
                     f"{partial} is {start} bytes but the remote file is "
                     f"{size}; delete it and pull again") from None
-            body = e.read().decode(errors="replace")
-            raise PeerError(f"GET {route}{remote} -> {e.code}: {body[:400]}") from None
-        except urllib.error.URLError as e:
-            raise PeerError(f"GET {route}{remote} -> unreachable: {e.reason}") from None
+            raise _peer_error(f"GET {route}{remote}", exc) from None
 
         with resp:
             want = (resp.headers.get(DIGEST_HEADER) or "").strip().lower()

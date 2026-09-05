@@ -21,12 +21,12 @@ import os
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from ml_stack.client.http import ServerError, ServerUnreachable, request_bytes
 
 from .discovery import (
     DEFAULT_CLUSTER,
@@ -207,6 +207,15 @@ def _started_pid(root: Path | str) -> int | None:
         return None
 
 
+def _said(raw: bytes) -> dict:
+    """A daemon's answer as a dict, empty when it is not JSON."""
+    try:
+        got = json.loads(raw or b"{}")
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
 def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
     """Add a cluster through the daemon already on ``port``, so it advertises at once.
 
@@ -219,18 +228,16 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
     headers = {"X-ML-Stack-UI": "1", "Content-Type": "application/json"}
 
     def call(path: str, body: dict[str, Any], cookie: str = "") -> tuple[int, dict, str]:
-        req = urllib.request.Request(f"{base}{path}", data=json.dumps(body).encode(),
-                                     method="POST", headers={**headers,
-                                                             **({"Cookie": cookie} if cookie
-                                                                else {})})
+        sent = {**headers, **({"Cookie": cookie} if cookie else {})}
         try:
-            with urllib.request.urlopen(req, timeout=30) as r:
-                return r.status, json.loads(r.read() or b"{}"), r.headers.get("Set-Cookie", "")
-        except urllib.error.HTTPError as e:
-            return e.code, json.loads(e.read() or b"{}"), ""
-        except (urllib.error.URLError, OSError, ValueError) as e:
+            reply = request_bytes(f"{base}{path}", data=json.dumps(body).encode(),
+                                  method="POST", headers=sent, timeout=30)
+            return reply.status, _said(reply.body), reply.headers.get("Set-Cookie", "")
+        except ServerUnreachable as e:
             raise JoinError(f"the daemon on port {port} did not take the passphrase: {e}") \
                 from None
+        except ServerError as e:
+            return e.status or 0, _said(e.body.encode()), ""
 
     cookie = ""
     status, body, set_cookie = call("/ui/session", {"passphrase": passphrase, "group": group})

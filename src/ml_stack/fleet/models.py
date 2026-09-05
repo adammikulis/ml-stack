@@ -12,13 +12,13 @@ import time
 import shutil
 import urllib.error
 import urllib.parse
-import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from ml_stack import hub
+from ml_stack.client.http import ServerError, ServerUnreachable, open_stream, request_json
 
 __all__ = ["Getting", "Model", "Models", "ModelError", "Downloads",
            "Suggestion", "caches", "family_of", "holding", "is_unfiltered",
@@ -267,15 +267,17 @@ class Models:
             stamp.unlink(missing_ok=True)
             start, origin = 0, {}
 
-        req = urllib.request.Request(url, headers={"User-Agent": "ml-stack"})
+        headers: dict[str, str] = {}
         if start:
-            req.add_header("Range", f"bytes={start}-")
+            headers["Range"] = f"bytes={start}-"
             if origin.get("validator"):
-                req.add_header("If-Range", str(origin["validator"]))
+                headers["If-Range"] = str(origin["validator"])
         try:
-            response = urllib.request.urlopen(req, timeout=120)
-        except urllib.error.HTTPError as exc:
-            if exc.code == 416 and start:
+            response = open_stream(url, headers=headers, timeout=120)
+        except ServerUnreachable as exc:
+            raise ModelError(f"could not download {name}: {exc}") from None
+        except ServerError as exc:
+            if exc.status == 416 and start:
                 size = range_total(exc.headers.get("Content-Range", ""))
                 if size is not None and size == start:
                     os.replace(partial, target)
@@ -287,9 +289,7 @@ class Models:
                 raise ModelError(
                     f"{name}: the part here is {start} bytes but the file is "
                     f"{size}; discarded it, ask again") from None
-            raise ModelError(f"could not download {name}: {exc.code}") from None
-        except (urllib.error.URLError, OSError) as exc:
-            raise ModelError(f"could not download {name}: {exc}") from None
+            raise ModelError(f"could not download {name}: {exc.status}") from None
 
         # A server that does not honour Range answers 200 with the whole file.
         if start and response.status != 206:
@@ -564,9 +564,7 @@ def family_of(name: str) -> str:
 
 
 def _hub(url: str, timeout: float = 25.0) -> Any:
-    req = urllib.request.Request(url, headers={"User-Agent": "ml-stack"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read())
+    return request_json(url, method="GET", timeout=timeout, tries=3)
 
 
 def _params_in(name: str) -> tuple[float, float]:
@@ -603,7 +601,7 @@ def _modalities(facts: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]
 def _repo_facts(repo: str) -> dict[str, Any]:
     try:
         return _hub(f"{HUB}/{repo}")
-    except (urllib.error.URLError, OSError, ValueError):
+    except (ServerError, urllib.error.URLError, OSError, ValueError):
         return {}
 
 
@@ -611,7 +609,7 @@ def _best_gguf(repo: str) -> tuple[str, int, bool] | None:
     """The Q4 build, its size, and whether the repository ships a vision projector."""
     try:
         tree = _hub(f"{HUB}/{repo}/tree/main?recursive=1")
-    except (urllib.error.URLError, OSError, ValueError):
+    except (ServerError, urllib.error.URLError, OSError, ValueError):
         return None
     whole = []
     sees = False
@@ -654,7 +652,7 @@ def _ranked() -> list[dict[str, Any]]:
     for order in ("downloads", "trendingScore"):
         try:
             got = _hub(f"{HUB}?filter=gguf&sort={order}&direction=-1&limit={SCAN}")
-        except (urllib.error.URLError, OSError, ValueError):
+        except (ServerError, urllib.error.URLError, OSError, ValueError):
             got = []
         boards.append([r for r in got if isinstance(r, dict)])
     if not any(boards):
@@ -688,7 +686,7 @@ def popular(free_gb: float = 0.0, ram_gb: float = 0.0, *, limit: int = PER_PAGE,
     if time.time() - age > POPULAR_TTL_S or not cached:
         try:
             listed = _ranked()
-        except (urllib.error.URLError, OSError, ValueError):
+        except (ServerError, urllib.error.URLError, OSError, ValueError):
             return suggestions(free_gb, ram_gb)
         found = _resolve_rows(listed)
         if not found:
@@ -756,7 +754,7 @@ def _searched(query: str, free_gb: float, ram_gb: float, *, limit: int,
         try:
             listed = _hub(f"{HUB}?filter=gguf&search={urllib.parse.quote(query)}"
                           f"&sort=downloads&direction=-1&limit={SCAN}")
-        except (urllib.error.URLError, OSError, ValueError):
+        except (ServerError, urllib.error.URLError, OSError, ValueError):
             return []
         _found[query] = _resolve_rows(listed if isinstance(listed, list) else [])
     out = _fitting(_found[query], free_gb, ram_gb, rude)
@@ -904,12 +902,9 @@ def _resolve(source: str) -> str:
 def _read_repo_files(owner: str, repo: str) -> list[str]:
     """Every file Hugging Face lists in a repository."""
     try:
-        req = urllib.request.Request(
-            f"https://huggingface.co/api/models/{owner}/{repo}",
-            headers={"User-Agent": "ml-stack"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            listed = json.loads(r.read())
-    except (urllib.error.URLError, OSError, ValueError) as exc:
+        listed = request_json(f"https://huggingface.co/api/models/{owner}/{repo}",
+                              method="GET", timeout=30, tries=3)
+    except (ServerError, OSError, ValueError) as exc:
         raise ModelError(f"could not read hf:{owner}/{repo}: {exc}") from None
     return [str(f.get("rfilename", "")) for f in listed.get("siblings") or []]
 
