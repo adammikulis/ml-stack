@@ -1,61 +1,46 @@
-"""A measurement run more than once, written down with everything that makes it comparable.
+"""A measurement run over several seeds, as a `record.Measured`.
 
 A `Suite` is a name, a line saying what it measures, and a function that runs one seed on
-one backend and returns a flat mapping of numbers. Everything around that -- seeding, the
-commit it ran on, the wall clock, the peak memory, the machine's own load at the start,
-the spread across seeds and the file it lands in -- is here, so a suite holds the
-measurement and nothing else.
+one backend and returns a flat mapping of numbers. `run` seeds each one, takes the lock,
+records the commit, the host, the wall clock, the peak memory and how busy the card was
+when it started, and folds the seeds into a `record.Spread` per metric. `said` reads one
+back out.
 
-What a result carries, and why each part is not optional:
-
-* **The seed, and more than one of them.** A run that does not seed cannot be repeated, and
-  one run reports no spread, so a difference between two of them cannot be told from noise.
-  `run` takes several seeds and reports each metric's mean, its standard deviation and how
-  many seeds actually produced it.
-* **The commit, and whether the tree was dirty.** A number from an edited checkout is not
-  reproducible; the record says so rather than implying otherwise.
-* **What else was running.** A wall clock taken while something else held the card
-  describes the contention as much as the work, so the load at the start is recorded
-  (`ml_stack.fleet.telemetry`) and a run that started on a busy machine says so.
-* **Every seed as it finishes.** A seed can run for hours, so the file is written after
-  each one: a run killed in its third seed leaves the two it has already paid for.
-  ``seeds`` is what was asked for and each metric's ``n`` is what arrived.
-
-Two runs of one suite differ by their arguments and their seeds, so the file name carries
-both -- otherwise scanning three configurations leaves one file, and the survivor is
-whichever ran last.
-
-    from ml_stack.suite import Suite, register, run
+    from ml_stack.bench.suite import register, run, said
 
     @register("attention", "one forward pass, per backend")
     def attention(*, backend, seed, width=512):
         return {"seconds": timed(width), "loss": measured(width)}
 
-    print(run("attention", backend="torch", seeds=(0, 1, 2), out_dir=here).said())
+    print(said(run("attention", backend="torch", seeds=(0, 1, 2), out_dir=here)))
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import statistics
-import subprocess
+import socket
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack.bench.keep import _commit
+from ml_stack.bench.record import Measured, Spread
 from ml_stack.serve.binary import CACHE_ROOT
 
-__all__ = ["Result", "Suite", "known", "peak_memory_bytes", "provenance", "register",
-           "registered", "run", "suite_lock"]
+__all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "peak_memory_bytes",
+           "register", "registered", "run", "said", "suite_lock"]
 
 #: What one seed of a suite hands back: a flat mapping of numbers.
 Metrics = Mapping[str, float]
 Measure = Callable[..., Metrics]
 
 _SUITES: dict[str, "Suite"] = {}
+
+#: What a suite run is marked with, so it is never read as an answering run.
+KIND = "suite"
 
 #: Where two runs wait for each other, so neither times the other's work.
 LOCK = CACHE_ROOT / "suite.lock"
@@ -76,42 +61,8 @@ class Suite:
     """Backend names this suite runs on; empty means any."""
 
 
-@dataclass
-class Result:
-    """One suite, one backend, every seed: the numbers and what they were measured under."""
-
-    suite: str
-    backend: str
-    commit: str
-    dirty: bool
-    seeds: list[int]
-    #: metric -> ``{"mean", "std", "n", "values"}``
-    metrics: dict[str, dict[str, Any]]
-    config: dict[str, Any] = field(default_factory=dict)
-    seconds: float = 0.0
-    peak_memory_bytes: int = 0
-    busy_pct_at_start: float = 0.0
-    failures: list[str] = field(default_factory=list)
-
-    def said(self) -> str:
-        """The result as a person reads it: every metric with its spread, one screen."""
-        head = f"{self.suite} [{self.backend}] @ {self.commit or 'unknown'}"
-        if self.dirty:
-            head += " (a dirty tree -- not reproducible)"
-        out = [head, f"  seeds={self.seeds} {self.seconds:.1f}s"
-                     + (f" peak {self.peak_memory_bytes / 1e9:.2f}G"
-                        if self.peak_memory_bytes else "")]
-        if self.busy_pct_at_start > BUSY_PCT:
-            out.append(f"  the card was {self.busy_pct_at_start:.0f}% busy when this "
-                       "started; the clock is not this run's alone")
-        for key in sorted(self.metrics):
-            m = self.metrics[key]
-            out.append(f"  {key:32s} {m['mean']:12.5f} +/- {m['std']:.5f}  (n={m['n']})")
-        out += [f"  FAILED {why}" for why in self.failures]
-        return "\n".join(out)
-
-
-def register(name: str, about: str, *, backends: Sequence[str] = ()) -> Callable[[Measure], Measure]:
+def register(name: str, about: str,
+             *, backends: Sequence[str] = ()) -> Callable[[Measure], Measure]:
     """Register the decorated function as the suite ``name``."""
     def take(fn: Measure) -> Measure:
         if name in _SUITES:
@@ -129,18 +80,9 @@ def known() -> dict[str, str]:
 def registered(name: str) -> Suite:
     """The suite called ``name``. `KeyError` names what there is instead."""
     if name not in _SUITES:
-        raise KeyError(f"no suite called {name!r}; there is {', '.join(sorted(_SUITES)) or 'none'}")
+        raise KeyError(f"no suite called {name!r}; there is "
+                       f"{', '.join(sorted(_SUITES)) or 'none'}")
     return _SUITES[name]
-
-
-def provenance(where: Path | str | None = None) -> tuple[str, bool]:
-    """``(short commit, the tree was dirty)`` for the checkout at ``where``, or ``("", False)``."""
-    def git(*words: str) -> str:
-        return subprocess.run(["git", *(["-C", str(where)] if where else []), *words],
-                              capture_output=True, text=True, timeout=15,
-                              check=False).stdout.strip()
-    sha = git("rev-parse", "--short", "HEAD")
-    return (sha, bool(sha and git("status", "--porcelain")))
 
 
 def peak_memory_bytes(backend: str) -> int:
@@ -155,7 +97,8 @@ def peak_memory_bytes(backend: str) -> int:
 
             if torch.cuda.is_available():
                 return int(torch.cuda.max_memory_allocated())
-            if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+            mps = getattr(torch.backends, "mps", None)
+            if mps is not None and mps.is_available():
                 return int(torch.mps.driver_allocated_memory())
     except Exception:  # noqa: BLE001 - a peak nobody reports is 0, never a failed run
         return 0
@@ -193,19 +136,65 @@ def file_name(name: str, backend: str, commit: str, config: Mapping[str, Any],
     digest = hashlib.sha256(stamp.encode()).hexdigest()[:8]
     plain = "-".join(f"{k}_{v}" for k, v in sorted(config.items())
                      if isinstance(v, (str, int, bool)) and len(str(v)) <= 16)[:60]
-    said = f"{plain}-seeds_{len(seeds)}" if plain else f"seeds_{len(seeds)}"
-    return f"{name}.{backend}.{commit or 'unknown'}.{said}.{digest}.json"
+    told = f"{plain}-seeds_{len(seeds)}" if plain else f"seeds_{len(seeds)}"
+    return f"{name}.{backend}.{commit or 'unknown'}.{told}.{digest}.json"
+
+
+def said(one: Measured) -> str:
+    """One suite run as a person reads it: every metric with its spread, one screen."""
+    head = f"{one.label} [{one.server.get('backend') or ''}] @ {one.sha or 'unknown'}"
+    if one.dirty:
+        head += " (a dirty tree -- not reproducible)"
+    peak = int(one.server.get("peak_memory_bytes") or 0)
+    out = [head, f"  seeds={list(one.seeds)} {one.seconds:.1f}s"
+                 + (f" peak {peak / 1e9:.2f}G" if peak else "")]
+    busy = float(one.server.get("busy_pct_at_start") or 0.0)
+    if busy > BUSY_PCT:
+        out.append(f"  the card was {busy:.0f}% busy when this started; the clock is not "
+                   "this run's alone")
+    for key in sorted(one.metrics):
+        got = one.metrics[key]
+        out.append(f"  {key:32s} {got.mean:12.5f} +/- {got.std:.5f}  (n={got.n})")
+    out += [f"  FAILED {why}" for why in one.failures]
+    return "\n".join(out)
+
+
+@dataclass(frozen=True)
+class _Under:
+    """What every fold of one run shares."""
+
+    name: str
+    backend: str
+    commit: str
+    seeds: tuple[int, ...]
+    config: Mapping[str, Any]
+    busy: float = 0.0
+
+
+def _folded(under: _Under, each: Sequence[Mapping[str, float]], *, seconds: float = 0.0,
+            failures: Sequence[str] = (), peak: int = 0) -> Measured:
+    """Mean and spread over the seeds that finished, not the seeds that were asked for."""
+    metrics = {key: Spread.over([one[key] for one in each if key in one])
+               for key in sorted({k for one in each for k in one})}
+    host = socket.gethostname()
+    return Measured(
+        label=under.name, kind=KIND, at=time.strftime("%FT%T"), host=host,
+        commit=under.commit, seconds=seconds, seeds=under.seeds, metrics=metrics,
+        failures=tuple(failures),
+        server={"backend": under.backend, "host": host, "commit": under.commit,
+                "peak_memory_bytes": peak, "busy_pct_at_start": under.busy},
+        extra={"config": dict(under.config)})
 
 
 def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
         out_dir: Path | str | None = None, where: Path | str | None = None,
-        wait: bool = True, lock: Path | str | None = None, **arguments: Any) -> Result:
+        wait: bool = True, lock: Path | str | None = None, **arguments: Any) -> Measured:
     """Run one suite on one backend over ``seeds``, and write the result after each one.
 
     ``backend`` is a name `ml_stack.train.backend` knows; left out, the detected default.
     ``arguments`` reach the suite's own function. ``lock`` is the file runs take turns on,
-    `LOCK` unless said. Returns the aggregate; a seed that raised is recorded in
-    ``failures`` and left out of every mean rather than averaged away.
+    `LOCK` unless said. Returns the record; a seed that raised is recorded in ``failures``
+    and left out of every mean rather than averaged away.
     """
     suite = registered(name)
     if not seeds:
@@ -219,48 +208,35 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
 
     from ml_stack.train.backend import set_seeds
 
-    commit, dirty = provenance(where)
+    under = _Under(name, backend, _commit(Path(where) if where is not None else None),
+                   tuple(int(s) for s in seeds), dict(arguments))
     written = None
     if out_dir is not None:
         written = Path(out_dir)
         written.mkdir(parents=True, exist_ok=True)
+    into = written / file_name(name, backend, under.commit.split(" ")[0], arguments,
+                               under.seeds) if written is not None else None
 
     each: list[dict[str, float]] = []
     failures: list[str] = []
-    result = _folded(name, backend, commit, dirty, seeds, each, arguments, 0.0, failures, 0.0)
+    out = _folded(under, each)
     with suite_lock(lock, wait=wait):
-        busy = busy_pct()
+        under = replace(under, busy=busy_pct())
         began = time.perf_counter()
-        for seed in seeds:
+        for seed in under.seeds:
             set_seeds(seed)
             try:
                 each.append({str(k): float(v) for k, v in suite.measure(
                     backend=backend, seed=seed, **arguments).items()})
             except Exception as exc:  # noqa: BLE001 - a seed that failed is reported, not averaged
                 failures.append(f"seed {seed}: {type(exc).__name__}: {exc}")
-            result = _folded(name, backend, commit, dirty, seeds, each, arguments,
-                             time.perf_counter() - began, failures, busy,
-                             peak=peak_memory_bytes(backend))
-            if written is not None:
-                (written / file_name(name, backend, commit, arguments, seeds)).write_text(
-                    json.dumps(asdict(result), indent=2, sort_keys=True), encoding="utf-8")
-    return result
-
-
-def _folded(name: str, backend: str, commit: str, dirty: bool, seeds: Sequence[int],
-            each: list[dict[str, float]], arguments: Mapping[str, Any], seconds: float,
-            failures: list[str], busy: float, *, peak: int = 0) -> Result:
-    """Mean and spread over the seeds that finished, not the seeds that were asked for."""
-    metrics: dict[str, dict[str, Any]] = {}
-    for key in sorted({k for one in each for k in one}):
-        values = [one[key] for one in each if key in one]
-        metrics[key] = {"mean": statistics.fmean(values),
-                        "std": statistics.stdev(values) if len(values) > 1 else 0.0,
-                        "n": len(values), "values": values}
-    return Result(suite=name, backend=backend, commit=commit, dirty=dirty,
-                  seeds=[int(s) for s in seeds], metrics=metrics, config=dict(arguments),
-                  seconds=seconds, peak_memory_bytes=peak, busy_pct_at_start=busy,
-                  failures=list(failures))
+            out = _folded(under, each, seconds=time.perf_counter() - began,
+                          failures=failures, peak=peak_memory_bytes(backend))
+            if into is not None:
+                into.write_text(
+                    json.dumps(out.to_dict(), indent=2, sort_keys=True, default=str),
+                    encoding="utf-8")
+    return out
 
 
 # ---------------------------------------------------------------------------- the command
@@ -293,7 +269,8 @@ def parser():
         prog="ml-stack-suite",
         description="A measurement run over several seeds, written down with the commit, "
                     "the spread and what else was running.")
-    top.add_argument("--import", dest="imports", action="append", default=[], metavar="MODULE",
+    top.add_argument("--import", dest="imports", action="append", default=[],
+                     metavar="MODULE",
                      help="a module to import so its @register runs; repeatable")
     subs = top.add_subparsers(dest="command", required=True)
     subs.add_parser("list", help="every suite that is registered, and what it measures")
@@ -333,15 +310,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "=" not in pair:
             print(f"--set takes k=v, not {pair!r}", file=sys.stderr)
             return 2
-        key, said = pair.split("=", 1)
-        settings[key.strip()] = _value(said)
+        key, told = pair.split("=", 1)
+        settings[key.strip()] = _value(told)
     try:
         out = run(args.name, backend=args.backend, seeds=tuple(args.seed) or (0, 1, 2),
                   out_dir=args.out or None, wait=not args.no_wait, **settings)
     except (KeyError, ValueError) as why:
         print(f"error: {why}", file=sys.stderr)
         return 2
-    print(out.said())
+    print(said(out))
     return 1 if out.failures else 0
 
 

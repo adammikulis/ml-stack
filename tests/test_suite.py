@@ -1,4 +1,4 @@
-"""`ml_stack.suite`: a measurement run over several seeds, and what its record carries.
+"""`ml_stack.bench.suite`: a measurement run over several seeds, and what its record carries.
 
 Every suite here is invented and counts rather than computes, so the tests measure the
 harness and not a model. Nothing reads or writes outside ``tmp_path``.
@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import subprocess
+from dataclasses import replace
 
 import pytest
 
-from ml_stack import suite as suites
+from ml_stack.bench import suite as suites
 from ml_stack.lock import Busy, only_one
 
 
@@ -52,7 +53,8 @@ def test_an_unknown_suite_names_what_there_is_instead():
 
 def test_a_suite_refuses_a_backend_it_does_not_declare(lock):
     counting(backends=("counting",))
-    assert suites.run("counting", backend="counting", seeds=(0,), lock=lock).backend == "counting"
+    out = suites.run("counting", backend="counting", seeds=(0,), lock=lock)
+    assert out.server["backend"] == "counting"
     with pytest.raises(ValueError, match="runs on counting"):
         suites.run("counting", backend="other", seeds=(0,), lock=lock)
 
@@ -69,11 +71,13 @@ def test_no_seeds_is_refused_because_one_run_measures_no_spread(lock):
 def test_every_metric_carries_its_mean_spread_and_how_many_seeds_made_it(lock):
     counting()
     out = suites.run("counting", backend="counting", seeds=(0, 2, 4), width=7, lock=lock)
-    assert out.metrics["width"] == {"mean": 7.0, "std": 0.0, "n": 3, "values": [7.0, 7.0, 7.0]}
-    assert out.metrics["seed"]["mean"] == 2.0 and out.metrics["seed"]["n"] == 3
-    assert out.metrics["seed"]["std"] == pytest.approx(2.0)
-    assert out.seeds == [0, 2, 4] and out.config == {"width": 7}
-    assert out.failures == [] and out.seconds > 0
+    assert out.metrics["width"].to_dict() == {"mean": 7.0, "std": 0.0, "n": 3,
+                                              "values": [7.0, 7.0, 7.0]}
+    assert out.metrics["seed"].mean == 2.0 and out.metrics["seed"].n == 3
+    assert out.metrics["seed"].std == pytest.approx(2.0)
+    assert out.seeds == (0, 2, 4) and out.extra["config"] == {"width": 7}
+    assert out.failures == () and out.seconds > 0
+    assert out.kind == suites.KIND, "never read as a run that answered questions"
 
 
 def test_a_seed_that_raised_is_reported_and_left_out_of_the_mean(lock):
@@ -85,21 +89,32 @@ def test_a_seed_that_raised_is_reported_and_left_out_of_the_mean(lock):
     suites.register("flaky", "one seed always fails")(measure)
 
     out = suites.run("flaky", backend="counting", seeds=(0, 1, 2), lock=lock)
-    assert out.metrics["value"]["n"] == 2, "what arrived"
-    assert out.seeds == [0, 1, 2], "what was asked for"
-    assert out.failures == ["seed 1: RuntimeError: this seed is unlucky"]
+    assert out.metrics["value"].n == 2, "what arrived"
+    assert out.seeds == (0, 1, 2), "what was asked for"
+    assert out.failures == ("seed 1: RuntimeError: this seed is unlucky",)
 
 
 def test_the_reading_says_the_spread_the_failures_and_a_dirty_tree(lock):
     counting()
     out = suites.run("counting", backend="counting", seeds=(0, 1), lock=lock)
-    out.dirty = True
-    out.failures = ["seed 9: RuntimeError: nope"]
-    out.busy_pct_at_start = 91.0
-    said = out.said()
+    out = replace(out, commit="abc1234 (dirty)",
+                  failures=("seed 9: RuntimeError: nope",),
+                  server={**out.server, "busy_pct_at_start": 91.0})
+    said = suites.said(out)
     assert "counting [counting]" in said and "a dirty tree" in said
     assert "seed" in said and "(n=2)" in said
     assert "91% busy" in said and "FAILED seed 9" in said
+
+
+def test_a_run_reads_back_out_of_what_was_written(lock):
+    from ml_stack.bench.record import Measured
+
+    counting()
+    out = suites.run("counting", backend="counting", seeds=(0, 1), width=3, lock=lock)
+    back = Measured.from_dict(json.loads(json.dumps(out.to_dict())))
+    assert back.metrics["width"].mean == 3.0
+    assert back.seeds == (0, 1) and back.extra["config"] == {"width": 3}
+    assert suites.said(back) == suites.said(out)
 
 
 # ------------------------------------------------------------------- what is written down
@@ -114,13 +129,14 @@ def test_the_file_is_written_after_every_seed_not_only_at_the_end(tmp_path, lock
         return {"value": float(seed)}
     suites.register("slow", "records what was on disk when it started")(measure)
 
-    suites.run("slow", backend="counting", seeds=(0, 1, 2), out_dir=tmp_path / "out", lock=lock)
+    suites.run("slow", backend="counting", seeds=(0, 1, 2), out_dir=tmp_path / "out",
+               lock=lock)
     assert seen[0] == [], "nothing before the first seed"
     assert len(seen[1]) == 1 and len(seen[2]) == 1, "and one file from the seed before"
 
     [written] = (tmp_path / "out").glob("*.json")
     held = json.loads(written.read_text())
-    assert held["metrics"]["value"]["n"] == 3 and held["suite"] == "slow"
+    assert held["metrics"]["value"]["n"] == 3 and held["label"] == "slow"
     assert held["seeds"] == [0, 1, 2]
 
 
@@ -150,7 +166,7 @@ def test_two_runs_take_turns_rather_than_timing_each_other(lock):
             suites.run("counting", backend="counting", seeds=(0,), wait=False, lock=lock)
 
 
-def test_provenance_reads_the_commit_and_whether_the_tree_was_edited(tmp_path):
+def test_the_record_says_the_commit_and_whether_the_tree_was_edited(tmp_path, lock):
     repo = tmp_path / "repo"
     repo.mkdir()
 
@@ -164,10 +180,12 @@ def test_provenance_reads_the_commit_and_whether_the_tree_was_edited(tmp_path):
     git("add", "a.txt")
     git("commit", "-qm", "one")
 
-    sha, dirty = suites.provenance(repo)
-    assert len(sha) >= 7 and not dirty
+    counting()
+    clean = suites.run("counting", backend="counting", seeds=(0,), where=repo, lock=lock)
+    assert len(clean.sha) >= 7 and clean.dirty is False
     (repo / "a.txt").write_text("two")
-    assert suites.provenance(repo) == (sha, True)
+    edited = suites.run("counting", backend="counting", seeds=(0,), where=repo, lock=lock)
+    assert edited.sha == clean.sha and edited.dirty is True
 
 
 def test_a_backend_that_reports_no_peak_is_zero_rather_than_an_error():
@@ -194,7 +212,7 @@ def a_module(tmp_path, monkeypatch, text):
 
 
 MODULE = '''
-from ml_stack.suite import register
+from ml_stack.bench.suite import register
 
 @register("weighing", "the width it was given")
 def weighing(*, backend, seed, width=10, tight=False):
@@ -240,7 +258,7 @@ def test_run_says_what_went_wrong_rather_than_raising(tmp_path, monkeypatch, cap
 
 def test_a_failed_seed_makes_the_command_exit_nonzero(tmp_path, monkeypatch, capsys):
     name = a_module(tmp_path, monkeypatch, '''
-from ml_stack.suite import register
+from ml_stack.bench.suite import register
 
 @register("flaky", "fails on the second seed")
 def flaky(*, backend, seed):

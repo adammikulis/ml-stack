@@ -31,7 +31,7 @@ COMMANDS = {
     "src/ml_stack/redact/audit.py",
     "src/ml_stack/serve/cli.py",
     "src/ml_stack/setup.py",
-    "src/ml_stack/suite.py",
+    "src/ml_stack/bench/suite.py",
     "src/ml_stack/train/run.py",
     "src/ml_stack/train/tools.py",
     "src/ml_stack/world/cli.py",

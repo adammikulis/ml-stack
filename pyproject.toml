@@ -121,7 +121,7 @@ ml-stack-world = "ml_stack.world.cli:main"
 ml-stack-ingest = "ml_stack.ingest:main"
 # the long commands this machine has recorded: what is running, waiting on one, stopping it
 ml-stack-jobs = "ml_stack.jobs:main"
-ml-stack-suite = "ml_stack.suite:main"
+ml-stack-suite = "ml_stack.bench.suite:main"
 ml-stack-claude = "ml_stack.claude:main"
 ml-stack-agent = "ml_stack.harness:main"
 # a rendered graph page served on loopback, with the model behind it

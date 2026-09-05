@@ -30,6 +30,7 @@ from typing import Any
 # at import.
 from ml_stack import bench
 from ml_stack.bench.backends import http_of, processes, served_by, timings_of
+from ml_stack.bench.record import prompt_digest
 from ml_stack.bench.keep import SHORT, SMOKE
 from ml_stack.bench.score import Row, prefix_kept, unread_named
 from ml_stack.graph.vectors import MARGIN, stands_out
@@ -257,8 +258,6 @@ class Counting:
         self.calls += 1
         sent = time.time()
         if not self.prompts:
-            from ml_stack.bench.record import prompt_digest
-
             system = next((str(m.get("content") or "") for m in (messages or ())
                            if isinstance(m, Mapping) and m.get("role") == "system"), "")
             self.prompts = prompt_digest(system, kw.get("tools") or ())
