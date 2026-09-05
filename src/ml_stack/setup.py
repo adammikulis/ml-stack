@@ -24,6 +24,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from ml_stack.units import human_bytes
 
 __all__ = ["BEHAVIOURS", "CHECKOUT", "SPEECH_PROTOCOLS", "Behaviour", "Finding", "ask",
            "look", "main"]
@@ -122,7 +123,6 @@ def _sysctl(key: str) -> str:
 def look() -> list[Finding]:
     """Everything worth knowing before serving anything, without changing a thing."""
     from ml_stack.hub import room, total_memory
-    from ml_stack.units import human_bytes
 
     out: list[Finding] = []
 

@@ -35,6 +35,7 @@ from ml_stack.serve.manager import (
 )
 from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import pid_exists
+from ml_stack.units import human_bytes
 
 _SPEC = ServerSpec(model="")
 DEFAULT_PORT = _SPEC.port
@@ -656,7 +657,6 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
-    from ml_stack.units import human_bytes
 
     if getattr(args, "ui", False):
         return _fit_ui()
@@ -879,7 +879,6 @@ def machine_memory() -> dict | None:
     """What the machine holds: total, used, wired, free, the llama-servers' resident total,
     everything else's, and the five largest non-server processes -- from psutil, or None
     without it."""
-    from ml_stack.units import human_bytes
 
     try:
         import psutil
@@ -918,7 +917,6 @@ def cmd_limits(args: argparse.Namespace) -> int:
     """
     from ml_stack.bench.history import parse_duration
     from ml_stack.hub import machine_room
-    from ml_stack.units import human_bytes
     from ml_stack.serve.fit import parse_room
     from ml_stack.serve.limits import changed, clear, read, where
 
@@ -1007,7 +1005,6 @@ def cmd_memory(args: argparse.Namespace) -> int:
     model that loaded yesterday can fail today with an error that never mentions memory.
     """
     from ml_stack.hub import room, total_memory
-    from ml_stack.units import human_bytes
 
     total = total_memory()
     now = room()

@@ -27,6 +27,7 @@ from typing import Any
 
 from ml_stack.records import Document
 from ml_stack.serve.binary import CACHE_ROOT
+from ml_stack.units import human_bytes
 
 __all__ = ["FILE", "Limits", "changed", "clear", "read", "where", "write"]
 
@@ -75,7 +76,6 @@ class Limits:
 
     def said(self) -> list[str]:
         """One line per limit, for a person; empty when nothing is limited."""
-        from ml_stack.units import human_bytes
 
         out = []
         if self.memory_bytes:

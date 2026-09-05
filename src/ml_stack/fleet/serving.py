@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from typing import Any
 
 from ml_stack.files import write_json
+from ml_stack.units import human_bytes
 
 __all__ = ["Endpoint", "Hosting", "NoRoom", "Served", "Serving", "Started",
            "discover_serving", "start_model", "stop_model"]
@@ -171,7 +172,6 @@ class Hosting:
     def fits_in(self, name: str, *, context: int, parallel: int, room: int) -> str:
         """"" when the model with ``parallel`` seats fits in ``room`` bytes by its memory
         record, or a line saying what it needs. A model with no record passes."""
-        from ml_stack.units import human_bytes
         from ml_stack.serve.fit import records
         from .plan import fit_for
 

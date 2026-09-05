@@ -31,6 +31,7 @@ from ml_stack.serve.binary import CACHE_ROOT
 from ml_stack.serve.ports import free_port, port_is_free
 from ml_stack.serve.process import kill_process_tree, pid_exists
 from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
+from ml_stack.units import human_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -453,7 +454,6 @@ class ServerManager:
         summarising it did not rescue that.
         """
         from ml_stack.client.chat import Client
-        from ml_stack.units import human_bytes
         from ml_stack.hub import room as machine_room
 
         told = say or self.say or logger.info

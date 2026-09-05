@@ -42,6 +42,7 @@ from .discovery import (
     memberships,
 )
 from .launch import HTTP_PORT, already_running, wait_for_health
+from ml_stack.units import human_bytes
 
 __all__ = ["Check", "JoinError", "Joined", "DEFAULT_ROOT", "STARTED_FILE", "apply_plan",
            "checks", "describe", "join_machine", "leave_machine", "main", "peers",
@@ -258,7 +259,6 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
     # the device probe, and its card's memory is the next best answer.
     vram_total, vram_free = d.get("vram_total_gb"), d.get("vram_free_gb")
     if d.get("room_bytes"):
-        from ml_stack.units import human_bytes
 
         room = human_bytes(int(d["room_bytes"]))
     elif vram_total:

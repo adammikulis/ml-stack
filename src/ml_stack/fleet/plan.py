@@ -7,6 +7,7 @@ from typing import Any, Callable, Sequence
 
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, family_of, quant_of
+from ml_stack.units import human_bytes
 
 __all__ = ["PREFERENCES", "Placement", "Room", "Row", "fit_for", "place", "ranked",
            "room_of", "table"]
@@ -133,7 +134,6 @@ def _note(out: Placement, peer: str, model: str, reason: str) -> None:
 def _seats_on(peer: Room, fit: Fit, context: int, left: int) -> tuple[int, int, str]:
     """Seats for at most ``left`` users on ``peer``, the bytes that uses, and the reason
     when there are none."""
-    from ml_stack.units import human_bytes
 
     here = fit.at_room(peer.room)
     loaded, each = here.line(context)
@@ -158,7 +158,6 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
     waiting, ties going to the better-ranked one. A peer serves one model. Stops when
     every user has a seat; ``unplaced`` is how many did not get one.
     """
-    from ml_stack.units import human_bytes
 
     say = log or (lambda line: None)
     want = prefer if prefer in PREFERENCES else "quality"
@@ -238,7 +237,6 @@ def place(users: int, context: int, peers: Sequence[Any], profiles: Sequence[Pro
 
 def table(placement: Placement) -> str:
     """The placement, as text."""
-    from ml_stack.units import human_bytes
 
     lines = [f"{'PEER':<16} {'MODEL':<48} {'SEATS':>5} {'CONTEXT':>8} {'USED':>8} {'ROOM':>8}"]
     for r in placement.rows:
