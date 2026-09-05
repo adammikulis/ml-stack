@@ -96,7 +96,7 @@ def test_session_leases_the_measured_shape_and_the_command_prints_the_answer(fak
                                             "--allow", "Read", "--max-turns", "2"]) == 0
     out = capsys.readouterr()
     assert "It is a lattice." in out.out and "spent: 2 turn(s)" in out.out
-    assert "renders it instead (kestrel-8B.jinja)" in out.err
+    assert "renders it instead (kestrel-8B.jinja)" in out.out
     assert seen["lease"]["port"] == 8899 and seen["lease"]["cache_type_k"] == "q8_0"
     assert seen["lease"]["chat_template_file"] == pathlib.Path("/tmp/kestrel-8B.jinja")
     assert seen["released"]

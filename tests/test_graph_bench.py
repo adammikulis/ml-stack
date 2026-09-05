@@ -2031,14 +2031,14 @@ def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path,
 
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--also", "terse",
-                        "--serve-kv", "q8_0", *seen["common"]]) == 0
+                        "--serve-kv", "f16", *seen["common"]]) == 0
     capsys.readouterr()
-    assert seen["kwargs"][0]["cache_type_k"] == "q8_0"
-    assert seen["kwargs"][0]["cache_type_v"] == "q8_0"
-    assert seen["preflights"][0].cache_type_k == "q8_0", "and the preflight sized that cache"
+    assert seen["kwargs"][0]["cache_type_k"] == "f16"
+    assert seen["kwargs"][0]["cache_type_v"] == "f16"
+    assert seen["preflights"][0].cache_type_k == "f16", "and the preflight sized that cache"
     assert sorted(r["label"] for r in runs(seen["kept"])) == \
-        ["tiny-plain-kv-q8_0", "tiny-plain-terse-kv-q8_0"]
-    assert all(r["server"]["cache_type"] == "q8_0" for r in runs(seen["kept"]))
+        ["tiny-plain-kv-f16", "tiny-plain-terse-kv-f16"]
+    assert all(r["server"]["cache_type"] == "f16" for r in runs(seen["kept"]))
 
     save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
          held={"context": 32768, "slots": 1})
@@ -2046,7 +2046,7 @@ def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path,
     said = capsys.readouterr().out
     quantised = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-kv"))
     plain = next(ln for ln in said.splitlines() if ln.startswith("tried"))
-    assert quantised.split()[1:4] == ["32k", "x1/q8", "1"], "ctx says so, n still fourth"
+    assert quantised.split()[1:4] == ["32k", "x1/f16", "1"], "ctx says so, n still fourth"
     assert plain.split()[1:4] == ["32k", "x1", "1"]
 
     assert kv_short("q8_0") == "q8" and kv_short("q4_0") == "q4"
@@ -2452,7 +2452,7 @@ def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path
     said = capsys.readouterr().out
     budgeted = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-rb"))
     plain = next(ln for ln in said.splitlines() if ln.startswith("tried"))
-    assert budgeted.split()[1:4] == ["32k", "x1/rb", "1"], "ctx says so, n still fourth"
+    assert budgeted.split()[1:4] == ["32k", "x1/q8/rb", "1"], "ctx says so, n still fourth"
     assert plain.split()[1:4] == ["32k", "x1", "1"]
 
     # without the flag nothing is bound and no label says so

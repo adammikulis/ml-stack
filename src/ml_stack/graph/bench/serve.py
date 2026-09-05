@@ -266,8 +266,9 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     passes it -- and a way that has one is skipped before the model is loaded, so a sweep
     killed on its third model costs the third model to re-run and not the first two.
 
-    The label carries what the table has to show: ``-kv-q8_0`` for a quantised cache and
-    ``-rbN`` for a thinking budget, because each is another configuration. Each question is
+    The label carries what the table has to show: ``-kv-TYPE`` for a cache stored as
+    anything but the default q8_0, and ``-rbN`` for a thinking budget, because each is
+    another configuration. Each question is
     capped at the run's own ``talking.timeout`` -- see `_ask_once`.
 
     **The load is preflighted first** -- shards present, architecture read by this build,
@@ -281,7 +282,10 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     model = run.model
     per_question = float(run.talking.timeout)
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-    suffix = ((f"-kv-{run.shape.cache_type}" if run.shape.cache_type else "")
+    from ml_stack.serve.shape import DEFAULT_CACHE
+
+    kv = run.shape.cache_type
+    suffix = ((f"-kv-{kv}" if kv and kv != DEFAULT_CACHE else "")
               + (f"-rb{run.shape.reasoning_budget}"
                  if run.shape.reasoning_budget is not None else ""))
 

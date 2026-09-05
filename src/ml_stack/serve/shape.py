@@ -53,6 +53,10 @@ __all__ = ["Asking", "Run", "Shape", "Talking", "draft_for", "held", "projector_
 SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
 
 
+#: how the KV cache is stored unless a shape says otherwise
+DEFAULT_CACHE = "q8_0"
+
+
 @dataclass(frozen=True)
 class Shape:
     """One model, served one way. :meth:`lease` is what :func:`ml_stack.serve.serve` takes."""
@@ -66,7 +70,7 @@ class Shape:
     seat_context: int = 4096
     # How the KV cache is stored: q8_0 unless a shape says otherwise (measured 2026-09-02
     # on Flash-Next: F1 unchanged, faster, half the cache); "f16" asks for the full one.
-    cache_type: str = "q8_0"
+    cache_type: str = DEFAULT_CACHE
     # Whether every seat's cache is one pool the server masks per sequence, or a cache per
     # slot. None leaves the build's own default; measure before choosing.
     kv_unified: bool | None = None

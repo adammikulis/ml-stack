@@ -327,8 +327,9 @@ def _parser() -> argparse.ArgumentParser:
                             "value, labelled draft:<head>@nN. Without it, once at the "
                             "build's own default")
     heads.add_argument("--serve-kv", default="", metavar="TYPE",
-                       help="quantise the KV cache of the served model (q8_0, q4_0); the "
-                            "label ends -kv-TYPE and the table's ctx column shows it")
+                       help="how the served model's KV cache is stored (q8_0 unless said; "
+                            "f16, q4_0); a label ends -kv-TYPE for anything but q8_0 and "
+                            "the table's ctx column shows it")
     heads.add_argument("--port", type=int, default=8099)
     heads.add_argument("--context", type=int, default=32768)
     heads.add_argument("--parallel", type=int, default=1, metavar="N",
@@ -434,10 +435,11 @@ def _parser() -> argparse.ArgumentParser:
     sweep.add_argument("--binary", default="", metavar="PATH",
                        help="a llama-server that reads these models")
     sweep.add_argument("--serve-kv", default="", metavar="TYPE",
-                       help="quantise the KV cache of each --serve'd model (q8_0, q4_0): "
-                            "every label ends -kv-TYPE and the table's ctx column shows "
-                            "it, since a run with a quantised cache is another "
-                            "configuration and not another model")
+                       help="how each --serve'd model's KV cache is stored (q8_0 unless "
+                            "said; f16, q4_0): a label ends -kv-TYPE for anything but "
+                            "q8_0 and the table's ctx column shows it, since a cache "
+                            "stored differently is another configuration and not "
+                            "another model")
     sweep.add_argument("--serve-kv-unified", action=argparse.BooleanOptionalAction,
                        default=None,
                        help="serve each --serve'd model with one cache pool for every slot "
