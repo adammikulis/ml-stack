@@ -209,7 +209,7 @@ def check(tool: str, given: dict) -> int:
     if re.search(r"(Path\.home\(\)|expanduser\(\))", fresh) and ".ml-stack" in fresh \
             and here != "src/ml_stack/paths.py":
         return refuse("do not build `~/.ml-stack` again. Each package keeps one `HOME` "
-                      "constant (`ml_stack.jobs.HOME`, `ml_stack.graph.bench.keep.HOME`); "
+                      "constant (`ml_stack.jobs.HOME`, `ml_stack.bench.keep.HOME`); "
                       "use that package's, or add one to the package that owns this file.")
 
     try:
