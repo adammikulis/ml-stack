@@ -204,6 +204,45 @@ time with the page's server down for the Ollama half.
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.
 
+## The window, for the shell that replaces it
+
+The interface was driven inside the real WKWebView on macOS on 2026-09-05, first run
+through to the close question, against a scratch state directory.
+
+- [ ] **The window opens in the middle of the primary display, and the application is
+  called "python".** `webview.create_window` is given width, height and `min_size` and no
+  `x`/`y`, so macOS centres it on whichever screen is main; the process has no bundle, so
+  the menu bar, the Dock and `CGWindowListCopyWindowInfo` all name it `python`. The shell
+  that replaces `src/ml_stack/fleet/app.py` needs a remembered position and a real
+  application identity.
+- [ ] **What the close question does, for the shell that has to reproduce it.** The native
+  side intercepts the close and calls `window.mlStackAskOnClose()`; the page shows
+  `close-sheet`, whose two choices call `window.pywebview.api.close_choice(mode, remember)`
+  with `mode` in `background` | `quit`. `background` hides the window and leaves the daemon
+  serving; `quit` destroys it. With `remember` ticked the mode is written to
+  `settings.json` as `on_close`, and the next close acts on it without asking. Cancel
+  hides the sheet and nothing else. A shell that keeps this contract -- the same two
+  strings, the same settings key, a JS entry point the native side can call -- needs no
+  change to the page.
+- [ ] **What WKWebView renders the same as Chromium, so far.** Light-DOM custom elements,
+  `[hidden]`, the sheet's backdrop blur, the context `input[type=range]`, the styled
+  checkbox and radio rows, a card taller than the window with its own scrollbar, and the
+  system sans stack. Nothing needed a resize to appear and no font fell back. Not yet
+  driven in the window: the Chat screen with a model behind it, the Models screen's
+  download, and the Fit screen's tables beyond confirming they draw.
+- [ ] **`ml-stack-app` cannot be driven by a synthetic click on this machine.** `osascript`
+  is refused assistive access, so first run was walked by evaluating JS in the live
+  WKWebView (real handlers, real DOM, real bridge) rather than by moving the mouse. Granting
+  Terminal accessibility rights would let a later session click for real.
+- [ ] **`serve_forever` preferring `Settings.name` over the hostname has no test.** It was
+  driven by hand -- the wizard renames the machine, the daemon restarts, `/health` answers
+  with the new name -- but every test that boots a daemon builds `make_handler` directly, so
+  nothing covers the resolution order. A subprocess boot with a settings file would.
+- [ ] **The first-run library list showed PyTorch as not installed on a machine that could
+  import it.** `/ui/libraries` decides `installed`, and the tick came out clear where torch
+  was importable from the daemon's own interpreter. Worth finding out what it checks before
+  someone downloads 200 MB they already have.
+
 ## From beehavior
 
 `~/Documents/repos/beehavior` is the other repository that grew these shapes, and its own
