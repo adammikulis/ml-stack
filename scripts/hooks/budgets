@@ -33,8 +33,8 @@ def _git(*args: str) -> str:
 
 
 def staged() -> list[str]:
-    """The .py files this commit adds or changes."""
-    out = _git("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z")
+    """The .py files this commit adds, changes, renames or deletes."""
+    out = _git("diff", "--cached", "--name-only", "--diff-filter=ACMRD", "-z")
     return [name for name in out.split("\0") if name.endswith(".py")]
 
 
