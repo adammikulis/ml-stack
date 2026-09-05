@@ -1086,7 +1086,8 @@ def _run(args: Any) -> int:
                                graph=graph, per_question=args.per_question)
                 saved.append(save(args.kept, rows,
                                   held={**bench.footprint(url), "sampling": used,
-                                        "graph": _which(graph), "finder": ask.finder}))
+                                        "graph": _which(graph), "finder": ask.finder},
+                                  asking=getattr(ask, "asking", None)))
         print()
         table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
         return 0
@@ -1186,7 +1187,8 @@ def _run(args: Any) -> int:
               + (f", {slots} slot(s)" if slots > 0 else ""))
         key = save(args.kept, rows,
                    held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
-                         "graph": _which(graph), "finder": ask.finder})
+                         "graph": _which(graph), "finder": ask.finder},
+                   asking=getattr(ask, "asking", None))
         print(f"kept as {key}")
         if args.smoke:
             table(read_back(args.kept, [key]))
@@ -1299,7 +1301,8 @@ def _run(args: Any) -> int:
                    per_question=args.per_question)
     key = save(args.kept, rows,
                held={**bench.footprint(args.base_url), "sampling": client.sampling,
-                     "graph": _which(graph), "finder": found})
+                     "graph": _which(graph), "finder": found},
+               asking=getattr(ask, "asking", None))
     print(f"kept as {key}")
     if args.smoke:
         table(read_back(args.kept, [key]))

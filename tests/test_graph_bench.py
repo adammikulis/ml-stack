@@ -777,6 +777,46 @@ def test_the_terse_tools_look_up_through_the_store_too(tmp_path):
     assert "topic:compiler" in terse.told()
 
 
+def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypatch, capsys):
+    """`--reach` and `--rounds` are on `run` as well as `sweep`, so they have to reach
+    `converse` there and stand beside the row that was measured under them."""
+    pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
+    import ml_stack.bench as bench
+    from ml_stack.bench.run import asking_from
+    from ml_stack.bench import _parser
+
+    assert asking_from(_parser().parse_args(
+        ["run", "x", "--reach", "8000", "--rounds", "20"])) == Asking(reach=8000, rounds=20)
+    assert asking_from(_parser().parse_args(["run", "x"])) == Asking()
+
+    monkeypatch.setattr(bench, "HOME", tmp_path / "home")
+    monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
+    monkeypatch.setattr(bench, "ask_from", lambda spec: _Scripted)
+    graph = tmp_path / "g.json"
+    graph.write_text(json.dumps(TINY))
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    kept = tmp_path / "runs.ladybug"
+    ways = []
+    real_asking = bench.asking
+
+    def watched(graph, **kw):
+        ways.append(kw["how"])
+        return real_asking(graph, **kw)
+
+    monkeypatch.setattr(bench, "asking", watched)
+    assert bench._main(["run", "measured-that-way", "--kept", str(kept),
+                        "--graph", str(graph), "--questions", str(asked),
+                        "--client", "fake:client", "--no-smoke",
+                        "--reach", "8000", "--rounds", "20"]) == 0
+    capsys.readouterr()
+    assert ways == [Asking(reach=8000, rounds=20)]
+    back = {r["label"]: r for r in runs(kept)}
+    assert back["measured-that-way"]["asking"]["reach"] == 8000
+    assert back["measured-that-way"]["asking"]["rounds"] == 20
+
+
 def test_a_run_writes_down_which_finder_it_measured(tmp_path, monkeypatch, capsys):
     """Like `ctx`: a run with one finder against a run with another is two measurements,
     and the only way to know later is to write it down now."""
