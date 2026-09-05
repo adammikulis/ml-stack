@@ -47,7 +47,7 @@ def detect_device() -> DeviceProfile:
 
 def resolve_torch_device(prefer: str | None = None):
     """A ``torch.device`` for this machine."""
-    from ml_stack.backend.torch_ops import require_torch
+    from ml_stack.train.backend.torch_ops import require_torch
 
     torch, _ = require_torch()
 

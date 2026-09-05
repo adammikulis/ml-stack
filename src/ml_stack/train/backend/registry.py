@@ -6,12 +6,12 @@ import os
 import sys
 from collections.abc import Callable
 
-from ml_stack.backend.ops import ArrayBackend
+from ml_stack.train.backend.ops import ArrayBackend
 
 _FACTORIES: dict[str, "Callable[[], ArrayBackend]"] = {}
 _BUILT: dict[str, ArrayBackend] = {}
 
-REGISTRY_GROUP = "ml_stack.backend"
+REGISTRY_GROUP = "ml_stack.train.backend"
 """Entry-point group a third-party backend registers itself under."""
 
 
@@ -59,7 +59,7 @@ def _load_plugins() -> None:
 
 def torch_backend() -> ArrayBackend:
 
-    from ml_stack.backend.torch_ops import (
+    from ml_stack.train.backend.torch_ops import (
         TorchArrayOps,
         build_scatter_add,
         build_segment_sum,
@@ -82,7 +82,7 @@ def torch_backend() -> ArrayBackend:
 
 def mlx_backend() -> ArrayBackend:
 
-    from ml_stack.backend.mlx_ops import (
+    from ml_stack.train.backend.mlx_ops import (
         build_make_linear,
         build_scatter_add,
         build_segment_sum,

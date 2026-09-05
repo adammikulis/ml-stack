@@ -88,7 +88,7 @@ def build(recipe_id: str, config: dict[str, Any], data: Path | str,
     config = validate(recipe_id, config)
     spec = recipe(recipe_id)
     if not framework:
-        from ml_stack.backend import detect_backend
+        from ml_stack.train.backend import detect_backend
         framework = detect_backend()
 
     if recipe_id == "text-lm":

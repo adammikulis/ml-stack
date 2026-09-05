@@ -202,7 +202,7 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
         wait: bool = True, lock: Path | str | None = None, **arguments: Any) -> Result:
     """Run one suite on one backend over ``seeds``, and write the result after each one.
 
-    ``backend`` is a name `ml_stack.backend` knows; left out, the detected default.
+    ``backend`` is a name `ml_stack.train.backend` knows; left out, the detected default.
     ``arguments`` reach the suite's own function. ``lock`` is the file runs take turns on,
     `LOCK` unless said. Returns the aggregate; a seed that raised is recorded in
     ``failures`` and left out of every mean rather than averaged away.
@@ -211,13 +211,13 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
     if not seeds:
         raise ValueError(f"{name} needs at least one seed: one run measures no spread")
     if not backend:
-        from ml_stack.backend import detect_backend
+        from ml_stack.train.backend import detect_backend
 
         backend = detect_backend()
     if suite.backends and backend not in suite.backends:
         raise ValueError(f"{name} runs on {', '.join(suite.backends)}, not {backend!r}")
 
-    from ml_stack.backend import set_seeds
+    from ml_stack.train.backend import set_seeds
 
     commit, dirty = provenance(where)
     written = None

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from ml_stack.backend import available, get_backend
+from ml_stack.train.backend import available, get_backend
 from ml_stack.graph import (
     Graph,
     NotADAG,

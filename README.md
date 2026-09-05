@@ -387,7 +387,6 @@ questions as well. It is not built yet.
 | `ml_stack.gguf` | Converter/quantiser discovery, export, tokenizer-metadata repair |
 | `ml_stack.speech` | ASR / TTS / VAD behind three protocols and one resolver |
 | `ml_stack.vision` | Image payloads, and a gate that verifies a model can see |
-| `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
 | `ml_stack.graph` | A graph: stored, searched, asked about, drawn — and as tensors |
 | `ml_stack.entities` | Resolving names, planning edits, spelling, paths through a graph |
 | `ml_stack.scrape` | Reading a site you are signed in to, with presets to start from |
@@ -397,6 +396,7 @@ questions as well. It is not built yet.
 | `ml_stack.web` | Search, read and screenshot the web as tools, refused against private addresses |
 | `ml_stack.redact` | Reading a file for a real person's details — the hook's reader and `ml-stack-audit` |
 | `ml_stack.train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
+| `ml_stack.train.backend` | One array API over MLX and PyTorch, so math is written once |
 | `ml_stack.testing` | Cross-backend numerical parity harness |
 
 Everything above ships in one package. The extras carry what a module needs beyond the

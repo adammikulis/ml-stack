@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from ml_stack.backend import (
+from ml_stack.train.backend import (
     ArrayBackend,
     BackendUnavailable,
     available,
@@ -17,7 +17,7 @@ from ml_stack.backend import (
     get_backend,
     set_seeds,
 )
-from ml_stack.backend.registry import reset
+from ml_stack.train.backend.registry import reset
 from ml_stack.testing import assert_forward_parity, needs_both, needs_mlx, needs_torch
 
 BACKENDS = available()
@@ -87,7 +87,7 @@ def test_backend_is_fully_populated(name):
 def test_every_protocol_operation_exists(name):
     """The protocol is the contract that stops the backends diverging. A missing method
     should fail here, not deep inside somebody's forward pass."""
-    from ml_stack.backend.ops import ArrayOps
+    from ml_stack.train.backend.ops import ArrayOps
 
     ops = get_backend(name).ops
     required = [
@@ -285,12 +285,12 @@ class TestRegistryIsExtensible:
     backend -- ROCm through a different seam, JAX, anything -- had nowhere to go."""
 
     def test_the_builtin_backends_are_registered_not_special_cased(self):
-        from ml_stack.backend import backends
+        from ml_stack.train.backend import backends
 
         assert "mlx" in backends() and "torch" in backends()
 
     def test_a_backend_can_be_registered_and_fetched(self):
-        from ml_stack.backend import backends, get_backend, register
+        from ml_stack.train.backend import backends, get_backend, register
 
         sentinel = object()
         register("pretend", lambda: sentinel, replace=True)
@@ -298,14 +298,14 @@ class TestRegistryIsExtensible:
             assert "pretend" in backends()
             assert get_backend("pretend") is sentinel
         finally:
-            from ml_stack.backend import registry
+            from ml_stack.train.backend import registry
             registry._FACTORIES.pop("pretend", None)
             registry._BUILT.pop("pretend", None)
 
     def test_shadowing_an_existing_name_is_refused_unless_asked(self):
         """Two packages claiming 'torch' and the winner being import order is diagnosed
         by printing the backend and not believing the answer."""
-        from ml_stack.backend import BackendUnavailable, register
+        from ml_stack.train.backend import BackendUnavailable, register
 
         with pytest.raises(BackendUnavailable, match="already registered"):
             register("torch", lambda: None)
@@ -313,8 +313,8 @@ class TestRegistryIsExtensible:
     def test_one_broken_backend_does_not_make_the_others_unlistable(self):
         """`available()` is what the fleet's device report calls. A plugin that raises
         on import must cost its own entry, not every entry."""
-        from ml_stack.backend import available, register
-        from ml_stack.backend import registry
+        from ml_stack.train.backend import available, register
+        from ml_stack.train.backend import registry
 
         before = available()
         register("broken", lambda: (_ for _ in ()).throw(ImportError("no driver")),
@@ -326,7 +326,7 @@ class TestRegistryIsExtensible:
             registry._FACTORIES.pop("broken", None)
 
     def test_an_unknown_backend_names_what_is_available(self):
-        from ml_stack.backend import BackendUnavailable, get_backend
+        from ml_stack.train.backend import BackendUnavailable, get_backend
 
         with pytest.raises(BackendUnavailable, match="unknown backend"):
             get_backend("nope")

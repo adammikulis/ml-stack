@@ -107,12 +107,12 @@ def report() -> dict[str, Any]:
     """Accelerator facts, as far as they can be established on this machine."""
     out: dict[str, Any] = {}
     try:
-        from ml_stack.backend import available
+        from ml_stack.train.backend import available
         out["backends"] = list(available())
     except Exception:                                 # noqa: BLE001
         pass
     try:
-        from ml_stack.backend import detect_device
+        from ml_stack.train.backend import detect_device
         profile = detect_device()
         out["vendor"] = str(profile.vendor)
         out["device"] = out["gpu"] = profile.name

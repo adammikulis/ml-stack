@@ -61,7 +61,7 @@ class Graph:
         **kwargs: Any,
     ) -> "Graph":
         """Build from a Python edge list. For tests and small graphs."""
-        from ml_stack.backend import get_backend
+        from ml_stack.train.backend import get_backend
 
         backend = backend or get_backend()
         ops = backend.ops
@@ -86,7 +86,7 @@ class BatchedGraph:
 
 def batch_graphs(graphs: list[Graph], *, backend: Any = None) -> BatchedGraph:
     """Merge graphs into one super-graph, offsetting each one's edge indices."""
-    from ml_stack.backend import get_backend
+    from ml_stack.train.backend import get_backend
 
     if not graphs:
         raise ValueError("cannot batch an empty list of graphs")
