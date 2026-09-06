@@ -23,8 +23,8 @@ LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("model", ("client", "gguf", "hub", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
     ("machine", ("fleet", "serve", "setup")),
-    ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "testing",
-               "train", "web")),
+    ("tools", ("bench", "claude", "cli", "do", "draft", "harness", "mcp", "surface",
+               "testing", "train", "web")),
 )
 
 RANK = {package: height for height, (_, packages) in enumerate(LAYERS)

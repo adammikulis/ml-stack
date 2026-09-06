@@ -45,6 +45,7 @@ HELP: dict[str, str] = {
     "setup": "The machine facts serving depends on, and what to do about each.",
     "speech": "Speech recognition, synthesis and voice activity on this machine.",
     "store": "What a graph store holds, read by key and by scan, and whether they agree.",
+    "surface": "Every command's help and every safe command's output, captured and compared.",
     "suite": "A measurement run over several seeds, written down whole.",
     "train-run": "Train one recipe from a config file, to an adapter or a served GGUF.",
     "train-tools": "A project's tools into training data, a fine-tuned caller and a GGUF.",
@@ -119,6 +120,19 @@ TABLE: tuple[Row, ...] = (
         "the cluster this machine belongs to and who else is in it: `setup` joins one with the passphrase every machine shares (`init` mints a random key instead), `key` and `token` print the key and the bearer token it derives, `ls` lists the daemons answering on this LAN, `pause` stops taking work now and `resume` starts again, and `when` and `busy WHEN` set the hours this machine keeps to itself -- `busy 'mon-fri 09:00-17:00'`, repeatable, and queued work waits for the window to close rather than failing. `--cluster-key` picks a key file other than `~/.ml-stack/cluster.key`"),
     Row("ml-stack-traind",
         "the daemon behind a peer: one box, one job at a time, reachable over the LAN. It announces this machine (`--no-announce` keeps it invisible), serves the API and the web interface (`--no-web` only the API), runs `--slots` jobs at once, declares `--label` roles work can require, and reports the card through `--report MODULE:CALLABLE`. `--busy WHEN` and `--free WHEN` are the hours it keeps to itself and the exceptions carved out of them, `--on-paused` says whether work already running is stopped or left to finish, `--track BRANCH` follows a branch rather than releases and restarts itself when nothing is running, and `--persist` installs it to start at logon instead of serving now"),
+    Row("ml-stack-surface capture --out DIR",
+        "every `ml-stack-<command>` and every subcommand it declares, found by asking each "
+        "command's own parser rather than from a list kept by hand: `--help` for all of "
+        "them, and the output of the ones that are safe to run -- the invocations named in "
+        "`surface.ops.SAFE`, which read this machine and change nothing, plus every "
+        "command whose parser refuses a bare argv, where running it can only print usage. "
+        "Anything else is recorded as help only, never skipped in silence. `list` prints "
+        "the same walk and takes nothing; `--src DIR` asks another checkout's `src/`, "
+        "`--only serve,bench` narrows it. `diff BEFORE AFTER` prints what changed between "
+        "two captures and exits 1 when anything did, with what legitimately varies between "
+        "runs -- times, sizes, pids, ports, hosts, this machine's paths -- standing as "
+        "`<took>`, `<pid>` and the like in the invocations, and paths alone settled in the "
+        "help, so a moved flag still shows"),
     Row("ml-stack-help [<command>...]",
         "every command with the first line of its help, or one command's own help -- also `ml-stack help bench sweep`"),
 )

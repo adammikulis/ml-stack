@@ -130,6 +130,8 @@ ml-stack-do = "ml_stack.do:main"
 # what a draft head is worth for one model: no head, then the head at each depth
 ml-stack-draft = "ml_stack.draft:main"
 ml-stack-help = "ml_stack.cli:help_main"
+# every command's --help and every safe command's output, written down to be diffed
+ml-stack-surface = "ml_stack.surface.cli:main"
 # every tracked file read for a person's details, reported and never blocked
 ml-stack-audit = "ml_stack.redact.audit:main"
 

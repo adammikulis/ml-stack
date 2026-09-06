@@ -488,8 +488,10 @@ worth taking, in this order:
   carries the lines); leave the handler to parse and print; declare each subcommand with
   `@COMMANDS.command(name, help=..., options=[option("port", ...), flag("--own", ...)])` in
   the order the old parser added them, so `--help` is unchanged; set `main = COMMANDS.run`
-  and delete the `def main`. Diff every subcommand's `--help` and the command's own output
-  against `main` before and after -- that is what catches a moved flag.
+  and delete the `def main`. `ml-stack-surface capture --out DIR --src SRC` writes every
+  subcommand's `--help` and the output of everything safe to run; take one against
+  `main`'s `src/` and one against the branch, and `ml-stack-surface diff BEFORE AFTER`
+  names what moved.
   Worth doing next in this order: `ml-stack-bench` (1,886 lines, two `main`s, and the last
   screen-scrape in `mcp.bench_show` and `do.bench_cli` is waiting on it), `ml-stack-setup`
   and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
