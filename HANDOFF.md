@@ -110,17 +110,29 @@ plan` names them as unplaceable rather than guessing.
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
   here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
-- [ ] **Watch ggml-org/llama.cpp#27836, because it makes Flash-Next faster.** A draft,
-  last touched 2026-09-02, checked 2026-09-06; mainline is b10825, the fork is b10715.
-  The PR reports 86-89% draft acceptance on an M3 Max against the fork's 73-79%.
-  Acceptance is the share of speculated tokens kept, so it sets how many tokens come out
-  of each pass through the model: at the profile's `--spec-n-max 4` that is roughly a
-  quarter more tokens per pass, and about a tenth off a question once the half of the wall
-  clock that is reading tool results back is counted in. That estimate is arithmetic from
-  the numbers above, measured on somebody else's machine, so **measure acceptance here
-  before believing it** -- `ml-stack-bench drafts` against the fork's own figure.
-  Adopting it is a download: `ml-stack-serve build`, then the profile's `--build unsloth`
-  goes and the run is re-measured. Nothing to prepare in the meantime.
+- [ ] **Watch ggml-org/llama.cpp#27836, then measure it here; nobody has compared it to
+  the fork.** A draft, last touched 2026-09-02, checked 2026-09-06. Mainline is b10825,
+  the fork b10715, and the profile pins `--build unsloth` so mainline moving changes
+  nothing until this lands.
+
+  **The PR's numbers do not answer whether it beats the fork**, and reading them as if
+  they did is a mistake already made once here. Its table is MTP against *no speculation*
+  on an M3 Max: 27.43 tok/s baseline, 89.2% acceptance and 37.22 tok/s at
+  `--spec-draft-n-max 2`, 85.7% and 38.83 at 3. That is **UD-IQ4_XS at depth 2 and 3**,
+  in a harness it names but does not describe. This machine serves **UD-Q4_K_XL at depth
+  4** against graph tool-calling, and acceptance falls as depth rises, so the PR's own
+  trend puts depth 4 below both figures. Nothing in it is a fork comparison.
+
+  So the only way to know what it is worth is `ml-stack-bench drafts` on this machine, on
+  this quantisation, at this depth, against the questions this graph asks -- once with the
+  fork and once with mainline. Acceptance sets tokens per forward pass, so the difference
+  is decode speed on the model this project actually runs, which is worth measuring
+  properly rather than estimating. Taking it costs a download: `ml-stack-serve build`,
+  then the profile's `--build unsloth` goes.
+
+  One thing the PR does establish and is worth keeping: temperature-0 output is
+  byte-identical with the head on and off, so speculation is not changing what the model
+  says. Its benchmark runs were produced with an agent, per its own disclosure.
 
 ## Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
