@@ -11,13 +11,13 @@ from __future__ import annotations
 import json
 import os
 import signal
-import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.command import Group, flag
 from ml_stack.home import expand, state
 from ml_stack.lock import Busy
 from ml_stack.log import say, warn
@@ -30,8 +30,18 @@ def home_dir() -> Path:
 STOP_WAIT = 60.0
 """How long `stop` waits for the pid to end before saying it is still going."""
 
-__all__ = ["Job", "record", "alive", "held", "wait", "stop", "status", "main",
-           "home_dir", "STOP_WAIT"]
+__all__ = [
+    "STOP_WAIT",
+    "Job",
+    "alive",
+    "held",
+    "home_dir",
+    "main",
+    "record",
+    "status",
+    "stop",
+    "wait",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -202,24 +212,8 @@ def status(*, say: Callable[[str], None] = say, home: Path | None = None) -> int
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """``ml-stack-jobs``: what long commands this machine has recorded, and waiting on or
-    stopping one."""
-    import argparse
-
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-jobs", allow_abbrev=False,
-        description="The long commands this machine records -- a bench sweep, an ingest "
-                    "reading documents -- with the pid, the argv and the log of each. `status` "
-                    "lists them; `wait KIND` blocks until one has ended, so the next command "
-                    "is `wait && next`; `stop KIND` ends it.")
-    ap.add_argument("word", choices=("status", "wait", "stop"))
-    ap.add_argument("kind", nargs="?", default="", metavar="KIND",
-                    help="which job -- `bench`, `ingest`, whatever wrote the record; "
-                         "`status` names them all")
-    ap.add_argument("--home", default="", metavar="DIR",
-                    help=f"where the records are (default: {home_dir()})")
-    args = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+def _run(args: Any) -> int:
+    """``ml-stack-jobs``: what is recorded, waiting on one, stopping one."""
     home = expand(args.home) if args.home else None
     if args.word == "status":
         return status(home=home)
@@ -229,6 +223,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.word == "wait":
         return wait(args.kind, home=home)
     return stop(args.kind, home=home)
+
+
+COMMANDS = Group(
+    "ml-stack-jobs",
+    "The long commands this machine records -- a bench sweep, an ingest reading documents "
+    "-- with the pid, the argv and the log of each. `status` lists them; `wait KIND` "
+    "blocks until one has ended, so the next command is `wait && next`; `stop KIND` ends "
+    "it.",
+    allow_abbrev=False, run=_run,
+    options=[
+        flag("word", choices=("status", "wait", "stop")),
+        flag("kind", nargs="?", default="", metavar="KIND",
+             help="which job -- `bench`, `ingest`, whatever wrote the record; `status` "
+                  "names them all"),
+        flag("--home", default="", metavar="DIR",
+             help=f"where the records are (default: {home_dir()})"),
+    ])
+main = COMMANDS.run
 
 
 if __name__ == "__main__":  # pragma: no cover - the entry point is `ml-stack-jobs`

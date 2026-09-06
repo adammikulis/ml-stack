@@ -199,7 +199,7 @@ def consistency(corpus: Sequence[str | Path], where: str | Path, *,
     recorded = recorded / "messages.jsonl" if recorded.is_dir() else recorded.parent / "messages.jsonl"
     report.counts["asserted"] = report.counts["asserted_found"] = 0
     if recorded.is_file():
-        from ml_stack.world.cli import read_messages
+        from ml_stack.world.ops import read_messages
 
         for told in read_messages(recorded):
             if not told.attrs.get("asserts_exact", True):
