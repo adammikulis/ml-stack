@@ -375,19 +375,6 @@ RICH_SENTENCE = ("Each hit says why it matched and, for a topic or a place, who 
                  "it — read those people rather than searching for them.")
 
 
-def _rich(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Those schemas, copied, with look_up told what its hits now carry."""
-    out = copy.deepcopy(list(schemas))
-    for schema in out:
-        if schema["function"]["name"] == "look_up":
-            schema["function"]["description"] += " " + RICH_SENTENCE
-    return out
-
-
-RICH = _rich(TOOLS)
-RICH_TERSE = _rich(TERSE)
-
-
 # The tight asking: what `show` says, and what the model is told, when a model that finds
 # nearly everything then lights far more than the answer. Measured over the invented
 # community, 34 questions at 32k: Qwen3.8-Flash-Next reached 92% recall and 44% precision,
@@ -446,21 +433,6 @@ TIGHT_SYSTEM_SENTENCE = ("Name in your answer only entries a tool returned — f
 LIT_TIGHT = 6
 
 
-def _tight(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Those schemas, copied, with show told to light only what answers the question.
-
-    The terse set gets the terse wording, told by show's description being TERSE's; any
-    other show -- TOOLS', RICH's, a caller's -- gets the full one, example and all.
-    """
-    brief = _schema("show", TERSE)["function"]["description"]
-    out = copy.deepcopy(list(schemas))
-    for schema in out:
-        if schema["function"]["name"] == "show":
-            was = schema["function"]["description"]
-            schema["function"]["description"] = TIGHT_SHOW_TERSE if was == brief else TIGHT_SHOW
-    return out
-
-
 # ------------------------------------------------------------------ all the lookups at once
 #
 # The asking that costs the least, for the model that answers best. Measured 2026-09-02 on
@@ -500,16 +472,6 @@ BATCH_EXAMPLES = {
 }
 
 
-def _batched(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Those schemas, copied, with each searching tool shown a three-entry call."""
-    out = copy.deepcopy(list(schemas))
-    for schema in out:
-        more = BATCH_EXAMPLES.get(str(schema["function"]["name"]))
-        if more:
-            schema["function"]["description"] += more
-    return out
-
-
 # ------------------------------------------------------------------ one entry at a time
 #
 # The opposite of `batch`, and it is here for the opposite model. A fat tool result is a
@@ -545,16 +507,6 @@ SINGLE_EXAMPLES = {
     "look_around": " One id to a call here too: {\"ids\": [\"topic:ceramics\"]}, then "
                    "another call for the next neighbourhood.",
 }
-
-
-def _singled(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Those schemas, copied, with each searching tool shown a one-entry call."""
-    out = copy.deepcopy(list(schemas))
-    for schema in out:
-        more = SINGLE_EXAMPLES.get(str(schema["function"]["name"]))
-        if more:
-            schema["function"]["description"] += more
-    return out
 
 
 def _all_at_once(reply: Any) -> bool:
@@ -607,25 +559,6 @@ FEW_SYSTEM_SENTENCE = (
     "You have three tools and no others: look_up finds entries by name, look_at reads what "
     "is held on them and what they are joined to, and show says what your answer is about. "
     "There is no path tool and no listing tool here; read your way to both of those.")
-
-
-def _few(schemas: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Those schemas, copied, with every way of looking but look_up and look_at taken away.
-
-    A tool that does not search is kept, whoever added it: this is about what the choosing
-    costs, and `show` -- or a caller's change request -- is not a choice between ways to
-    look. `look_up` is told what the offer no longer has, and how to answer those questions
-    with what it does.
-    """
-    out: list[dict[str, Any]] = []
-    for schema in copy.deepcopy(list(schemas)):
-        name = str((schema.get("function") or {}).get("name") or "")
-        if name in SEARCHING and name not in FEW_TOOLS:
-            continue
-        if name == "look_up":
-            schema["function"]["description"] += " " + FEW_SENTENCE
-        out.append(schema)
-    return out
 
 
 # ------------------------------------------------------------------ what kind was asked for
@@ -1332,6 +1265,45 @@ def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, 
     raise KeyError(name)
 
 
+_TERSE_SHOW = _schema("show", TERSE)["function"]["description"]
+
+
+def _asked(schemas: Sequence[Mapping[str, Any]], asking: Asking) -> list[dict[str, Any]]:
+    """Those schemas, copied, with everything ``asking`` asks for written onto each.
+
+    One walk over the set. ``rich`` says what a look_up hit carries; ``batch`` and
+    ``single`` show each searching tool a three-entry and a one-entry call; ``few`` drops
+    every way of looking but `look_up` and `look_at` and tells look_up what is gone;
+    ``tight`` replaces what `show` says, in the terse wording for a terse `show` and the
+    full one otherwise. The schemas themselves come back when the asking asks for none of
+    it.
+    """
+    if not (asking.rich or asking.batch or asking.single or asking.few or asking.tight):
+        return list(schemas)
+    out: list[dict[str, Any]] = []
+    for schema in copy.deepcopy(list(schemas)):
+        name = str((schema.get("function") or {}).get("name") or "")
+        if asking.few and name in SEARCHING and name not in FEW_TOOLS:
+            continue
+        more = ""
+        if asking.rich and name == "look_up":
+            more += " " + RICH_SENTENCE
+        if asking.batch:
+            more += BATCH_EXAMPLES.get(name, "")
+        if asking.single:
+            more += SINGLE_EXAMPLES.get(name, "")
+        if asking.few and name == "look_up":
+            more += " " + FEW_SENTENCE
+        if more:
+            schema["function"]["description"] += more
+        if asking.tight and name == "show":
+            was = schema["function"]["description"]
+            schema["function"]["description"] = (
+                TIGHT_SHOW_TERSE if was == _TERSE_SHOW else TIGHT_SHOW)
+        out.append(schema)
+    return out
+
+
 def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
               terse: bool = False, rich: bool = False,
               tight: bool = True, reach: int | None = None,
@@ -1412,22 +1384,11 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
 
     does = {"look_up": find, "look_at": read, "look_around": around, "path_between": trace,
             "list_kind": listing, "show": light, "summarise": glance}
-    if rich:
-        schemas = RICH_TERSE if terse else RICH
-    else:
-        schemas = TERSE if terse else TOOLS
+    base: Sequence[Mapping[str, Any]] = TERSE if terse else TOOLS
     if summary:
-        schemas = [*schemas, SUMMARY_SCHEMA]
-    if batch:
-        schemas = _batched(schemas)
-    if single:
-        schemas = _singled(schemas)
-    if few:
-        # after the worked calls and before tight: what is taken away is taken away
-        # whatever was written on it, and tight is about `show`, which stays
-        schemas = _few(schemas)
-    if tight:
-        schemas = _tight(schemas)
+        base = [*base, SUMMARY_SCHEMA]
+    schemas = _asked(base, Asking(rich=rich, tight=tight, batch=batch, single=single,
+                                  few=few))
     # in the order the schemas are written, which is the order a model reads them in
     return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
 
@@ -1646,24 +1607,16 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
                  else (schema, _found)
                  for schema, fn in tools]
-    if batch and given:
-        # the same as tight: a caller's own tools are described on a copy, never in place
-        told = _batched([schema for schema, _ in tools])
-        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
-    if single and given:
-        told = _singled([schema for schema, _ in tools])
-        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
-    if few and given:
-        # this one takes schemas away rather than rewriting them, so the callables are
-        # matched back by name: a caller's own acting tool keeps the function it came with
-        kept = {str((schema.get("function") or {}).get("name") or ""): schema
-                for schema in _few([schema for schema, _ in tools])}
-        tools = [(kept[name], fn) for schema, fn in tools
-                 if (name := str((schema.get("function") or {}).get("name") or "")) in kept]
-    if tight and given:
-        # a caller's own tools carry a show of their own; tight is about what it says
-        told = _tight([schema for schema, _ in tools])
-        tools = [(schema, fn) for schema, (_, fn) in zip(told, tools, strict=True)]
+    if given:
+        # a caller's own tools are described on a copy, never in place, and `few` takes
+        # some away, so the callables are matched back by name -- a caller's own acting
+        # tool keeps the function it came with. `rich` is off: it describes look_up's own
+        # hits, and a caller's look_up returns whatever it returns.
+        told = {str((schema.get("function") or {}).get("name") or ""): schema
+                for schema in _asked([schema for schema, _ in tools],
+                                     replace(asking, rich=False))}
+        tools = [(told[name], fn) for schema, fn in tools
+                 if (name := str((schema.get("function") or {}).get("name") or "")) in told]
     schemas = [schema for schema, _ in tools]
     run = {str((schema.get("function") or {}).get("name") or ""): fn for schema, fn in tools}
 
