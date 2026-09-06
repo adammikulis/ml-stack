@@ -1619,7 +1619,7 @@ def test_status_says_what_is_measuring_or_that_nothing_is(tmp_path, monkeypatch,
     _measuring(tmp_path, os.getpid())                     # alive: this very process
     assert bench.main(["status"]) == 0
     said = capsys.readouterr().out
-    assert f"measuring since 2026-09-01T18:00:00 (pid {os.getpid()})" in said
+    assert f"since 2026-09-01T18:00:00 (pid {os.getpid()})" in said
     assert "ml-stack-bench sweep --serve tiny" in said
     assert "sweep-tiny-20260901T180000.log" in said
     assert "last: third" in said
