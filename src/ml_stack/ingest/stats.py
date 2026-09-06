@@ -71,10 +71,13 @@ class RunStats:
     @property
     def passes(self) -> int | None:
         """Verification passes the model made, or None where nothing was drafted."""
+        if self.spent.verify_n:
+            return self.spent.verify_n
         taken = self.spent.draft_taken
         if not self.spent.completion_tokens or not taken:
             return None
-        # one pass writes one token of its own, so written less accepted is the pass count
+        # where a server does not count its passes: one pass writes one token of its own,
+        # so the tokens written less the drafted ones accepted is the number of passes
         return self.spent.completion_tokens - taken
 
     @property
@@ -257,9 +260,12 @@ def _drafting_said(stats: Any) -> list[str]:
         return ["  drafting  no draft head: every token was written by the model itself"]
     depth = (f"{stats.head_depth} token(s) ahead per pass" if stats.head_depth
              else "depth not named by the run record")
-    return [f"  drafting  {stats.head or 'head not named by the run record'}, {depth}",
-            f"            {(stats.spent.acceptance or 0) * 100:.1f}% of drafted tokens kept "
-            f"(higher is better), {stats.tokens_per_pass:.1f} tokens per verification pass"]
+    kept = (f"            {(stats.spent.acceptance or 0) * 100:.1f}% of drafted tokens kept "
+            f"(higher is better), {stats.tokens_per_pass:.1f} tokens per verification pass")
+    if stats.spent.draft_ms:
+        kept += (f"\n            {stats.spent.draft_ms / 1000:.0f}s guessing, "
+                 f"{(stats.spent.verify_ms or 0) / 1000:.0f}s checking")
+    return [f"  drafting  {stats.head or 'head not named by the run record'}, {depth}", kept]
 
 
 def _for_long(seconds: float) -> str:
