@@ -134,7 +134,8 @@ class TestThePage:
         assert not re.search(r'(?:src|href)="https?://', got["raw"]), \
             "the page fetches a library"
 
-    def test_the_script_parses(self, tmp_path):
+    @pytest.mark.parametrize("name", ["fit-model", "fit-view", "rates-view", "telemetry-view"])
+    def test_the_script_parses(self, tmp_path, name):
         """A duplicate declaration anywhere in it stops the whole page loading."""
         from ml_stack.fleet.page import COMPONENTS_DIR
         from ml_stack.ui import load
@@ -142,11 +143,56 @@ class TestThePage:
         node = shutil.which("node")
         if node is None:
             pytest.skip("no node to parse with")
-        script = load(COMPONENTS_DIR, ["fit-view"])[0].read().script
-        path = tmp_path / "fit-view.js"
+        script = load(COMPONENTS_DIR, [name])[0].read().script
+        path = tmp_path / f"{name}.js"
         path.write_text(script, encoding="utf-8")
         done = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
         assert done.returncode == 0, done.stderr[-500:]
+
+
+class TestTheSplitBetweenTheFourComponents:
+    """`fit-view` used to be one 1,150-line file holding three screens; it is now four.
+
+    Nothing here drives a browser -- `TestTheFitView` in `test_fleet_page.py` already opens
+    all three screens and reads what they draw. This is the seam itself: the formatting and
+    the chart geometry live once, in `fit-model`, and the other three read it off
+    `window.fitModel` rather than each carrying their own copy.
+    """
+
+    NAMES = ("fit-model", "fit-view", "rates-view", "telemetry-view")
+
+    def read(self, name: str) -> str:
+        from ml_stack.fleet.page import COMPONENTS_DIR
+
+        return (COMPONENTS_DIR / f"{name}.html").read_text(encoding="utf-8")
+
+    def test_every_piece_ships_with_the_package(self):
+        for name in self.NAMES:
+            from ml_stack.fleet.page import COMPONENTS_DIR
+
+            assert (COMPONENTS_DIR / f"{name}.html").is_file(), f"{name} is missing"
+
+    def test_the_formatting_and_geometry_are_defined_once(self):
+        """A helper `rates-view` or `telemetry-view` also needs is read off `fitModel`,
+        never redeclared -- the same rule as the copied regex `test_the_pages_carry_the_same_rule`
+        (in `test_hub.py`) exists to catch, one level down."""
+        shared = ("function svgEl", "function prettyName", "function clip",
+                  "FM.COLOURS =", "FM.GB =")
+        texts = {name: self.read(name) for name in self.NAMES}
+        for needle in shared:
+            holders = [name for name, text in texts.items() if needle in text]
+            assert holders == ["fit-model"], f"{needle!r} is defined in {holders}, not fit-model alone"
+
+    def test_rates_view_and_telemetry_view_read_the_shared_model(self):
+        for name in ("rates-view", "telemetry-view"):
+            assert "window.fitModel" in self.read(name), f"{name} does not read fit-model"
+
+    def test_fit_view_keeps_the_frame_the_other_two_mount_into(self):
+        html = self.read("fit-view")
+        assert "<rates-view></rates-view>" in html
+        assert "<telemetry-view></telemetry-view>" in html
+        for anchor in ("id=\"fit-heading\"", "id=\"fit-views\"", "id=\"fit-body\""):
+            assert anchor in html, f"the frame lost {anchor}"
 
     def test_the_app_offers_it_beside_the_cluster_view(self):
         from ml_stack.fleet.page import COMPONENTS_DIR
