@@ -3,7 +3,7 @@ and the two commands that print it."""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -13,7 +13,7 @@ from ml_stack.ingest.progress import GIVE_UP, Progress
 from ml_stack.ingest.reads import _read_json, reads_path, tokens_of, units_of
 from ml_stack.log import say
 
-__all__ = ["Source", "Sources", "show", "sources"]
+__all__ = ["Source", "Sources", "run_attrs", "show", "sources"]
 
 
 @dataclass
@@ -247,6 +247,22 @@ class Sources:
         return out
 
 
+def run_attrs(out: str | Path, run_ids: Iterable[str] = ()) -> dict[str, dict[str, Any]]:
+    """The ``run`` nodes of a store by id -- what each run read with. ``run_ids`` narrows it."""
+    if not Path(out).expanduser().exists():
+        return {}
+    from ml_stack.graph.store import GraphStore
+
+    wanted = {str(one) for one in run_ids if one}
+    try:
+        with GraphStore(out, read_only=True) as store:
+            return {str(n["id"]): dict(n.get("attrs") or {})
+                    for n in store.nodes(kind="run")
+                    if not wanted or str(n["id"]) in wanted}
+    except Exception:  # noqa: BLE001 - a store a writer holds says nothing about its runs
+        return {}
+
+
 def _logged(store: Any) -> bool:
     """Whether the store holds a merges document, however many merges are in it."""
     from ml_stack.graph.tidy import MERGES
@@ -384,14 +400,7 @@ def sources(out: str | Path, *, most: int = 10, say: Callable[[str], None] = say
 
 def _run_said(out: str | Path, run_id: str) -> str:
     """One run node as a person reads it: the model and when."""
-    from ml_stack.graph.store import GraphStore
-
-    try:
-        with GraphStore(out, read_only=True) as store:
-            attrs = next((n.get("attrs") or {} for n in store.nodes(kind="run")
-                          if n["id"] == run_id), {})
-    except Exception:  # noqa: BLE001 - a store a writer holds; the id still says something
-        attrs = {}
+    attrs = run_attrs(out, [run_id]).get(run_id, {})
     model = str(attrs.get("model") or "")
     try:
         from ml_stack.hub import pretty_name

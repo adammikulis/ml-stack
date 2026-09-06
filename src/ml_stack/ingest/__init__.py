@@ -175,10 +175,14 @@ from ml_stack.ingest.migrate import (
 from ml_stack.ingest.progress import (
     GIVE_UP as GIVE_UP,
     Progress as Progress,
-    status as status,
-    _source_in_store as _source_in_store,
     _folded_at as _folded_at,
+)
+from ml_stack.ingest.stats import (
+    RunStats as RunStats,
+    run_stats as run_stats,
+    status as status,
     _for_long as _for_long,
+    _source_in_store as _source_in_store,
 )
 from ml_stack.ingest.reads import (
     Read as Read,
@@ -216,6 +220,7 @@ from ml_stack.ingest.serving import (
 from ml_stack.ingest.sources import (
     Source as Source,
     Sources as Sources,
+    run_attrs as run_attrs,
     show as show,
     sources as sources,
     _decisions_in as _decisions_in,
@@ -228,11 +233,13 @@ from ml_stack.ingest.vocabulary import (
 
 __all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS",
            "INSTRUCTIONS", "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
-           "Imported", "Progress", "Scored", "Source", "Sources", "Stopped", "Vocabulary",
+           "Imported", "Progress", "RunStats", "Scored", "Source", "Sources", "Stopped",
+           "Vocabulary",
            "ask", "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs",
            "detach", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
            "gold_score", "graph_of", "home_dir", "import_lines", "imported",
            "instructions", "main", "marked", "migrate", "read_asked", "read_gold",
+           "run_attrs", "run_stats",
            "sayable", "schema",
            "score_asked", "show", "sources", "status", "unit_of", "units_of", "vague",
            "verb_for",

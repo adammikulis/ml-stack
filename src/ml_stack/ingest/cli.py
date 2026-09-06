@@ -21,10 +21,11 @@ from ml_stack.ingest.extract import PER_SECTION, schema
 from ml_stack.ingest.fold import fold
 from ml_stack.ingest.gold import gold_lines, gold_score, read_gold
 from ml_stack.ingest.migrate import migrate
-from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at, status
+from ml_stack.ingest.progress import GIVE_UP, Progress, _folded_at
 from ml_stack.ingest.reads import _read_json
 from ml_stack.ingest.run import Stopped, _read_run, _stopping
 from ml_stack.ingest.sources import show, sources
+from ml_stack.ingest.stats import status
 from ml_stack.log import say, warn
 
 __all__ = ["STOP_WAIT", "detach", "home_dir", "main", "parser", "retry", "stop", "wait"]
@@ -206,7 +207,9 @@ def parser() -> argparse.ArgumentParser:
                     "`ml-stack-ingest DOC.pdf ... --out STORE`.",
         epilog="Instead of documents, one of these words:\n"
                "  status   how far the run into --out has got, what failed, what is in the\n"
-               "           store, what it cost per unit, and how long the rest will take\n"
+               "           store, what it cost per unit, how fast the model is reading and\n"
+               "           writing, how much of the draft head is kept, and how long the\n"
+               "           rest will take\n"
                "  show     what was read: concepts, relations and the folds each source made\n"
                "  sources  every source in the store: what the store holds for each, the\n"
                "           concepts more than one source names, the names tidy joined across\n"

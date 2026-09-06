@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any
 
 __all__ = ["ARGS_CAP", "Call", "args_summary"]
@@ -205,6 +205,12 @@ class Call:
             completion_tokens=int(usage.get("completion_tokens") or 0),
             seconds=float(took),
         )
+
+    @classmethod
+    def from_kept(cls, one: Mapping[str, Any]) -> Call:
+        """One record `public` wrote, read back; the keys it derives are left out."""
+        known = {f.name for f in fields(cls)}
+        return cls(**{k: v for k, v in (one or {}).items() if k in known})
 
     @classmethod
     def from_trace(cls, entry: Mapping[str, Any]) -> Call:
