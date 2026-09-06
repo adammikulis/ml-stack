@@ -19,7 +19,6 @@ from conftest import (
     fake_binary,
     fake_memory,
     fake_process,
-    json_reply,
     write_gguf,
 )
 
@@ -47,8 +46,9 @@ def serving():
     started: list[FakeLlamaServer] = []
 
     def start(**held) -> FakeLlamaServer:
+        held.setdefault("model", f"/models/{MODEL}")
         held.setdefault("context", 4096)
-        fake = FakeLlamaServer(Served(model=f"/models/{MODEL}", **held))
+        fake = FakeLlamaServer(Served(**held))
         started.append(fake)
         return fake
 
@@ -923,21 +923,15 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     assert "no llama-server is running" in capsys.readouterr().out
 
 
-def test_status_reports_a_foreign_server_and_leaves_it_alone(state, server, monkeypatch,
+def test_status_reports_a_foreign_server_and_leaves_it_alone(state, serving, monkeypatch,
                                                               capsys):
     """A server answering health checks that this machine never recorded is named foreign,
     with its pid -- never judged for adopting or starting over it (the backend now never
     kills one it did not start; `ports.reclaim_port`)."""
     from ml_stack.serve import cli, ops
 
-    def handled(method, path, body):
-        if path == "/health":
-            return json_reply({})
-        if path == "/v1/models":
-            return json_reply({"data": [{"id": "foreign-model.gguf"}]})
-        return 404, b"{}"
-
-    instance = server(handled)
+    instance = serving(model="/models/foreign-model.gguf")
+    instance.refuse["/props"] = 404
     monkeypatch.setattr(ops, "server_pids_on_port", lambda port: [9911] if port == instance.port
                         else [])
 

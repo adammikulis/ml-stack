@@ -16,6 +16,7 @@ import time
 
 import pytest
 from conftest import json_reply
+
 from ml_stack.client.health import ServingParams
 from ml_stack.serve import (
     LlamaServerBackend,
@@ -34,8 +35,29 @@ from ml_stack.serve import (
     tail,
 )
 from ml_stack.serve.manager import orphaned
-from ml_stack.testing.fakes import fake_binary, fake_llama_binary
+from ml_stack.testing.fakes import (
+    FakeLlamaServer,
+    Served,
+    fake_binary,
+    fake_llama_binary,
+)
 from tests.conftest import leased
+
+
+@pytest.fixture
+def serving():
+    """llama-servers on real sockets, closed at the end of the test."""
+    started: list[FakeLlamaServer] = []
+
+    def start(model: str, *, context: int = 4096, slots: int = 1) -> FakeLlamaServer:
+        fake = FakeLlamaServer(Served(model=f"/models/{model}", context=context,
+                                      slots=slots))
+        started.append(fake)
+        return fake
+
+    yield start
+    for fake in started:
+        fake.close()
 
 
 @pytest.fixture
@@ -502,22 +524,9 @@ class TestAdoptingTheWrongShape:
             state_file=tmp_path / "servers.json",
         )
 
-    @staticmethod
-    def _handler(model: str, n_ctx: int, slots: int):
-        def handle(method, path, body):
-            if path.startswith("/props"):
-                return json_reply({
-                    "model_path": f"/models/{model}",
-                    "total_slots": slots,
-                    "default_generation_settings": {"n_ctx": n_ctx},
-                })
-            return json_reply({"data": [{"id": model}]})
-
-        return handle
-
     def test_a_running_server_with_too_few_slots_is_refused(
-            self, server, tmp_path, binary):
-        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+            self, serving, tmp_path, binary):
+        instance = serving("a-model.gguf", context=4096, slots=1)
         manager = self._manager(tmp_path, binary)
 
         with pytest.raises(ServerFailed, match="slots: asked for 4, serving 1"):
@@ -525,9 +534,9 @@ class TestAdoptingTheWrongShape:
                                      context=4096, parallel=4))
 
     def test_a_running_server_with_a_smaller_context_is_refused(
-            self, server, tmp_path, binary):
+            self, serving, tmp_path, binary):
         """A caller that asked for 32k and gets 4k has its prompts truncated instead."""
-        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+        instance = serving("a-model.gguf", context=4096, slots=1)
         manager = self._manager(tmp_path, binary)
 
         with pytest.raises(ServerFailed,
@@ -535,9 +544,9 @@ class TestAdoptingTheWrongShape:
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                      context=32768))
 
-    def test_context_is_compared_one_slot_at_a_time(self, server, tmp_path, binary):
+    def test_context_is_compared_one_slot_at_a_time(self, serving, tmp_path, binary):
         """llama-server splits --ctx-size across -np, and reports one slot's share."""
-        instance = server(self._handler("a-model.gguf", n_ctx=32768, slots=2))
+        instance = serving("a-model.gguf", context=32768, slots=2)
         manager = self._manager(tmp_path, binary)
 
         adopted = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
@@ -548,8 +557,8 @@ class TestAdoptingTheWrongShape:
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                      context=65536, parallel=1))
 
-    def test_the_shape_that_was_asked_for_is_adopted(self, server, tmp_path, binary):
-        instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
+    def test_the_shape_that_was_asked_for_is_adopted(self, serving, tmp_path, binary):
+        instance = serving("a-model.gguf", context=4096, slots=1)
         manager = self._manager(tmp_path, binary)
 
         info = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
@@ -619,16 +628,6 @@ class TestServingBeside:
     picking another port by hand is work a machine can do.
     """
 
-    def other(self):
-        """A server answering as something entirely different is serving on this port."""
-        def handle(method, path, body):
-            if path.startswith("/props"):
-                return json_reply({"model_path": "/m/somethingelse.gguf", "total_slots": 1,
-                                   "default_generation_settings": {"n_ctx": 4096}})
-            return json_reply({"data": [{"id": "somethingelse.gguf"}]})
-
-        return handle
-
     def manager(self, tmp_path, started):
         class Backend(ServerBackend):
             name = "fake"
@@ -643,8 +642,8 @@ class TestServingBeside:
 
         return ServerManager(backend=Backend(), state_file=tmp_path / "servers.json")
 
-    def test_a_busy_port_is_served_beside_rather_than_refused(self, server, tmp_path):
-        instance = server(self.other())
+    def test_a_busy_port_is_served_beside_rather_than_refused(self, serving, tmp_path):
+        instance = serving("somethingelse.gguf")
         started: list[ServerSpec] = []
         held = self.manager(tmp_path, started)
         info = held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port))
@@ -654,17 +653,17 @@ class TestServingBeside:
 
         assert is_healthy(instance.base_url), "the other server is untouched"
 
-    def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, server, tmp_path):
-        instance = server(self.other())
+    def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
+        instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
         with pytest.raises(ServerFailed, match="different shape"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
-    def test_it_refuses_when_the_machine_has_no_room(self, server, tmp_path, monkeypatch):
+    def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
         """Starting a load that will be killed halfway is worse than saying no."""
         big = tmp_path / "big.gguf"
         big.write_bytes(b"0" * 4096)
-        instance = server(self.other())
+        instance = serving("somethingelse.gguf")
         monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
         with pytest.raises(ServerFailed, match="different shape"):
@@ -730,7 +729,7 @@ def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked()
     argv = backend.command(ServerSpec(
         model="/m/w.gguf", port=1, spec_type="ngram-mod", spec_draft_max=5,
         spec_draft_min=1, spec_ngram_min=32, spec_ngram_max=64, spec_draft_ngl=99))
-    pairs = dict(zip(argv, argv[1:]))
+    pairs = dict(zip(argv, argv[1:], strict=False))
     assert pairs["--spec-type"] == "ngram-mod"
     assert pairs["--spec-draft-n-max"] == "5" and pairs["--spec-draft-n-min"] == "1"
     assert pairs["--spec-ngram-mod-n-min"] == "32" and pairs["--spec-ngram-mod-n-max"] == "64"
@@ -754,7 +753,7 @@ def test_the_lookup_cache_reaches_the_command_line():
     argv = backend.command(ServerSpec(model="/m/w.gguf", port=1, spec_type="ngram-cache",
                                       lookup_static="/c/seed.bin",
                                       lookup_dynamic="/c/learnt.bin"))
-    pairs = dict(zip(argv, argv[1:]))
+    pairs = dict(zip(argv, argv[1:], strict=False))
     assert pairs["--lookup-cache-static"] == "/c/seed.bin"
     assert pairs["--lookup-cache-dynamic"] == "/c/learnt.bin"
 
@@ -799,7 +798,7 @@ def test_the_serving_knobs_that_shorten_a_run():
 
     argv = backend.command(ServerSpec(model="/m/w.gguf", port=1, cache_reuse=256,
                                       warmup=False, context_per_slot=32768))
-    pairs = dict(zip(argv, argv[1:]))
+    pairs = dict(zip(argv, argv[1:], strict=False))
     assert pairs["--cache-reuse"] == "256"
     assert pairs["--kv-unified-per-slot"] == "32768"
     assert "--no-warmup" in argv
