@@ -242,6 +242,7 @@ class Availability:
                 "paused_until": (None if not self.paused
                                  or self.paused_until == math.inf
                                  else self.paused_until),
+                "paused_reason": self.paused_reason if self.paused else "",
                 "next_open": nxt.timestamp() if nxt else None,
                 "windows": [w.describe() for w in self.windows],
                 "reserved": (self.held_by().public() if self.held_by() else None)}

@@ -4,32 +4,43 @@ There is no cluster-wide switch. `pause_fleet` asks each peer the same thing
 ``ml-stack-fleet`` asks one -- ``POST /availability`` -- so every machine still owns its
 own answer. A machine that is off never receives the message; `seen` remembers the ones
 this machine has met so `pause_table` can name it.
+
+A machine that was off hears nothing, so it asks when it starts: `peer_pause` reads the
+pause off the beacons it can hear and `adopt_pause` takes it.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from ml_stack.home import expand
 
-from .discovery import derive_token, memberships
+from .availability import Availability
+from .discovery import Beacon, derive_token, discover, memberships
 from .remote import Peer, PeerError
 
 __all__ = [
+    "ADOPT_S",
+    "CLUSTER_PAUSE",
     "SEEN_FILE",
     "SEEN_FOR_S",
     "UNHEARD",
+    "Adopted",
     "Answer",
     "Fanout",
+    "adopt_pause",
     "minutes_of",
+    "pause_among",
     "pause_fleet",
     "pause_table",
     "peer_clients",
+    "peer_pause",
     "remember_seen",
     "seen",
 ]
@@ -39,6 +50,9 @@ SEEN_FILE = "fleet-seen.json"
 SEEN_FOR_S = 7 * 86400
 UNHEARD = "did not answer; it will take work when it comes back"
 REACH_S = 15.0
+ADOPT_S = 2.5
+"""How long a starting daemon listens for a pause before it takes work."""
+CLUSTER_PAUSE = "the cluster was paused while this machine was away"
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,3 +185,73 @@ def pause_table(answers: Sequence[Answer], *, resume: bool = False,
                   "asleep takes work",
                   "as soon as it is running again; run this command once it is back."]
     return "\n".join(lines)
+
+
+@dataclass(frozen=True, slots=True)
+class Adopted:
+    """A pause one machine takes from another, and who it came from."""
+
+    name: str
+    until: float
+    reason: str
+
+    def said(self) -> str:
+        """The pause in a few words, for the line a starting daemon prints."""
+        if self.until == math.inf:
+            when = "until it is resumed"
+        else:
+            when = "until " + time.strftime("%a %H:%M", time.localtime(self.until))
+        return f"{self.reason}, {when} (from {self.name})"
+
+
+def _reported(row: dict[str, Any]) -> dict[str, Any]:
+    """The availability half of a peer row, whether it is loose or under ``device``."""
+    said = row.get("availability") or (row.get("device") or {}).get("availability")
+    return said if isinstance(said, dict) else {}
+
+
+def pause_among(rows: Sequence[dict[str, Any]], *,
+                now: float | None = None) -> Adopted | None:
+    """The pause that lasts longest among these peers, or None when none is in force."""
+    now = time.time() if now is None else now
+    best: Adopted | None = None
+    for row in rows:
+        said = _reported(row)
+        # `Availability.public` reports paused_until as null both for no pause and for
+        # one with no end, so the boolean is the only thing that says which.
+        if not said.get("paused"):
+            continue
+        held = said.get("paused_until")
+        until = math.inf if held is None else float(held)
+        if until <= now:
+            continue
+        if best is None or until > best.until:
+            best = Adopted(str(row.get("name") or "a peer"), until,
+                           str(said.get("paused_reason") or ""))
+    return best
+
+
+def peer_pause(cluster_key_path: Path | str | None = None, *,
+               timeout_s: float = ADOPT_S, port: int | None = None,
+               finder: Callable[..., list[Beacon]] = discover) -> Adopted | None:
+    """Listen for this machine's clusters and return the pause they are under."""
+    rows: list[dict[str, Any]] = []
+    deadline = time.time() + timeout_s
+    for member in memberships(cluster_key_path):
+        left = deadline - time.time()
+        if left <= 0:
+            break
+        for beacon in finder(member.key, timeout_s=left, port=port):
+            rows.append({"name": beacon.name, "device": beacon.device})
+    return pause_among(rows)
+
+
+def adopt_pause(schedule: Availability, found: Adopted | None) -> Adopted | None:
+    """Take ``found`` unless this machine is already paused for at least as long."""
+    if found is None:
+        return None
+    if schedule.paused and (schedule.paused_until or math.inf) >= found.until:
+        return None
+    schedule.paused_until = found.until
+    schedule.paused_reason = found.reason or CLUSTER_PAUSE
+    return found

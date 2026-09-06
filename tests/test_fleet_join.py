@@ -10,10 +10,12 @@ the page's routes. Every name is invented.
 from __future__ import annotations
 
 import json
+import math
 import socket
 import subprocess
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -656,10 +658,14 @@ class PausableDaemon:
             def log_message(self_, *a: object) -> None:
                 pass
 
+        def refresh(b: Beacon) -> None:
+            b.device = {**DEVICE, "availability": schedule.public()}
+
         self.httpd = ThreadingHTTPServer(("127.0.0.1", port), H)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-        self.advertiser = Advertiser(Beacon(name=name, port=port, device=dict(DEVICE)),
-                                     key, port=udp, interval_s=0.2).start()
+        beacon = Beacon(name=name, port=port, device=dict(DEVICE))
+        self.advertiser = Advertiser(beacon, key, port=udp, interval_s=0.2,
+                                     refresh=refresh).start()
 
     def close(self) -> None:
         self.advertiser.stop()
@@ -747,3 +753,112 @@ class TestPauseTheFleet:
         _, key, _, root = cluster
         assert joining.main(["--cluster-key", str(key), "--root", str(root),
                              "pause", "--for", "soon"]) == 2
+
+
+# -- a machine that was away -----------------------------------------------------------
+def _paused(name: str, until: float | None, reason: str = "",
+            paused: bool = True) -> dict:
+    """A peer row shaped the way a beacon carries one."""
+    return {"name": name,
+            "device": {"availability": {"paused": paused, "paused_until": until,
+                                        "paused_reason": reason}}}
+
+
+class TestWhichPauseIsAdopted:
+    def test_the_longest_pause_wins(self):
+        from ml_stack.fleet.pausing import pause_among
+
+        now = time.time()
+        found = pause_among([_paused("harrowgate", now + 600, "a call"),
+                             _paused("larch", now + 7200, "rendering")])
+        assert found is not None
+        assert (found.name, found.reason) == ("larch", "rendering")
+
+    def test_a_pause_with_no_end_beats_a_timed_one(self):
+        from ml_stack.fleet.pausing import pause_among
+
+        found = pause_among([_paused("larch", time.time() + 86400, "rendering"),
+                             _paused("studio", None, "somebody is here")])
+        assert found is not None and found.name == "studio"
+        assert found.until == math.inf
+        assert "until it is resumed" in found.said()
+
+    def test_a_pause_that_has_run_out_is_not_adopted(self):
+        from ml_stack.fleet.pausing import pause_among
+
+        assert pause_among([_paused("larch", time.time() - 60, "rendering")]) is None
+
+    def test_a_machine_taking_work_carries_no_pause(self):
+        from ml_stack.fleet.pausing import pause_among
+
+        assert pause_among([_paused("larch", None, "", paused=False)]) is None
+
+    def test_a_machine_keeps_its_own_longer_pause(self):
+        from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.pausing import adopt_pause, pause_among
+
+        mine = Availability()
+        mine.pause(minutes=600, reason="rendering here")
+        assert adopt_pause(mine, pause_among([_paused("larch", time.time() + 600,
+                                                      "a call")])) is None
+        assert mine.paused_reason == "rendering here"
+
+    def test_a_pause_with_no_reason_still_says_why(self):
+        from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.pausing import CLUSTER_PAUSE, adopt_pause, pause_among
+
+        mine = Availability()
+        adopt_pause(mine, pause_among([_paused("larch", None)]))
+        assert CLUSTER_PAUSE in mine.may_start()[1]
+
+
+class TestAdoptingThePauseOnStartup:
+    @pytest.mark.slow
+    def test_a_machine_that_starts_into_a_paused_cluster_comes_up_paused(self, cluster):
+        from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.pausing import adopt_pause, peer_pause
+
+        made, key, udp, _ = cluster
+        for one in made:
+            one.schedule.pause(minutes=120, reason="somebody is here")
+
+        mine = Availability()
+        taken = adopt_pause(mine, peer_pause(key, timeout_s=3.0, port=udp))
+        assert taken is not None, "no peer's pause was heard"
+        assert not mine.may_start()[0]
+        assert "somebody is here" in mine.may_start()[1]
+
+    @pytest.mark.slow
+    def test_a_machine_that_starts_into_a_running_cluster_takes_work(self, cluster):
+        from ml_stack.fleet.availability import Availability
+        from ml_stack.fleet.pausing import adopt_pause, peer_pause
+
+        made, key, udp, _ = cluster
+        for one in made:
+            one.schedule.pause(minutes=1, reason="somebody is here")
+            one.schedule.resume()
+
+        mine = Availability()
+        assert adopt_pause(mine, peer_pause(key, timeout_s=3.0, port=udp)) is None
+        assert mine.may_start()[0]
+
+    def test_a_machine_with_no_cluster_does_not_wait(self, tmp_path):
+        from ml_stack.fleet.pausing import peer_pause
+
+        started = time.time()
+        assert peer_pause(tmp_path / "nothing.key", timeout_s=30.0) is None
+        assert time.time() - started < 1.0
+
+
+class TestStatusSaysWhoIsPaused:
+    def test_a_paused_peer_is_named_with_its_reason(self):
+        from ml_stack.fleet.availability import Availability
+
+        schedule = Availability()
+        schedule.pause(minutes=120, reason="somebody is here")
+        beacon = Beacon(name="larch", port=8770, host="127.0.0.1",
+                        device={**DEVICE, "availability": schedule.public()})
+        row = describe(beacon)
+        assert row["paused"] and "somebody is here" in row["paused_because"]
+        text = table([row])
+        assert "paused" in text and "somebody is here" in text

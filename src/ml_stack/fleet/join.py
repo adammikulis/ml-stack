@@ -313,6 +313,7 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
     else:
         room = "?"
     lock = d.get("lock") or ("measuring" if d.get("measuring") else "")
+    said = d.get("availability") or {}
     return {
         "name": beacon.name, "host": beacon.host, "base_url": beacon.base_url,
         "port": beacon.port, "busy": bool(beacon.busy), "free": beacon.free,
@@ -320,6 +321,9 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
         "room": room, "serving": served,
         "models": [str(m.get("name")) for m in (d.get("models") or []) if m.get("name")],
         "lock": str(lock) if lock else "",
+        "paused": bool(said.get("paused")),
+        "paused_because": (str(said.get("unavailable_because") or "paused")
+                           if said.get("paused") else ""),
         "commit": str(d.get("bench_commit") or d.get("commit") or "?"),
         "commit_age_s": float(d.get("commit_age_s") or 0.0),
         "version": str(d.get("version") or ""),
@@ -410,9 +414,15 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
             state += f" +{r['queued']}"
         if r.get("lock"):
             state = "measuring"
+        if r.get("paused"):
+            state = "paused"
         serving = ", ".join(r["serving"]) or "-"
         lines.append(f"{r['name']:<16} {r['base_url']:<28} {r['room']:<16} {state:<12} "
                      f"{running_code(r):<12} {updating(r):<12} {serving}")
+    held = [r for r in rows if r.get("paused")]
+    if held:
+        lines.append("")
+        lines += [f"{r['name']:<16} {r['paused_because']}" for r in held]
     return "\n".join(lines)
 
 

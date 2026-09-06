@@ -32,6 +32,7 @@ from ml_stack.hub import default_roots, free_memory, total_memory
 from ml_stack.log import say, warn
 
 from .models import Downloads, Models, ModelError
+from .pausing import ADOPT_S, adopt_pause, peer_pause
 from .serving import Hosting, Serving
 from .settings import Settings
 from ml_stack.platform import (
@@ -1205,6 +1206,11 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         schedule.windows.append(parse_window(spec, busy=False))
     if busy_hours or free_hours:
         schedule.save(schedule_path)
+
+    taken = adopt_pause(schedule, peer_pause(cluster_key_path, timeout_s=ADOPT_S))
+    if taken is not None:
+        schedule.save(schedule_path)
+        say(f"  paused with the cluster: {taken.said()}")
 
     # What the screen shows has to be what the daemon is doing, so the effective
     # values go back into the settings object whether they came from a flag or a file.
