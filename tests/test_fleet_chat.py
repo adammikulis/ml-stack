@@ -12,14 +12,17 @@ import json
 import socket
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 
 import pytest
+from test_fleet_ui import WORDS
+from test_fleet_ui import Serving as UIServing
+
 from ml_stack.fleet.chat import find, targets
 from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
 from ml_stack.fleet.discovery import join_cluster
 from ml_stack.fleet.serving import Serving
-from test_fleet_ui import WORDS, Serving as UIServing
+from ml_stack.testing.fakes import FakeLlamaServer, Served
 
 PIECES = ["Hel", "lo", " there"]
 
@@ -37,37 +40,11 @@ def _free_port() -> int:
 @pytest.fixture
 def model_server():
     """A llama.cpp-shaped server that streams a reply a piece at a time."""
-
-    class H(BaseHTTPRequestHandler):
-        def log_message(self, *a):
-            pass
-
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Length", "2")
-            self.end_headers()
-            self.wfile.write(b"{}")
-
-        def do_POST(self):
-            length = int(self.headers.get("Content-Length", "0"))
-            self.rfile.read(length)
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.end_headers()
-            for piece in PIECES:
-                frame = {"choices": [{"delta": {"content": piece}}]}
-                self.wfile.write(f"data: {json.dumps(frame)}\n\n".encode())
-                self.wfile.flush()
-                time.sleep(0.05)
-            self.wfile.write(b"data: [DONE]\n\n")
-            self.wfile.flush()
-
-    srv = ThreadingHTTPServer(("127.0.0.1", _free_port()), H)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    fake = FakeLlamaServer(Served(pieces=tuple(PIECES), gap=0.05))
     try:
-        yield srv.server_address[1]
+        yield fake.port
     finally:
-        srv.shutdown()
+        fake.close()
 
 
 @pytest.fixture
@@ -275,6 +252,7 @@ class TestChattingThroughTheInterface:
         import os
         import time as clock
         from http.server import BaseHTTPRequestHandler
+
         from ml_stack.fleet.models import CHUNK, Downloads, Models
 
         payload = os.urandom(2 * CHUNK)

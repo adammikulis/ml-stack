@@ -27,7 +27,7 @@ def find(root: Path) -> list[Finding]:
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name.startswith("Fake"):
                 out.append(Finding(where, node.lineno, f"class {node.name}"))
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if node.name.startswith("fake_"):
-                    out.append(Finding(where, node.lineno, f"def {node.name}"))
+            elif (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                  and node.name.startswith("fake_")):
+                out.append(Finding(where, node.lineno, f"def {node.name}"))
     return out

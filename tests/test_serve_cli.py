@@ -1,8 +1,8 @@
 """``ml-stack-serve``: what it prints, what it exits with, and what it refuses to do.
 
-The adoption paths run against a real HTTP server standing in for a live llama-server,
-so the refusals here are the library's own, reached over a real socket. No model is
-loaded anywhere in this file.
+The adoption paths run against `FakeLlamaServer` on a real socket, so the refusals here
+are the library's own, reached the way a person's `ml-stack-serve status` reaches a live
+one. No model is loaded anywhere in this file.
 """
 
 from __future__ import annotations
@@ -22,11 +22,13 @@ from conftest import (
     json_reply,
     write_gguf,
 )
+
 from ml_stack.client import is_healthy
+from ml_stack.client.counters import Speculative
 from ml_stack.serve import cli, ops
 from ml_stack.serve.backend import ServerInfo, ServerSpec
 from ml_stack.serve.ports import free_port
-from ml_stack.testing import FakePreflight
+from ml_stack.testing import FakeLlamaServer, FakePreflight, Served
 
 MODEL = "tinyfixture-4B-Q4_K_M.gguf"
 
@@ -39,18 +41,20 @@ def state(tmp_path, monkeypatch):
     return path
 
 
-def serving(model: str = MODEL, n_ctx: int = 4096, slots: int = 1):
-    """A handler answering /health, /v1/models and /props like llama-server does."""
-    def handle(method, path, body):
-        if path.startswith("/props"):
-            return json_reply({
-                "model_path": f"/models/{model}",
-                "total_slots": slots,
-                "default_generation_settings": {"n_ctx": n_ctx},
-            })
-        return json_reply({"data": [{"id": model}]})
+@pytest.fixture
+def serving():
+    """llama-servers on real sockets, closed at the end of the test."""
+    started: list[FakeLlamaServer] = []
 
-    return handle
+    def start(**held) -> FakeLlamaServer:
+        held.setdefault("context", 4096)
+        fake = FakeLlamaServer(Served(model=f"/models/{MODEL}", **held))
+        started.append(fake)
+        return fake
+
+    yield start
+    for fake in started:
+        fake.close()
 
 
 def record(state, port: int, *, pid: int, owner_pid: int) -> None:
@@ -73,8 +77,8 @@ class TestStatus:
         assert payload["serving"] is False
         assert payload["servers"] == []
 
-    def test_a_running_server_is_described(self, server, state, capsys):
-        instance = server(serving(n_ctx=8192, slots=2))
+    def test_a_running_server_is_described(self, serving, state, capsys):
+        instance = serving(context=8192, slots=2)
         assert cli.main(["status", "--port", str(instance.port)]) == 0
 
         out = capsys.readouterr().out
@@ -83,8 +87,8 @@ class TestStatus:
         assert "8192 per slot" in out
         assert "slots    2" in out
 
-    def test_a_running_server_in_json(self, server, state, capsys):
-        instance = server(serving(n_ctx=8192, slots=2))
+    def test_a_running_server_in_json(self, serving, state, capsys):
+        instance = serving(context=8192, slots=2)
         assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
 
         payload = json.loads(capsys.readouterr().out)
@@ -97,15 +101,15 @@ class TestStatus:
         assert row["slots"] == 2
         assert row["verdict"] == "adopt"
 
-    def test_it_says_whether_a_lease_would_adopt_or_start(self, server, state, capsys):
-        instance = server(serving(n_ctx=4096, slots=1))
+    def test_it_says_whether_a_lease_would_adopt_or_start(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         out = capsys.readouterr().out
         assert "would adopt this server" in out
         assert "--parallel" not in out, "one seat is the default and is not spelt out"
 
-    def test_a_lease_that_would_be_refused_says_which_field(self, server, state, capsys):
-        instance = server(serving(n_ctx=4096, slots=1))
+    def test_a_lease_that_would_be_refused_says_which_field(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["status", "--port", str(instance.port),
                          "--parallel", "4", "--context", "32768"]) == 0
 
@@ -114,34 +118,34 @@ class TestStatus:
         assert "slots: asked for 4, serving 1" in out
         assert "context: asked for 8192 per slot, serving 4096" in out
 
-    def test_a_recorded_port_is_surveyed_without_being_named(self, server, state, capsys):
-        instance = server(serving())
+    def test_a_recorded_port_is_surveyed_without_being_named(self, serving, state, capsys):
+        instance = serving()
         record(state, instance.port, pid=4242, owner_pid=4242)
 
         assert cli.main(["status", "--port", str(free_port())]) == 0
         assert instance.base_url in capsys.readouterr().out
 
-    def test_a_server_ml_serve_started_is_named_as_such(self, server, state, capsys):
-        instance = server(serving())
+    def test_a_server_ml_serve_started_is_named_as_such(self, serving, state, capsys):
+        instance = serving()
         record(state, instance.port, pid=4242, owner_pid=4242)
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert "started by 'ml-stack-serve up'" in capsys.readouterr().out
 
-    def test_the_process_holding_the_lease_is_named(self, server, state, capsys):
-        instance = server(serving())
+    def test_the_process_holding_the_lease_is_named(self, serving, state, capsys):
+        instance = serving()
         record(state, instance.port, pid=999_999_998, owner_pid=os.getpid())
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert f"held by process {os.getpid()}" in capsys.readouterr().out
 
-    def test_an_unrecorded_server_says_down_will_not_touch_it(self, server, state, capsys):
-        instance = server(serving())
+    def test_an_unrecorded_server_says_down_will_not_touch_it(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["status", "--port", str(instance.port)]) == 0
         assert "none on record" in capsys.readouterr().out
 
-    def test_a_server_whose_owner_has_gone_is_called_orphaned(self, server, state, capsys):
-        instance = server(serving())
+    def test_a_server_whose_owner_has_gone_is_called_orphaned(self, serving, state, capsys):
+        instance = serving()
         record(state, instance.port, pid=999_999_997, owner_pid=999_999_998)
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
@@ -151,26 +155,26 @@ class TestStatus:
 
 
 class TestUp:
-    def test_it_adopts_a_compatible_server(self, server, state, capsys):
-        instance = server(serving(n_ctx=4096, slots=1))
+    def test_it_adopts_a_compatible_server(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port)]) == 0
 
         out = capsys.readouterr().out
         assert out.startswith("adopted ")
         assert instance.base_url in out
 
-    def test_adoption_is_reported_as_adoption_in_json(self, server, state, capsys):
-        instance = server(serving(n_ctx=4096, slots=1))
+    def test_adoption_is_reported_as_adoption_in_json(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--json"]) == 0
 
         payload = json.loads(capsys.readouterr().out)
         assert payload["adopted"] is True
         assert payload["base_url"] == instance.base_url
 
-    def test_it_refuses_a_different_shape_on_a_busy_port(self, server, state, capsys):
+    def test_it_refuses_a_different_shape_on_a_busy_port(self, serving, state, capsys):
         """Adopting the wrong shape is what makes a caller reload the weights it
         already had."""
-        instance = server(serving(n_ctx=4096, slots=1))
+        instance = serving()
         code = cli.main(["up", MODEL, "--port", str(instance.port),
                          "--parallel", "4", "--context", "32768"])
 
@@ -180,12 +184,12 @@ class TestUp:
         assert "context: asked for 8192 per slot, serving 4096" in err
         assert is_healthy(instance.base_url), "the refusal must not have stopped it"
 
-    def test_up_adopts_a_matching_orphan_and_records_it_as_its_own(self, server, state,
+    def test_up_adopts_a_matching_orphan_and_records_it_as_its_own(self, serving, state,
                                                                     capsys):
         """After `up` has adopted it, the orphan is on the record under the server's own
         pid -- the way `up` records a server it started -- so `status` no longer calls
         it orphaned and `down` stops it."""
-        instance = server(serving())
+        instance = serving()
         orphan = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         try:
             record(state, instance.port, pid=orphan.pid, owner_pid=999_999_998)
@@ -205,8 +209,8 @@ class TestUp:
                 orphan.kill()
             orphan.wait()
 
-    def test_it_refuses_a_different_model_on_a_busy_port(self, server, state, capsys):
-        instance = server(serving())
+    def test_it_refuses_a_different_model_on_a_busy_port(self, serving, state, capsys):
+        instance = serving()
         code = cli.main(["up", "other-8B-Q4_K_M.gguf", "--port", str(instance.port)])
 
         assert code == 2
@@ -234,16 +238,16 @@ class TestUp:
 
 
 class TestDown:
-    def test_it_refuses_a_server_this_machine_has_no_record_of(self, server, state, capsys):
-        instance = server(serving())
+    def test_it_refuses_a_server_this_machine_has_no_record_of(self, serving, state, capsys):
+        instance = serving()
         assert cli.main(["down", "--port", str(instance.port)]) == 2
 
         err = capsys.readouterr().err
         assert "no record of starting it" in err
         assert is_healthy(instance.base_url), "it must still be running"
 
-    def test_it_refuses_a_server_another_live_process_holds(self, server, state, capsys):
-        instance = server(serving())
+    def test_it_refuses_a_server_another_live_process_holds(self, serving, state, capsys):
+        instance = serving()
         record(state, instance.port, pid=999_999_998, owner_pid=os.getpid())
 
         assert cli.main(["down", "--port", str(instance.port)]) == 2
@@ -342,7 +346,7 @@ class TestTellingTheFleet:
 
     `ml-stack-serve up` leased and recorded the port in its own state file and stopped there, so a
     peer asking who is serving a model saw nothing and loaded its own copy — while a working
-    server sat idle on this machine.
+    serving sat idle on this machine.
     """
 
     def beacon(self, root):
@@ -350,10 +354,10 @@ class TestTellingTheFleet:
 
         return Serving(root / "serving.json")
 
-    def test_putting_a_model_up_announces_it(self, server, state, tmp_path):
+    def test_putting_a_model_up_announces_it(self, serving, state, tmp_path):
         root = tmp_path / "traind"
         root.mkdir()
-        instance = server(serving(slots=2))
+        instance = serving(slots=2)
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--parallel", "2",
                          "--root", str(root)]) == 0
         served = self.beacon(root).all()
@@ -377,10 +381,10 @@ class TestTellingTheFleet:
             proc.wait(timeout=5)
         assert self.beacon(root).all() == [], "the beacon still points at a dead port"
 
-    def test_a_machine_with_no_fleet_is_not_given_one(self, server, state, tmp_path):
+    def test_a_machine_with_no_fleet_is_not_given_one(self, serving, state, tmp_path):
         """Announcing is for machines in a fleet; the rest get no stray files."""
         root = tmp_path / "never-set-up"
-        instance = server(serving())
+        instance = serving()
         assert cli.main(["up", MODEL, "--port", str(instance.port), "--root", str(root)]) == 0
         assert not root.exists()
         assert ops.beacon(str(root)) is None
@@ -759,6 +763,7 @@ class TestBuildFlag:
 class TestModelsFetch:
     def test_fetch_downloads_and_prints_each_reference(self, monkeypatch, capsys, tmp_path):
         import huggingface_hub
+
         import ml_stack.hub as hub
 
         monkeypatch.setattr(hub, "files", lambda repo, **kw: [("thing-Q4_K_M.gguf", 4_000)])
@@ -777,7 +782,7 @@ def test_preflight_only_resolves_a_draft_named_by_file(monkeypatch, tmp_path, ca
     """`up --preflight-only` with `--draft hf:owner/repo/MTP/head.gguf` refused the reference
     where a real start would have fetched it and served by path. Mutation: drop the
     resolved_draft call before Preflight."""
-    from ml_stack.serve import cli, ops
+    from ml_stack.serve import cli
 
     head = tmp_path / "mtp-head-Q8_0.gguf"
     head.write_bytes(b"GGUF")
@@ -819,45 +824,16 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     assert Path(found).is_symlink() and Path(found).stat().st_size == 100
 
 
-def drafting_server(*, metrics: bool = True, drafts: int = 0, drafted: int = 0,
-                    accepted: int = 0):
-    """A handler answering /props and, where ``metrics``, the speculative counters."""
-    counters = "\n".join([
-        f"llamacpp:spec_decode_num_drafts_total {drafts}",
-        f"llamacpp:spec_decode_num_draft_tokens_total {drafted}",
-        f"llamacpp:spec_decode_num_accepted_tokens_total {accepted}",
-    ])
-
-    def handle(method, path, body):
-        if path.startswith("/props"):
-            return json_reply({"model_path": f"/models/{MODEL}", "total_slots": 1,
-                               "endpoint_metrics": metrics,
-                               "default_generation_settings": {"n_ctx": 4096}})
-        if path.startswith("/metrics"):
-            return (200, counters.encode()) if metrics else (501, b"{}")
-        return json_reply({"data": [{"id": MODEL}]})
-
-    return handle
-
-
-def a_llama_server(port: int, *, draft: str = "", spec_type: str = "",
-                   draft_max: int | None = None):
-    """One row of `every_server`, as a server started with (or without) a draft head."""
-    return {"pid": 4242, "port": port, "defunct": False, "model": f"/models/{MODEL}",
-            "binary": "/x/llama-server", "draft": draft, "spec_type": spec_type,
-            "draft_max": draft_max, "rss": 0}
-
-
 class TestStatusDrafting:
     """`status` says whether a draft head is loaded and how much of it is being kept."""
 
-    def test_a_head_is_named_with_its_depth_and_what_the_server_keeps(self, server, state,
+    def test_a_head_is_named_with_its_depth_and_what_the_server_keeps(self, serving, state,
                                                                      monkeypatch, capsys):
-        instance = server(drafting_server(drafts=100, drafted=400, accepted=340))
+        instance = serving(counted=Speculative(drafts=100, drafted=400, accepted=340),
+                           draft="/heads/mtp-tinyfixture-Q8_0.gguf",
+                           spec_type="draft-mtp", draft_max=4)
         record(state, instance.port, pid=4242, owner_pid=os.getpid())
-        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
-            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf", spec_type="draft-mtp",
-            draft_max=4)])
+        monkeypatch.setattr(ops, "every_server", lambda: [instance.record(pid=4242)])
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
 
@@ -866,11 +842,11 @@ class TestStatusDrafting:
         assert "85.0% of drafted tokens kept since the server came up (higher is better)" in out
         assert "4.4 tokens per verification pass" in out
 
-    def test_a_server_with_no_head_says_so_rather_than_zero(self, server, state, monkeypatch,
+    def test_a_server_with_no_head_says_so_rather_than_zero(self, serving, state, monkeypatch,
                                                             capsys):
-        instance = server(drafting_server())
+        instance = serving(counted=Speculative())
         record(state, instance.port, pid=4242, owner_pid=os.getpid())
-        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(instance.port)])
+        monkeypatch.setattr(ops, "every_server", lambda: [instance.record(pid=4242)])
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
 
@@ -879,11 +855,11 @@ class TestStatusDrafting:
         assert "0.0%" not in out
 
     def test_a_server_started_without_metrics_says_the_counters_are_not_there(
-            self, server, state, monkeypatch, capsys):
-        instance = server(drafting_server(metrics=False))
+            self, serving, state, monkeypatch, capsys):
+        instance = serving(metrics=False, draft="/heads/mtp-tinyfixture-Q8_0.gguf",
+                           spec_type="draft-mtp")
         record(state, instance.port, pid=4242, owner_pid=os.getpid())
-        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
-            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf", spec_type="draft-mtp")])
+        monkeypatch.setattr(ops, "every_server", lambda: [instance.record(pid=4242)])
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
 
@@ -891,12 +867,12 @@ class TestStatusDrafting:
         assert "drafting mtp-tinyfixture-Q8_0.gguf, draft-mtp" in out
         assert "acceptance unknown: this server was started without --metrics" in out
 
-    def test_a_head_that_has_drafted_nothing_yet_says_that(self, server, state, monkeypatch,
+    def test_a_head_that_has_drafted_nothing_yet_says_that(self, serving, state, monkeypatch,
                                                            capsys):
-        instance = server(drafting_server(drafts=0, drafted=0, accepted=0))
+        instance = serving(counted=Speculative(),
+                           draft="/heads/mtp-tinyfixture-Q8_0.gguf")
         record(state, instance.port, pid=4242, owner_pid=os.getpid())
-        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
-            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf")])
+        monkeypatch.setattr(ops, "every_server", lambda: [instance.record(pid=4242)])
 
         assert cli.main(["status", "--port", str(instance.port)]) == 0
 
@@ -934,7 +910,7 @@ def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monke
     out = capsys.readouterr().out
     assert ":8081  pid 11  embeddinggemma-300M (Q8_0)  1.0G resident  NOT leased" in out
     assert ":8082  pid 12  thing (Q4_K_XL)  60.0G resident  leased" in out
-    assert f":8083  pid 15  big (Q4_K_XL)  50.0G resident  leased" in out
+    assert ":8083  pid 15  big (Q4_K_XL)  50.0G resident  leased" in out
     assert f"      cache  {tmp_path / 'hub'}  (5M)" in out, "the root it lies under, whole"
     assert f"      cache  {aside}  (4M)" in out, "under no root: the file's own directory"
     lines = out.splitlines()

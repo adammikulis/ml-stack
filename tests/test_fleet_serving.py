@@ -8,76 +8,19 @@ import threading
 import time
 import urllib.error
 import urllib.request
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 
 import pytest
+
 from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
 from ml_stack.fleet.serving import Endpoint, Serving, answers
+from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 
 
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-
-
-class FakeModelServer:
-    """A real socket that streams like llama.cpp does, with real gaps between tokens."""
-
-    def __init__(self, tokens: int = 8, gap: float = 0.25):
-        self.disconnected = threading.Event()
-        outer = self
-
-        class H(BaseHTTPRequestHandler):
-            protocol_version = "HTTP/1.0"
-
-            def log_message(self, *a):
-                pass
-
-            def do_GET(self):
-                if self.path in ("/health", "/v1/models"):
-                    body = b'{"status":"ok"}'
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                else:
-                    self.send_response(404)
-                    self.end_headers()
-
-            def do_POST(self):
-                n = int(self.headers.get("Content-Length", "0"))
-                req = json.loads(self.rfile.read(n) or b"{}")
-                if not req.get("stream"):
-                    body = json.dumps({"choices": [{"message": {"content": "hello"},
-                                                    "finish_reason": "stop"}]}).encode()
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_header("Content-Length", str(len(body)))
-                    self.end_headers()
-                    self.wfile.write(body)
-                    return
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.end_headers()
-                try:
-                    for i in range(tokens):
-                        self.wfile.write(
-                            f"data: {json.dumps({'i': i})}\n\n".encode())
-                        self.wfile.flush()
-                        time.sleep(gap)
-                    self.wfile.write(b"data: [DONE]\n\n")
-                except (BrokenPipeError, ConnectionResetError):
-                    outer.disconnected.set()
-
-        self.port = free_port()
-        self.httpd = ThreadingHTTPServer(("127.0.0.1", self.port), H)
-        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
-
-    def close(self):
-        self.httpd.shutdown()
-        self.httpd.server_close()
 
 
 class Daemon:
@@ -110,7 +53,9 @@ class Daemon:
 
 @pytest.fixture
 def model():
-    m = FakeModelServer()
+    """A model server that streams a reply with real gaps between its pieces."""
+    m = FakeLlamaServer(Served(answer="hello", gap=0.25,
+                               pieces=tuple(f"tok{n}" for n in range(8))))
     try:
         yield m
     finally:
@@ -295,57 +240,20 @@ def test_a_probe_takes_a_server_that_only_lists_models(server):
     assert answers(instance.port, timeout=2.0)
 
 
-FAKE_SERVER = '''
-import json, sys
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
-
-argv = sys.argv[1:]
-Path(sys.argv[0]).with_name("argv.json").write_text(json.dumps(argv))
-port = int(argv[argv.index("--port") + 1])
-name = Path(argv[argv.index("-m") + 1]).name
-
-
-class H(BaseHTTPRequestHandler):
-    protocol_version = "HTTP/1.1"
-
-    def log_message(self, *a):
-        pass
-
-    def do_GET(self):
-        body = json.dumps({"status": "ok", "data": [{"id": name}]}).encode()
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-ThreadingHTTPServer(("127.0.0.1", port), H).serve_forever()
-'''
-
-
 @pytest.fixture
-def fake_llama_server(tmp_path, monkeypatch):
+def llama_binary(tmp_path, monkeypatch):
     """A llama-server that really launches, binds the port it was given and answers."""
-    import sys
-
     from ml_stack.serve import backend as backend_module
 
     monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
-    script = tmp_path / "server.py"
-    script.write_text(FAKE_SERVER)
-    binary = tmp_path / "llama-server"
-    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
-    binary.chmod(0o755)
-    return binary
+    return fake_llama_binary(tmp_path)
 
 
 @pytest.fixture
-def manager(tmp_path, fake_llama_server):
+def manager(tmp_path, llama_binary):
     from ml_stack.serve import LlamaServerBackend, ServerManager
 
-    return ServerManager(LlamaServerBackend(binary=fake_llama_server),
+    return ServerManager(LlamaServerBackend(binary=llama_binary),
                          state_file=tmp_path / "servers.json")
 
 
@@ -408,8 +316,8 @@ class TestStartingAModelWithoutTheInterface:
 
     def test_a_draft_beside_the_model_is_served_with_it(self, tmp_path, manager, gguf):
         """A machine that fetched the draft and does not pass it paid for nothing."""
-        from ml_stack.hub import DRAFT_MARK
         from ml_stack.fleet.serving import start_model, stop_model
+        from ml_stack.hub import DRAFT_MARK
 
         draft = gguf.with_suffix(DRAFT_MARK + gguf.suffix)
         draft.write_bytes(b"GGUF" + b"\x00" * 64)

@@ -12,6 +12,7 @@ import os
 import subprocess
 
 import pytest
+
 from ml_stack.serve import backend
 from ml_stack.serve.backend import (
     LlamaServerBackend,
@@ -24,6 +25,7 @@ from ml_stack.serve.backend import (
     unknown_flags,
     values_of,
 )
+from ml_stack.testing.fakes import fake_binary
 from tests.conftest import leased, write_gguf
 
 HELP = """\
@@ -72,15 +74,6 @@ common params:
 """
 
 
-def fake_server(tmp_path, help_text: str = HELP, *, name: str = "llama-server"):
-    """A script that answers ``--help`` the way llama-server does, and nothing else."""
-    path = tmp_path / name
-    path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
-                    + help_text + "HELP\nexit 0\nfi\nexit 0\n")
-    path.chmod(0o755)
-    return path
-
-
 @pytest.fixture(autouse=True)
 def _fresh_cache(monkeypatch):
     monkeypatch.setattr(backend, "_HELP", {})
@@ -88,7 +81,7 @@ def _fresh_cache(monkeypatch):
 
 class TestFlagsOf:
     def test_it_reads_the_flags_out_of_the_help_text(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert {"-c", "--ctx-size", "-m", "--model", "-ngl", "--gpu-layers",
                 "--n-gpu-layers", "--host", "--port", "--spec-draft-n-max",
                 "--no-warmup", "-fa", "--flash-attn"} <= known
@@ -96,31 +89,32 @@ class TestFlagsOf:
     def test_a_flag_the_help_says_was_removed_is_not_known(self, tmp_path):
         """The build lists `--draft-max` only to say it is gone, and passing it is an
         error just the same. Measured on llama.cpp 0.3.0."""
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert "--draft-max" not in known
         assert "--draft" not in known
         assert "--spec-draft-n-max" in known
 
     def test_words_in_the_descriptions_are_not_flags(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert not any(flag.strip("-").isdigit() for flag in known), known
         assert "-1" not in known
         assert "LLAMA_ARG_SPEC_DRAFT_N_MAX" not in known
 
     def test_a_binary_is_read_once_until_it_changes(self, tmp_path):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         first = flags_of(binary)
         assert "--spec-draft-n-max" in first
 
         # A rebuild at the same path, with a newer mtime, is read again.
-        fake_server(tmp_path, HELP.replace("--spec-draft-n-max", "--spec-draft-max"))
+        fake_binary(tmp_path,
+                    help_text=HELP.replace("--spec-draft-n-max", "--spec-draft-max"))
         newer = os.stat(binary).st_mtime + 10
         os.utime(binary, (newer, newer))
         second = flags_of(binary)
         assert "--spec-draft-max" in second and "--spec-draft-n-max" not in second
 
         # The same mtime is the cache, whatever the file now says.
-        fake_server(tmp_path, HELP)
+        fake_binary(tmp_path, help_text=HELP)
         os.utime(binary, (newer, newer))
         assert flags_of(binary) == second
 
@@ -148,23 +142,23 @@ class TestFlagsOf:
 
 class TestUnknownFlags:
     def test_a_missing_flag_is_paired_with_the_nearest_the_build_has(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         argv = ["/x/llama-server", "-m", "a.gguf", "--draft-max", "3", "-c", "4096"]
         assert unknown_flags(argv, known) == [("--draft-max", "--spec-draft-n-max")]
 
     def test_nothing_close_is_the_empty_string(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert unknown_flags(["--zzqx-nothing-like-it"], known) == [("--zzqx-nothing-like-it", "")]
 
     def test_values_that_start_with_a_dash_are_not_flags(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert unknown_flags(["-c", "-1", "--port", "-8"], known) == []
 
     def test_an_unknown_build_is_given_no_opinion(self):
         assert unknown_flags(["--draft-max", "3"], frozenset()) == []
 
     def test_each_flag_is_named_once(self, tmp_path):
-        known = flags_of(fake_server(tmp_path))
+        known = flags_of(fake_binary(tmp_path, help_text=HELP))
         assert unknown_flags(["--draft-max", "3", "--draft-max", "4"], known) == [
             ("--draft-max", "--spec-draft-n-max")]
 
@@ -175,14 +169,14 @@ class TestConversationCacheFlags:
     be asked whether it has them before a load."""
 
     def test_none_on_every_field_emits_nothing(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf"))
         for flag in ("--kv-unified", "--no-kv-unified", "--cache-ram", "--cache-idle-slots",
                      "--no-cache-idle-slots", "--slot-prompt-similarity", "--slot-save-path"):
             assert flag not in argv, flag
 
     def test_true_and_false_emit_the_flag_and_its_no_form(self, tmp_path):
-        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
         on = backend_.command(ServerSpec(model="m.gguf", kv_unified=True, cache_idle_slots=True))
         assert "--kv-unified" in on and "--cache-idle-slots" in on
         assert "--no-kv-unified" not in on and "--no-cache-idle-slots" not in on
@@ -192,20 +186,20 @@ class TestConversationCacheFlags:
         assert "--kv-unified" not in off and "--cache-idle-slots" not in off
 
     def test_the_valued_flags_carry_their_values(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf", cache_ram_mb=4096, slot_prompt_similarity=0.25,
                        slot_save_path=tmp_path / "slots"))
         assert argv[argv.index("--cache-ram") + 1] == "4096"
         assert argv[argv.index("--slot-prompt-similarity") + 1] == "0.25"
         assert argv[argv.index("--slot-save-path") + 1] == str(tmp_path / "slots")
         # nought is a choice, not an absence: --cache-ram 0 disables the cache
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf", cache_ram_mb=0, slot_prompt_similarity=0.0))
         assert argv[argv.index("--cache-ram") + 1] == "0"
         assert argv[argv.index("--slot-prompt-similarity") + 1] == "0.0"
 
     def test_a_build_that_lists_them_accepts_them(self, tmp_path):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         known = flags_of(binary)
         assert {"--kv-unified", "--no-kv-unified", "--cache-ram", "--cache-idle-slots",
                 "--no-cache-idle-slots", "--slot-prompt-similarity", "--slot-save-path"} <= known
@@ -216,7 +210,7 @@ class TestConversationCacheFlags:
         assert unknown_flags(argv, known) == []
 
     def test_a_build_without_them_names_them_before_the_load(self, tmp_path):
-        older = fake_server(tmp_path, "\n".join(
+        older = fake_binary(tmp_path, help_text="\n".join(
             line for line in HELP.splitlines()
             if "kv-unified," not in line and "cache-ram" not in line) + "\n")
         argv = LlamaServerBackend(binary=older).command(
@@ -227,7 +221,7 @@ class TestConversationCacheFlags:
 
 class TestEmittedFlags:
     def test_every_flag_the_argv_builder_knows_appears(self, tmp_path):
-        flags = emitted_flags(LlamaServerBackend(binary=fake_server(tmp_path)))
+        flags = emitted_flags(LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)))
         for flag in ("-m", "--hf-repo", "--hf-file", "--mmproj", "--mmproj-url", "-md",
                      "-hfd", "--spec-type", "--spec-draft-n-max", "--spec-draft-ngl",
                      "--override-tensor", "--cpu-moe", "--n-cpu-moe", "--cache-reuse",
@@ -251,26 +245,26 @@ class TestMemoryFlags:
     them the way it varies everything else through ``ServerSpec``."""
 
     def test_none_on_every_field_emits_nothing(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf"))
         for flag in ("--cache-type-k", "--cache-type-v", "--no-mmap", "--mlock"):
             assert flag not in argv, flag
 
     def test_cache_types_carry_their_values(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf", cache_type_k="q8_0", cache_type_v="q4_0"))
         assert argv[argv.index("--cache-type-k") + 1] == "q8_0"
         assert argv[argv.index("--cache-type-v") + 1] == "q4_0"
 
     def test_mmap_false_emits_no_mmap_and_true_emits_nothing(self, tmp_path):
         """mmap on is the server's own default and passes no flag either way."""
-        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
         assert "--no-mmap" in backend_.command(ServerSpec(model="m.gguf", mmap=False))
         assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf", mmap=True))
         assert "--no-mmap" not in backend_.command(ServerSpec(model="m.gguf"))
 
     def test_mlock_true_emits_mlock(self, tmp_path):
-        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
         assert "--mlock" in backend_.command(ServerSpec(model="m.gguf", mlock=True))
         assert "--mlock" not in backend_.command(ServerSpec(model="m.gguf", mlock=False))
 
@@ -280,19 +274,19 @@ class TestReasoningBudget:
     sweep can bind it per served model and record it, like the cache type."""
 
     def test_a_budget_is_emitted_with_its_value(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf", reasoning_budget=2048))
         assert argv[argv.index("--reasoning-budget") + 1] == "2048"
 
     def test_none_emits_nothing_and_minus_one_is_unlimited_not_nothing(self, tmp_path):
-        backend_ = LlamaServerBackend(binary=fake_server(tmp_path))
+        backend_ = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP))
         assert "--reasoning-budget" not in backend_.command(ServerSpec(model="m.gguf"))
         argv = backend_.command(ServerSpec(model="m.gguf", reasoning_budget=-1))
         assert argv[argv.index("--reasoning-budget") + 1] == "-1", "llama.cpp's own unlimited"
 
     def test_a_build_without_the_flag_is_told_before_anything_starts(self, tmp_path):
         """The fake help has no --reasoning-budget, like a release from before it existed."""
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model="m.gguf", reasoning_budget=512))
         assert "--reasoning-budget" in dict(unknown_flags(argv, flags_of(binary)))
@@ -303,7 +297,7 @@ class TestRopeYarnFlags:
     every field emits nothing, so the model's own default (unscaled) stands."""
 
     def test_none_on_every_field_emits_nothing(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf"))
         for flag in ("--rope-scaling", "--rope-scale", "--yarn-orig-ctx",
                      "--yarn-ext-factor", "--yarn-attn-factor", "--yarn-beta-fast",
@@ -311,7 +305,7 @@ class TestRopeYarnFlags:
             assert flag not in argv, flag
 
     def test_every_field_carries_its_value(self, tmp_path):
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model="m.gguf", rope_scaling="yarn", rope_scale=8.0,
                        yarn_orig_ctx=131072, yarn_ext_factor=1.0, yarn_attn_factor=1.0,
                        yarn_beta_fast=32.0, yarn_beta_slow=1.0))
@@ -324,7 +318,7 @@ class TestRopeYarnFlags:
         assert argv[argv.index("--yarn-beta-slow") + 1] == "1.0"
 
     def test_a_build_without_them_names_them_before_the_load(self, tmp_path):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model="m.gguf", rope_scaling="yarn", rope_scale=4.0,
                        yarn_orig_ctx=32768))
@@ -429,7 +423,7 @@ class TestLaunchRefusal:
         """A refusal that comes after the load costs the load. Nothing may be started."""
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         flags_of(binary)    # the help is read once, here; after this nothing may run
         started: list[list[str]] = []
 
@@ -446,7 +440,7 @@ class TestLaunchRefusal:
         assert started == []
 
     def test_one_line_per_flag(self, tmp_path, monkeypatch):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         flags_of(binary)
         monkeypatch.setattr(subprocess, "Popen",
                             lambda *a, **k: (_ for _ in ()).throw(AssertionError("started")))
@@ -475,7 +469,7 @@ class TestLaunchRefusal:
             reached.append("popen")
             raise OSError("stop here")
 
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         monkeypatch.setattr(subprocess, "Popen", popen)
         gguf = tmp_path / "model.gguf"
         gguf.write_bytes(b"GGUF" + b"\x00" * 64)

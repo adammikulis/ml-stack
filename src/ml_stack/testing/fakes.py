@@ -15,6 +15,9 @@ What is here:
 - `ScriptedModel`: the graph tests' model -- a script of tool calls, then words.
 - `FakeServe` / `fake_serve`: `serve()` that starts nothing and yields a real `ServerInfo`.
 - `FakeReport` / `FakePreflight`: a preflight that read nothing and passed, or refused.
+- `FakeBackend`: a `ServerBackend` that binds no socket and records every spec.
+- `Served` / `FakeLlamaServer` / `fake_llama_server`: a llama-server on a real socket.
+- `fake_llama_binary` / `fake_binary`: the same as an executable, and a bare `--help` stub.
 - `mirrors` / `drift`: does a fake's signature match the real one, and how not.
 """
 
@@ -22,28 +25,53 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable, Iterator
+import os
+import sys
+import threading
+import time
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
-from pathlib import Path
+from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ml_stack.client import families
 from ml_stack.client.chat import Client, Reply
+from ml_stack.client.counters import Speculative
 from ml_stack.client.families import Family
-from ml_stack.serve.backend import ServerFailed, ServerInfo, ServerSpec
+from ml_stack.http import json_body
+from ml_stack.serve.backend import (
+    LlamaServerBackend,
+    ServerBackend,
+    ServerFailed,
+    ServerInfo,
+    ServerSpec,
+)
 from ml_stack.serve.manager import ServerManager, serve
 from ml_stack.serve.preflight import Check, Preflight, Report
 
 __all__ = [
+    "DRAFTING",
+    "LLAMA_SERVER_FLAGS",
+    "LLAMA_SERVER_HELP",
+    "FakeBackend",
     "FakeClient",
+    "FakeLlamaServer",
     "FakePreflight",
     "FakeReport",
     "FakeServe",
     "ScriptedModel",
+    "Served",
     "drift",
+    "fake_binary",
+    "fake_llama_binary",
+    "fake_llama_server",
     "fake_serve",
+    "metrics_text",
     "mirrors",
     "reply_from",
+    "serve_from_argv",
 ]
 
 
@@ -418,6 +446,388 @@ class FakePreflight:
                           model=spec.model)
 
 
+# ---------------------------------------------------------------- a llama-server
+
+LLAMA_SERVER_FLAGS = (
+    "-m, --model FNAME", "-c, --ctx-size N", "-ngl, --gpu-layers, --n-gpu-layers N",
+    "-fa, --flash-attn [on|off|auto]", "-np, --parallel N", "--host HOST", "--port PORT",
+    "--alias NAME", "--jinja", "--metrics", "--embeddings", "--pooling TYPE", "--mlock",
+    "--no-mmap", "--no-warmup", "--chat-template-file FNAME", "--cache-reuse N",
+    "--cache-ram N", "--cache-idle-slots, --no-cache-idle-slots", "-ctk, --cache-type-k TYPE",
+    "-ctv, --cache-type-v TYPE", "-kvu, --kv-unified, --no-kv-unified",
+    "--kv-unified-per-slot N", "-sps, --slot-prompt-similarity SIMILARITY",
+    "--slot-save-path PATH", "-ot, --override-tensor PATTERN", "--cpu-moe",
+    "--n-cpu-moe N", "--reasoning-budget N", "--rope-scale N", "--rope-scaling TYPE",
+    "--yarn-orig-ctx N", "--yarn-ext-factor N", "--yarn-attn-factor N",
+    "--yarn-beta-fast N", "--yarn-beta-slow N", "--mmproj FILE", "--mmproj-url URL",
+    "-hf, --hf-repo REPO", "--hf-file FILE", "-hfd, --hf-repo-draft REPO",
+    "-md, --model-draft FNAME", "--spec-type TYPE", "--spec-draft-n-max N",
+    "--spec-draft-n-min N", "--spec-draft-ngl N",
+    "-ngld, --gpu-layers-draft, --n-gpu-layers-draft N", "--spec-draft-type-k TYPE",
+    "--spec-draft-type-v TYPE", "--spec-ngram-mod-n-max N", "--spec-ngram-mod-n-min N",
+    "--lookup-cache-static FNAME", "--lookup-cache-dynamic FNAME",
+)
+"""Every flag `ml_stack.serve.backend.ServerSpec` can put on a command line."""
+
+LLAMA_SERVER_HELP = "".join(f"{flag:<52}what it sets\n" for flag in LLAMA_SERVER_FLAGS)
+"""``--help`` in llama-server's shape, listing `LLAMA_SERVER_FLAGS`."""
+
+CHAT_TEMPLATE = "{% for m in messages %}{{ m['content'] }}{% endfor %}"
+
+DRAFTING = Speculative(drafts=412, drafted=1648, accepted=1533,
+                       per_position=(402, 380, 341, 300, 110))
+"""Counters a server with a draft head reports: four tokens offered a pass, most kept."""
+
+_SPEC_TOTALS = (("llamacpp:spec_decode_num_drafts_total", "drafts"),
+                ("llamacpp:spec_decode_num_draft_tokens_total", "drafted"),
+                ("llamacpp:spec_decode_num_accepted_tokens_total", "accepted"))
+_SPEC_PER_POS = "llamacpp:spec_decode_num_accepted_tokens_per_pos_total"
+_PROCESSING = "llamacpp:requests_processing"
+
+
+def metrics_text(counted: Speculative | None) -> str:
+    """``/metrics`` in the Prometheus shape llama.cpp writes; the speculative counters
+    appear only where ``counted`` is given, which is where a draft head was loaded."""
+    out = [f"# HELP {_PROCESSING} Number of requests processing",
+           f"# TYPE {_PROCESSING} gauge",
+           f"{_PROCESSING} {0 if counted is None else counted.processing}"]
+    if counted is not None:
+        for name, part in _SPEC_TOTALS:
+            out += [f"# HELP {name} Speculative decoding", f"# TYPE {name} counter",
+                    f"{name} {getattr(counted, part)}"]
+        out += [f"# HELP {_SPEC_PER_POS} Accepted tokens per draft position",
+                f"# TYPE {_SPEC_PER_POS} counter"]
+        out += [f'{_SPEC_PER_POS}{{position="{at}"}} {n}'
+                for at, n in enumerate(counted.per_position)]
+    return "\n".join(out) + "\n"
+
+
+@dataclass(frozen=True, slots=True)
+class Served:
+    """What a fake llama-server is holding, and what it says when asked.
+
+    ``counted`` standing in for the draft head llama.cpp reports nothing else about:
+    None is a server with no head and no speculative counters on ``/metrics``.
+    ``metrics`` False is a server started without ``--metrics``, which answers 501 there.
+    ``answer`` is the reply a completion comes back with, or a callable given the request
+    body; ``pieces`` is how a streamed one is broken up and ``gap`` the seconds between.
+    """
+
+    model: str = "quince-2b.gguf"
+    context: int = 32768
+    slots: int = 1
+    metrics: bool = True
+    draft: str = ""
+    spec_type: str = ""
+    draft_max: int | None = None
+    counted: Speculative | None = None
+    answer: Any = "hello"
+    pieces: tuple[str, ...] = ()
+    gap: float = 0.0
+    build_info: str = "b7000-fakebuild"
+
+    @property
+    def name(self) -> str:
+        """The id ``/v1/models`` lists: the weights file's own name."""
+        return PurePosixPath(self.model).name or self.model
+
+    def props(self) -> dict[str, Any]:
+        """``/props``, with the fields `serving_params` and `drafting_of` read."""
+        return {"model_path": self.model, "total_slots": self.slots,
+                "endpoint_metrics": self.metrics, "build_info": self.build_info,
+                "chat_template": CHAT_TEMPLATE,
+                "default_generation_settings": {"n_ctx": self.context,
+                                                "model": self.model, "seed": 0xFFFFFFFF}}
+
+
+class FakeLlamaServer:
+    """A llama-server on a real loopback socket: the routes this repo's clients ask for.
+
+    ``requests`` is every ``(method, path, body)`` it took; ``saved`` and ``restored``
+    every slot the manager asked it to write out or read back; ``slots`` the rows
+    ``/slots`` answers with, which a test may edit. ``refuse`` maps a path -- with its
+    query, or without -- to the status it answers there instead. ``disconnected`` is set
+    when a reader hangs up mid-stream.
+    """
+
+    def __init__(self, served: Served | None = None, *, port: int = 0) -> None:
+        self.served = served if served is not None else Served()
+        self.requests: list[tuple[str, str, bytes]] = []
+        self.saved: list[tuple[int, str]] = []
+        self.restored: list[tuple[int, str]] = []
+        self.slots = [{"id": n, "n_ctx": self.served.context // max(self.served.slots, 1),
+                       "is_processing": False} for n in range(self.served.slots)]
+        self.refuse: dict[str, int] = {}
+        self.disconnected = threading.Event()
+        self._httpd = ThreadingHTTPServer(("127.0.0.1", port), _routes(self))
+        self.port = int(self._httpd.server_address[1])
+        self.base_url = f"http://127.0.0.1:{self.port}"
+        self._thread = threading.Thread(target=self._httpd.serve_forever, daemon=True)
+        self._thread.start()
+
+    def close(self) -> None:
+        """Stop serving and give the port back."""
+        self._httpd.shutdown()
+        self._httpd.server_close()
+        self._thread.join(timeout=5)
+
+    def record(self, *, pid: int = 0) -> dict[str, Any]:
+        """This server as a row of `ml_stack.serve.process.every_server`."""
+        return {"pid": pid or os.getpid(), "port": self.port, "defunct": False,
+                "model": self.served.model, "binary": "llama-server",
+                "draft": self.served.draft, "spec_type": self.served.spec_type,
+                "draft_max": self.served.draft_max, "rss": 0}
+
+    def sent_to(self, path: str) -> list[dict[str, Any]]:
+        """The bodies posted to ``path``."""
+        return [json_body(raw) for method, seen, raw in self.requests
+                if method == "POST" and seen.partition("?")[0] == path]
+
+    def refused(self, path: str) -> tuple[int, str, bytes] | None:
+        """What ``refuse`` says to answer at ``path``, or None where it says nothing."""
+        bare, _, _ = path.partition("?")
+        status = self.refuse.get(path) or self.refuse.get(bare)
+        return _json({"error": f"refusing {path}"}, status=status) if status else None
+
+    def answer_to(self, body: dict[str, Any]) -> str:
+        """The text a completion comes back with, for the request ``body``."""
+        said = self.served.answer
+        return str(said(body) if callable(said) else said)
+
+    def get(self, path: str) -> tuple[int, str, bytes]:
+        """``(status, content type, body)`` for a GET of ``path``."""
+        if (said := self.refused(path)) is not None:
+            return said
+        served, bare = self.served, path.partition("?")[0]
+        if bare.startswith("/health"):
+            return _json({"status": "ok"})
+        if bare.startswith("/props"):
+            return _json(served.props())
+        if bare in ("/v1/models", "/models"):
+            return _json({"object": "list", "data": [{"id": served.name}]})
+        if bare.startswith("/metrics"):
+            if not served.metrics:
+                return 501, "text/plain", b"metrics endpoint is disabled\n"
+            return 200, "text/plain", metrics_text(served.counted).encode()
+        if bare == "/slots":
+            return _json(self.slots)
+        return _json({"error": f"no such route: {bare}"}, status=404)
+
+    def post(self, path: str, body: dict[str, Any]) -> tuple[int, str, bytes]:
+        """``(status, content type, body)`` for a POST of ``body`` to ``path``."""
+        if (said := self.refused(path)) is not None:
+            return said
+        bare, _, query = path.partition("?")
+        parts = [one for one in bare.split("/") if one]
+        if bare == "/v1/chat/completions":
+            return _json({"model": self.served.name, "choices": [
+                {"index": 0, "message": {"role": "assistant",
+                                         "content": self.answer_to(body)},
+                 "finish_reason": "stop"}]})
+        if bare in ("/completion", "/completions"):
+            return _json({"content": self.answer_to(body), "stopped_limit": False,
+                          "truncated": False})
+        if bare == "/tokenize":
+            return _json({"tokens": list(range(len(str(body.get("content") or "").split()))) })
+        if bare == "/detokenize":
+            return _json({"content": " ".join(str(n) for n in body.get("tokens") or [])})
+        if bare in ("/v1/embeddings", "/embedding", "/embeddings"):
+            return _json({"data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]})
+        if len(parts) == 2 and parts[0] == "slots" and parts[1].isdigit():
+            return self._slot(int(parts[1]), query, body)
+        return _json({"error": f"no such route: {bare}"}, status=404)
+
+    def _slot(self, which: int, query: str, body: dict[str, Any]) -> tuple[int, str, bytes]:
+        action = dict(one.split("=", 1) for one in query.split("&") if "=" in one).get("action")
+        kept = str(body.get("filename") or "")
+        if action == "save":
+            self.saved.append((which, kept))
+        elif action == "restore":
+            self.restored.append((which, kept))
+        else:
+            return _json({"error": f"unknown action: {action}"}, status=400)
+        return _json({"id_slot": which, "filename": kept})
+
+    def frames(self, body: dict[str, Any]) -> list[bytes]:
+        """The ``data:`` frames a streamed chat completion sends, the final one included."""
+        said = self.answer_to(body)
+        pieces = self.served.pieces or (said,)
+        out = [b"data: " + json.dumps(
+            {"choices": [{"index": 0, "delta": {"content": piece}}]}).encode() + b"\n\n"
+            for piece in pieces]
+        return [*out, b"data: [DONE]\n\n"]
+
+
+def _json(payload: Any, *, status: int = 200) -> tuple[int, str, bytes]:
+    return status, "application/json", json.dumps(payload).encode()
+
+
+def _routes(fake: FakeLlamaServer) -> type[BaseHTTPRequestHandler]:
+    """A handler class answering ``fake``'s routes."""
+
+    class _H(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def do_GET(self) -> None:
+            fake.requests.append(("GET", self.path, b""))
+            self._answer(*fake.get(self.path))
+
+        def do_POST(self) -> None:
+            length = int(self.headers.get("content-length") or 0)
+            raw = self.rfile.read(length) if length else b""
+            fake.requests.append(("POST", self.path, raw))
+            body = json_body(raw)
+            if body.get("stream") and self.path.split("?")[0].endswith("/chat/completions"):
+                self._stream(fake.frames(body))
+                return
+            self._answer(*fake.post(self.path, body))
+
+        def _answer(self, status: int, kind: str, payload: bytes) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def _stream(self, frames: Iterable[bytes]) -> None:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            try:
+                for frame in frames:
+                    self.wfile.write(frame)
+                    self.wfile.flush()
+                    if fake.served.gap:
+                        time.sleep(fake.served.gap)
+            except (BrokenPipeError, ConnectionResetError):
+                fake.disconnected.set()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    return _H
+
+
+@contextmanager
+def fake_llama_server(served: Served | None = None, *, port: int = 0
+                      ) -> Iterator[FakeLlamaServer]:
+    """A llama-server on a real socket for the block, closed at the end."""
+    fake = FakeLlamaServer(served, port=port)
+    try:
+        yield fake
+    finally:
+        fake.close()
+
+
+# ---------------------------------------------------------------- as a binary
+
+def fake_binary(where: Path, *, help_text: str = "-m, --model FNAME  model path\n",
+                name: str = "llama-server") -> Path:
+    """An executable in ``where`` answering ``--help`` with ``help_text``, exit 0 otherwise."""
+    path = where / name
+    path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
+                    + help_text + "HELP\nexit 0\nfi\nexit 0\n")
+    path.chmod(0o755)
+    return path
+
+
+_FLAGS = {"model": ("--model", "-m"), "context": ("--ctx-size", "-c"),
+          "slots": ("--parallel", "-np"), "draft": ("--model-draft", "-md"),
+          "spec_type": ("--spec-type",), "port": ("--port",)}
+
+
+def _after(argv: list[str], names: tuple[str, ...]) -> str:
+    for at, one in enumerate(argv[:-1]):
+        if one in names:
+            return argv[at + 1]
+    return ""
+
+
+def serve_from_argv(argv: list[str], *, where: Path) -> int:
+    """Serve `fake_llama_server` on the ``--port`` in ``argv`` until the process is killed.
+
+    ``--help`` prints `LLAMA_SERVER_HELP` and returns instead. The argv it was launched
+    with is written to ``argv.json`` in ``where``, for a test asserting on a command line.
+    """
+    if "--help" in argv:
+        sys.stdout.write(LLAMA_SERVER_HELP)
+        return 0
+    (where / "argv.json").write_text(json.dumps(argv))
+    context = _after(argv, _FLAGS["context"])
+    slots = _after(argv, _FLAGS["slots"])
+    draft = _after(argv, _FLAGS["draft"])
+    served = Served(model=_after(argv, _FLAGS["model"]) or "model.gguf",
+                    context=int(context) if context.isdigit() else 4096,
+                    slots=int(slots) if slots.isdigit() else 1,
+                    draft=draft, spec_type=_after(argv, _FLAGS["spec_type"]),
+                    counted=DRAFTING if draft else None)
+    port = _after(argv, _FLAGS["port"])
+    FakeLlamaServer(served, port=int(port) if port.isdigit() else 8080)
+    threading.Event().wait()
+    return 0
+
+
+def _import_root() -> Path:
+    """The directory ``ml_stack`` is imported from, for a subprocess to put on its path."""
+    return Path(__file__).resolve().parents[2]
+
+
+_LAUNCHER = """#!{python}
+import os, sys
+sys.path.insert(0, {root!r})
+# argv[0] is what a process scan matches a llama-server on, so this wears the name.
+if not os.environ.get("MLSTACK_FAKE_LLAMA"):
+    os.environ["MLSTACK_FAKE_LLAMA"] = "1"
+    os.execv(sys.executable, ["llama-server", __file__, *sys.argv[1:]])
+from pathlib import Path
+
+from ml_stack.testing.fakes import serve_from_argv
+
+raise SystemExit(serve_from_argv(sys.argv[1:], where=Path(__file__).parent))
+"""
+
+
+def fake_llama_binary(where: Path, *, name: str = "llama-server") -> Path:
+    """An executable in ``where`` that answers ``--help`` and then really serves.
+
+    Started for real by ``Popen``, it binds the ``--port`` it was given, presents to a
+    process scan as ``llama-server``, and answers everything `FakeLlamaServer` answers
+    for the model, context, slots and draft head its command line named.
+    """
+    path = where / name
+    path.write_text(_LAUNCHER.format(python=sys.executable, root=str(_import_root())))
+    path.chmod(0o755)
+    return path
+
+
+# ---------------------------------------------------------------- a backend
+
+class FakeBackend(ServerBackend):
+    """`ServerBackend` that binds nothing: every spec it was asked to start is in
+    ``started``, and the info it hands back names the port the spec asked for."""
+
+    name = "fake"
+
+    def __init__(self, *, pid: int = 90000, load_s: float | None = 1.5,
+                 warmup_s: float | None = 0.5) -> None:
+        self.started: list[ServerSpec] = []
+        self.pid = pid
+        self.load_s = load_s
+        self.warmup_s = warmup_s
+
+    def command(self, spec: ServerSpec) -> list[str]:
+        return ["fake", "--port", str(spec.port), "--model", str(spec.model)]
+
+    def start(self, spec: ServerSpec, *, lease: Any, timeout: float = 300.0,
+              check_flags: bool = True, preflight: bool = True,
+              warmup_request: bool = True) -> ServerInfo:
+        self.started.append(spec)
+        return ServerInfo(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
+                          pid=self.pid + len(self.started), backend=self.name,
+                          load_s=self.load_s, warmup_s=self.warmup_s)
+
+
 # ---------------------------------------------------------------- the diff
 
 _VARIADIC = (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
@@ -475,6 +885,8 @@ MIRRORED: tuple[tuple[str, Any, Any], ...] = (
     ("FakeServe.__call__", FakeServe.__call__, serve),
     ("fake_serve", fake_serve, serve),
     ("FakePreflight.__call__", FakePreflight.__call__, Preflight),
+    ("FakeBackend.command", FakeBackend.command, ServerBackend.command),
+    ("FakeBackend.start", FakeBackend.start, LlamaServerBackend.start),
 )
 """Every fake here beside what it stands in for. The test walks this; a fake added to the
 module and not to this table is a fake nothing checks."""

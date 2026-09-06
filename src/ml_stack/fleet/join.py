@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.http import ServerError, ServerUnreachable, request_bytes
+from ml_stack.http import ServerError, ServerUnreachable, json_body, request_bytes
 from ml_stack.jobs import detach
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
@@ -233,15 +233,6 @@ def _started_pid(root: Path | str) -> int | None:
         return None
 
 
-def _said(raw: bytes) -> dict:
-    """A daemon's answer as a dict, empty when it is not JSON."""
-    try:
-        got = json.loads(raw or b"{}")
-    except ValueError:
-        return {}
-    return got if isinstance(got, dict) else {}
-
-
 def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
     """Add a cluster through the daemon already on ``port``, so it advertises at once.
 
@@ -258,12 +249,12 @@ def _enrol_via_daemon(port: int, passphrase: str, group: str) -> None:
         try:
             reply = request_bytes(f"{base}{path}", data=json.dumps(body).encode(),
                                   method="POST", headers=sent, timeout=30)
-            return reply.status, _said(reply.body), reply.headers.get("Set-Cookie", "")
+            return reply.status, json_body(reply.body), reply.headers.get("Set-Cookie", "")
         except ServerUnreachable as e:
             raise JoinError(f"the daemon on port {port} did not take the passphrase: {e}") \
                 from None
         except ServerError as e:
-            return e.status or 0, _said(e.body.encode()), ""
+            return e.status or 0, json_body(e.body.encode()), ""
 
     cookie = ""
     status, body, set_cookie = call("/ui/session", {"passphrase": passphrase, "group": group})

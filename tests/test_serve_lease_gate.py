@@ -12,7 +12,7 @@ import pytest
 from ml_stack.serve.backend import Lease, LlamaServerBackend, ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.manager import ServerManager
 from ml_stack.serve.ports import free_port
-from tests.conftest import fake_binary
+from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_binary
 
 
 def test_the_backend_launches_nothing_without_a_lease(tmp_path):
@@ -96,17 +96,19 @@ def _ended(proc, within: float = 10.0) -> bool:
     return proc.poll() is not None
 
 
-def _serving(model: str, n_ctx: int = 4096, slots: int = 1):
-    """A handler answering /health, /v1/models and /props the way llama-server does."""
-    from tests.conftest import json_reply
+@pytest.fixture
+def serving():
+    """llama-servers on real sockets, closed at the end of the test."""
+    started: list[FakeLlamaServer] = []
 
-    def handle(method, path, body):
-        if path.startswith("/props"):
-            return json_reply({"model_path": f"/models/{model}", "total_slots": slots,
-                               "default_generation_settings": {"n_ctx": n_ctx}})
-        return json_reply({"data": [{"id": model}]})
+    def start(model: str) -> FakeLlamaServer:
+        fake = FakeLlamaServer(Served(model=f"/models/{model}", context=4096))
+        started.append(fake)
+        return fake
 
-    return handle
+    yield start
+    for fake in started:
+        fake.close()
 
 
 def _orphan_record(state, port: int, pid: int, model: str = "fine.gguf") -> None:
@@ -115,13 +117,13 @@ def _orphan_record(state, port: int, pid: int, model: str = "fine.gguf") -> None
         "model": model}}))
 
 
-def test_a_lease_stops_an_orphan_of_another_shape_before_starting(tmp_path, server):
+def test_a_lease_stops_an_orphan_of_another_shape_before_starting(tmp_path, serving):
     """A record whose leasing process has gone while its server runs on, serving a shape
     the lease cannot use: the lease stops that server, says so, and starts its own."""
     import os
 
     state = tmp_path / "servers.json"
-    instance = server(_serving("other-8B-Q4_K_M.gguf"))
+    instance = serving("other-8B-Q4_K_M.gguf")
     orphan = _sleeper()
     try:
         _orphan_record(state, instance.port, orphan.pid, model="other-8B-Q4_K_M.gguf")
@@ -141,14 +143,14 @@ def test_a_lease_stops_an_orphan_of_another_shape_before_starting(tmp_path, serv
         orphan.wait()
 
 
-def test_a_lease_adopts_an_orphan_of_the_same_shape_and_takes_it_over(tmp_path, server):
+def test_a_lease_adopts_an_orphan_of_the_same_shape_and_takes_it_over(tmp_path, serving):
     """The page server restarts, the process that leased the 90 GB model goes with it,
     and the new one asks for the same shape on the same port: it is adopted, not
     reloaded, and the record's owner becomes the new leaser."""
     import os
 
     state = tmp_path / "servers.json"
-    instance = server(_serving("fine.gguf"))
+    instance = serving("fine.gguf")
     orphan = _sleeper()
     try:
         _orphan_record(state, instance.port, orphan.pid)

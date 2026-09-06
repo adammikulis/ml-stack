@@ -8,15 +8,17 @@ llama-server that is a script. Every name is invented.
 from __future__ import annotations
 
 import json
-import sys
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
+from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
+
 from ml_stack.fleet import join as joining
 from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
-from ml_stack.fleet.discovery import Advertiser, Beacon, join as join_cluster, load_cluster_key
+from ml_stack.fleet.discovery import Advertiser, Beacon, load_cluster_key
+from ml_stack.fleet.discovery import join as join_cluster
 from ml_stack.fleet.join import main
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table
@@ -24,8 +26,7 @@ from ml_stack.fleet.remote import Peer, PeerError
 from ml_stack.fleet.serving import Hosting, NoRoom, Serving
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile
-from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
-from test_fleet_serving import FAKE_SERVER
+from ml_stack.testing.fakes import fake_llama_binary
 
 G = 1 << 30
 M = 1 << 20
@@ -290,16 +291,11 @@ class TestCommand:
 
 # -- POST /serve, and --apply -------------------------------------------------------------
 @pytest.fixture
-def fake_llama_server(tmp_path, monkeypatch):
+def llama_binary(tmp_path, monkeypatch):
     from ml_stack.serve import backend as backend_module
 
     monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
-    script = tmp_path / "server.py"
-    script.write_text(FAKE_SERVER)
-    binary = tmp_path / "llama-server"
-    binary.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
-    binary.chmod(0o755)
-    return binary
+    return fake_llama_binary(tmp_path)
 
 
 class ServingDaemon:
@@ -349,8 +345,8 @@ class ServingDaemon:
 
 class TestServeRoute:
     def test_it_serves_a_model_this_machine_holds_with_its_seats(
-            self, tmp_path, fake_llama_server, daemons):
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G)
+            self, tmp_path, llama_binary, daemons):
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
         served = d.client._json("POST", "/serve", {"model": MID, "context": 16384,
                                                    "parallel": 2})
@@ -363,8 +359,8 @@ class TestServeRoute:
         assert health["serving"][0]["slots"] == 2
 
     def test_asked_again_it_answers_with_the_server_already_up(
-            self, tmp_path, fake_llama_server, daemons):
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G)
+            self, tmp_path, llama_binary, daemons):
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
         first = d.client._json("POST", "/serve", {"model": MID, "context": 16384,
                                                   "parallel": 2})
@@ -374,15 +370,15 @@ class TestServeRoute:
         assert status == 200 and json.loads(body)["port"] == first["port"]
         assert len(d.hosting.leases) == 1
 
-    def test_a_model_it_does_not_hold_is_404(self, tmp_path, fake_llama_server, daemons):
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G)
+    def test_a_model_it_does_not_hold_is_404(self, tmp_path, llama_binary, daemons):
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
         with pytest.raises(PeerError, match="404"):
             d.client._json("POST", "/serve", {"model": BIG, "parallel": 1})
 
-    def test_more_seats_than_the_room_holds_is_409(self, tmp_path, fake_llama_server,
+    def test_more_seats_than_the_room_holds_is_409(self, tmp_path, llama_binary,
                                                    daemons):
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G)
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
         with pytest.raises(PeerError, match="409") as caught:
             d.client._json("POST", "/serve", {"model": MID, "context": 16384,
@@ -390,8 +386,8 @@ class TestServeRoute:
         assert "refused" in str(caught.value) and "does not fit" in str(caught.value)
         assert d.hosting.leases == {}
 
-    def test_without_a_bearer_token_it_is_401(self, tmp_path, fake_llama_server, daemons):
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G)
+    def test_without_a_bearer_token_it_is_401(self, tmp_path, llama_binary, daemons):
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G)
         daemons.append(d)
         with pytest.raises(PeerError, match="401"):
             Peer(d.client.base_url, "wrong")._json("POST", "/serve", {"model": MID})
@@ -405,10 +401,10 @@ class TestServeRoute:
 
 class TestApply:
     def test_apply_serves_the_plan_through_each_daemon(
-            self, tmp_path, fake_llama_server, key, udp, daemons, measured, monkeypatch,
+            self, tmp_path, llama_binary, key, udp, daemons, measured, monkeypatch,
             capsys):
         raw = load_cluster_key(key)
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G, key=raw,
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G, key=raw,
                           udp=udp)
         daemons.append(d)
         monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
@@ -422,10 +418,10 @@ class TestApply:
         assert f"small            {MID}:{live[0].port} (2 seat(s))" in out
 
     def test_apply_as_json_carries_each_answer(
-            self, tmp_path, fake_llama_server, key, udp, daemons, measured, monkeypatch,
+            self, tmp_path, llama_binary, key, udp, daemons, measured, monkeypatch,
             capsys):
         raw = load_cluster_key(key)
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G, key=raw,
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G, key=raw,
                           udp=udp)
         daemons.append(d)
         monkeypatch.setenv("ML_STACK_DISCOVERY_PORT", str(udp))
@@ -437,9 +433,9 @@ class TestApply:
         assert got["applied"][0]["serving"][0]["models"] == [MID]
 
     def test_a_peer_that_refuses_is_reported_not_dropped(
-            self, tmp_path, fake_llama_server, key, udp, daemons, monkeypatch, capsys):
+            self, tmp_path, llama_binary, key, udp, daemons, monkeypatch, capsys):
         raw = load_cluster_key(key)
-        d = ServingDaemon(tmp_path, fake_llama_server, name="small", room=24 * G, key=raw,
+        d = ServingDaemon(tmp_path, llama_binary, name="small", room=24 * G, key=raw,
                           udp=udp, fits=lambda: [])
         daemons.append(d)
         # The planner believes a record the daemon does not hold; the daemon holds BIG nowhere.

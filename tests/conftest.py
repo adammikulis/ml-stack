@@ -27,6 +27,10 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
+# ``src`` goes on the path above, so these cannot be imported with the rest.
+from ml_stack.testing.fakes import LLAMA_SERVER_HELP as LLAMA_SERVER_HELP  # noqa: E402
+from ml_stack.testing.fakes import fake_binary as fake_binary  # noqa: E402
+
 
 Handler = Callable[[str, str, bytes], tuple[int, bytes]]
 """``(method, path, body) -> (status, response_body)``"""
@@ -217,23 +221,6 @@ def threaded_server(handler_class, *, port: int = 0):
 
 # -- a model file, without a model ------------------------------------------------------
 
-#: Enough of a real ``--help`` to answer every flag ``command()`` emits for a bare
-#: ServerSpec, so the flag check (which nothing using this is testing) does not refuse.
-LLAMA_SERVER_HELP = (
-    "-m,    --model FNAME                    model path\n"
-    "-c,    --ctx-size N                     size of the prompt context\n"
-    "-ngl,  --gpu-layers, --n-gpu-layers N   number of layers to store in VRAM\n"
-    "-fa,   --flash-attn [on|off|auto]       set Flash Attention use\n"
-    "-np,   --parallel N                     number of server slots\n"
-    "       --host HOST                      ip address to listen on\n"
-    "       --port PORT                      port to listen on\n"
-    "       --jinja                          use jinja template for chat\n"
-    "-np,   --parallel N                     number of server slots\n"
-    "-ctk, --cache-type-k TYPE            KV cache data type for K\n"
-    "-ctv, --cache-type-v TYPE            KV cache data type for V\n"
-)
-
-
 def write_gguf(path: Path, metadata: dict, *, tensor_count: int = 0) -> Path:
     """A real, minimal GGUF v3 file: magic, version, counts, one key/value pair per
     metadata item -- ints as uint32, floats as float32, strings as strings, a list as an
@@ -272,15 +259,6 @@ def write_gguf(path: Path, metadata: dict, *, tensor_count: int = 0) -> Path:
     for name, value in metadata.items():
         body += kv(name, value)
     path.write_bytes(body)
-    return path
-
-
-def fake_binary(tmp_path: Path, *, help_text: str = "-m, --model FNAME  model path\n") -> Path:
-    """An executable that answers ``--help`` with ``help_text`` and exits 0 for anything else."""
-    path = tmp_path / "llama-server"
-    path.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
-                    + help_text + "HELP\nexit 0\nfi\nexit 0\n")
-    path.chmod(0o755)
     return path
 
 

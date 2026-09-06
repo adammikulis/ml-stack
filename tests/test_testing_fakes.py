@@ -15,13 +15,17 @@ from ml_stack.client import Client, Reply
 from ml_stack.serve import ServerFailed, ServerInfo, ServerSpec
 from ml_stack.serve.preflight import Report
 from ml_stack.testing import (
+    DRAFTING,
     MIRRORED,
     FakeClient,
     FakePreflight,
     FakeReport,
     FakeServe,
     ScriptedModel,
+    Served,
     drift,
+    fake_llama_binary,
+    fake_llama_server,
     fake_serve,
     mirrors,
 )
@@ -36,15 +40,21 @@ def test_every_fake_mirrors_the_real_signature(label, fake, real):
     assert mirrors(fake, real), f"{label}: " + "; ".join(drift(fake, real))
 
 
+#: Fakes with nothing to diff. `FakeReport` is a `Report`, checked by ``isinstance``;
+#: `Served` is a value object; the rest stand in for a program rather than a callable, and
+#: are checked by driving the real clients at them below.
+NO_SIGNATURE = {"FakeReport", "Served", "FakeLlamaServer", "fake_binary",
+                "fake_llama_binary", "fake_llama_server"}
+
+
 def test_every_fake_in_the_module_is_in_the_table():
     """A fake added to the module and not to `MIRRORED` is a fake nothing checks."""
     from ml_stack.testing import fakes
 
     listed = {label.split(".")[0] for label, _, _ in MIRRORED}
     public = {name for name in fakes.__all__
-              if name[0].isupper() or name.startswith("fake_")}
-    # FakeReport is a Report, not a stand-in for one: its own test is `isinstance`.
-    assert public - {"FakeReport"} == listed
+              if (name[0].isupper() and not name.isupper()) or name.startswith("fake_")}
+    assert public - NO_SIGNATURE == listed
 
 
 def _real(base_url, *, timeout=None, slot=None):
@@ -280,3 +290,133 @@ def test_a_fake_preflight_records_what_it_was_asked_and_refuses_by_name():
     assert not preflight(ServerSpec(model="huge.gguf"), binary="x").ok
     assert [s.model for s in preflight.seen] == ["tiny.gguf", "huge.gguf"]
     assert preflight.seen[0].draft == "head.gguf"
+
+
+# ---------------------------------------------------------------- the llama-server
+
+def test_the_clients_read_the_fake_the_way_they_read_a_real_one():
+    """Every reader in `ml_stack.client` against one fake, over a real socket."""
+    from ml_stack.client import Client, is_healthy, reported_models
+    from ml_stack.client.counters import read_speculative
+    from ml_stack.client.health import serving_params
+
+    held = Served(model="/models/quince-2b-Q4_K_M.gguf", context=8192, slots=2,
+                  draft="mtp.gguf", spec_type="mtp", counted=DRAFTING, answer="a reply")
+    with fake_llama_server(held) as server:
+        assert is_healthy(server.base_url)
+        assert reported_models(server.base_url) == ["quince-2b-Q4_K_M.gguf"]
+
+        params = serving_params(server.base_url)
+        assert params.n_ctx == 8192 and params.total_slots == 2
+        assert params.quant == "Q4_K_M" and params.raw["endpoint_metrics"] is True
+
+        counted = read_speculative(server.base_url)
+        assert counted == DRAFTING
+
+        client = Client(server.base_url)
+        assert client.chat([{"role": "user", "content": "hi"}]).content == "a reply"
+        assert client.complete("hi") == "a reply"
+        assert client.tokenize("one two three") == [0, 1, 2]
+        assert client.served_by()["program"] == "llama.cpp"
+
+
+def test_a_server_started_without_metrics_answers_501_there():
+    from ml_stack.client.counters import read_speculative
+
+    with fake_llama_server(Served(metrics=False, counted=DRAFTING)) as server:
+        assert read_speculative(server.base_url) is None
+        assert server.get("/metrics")[0] == 501
+
+
+def test_a_server_with_no_draft_head_reports_no_speculative_counters():
+    from ml_stack.client.counters import read_speculative
+
+    with fake_llama_server() as server:
+        assert read_speculative(server.base_url) is None, "nothing drafted, nothing counted"
+        assert "requests_processing" in server.get("/metrics")[2].decode()
+
+
+def test_it_records_what_was_asked_of_it_and_saves_and_restores_slots():
+    from ml_stack.http import request_json
+
+    with fake_llama_server(Served(slots=2)) as server:
+        request_json(f"{server.base_url}/slots/1?action=save", payload={"filename": "s.bin"})
+        request_json(f"{server.base_url}/slots/1?action=restore", payload={"filename": "s.bin"})
+        request_json(f"{server.base_url}/completion", payload={"prompt": "hello"})
+
+        assert server.saved == [(1, "s.bin")] and server.restored == [(1, "s.bin")]
+        assert server.sent_to("/completion") == [{"prompt": "hello"}]
+        assert [row["id"] for row in server.get("/slots")[2] and server.slots] == [0, 1]
+
+
+def test_a_route_can_be_made_to_fail_without_the_rest_going_with_it():
+    from ml_stack.client import is_healthy
+    from ml_stack.http import ServerError, request_json
+
+    with fake_llama_server() as server:
+        server.refuse["/props"] = 404
+        server.refuse["/v1/chat/completions"] = 500
+        assert is_healthy(server.base_url), "/health still answers"
+        with pytest.raises(ServerError, match="500"):
+            request_json(f"{server.base_url}/v1/chat/completions", payload={"messages": []})
+
+
+def test_a_streamed_completion_arrives_in_the_pieces_it_was_given():
+    from ml_stack.client import Client
+
+    seen: list[tuple[str, str]] = []
+    with fake_llama_server(Served(pieces=("one ", "two ", "three"))) as server:
+        reply = Client(server.base_url).chat([{"role": "user", "content": "hi"}],
+                                             on_delta=lambda kind, text: seen.append(
+                                                 (kind, text)))
+    assert reply.content == "one two three"
+    assert [text for kind, text in seen] == ["one ", "two ", "three"]
+
+
+def test_the_answer_can_be_worked_out_from_the_request():
+    from ml_stack.client import Client
+
+    held = Served(answer=lambda body: str(len(body.get("messages") or [])))
+    with fake_llama_server(held) as server:
+        client = Client(server.base_url)
+        assert client.chat([{"role": "user", "content": "a"}]).content == "1"
+        assert client.chat([{"role": "user", "content": "a"},
+                            {"role": "assistant", "content": "b"},
+                            {"role": "user", "content": "c"}]).content == "3"
+
+
+@pytest.mark.slow
+def test_the_binary_really_launches_and_answers_on_the_port_it_was_given(tmp_path):
+    """Started by `LlamaServerBackend`, past the flag check and the health poll."""
+    import json as encoding
+
+    from ml_stack.client import reported_models
+    from ml_stack.serve import LlamaServerBackend, ServerSpec, free_port
+    from ml_stack.serve import backend as backend_module
+    from ml_stack.serve.process import every_server
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(backend_module, "log_dir", lambda: tmp_path / "logs")
+    binary = fake_llama_binary(tmp_path)
+    model = tmp_path / "quince-2b-Q4_K_M.gguf"
+    model.write_bytes(b"GGUF" + b"\x00" * 64)
+    draft = tmp_path / "mtp.gguf"
+    draft.write_bytes(b"GGUF" + b"\x00" * 64)
+    spec = ServerSpec(model=model, port=free_port(), context=2048, draft=str(draft),
+                      spec_type="mtp")
+    from conftest import leased
+
+    info = leased(LlamaServerBackend(binary=binary), spec, timeout=30.0, preflight=False,
+                  warmup_request=False)
+    try:
+        assert reported_models(info.base_url) == ["quince-2b-Q4_K_M.gguf"]
+        argv = encoding.loads((tmp_path / "argv.json").read_text())
+        assert argv[argv.index("-c") + 1] == "2048"
+        scanned = [row for row in every_server() if row["port"] == spec.port]
+        assert scanned and scanned[0]["spec_type"] == "mtp", (
+            "a process scan sees it as a llama-server with a draft head")
+    finally:
+        from ml_stack.serve.process import kill_process_tree
+
+        kill_process_tree(info.pid)
+        monkeypatch.undo()

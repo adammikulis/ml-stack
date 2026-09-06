@@ -34,16 +34,15 @@ from ml_stack.serve import (
     tail,
 )
 from ml_stack.serve.manager import orphaned
+from ml_stack.testing.fakes import fake_binary, fake_llama_binary
 from tests.conftest import leased
 
 
 @pytest.fixture
-def fake_binary(tmp_path):
-    """A file standing in for llama-server, so ``command()`` can resolve a path."""
-    path = tmp_path / "llama-server"
-    path.write_text("#!/bin/sh\nexit 0\n")
-    path.chmod(0o755)
-    return path
+def binary(tmp_path):
+    """A file standing in for llama-server, printing no help, so ``command()`` can
+    resolve a path and the flag check has no opinion."""
+    return fake_binary(tmp_path, help_text="")
 
 
 @pytest.fixture
@@ -54,62 +53,62 @@ def gguf(tmp_path):
 
 
 class TestCommand:
-    def test_uses_long_flags_only(self, fake_binary, gguf):
+    def test_uses_long_flags_only(self, binary, gguf):
         """Short forms are ambiguous across llama-server versions -- `-a` is `--alias`,
         so a stale short flag misconfigures silently instead of erroring."""
-        argv = LlamaServerBackend(binary=fake_binary).command(ServerSpec(model=gguf, port=1234))
+        argv = LlamaServerBackend(binary=binary).command(ServerSpec(model=gguf, port=1234))
         assert "--host" in argv and "--port" in argv
         assert "-a" not in argv and "-p" not in argv
         assert argv[argv.index("--port") + 1] == "1234"
 
-    def test_binds_loopback_not_all_interfaces(self, fake_binary, gguf):
+    def test_binds_loopback_not_all_interfaces(self, binary, gguf):
         """A local model server on 0.0.0.0 is an unauthenticated inference endpoint on
         every network the machine is attached to."""
-        argv = LlamaServerBackend(binary=fake_binary).command(ServerSpec(model=gguf))
+        argv = LlamaServerBackend(binary=binary).command(ServerSpec(model=gguf))
         assert argv[argv.index("--host") + 1] == "127.0.0.1"
 
-    def test_hf_reference_defers_the_download_to_the_server(self, fake_binary):
+    def test_hf_reference_defers_the_download_to_the_server(self, binary):
         """Re-implementing the fetch here is how a machine ends up with two model caches."""
-        argv = LlamaServerBackend(binary=fake_binary).command(
+        argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model="hf:owner/repo/weights-Q4_K_M.gguf")
         )
         assert argv[argv.index("--hf-repo") + 1] == "owner/repo"
         assert argv[argv.index("--hf-file") + 1] == "weights-Q4_K_M.gguf"
         assert "-m" not in argv
 
-    def test_hf_reference_without_a_file_is_allowed(self, fake_binary):
-        argv = LlamaServerBackend(binary=fake_binary).command(ServerSpec(model="hf:owner/repo"))
+    def test_hf_reference_without_a_file_is_allowed(self, binary):
+        argv = LlamaServerBackend(binary=binary).command(ServerSpec(model="hf:owner/repo"))
         assert argv[argv.index("--hf-repo") + 1] == "owner/repo"
         assert "--hf-file" not in argv
 
-    def test_malformed_hf_reference_is_rejected(self, fake_binary):
+    def test_malformed_hf_reference_is_rejected(self, binary):
         with pytest.raises(ServerFailed, match="malformed HF reference"):
-            LlamaServerBackend(binary=fake_binary).command(ServerSpec(model="hf:justowner"))
+            LlamaServerBackend(binary=binary).command(ServerSpec(model="hf:justowner"))
 
-    def test_embedding_mode_drops_the_chat_template(self, fake_binary, gguf):
+    def test_embedding_mode_drops_the_chat_template(self, binary, gguf):
         """An embedding server has no chat turn to template."""
-        argv = LlamaServerBackend(binary=fake_binary).command(
+        argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model=gguf, embedding=True)
         )
         assert "--embeddings" in argv
         assert "--jinja" not in argv
 
-    def test_extra_args_land_last_so_they_can_override(self, fake_binary, gguf):
-        argv = LlamaServerBackend(binary=fake_binary).command(
+    def test_extra_args_land_last_so_they_can_override(self, binary, gguf):
+        argv = LlamaServerBackend(binary=binary).command(
             ServerSpec(model=gguf, extra_args=("--cache-reuse", "256"))
         )
         assert argv[-2:] == ["--cache-reuse", "256"]
 
 
 class TestStartGuards:
-    def test_a_missing_model_fails_immediately_with_the_path(self, fake_binary, tmp_path):
+    def test_a_missing_model_fails_immediately_with_the_path(self, binary, tmp_path):
         """Left to the server this becomes 'did not become healthy', which sends the
         reader looking for a slow load that never happened."""
-        backend = LlamaServerBackend(binary=fake_binary)
+        backend = LlamaServerBackend(binary=binary)
         with pytest.raises(ServerFailed, match="no model file at"):
             leased(backend, ServerSpec(model=tmp_path / "absent.gguf"))
 
-    def test_a_foreign_process_on_the_port_is_refused_not_killed(self, fake_binary, gguf):
+    def test_a_foreign_process_on_the_port_is_refused_not_killed(self, binary, gguf):
         """The port check matches our own binary names; anything else is somebody's
         service and must not be terminated."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as held:
@@ -117,7 +116,7 @@ class TestStartGuards:
             held.listen(1)
             port = held.getsockname()[1]
 
-            backend = LlamaServerBackend(binary=fake_binary)
+            backend = LlamaServerBackend(binary=binary)
             with pytest.raises(ServerFailed, match="not one of ours"):
                 leased(backend, ServerSpec(model=gguf, port=port), timeout=1.0)
 
@@ -125,7 +124,7 @@ class TestStartGuards:
             assert held.fileno() != -1
 
     def test_the_slot_save_path_is_made_rather_than_left_for_the_server_to_refuse(
-            self, fake_binary, gguf, tmp_path):
+            self, binary, gguf, tmp_path):
         """llama-server's whole complaint about a missing --slot-save-path directory is
         'not a directory', at the end of a load -- not a directory it will create.
 
@@ -133,7 +132,7 @@ class TestStartGuards:
         """
         save_path = tmp_path / "slots"
         assert not save_path.exists()
-        backend = LlamaServerBackend(binary=fake_binary)
+        backend = LlamaServerBackend(binary=binary)
         with pytest.raises(ServerFailed):
             leased(backend, ServerSpec(model=gguf, slot_save_path=save_path),
                   timeout=1.0, preflight=False)
@@ -250,36 +249,36 @@ class TestModelMatches:
 
 
 class TestAdoption:
-    def _manager(self, tmp_path, fake_binary):
+    def _manager(self, tmp_path, binary):
         return ServerManager(
-            LlamaServerBackend(binary=fake_binary),
+            LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
         )
 
-    def test_nothing_running_means_nothing_to_adopt(self, tmp_path, fake_binary):
-        manager = self._manager(tmp_path, fake_binary)
+    def test_nothing_running_means_nothing_to_adopt(self, tmp_path, binary):
+        manager = self._manager(tmp_path, binary)
         assert manager.adopt(ServerSpec(model="m.gguf", port=free_port())) is None
 
-    def test_a_matching_server_is_adopted(self, server, tmp_path, fake_binary):
+    def test_a_matching_server_is_adopted(self, server, tmp_path, binary):
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         assert info is not None and info.adopted
 
-    def test_a_server_with_different_weights_is_refused(self, server, tmp_path, fake_binary):
+    def test_a_server_with_different_weights_is_refused(self, server, tmp_path, binary):
         """'Something answers on this port' and 'it serves what I asked for' are
         different facts. Adopting on the first silently benchmarks the wrong weights."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "some-other.gguf"}]}))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         with pytest.raises(ServerFailed, match="model: asked for 'model.gguf'"):
             manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
 
-    def test_release_leaves_an_adopted_server_running(self, server, tmp_path, fake_binary):
+    def test_release_leaves_an_adopted_server_running(self, server, tmp_path, binary):
         """Terminate only what you launched."""
         instance = server(lambda m, p, b: json_reply({"data": [{"id": "model.gguf"}]}))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         info = manager.adopt(ServerSpec(model="model.gguf", port=instance.port))
         manager.release(info)
@@ -289,18 +288,18 @@ class TestAdoption:
 
         assert is_healthy(instance.base_url)
 
-    def test_release_of_an_unowned_info_does_not_raise(self, tmp_path, fake_binary):
-        manager = self._manager(tmp_path, fake_binary)
+    def test_release_of_an_unowned_info_does_not_raise(self, tmp_path, binary):
+        manager = self._manager(tmp_path, binary)
         manager.release(ServerInfo(base_url="http://127.0.0.1:1", port=1, pid=None,
                                    backend="llama.cpp", adopted=False))
 
 
 class TestNegativeCache:
-    def test_a_failed_start_is_not_retried_immediately(self, tmp_path, fake_binary):
+    def test_a_failed_start_is_not_retried_immediately(self, tmp_path, binary):
         """A caller polling on every frame must not re-pay the connect timeout each time
         once the answer is known to be 'no'."""
         manager = ServerManager(
-            LlamaServerBackend(binary=fake_binary), state_file=tmp_path / "s.json"
+            LlamaServerBackend(binary=binary), state_file=tmp_path / "s.json"
         )
         spec = ServerSpec(model=tmp_path / "absent.gguf", port=free_port())
 
@@ -360,19 +359,19 @@ class TestScaledTimeout:
 
 
 class TestStateFile:
-    def test_it_is_written_atomically_and_is_valid_json(self, tmp_path, fake_binary):
+    def test_it_is_written_atomically_and_is_valid_json(self, tmp_path, binary):
         state = tmp_path / "servers.json"
-        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
         manager._mine["9999"] = {"port": 9999, "owner_pid": os.getpid(), "pid": 1}
         manager._save()
 
         assert json.loads(state.read_text())["9999"]["port"] == 9999
         assert not state.with_suffix(".json.tmp").exists()
 
-    def test_a_corrupt_state_file_does_not_crash_a_lease(self, tmp_path, fake_binary):
+    def test_a_corrupt_state_file_does_not_crash_a_lease(self, tmp_path, binary):
         state = tmp_path / "servers.json"
         state.write_text("{ this is not json")
-        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
         assert manager._load() == {}
 
     def test_recorded_servers_is_keyed_by_port(self, tmp_path):
@@ -383,11 +382,11 @@ class TestStateFile:
     def test_recorded_servers_of_a_missing_file_is_empty(self, tmp_path):
         assert recorded_servers(tmp_path / "absent.json") == {}
 
-    def test_load_s_and_warmup_s_are_kept_in_the_record(self, tmp_path, fake_binary):
+    def test_load_s_and_warmup_s_are_kept_in_the_record(self, tmp_path, binary):
         """`ml-stack-serve status --json` reads these back -- a fact worth keeping, not a
         log line to be grepped for later."""
         state = tmp_path / "servers.json"
-        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
         info = ServerInfo(base_url="http://127.0.0.1:9999", port=9999, pid=1,
                           backend="llama.cpp", load_s=12.5, warmup_s=0.8)
         manager._record(ServerSpec(model="m.gguf", port=9999), info)
@@ -399,11 +398,11 @@ class TestStateFile:
 
 class TestDetach:
     def test_a_detached_server_outlives_the_process_that_started_it(
-            self, tmp_path, fake_binary):
+            self, tmp_path, binary):
         """The record is kept against the server's own pid, so a later save that prunes
         dead owners does not throw the entry away."""
         state = tmp_path / "servers.json"
-        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
             info = ServerInfo(base_url="http://127.0.0.1:9101", port=9101, pid=proc.pid,
@@ -414,15 +413,15 @@ class TestDetach:
             assert recorded_servers(state)[9101]["owner_pid"] == proc.pid
 
             # a fresh process saving its own view keeps the entry
-            ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)._save()
+            ServerManager(LlamaServerBackend(binary=binary), state_file=state)._save()
             assert 9101 in recorded_servers(state)
         finally:
             proc.kill()
             proc.wait()
 
-    def test_a_detached_server_is_not_stopped_by_stop_all(self, tmp_path, fake_binary):
+    def test_a_detached_server_is_not_stopped_by_stop_all(self, tmp_path, binary):
         state = tmp_path / "servers.json"
-        manager = ServerManager(LlamaServerBackend(binary=fake_binary), state_file=state)
+        manager = ServerManager(LlamaServerBackend(binary=binary), state_file=state)
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
             info = ServerInfo(base_url="http://127.0.0.1:9102", port=9102, pid=proc.pid,
@@ -497,9 +496,9 @@ class TestShapeMismatch:
 class TestAdoptingTheWrongShape:
     """The right model in the wrong shape is still the wrong server."""
 
-    def _manager(self, tmp_path, fake_binary):
+    def _manager(self, tmp_path, binary):
         return ServerManager(
-            LlamaServerBackend(binary=fake_binary),
+            LlamaServerBackend(binary=binary),
             state_file=tmp_path / "servers.json",
         )
 
@@ -517,29 +516,29 @@ class TestAdoptingTheWrongShape:
         return handle
 
     def test_a_running_server_with_too_few_slots_is_refused(
-            self, server, tmp_path, fake_binary):
+            self, server, tmp_path, binary):
         instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         with pytest.raises(ServerFailed, match="slots: asked for 4, serving 1"):
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                      context=4096, parallel=4))
 
     def test_a_running_server_with_a_smaller_context_is_refused(
-            self, server, tmp_path, fake_binary):
+            self, server, tmp_path, binary):
         """A caller that asked for 32k and gets 4k has its prompts truncated instead."""
         instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         with pytest.raises(ServerFailed,
                            match="context: asked for 32768 per slot, serving 4096"):
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                      context=32768))
 
-    def test_context_is_compared_one_slot_at_a_time(self, server, tmp_path, fake_binary):
+    def test_context_is_compared_one_slot_at_a_time(self, server, tmp_path, binary):
         """llama-server splits --ctx-size across -np, and reports one slot's share."""
         instance = server(self._handler("a-model.gguf", n_ctx=32768, slots=2))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         adopted = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                            context=65536, parallel=2))
@@ -549,9 +548,9 @@ class TestAdoptingTheWrongShape:
             manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                      context=65536, parallel=1))
 
-    def test_the_shape_that_was_asked_for_is_adopted(self, server, tmp_path, fake_binary):
+    def test_the_shape_that_was_asked_for_is_adopted(self, server, tmp_path, binary):
         instance = server(self._handler("a-model.gguf", n_ctx=4096, slots=1))
-        manager = self._manager(tmp_path, fake_binary)
+        manager = self._manager(tmp_path, binary)
 
         info = manager.adopt(ServerSpec(model="a-model.gguf", port=instance.port,
                                         context=4096, parallel=1))
@@ -842,49 +841,12 @@ def test_one_seat_says_so_rather_than_leaving_it_to_the_server():
     assert four[four.index("-np") + 1] == "4"
 
 
-FAKE_HEALTHY = """\
-import http.server
-import sys
-
-port = 8080
-for i, arg in enumerate(sys.argv):
-    if arg == "--port":
-        port = int(sys.argv[i + 1])
-
-
-class Handler(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        body = b'{"status": "ok"}'
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def log_message(self, *args):
-        pass
-
-
-http.server.HTTPServer(("127.0.0.1", port), Handler).serve_forever()
-"""
-
-
-def healthy_binary(tmp_path):
-    """A stand-in llama-server that answers /health and runs until it is stopped."""
-    script = tmp_path / "fake_llama_server.py"
-    script.write_text(FAKE_HEALTHY)
-    path = tmp_path / "llama-server"
-    path.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{script}" "$@"\n')
-    path.chmod(0o755)
-    return path
-
-
 @pytest.fixture
 def running(tmp_path):
     """A manager holding one real, healthy stand-in server, stopped at the end."""
     model = tmp_path / "model.gguf"
     model.write_bytes(b"GGUF" + b"\x00" * 64)
-    manager = ServerManager(backend=LlamaServerBackend(binary=healthy_binary(tmp_path)),
+    manager = ServerManager(backend=LlamaServerBackend(binary=fake_llama_binary(tmp_path)),
                             state_file=tmp_path / "servers.json")
     info = manager.lease(ServerSpec(model=model, port=free_port()), roam=False,
                          timeout=30.0, check_flags=False, preflight=False,
@@ -918,7 +880,7 @@ class TestTheStartedProcess:
         monkeypatch.setattr(backend_module, "wait_for_health", watching)
         model = tmp_path / "model.gguf"
         model.write_bytes(b"GGUF" + b"\x00" * 64)
-        manager = ServerManager(backend=LlamaServerBackend(binary=healthy_binary(tmp_path)),
+        manager = ServerManager(backend=LlamaServerBackend(binary=fake_llama_binary(tmp_path)),
                                 state_file=tmp_path / "servers.json")
         info = manager.lease(ServerSpec(model=model, port=free_port()), roam=False,
                              timeout=30.0, check_flags=False, preflight=False,

@@ -53,6 +53,15 @@ class Reply:
     headers: Any
 
 
+def json_body(raw: bytes) -> dict[str, Any]:
+    """A request or response body as the object it holds; empty for anything else."""
+    try:
+        body = json.loads(raw or b"{}")
+    except ValueError:
+        return {}
+    return body if isinstance(body, dict) else {}
+
+
 def build_request(url: str, *, data: bytes | None = None, method: str | None = None,
                   headers: dict[str, str] | None = None,
                   token: str = "") -> urllib.request.Request:

@@ -1293,35 +1293,24 @@ def test_a_run_told_to_stop_folds_what_it_read_and_ends_cleanly(tmp_path):
     pytest.importorskip("ladybug")
     import subprocess
     import threading
-    from http.server import BaseHTTPRequestHandler
 
-    from conftest import REPO, threaded_server
+    from conftest import REPO
+    from ml_stack.testing.fakes import Served, fake_llama_server
 
     store = tmp_path / "sources.ladybug"
     source = a_textbook(tmp_path / "lattice.pdf")
     second = threading.Event()
-    asked: list[bytes] = []
+    asked: list[dict] = []
 
-    class Model(BaseHTTPRequestHandler):
-        protocol_version = "HTTP/1.1"
+    def extracted(body: dict) -> str:
+        asked.append(body)
+        if len(asked) > 1:
+            second.set()
+            time.sleep(10)          # long enough for the stop to land inside this unit
+        return json.dumps(LATTICE)
 
-        def do_POST(self):
-            asked.append(self.rfile.read(int(self.headers.get("content-length") or 0)))
-            if len(asked) > 1:
-                second.set()
-                time.sleep(10)          # long enough for the stop to land inside this unit
-            body = json.dumps({"choices": [{"message": {
-                "role": "assistant", "content": json.dumps(LATTICE)}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, *args):
-            pass
-
-    with threaded_server(Model) as url:
+    with fake_llama_server(Served(answer=extracted)) as model:
+        url = model.base_url
         child = subprocess.Popen(
             [sys.executable, "-m", "ml_stack.ingest", source, "--out", str(store),
              "--base-url", url],
