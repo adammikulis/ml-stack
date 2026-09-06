@@ -67,6 +67,12 @@ def test_a_run_with_no_draft_head_says_so_rather_than_zero(tmp_path):
     assert stats.spent.acceptance is None
 
 
+def test_the_model_falls_back_to_what_the_replies_named(tmp_path):
+    stats = run_stats(a_run(tmp_path, calls=[a_call()]))
+
+    assert stats.model == "thornwick-8b.gguf"
+
+
 def test_a_run_whose_calls_never_reached_the_server_measures_nothing(tmp_path):
     stats = run_stats(a_run(tmp_path, calls=[]))
 

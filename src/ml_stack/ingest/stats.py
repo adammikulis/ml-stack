@@ -39,7 +39,7 @@ class RunStats:
     seconds: float = 0.0             # wall clock across the sections that finished
     spent: Spent = field(default_factory=Spent)
     runs: int = 0                    # runs that wrote into this store
-    model: str = ""
+    model: str = ""                  # the run record's, or what the replies said
     head: str = ""                   # the draft head file, "" when the record names none
     head_depth: int | None = None    # tokens guessed ahead of the model, per pass
     sampling: Mapping[str, Any] = field(default_factory=dict)
@@ -116,7 +116,7 @@ def run_stats(out: str | Path, *, view: Any = None) -> RunStats:
         sections=int(totals["sections"]), wanted=int(totals["of"]),
         failed=int(totals["failed"]), given_up=int(totals["given_up"]),
         seconds=float(totals["seconds"]), spent=spent, runs=len(run_ids),
-        model=Path(str(attrs.get("model") or "")).name,
+        model=Path(str(attrs.get("model") or spent.model or "")).name,
         head=_head_named(str(attrs.get("serving") or "")),
         head_depth=_depth(attrs.get("n_max")),
         sampling=dict(attrs.get("sampling") or {}))
