@@ -102,9 +102,26 @@ works against any client, lm-eval included. Servers are now launched with `--met
   time -- read acceptance and acceptance-by-position, which are per-token ratios, and fix
   the generated length before quoting seconds.
 - [ ] **Only the ingest captures counters; the other harnesses do not.** `ml-stack-bench`
-  (`standard`, `drafts`, `sweep`), `ml-stack-world simulate` and `converse` each need a
-  `counting()` around the block they already run, labelled with the workload and the
-  sampling they used. No new harness -- the capture goes around what is there.
+  (`standard`, `drafts`, `sweep`), `ml-stack-draft`, `ml-stack-world simulate` and
+  `converse` each need a `counting()` around the block they already run, labelled with the
+  workload and the sampling they used. No new harness -- the capture goes around what is
+  there. `ml-stack-draft` wants it most: its `tok/pass` column is empty on any build
+  without `0002-speculative-timings.patch`, and the counters answer the same question off
+  `/metrics` on every build.
+- [ ] **`ml-stack-draft` has not been run against Flash-Next.** It was driven end to end on
+  gemma-4 E2B and E4B (2 questions an arm, `--anyway` on a busy machine): the arms serve,
+  the table prints, the run is kept, the paste line is right. The command is
+  `ml-stack-draft Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`, on a quiet machine,
+  with no other flags. On E4B the head's own cache at q4_0 moved throughput by 0.1 tok/s
+  against f16, which is why `--draft-kv` is a flag and not a default arm; whether that
+  holds on Flash-Next is one `--draft-kv q4_0` away.
+- [ ] **The pre-load estimate does not charge a draft head's KV cache.**
+  `serve.preflight.draft_kv_estimate_bytes` computes it from the head's own GGUF (honouring
+  `nextn_predict_layers`, without which an MTP head's header reads as its target's 49
+  layers where llama.cpp builds one), and `fit` charges it from the load log. `Preflight`
+  itself does not add it: its signature is nine parameters, over the edit guard's limit, so
+  it cannot be edited until its six reader seams become a dataclass. That refactor reaches
+  `bench/selfcheck.py` and the preflight tests.
 - [ ] **The ingest's counter table has not been driven through `ml-stack-ingest` itself.**
   `_counted` and `_counter_lines` in `ml_stack/ingest/run.py` are exercised by the client
   path and by unit tests, not by a real read of a chapter.
