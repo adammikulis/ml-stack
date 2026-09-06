@@ -442,9 +442,9 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
     with its speedup over the baseline as a number, and which configuration to serve.
     """
     # The base model is loaded again for every head, because `-md` is bound when the server
-    # starts and llama.cpp has no runtime swap: N configurations is N servers. It costs much
-    # less than the first load -- the weights are mmapped and the pages are still cached --
-    # but it is not free, so `served` times it and prints it rather than waving it away.
+    # starts and llama.cpp has no runtime swap. It costs much less than the first load --
+    # the weights are mmapped and the pages are still cached -- but it is not free, so
+    # `served` times it and prints it rather than waving it away.
     out: list[Row] = []
     lengths = list(n_max) or [None]
     before = {r.get("key") for r in bench._kept(kept)} if kept else set()
