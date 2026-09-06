@@ -38,6 +38,9 @@ from ml_stack.records import Records
 
 __all__ = [
     "ASK",
+    "ASK",
+    "CHAT",
+    "INGEST",
     "WORKLOADS",
     "Profile",
     "add",
@@ -66,6 +69,9 @@ WORKLOADS = {
 
 ASK = "ask"
 """The workload a record with none belongs to, and what `--for` means when unsaid."""
+
+INGEST = "ingest"
+CHAT = "chat"
 
 
 def workload_named(name: str) -> str:

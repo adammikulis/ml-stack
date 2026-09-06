@@ -508,6 +508,8 @@ class LlamaServerBackend(ServerBackend):
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:
             argv += ["--jinja"]
+        # /metrics carries the speculative counters; without this flag the route 501s
+        argv += ["--metrics"]
         if spec.cache_type_k:
             argv += ["--cache-type-k", str(spec.cache_type_k)]
         if spec.cache_type_v:

@@ -5,18 +5,26 @@ from __future__ import annotations
 
 import math
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from ml_stack.client.counters import (
+    Ledger,
+    counting,
+    sampling_named,
+    survival_lines,
+)
 from ml_stack.ingest.extract import schema
 from ml_stack.ingest.fold import fold_into
 from ml_stack.ingest.judge import run_record, write_run
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import Read, _keep_reads, _read_json, reads_path
+from ml_stack.ingest.serving import _sampling
 from ml_stack.log import say, warn
+from ml_stack.serve.profile import INGEST
 
 __all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit"]
 
@@ -124,7 +132,7 @@ def _read_run(args: Any) -> int:
         return got
 
     try:
-        with _stopping(), ingest._serving(args) as client:
+        with _stopping(), ingest._serving(args) as client, _counted(args, client) as counted:
             run_id = write_run(args.out,
                                run_record(args, serving=ingest._serving_said(args)))
             say(f"  run {run_id}: units read now point at it")
@@ -236,10 +244,37 @@ def _read_run(args: Any) -> int:
         + (f"; {totals['failed']} failed" if totals["failed"] else ""))
     if spent.drafted:
         say(_drafting_line(spent))
+    for line in _counter_lines(counted):
+        say(line)
     if stopped:
         say("stopped: what was read is folded into the store; "
             f"the same command with --resume reads on ({args.out})")
     return code
+
+
+@contextmanager
+def _counted(args: Any, client: Any) -> Iterator[Any]:
+    """The server's speculative counters either side of the whole read, labelled."""
+    base = str(getattr(client, "base_url", "") or "")
+    asked = _sampling(args)
+    if not base:
+        yield None
+        return
+    with counting(base, workload=INGEST,
+                  sampling=sampling_named(asked.get("temperature"), top_p=asked.get("top_p")),
+                  label=str(getattr(args, "out", "") or "")) as block:
+        yield block
+
+
+def _counter_lines(block: Any) -> list[str]:
+    """What the counters said about this read, or why they said nothing."""
+    if block is None:
+        return ["the server was not reachable for its speculative counters"]
+    led = Ledger([block])
+    out = list(led.lines())
+    if (moved := block.delta) is not None and moved.drafts:
+        out += ["", "  acceptance by position within the draft:", *survival_lines(moved)]
+    return out
 
 
 def _drafting_line(spent: Any) -> str:

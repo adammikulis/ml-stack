@@ -183,6 +183,11 @@ select = [
 # S603 and S607 fire on every subprocess call and every argv[0] without a full path.
 ignore = ["S603", "S607"]
 
+[tool.ruff.lint.isort]
+# The pre-commit gate lints a temporary tree holding only the staged files, where ml_stack
+# is not on any path; without this it reads as third-party and every import block moves.
+known-first-party = ["ml_stack"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = [
     "S101",  # assert is what a test is written in
