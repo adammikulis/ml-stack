@@ -475,13 +475,60 @@ def settings_bytes(paths) -> dict[str, bytes | None]:
     return out
 
 
+def lease_entries(lease_file, older_lease) -> dict | None:
+    """The lease file's entries by port, or None when there is no file.
+
+    A file that is not the manager's JSON reads as {"?": bytes} so any rewrite of it
+    still shows.
+    """
+    where = lease_file if lease_file.exists() else older_lease
+    if not where.exists():
+        return None
+    try:
+        held = json.loads(where.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {"?": where.read_bytes() if where.exists() else b""}
+    return held if isinstance(held, dict) else {"?": held}
+
+
+def ours(entry) -> bool:
+    """Whether a lease entry was written by this test session -- its owner is this
+    process, an ancestor or a descendant.
+
+    A live ingest or a person's serve on this machine rewrites the real state file while
+    the suite runs; that is theirs.
+    """
+    owner = entry.get("owner_pid") if isinstance(entry, dict) else None
+    if not isinstance(owner, int):
+        return True
+    try:
+        import psutil
+
+        me = psutil.Process(os.getpid())
+        tree = {me.pid, *(p.pid for p in me.parents()), *(p.pid for p in me.children(True))}
+        # an owner that has gone and was never in this tree was somebody else's server
+        # ending while the suite ran -- not ours
+        return owner in tree
+    except Exception:  # noqa: BLE001 - no psutil: judge by the pid alone
+        return owner == os.getpid()
+
+
+def points_at(link) -> str:
+    """What ``link`` resolves to, or "" when there is nothing there."""
+    try:
+        return str(link.resolve(strict=True))
+    except OSError:
+        return ""
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _real_cache_and_state_untouched():
     """Fails the run if a test wrote into the real ml_stack cache or server state.
 
-    Snapshots the log directory, the lease file and the two settings files -- resolved
-    once at session start, before any per-test fixture moves the state or cache root --
-    and compares again once every test in the session has run. Safe when no path exists.
+    Snapshots the log directory, the lease file, the two settings files and the link
+    naming the managed llama.cpp build -- resolved once at session start, before any
+    per-test fixture moves the state or cache root -- and compares again once every test
+    in the session has run. Safe when no path exists.
 
     The log directory holds one append-only file per server this machine is running, so a
     file that got *shorter* is a truncation and nothing but a test does that; a file that
@@ -496,6 +543,7 @@ def _real_cache_and_state_untouched():
     older_lease = cache("servers.json")
     settings = [where(name) for name in ("limits.json", "idle.json")
                 for where in (state, cache)]
+    current_build = state("llama.cpp") / "current"
 
     def log_sizes() -> dict[str, tuple[int, int]]:
         if not log_dir.is_dir():
@@ -510,40 +558,15 @@ def _real_cache_and_state_untouched():
         return out
 
     def state_entries() -> dict | None:
-        """The lease file's entries by port, or None when there is no file. A file that
-        is not the manager's JSON reads as {"?": bytes} so any rewrite of it still shows."""
-        where = lease_file if lease_file.exists() else older_lease
-        if not where.exists():
-            return None
-        try:
-            held = json.loads(where.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return {"?": where.read_bytes() if where.exists() else b""}
-        return held if isinstance(held, dict) else {"?": held}
-
-    def ours(entry) -> bool:
-        """Whether an entry was written by this test session -- its owner is this
-        process, an ancestor or a descendant. A live ingest or a person's serve on this
-        machine rewrites the real state file while the suite runs; that is theirs."""
-        owner = entry.get("owner_pid") if isinstance(entry, dict) else None
-        if not isinstance(owner, int):
-            return True
-        try:
-            import psutil
-
-            me = psutil.Process(os.getpid())
-            tree = {me.pid, *(p.pid for p in me.parents()), *(p.pid for p in me.children(True))}
-            # an owner that has gone and was never in this tree was somebody else's server
-            # ending while the suite ran (a judged pass's, 2026-09-03) -- not ours
-            return owner in tree
-        except Exception:  # noqa: BLE001 - no psutil: judge by the pid alone
-            return owner == os.getpid()
+        return lease_entries(lease_file, older_lease)
 
     before_logs, before_state = log_sizes(), state_entries()
     before_settings = settings_bytes(settings)
+    before_build = points_at(current_build)
     yield
     after_logs, after_state = log_sizes(), state_entries()
     after_settings = settings_bytes(settings)
+    after_build = points_at(current_build)
 
     problems = []
     cut = truncated_logs(before_logs, after_logs)
@@ -562,6 +585,8 @@ def _real_cache_and_state_untouched():
             problems.append(f"{lease_file}: changed (entries {sorted(mine) or 'created/removed'})")
     problems.extend(f"{where}: changed" for where, held in before_settings.items()
                     if after_settings.get(where) != held)
+    if after_build != before_build:
+        problems.append(f"{current_build}: now points at {after_build}, was {before_build}")
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
                     pytrace=False)
