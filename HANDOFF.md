@@ -484,22 +484,6 @@ worth taking, in this order:
   `ml-stack-peers`, `ml-stack-traind`. A command whose row in the README's table changes
   is a change to `ml_stack.cli.reference` and `scripts/reference --write`.
 
-## Where state lives
-
-- [ ] **`ML_STACK_HOME` does not move the llama.cpp builds.** `ml_stack.home` reads the
-  environment when it is called, so every home and record file follows the variable -- but
-  `serve/binary.py` still binds `MANAGED_ROOT`, `MANAGED_CURRENT` and `MANAGED_NAMED` at
-  import, and `serve/build.py` derives `ROOT`, `SRC_DIR`, `BUILDS_DIR`, `CURRENT_LINK`,
-  `NAMED_DIR` and `NAMED_SRC_DIR` from them, so a process that sets the variable after
-  import still finds the builds under the old root. `hub.HUB_CACHE` is the same shape for
-  `$HF_HOME`. Making them functions is about 40 call sites in `build.py` and eight
-  `monkeypatch.setattr` in `test_serve_build.py`, `test_hub.py` and `test_doctor.py`.
-- [ ] **`limits.json` and `idle.json` are under the cache root, not the state root.** What
-  this machine is set to allow, and how long each server has been idle, are both state a
-  person would lose by clearing caches -- the same reason `servers.json` moved to
-  `~/.ml-stack`. Moving them needs the same read-the-old-path-once step `manager.lease_file`
-  does, and `MLSTACK_LIMITS_FILE` keeps working either way.
-
 ## Layers
 
 - [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
