@@ -144,13 +144,47 @@ def cmd_status(args: argparse.Namespace) -> int:
         if snapshot.load_s is not None:
             warm = f", warm-up {snapshot.warmup_s:.1f}s" if snapshot.warmup_s is not None else ""
             say(f"  loaded   in {snapshot.load_s:.1f}s{warm}")
+        for line in _drafting_lines(snapshot.drafting):
+            say(line)
         if snapshot.verdict:
             say("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
                                      args.parallel))
     for held in found.foreign:
         say(base_url_for(held["port"]))
         say(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
+        say("  drafting " + (f"{held['draft']}, from its command line"
+                             if held.get("draft") else
+                             "no draft head -- every token is written by the model itself"))
     return 0
+
+
+def _drafting_lines(drafting: ops.Drafting | None) -> list[str]:
+    """What `status` says about a server's draft head: what it is, and how much is kept."""
+    if drafting is None:
+        return []
+    if not drafting.loaded:
+        return ["  drafting no draft head -- every token is written by the model itself"]
+    named = [drafting.head or "a head the command line does not name"]
+    if drafting.spec_type:
+        named.append(drafting.spec_type)
+    if drafting.ahead is not None:
+        named.append(f"{drafting.ahead} token(s) ahead per pass")
+    return [f"  drafting {', '.join(named)}", "           " + _kept_line(drafting)]
+
+
+def _kept_line(drafting: ops.Drafting) -> str:
+    """How much of the draft the model has kept since this server came up."""
+    if not drafting.metrics:
+        return ("acceptance unknown: this server was started without --metrics, so it "
+                "reports no counters")
+    counted = drafting.counted
+    if counted is None:
+        return "acceptance unknown: this server answered no counters"
+    if not counted.drafts:
+        return "nothing drafted yet since the server came up"
+    return (f"{(counted.acceptance or 0) * 100:.1f}% of drafted tokens kept since the server "
+            f"came up (higher is better), "
+            f"{counted.tokens_per_draft or 0:.1f} tokens per verification pass")
 
 
 def from_profile(args: argparse.Namespace, model: str,

@@ -818,6 +818,90 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     assert Path(found).is_symlink() and Path(found).stat().st_size == 100
 
 
+def drafting_server(*, metrics: bool = True, drafts: int = 0, drafted: int = 0,
+                    accepted: int = 0):
+    """A handler answering /props and, where ``metrics``, the speculative counters."""
+    counters = "\n".join([
+        f"llamacpp:spec_decode_num_drafts_total {drafts}",
+        f"llamacpp:spec_decode_num_draft_tokens_total {drafted}",
+        f"llamacpp:spec_decode_num_accepted_tokens_total {accepted}",
+    ])
+
+    def handle(method, path, body):
+        if path.startswith("/props"):
+            return json_reply({"model_path": f"/models/{MODEL}", "total_slots": 1,
+                               "endpoint_metrics": metrics,
+                               "default_generation_settings": {"n_ctx": 4096}})
+        if path.startswith("/metrics"):
+            return (200, counters.encode()) if metrics else (501, b"{}")
+        return json_reply({"data": [{"id": MODEL}]})
+
+    return handle
+
+
+def a_llama_server(port: int, *, draft: str = "", spec_type: str = "",
+                   draft_max: int | None = None):
+    """One row of `every_server`, as a server started with (or without) a draft head."""
+    return {"pid": 4242, "port": port, "defunct": False, "model": f"/models/{MODEL}",
+            "binary": "/x/llama-server", "draft": draft, "spec_type": spec_type,
+            "draft_max": draft_max, "rss": 0}
+
+
+class TestStatusDrafting:
+    """`status` says whether a draft head is loaded and how much of it is being kept."""
+
+    def test_a_head_is_named_with_its_depth_and_what_the_server_keeps(self, server, state,
+                                                                     monkeypatch, capsys):
+        instance = server(drafting_server(drafts=100, drafted=400, accepted=340))
+        record(state, instance.port, pid=4242, owner_pid=os.getpid())
+        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
+            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf", spec_type="draft-mtp",
+            draft_max=4)])
+
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+
+        out = capsys.readouterr().out
+        assert "drafting mtp-tinyfixture-Q8_0.gguf, draft-mtp, 4 token(s) ahead per pass" in out
+        assert "85.0% of drafted tokens kept since the server came up (higher is better)" in out
+        assert "4.4 tokens per verification pass" in out
+
+    def test_a_server_with_no_head_says_so_rather_than_zero(self, server, state, monkeypatch,
+                                                            capsys):
+        instance = server(drafting_server())
+        record(state, instance.port, pid=4242, owner_pid=os.getpid())
+        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(instance.port)])
+
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+
+        out = capsys.readouterr().out
+        assert "drafting no draft head -- every token is written by the model itself" in out
+        assert "0.0%" not in out
+
+    def test_a_server_started_without_metrics_says_the_counters_are_not_there(
+            self, server, state, monkeypatch, capsys):
+        instance = server(drafting_server(metrics=False))
+        record(state, instance.port, pid=4242, owner_pid=os.getpid())
+        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
+            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf", spec_type="draft-mtp")])
+
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+
+        out = capsys.readouterr().out
+        assert "drafting mtp-tinyfixture-Q8_0.gguf, draft-mtp" in out
+        assert "acceptance unknown: this server was started without --metrics" in out
+
+    def test_a_head_that_has_drafted_nothing_yet_says_that(self, server, state, monkeypatch,
+                                                           capsys):
+        instance = server(drafting_server(drafts=0, drafted=0, accepted=0))
+        record(state, instance.port, pid=4242, owner_pid=os.getpid())
+        monkeypatch.setattr(ops, "every_server", lambda: [a_llama_server(
+            instance.port, draft="/heads/mtp-tinyfixture-Q8_0.gguf")])
+
+        assert cli.main(["status", "--port", str(instance.port)]) == 0
+
+        assert "nothing drafted yet since the server came up" in capsys.readouterr().out
+
+
 def test_status_every_lists_each_llama_server_and_says_which_nobody_leased(monkeypatch, capsys,
                                                                             tmp_path):
     """A stray server -- a Homebrew one from before the managed build -- holds memory a lease
@@ -888,7 +972,7 @@ def test_status_reports_a_foreign_server_and_leaves_it_alone(state, server, monk
 
     assert cli.main(["status", "--port", str(instance.port), "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["foreign"] == [{"port": instance.port, "pid": 9911}]
+    assert payload["foreign"] == [{"port": instance.port, "pid": 9911, "draft": ""}]
     assert payload["servers"] == []
     assert payload["serving"] is True
 

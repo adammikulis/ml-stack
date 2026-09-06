@@ -11,13 +11,14 @@ from __future__ import annotations
 import os
 import platform
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
 from ml_stack import home
 from ml_stack.client import is_healthy, reported_models
+from ml_stack.client.counters import Speculative, read_speculative
 from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
@@ -44,7 +45,8 @@ from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
 from ml_stack.serve.process import every_server, machine_memory, pid_exists
 from ml_stack.units import human_bytes
 
-__all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Limits", "Machine",
+__all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Limits",
+           "Machine",
            "Processes", "Recorded", "Refused", "Resolved", "Snapshot", "Started",
            "Status", "Stopped", "alongside", "announce", "base_url_for", "beacon",
            "cache_of", "down", "drafted", "escalate", "fit_markdown", "fit_page", "judge",
@@ -66,6 +68,22 @@ class Refused(Exception):
 
 
 @dataclass(frozen=True, slots=True)
+class Drafting:
+    """The draft head a server is running, and what its counters say of it."""
+
+    head: str = ""                       # the head file it was started with
+    spec_type: str = ""                  # the speculation that head implements
+    ahead: int | None = None             # tokens it guesses per verification pass
+    metrics: bool | None = None          # whether the server answers /metrics
+    counted: Speculative | None = None   # its counters since it came up
+
+    @property
+    def loaded(self) -> bool:
+        """Whether a draft head was named on the server's command line."""
+        return bool(self.head or self.spec_type)
+
+
+@dataclass(frozen=True, slots=True)
 class Snapshot:
     """One server that is answering, and what a lease for it would do."""
 
@@ -81,6 +99,7 @@ class Snapshot:
     recorded: bool = False
     load_s: float | None = None
     warmup_s: float | None = None
+    drafting: Drafting | None = None
     verdict: str = ""
     reason: str = ""
 
@@ -91,7 +110,7 @@ class Status:
 
     ports: tuple[int, ...]
     servers: tuple[Snapshot, ...]
-    foreign: tuple[dict[str, int], ...]
+    foreign: tuple[dict[str, Any], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,8 +191,24 @@ def _float_or_none(value: object) -> float | None:
     return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
 
 
-def look(port: int, records: dict[int, dict]) -> Snapshot | None:
-    """What is serving on ``port``, or ``None`` when nothing answers there."""
+def drafting_of(base_url: str, entry: Mapping[str, Any], params: Any) -> Drafting:
+    """The draft head a server was started with, and the counters it reports for it."""
+    metrics = params.raw.get("endpoint_metrics") if params is not None else None
+    head = str(entry.get("draft") or "")
+    counted = read_speculative(base_url) if metrics else None
+    return Drafting(head=Path(head).name if head else "",
+                    spec_type=str(entry.get("spec_type") or ""),
+                    ahead=_int_or_none(entry.get("draft_max")),
+                    metrics=None if metrics is None else bool(metrics), counted=counted)
+
+
+def look(port: int, records: dict[int, dict], served: Mapping[int, Any] | None = None
+         ) -> Snapshot | None:
+    """What is serving on ``port``, or ``None`` when nothing answers there.
+
+    ``served`` is `ml_stack.serve.process.every_server` by port; without it the snapshot
+    says nothing about drafting, which the server itself does not report.
+    """
     url = base_url_for(port)
     if not is_healthy(url, timeout=PROBE_TIMEOUT):
         return None
@@ -199,6 +234,8 @@ def look(port: int, records: dict[int, dict]) -> Snapshot | None:
         recorded=bool(entry),
         load_s=_float_or_none(entry.get("load_s")),
         warmup_s=_float_or_none(entry.get("warmup_s")),
+        drafting=(drafting_of(url, (served or {}).get(port) or {}, params)
+                  if served is not None and port in served else None),
     )
 
 
@@ -238,11 +275,12 @@ def status(*, port: int, model: str = "", context: int = 0, parallel: int = 1) -
     records = recorded_servers(lease_file())
     ports = sorted({*records, int(port)})
     manager = ServerManager(state_file=lease_file())
+    served = {int(one["port"]): one for one in every_server() if not one.get("defunct")}
 
     found: list[Snapshot] = []
-    foreign: list[dict[str, int]] = []
+    foreign: list[dict[str, Any]] = []
     for one in ports:
-        snapshot = look(one, records)
+        snapshot = look(one, records, served)
         if snapshot is None:
             continue
         if not snapshot.recorded:
@@ -250,7 +288,9 @@ def status(*, port: int, model: str = "", context: int = 0, parallel: int = 1) -
             # one, so it is reported and left alone rather than judged
             pids = server_pids_on_port(one)
             if pids:
-                foreign.extend({"port": one, "pid": pid} for pid in pids)
+                head = str((served.get(one) or {}).get("draft") or "")
+                foreign.extend({"port": one, "pid": pid,
+                                "draft": Path(head).name if head else ""} for pid in pids)
                 continue
         wanted = model or snapshot.model
         if wanted:

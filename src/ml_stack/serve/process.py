@@ -77,7 +77,8 @@ def kill_process_tree(pid: int, *, grace_s: float = 5.0) -> list[int]:
 
 
 def every_server() -> list[dict]:
-    """Every llama-server process on this machine, leased or not: pid, port, model, memory.
+    """Every llama-server process on this machine, leased or not: pid, port, model, the draft
+    head it was started with, memory.
 
     A server nobody recorded -- a Homebrew one from before the managed build, a hand start
     -- holds memory a lease cannot see.
@@ -115,10 +116,15 @@ def every_server() -> list[dict]:
             from ml_stack.bench.measure import footprint_of
 
             rss = footprint_of(proc) or rss
+        ahead = after("--spec-draft-n-max")
         out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
                     "defunct": state == psutil.STATUS_ZOMBIE,
                     "model": after("--model", "-m") or after("-hf") or "",
                     "binary": argv[0] if argv else name,
+                    "draft": after("--spec-draft-model", "-md") or after("--model-draft")
+                             or after("-hfd"),
+                    "spec_type": after("--spec-type"),
+                    "draft_max": int(ahead) if ahead.isdigit() else None,
                     "rss": rss})
     return sorted(out, key=lambda r: r["port"])
 
