@@ -282,6 +282,15 @@ class Measured:
     recurrent_bytes: int = 0
     model_file: str = ""
     build: str = ""
+    draft_per_token: int = 0
+    """Bytes of KV cache the draft head keeps per token of context, per sequence. 0 for a
+    load with no head, and for one whose head kept no cache of its own."""
+    draft_per_seq: int = 0
+    """Bytes the draft head costs a sequence whatever its context is."""
+    draft_cache_type: str = ""
+    """What the draft head's cache stores, as llama.cpp names it. llama.cpp's own default
+    is f16 whatever the target's cache type is."""
+    draft_kv_layers: int = 0
     segments: tuple[Segment, ...] = ()
     """Every model the load brought in, in load order -- the target, a draft head, a
     projector -- and where each one's weights ended up, per backend."""
@@ -326,6 +335,12 @@ class Measured:
             parts.append(f"a {self.swa_cells}-cell sliding window")
         if self.cache_type:
             parts.append(f"cache {self.cache_type}")
+        if self.draft_per_token or self.draft_per_seq:
+            parts.append(f"the draft head's own cache {human_bytes(self.draft_per_token)} "
+                         f"per token"
+                         + (f", {human_bytes(self.draft_per_seq)} per sequence"
+                            if self.draft_per_seq else "")
+                         + (f" ({self.draft_cache_type})" if self.draft_cache_type else ""))
         if self.segments:
             parts.append(f"weights {human_bytes(self.weights_gpu)} on the GPU, "
                          f"{human_bytes(self.weights_cpu)} mapped on the CPU")
@@ -402,21 +417,78 @@ def _segment_of(text: str, index: int) -> Segment | None:
         declined=tuple(declined))
 
 
+def _cache_of(segment: str) -> Measured | None:
+    """What one model's part of the log says it allocated, or None when it allocated none."""
+    kv = list(_KV_SIZE.finditer(segment))
+    rs = list(_RS_SIZE.finditer(segment))
+    if not kv and not rs:
+        return None
+
+    source = _LOADED.search(segment)
+    model_file = Path(source.group(1)).name if source else ""
+
+    per_token = kv_bytes = cells = seqs = kv_layers = 0
+    swa_bytes = swa_cells = 0
+    cache_type = ""
+    if kv:
+        # llama_kv_cache_iswa builds the base cache first and the SWA one second; the
+        # base is the one whose cells are the context.
+        base, *others = kv
+        kv_bytes, cells = _mib(base.group(1)), int(base.group(2))
+        kv_layers, seqs = int(base.group(3)), int(base.group(4))
+        # llama-kv-cache.cpp prints "n_seq_max/n_stream" -- one stream is one shared
+        # buffer sized for every sequence; more than one is a separate full-size copy
+        # per sequence, and kv_bytes is already the sum over every stream.
+        streams = max(1, int(base.group(5)))
+        type_k, type_v = base.group(6), base.group(8)
+        cache_type = type_k if type_k == type_v else f"{type_k}/{type_v}"
+        per_token = kv_bytes // (cells * streams) if cells else 0
+        for other in others:
+            each, wide = _mib(other.group(1)), int(other.group(2))
+            if cells and wide >= cells:
+                # a second cache spanning the whole context -- a sparse layer's indexer
+                # keeps one beside its K/V -- costs per token, not per sequence
+                kv_bytes += each
+                per_token += each // (wide * streams)
+            else:
+                swa_bytes += each
+                swa_cells = max(swa_cells, wide)
+            kv_layers += int(other.group(3))
+
+    recurrent_bytes = recurrent_layers = 0
+    rs_seqs = 0
+    for one in rs:
+        recurrent_bytes += _mib(one.group(1))
+        recurrent_layers += int(one.group(3))
+        rs_seqs = max(rs_seqs, int(one.group(4)))
+
+    # Both fixed costs were sized for however many sequences were served; one sequence's
+    # share is what a user costs.
+    share = max(seqs, rs_seqs, 1)
+
+    # The compute buffers are one per backend and the reserve can run more than once, so
+    # the last figure for each backend is the one that stands.
+    by_backend: dict[str, int] = {}
+    for one in _COMPUTE.finditer(segment):
+        by_backend[one.group(1)] = _mib(one.group(2))
+
+    return Measured(
+        per_token=per_token, per_seq=(recurrent_bytes + swa_bytes) // share,
+        compute=sum(by_backend.values()),
+        cache_type=cache_type, kv_layers=kv_layers, recurrent_layers=recurrent_layers,
+        cells=cells, seqs=share, swa_cells=swa_cells, kv_bytes=kv_bytes,
+        swa_bytes=swa_bytes, recurrent_bytes=recurrent_bytes, model_file=model_file)
+
+
+def _loaded_file(segment: str) -> str:
+    """The file name the load line in this part of the log names, or ""."""
+    found = _LOADED.search(segment) or _CLIP_FILE.search(segment)
+    return Path(found.group(1)).name if found else ""
+
+
 def parse_load_log(text: str) -> Measured:
-    """What llama.cpp allocated, from the log it wrote at `-lv 4`.
-
-    Robust to every line being absent: a model with no recurrent layers prints no
-    `llama_memory_recurrent` line, one with no sliding window prints one `llama_kv_cache`
-    line rather than two, and a log written at the default verbosity prints none of them --
-    which comes back as an all-zero ``Measured`` whose ``measured`` is False, never as a
-    raise. Only the *first* model's **cache** is read: a draft head loads after the target
-    and prints the same lines again.
-
-    The **weights** are read from every model in the log, kept apart as ``segments`` -- the
-    target, then a draft head, then a projector -- because "how big is it in memory" is not
-    the file size and llama.cpp is the only thing that knows the difference. See this
-    module's own docstring for why the two numbers differ and by how much.
-    """
+    """What llama.cpp allocated, from the log it wrote at `-lv 4`: the target's cache, a
+    draft head's own cache beside it, and every model's weights."""
     build = ""
     found = _BUILD.search(text)
     if found:
@@ -427,63 +499,17 @@ def parse_load_log(text: str) -> Measured:
                    (_segment_of(part, i) for i, part in enumerate(parts))
                    if seg is not None)
 
-    for segment in parts:
-        kv = list(_KV_SIZE.finditer(segment))
-        rs = list(_RS_SIZE.finditer(segment))
-        if not kv and not rs:
-            continue
-
-        source = _LOADED.search(segment)
-        model_file = Path(source.group(1)).name if source else ""
-
-        per_token = kv_bytes = cells = seqs = kv_layers = 0
-        swa_bytes = swa_cells = 0
-        cache_type = ""
-        if kv:
-            # llama_kv_cache_iswa builds the base cache first and the SWA one second; the
-            # base is the one whose cells are the context.
-            base, *sliding = kv
-            kv_bytes, cells = _mib(base.group(1)), int(base.group(2))
-            kv_layers, seqs = int(base.group(3)), int(base.group(4))
-            # llama-kv-cache.cpp prints "n_seq_max/n_stream" -- one stream is one shared
-            # buffer sized for every sequence; more than one is a separate full-size copy
-            # per sequence, and kv_bytes is already the sum over every stream.
-            streams = max(1, int(base.group(5)))
-            type_k, type_v = base.group(6), base.group(8)
-            cache_type = type_k if type_k == type_v else f"{type_k}/{type_v}"
-            per_token = kv_bytes // (cells * streams) if cells else 0
-            for other in sliding:
-                swa_bytes += _mib(other.group(1))
-                swa_cells = max(swa_cells, int(other.group(2)))
-                kv_layers += int(other.group(3))
-
-        recurrent_bytes = recurrent_layers = 0
-        rs_seqs = 0
-        if rs:
-            for one in rs:
-                recurrent_bytes += _mib(one.group(1))
-                recurrent_layers += int(one.group(3))
-                rs_seqs = max(rs_seqs, int(one.group(4)))
-
-        # Both fixed costs were sized for however many sequences were served; one
-        # sequence's share is what a user costs.
-        share = max(seqs, rs_seqs, 1)
-        per_seq = (recurrent_bytes + swa_bytes) // share
-
-        # The compute buffers are one per backend and the reserve can run more than once,
-        # so the last figure for each backend is the one that stands.
-        by_backend: dict[str, int] = {}
-        for one in _COMPUTE.finditer(segment):
-            by_backend[one.group(1)] = _mib(one.group(2))
-
-        return Measured(
-            per_token=per_token, per_seq=per_seq, compute=sum(by_backend.values()),
-            cache_type=cache_type, kv_layers=kv_layers, recurrent_layers=recurrent_layers,
-            cells=cells, seqs=share, swa_cells=swa_cells, kv_bytes=kv_bytes,
-            swa_bytes=swa_bytes, recurrent_bytes=recurrent_bytes, model_file=model_file,
-            build=build, segments=loaded)
-
-    return Measured(build=build, segments=loaded)
+    caches = [(i, one) for i, one in
+              ((i, _cache_of(part)) for i, part in enumerate(parts)) if one is not None]
+    if not caches:
+        return Measured(build=build, segments=loaded)
+    head = next((one for i, one in caches[1:]
+                 if _kind_of(_loaded_file(parts[i]), i) == "draft"), None)
+    return replace(caches[0][1], build=build, segments=loaded,
+                   draft_per_token=head.per_token if head else 0,
+                   draft_per_seq=head.per_seq if head else 0,
+                   draft_cache_type=head.cache_type if head else "",
+                   draft_kv_layers=head.kv_layers if head else 0)
 
 
 # ------------------------------------------------------------------ one measured model
@@ -507,6 +533,14 @@ class Fit:
     compute: int = 0
     cache_type: str = "f16"
     spec: str = ""
+    draft_per_token: int = 0
+    """Bytes of KV cache the draft head keeps per token of context, per seat. A draft keeps
+    its own cache at the target's context, so this is charged per user like the model's."""
+    draft_per_seq: int = 0
+    """Bytes the draft head costs a seat whatever its context is."""
+    draft_cache_type: str = ""
+    """What the head's cache stores. "" for a record with no head, or one measured before
+    the head's cache was read apart from the model's."""
     build: str = ""
     measured_at: str = ""
     context: int = 0
@@ -548,10 +582,20 @@ class Fit:
         return self.weights + self.draft
 
     @property
-    def key(self) -> tuple[str, str, str]:
+    def key(self) -> tuple[str, str, str, str]:
         """What a record is keyed by in the file: the model file's basename, the cache type
-        it was measured with, and the speculation kind."""
-        return (self.model, self.cache_type, self.spec)
+        it was measured with, the speculation kind, and the head's own cache type."""
+        return (self.model, self.cache_type, self.spec, self.draft_cache_type)
+
+    @property
+    def token_bytes(self) -> int:
+        """Bytes one seat pays per token of context: the model's cache and the head's."""
+        return self.per_token + self.draft_per_token
+
+    @property
+    def seq_bytes(self) -> int:
+        """Bytes one seat pays whatever its context: the model's and the head's."""
+        return self.per_seq + self.draft_per_seq
 
     def free(self) -> int:
         """Bytes left for caches once the weights, a draft and the compute buffers are in.
@@ -559,8 +603,13 @@ class Fit:
         return max(0, self.room - self.loaded())
 
     def cost(self, per_user_context: int) -> int:
-        """What one more user at ``per_user_context`` tokens costs, in bytes."""
-        return self.per_token * max(0, int(per_user_context)) + self.per_seq
+        """What one more user at ``per_user_context`` tokens costs, in bytes -- the model's
+        cache and, where a head is served, the head's own."""
+        return self.token_bytes * max(0, int(per_user_context)) + self.seq_bytes
+
+    def draft_cost(self, per_user_context: int) -> int:
+        """What of `cost` is the draft head's own cache. 0 where none is served."""
+        return self.draft_per_token * max(0, int(per_user_context)) + self.draft_per_seq
 
     def loaded(self) -> int:
         """What the model costs with nobody on it: the weights that are actually resident,
@@ -603,10 +652,10 @@ class Fit:
         context rather than the head count.
         """
         parallel = max(1, int(parallel))
-        if self.per_token <= 0:
+        if self.token_bytes <= 0:
             return 0
-        each = self.free() // parallel - self.per_seq
-        return max(0, each // self.per_token)
+        each = self.free() // parallel - self.seq_bytes
+        return max(0, each // self.token_bytes)
 
     def at_room(self, room: int) -> Fit:
         """The same measurement, asked about a machine with this much room instead."""
@@ -617,6 +666,8 @@ class Fit:
             "model": self.model, "weights": self.weights, "draft": self.draft,
             "room": self.room, "per_token": self.per_token, "per_seq": self.per_seq,
             "compute": self.compute, "cache_type": self.cache_type, "spec": self.spec,
+            "draft_per_token": self.draft_per_token, "draft_per_seq": self.draft_per_seq,
+            "draft_cache_type": self.draft_cache_type,
             "build": self.build, "measured_at": self.measured_at, "context": self.context,
             "parallel": self.parallel, "kv_layers": self.kv_layers,
             "recurrent_layers": self.recurrent_layers, "swa_cells": self.swa_cells,
@@ -648,7 +699,8 @@ class Fit:
         back off, using the numbers this same load produced. Never below what the log said
         was resident on the GPU, because that part cannot be paged out.
         """
-        per_token, per_seq = measured.per_token, measured.per_seq
+        per_token = measured.per_token + measured.draft_per_token
+        per_seq = measured.per_seq + measured.draft_per_seq
         resident = 0
         if resident_peak > 0:
             held = max(1, int(parallel or 1)) * (per_token * max(0, int(context)) + per_seq)
@@ -657,10 +709,12 @@ class Fit:
         return cls(
             model=model or measured.model_file,
             weights=weights, draft=draft, room=room,
-            per_token=per_token, per_seq=per_seq,
+            per_token=measured.per_token, per_seq=measured.per_seq,
             compute=measured.compute,
             cache_type=cache_type or measured.cache_type or "f16",
             spec=spec, build=build or measured.build,
+            draft_per_token=measured.draft_per_token, draft_per_seq=measured.draft_per_seq,
+            draft_cache_type=measured.draft_cache_type,
             measured_at=when or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             context=context, parallel=parallel, kv_layers=measured.kv_layers,
             recurrent_layers=measured.recurrent_layers, swa_cells=measured.swa_cells,
@@ -674,7 +728,7 @@ class Fit:
 _STORE: Records[Fit] = Records(
     "fit.json", env="MLSTACK_FIT_FILE",
     build=Fit.from_dict, unbuild=lambda f: f.as_dict(), key=lambda f: f.key,
-    order=lambda f: (f.model.lower(), f.cache_type, f.spec))
+    order=lambda f: (f.model.lower(), f.cache_type, f.spec, f.draft_cache_type))
 
 
 def package_file() -> Path:
@@ -809,6 +863,19 @@ def _headline(fit: Fit) -> str:
     return ", ".join(bits)
 
 
+def _drafts(fit: Fit) -> str:
+    """What the draft head's own cache costs a seat, or "" where none is served."""
+    if not (fit.draft_per_token or fit.draft_per_seq):
+        return ""
+    said = [f"the draft head keeps its own cache: {human_bytes(fit.draft_per_token)} per "
+            f"token of context"]
+    if fit.draft_per_seq:
+        said.append(f"{human_bytes(fit.draft_per_seq)} fixed per sequence")
+    if fit.draft_cache_type:
+        said.append(f"stored as {fit.draft_cache_type}")
+    return ", ".join(said)
+
+
 def _shape(fit: Fit) -> str:
     bits = [f"{fit.kv_layers} layers with a cache"]
     if fit.recurrent_layers:
@@ -859,14 +926,17 @@ def _block(fit: Fit, contexts: list[int]) -> str:
     lines += [f"  {said}" for said in _where_it_went(fit)]
     lines.append(f"  {human_bytes(fit.per_token)} per token of context, "
                  f"{human_bytes(fit.per_seq)} fixed per sequence")
+    if _drafts(fit):
+        lines.append(f"  {_drafts(fit)}")
     shape = _shape(fit)
     if shape:
         lines.append(f"  {shape}")
     lines.append("")
-    lines.append("  per user context   users that fit   each costs")
+    lines.append("  per user context   users that fit   each costs   of which the head")
     for context in contexts:
         lines.append(f"  {_tokens(context):>16}   {fit.users(context):>14}   "
-                     f"{human_bytes(fit.cost(context)):>10}")
+                     f"{human_bytes(fit.cost(context)):>10}   "
+                     f"{(human_bytes(fit.draft_cost(context)) if fit.draft_per_token else '-'):>17}")
     lines.append(f"  one user, longest context: {_tokens(fit.longest(1))} tokens")
     return "\n".join(lines)
 
@@ -882,14 +952,17 @@ def _block_md(fit: Fit, contexts: list[int]) -> str:
                  f"caches")
     lines.append(f"- **{human_bytes(fit.per_token)} per token of context**, "
                  f"**{human_bytes(fit.per_seq)} fixed per sequence**")
+    if _drafts(fit):
+        lines.append(f"- {_drafts(fit)}")
     shape = _shape(fit)
     if shape:
         lines.append(f"- {shape}")
-    lines += ["", "| per user context | users that fit | each costs |",
-              "| --- | --- | --- |"]
+    lines += ["", "| per user context | users that fit | each costs | of which the head |",
+              "| --- | --- | --- | --- |"]
     for context in contexts:
         lines.append(f"| {_tokens(context)} | {fit.users(context)} | "
-                     f"{human_bytes(fit.cost(context))} |")
+                     f"{human_bytes(fit.cost(context))} | "
+                     f"{human_bytes(fit.draft_cost(context)) if fit.draft_per_token else '-'} |")
     lines += ["", f"One user, longest context: **{_tokens(fit.longest(1))} tokens**."]
     return "\n".join(lines)
 

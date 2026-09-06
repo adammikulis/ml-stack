@@ -414,7 +414,7 @@ class TestMeasuring:
         assert record.per_seq == 24 * MIB
         assert record.cache_type == "f16"
         assert record.swa_cells == 1536
-        assert record.key == ("quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf", "f16", "")
+        assert record.key == ("quillhaven-E2B-it-qat-UD-Q4_K_XL.gguf", "f16", "", "")
 
 
 class TestSayingIt:
@@ -1475,3 +1475,82 @@ class TestMeasuringRecordsWhereItWent:
         assert row.resident_after == 100
         assert row.loaded() == 6 * GIB + 304 * MIB
         assert "resident after 100 questions" in capsys.readouterr().out
+
+
+# A sparse-attention model: the base cache, then a second cache over the *same* context for
+# the indexer, then a recurrent state. The second one is not a sliding window and does not
+# cost a fixed amount per sequence -- it grows with the context like the first.
+SPARSE_LOG = """\
+0.00.100.000 I llama_model_loader: loaded meta data with 67 key-value pairs and 1224 tensors \
+from /models/marrowgate-Flash-UD-Q4_K_XL-00001-of-00004.gguf (version GGUF V3 (latest))
+0.00.200.100 I llama_kv_cache: size =   816.00 MiB ( 32768 cells,  12 layers,  2/2 seqs), \
+K (q8_0):   408.00 MiB, V (q8_0):   408.00 MiB
+0.00.242.057 I llama_memory_recurrent: size =  900.00 MiB (     2 cells,  48 layers,  \
+2 seqs  3 rs_seq), R (f32):    36.00 MiB, S (f32):   862.00 MiB, P (f32):     2.00 MiB
+0.00.257.897 I llama_kv_cache: size =   306.00 MiB ( 32768 cells,  12 layers,  2/2 seqs), \
+K (q8_0):   102.00 MiB, V (q8_0):   204.00 MiB
+0.00.300.000 I sched_reserve:      Metal compute buffer size =   380.00 MiB
+"""
+
+# The same load with a next-token head beside it. The head keeps one layer of cache over the
+# whole context, at f16, whatever the target's cache type is.
+SPARSE_DRAFTED_LOG = SPARSE_LOG + """\
+0.00.328.372 I llama_model_loader: loaded meta data with 52 key-value pairs and 32 tensors \
+from /models/mtp-marrowgate-Flash-shared-Q8_0.gguf (version GGUF V3 (latest))
+0.00.553.679 I llama_kv_cache: size =   128.00 MiB ( 32768 cells,   1 layers,  2/2 seqs), \
+K (f16):    64.00 MiB, V (f16):    64.00 MiB
+0.00.560.938 I sched_reserve:      Metal compute buffer size =   309.00 MiB
+"""
+
+
+class TestTheDraftsOwnCache:
+    """A draft head keeps a second KV cache at the target's context. It is a cost per seat
+    like the model's own, and a person choosing whether to serve a head is choosing it."""
+
+    def test_a_second_cache_over_the_whole_context_costs_per_token(self):
+        got = parse_load_log(SPARSE_LOG)
+        # 816 MiB over 32768 cells and 2 streams, plus 306 MiB the same way
+        assert got.per_token == (816 * MIB) // (32768 * 2) + (306 * MIB) // (32768 * 2)
+        assert got.per_seq == (900 * MIB) // 2, "only the recurrent state is per sequence"
+        assert got.swa_cells == 0, "a cache at the full context is not a sliding window"
+
+    def test_a_sliding_window_is_still_charged_per_sequence(self):
+        got = parse_load_log(ISWA_LOG)
+        assert got.swa_cells == 1536
+        assert got.per_seq == 24 * MIB
+
+    def test_the_heads_cache_is_read_apart_from_the_models(self):
+        bare, drafted = parse_load_log(SPARSE_LOG), parse_load_log(SPARSE_DRAFTED_LOG)
+        assert drafted.per_token == bare.per_token, "the target's own cache is unchanged"
+        assert drafted.draft_per_token == (128 * MIB) // (32768 * 2)
+        assert drafted.draft_cache_type == "f16"
+        assert drafted.draft_kv_layers == 1
+        assert bare.draft_per_token == 0 and bare.draft_cache_type == ""
+
+    def test_a_seat_pays_the_heads_cache_as_well(self):
+        drafted = Fit.of(parse_load_log(SPARSE_DRAFTED_LOG), model="m.gguf",
+                         weights=90 * GIB, room=110 * GIB, context=32768, parallel=2,
+                         spec="draft-mtp")
+        bare = Fit.of(parse_load_log(SPARSE_LOG), model="m.gguf", weights=90 * GIB,
+                      room=110 * GIB, context=32768, parallel=2)
+        assert drafted.draft_cost(32768) == drafted.draft_per_token * 32768
+        assert drafted.cost(32768) - bare.cost(32768) == drafted.draft_cost(32768)
+        assert drafted.longest(1) < bare.longest(1), "the head takes context from a seat"
+
+    def test_the_head_is_named_in_the_block_rather_than_folded_in(self):
+        drafted = Fit.of(parse_load_log(SPARSE_DRAFTED_LOG), model="m.gguf",
+                         weights=90 * GIB, room=110 * GIB, context=32768, parallel=2,
+                         spec="draft-mtp")
+        said = render([drafted], [32768])
+        assert "the draft head keeps its own cache" in said
+        assert "f16" in said
+        assert "of which the head" in said
+
+    def test_a_record_keeps_the_two_caches_apart_when_it_is_written_and_read(self):
+        drafted = Fit.of(parse_load_log(SPARSE_DRAFTED_LOG), model="m.gguf",
+                         weights=90 * GIB, room=110 * GIB, context=32768, parallel=2,
+                         spec="draft-mtp")
+        back = Fit.from_dict(drafted.as_dict())
+        assert back.draft_per_token == drafted.draft_per_token
+        assert back.draft_cache_type == "f16"
+        assert back.key[-1] == "f16", "two heads' cache types are two records, not one"

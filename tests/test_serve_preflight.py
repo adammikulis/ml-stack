@@ -712,3 +712,72 @@ class TestSeams:
         assert by_name["shards"].ok and by_name["architecture"].detail == "llama"
         assert report.weights_bytes == gguf.stat().st_size
         assert report.kv_estimate_bytes == 32 * 8 * 128 * 512 * 4
+
+
+class TestTheDraftsOwnCacheEstimate:
+    """Before any load: what a draft head's own KV cache will cost, from its header."""
+
+    def _head(self, tmp_path, extra=None):
+        return write_gguf(tmp_path / "mtp-marrowgate-shared-Q8_0.gguf", {
+            "general.architecture": "marrow",
+            "marrow.block_count": 49,
+            "marrow.nextn_predict_layers": 1,
+            "marrow.attention.head_count": 24,
+            "marrow.attention.head_count_kv": 2,
+            "marrow.attention.key_length": 256,
+            "marrow.attention.value_length": 256,
+            "marrow.full_attention_interval": 4,
+            **(extra or {})})
+
+    def test_only_the_heads_own_prediction_layers_hold_a_cache(self, tmp_path):
+        """The head carries the target's block count -- 49 -- and builds one layer."""
+        spec = ServerSpec(model="m.gguf", draft=str(self._head(tmp_path)), context=32768)
+        # one layer, 2 KV heads, 256 wide each way, f16
+        assert preflight.draft_kv_estimate_bytes(spec) == 1 * 2 * (256 * 2 + 256 * 2) * 32768
+
+    def test_the_heads_cache_type_is_f16_until_it_is_said(self, tmp_path):
+        head = str(self._head(tmp_path))
+        full = preflight.draft_kv_estimate_bytes(
+            ServerSpec(model="m.gguf", draft=head, context=32768))
+        smaller = preflight.draft_kv_estimate_bytes(
+            ServerSpec(model="m.gguf", draft=head, context=32768,
+                       spec_draft_type_k="q4_0", spec_draft_type_v="q4_0"))
+        assert smaller < full
+        assert smaller == int(full * (18 / 32) / 2)
+
+    def test_the_targets_cache_type_does_not_change_the_heads(self, tmp_path):
+        head = str(self._head(tmp_path))
+        asked = ServerSpec(model="m.gguf", draft=head, context=32768,
+                           cache_type_k="q4_0", cache_type_v="q4_0")
+        bare = ServerSpec(model="m.gguf", draft=head, context=32768)
+        assert preflight.draft_kv_estimate_bytes(asked) == \
+            preflight.draft_kv_estimate_bytes(bare)
+
+    def test_it_grows_with_the_context(self, tmp_path):
+        head = str(self._head(tmp_path))
+        at_32k = preflight.draft_kv_estimate_bytes(
+            ServerSpec(model="m.gguf", draft=head, context=32768))
+        at_256k = preflight.draft_kv_estimate_bytes(
+            ServerSpec(model="m.gguf", draft=head, context=262144))
+        assert at_256k == at_32k * 8
+
+    def test_no_head_costs_nothing(self, tmp_path):
+        assert preflight.draft_kv_estimate_bytes(
+            ServerSpec(model="m.gguf", context=32768)) == 0
+
+    def test_a_head_this_machine_does_not_hold_is_unknown_not_free(self, tmp_path):
+        spec = ServerSpec(model="m.gguf", draft="hf:owner/repo/absent.gguf", context=32768)
+        assert preflight.draft_kv_estimate_bytes(spec) == 0
+
+    def test_a_draft_that_is_a_whole_model_is_estimated_layer_by_layer(self, tmp_path):
+        """No `nextn_predict_layers`, so every layer that holds a cache is charged."""
+        whole = write_gguf(tmp_path / "small-draft.gguf", {
+            "general.architecture": "marrow",
+            "marrow.block_count": 8,
+            "marrow.attention.head_count": 8,
+            "marrow.attention.head_count_kv": 2,
+            "marrow.attention.key_length": 128,
+            "marrow.attention.value_length": 128})
+        spec = ServerSpec(model="m.gguf", draft=str(whole), context=4096)
+        assert preflight.draft_kv_estimate_bytes(spec) == \
+            8 * 2 * (128 * 2 + 128 * 2) * 4096

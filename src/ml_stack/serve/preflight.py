@@ -472,6 +472,59 @@ def _kv_estimate_bytes(meta: dict[str, object], context: int,
         return 0
 
 
+def _head_kv_per_token(meta: dict[str, object], type_k: str, type_v: str) -> int:
+    """Bytes of KV cache a next-token-prediction head keeps per token, from its header.
+
+    0 for anything that is not one: a head shares its target's tensors and carries the
+    target's ``block_count``, so only ``nextn_predict_layers`` says how many layers of its
+    own llama.cpp builds -- and only those hold a cache.
+    """
+    try:
+        arch = str(meta.get("general.architecture") or "")
+        layers = int(meta.get(f"{arch}.nextn_predict_layers") or 0)
+        if not (arch and layers > 0):
+            return 0
+        heads = _per_layer(meta.get(f"{arch}.attention.head_count_kv") or 0, 1)[0]
+        key_dim = float(meta.get(f"{arch}.attention.key_length") or 0)  # type: ignore[arg-type]
+        value_dim = float(meta.get(f"{arch}.attention.value_length")  # type: ignore[arg-type]
+                          or key_dim)
+        bytes_k = _CACHE_BYTES.get((type_k or "f16").lower(), 2.0)
+        bytes_v = _CACHE_BYTES.get((type_v or type_k or "f16").lower(), 2.0)
+        return int(layers * heads * (key_dim * bytes_k + value_dim * bytes_v))
+    except (TypeError, ValueError, IndexError):
+        return 0
+
+
+def draft_kv_estimate_bytes(
+        spec, *, read_header: Callable[..., dict[str, object]] | None = None) -> int:
+    """Bytes of KV cache the draft head this spec names keeps, at the spec's context.
+
+    0 when no head is named, or its file is not on this machine to read. llama.cpp stores
+    the head's cache at f16 unless ``spec_draft_type_k/v`` say otherwise, whatever the
+    target's own cache type is.
+    """
+    ref = str(getattr(spec, "draft", "") or "")
+    if not ref:
+        return 0
+    path = home.expand(ref)
+    if not path.is_file():
+        found = _local_index().get(ref.replace("\\", "/").rsplit("/", 1)[-1])
+        if found is None:
+            return 0
+        path = found
+    try:
+        meta = (read_header or read_gguf_header)(path)
+    except (OSError, ValueError, KeyError, struct.error):
+        return 0
+    type_k = str(getattr(spec, "spec_draft_type_k", "") or "f16")
+    type_v = str(getattr(spec, "spec_draft_type_v", "") or type_k)
+    context = int(getattr(spec, "context", 0) or 0)
+    per_token = _head_kv_per_token(meta, type_k, type_v)
+    if per_token:
+        return per_token * max(0, context)
+    return _kv_estimate_bytes(meta, context, type_k, type_v)
+
+
 def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes: int,
               limit_bytes: int) -> Check:
     total = weights_bytes + draft_bytes + mmproj_bytes + kv_bytes + RUNTIME_ALLOWANCE_BYTES
