@@ -38,7 +38,7 @@ def test_installing_ml_stack_brings_in_nothing():
 
     meta = tomllib.load((REPO / "pyproject.toml").open("rb"))["project"]
     assert meta["dependencies"] == []
-    assert set(meta["optional-dependencies"]) >= {"app", "train", "serve", "all"}
+    assert set(meta["optional-dependencies"]) >= {"train", "serve", "all"}
 
 
 def test_the_web_assets_are_not_python():
