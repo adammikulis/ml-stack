@@ -94,6 +94,17 @@ def without_heredocs(command: str) -> str:
     return "\n".join(kept)
 
 
+SEARCHERS = r"grep|egrep|fgrep|rg|ag|ack|awk|sed|comm|diff"
+
+
+def without_search_patterns(command: str) -> str:
+    """Drop the quoted arguments of a search command, which are text being looked for."""
+    def strip(match: re.Match) -> str:
+        head = match.group(0)
+        return re.sub(r"'[^']*'|\"[^\"]*\"", "''", head)
+    return re.sub(rf"\b({SEARCHERS})\b[^|;&\n]*", strip, command)
+
+
 def main() -> int:
     if os.environ.get("MLSTACK_GUARD") == "off":
         return 0
@@ -104,6 +115,7 @@ def main() -> int:
     if event.get("tool_name") != "Bash":
         return 0
     command = without_heredocs((event.get("tool_input") or {}).get("command") or "")
+    command = without_search_patterns(command)
     for pattern, instead in REFUSE:
         if re.search(pattern, command, re.M):
             print(f"blocked: {instead}\n\n"

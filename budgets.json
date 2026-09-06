@@ -16,7 +16,7 @@
   "print-calls": 0,
   "process-scans": 5,
   "pyright-errors": 2,
-  "ruff-blind-except": 27,
+  "ruff-blind-except": 23,
   "ruff-bugbear": 73,
   "ruff-other": 948,
   "ruff-security": 136,

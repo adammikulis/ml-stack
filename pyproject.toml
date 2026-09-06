@@ -196,6 +196,9 @@ known-first-party = ["ml_stack"]
     "S107",
     "S108",  # /tmp paths in fixtures
 ]
+"scripts/hooks/**" = [
+    "BLE001",  # a guard that fails must let the command through, not block on its own error
+]
 
 # Checks that read the source alone. A check that reads a type out of an installed package
 # counts differently on every machine.
