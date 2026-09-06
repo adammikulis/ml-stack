@@ -59,8 +59,6 @@ put it. `patches/llama.cpp/0001-speculative-per-request.patch` is the patch;
 `ml-stack-serve build --from source` applies it and names the build directory after its
 digest.
 
-- [ ] **Adam's call: send it to `ggml-org/llama.cpp`.** Nothing has been opened. The write-up
-  is what a pull request would say.
 - [ ] **Flash-Next's MTP head still needs the unsloth fork, and this machine's `unsloth`
   build is a downloaded release, so it carries no patch.** Serving Flash-Next therefore
   still takes a depth at startup, which is the workload the per-request depth was wanted
@@ -77,6 +75,40 @@ digest.
   `n_min` or `type` per-request means giving every implementation per-sequence parameters,
   which is a much larger change than this one. `Client` refuses those names rather than
   sending something the server would drop.
+
+## What a draft head costs, and where the draft stops paying
+
+`patches/llama.cpp/0002-speculative-timings.patch` splits generation into `draft_ms` and
+`verify_ms` with `verify_n` passes, per request. `ml_stack.client.counters` reads the four
+`llamacpp:spec_decode_*` counters off `/metrics` and differences them across a block of
+work, labelled with a workload and a sampling regime; `Ledger` totals them per label and
+pools them. Every build under `~/.ml-stack/llama.cpp/builds/` carries the counters, so this
+works against any client, lm-eval included. Servers are now launched with `--metrics`.
+
+- [ ] **The per-workload by sampling matrix on Flash-Next has not been run.** It needs the
+  card and about 50G that another agent's server held all afternoon. Each workload
+  (`ask`, `ingest`, `chat`) at greedy and at temperature 1.0, using the harnesses that
+  exist: `ml-stack-ingest` over a chapter, `ml-stack-bench drafts` or `sweep` for graph
+  answering, `ml-stack-world simulate --mix` or `ml-stack-bench extract --world` for prose,
+  `ml-stack-bench standard` for GSM8K, HumanEval, MMLU-Pro and IFEval. Extraction and graph
+  answering are greedy by profile, so their temperature arm describes a shape nobody serves
+  and is there for the curve; prose and chat run hot for real. Wall clock is not comparable
+  across the temperature arms, because the model writes a different number of tokens each
+  time -- read acceptance and acceptance-by-position, which are per-token ratios, and fix
+  the generated length before quoting seconds.
+- [ ] **Only the ingest captures counters; the other harnesses do not.** `ml-stack-bench`
+  (`standard`, `drafts`, `sweep`), `ml-stack-world simulate` and `converse` each need a
+  `counting()` around the block they already run, labelled with the workload and the
+  sampling they used. No new harness -- the capture goes around what is there.
+- [ ] **The ingest's counter table has not been driven through `ml-stack-ingest` itself.**
+  `_counted` and `_counter_lines` in `ml_stack/ingest/run.py` are exercised by the client
+  path and by unit tests, not by a real read of a chapter.
+- [ ] **Whether draft depth should adapt during generation is unanswered and was not
+  built.** A fixed sweep at 4, 8, 12 and 16 on two biology sections tripled tokens per
+  verification pass while generation time stayed flat, which says the per-pass cost rose to
+  cancel the gain. Acceptance by position is the cheaper way to answer it: it shows where in
+  the draft acceptance falls off, on one run, instead of a sweep per depth. Build adaptation
+  only if that curve shows a knee worth chasing.
 
 ## Measurements queued (each needs the GPU; sample first)
 
