@@ -88,27 +88,42 @@ def _frontmost() -> str:
 
 
 @contextlib.contextmanager
-def browser(window: Window) -> Iterator[Any]:
-    """A page, on a profile that persists. Closed when the block ends."""
+def _paged(play: Any, window: Window) -> Iterator[Any]:
+    """A page on that Playwright, over a profile directory that persists."""
+    profile = Path(window.profile).expanduser()
+    profile.mkdir(parents=True, exist_ok=True)
+    with keeping_focus():
+        context = play.chromium.launch_persistent_context(
+            str(profile), headless=window.headless, channel=window.channel,
+            args=window.args(),
+            viewport={"width": window.width, "height": window.height})
+    context.set_default_timeout(window.timeout_ms)
+    page = context.pages[0] if context.pages else context.new_page()
+    try:
+        yield page
+    finally:
+        with contextlib.suppress(Exception):
+            context.close()
+
+
+@contextlib.contextmanager
+def browser(window: Window, play: Any = None) -> Iterator[Any]:
+    """A page, on a profile that persists. Closed when the block ends.
+
+    ``play`` is a Playwright already open in this thread; Playwright's sync API allows
+    only one per thread, so a caller holding one hands it over instead of opening a
+    second. Without one, a Playwright is opened for the block.
+    """
+    if play is not None:
+        with _paged(play, window) as page:
+            yield page
+        return
     try:
         from playwright.sync_api import sync_playwright
     except ImportError as exc:  # pragma: no cover - depends on what is installed
         raise BrowserUnavailable(str(exc)) from exc
-    profile = Path(window.profile).expanduser()
-    profile.mkdir(parents=True, exist_ok=True)
-    with sync_playwright() as play:
-        with keeping_focus():
-            context = play.chromium.launch_persistent_context(
-                str(profile), headless=window.headless, channel=window.channel,
-                args=window.args(),
-                viewport={"width": window.width, "height": window.height})
-        context.set_default_timeout(window.timeout_ms)
-        page = context.pages[0] if context.pages else context.new_page()
-        try:
-            yield page
-        finally:
-            with contextlib.suppress(Exception):
-                context.close()
+    with sync_playwright() as opened, _paged(opened, window) as page:
+        yield page
 
 
 def sign_in(window: Window, url: str, *, done: str = "", patience_s: float = 600.0) -> bool:

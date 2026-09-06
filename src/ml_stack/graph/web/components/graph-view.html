@@ -291,7 +291,7 @@
         M.setCount('');
       }
       if (nothingFound()) {
-        M.openAnswers(`nothing in the graph matches “${M.askedText()}”` +
+        M.openAnswers(`nothing in the graph matches “${M.askedText() || M.searchText()}”` +
                     (served ? ' — press enter to ask the model anyway' : ''));
       }
       layoutLabels();

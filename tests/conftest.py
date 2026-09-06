@@ -623,6 +623,15 @@ def leased(backend, spec, **starting):
     state = Path(tempfile.mkdtemp()) / "servers.json"
     return ServerManager(backend=backend, state_file=state).lease(spec, roam=False, **starting)
 
+
+@pytest.fixture(scope="session")
+def playwright():
+    """The one Playwright this worker gets; a second in the same thread refuses."""
+    pw = pytest.importorskip("playwright.sync_api")
+    with pw.sync_playwright() as play:
+        yield play
+
+
 def pytest_addoption(parser) -> None:
     parser.addoption("--slow", action="store_true", default=False,
                      help="also run the tests marked slow (a browser, a subprocess, a "

@@ -50,6 +50,7 @@ HELP: dict[str, str] = {
     "train-run": "Train one recipe from a config file, to an adapter or a served GGUF.",
     "train-tools": "A project's tools into training data, a fine-tuned caller and a GGUF.",
     "traind": "A training daemon: one GPU box, one job at a time, reachable over the LAN.",
+    "walk": "Click through a page's screens, screenshot each and read what came back.",
     "world": "Invent an organised group as a graph with people who could talk.",
 }
 """``ml-stack-<word>`` -> the one line ``ml-stack --list`` prints for it."""
@@ -133,6 +134,8 @@ TABLE: tuple[Row, ...] = (
         "runs -- times, sizes, pids, ports, hosts, this machine's paths -- standing as "
         "`<took>`, `<pid>` and the like in the invocations, and paths alone settled in the "
         "help, so a moved flag still shows"),
+    Row("ml-stack-walk fleet\\|graph [SCREEN...]",
+        "the interface driven the way a person drives it, so a claim that a screen works has something behind it: `fleet` opens the daemon's page and presses through it -- the first-run steps (name, clusters, job, start; `--setup` presses on through the ones that save this machine's preferences), then the Cluster, Chat, Models, Settings and Fit tabs, signing in with `--passphrase` where a cluster asks -- and `graph` opens a rendered graph page and works its panes: the graph once it has settled, the legend, the filter box (`--find`), an entry's detail, the map, 3D, the history, the question box (`--ask` sends one) and the review queue. Each screen is screenshotted into `--out` **and its text printed**, so the walk reads in a terminal; every `pageerror` and console error is collected and named against the screen that raised it, and the walk exits non-zero rather than reporting success over a red console. A screen the daemon's state does not have -- the app behind an unfinished wizard, a passphrase nobody gave -- is skipped with the reason. Headless by default; `--no-headless` opens a window where `ML_STACK_WINDOW_POSITION` says and gives the screen back"),
     Row("ml-stack-help [<command>...]",
         "every command with the first line of its help, or one command's own help -- also `ml-stack help bench sweep`"),
 )

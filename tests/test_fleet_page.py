@@ -36,15 +36,14 @@ def sample_fits():
 
 
 @pytest.fixture(scope="session")
-def browser():
-    with pw.sync_playwright() as p:
-        try:
-            # headless is the default, said out loud: a test must never take the screen
-            b = p.chromium.launch(headless=True)
-        except Exception as exc:                       # noqa: BLE001
-            pytest.skip(f"chromium did not launch: {exc}")
-        yield b
-        b.close()
+def browser(playwright):
+    try:
+        # headless is the default, said out loud: a test must never take the screen
+        b = playwright.chromium.launch(headless=True)
+    except Exception as exc:                           # noqa: BLE001
+        pytest.skip(f"chromium did not launch: {exc}")
+    yield b
+    b.close()
 
 
 @pytest.fixture

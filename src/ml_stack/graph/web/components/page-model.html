@@ -396,6 +396,6 @@
   // a component left off the page leaves its hooks as no-ops, so the rest still works
   const noop = () => {};
   for (const name of ['paintCounts', 'setCount', 'openAnswers', 'face', 'draftable', 'refresh', 'layoutLabels', 'measure', 'fit', 'applyRemoval', 'arrange', 'recenter', 'raiseSelected', 'select', 'bringIntoView', 'stopSignal', 'runSignal', 'findPaths', 'applyPhysics', 'resized', 'setSplit', 'setMapHeight', 'setView', 'setSpin', 'flyTo', 'push3d', 'mark3dPicked', 'cssVar', 'init3d', 'stopHistory', 'playHistory', 'paintGlow', 'renderDetail', 'renderFound', 'selectEdge', 'showAnswerAgain', 'pick', 'clearPicks', 'renderPicked']) M[name] = noop;
-  M.glow = new Map(); M.key3d = () => ''; M.askedText = () => '';
+  M.glow = new Map(); M.key3d = () => ''; M.askedText = () => ''; M.searchText = () => '';
 })();
 </script>

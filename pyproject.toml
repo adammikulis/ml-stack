@@ -134,6 +134,8 @@ ml-stack-help = "ml_stack.cli:help_main"
 ml-stack-surface = "ml_stack.surface.cli:main"
 # every tracked file read for a person's details, reported and never blocked
 ml-stack-audit = "ml_stack.redact.audit:main"
+# open a page, click through its screens, screenshot each one and read what came back
+ml-stack-walk = "ml_stack.walk.cli:main"
 
 # What the daemon reports about this box beyond what the standard library can see: the
 # card, its vendor and its memory. Without it every machine reports no accelerator.

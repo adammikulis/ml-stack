@@ -31,7 +31,7 @@
       if (e.key !== 'Escape') return;
       gBox.value = ''; M.query = ''; M.answer = null; M.refresh();
     });
-    Object.assign(M, { setCount });
+    Object.assign(M, { setCount, searchText: () => gBox.value.trim() });
   }
   class GraphSearch extends HTMLElement {
     connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }

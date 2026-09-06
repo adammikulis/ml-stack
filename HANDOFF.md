@@ -359,6 +359,20 @@ time with the page's server down for the Ollama half.
   import it.** `/ui/libraries` decides `installed`, and the tick came out clear where torch
   was importable from the daemon's own interpreter. Worth finding out what it checks before
   someone downloads 200 MB they already have.
+- [ ] **`ml-stack-walk` has never walked a screen with a model behind it.** Every walk so
+  far was against a daemon serving nothing and an `ml-stack-graph serve` with no `--model`,
+  so Chat reads "No model is running yet", the graph's question box is only read, and the
+  review queue is skipped because `#review-box` stays hidden with no change requests
+  waiting. Unwalked: sending a message on Chat, a download on Models, `--ask` through
+  `/ask/stream`, and a review queue with something in it. `ml-stack-serve up <model>`
+  first, then `ml-stack-walk fleet chat models` and `ml-stack-walk graph ask review --ask
+  "..."`.
+- [ ] **The graph page's ▶ history chip does nothing on a graph whose links carry no
+  messages, and says so nowhere.** `playHistory` in `graph-history.html` returns early when
+  `histOrder` is empty, leaving the chip pressable and inert; a reader presses it and gets
+  silence. `ml-stack-walk graph history` reports "this graph's links carry no messages to
+  play through" because it can read `aria-pressed`, which is more than the page tells
+  anyone. Either hide the chip when nothing would play, or have it say why.
 
 ## From beehavior
 
