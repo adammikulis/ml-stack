@@ -66,6 +66,11 @@ REFUSE = [
     (r"\bpkill\b[^|;]*llama|\bkillall\b[^|;]*llama",
      "Do not pkill llama-server. `ml-stack-serve down --port N` releases the lease too; "
      "killing the process leaves the lease behind and the next `up` refuses."),
+    (r"(^|[;&|(]\s*)git\s+push\b",
+     "A push is Adam's to make, not an agent's. release-please reads the subjects on "
+     "`main`, so a push moves the release PR, and a repository that is 179 commits behind "
+     "goes public in one command. Land your branch into local `main` and stop there; say in "
+     "your report that it is unpushed."),
     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
      "between a real community and a public repository. If it flagged an invented name, add "

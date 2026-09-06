@@ -1,0 +1,23 @@
+#!/bin/sh
+# Refuse a push that nobody asked for.
+#
+# release-please reads the subjects on `main`, so a push moves the release PR; and a
+# checkout that is many commits behind its remote publishes all of them at once. An agent
+# landing a branch into local `main` is finished there.
+#
+# A person pushing on purpose sets ML_STACK_PUSH=yes for that one command:
+#
+#     ML_STACK_PUSH=yes git push
+[ "$ML_STACK_PUSH" = yes ] && exit 0
+cat >&2 <<'WHY'
+pre-push: refused.
+
+A push is the repository owner's to make. release-please reads the commit subjects on
+`main`, so pushing moves the release pull request, and a local `main` that is ahead
+publishes every commit on it at once.
+
+Land your branch into local `main` and stop there. Say in your report that it is unpushed.
+
+To push on purpose:  ML_STACK_PUSH=yes git push
+WHY
+exit 1

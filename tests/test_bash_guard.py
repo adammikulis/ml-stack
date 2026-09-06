@@ -45,6 +45,10 @@ def guard(command: str, tool: str = "Bash", **env: str) -> int:
     ('git add . ', "the dot is the same"),
     ('git add -u', "every tracked change is the same"),
     ('git commit -am "x"', "commit -a stages everything too"),
+    ('git push', "a push is the owner's to make"),
+    ('git push origin main', "the same, named"),
+    ('git push --force origin main', "a forced push most of all"),
+    ('git merge --ff-only work && git push', "still a push after a merge"),
 ])
 def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     assert guard(command) == BLOCKED, why
@@ -63,6 +67,9 @@ def test_the_shells_that_should_have_been_commands_are_refused(command, why):
     'git add -p src/one.py',
     'git commit -m "x"',
     'git commit -m "docs: the guard refuses git add -A"',
+    "grep -rn 'git push' docs/",
+    'git log --oneline origin/main..main',
+    'git rev-list --left-right --count origin/main...main',
 ])
 def test_ordinary_work_is_not_refused(command):
     """A guard that fires on ordinary commands is a guard that gets switched off."""
@@ -93,3 +100,4 @@ def test_only_bash_is_guarded():
 def test_the_guard_can_be_switched_off_for_a_session():
     """MLSTACK_GUARD=off is the escape hatch; needing it means a rule is wrong, but it must work."""
     assert guard("pkill -f llama-server", MLSTACK_GUARD="off") == ALLOWED
+
