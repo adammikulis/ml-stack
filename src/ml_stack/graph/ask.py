@@ -28,9 +28,11 @@ from typing import Any
 
 from ml_stack.client.spent import Spent
 from ml_stack.client.tokens import estimate_tokens
+from ml_stack.entities.paths import between, shortest_path
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.grammar import CAP, call_from, call_schema, response_format
 from ml_stack.graph.search import MATCHED_BY_RANK
+from ml_stack.vision.payloads import build_message
 
 SYSTEM = (
     "You are answering a question about a graph. You cannot see it; you read it with the tools "
@@ -1124,8 +1126,6 @@ def look_around(graph: Mapping[str, Any], ids: Sequence[str], *, hops: int = 1,
 
 def path_between(graph: Mapping[str, Any], start: str, goal: str) -> dict[str, Any]:
     """The chain of entries from one to another, and how it reads."""
-    from ml_stack.entities.paths import between, shortest_path
-
     edges = list(graph.get("edges") or ())
     ids = between(edges, start, goal)
     if not ids:
@@ -1578,60 +1578,121 @@ def _spoken(turn: Any) -> tuple[str, str]:
     return ("assistant" if role == "assistant" else "user"), str(text or "")
 
 
-def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: Asking,
-              turns: Sequence[Mapping[str, str]], system: str, limit: int,
-              tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
-              finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
-              summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
-    rich, tight, reach = asking.rich, asking.tight, asking.reach
-    kinds, batch, single, few = asking.kinds, asking.batch, asking.single, asking.few
-    summary_tool, constrain_ids = asking.summary, asking.constrain_ids
-    rounds = ROUNDS if asking.rounds is None else int(asking.rounds)
-    given = tools is not None
+# What one turn is told when it asked for the same thing twice, when it said nothing,
+# when it answered from memory, and what the reader is told when nothing answered at all.
+ALREADY = ("You have asked this exactly before and got the same answer. Use what it gave "
+           "you, look for something else, or answer the question.")
+SHORTLIST = ("A search turned up these entries; some may be irrelevant. Look at the ones "
+             "that seem to answer the question before trusting them, and ignore the "
+             "rest:\n")
+ANSWER_NOW = "Answer the question now, in plain words."
+FROM_THE_NOTES = ("Write the answer your notes were working towards, in plain prose for "
+                  "someone who cannot see them. Do not narrate what you looked up.")
+GO_AND_LOOK = ("You answered without searching the graph. You have not seen this graph "
+               "before and cannot answer it from memory. Call look_up now with the words "
+               "from the question, then answer from what it returns.")
+NO_ANSWER = ("The model did not finish an answer. What it opened is lit up on the graph; "
+             "asking again, or more narrowly, usually gets one.")
+
+
+def _note(into: list[str], ids: Sequence[str], known: set[str]) -> None:
+    """Add to ``into``, in order and without repeating, the ids the graph holds."""
+    for one in ids:
+        if str(one) in known and str(one) not in into:
+            into.append(str(one))
+
+
+def _read_ids(args: Mapping[str, Any], known: set[str]) -> tuple[list[str], int]:
+    """The ids a call named, and how many of them the graph holds."""
+    ids = [str(i) for i in (args.get("ids") or ())]
+    return ids, sum(1 for i in ids if i in known)
+
+
+def _under(offer: Sequence[Mapping[str, Any]], ids_known: Sequence[str],
+           constrain_ids: bool) -> dict[str, Any] | None:
+    """The response_format a turn offering ``offer`` answers under, if it is constrained."""
+    if not constrain_ids or not offer:
+        return None
+    schema = call_schema(offer, ids_known)
+    return response_format(schema) if schema is not None else None
+
+
+def _read_back(reply: Any, constrain_ids: bool) -> Any:
+    """A constrained reply's JSON as the tool call or the prose it holds."""
+    if not constrain_ids or (getattr(reply, "tool_calls", None) or []):
+        return reply
+    calls, answer = call_from(getattr(reply, "content", "") or "")
+    if calls:
+        return replace(reply, content="", tool_calls=calls)
+    if answer is not None:
+        return replace(reply, content=answer)
+    return reply
+
+
+def _searched(reply: Any) -> bool:
+    """Whether that reply asked for anything other than showing."""
+    return any((call.get("function") or {}).get("name") in SEARCHING
+               for call in (getattr(reply, "tool_calls", None) or []))
+
+
+def _finding(graph: Mapping[str, Any], finder: Any, *, rich: bool) -> Any:
+    """look_up over a caller's own finder: one word or several, in one call."""
+    def found(args: Mapping[str, Any]) -> Any:
+        wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
+        if not wanted and str(args.get("text") or "").strip():
+            wanted = [str(args["text"])]
+        rows, seen = [], set()
+        for text in wanted:
+            for r in finder(text):
+                if r["id"] not in seen:
+                    seen.add(r["id"])
+                    rows.append(r)
+        return _enriched(graph, rows) if rich else rows
+
+    return found
+
+
+def _offer(graph: Mapping[str, Any], tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
+           *, finder: Any, asking: Asking) -> list[tuple[Mapping[str, Any], Any]]:
+    """The ``(schema, callable)`` pairs one question is answered with."""
     if tools is None:
-        tools = tools_for(graph, finder=finder, rich=rich, tight=tight, reach=reach,
-                          batch=batch, single=single, few=few, summary=summary_tool)
-    elif finder is not None:
-        def _found(args: Mapping[str, Any]) -> Any:
-            wanted = [str(x) for x in (args.get("texts") or ()) if str(x).strip()]
-            if not wanted and str(args.get("text") or "").strip():
-                wanted = [str(args["text"])]
-            rows, seen = [], set()
-            for text in wanted:
-                for r in finder(text):
-                    if r["id"] not in seen:
-                        seen.add(r["id"])
-                        rows.append(r)
-            return _enriched(graph, rows) if rich else rows
-
+        return tools_for(graph, finder=finder, rich=asking.rich, tight=asking.tight,
+                         reach=asking.reach, batch=asking.batch, single=asking.single,
+                         few=asking.few, summary=asking.summary)
+    if finder is not None:
+        instead = _finding(graph, finder, rich=asking.rich)
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
-                 else (schema, _found)
+                 else (schema, instead)
                  for schema, fn in tools]
-    if given:
-        # a caller's own tools are described on a copy, never in place, and `few` takes
-        # some away, so the callables are matched back by name -- a caller's own acting
-        # tool keeps the function it came with. `rich` is off: it describes look_up's own
-        # hits, and a caller's look_up returns whatever it returns.
-        told = {str((schema.get("function") or {}).get("name") or ""): schema
-                for schema in _asked([schema for schema, _ in tools],
-                                     replace(asking, rich=False))}
-        tools = [(told[name], fn) for schema, fn in tools
-                 if (name := str((schema.get("function") or {}).get("name") or "")) in told]
-    schemas = [schema for schema, _ in tools]
-    run = {str((schema.get("function") or {}).get("name") or ""): fn for schema, fn in tools}
+    # A caller's own tools are described on a copy, never in place, and `few` takes some
+    # away, so the callables are matched back by name -- a caller's own acting tool keeps
+    # the function it came with. `rich` is off: it says what look_up's own hits carry, and
+    # a caller's look_up returns whatever it returns.
+    told = {str((schema.get("function") or {}).get("name") or ""): schema
+            for schema in _asked([schema for schema, _ in tools],
+                                 replace(asking, rich=False))}
+    return [(told[name], fn) for schema, fn in tools
+            if (name := str((schema.get("function") or {}).get("name") or "")) in told]
 
-    known = {str(n["id"]) for n in (graph.get("nodes") or ())}
-    if tight:
-        system = system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH) + " " + TIGHT_SYSTEM_SENTENCE
-    if batch:
+
+def _telling(system: str, *, asking: Asking, known: set[str], graph: Mapping[str, Any],
+             held: Sequence[str], out: Answer) -> tuple[str, bool]:
+    """The system prompt as this asking says it, and whether ids are held to the graph's.
+
+    Constraining is dropped over `CAP` ids, which is written into the answer's steps.
+    """
+    if asking.tight:
+        system = (system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH)
+                  + " " + TIGHT_SYSTEM_SENTENCE)
+    if asking.batch:
         system = system + "\n\n" + BATCH_SYSTEM_SENTENCE
-    if single:
+    if asking.single:
         system = system + "\n\n" + SINGLE_SYSTEM_SENTENCE
-    if few:
+    if asking.few:
         # the prompt names `path_between` in its second sentence, and this offer has no
         # such tool: swapped for what to do instead, never left to be reached for
         system = system.replace(PATH_CLAUSE, FEW_PATH_CLAUSE) + "\n\n" + FEW_SYSTEM_SENTENCE
-    out = Answer()
+    constrain_ids = asking.constrain_ids
     if constrain_ids and len(known) > CAP:
         out.steps.append(f"ids not constrained: {len(known)} entries, over the cap of {CAP}")
         constrain_ids = False
@@ -1642,18 +1703,18 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
         system = (system + "\n\nCurrently highlighted: "
                   + ", ".join(f"{label[h]} ({h})" for h in lit))
+    return system, constrain_ids
 
-    def note(into: list[str], ids: Sequence[str]) -> None:
-        for one in ids:
-            if str(one) in known and str(one) not in into:
-                into.append(str(one))
 
-    said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
-             "content": str(t.get("content") or "")[:SAID_CHARS_BACK]}
-            for t in turns if str(t.get("content") or "").strip()]
-    # In this order: the summary, then what was recalled, then the window. The summary is
-    # the thing that changes least, so it goes first and the cached prefix covers it; the
-    # window is the thing that must be complete, so nothing here is taken out of it.
+def _remembered(turns: Sequence[Mapping[str, str]], summary: Any, recalled: Sequence[Any],
+                out: Answer) -> list[dict[str, Any]]:
+    """The messages before the question: the rolling summary, what was recalled, then the
+    window, each counted against the part of the prompt it filled.
+
+    In that order. The summary is the thing that changes least, so it goes first and the
+    cached prefix covers it; the window is the thing that must be complete, so nothing
+    here is taken out of it.
+    """
     ahead: list[dict[str, Any]] = []
     _, told = _spoken(summary)
     if told.strip():
@@ -1662,91 +1723,126 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
         role, text = _spoken(one)
         if text.strip():
             ahead.append({"role": role, "content": RECALLED + text[:SAID_CHARS_BACK]})
-    messages: list[dict[str, Any]] = [{"role": "system", "content": system}, *ahead, *said]
-    # what filled the prompt, by part -- with a window, a summary and recall the length of
-    # the conversation says nothing about what the slot holds; this does, and `spent`
-    # keeps the server's exact count beside it
-    out.spent.part("system", system)
-    out.spent.part("tools", json.dumps(schemas))
+    said = [{"role": ("assistant" if t.get("role") == "assistant" else "user"),
+             "content": str(t.get("content") or "")[:SAID_CHARS_BACK]}
+            for t in turns if str(t.get("content") or "").strip()]
     for one in ahead:
         text = str(one.get("content") or "")
         out.spent.part("summary" if text.startswith(EARLIER) else "recalled", text)
     for one in said:
         out.spent.part("window", one.get("content"))
+    return [*ahead, *said]
 
-    # A search has already been run — cheaply, by a small model that only measures meaning —
-    # and what it found is read out before the first turn. Most questions are then answered
-    # without calling anything, which is the point: every look_up is a whole round trip
-    # through a large model, and the small one costs milliseconds. It is a suggestion, not
-    # an answer: the tools are all still there, and the prompt says to go looking when this
-    # is not what the question was about.
-    #
-    # It goes *before* the question, as candidates to check, and not after it as the
-    # answer's raw material. Measured on gemma-4-E4B: eight likely entries handed over as
-    # the last message after the question, phrased "use them if they answer it", took it
-    # from 58% F1 to 33% -- it echoed the list rather than selecting from it. What comes
-    # last is what a small model answers about; the question has to be the last thing it
-    # reads, and the list has to arrive as something to verify rather than something to say.
-    start = [str(i) for i in opening if str(i) in known][:FOUND]
-    if start:
-        material = (run.get("look_at") or (lambda a: look_at(graph, a["ids"])))({"ids": start})
-        note(out.found, start)
-        out.steps.append(f"was handed {len(start)} to start from")
-        messages.append({"role": "user", "content":
-                         "A search turned up these entries; some may be irrelevant. Look at "
-                         "the ones that seem to answer the question before trusting them, "
-                         "and ignore the rest:\n" + str(material)})
-        out.spent.part("shortlist", material)
-        if emit is not None:
-            emit({"event": "tool", "name": "shortlist", "detail": f"{len(start)} to start from"})
-    messages.append({"role": "user", "content": question})
-    out.spent.part("question", question)
 
-    # The tools that go looking. A call to one of them on the last turn is refused, not run;
-    # the tools that act -- show, a caller's change request -- run on any turn. The list
-    # offered never changes within a question: the chat template renders the tools block
-    # before the first message, so a turn offering fewer tools loses llama.cpp's prompt
-    # cache from the start and re-reads everything the question accumulated. Measured on
-    # the real graph, 2026-09-03: the last call of every question read ~3.2k tokens with
-    # nothing cached, twice what its tool results came to, and the page answered in 49 s
-    # where the bench answered in 27 s.
-    searching = set(SEARCHING)
+def _recorded(out: Answer, name: str, args: Mapping[str, Any], result: Any,
+              known: set[str]) -> Any:
+    """``result`` as the model is told it, with what the call found, read and traced
+    written onto ``out`` and a step for what it did."""
+    if name == "look_up":
+        _note(out.found, [r["id"] for r in result] if isinstance(result, list) else [], known)
+        asked = [str(x) for x in (args.get("texts") or ())] or [str(args.get("text") or "")]
+        out.steps.append("looked up " + ", ".join(repr(x) for x in asked))
+    elif name == "look_at":
+        # one guard, in `_note`: an id the model made up is neither read nor lit up
+        ids, real = _read_ids(args, known)
+        _note(out.read, ids, known)
+        result = result or "nothing on those"
+        out.steps.append(f"read {real} entr" + ("y" if real == 1 else "ies"))
+    elif name == "look_around":
+        # The centres are read; everything the result named -- read back off the text, so
+        # a neighbourhood the budget cut short is not counted -- is found. Between them
+        # that is what look_at's ids and look_up's hits are, so the score, the cap and
+        # tight's "did a tool return this" all treat it the same.
+        ids, real = _read_ids(args, known)
+        _note(out.read, ids, known)
+        result = result or "nothing is joined to those"
+        _note(out.found, _ids_in(str(result)), known)
+        out.steps.append(f"looked around {real} entr" + ("y" if real == 1 else "ies"))
+    elif name == "path_between":
+        _note(out.path, result.get("path") or [], known)
+        out.steps.append("traced a path" if result.get("path") else "found no path")
+    elif name == "summarise":
+        # everything it named is bracketed, as look_around brackets its neighbours, so an
+        # entry the summary read out counts as found and may be selected
+        _note(out.found, _ids_in(str(result)), known)
+        out.steps.append("read the graph at a glance")
+    elif name == "list_kind":
+        listed = result.get("entries") if isinstance(result, Mapping) else None
+        if listed is None:
+            out.steps.append(f"found no kind {str(args.get('kind') or '')!r}")
+        else:
+            _note(out.found, [r["id"] for r in listed], known)
+            _note(out.listed, [r["id"] for r in listed], known)
+            out.steps.append(f"listed {len(listed)} of kind {result.get('kind')!r}")
+    elif name == "show":
+        # the same guard as look_at: an id the model made up is not lit up
+        ids, real = _read_ids(args, known)
+        _note(out.show, ids, known)
+        out.steps.append(f"selected {real} entr" + ("y" if real == 1 else "ies"))
+    else:
+        out.steps.append(f"used {name}")
+    return result
 
-    ids_known = sorted(known)
 
-    def under(offer: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
-        """The response_format a turn offering ``offer`` answers under, if it is constrained."""
-        if not constrain_ids or not offer:
-            return None
-        schema = call_schema(offer, ids_known)
-        return response_format(schema) if schema is not None else None
+def _pictures(name: str, result: Any, out: Answer) -> tuple[Any, dict[str, Any] | None, int]:
+    """``result`` without its images, the message carrying them, and how many went.
 
-    def read_back(reply: Any) -> Any:
-        """A constrained reply's JSON as the tool call or the prose it holds."""
-        if not constrain_ids or (getattr(reply, "tool_calls", None) or []):
-            return reply
-        calls, answer = call_from(getattr(reply, "content", "") or "")
-        if calls:
-            return replace(reply, content="", tool_calls=calls)
-        if answer is not None:
-            return replace(reply, content=answer)
-        return reply
+    llama.cpp cannot carry an image inside a tool result, so what `web.tools(vision=True)`
+    returns under ``_images`` comes out before the result is encoded and goes in as a user
+    message of its own. A picture that cannot be prepared is said in the steps and not
+    sent: a model told to look at nothing answers about nothing, confidently.
+    """
+    if not (isinstance(result, Mapping) and "_images" in result):
+        return result, None, 0
+    result = dict(result)
+    pictures = list(result.pop("_images") or ())
+    if not pictures:
+        return result, None, 0
+    seen, report = build_message(f"What {name} returned for the call above, as seen:",
+                                 pictures)
+    kept = sum(1 for p in seen["content"] if p.get("type") == "image_url")
+    if kept:
+        return result, seen, kept
+    why = "; ".join(report.warnings) or "no reason given"
+    out.steps.append(f"{name} returned {len(pictures)} image"
+                     + ("" if len(pictures) == 1 else "s")
+                     + f" and none could be shown: {why}")
+    return result, None, 0
 
-    def step(*, spoken: bool = True) -> Any:
-        """One model turn over ``messages``, offered the same tools as every other.
+
+@dataclass
+class _Loop:
+    """One question in flight: what has been sent, what is being built, what was asked for."""
+
+    client: Any
+    graph: Mapping[str, Any]
+    emit: Any
+    schemas: list[Mapping[str, Any]]
+    run: dict[str, Any]
+    known: set[str]
+    ids_known: list[str]
+    constrain_ids: bool
+    reach: int | None
+    out: Answer
+    messages: list[dict[str, Any]]
+    called: bool = False
+    repeats: int = 0
+    asked_for: set[tuple[str, str]] = field(default_factory=set)
+
+    def say(self, *, spoken: bool = True) -> Any:
+        """One model turn over the messages so far, offered the same tools as every other.
 
         ``spoken`` streams the reply to ``emit``; off, the reply comes back unannounced.
         """
-        offer = schemas
-        kw: dict[str, Any] = {"tools": offer} if offer else {}
-        form = under(offer)
+        kw: dict[str, Any] = {"tools": self.schemas} if self.schemas else {}
+        form = _under(self.schemas, self.ids_known, self.constrain_ids)
         if form is not None:
             kw["response_format"] = form
         sent = time.monotonic()
-        if emit is None or not spoken:
-            reply = client.chat(messages, think=False, **kw)
-            out.spent.note(reply, time.monotonic() - sent)
-            return read_back(reply)
+        if self.emit is None or not spoken:
+            reply = self.client.chat(self.messages, think=False, **kw)
+            self.out.spent.note(reply, time.monotonic() - sent)
+            return _read_back(reply, self.constrain_ids)
         streamed = {"thinking": False, "answer": False}
 
         def on_delta(kind: str, text: str) -> None:
@@ -1754,249 +1850,253 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
                 return
             name = "thinking" if kind == "thinking" else "answer"
             streamed[name] = True
-            emit({"event": name, "text": text})
+            self.emit({"event": name, "text": text})
 
         # a constrained turn is JSON as it streams and prose only once read back, so it
         # arrives whole
         if form is None:
-            reply = client.chat(messages, think=False, on_delta=on_delta, **kw)
+            reply = self.client.chat(self.messages, think=False, on_delta=on_delta, **kw)
         else:
-            reply = client.chat(messages, think=False, **kw)
-        out.spent.note(reply, time.monotonic() - sent)
-        reply = read_back(reply)
+            reply = self.client.chat(self.messages, think=False, **kw)
+        self.out.spent.note(reply, time.monotonic() - sent)
+        reply = _read_back(reply, self.constrain_ids)
         if not streamed["thinking"]:
             trace = (getattr(reply, "thinking", "") or "").strip()
             if trace:
-                emit({"event": "thinking", "text": trace})
+                self.emit({"event": "thinking", "text": trace})
         if not streamed["answer"] and not (getattr(reply, "tool_calls", None) or []):
             whole = (getattr(reply, "content", "") or "")
             if whole.strip():
-                emit({"event": "answer", "text": whole})
+                self.emit({"event": "answer", "text": whole})
         return reply
 
-    def _searched(reply: Any) -> bool:
-        """Whether that reply asked for anything other than showing."""
-        return any((call.get("function") or {}).get("name") in searching
-                   for call in (getattr(reply, "tool_calls", None) or []))
-
-    spent = False
-    spent_on: set[tuple[str, str]] = set()
-    repeats = 0
-    reply = None
-    def dispatch(reply: Any, *, searching_over: bool = False) -> bool:
+    def act(self, reply: Any, *, searching_over: bool = False) -> bool:
         """Run whatever the reply asked for. False when it asked for nothing.
 
         With ``searching_over`` a call to a searching tool is refused instead of run: its
         tool message says so, and the tools that act still run.
         """
-        nonlocal spent, repeats
         calls = getattr(reply, "tool_calls", None) or []
         if not calls:
             return False
-        spent = True
+        self.called = True
         # One round, however many calls it carried. A reply may ask for several at once --
         # llama-server returns them in one message -- and every one of them is run below,
         # in order, each answered with a tool message of its own. A reply refused whole
         # spent nothing and is no round.
-        if not (searching_over and all((c.get("function") or {}).get("name") in searching
+        if not (searching_over and all((c.get("function") or {}).get("name") in SEARCHING
                                        for c in calls)):
-            out.rounds += 1
-        messages.append({"role": "assistant", "content": reply.content or "", "tool_calls": calls})
+            self.out.rounds += 1
+        self.messages.append({"role": "assistant", "content": reply.content or "",
+                              "tool_calls": calls})
         for call in calls:
-            fn = call.get("function") or {}
-            name = fn.get("name") or ""
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                args = {}
-            if emit is not None:
-                emit({"event": "tool", "name": name, "detail": _call_detail(name, args)})
-            do = run.get(name)
-            again = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
-            if do is None:
-                result: Any = {"error": f"no such tool: {name}"}
-            elif searching_over and name in searching:
-                result = {"refused": OVER}
-                out.steps.append(f"refused {name}: the searching is over")
-            elif again in spent_on:
-                # Asking the same thing twice is how a budget disappears: measured against a
-                # real graph, one question spent six of its ten rounds looking up one word,
-                # over and over, and never answered. Being told does not stop it — the tools
-                # are taken away below, which does.
-                repeats += 1
-                result = {"already": "You have asked this exactly before and got the same "
-                                     "answer. Use what it gave you, look for something else, "
-                                     "or answer the question."}
-                out.steps.append(f"asked {name} the same thing again")
-            elif name == "look_up":
-                result = do(args)
-                note(out.found, [r["id"] for r in result] if isinstance(result, list) else [])
-                asked = [str(x) for x in (args.get("texts") or ())] or [str(args.get("text") or "")]
-                out.steps.append("looked up " + ", ".join(repr(x) for x in asked))
-            elif name == "look_at":
-                # one guard, in note: an id the model made up is neither read nor lit up
-                ids = [str(i) for i in (args.get("ids") or ())]
-                note(out.read, ids)
-                result = do(args) or "nothing on those"
-                real = sum(1 for i in ids if i in known)
-                out.steps.append(f"read {real} entr" + ("y" if real == 1 else "ies"))
-            elif name == "look_around":
-                # The centres are read; everything the result named -- read back off the
-                # text, so a neighbourhood the budget cut short is not counted -- is found.
-                # Between them that is what look_at's ids and look_up's hits are, so the
-                # score, the cap and tight's "did a tool return this" all treat it the same.
-                ids = [str(i) for i in (args.get("ids") or ())]
-                note(out.read, ids)
-                result = do(args) or "nothing is joined to those"
-                note(out.found, _ids_in(str(result)))
-                real = sum(1 for i in ids if i in known)
-                out.steps.append(f"looked around {real} entr" + ("y" if real == 1 else "ies"))
-            elif name == "path_between":
-                result = do(args)
-                note(out.path, result.get("path") or [])
-                out.steps.append("traced a path" if result.get("path") else "found no path")
-            elif name == "summarise":
-                result = do(args)
-                # everything it named is bracketed, as look_around brackets its neighbours,
-                # so an entry the summary read out counts as found and may be selected
-                note(out.found, _ids_in(str(result)))
-                out.steps.append("read the graph at a glance")
-            elif name == "list_kind":
-                result = do(args)
-                listed = result.get("entries") if isinstance(result, Mapping) else None
-                if listed is None:
-                    out.steps.append(f"found no kind {str(args.get('kind') or '')!r}")
-                else:
-                    note(out.found, [r["id"] for r in listed])
-                    note(out.listed, [r["id"] for r in listed])
-                    out.steps.append(f"listed {len(listed)} of kind {result.get('kind')!r}")
-            elif name == "show":
-                # the same guard as look_at: an id the model made up is not lit up
-                ids = [str(i) for i in (args.get("ids") or ())]
-                note(out.show, ids)
-                result = do(args)
-                real = sum(1 for i in ids if i in known)
-                out.steps.append(f"selected {real} entr" + ("y" if real == 1 else "ies"))
-            else:
-                result = do(args)
-                out.steps.append(f"used {name}")
-            spent_on.add(again)
-            # A tool may bring pictures back for a vision model -- `web.tools(vision=True)`
-            # returns what a page looked like under `_images`. llama.cpp cannot carry an
-            # image inside a tool result, so they come out before the result is encoded
-            # and go in as a user message of their own, right after it.
-            seen: dict[str, Any] | None = None
-            kept = 0
-            if isinstance(result, Mapping) and "_images" in result:
-                result = dict(result)
-                pictures = list(result.pop("_images") or ())
-                if pictures:
-                    from ml_stack.vision.payloads import build_message
-
-                    seen, report = build_message(
-                        f"What {name} returned for the call above, as seen:", pictures)
-                    kept = sum(1 for p in seen["content"] if p.get("type") == "image_url")
-                    if not kept:
-                        # a picture that cannot be prepared is said, not sent: a model
-                        # told to look at nothing answers about nothing, confidently
-                        seen = None
-                        why = "; ".join(report.warnings) or "no reason given"
-                        out.steps.append(f"{name} returned {len(pictures)} image"
-                                         + ("" if len(pictures) == 1 else "s")
-                                         + f" and none could be shown: {why}")
-            count = _result_count(result)
-            if kept and isinstance(result, Mapping) and not ({"entries", "path"} & set(result)):
-                count = kept
-            if emit is not None:
-                emit({"event": "tool_result", "name": name, "count": count})
-            messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
-                             "name": name,
-                             "content": _cut(json.dumps(result, ensure_ascii=False,
-                                                        default=_plain), reach)})
-            out.spent.part("tool_results", messages[-1]["content"])
-            if seen is not None:
-                messages.append(seen)
+            self._one(call, searching_over=searching_over)
         return True
 
-    answered = False
-    nudged = False
-    nudged_single = False
+    def _one(self, call: Mapping[str, Any], *, searching_over: bool) -> None:
+        """Run one call and answer it with a tool message."""
+        fn = call.get("function") or {}
+        name = str(fn.get("name") or "")
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            args = {}
+        if self.emit is not None:
+            self.emit({"event": "tool", "name": name, "detail": _call_detail(name, args)})
+        do = self.run.get(name)
+        again = (name, json.dumps(args, sort_keys=True, ensure_ascii=False))
+        if do is None:
+            result: Any = {"error": f"no such tool: {name}"}
+        elif searching_over and name in SEARCHING:
+            result = {"refused": OVER}
+            self.out.steps.append(f"refused {name}: the searching is over")
+        elif again in self.asked_for:
+            # Asking the same thing twice is how a budget disappears: measured against a
+            # real graph, one question spent six of its ten rounds looking up one word,
+            # over and over, and never answered. Being told does not stop it -- the tools
+            # are refused after `REPEATS`, which does.
+            self.repeats += 1
+            result = {"already": ALREADY}
+            self.out.steps.append(f"asked {name} the same thing again")
+        else:
+            result = _recorded(self.out, name, args, do(args), self.known)
+        self.asked_for.add(again)
+        result, seen, kept = _pictures(name, result, self.out)
+        count = _result_count(result)
+        if kept and isinstance(result, Mapping) and not ({"entries", "path"} & set(result)):
+            count = kept
+        if self.emit is not None:
+            self.emit({"event": "tool_result", "name": name, "count": count})
+        self.messages.append({"role": "tool", "tool_call_id": call.get("id") or name,
+                              "name": name,
+                              "content": _cut(json.dumps(result, ensure_ascii=False,
+                                                         default=_plain), self.reach)})
+        self.out.spent.part("tool_results", self.messages[-1]["content"])
+        if seen is not None:
+            self.messages.append(seen)
+
+    def settle(self, reply: Any) -> Any:
+        """The last turn's reply, after what it asked for: a search is refused once and
+        the tools that act are run; the reply that follows is returned."""
+        if self.act(reply, searching_over=True):
+            reply = self.say()
+            if not _searched(reply) and self.act(reply, searching_over=True):
+                reply = self.say()
+        return reply
+
+
+def _shortlist(loop: _Loop, opening: Sequence[str]) -> list[str]:
+    """The entries a cheap search already found, read out before the first turn.
+
+    Before the question, as candidates to check, and never after it. Measured on
+    gemma-4-E4B: eight likely entries handed over as the last message after the question,
+    phrased "use them if they answer it", took it from 58% F1 to 33% -- it echoed the list
+    rather than selecting from it.
+    """
+    start = [str(i) for i in opening if str(i) in loop.known][:FOUND]
+    if not start:
+        return start
+    do = loop.run.get("look_at") or (lambda a: look_at(loop.graph, a["ids"]))
+    material = do({"ids": start})
+    _note(loop.out.found, start, loop.known)
+    loop.out.steps.append(f"was handed {len(start)} to start from")
+    loop.messages.append({"role": "user", "content": SHORTLIST + str(material)})
+    loop.out.spent.part("shortlist", material)
+    if loop.emit is not None:
+        loop.emit({"event": "tool", "name": "shortlist",
+                   "detail": f"{len(start)} to start from"})
+    return start
+
+
+def _nudge(loop: _Loop, reply: Any, asking: Asking, nudged: dict[str, bool]) -> None:
+    """Ask a turn to read the way the asking wants, once each.
+
+    ``batch`` when it read one entry and left the rest of what it found unread: the round
+    it is about to spend on the second one buys nothing the first call could not have
+    carried. ``single`` from the other end, when it read several at once. Said once -- a
+    model that ignores it twice is not going to be told into it, and the reminder costs a
+    message in every prompt after it.
+    """
+    if (asking.batch and not nudged["batch"] and _one_by_one(reply)
+            and any(i not in loop.out.read for i in loop.out.found)):
+        nudged["batch"] = True
+        loop.messages.append({"role": "user", "content": BATCH_NUDGE})
+        loop.out.spent.part("question", BATCH_NUDGE)
+        loop.out.steps.append("asked it to read the rest in one call")
+    if asking.single and not nudged["single"] and _all_at_once(reply):
+        nudged["single"] = True
+        loop.messages.append({"role": "user", "content": SINGLE_NUDGE})
+        loop.out.spent.part("question", SINGLE_NUDGE)
+        loop.out.steps.append("asked it to read one at a time")
+
+
+def _search(loop: _Loop, asking: Asking, rounds: int) -> tuple[Any, bool]:
+    """Turn after turn until the model stops calling tools, says what to light, goes in
+    circles or runs out: ``(the last reply, whether that reply is the answer)``."""
+    reply, answered = None, False
+    nudged = {"batch": False, "single": False}
     for _ in range(rounds):
-        if repeats >= REPEATS:
+        if loop.repeats >= REPEATS:
             # going in circles: the loop ends here and the answer is asked for below
-            out.steps.append("stopped searching in circles")
+            loop.out.steps.append("stopped searching in circles")
             break
-        reply = step()
-        if not dispatch(reply):
+        reply = loop.say()
+        if not loop.act(reply):
             answered = True          # it stopped calling tools, so this reply is the answer
             break
-        # It read one entry and left the rest of what it found unread: the round it is
-        # about to spend on the second one buys nothing the first call could not have
-        # carried. Said once -- a model that ignores it twice is not going to be told into
-        # it, and the reminder costs a message in every prompt after it.
-        if batch and not nudged and _one_by_one(reply) and any(i not in out.read
-                                                               for i in out.found):
-            nudged = True
-            messages.append({"role": "user", "content": BATCH_NUDGE})
-            out.spent.part("question", BATCH_NUDGE)
-            out.steps.append("asked it to read the rest in one call")
-        # And the same thing from the other end: it read several entries at once, which is
-        # the fat result `single` exists to avoid. Said once, for the same reason.
-        if single and not nudged_single and _all_at_once(reply):
-            nudged_single = True
-            messages.append({"role": "user", "content": SINGLE_NUDGE})
-            out.spent.part("question", SINGLE_NUDGE)
-            out.steps.append("asked it to read one at a time")
+        _nudge(loop, reply, asking, nudged)
         # Once it has said what its answer is about, more searching cannot improve that --
         # `show` is the last thing a turn does, and a round after it is a round trip spent
         # to be told the same. Only when the round did nothing else: a turn that showed and
         # kept looking in the same breath has not finished looking.
-        if out.show and not _searched(reply):
-            out.steps.append("said what to light, so the searching stopped")
+        if loop.out.show and not _searched(reply):
+            loop.out.steps.append("said what to light, so the searching stopped")
             break
+    return reply, answered
 
-    def settle(reply: Any) -> Any:
-        """The last turn's reply, after what it asked for: a search is refused once and
-        the tools that act are run; the reply that follows is returned."""
-        if dispatch(reply, searching_over=True):
-            reply = step()
-            if not _searched(reply) and dispatch(reply, searching_over=True):
-                reply = step()
+
+def _last_call(loop: _Loop) -> str:
+    """What a turn that said nothing is told: answer now, and for one that only ever
+    searched, what the graph holds on its top finds read out first."""
+    out = loop.out
+    if out.read or not out.found:
+        return ANSWER_NOW
+    top = out.found[:FOUND]
+    do = loop.run.get("look_at")
+    material = (do({"ids": top}) if do is not None else look_at(loop.graph, top)) or ""
+    _note(out.read, top, loop.known)
+    out.steps.append(f"read the top {len(top)} find" + ("" if len(top) == 1 else "s"))
+    if loop.emit is not None:
+        loop.emit({"event": "tool", "name": "look_at", "detail": f"{len(top)} ids"})
+        loop.emit({"event": "tool_result", "name": "look_at",
+                   "count": _result_count(material)})
+    return "What the graph holds on what you found:\n" + str(material) + "\n\n" + ANSWER_NOW
+
+
+def _finish(loop: _Loop, reply: Any, answered: bool) -> Any:
+    """The reply the answer is read out of.
+
+    The searching is over, one way or another, and the turn is told so: the tools that act
+    -- saying what to light, asking for the graph to be changed -- are run, not ignored. A
+    thinking model can stop calling tools and still say nothing, and it can run out of
+    rounds the same way; either silence gets one plain instruction to answer.
+    """
+    if loop.called and not answered:
+        loop.messages.append({"role": "user", "content": OVER})
+        loop.out.spent.part("question", OVER)
+        reply = loop.settle(loop.say())
+    if loop.called and not (getattr(reply, "content", "") or "").strip():
+        loop.messages.append({"role": "user", "content": _last_call(loop)})
+        reply = loop.say()
+    return reply
+
+
+def _from_the_notes(loop: _Loop, reply: Any) -> Any:
+    """One more turn, offered the model's own thinking back.
+
+    Thinking is a scratchpad -- "Actually the look_at shows... need to check X" -- and
+    showing it as the answer reads as a broken machine. Only prose that reads like an
+    answer is used, never the working itself.
+    """
+    trace = (getattr(reply, "thinking", "") or "").strip()
+    if not (trace or loop.messages[-1].get("role") == "assistant"):
         return reply
+    loop.messages.append({"role": "user", "content": FROM_THE_NOTES})
+    reply = loop.say(spoken=False)
+    said = (getattr(reply, "content", "") or "").strip()
+    loop.out.content = "" if is_working(said) else without_notes(said)
+    if loop.out.content and loop.emit is not None:
+        loop.emit({"event": "answer", "text": loop.out.content})
+    return reply
 
-    if spent and not answered:
-        # The searching is over, one way or another, and the turn is told so. The tools
-        # that act — saying what to light, asking for the graph to be changed — are run,
-        # not ignored: a member's request arrived on exactly this turn and was dropped
-        # because nothing here executed it.
-        messages.append({"role": "user", "content": OVER})
-        out.spent.part("question", OVER)
-        reply = settle(step())
-    # a thinking model can stop calling tools and still say nothing, and it can run out of
-    # rounds the same way. Either silence gets one plain instruction to answer; one that
-    # only ever searched also gets the top finds read to it first
-    if spent and not (getattr(reply, "content", "") or "").strip():
-        nudge = "Answer the question now, in plain words."
-        if not out.read and out.found:
-            top = out.found[:FOUND]
-            do = run.get("look_at")
-            material = (do({"ids": top}) if do is not None else look_at(graph, top)) or ""
-            note(out.read, top)
-            out.steps.append(f"read the top {len(top)} find" + ("" if len(top) == 1 else "s"))
-            if emit is not None:
-                emit({"event": "tool", "name": "look_at", "detail": f"{len(top)} ids"})
-                emit({"event": "tool_result", "name": "look_at",
-                      "count": _result_count(material)})
-            nudge = ("What the graph holds on what you found:\n" + str(material)
-                     + "\n\n" + nudge)
-        messages.append({"role": "user", "content": nudge})
-        reply = step()
+
+def _gave_up(loop: _Loop, reply: Any) -> None:
+    """Say there is no answer, and why, from the last reply.
+
+    The assumption is always the token budget and it is almost never that. Measured: the
+    same failing question at n_predict 2048 and 6144 came back `finish_reason: stop` both
+    times, with 628 and 767 characters of reasoning and nothing after it.
+    """
+    why = getattr(reply, "finish_reason", None) or "unknown"
+    thought = len((getattr(reply, "thinking", "") or "").strip())
+    wrote = len((getattr(reply, "content", "") or "").strip())
+    loop.out.steps.append(f"no answer: finish_reason={why}, thinking {thought} chars, "
+                          f"answer {wrote} chars")
+    loop.out.content = NO_ANSWER
+    if loop.emit is not None:
+        loop.emit({"event": "answer", "text": NO_ANSWER})
+
+
+def _worded(loop: _Loop, reply: Any) -> None:
+    """Read the answer out of the reply: a written-out `show` taken off it, the planning
+    trimmed from the front, and one more turn asked for when what is left is only notes."""
+    out = loop.out
     out.content = (getattr(reply, "content", "") or "").strip()
     if out.content:
         out.content, meant = spoken_show(out.content)
         if meant:
-            # what it wrote down is what it meant, and it is a tighter set than asking again
-            note(out.show, meant)
+            # what it wrote down is what it meant, and a tighter set than asking again
+            _note(out.show, meant, loop.known)
             out.steps.append("said what to light in words, so it was not asked again")
     if out.content and not is_working(out.content):
         trimmed = without_notes(out.content)
@@ -2004,142 +2104,163 @@ def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: A
             out.steps.append("trimmed the notes off the front of the answer")
             out.content = trimmed
     if out.content and is_working(out.content):
-        # It answered with its notes. Same remedy as saying nothing at all — the notes are
-        # the material, and what is wanted is the answer they were working towards.
+        # It answered with its notes. Same remedy as saying nothing at all -- the notes
+        # are the material, and what is wanted is the answer they were working towards.
         out.steps.append("answered with its notes, so was asked again")
-        messages.append({"role": "assistant", "content": out.content})
+        loop.messages.append({"role": "assistant", "content": out.content})
         out.content = ""
     if not out.content:
-        # Thinking is a scratchpad — "Actually the look_at shows… need to check X" — and
-        # showing it as the answer reads as a broken machine. It is offered back as
-        # material and asked for the answer it was working towards; only prose that reads
-        # like an answer is used, never the working itself.
-        trace = (getattr(reply, "thinking", "") or "").strip()
-        if trace or messages[-1].get("role") == "assistant":
-            messages.append({"role": "user", "content":
-                             "Write the answer your notes were working towards, in plain "
-                             "prose for someone who cannot see them. Do not narrate what you "
-                             "looked up."})
-            reply = step(spoken=False)
-            said = (getattr(reply, "content", "") or "").strip()
-            out.content = "" if is_working(said) else without_notes(said)
-            if out.content and emit is not None:
-                emit({"event": "answer", "text": out.content})
+        reply = _from_the_notes(loop, reply)
     if not out.content:
-        # Why there is no answer, from the last reply, because the assumption is always the
-        # token budget and it is almost never that. Measured: the same failing question at
-        # n_predict 2048 and 6144 came back `finish_reason: stop` both times, with 628 and
-        # 767 characters of reasoning and nothing after it. Nothing printed that, so the
-        # ceiling was raised again, which proved nothing. Now the reader is told.
-        why = getattr(reply, "finish_reason", None) or "unknown"
-        thought = len((getattr(reply, "thinking", "") or "").strip())
-        wrote = len((getattr(reply, "content", "") or "").strip())
-        out.steps.append(f"no answer: finish_reason={why}, thinking {thought} chars, "
-                         f"answer {wrote} chars")
-        out.content = ("The model did not finish an answer. What it opened is lit up on the "
-                       "graph; asking again, or more narrowly, usually gets one.")
-        if emit is not None:
-            emit({"event": "answer", "text": out.content})
-    # A model that answered without touching the graph answered from nothing, and nothing is
-    # what it knows: this graph was not in its training data. Measured over the invented
-    # community, six of gemma-4-E4B's nine failures were exactly this — two model calls, a
-    # hundred characters of prose, no search. The larger models never do it, which is why it
-    # went unseen until a small one was measured. It gets one chance to go and look, with the
-    # searching tools back on the table; if it declines again, its answer stands as it is.
-    if out.content and not (out.read or out.found or out.path) and "look_up" in run:
-        messages.append({"role": "assistant", "content": out.content})
-        messages.append({"role": "user", "content":
-                         "You answered without searching the graph. You have not seen this "
-                         "graph before and cannot answer it from memory. Call look_up now "
-                         "with the words from the question, then answer from what it returns."})
-        if emit is not None:
-            # a reader watching this stream has the first answer on screen already, and the
-            # page appends what arrives; without being told to start over it would show the
-            # two answers run together
-            emit({"event": "restart", "why": "answered without searching"})
-        reply = step()
-        if dispatch(reply):
-            reply = settle(step())
-        said = (getattr(reply, "content", "") or "").strip()
-        if said:
-            # whatever it said last is what the reader is looking at, so it is the answer
-            out.content, meant = spoken_show(said)
-            note(out.show, meant)
-        if out.read or out.found or out.path:
-            out.steps.append("answered without looking, so it was sent to look")
+        _gave_up(loop, reply)
 
-    # What the answer is about is the one thing only the model knows, and a turn that spends
-    # its budget searching never reaches `show` on its own — measured against a real graph,
-    # not one staffing question in six did. So it is asked outright, once, with the answer it
-    # just wrote in front of it; the tools offered are the same as on every other call, and
-    # only a `show` it calls is read.
-    if out.content and not out.show and (out.read or out.found or out.path):
-        messages.append({"role": "assistant", "content": out.content})
-        messages.append({"role": "user", "content": TIGHT_NUDGE if tight else SHOW_NUDGE})
-        last = step(spoken=False)
-        for call in (getattr(last, "tool_calls", None) or []):
-            fn = call.get("function") or {}
-            if (fn.get("name") or "") != "show":
-                continue
-            try:
-                args = json.loads(fn.get("arguments") or "{}")
-            except ValueError:
-                continue
-            ids = [str(i) for i in (args.get("ids") or ())]
-            note(out.show, ids)
-        if out.show:
-            out.steps.append(f"selected {len(out.show)} entr" + ("y" if len(out.show) == 1 else "ies"))
-    if (tight or kinds) and out.show:
+
+def _sent_to_look(loop: _Loop) -> None:
+    """One more chance for a model that answered without touching the graph.
+
+    It answered from nothing, and nothing is what it knows: this graph was not in its
+    training data. Measured over the invented community, six of gemma-4-E4B's nine
+    failures were exactly this -- two model calls, a hundred characters of prose, no
+    search. If it declines again, its answer stands as it is.
+    """
+    out = loop.out
+    loop.messages.append({"role": "assistant", "content": out.content})
+    loop.messages.append({"role": "user", "content": GO_AND_LOOK})
+    if loop.emit is not None:
+        # a reader watching this stream has the first answer on screen already, and the
+        # page appends what arrives; without being told to start over it would show the
+        # two answers run together
+        loop.emit({"event": "restart", "why": "answered without searching"})
+    reply = loop.say()
+    if loop.act(reply):
+        reply = loop.settle(loop.say())
+    said = (getattr(reply, "content", "") or "").strip()
+    if said:
+        # whatever it said last is what the reader is looking at, so it is the answer
+        out.content, meant = spoken_show(said)
+        _note(out.show, meant, loop.known)
+    if out.read or out.found or out.path:
+        out.steps.append("answered without looking, so it was sent to look")
+
+
+def _asked_to_show(loop: _Loop, *, tight: bool) -> None:
+    """Ask outright what the answer is about, once, with the answer in front of it.
+
+    A turn that spends its budget searching never reaches `show` on its own -- measured
+    against a real graph, not one staffing question in six did. The tools offered are the
+    same as on every other call, and only a `show` it calls is read.
+    """
+    out = loop.out
+    loop.messages.append({"role": "assistant", "content": out.content})
+    loop.messages.append({"role": "user", "content": TIGHT_NUDGE if tight else SHOW_NUDGE})
+    last = loop.say(spoken=False)
+    for call in (getattr(last, "tool_calls", None) or []):
+        fn = call.get("function") or {}
+        if (fn.get("name") or "") != "show":
+            continue
+        try:
+            args = json.loads(fn.get("arguments") or "{}")
+        except ValueError:
+            continue
+        _note(out.show, [str(i) for i in (args.get("ids") or ())], loop.known)
+    if out.show:
+        out.steps.append(f"selected {len(out.show)} entr"
+                         + ("y" if len(out.show) == 1 else "ies"))
+
+
+def _of_the_kind(out: Answer, graph: Mapping[str, Any], question: str) -> None:
+    """Drop from `show` what is not the kind the question asked for.
+
+    The question word said what kind the answer is, so what is not of that kind was found
+    on the way rather than asked for -- the topic that led to the people, for a question
+    that asked *who*. A listing is exempt, as it is from the cap; so is a question that
+    named several kinds or none, which `asked_kinds` answers None for.
+    """
+    wanted = asked_kinds(question)
+    if not wanted:
+        return
+    listed = set(out.listed)
+    of_kind = {str(n["id"]): _kind_of(n) for n in (graph.get("nodes") or ())}
+    kept = [i for i in out.show
+            if i in listed or of_kind.get(i, "") in wanted or i not in of_kind]
+    # A filter that empties the selection lights nothing, which is worse than lighting the
+    # wrong kind: the reader is left looking at a blank graph.
+    if kept and len(kept) < len(out.show):
+        out.steps.append(f"dropped {len(out.show) - len(kept)} of another kind from show, "
+                         f"which asked for " + "/".join(sorted(wanted)))
+        out.show = kept
+
+
+def _selected(out: Answer, graph: Mapping[str, Any], question: str, asking: Asking,
+              start: Sequence[str]) -> None:
+    """Cut `show` down to what the answer is about: a name no tool ever returned, a kind
+    the question did not ask for, and anything over `LIT_TIGHT`."""
+    named = _named_counts(graph, out.content, out.show)
+    if asking.tight:
         # The `made` case: a name in the prose that look_at never read is a guess, and
-        # lighting it endorses the guess. What was handed over at the start was read to the
-        # model too, so it counts as read. Then the cap: what the prose names is kept, most
-        # named first, and what it merely lit goes.
-        named = _named_counts(graph, out.content, out.show)
-        if tight:
-            # Known is what any tool returned -- found by look_up, listed by list_kind,
-            # read, traced, handed over -- and what is joined to something read: measured
-            # 2026-09-02, `place:calderwick` was listed and joined to the people read, and
-            # dropping it as "unread" cut a right answer. Only a name no tool ever returned
-            # is a guess. `out.found` is where a `look_around` neighbourhood lands, so a
-            # neighbour the model only ever saw indented under something it asked for still
-            # counts as read.
-            seen = (set(out.read) | set(start) | set(out.found) | set(out.path)
-                    | _joined_to(graph, out.read))
-            guessed = [i for i in out.show if named.get(i) and i not in seen]
-            if guessed:
-                out.show = [i for i in out.show if i not in guessed]
-                out.steps.append(f"dropped {len(guessed)} unread from show")
-        if kinds and out.show:
-            # The question word said what kind the answer is, so what is not of that kind
-            # was found on the way rather than asked for -- the topic that led to the
-            # people, for a question that asked *who*. A listing is exempt, as it is from
-            # the cap below; so is a question that named several kinds or none, which
-            # `asked_kinds` answers None for.
-            wanted = asked_kinds(question)
-            if wanted:
-                listed = set(out.listed)
-                of_kind = {str(n["id"]): _kind_of(n) for n in (graph.get("nodes") or ())}
-                kept = [i for i in out.show
-                        if i in listed or of_kind.get(i, "") in wanted or i not in of_kind]
-                # A filter that empties the selection lights nothing, which is worse than
-                # lighting the wrong kind: the reader is left looking at a blank graph.
-                if kept and len(kept) < len(out.show):
-                    out.steps.append(f"dropped {len(out.show) - len(kept)} of another kind "
-                                     f"from show, which asked for "
-                                     + "/".join(sorted(wanted)))
-                    out.show = kept
+        # lighting it endorses the guess. Known is what any tool returned -- found by
+        # look_up, listed by list_kind, read, traced, handed over -- and what is joined to
+        # something read: measured 2026-09-02, `place:calderwick` was listed and joined to
+        # the people read, and dropping it as "unread" cut a right answer. `out.found` is
+        # where a `look_around` neighbourhood lands, so a neighbour the model only ever saw
+        # indented under something it asked for still counts as read.
+        seen = (set(out.read) | set(start) | set(out.found) | set(out.path)
+                | _joined_to(graph, out.read))
+        guessed = [i for i in out.show if named.get(i) and i not in seen]
+        if guessed:
+            out.show = [i for i in out.show if i not in guessed]
+            out.steps.append(f"dropped {len(guessed)} unread from show")
+    if asking.kinds and out.show:
+        _of_the_kind(out, graph, question)
+    if asking.tight:
         # The cap never cuts a listing: "which companies are here?" has as many right
         # answers as there are companies, and cutting thirteen to six alphabetically threw
         # away three expected ones (measured 2026-09-02). It cuts among the rest, keeping
         # what the prose names first.
-        if tight:
-            listed = set(out.listed)
-            rest = [i for i in out.show if i not in listed]
-            if len(rest) > LIT_TIGHT:
-                whole = len(out.show)
-                kept = sorted(rest, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
-                out.show = [i for i in out.show if i in listed] + kept
-                out.steps.append(f"cut {whole - len(out.show)} of {whole} lit")
+        listed = set(out.listed)
+        rest = [i for i in out.show if i not in listed]
+        if len(rest) > LIT_TIGHT:
+            whole = len(out.show)
+            kept = sorted(rest, key=lambda i: -named.get(i, 0))[:LIT_TIGHT]
+            out.show = [i for i in out.show if i in listed] + kept
+            out.steps.append(f"cut {whole - len(out.show)} of {whole} lit")
+
+
+def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: Asking,
+              turns: Sequence[Mapping[str, str]], system: str, limit: int,
+              tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
+              finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
+              summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
+    out = Answer()
+    offer = _offer(graph, tools, finder=finder, asking=asking)
+    known = {str(n["id"]) for n in (graph.get("nodes") or ())}
+    system, constrain_ids = _telling(system, asking=asking, known=known, graph=graph,
+                                     held=held, out=out)
+    schemas = [schema for schema, _ in offer]
+    loop = _Loop(client=client, graph=graph, emit=emit, schemas=schemas,
+                 run={str((schema.get("function") or {}).get("name") or ""): fn
+                      for schema, fn in offer},
+                 known=known, ids_known=sorted(known), constrain_ids=constrain_ids,
+                 reach=asking.reach, out=out,
+                 messages=[{"role": "system", "content": system}])
+    # what filled the prompt, by part -- with a window, a summary and recall the length of
+    # the conversation says nothing about what the slot holds; this does, and `spent`
+    # keeps the server's exact count beside it
+    out.spent.part("system", system)
+    out.spent.part("tools", json.dumps(schemas))
+    loop.messages += _remembered(turns, summary, recalled, out)
+    start = _shortlist(loop, opening)
+    loop.messages.append({"role": "user", "content": question})
+    out.spent.part("question", question)
+    rounds = ROUNDS if asking.rounds is None else int(asking.rounds)
+    reply, answered = _search(loop, asking, rounds)
+    _worded(loop, _finish(loop, reply, answered))
+    if out.content and not (out.read or out.found or out.path) and "look_up" in loop.run:
+        _sent_to_look(loop)
+    if out.content and not out.show and (out.read or out.found or out.path):
+        _asked_to_show(loop, tight=asking.tight)
+    if (asking.tight or asking.kinds) and out.show:
+        _selected(out, graph, question, asking, start)
     for one in (*out.read, *out.path, *out.found):
         if one not in out.ids:
             out.ids.append(one)

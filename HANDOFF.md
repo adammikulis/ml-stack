@@ -464,19 +464,17 @@ worth taking, in this order:
 
 ## The tool loop
 
-- [ ] **`graph/ask.py:_converse` is 597 lines.** It takes an `Asking` now, so its signature
-  is fourteen parameters, but the body still holds seven closures (`note`, `under`,
-  `read_back`, `step`, `_searched`, `dispatch`, `settle`) and calls five schema-rewriting
-  variants (`_rich`, `_tight`, `_batched`, `_singled`, `_few`) that each copy every schema
-  to add a sentence. What to do with it: lift the schema variants into one `Asking`-driven
-  pass that rewrites a set once instead of five times over; lift the closures that only
-  read `graph` and `known` to module-level functions taking them; and split the loop body
-  -- one turn: build the offer, call the model, read the reply, run the tools -- from the
-  bookkeeping around it (`Answer.steps`, `Spent.part`, the emitted events). Nothing in it
-  may change the system prompt or a tool description:
-  `tests/test_asking_is_the_same_asking.py` hashes both for every way the bench measures,
-  and `graph/cache.py:fingerprint` puts those bytes in the answer-cache key that 290 kept
-  runs were measured against.
+- [ ] **`graph/ask.py` is 2,312 lines, and `deep-files` counts it as one site.** It holds
+  three jobs: the prompt text and the tool schemas (`SYSTEM`, `TOOLS`, `TERSE`, every
+  sentence a way of asking adds, `_asked`, `tools_for`), the tools themselves over a graph
+  (`look_up`, `look_at`, `look_around`, `path_between`, `list_kind`, `summarise`), and the
+  conversation (`Answer`, `_Loop`, `_converse`, `draft`). Splitting it into three modules
+  would take `deep-files` from 19 to 18 and give each half a name, but every one of the
+  nineteen test files that imports from `ml_stack.graph.ask` names the symbols directly, so
+  the move is a rename across the suite rather than a re-export. Whatever moves, the
+  prompt bytes may not: `tests/test_asking_is_the_same_asking.py` hashes the system prompt
+  and the tool schemas for every way the bench measures, and `graph/cache.py:fingerprint`
+  puts those bytes in the answer-cache key that 290 kept runs were measured against.
 
 ## The commands
 
