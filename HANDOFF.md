@@ -110,10 +110,17 @@ plan` names them as unplaceable rather than guessing.
   none -- rerun Flash-Next's hundred with `--trace` for ~5,000 turns), then
   `ml-stack-train-run --recipe tool-calls --size e4b --lora --export-gguf --yes` (~18 h
   here; Adam's go-ahead), then the measure in `docs/research/tool-caller-finetune.md`.
-- [ ] **Watch ggml-org/llama.cpp#27836** (a draft, last touched 2026-09-04, checked
-  2026-09-05). When the qwen4exp MTP graph merges, `ml-stack-serve build` and
-  `ml-stack-bench drafts` Flash-Next on mainline: the PR reports 86–89% acceptance on an
-  M3 Max against the fork's 73–79%. Then the profile's build field can go.
+- [ ] **Watch ggml-org/llama.cpp#27836, because it makes Flash-Next faster.** A draft,
+  last touched 2026-09-02, checked 2026-09-06; mainline is b10825, the fork is b10715.
+  The PR reports 86-89% draft acceptance on an M3 Max against the fork's 73-79%.
+  Acceptance is the share of speculated tokens kept, so it sets how many tokens come out
+  of each pass through the model: at the profile's `--spec-n-max 4` that is roughly a
+  quarter more tokens per pass, and about a tenth off a question once the half of the wall
+  clock that is reading tool results back is counted in. That estimate is arithmetic from
+  the numbers above, measured on somebody else's machine, so **measure acceptance here
+  before believing it** -- `ml-stack-bench drafts` against the fork's own figure.
+  Adopting it is a download: `ml-stack-serve build`, then the profile's `--build unsloth`
+  goes and the run is re-measured. Nothing to prepare in the meantime.
 
 ## Flash-Next, two builds: llama.cpp (unsloth GGUF Q4_K_XL, with and without the draft head) against Ollama (MLX, nvfp4)
 
