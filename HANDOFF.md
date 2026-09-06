@@ -59,6 +59,11 @@ put it. `patches/llama.cpp/0001-speculative-per-request.patch` is the patch;
 `ml-stack-serve build --from source` applies it and names the build directory after its
 digest.
 
+- [ ] **The draft-depth timings taken on 2026-09-05 were measured before a lease could be
+  refused, so a server may have shared the card with them.** One 138s reading against a
+  108-112s baseline is what that looks like. The runs carry no `beside` record -- it did
+  not exist yet -- so nothing can say after the fact whether they were alone. Re-measure
+  the depth sweep on a quiet card and compare.
 - [ ] **Flash-Next's MTP head still needs the unsloth fork, and this machine's `unsloth`
   build is a downloaded release, so it carries no patch.** Serving Flash-Next therefore
   still takes a depth at startup, which is the workload the per-request depth was wanted
