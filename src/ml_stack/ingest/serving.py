@@ -108,10 +108,7 @@ def _run(args: Any, *, resolve: bool = True,
     if not getattr(args, "images", False) and run.shape.mmproj:
         run = run.over(mmproj="")
     if getattr(args, "n_max", None) is not None:
-        # Extraction copies definitions out of the page: the head's guesses were accepted
-        # 97% of the time on a biology chapter against ~75% answering questions, so the
-        # length that measured best for answering is not the length for this. Measured
-        # here, per workload, with the same command that reads the sources.
+        # the draft length for this run, over the one the profile measured
         if not (run.shape.draft or run.shape.spec_type):
             say("--n-max: no draft head is being served, so there is no draft to lengthen")
         else:

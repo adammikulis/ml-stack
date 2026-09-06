@@ -59,10 +59,31 @@ ten questions, unconfirmed.
   --profile --for ingest` serves the graph-asking shape and says so. What is missing is a
   measurement: `ml-stack-bench extract` records `workload: ingest` and `report --profile`
   writes that slot, so a sampled extraction run over Flash-Next at draft depths 2, 4 and 8
-  would fill it. Flash-Next answering measured 86% draft acceptance at depth 2 falling to
-  54% at 8, with depth 2 the fastest arm while the record serves 4; extraction copies
-  definitions off the page and accepted 97% on a biology chapter, so its best depth is
-  likely higher, not lower. `chat` has no bench of its own -- the world writer and
+  would fill it. What makes it worth the GPU is that reading and answering accept the
+  head at very different rates *at the same depth 4*: reading a textbook unit accepts 96%,
+  answering a question over the graph accepts 75%. Both are on this machine and both
+  reproduce --
+
+  reading -- `draft_n` and `draft_n_accepted` sit on every call in the reads file beside the
+  store, under `<unit>.calls[]`, not on a bench run, which is why `runs.ladybug` has none:
+
+      import json
+      from pathlib import Path
+      d = json.loads(Path("~/.ml-stack/sources.ladybug.biology2e.reads.json")
+                     .expanduser().read_text())
+      calls = [c for r in d.values() if isinstance(r, dict) for c in (r.get("calls") or [])]
+      sum(c["draft_n_accepted"] for c in calls), sum(c["draft_n"] for c in calls)
+      # 30,648 accepted of 31,757 drafted -- 96.5%, biology2e chapter 2.
+      # The apbiology file the same way: 1,168,485 of 1,213,939 -- 96.3% over the book.
+
+  answering -- `ml_stack.bench.comparison._acceptance` over the runs in `runs.ladybug` whose
+  model is Flash-Next: depth 4, 83 runs, median 75.4%; depth 2, 79.1%; depth 8, 48.1%.
+
+  Neither says what the best *reading* depth is, because every ingest run so far was served
+  at the profile's 4 and `--n-max` has never been run at another. A head accepted 96% at 4
+  has room a head accepted 75% does not, so the reading depth is likely higher than 4 rather
+  than lower -- that is an inference from the acceptance, not a measurement, and it is what
+  the sweep would settle. `chat` has no bench of its own -- the world writer and
   `fleet.chat` both point at a server already up -- so measuring it needs a command first.
 
 Adam, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
