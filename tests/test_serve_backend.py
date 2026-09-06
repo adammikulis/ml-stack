@@ -534,24 +534,24 @@ class TestValuesOf:
     """What a flag will take, read out of the same help the flag names come from."""
 
     def test_it_reads_the_allowed_values_under_a_flag(self, tmp_path):
-        assert values_of(fake_server(tmp_path), "--cache-type-k") == frozenset(
+        assert values_of(fake_binary(tmp_path, help_text=HELP), "--cache-type-k") == frozenset(
             {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"})
 
     def test_the_draft_cache_flags_have_their_own_list(self, tmp_path):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         assert "q4_0" in values_of(binary, "--spec-draft-type-k")
         assert "q4_0" in values_of(binary, "--spec-draft-type-v")
 
     def test_an_alias_answers_the_same_list(self, tmp_path):
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         assert values_of(binary, "--cache-type-k-draft") == values_of(
             binary, "--spec-draft-type-k")
 
     def test_a_flag_that_names_no_list_has_no_opinion(self, tmp_path):
-        assert values_of(fake_server(tmp_path), "--ctx-size") == frozenset()
+        assert values_of(fake_binary(tmp_path, help_text=HELP), "--ctx-size") == frozenset()
 
     def test_a_flag_the_build_does_not_have_has_no_opinion(self, tmp_path):
-        assert values_of(fake_server(tmp_path), "--no-such-flag") == frozenset()
+        assert values_of(fake_binary(tmp_path, help_text=HELP), "--no-such-flag") == frozenset()
 
     def test_a_binary_that_prints_no_help_has_no_opinion(self, tmp_path):
         silent = tmp_path / "llama-server"
@@ -566,7 +566,7 @@ class TestDraftCacheType:
     def test_the_spec_emits_both_halves(self, tmp_path):
         model = write_gguf(tmp_path / "model.gguf", {})
         head = write_gguf(tmp_path / "draft.gguf", {})
-        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+        argv = LlamaServerBackend(binary=fake_binary(tmp_path, help_text=HELP)).command(
             ServerSpec(model=model, draft=head, spec_draft_type_k="q4_0",
                        spec_draft_type_v="q5_1"))
         assert argv[argv.index("--spec-draft-type-k") + 1] == "q4_0"
@@ -575,7 +575,7 @@ class TestDraftCacheType:
     def test_a_cache_type_the_build_will_not_take_is_refused_before_the_load(self, tmp_path):
         from ml_stack.serve.preflight import wrong_cache_types
 
-        binary = fake_server(tmp_path)
+        binary = fake_binary(tmp_path, help_text=HELP)
         spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
                           spec_draft_type_k="q3_K", spec_draft_type_v="q8_0")
         said = wrong_cache_types(spec, binary, values=values_of)
@@ -589,4 +589,4 @@ class TestDraftCacheType:
         spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
                           cache_type_k="q8_0", cache_type_v="q8_0",
                           spec_draft_type_k="q4_0", spec_draft_type_v="q4_0")
-        assert wrong_cache_types(spec, fake_server(tmp_path), values=values_of) == []
+        assert wrong_cache_types(spec, fake_binary(tmp_path, help_text=HELP), values=values_of) == []
