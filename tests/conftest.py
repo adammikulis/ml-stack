@@ -544,6 +544,13 @@ def _real_cache_and_state_untouched():
     settings = [where(name) for name in ("limits.json", "idle.json")
                 for where in (state, cache)]
     current_build = state("llama.cpp") / "current"
+    builds_dir = state("llama.cpp") / "builds"
+
+    def build_names() -> set[str]:
+        try:
+            return {one.name for one in builds_dir.iterdir()}
+        except OSError:
+            return set()
 
     def log_sizes() -> dict[str, tuple[int, int]]:
         if not log_dir.is_dir():
@@ -563,10 +570,12 @@ def _real_cache_and_state_untouched():
     before_logs, before_state = log_sizes(), state_entries()
     before_settings = settings_bytes(settings)
     before_build = points_at(current_build)
+    before_builds = build_names()
     yield
     after_logs, after_state = log_sizes(), state_entries()
     after_settings = settings_bytes(settings)
     after_build = points_at(current_build)
+    after_builds = build_names()
 
     problems = []
     cut = truncated_logs(before_logs, after_logs)
@@ -587,6 +596,9 @@ def _real_cache_and_state_untouched():
                     if after_settings.get(where) != held)
     if after_build != before_build:
         problems.append(f"{current_build}: now points at {after_build}, was {before_build}")
+    made = sorted(after_builds - before_builds)
+    if made:
+        problems.append(f"{builds_dir}: fetched or compiled {', '.join(made)}")
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
                     pytrace=False)
