@@ -1976,8 +1976,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
                       announce=lambda line: warn(line)):
-            # the record is written and retired by the lock's own block, so what `status`
-            # calls live is whoever holds the GPU, however the run was started
             remember(rest, pid=os.getpid())
             try:
                 return _main(rest)
