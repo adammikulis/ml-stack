@@ -103,6 +103,13 @@ works against any client, lm-eval included. Servers are now launched with `--met
 - [ ] **The ingest's counter table has not been driven through `ml-stack-ingest` itself.**
   `_counted` and `_counter_lines` in `ml_stack/ingest/run.py` are exercised by the client
   path and by unit tests, not by a real read of a chapter.
+- [ ] **`ml-stack-serve status` has not printed its drafting line for a server actually
+  serving a head.** The head file, the speculation type and the depth come from the
+  server's own command line, and the acceptance from `/metrics` through
+  `ml_stack.client.counters`; both are covered against a real socket in
+  `tests/test_serve_cli.py::TestStatusDrafting`, and the without-`--metrics` branch was
+  read off a live server. `ml-stack-serve up <model> --draft auto --for ingest`, then
+  `ml-stack-serve status --port <port>`, closes it in a minute.
 - [ ] **Whether draft depth should adapt during generation is unanswered and was not
   built.** A fixed sweep at 4, 8, 12 and 16 on two biology sections tripled tokens per
   verification pass while generation time stayed flat, which says the per-pass cost rose to
