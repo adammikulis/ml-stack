@@ -1,25 +1,30 @@
-"""One model's measured shape: how to serve it, how to ask it, and what said so.
+"""One model measured for one workload: how to serve it, how to ask it, and what said so.
 
 `fit` answers "how many people fit"; this answers the question that came before it -- *what
-shape*. A model does not have one good configuration and a list of flags: it has one that
-was measured, and the numbers live in a bench store nobody reads at serving time. So the
-conclusion is written down here, one record per model file, and both ends read it: the
-serve path takes :meth:`Profile.shape`, the asking path takes :meth:`Profile.asking`.
+shape*. A model does not have one good configuration and a list of flags, and it does not
+have one per model either: the best shape depends on what the model is doing, because the
+share of the output that is predictable differs. A tool call is mostly JSON skeleton and
+repeated key names; a document extraction is a thin skeleton around free strings; prose has
+no skeleton at all. So a record is keyed on the model *and the workload*, `WORKLOADS` names
+the three this repository drives a model with, and both ends read it: the serve path takes
+:meth:`Profile.shape`, the asking path takes :meth:`Profile.asked`, and the per-call path
+takes :meth:`Profile.talking`.
 
-Why a record and not a default. Qwen3.8-Flash-Next answers well only in a shape nothing
-else wants -- a fork build, the shared MTP head at four, a q8_0 cache, thinking off,
-``-ub 2048``, ``--spec-draft-p-min 0.5``, and three ways of asking at once -- and every one
-of those was a measurement. Written as defaults they would be wrong for gemma-4, which
-wants its thinking left on and no such flags at all. Written per model they are what they
-are: this model, measured on this machine, on that date, by that row of the store.
+A record has a startup half and a request half. `--context`, the draft head file, the cache
+type, the seat count and the build are what a server is told once; the draft depth, the
+draft p-min and the sampling ride on each call, so two workloads can share one served model
+and still each get what they measured. The startup half is written under ``serve`` and the
+request half under ``request``.
 
 The file is `ml_stack/data/profiles.json`, beside `fit.json` and layered the same way:
 what ships, with `~/.ml-stack/profiles.json` (or ``$MLSTACK_PROFILES_FILE``) over it, so a
-machine that measured a model again keeps its own answer without editing the package.
+machine that measured a model again keeps its own answer without editing the package. A
+record written before workloads is read as the graph asking, and a record that keeps its
+draft depth under ``serve`` is read the same as one that keeps it under ``request``.
 
 Nothing here measures anything. `ml-stack-bench report --profile` writes the records from
-the store's best row per model, which is the only way a record should ever appear: a shape
-typed in by hand is a remembered one, and the whole point is that this one was paid for.
+the store's best row per model and workload, which is the only way a record should ever
+appear.
 """
 
 from __future__ import annotations
@@ -31,8 +36,45 @@ from typing import Any
 
 from ml_stack.records import Records
 
-__all__ = ["Profile", "add", "local_file", "package_file", "profile_for", "profiles",
-           "record", "resolved", "said", "whole_context", "writable_file"]
+__all__ = [
+    "ASK",
+    "WORKLOADS",
+    "Profile",
+    "add",
+    "local_file",
+    "package_file",
+    "profile_for",
+    "profiles",
+    "record",
+    "resolved",
+    "said",
+    "whole_context",
+    "workload_named",
+    "writable_file",
+]
+
+
+# What this repository drives a model with, and one line saying what each is, in the order
+# a person meets them. Three, not one per module: `graph.ask`, `do`, `harness` and the
+# page all call `converse`; `ingest` and `Client.extract` and the judge all fill a schema;
+# `fleet.chat`, the world's writer and a question synthesiser all write prose.
+WORKLOADS = {
+    "ask": "tool-calling over a graph",
+    "ingest": "documents into JSON under a schema",
+    "chat": "prose, under no schema",
+}
+
+ASK = "ask"
+"""The workload a record with none belongs to, and what `--for` means when unsaid."""
+
+
+def workload_named(name: str) -> str:
+    """``name`` as one of `WORKLOADS`, or `ASK` when it is empty."""
+    named = str(name or "").strip().lower() or ASK
+    if named not in WORKLOADS:
+        raise ValueError(f"no such workload: {named}; there are "
+                         f"{', '.join(WORKLOADS)}")
+    return named
 
 
 # The asking fields whose value is a plain on/off, in the order a person reads them out.
@@ -56,27 +98,30 @@ UNSEEN = ("extra_args", "mmproj")
 
 @dataclass(frozen=True)
 class Profile:
-    """One model file, in the shape that measured best.
+    """One model file doing one workload, in the shape that measured best.
 
-    Three groups, and they stay apart because they are read by different code: ``serve``
-    is :meth:`shape`'s, ``ask`` is :meth:`asking`'s, and ``measured`` is neither -- it is
-    the provenance, so a person reading the record can tell what paid for it and when it
-    goes stale.
+    Four groups, and they stay apart because they are read by different code: ``serve`` is
+    :meth:`shape`'s and is what a server is told once, ``request`` is :meth:`talking`'s and
+    rides on each call, ``ask`` is :meth:`asked`'s, and ``measured`` is the provenance.
     """
 
     model: str
+    workload: str = ASK
 
-    # -- serving ------------------------------------------------------------------------
+    # -- serving, at startup ------------------------------------------------------------------------
     build: str = ""                      # a named llama.cpp build, "" for the managed one
     draft: str = ""                      # the head's file name, path, or hf: reference
     spec_type: str = ""                  # draft-mtp, draft-eagle3; "" reads it off the name
-    spec_draft_max: int | None = None    # tokens guessed ahead
     cache_type: str = ""                 # "" leaves the shape's own, q8_0
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
     extra_args: tuple[str, ...] = ()     # -ub 2048, --spec-draft-p-min 0.5
     seat_context: int = 32768            # what one conversation gets
     parallel: int = 1                    # how many conversations at once
+
+    # -- serving, per request -----------------------------------------------------------
+    spec_draft_max: int | None = None    # tokens guessed ahead
+    spec_p_min: float | None = None      # the draft's confidence floor
 
     # -- asking -------------------------------------------------------------------------
     tight: bool = True
@@ -166,12 +211,14 @@ class Profile:
     def talking(self, *, n_predict: int = 16384, timeout: float = 300.0) -> Any:
         """The client this record measured with, as a :class:`~ml_stack.serve.Talking`.
 
-        The sampling is the record's. The ceiling and the timeout are the caller's: how
-        long a machine will wait for one call is not what a measurement decided.
+        The sampling and the speculative depth are the record's, and both go out with each
+        call. The ceiling and the timeout are the caller's: how long a machine will wait
+        for one call is not what a measurement decided.
         """
         from ml_stack.serve.shape import Talking
 
-        return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling))
+        return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling),
+                       spec_draft_max=self.spec_draft_max, spec_p_min=self.spec_p_min)
 
     def alone(self, *, port: int = 8080, model: str = "", resolve: bool = True,
               n_predict: int = 16384, timeout: float = 300.0) -> Any:
@@ -200,42 +247,53 @@ class Profile:
     # -- the file -----------------------------------------------------------------------
 
     def as_dict(self) -> dict[str, Any]:
-        """The record as it is written: three groups, because a person reads it."""
+        """The record as it is written: four groups, because a person reads it."""
         serve: dict[str, Any] = {"build": self.build, "draft": self.draft,
                                  "spec_type": self.spec_type,
-                                 "spec_draft_max": self.spec_draft_max,
                                  "cache_type": self.cache_type,
                                  "reasoning_budget": self.reasoning_budget,
                                  "mmproj": self.mmproj,
                                  "extra_args": list(self.extra_args),
                                  "seat_context": self.seat_context,
                                  "parallel": self.parallel}
+        request: dict[str, Any] = {"spec_draft_max": self.spec_draft_max,
+                                   "spec_p_min": self.spec_p_min,
+                                   "sampling": dict(self.sampling)}
         ask: dict[str, Any] = {**{way: bool(getattr(self, way)) for way in WAYS},
-                               "reach": self.reach, "rounds": self.rounds,
-                               "sampling": dict(self.sampling)}
+                               "reach": self.reach, "rounds": self.rounds}
         measured = {"measured_at": self.measured_at, "label": self.label,
                     "questions": self.questions, "right": self.right,
                     "recall": self.recall, "precision": self.precision,
                     "seconds_per_question": self.seconds_per_question,
                     "host": self.host, "note": self.note}
-        return {"model": self.model, "serve": serve, "ask": ask, "measured": measured}
+        return {"model": self.model, "workload": self.workload, "serve": serve,
+                "request": request, "ask": ask, "measured": measured}
 
     @classmethod
     def from_dict(cls, row: Mapping[str, Any]) -> Profile:
-        """One record read back. A key this version does not know is ignored and one it
-        wants but does not find takes its default, so an older file still loads."""
+        """One record read back, under the workload it names or the graph asking.
+
+        Every group is flattened into one namespace, so a record that keeps its draft
+        depth under ``serve`` and its sampling under ``ask`` -- where they were written
+        before the startup and request halves were told apart -- reads the same as one
+        that keeps them under ``request``. A key this version does not know is ignored and
+        one it wants but does not find takes its default.
+        """
         flat: dict[str, Any] = {}
-        for group in ("serve", "ask", "measured"):
+        for group in ("serve", "request", "ask", "measured"):
             part = row.get(group)
             if isinstance(part, Mapping):
                 flat.update(part)
-        known = {f for f in cls.__dataclass_fields__ if f not in ("model", "served")}
+        known = {f for f in cls.__dataclass_fields__
+                 if f not in ("model", "workload", "served")}
         taken = {k: v for k, v in flat.items() if k in known}
         if "extra_args" in taken:
             taken["extra_args"] = tuple(str(a) for a in (taken["extra_args"] or ()))
         if "sampling" in taken and not isinstance(taken["sampling"], Mapping):
             taken.pop("sampling")
-        return cls(model=str(row.get("model") or ""), **taken)
+        named = str(row.get("workload") or "").strip().lower() or ASK
+        return cls(model=str(row.get("model") or ""),
+                   workload=named if named in WORKLOADS else ASK, **taken)
 
     def carrying(self, older: Profile | None) -> Profile:
         """This record, keeping from ``older`` the serving fields a measurement cannot see.
@@ -279,33 +337,57 @@ def quant_of(name: str) -> str:
     return pretty.split(" (", 1)[1].rstrip(")") if " (" in pretty else ""
 
 
-def profile_for(model: str, *, records: Sequence[Profile] | None = None) -> Profile | None:
-    """The measured shape for this model, or None when nothing measured it.
-
-    Three ways, narrowing: the file's own name; then the family and quantisation together,
-    so ``hf:owner/repo/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`` finds the record
-    kept under the bare file name; then the family alone, which is a *different*
-    quantisation of the same model and is returned with ``note`` saying so. A shape
-    measured on Q4_K_XL is the right starting point for IQ4_XS and is not a measurement of
-    it, and a caller that cannot see the difference would report one as the other.
-    """
-    every = list(records if records is not None else profiles())
+def _matched(every: Sequence[Profile], model: str) -> Profile | None:
+    """The record for this model among ``every``, by file name, then family and
+    quantisation, then family alone -- the last with ``note`` saying it is a different
+    quantisation of the same model."""
     asked = _plain(model)
     for one in every:
         if _plain(one.model) == asked:
             return replace(one, served=str(model))
     family, quant = family_of(model).lower(), quant_of(model).lower()
-    if family:
-        for one in every:
-            if one.family.lower() == family and one.quant.lower() == quant:
-                return replace(one, served=str(model))
-        for one in every:
-            if one.family.lower() == family:
-                said = (f"measured on {one.model}, not on {_basename(model)}: same model, "
-                        f"another quantisation")
-                return replace(one, served=str(model),
-                               note=f"{one.note}; {said}" if one.note else said)
+    if not family:
+        return None
+    for one in every:
+        if one.family.lower() == family and one.quant.lower() == quant:
+            return replace(one, served=str(model))
+    for one in every:
+        if one.family.lower() == family:
+            return replace(one, served=str(model),
+                           note=_and(one.note, f"measured on {one.model}, not on "
+                                               f"{_basename(model)}: same model, another "
+                                               f"quantisation"))
     return None
+
+
+def _and(note: str, said: str) -> str:
+    """``note`` with ``said`` after it."""
+    return f"{note}; {said}" if note else said
+
+
+def profile_for(model: str, *, workload: str = ASK,
+                records: Sequence[Profile] | None = None) -> Profile | None:
+    """The measured shape for this model doing this workload, or None when nothing
+    measured it.
+
+    A model with no record for the workload asked falls back to its graph-asking record,
+    returned with ``note`` saying which workload measured it and which one it was asked
+    for, so no caller serves a shape measured for something else without being told.
+    """
+    named = workload_named(workload)
+    every = list(records if records is not None else profiles())
+    found = _matched([one for one in every if one.workload == named], model)
+    if found is not None:
+        return found
+    if named == ASK:
+        return None
+    general = _matched([one for one in every if one.workload == ASK], model)
+    if general is None:
+        return None
+    return replace(general, note=_and(
+        general.note, f"measured for {ASK} ({WORKLOADS[ASK]}), not for {named} "
+                      f"({WORKLOADS[named]}); nothing has measured this model for "
+                      f"{named}"))
 
 
 def resolved(model: str, draft: str, mmproj: str, *, build: str = "") -> tuple[str, str]:
@@ -341,7 +423,8 @@ def resolved(model: str, draft: str, mmproj: str, *, build: str = "") -> tuple[s
 _STORE: Records[Profile] = Records(
     "profiles.json", env="MLSTACK_PROFILES_FILE",
     build=Profile.from_dict, unbuild=lambda p: p.as_dict(),
-    key=lambda p: _plain(p.model), order=lambda p: p.model.lower())
+    key=lambda p: (_plain(p.model), p.workload),
+    order=lambda p: (p.model.lower(), list(WORKLOADS).index(p.workload)))
 
 
 def package_file() -> Path:
@@ -483,7 +566,11 @@ def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
 
 def _flags(profile: Profile) -> str:
     """The serving line: what `ml-stack-serve up` would be told, in its own flags. One
-    seat holding the whole measured cache; `--parallel` is left to the caller."""
+    seat holding the whole measured cache; `--parallel` is left to the caller.
+
+    The draft depth is here as well as on the request line: it is the server's default,
+    which is what a call that cannot override it gets.
+    """
     parts = [f"--context {whole_context(profile)}"]
     if profile.build:
         parts.append(f"--build {profile.build}")
@@ -536,14 +623,31 @@ def _ways(profile: Profile) -> str:
     return f"{line} {sampled}".rstrip()
 
 
-def said(profile: Profile) -> str:
-    """One record as a person reads it: serve with, ask with, measured.
+def _per_request(profile: Profile) -> str:
+    """The request line: what travels with each call rather than with the server."""
+    parts = []
+    if profile.spec_draft_max is not None:
+        parts.append(f"draft {profile.spec_draft_max} ahead")
+    if profile.spec_p_min is not None:
+        parts.append(f"draft p-min {profile.spec_p_min}")
+    sampled = _sampled(profile.sampling)
+    if sampled:
+        parts.append(sampled if sampled == "greedy" else sampled.removeprefix("at "))
+    return ", ".join(parts)
 
-    Three lines and no table. A person asking `ml-stack-serve profile MODEL` is about to
-    serve it, and what they need is the flags, the ways, and enough of the provenance to
-    know whether to believe them.
+
+def said(profile: Profile) -> str:
+    """One record as a person reads it: what it is for, serve with, per request, ask with,
+    measured.
+
+    A few lines and no table. A person asking `ml-stack-serve profile MODEL` is about to
+    serve it, and what they need is the workload, the flags, the ways, and enough of the
+    provenance to know whether to believe them.
     """
-    lines = [profile.model, f"  serve with  {_flags(profile)}"]
+    lines = [profile.model,
+             f"  for         {profile.workload} -- "
+             f"{WORKLOADS.get(profile.workload, 'unknown')}",
+             f"  serve with  {_flags(profile)}"]
     if profile.extra_args:
         # llama-server's own flags: `up` has none of its own for them, and `--profile` is
         # the only thing that passes them, so the line says so rather than reading as
@@ -552,6 +656,10 @@ def said(profile: Profile) -> str:
                      f"-- llama-server's own, passed by --profile")
     lines.append(f"  measured at --parallel {max(1, profile.parallel)}, "
                  f"{profile.seat_context} per seat")
+    asked = _per_request(profile)
+    if asked:
+        lines.append(f"  per request {asked} -- sent with each call, where the build "
+                     f"takes it")
     lines.append(f"  ask with    {_ways(profile)}")
     if profile.questions:
         lines.append(

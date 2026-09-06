@@ -163,19 +163,29 @@ class Talking:
     """One model, talked to one way: what a :class:`~ml_stack.client.Client` is built from.
 
     ``timeout`` is the cap on one call, which is the bench's per-question cap said once.
-    ``think`` is deliberately absent from :meth:`client`: the client takes it per call --
+    ``think`` is absent from :meth:`client`: the client takes it per call --
     ``chat(..., think=)`` -- and handing it to ``Client.__init__`` raises.
+
+    ``spec_draft_max`` and ``spec_p_min`` are the speculative settings that ride on a
+    request rather than on the server, so one served model can guess ahead by a different
+    number of tokens for each workload asking it.
     """
 
     n_predict: int = 16384               # a ceiling, not a budget
     timeout: float = 300.0
     sampling: Mapping[str, Any] = field(default_factory=dict)
     think: bool | None = None
+    spec_draft_max: int | None = None    # tokens guessed ahead
+    spec_p_min: float | None = None      # the draft's confidence floor
 
     def client(self) -> dict[str, Any]:
         """The keyword arguments :class:`~ml_stack.client.Client` takes."""
         out: dict[str, Any] = {"n_predict": int(self.n_predict), "timeout": float(self.timeout)}
         out.update({k: v for k, v in dict(self.sampling).items() if v is not None})
+        if self.spec_draft_max is not None:
+            out["spec_draft_max"] = int(self.spec_draft_max)
+        if self.spec_p_min is not None:
+            out["spec_p_min"] = float(self.spec_p_min)
         return out
 
 

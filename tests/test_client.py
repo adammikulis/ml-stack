@@ -1226,3 +1226,46 @@ def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
     plain = Client("http://127.0.0.1:1", family=families.GENERIC.name)
     body = plain.build_body([{"role": "user", "content": "hi"}], think=False)
     assert "think" not in body      # whatever the family's switch is, the word itself never goes
+
+
+# -- the draft depth a request carries ----------------------------------------------------
+
+def test_a_measured_draft_depth_goes_out_with_the_request():
+    from ml_stack.client.chat import Client
+
+    body = Client("http://127.0.0.1:1", spec_draft_max=2, spec_p_min=0.5).build_body(
+        [{"role": "user", "content": "hi"}])
+    assert body["speculative"] == {"n_max": 2, "p_min": 0.5}
+
+
+def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
+    from ml_stack.client.chat import Client
+
+    client = Client("https://api.openai.com/v1", spec_draft_max=2, api="openai")
+    assert client.speculative == {}
+    assert "speculative" not in client.build_body([{"role": "user", "content": "hi"}])
+
+
+def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
+    """A build without the per-request override must still answer, at the served depth."""
+    from ml_stack.client import chat as chat_mod
+
+    chat_mod.forget_speculative()
+    sent: list[dict] = []
+
+    def answering(url, *, payload, **_):
+        sent.append(dict(payload))
+        if "speculative" in payload:
+            raise chat_mod.ServerError("400: unknown field 'speculative'")
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(chat_mod, "request_json", answering)
+    client = chat_mod.Client("http://127.0.0.1:1", spec_draft_max=2)
+    assert client.chat([{"role": "user", "content": "hi"}]).content == "ok"
+    assert len(sent) == 2 and "speculative" not in sent[1]
+
+    sent.clear()
+    chat_mod.Client("http://127.0.0.1:1",
+                    spec_draft_max=2).chat([{"role": "user", "content": "hi"}])
+    assert len(sent) == 1, "the server is asked once, not once per client"
+    chat_mod.forget_speculative()

@@ -664,3 +664,82 @@ def test_seats_asked_for_get_what_one_measured_seat_got():
     crowded = record.shape(seats=4, model="quince-2b.gguf", resolve=False)
     assert (crowded.seats, crowded.seat_context, crowded.context) == (4, 32768, 131072)
     assert crowded.lease()["parallel"] == 4
+
+
+# -- one record per model and workload ----------------------------------------------------
+
+def test_a_record_with_no_workload_reads_as_the_graph_asking(tmp_path):
+    """Every record written before workloads existed is the graph-asking record."""
+    older = {"model": MODEL,
+             "serve": {"draft": HEAD, "spec_draft_max": 4, "cache_type": "q8_0"},
+             "ask": {"tight": True, "batch": True, "sampling": {"temperature": 0.0}},
+             "measured": {"questions": 100, "right": 0.8}}
+    where = tmp_path / "older.json"
+    where.write_text(json.dumps([older], indent=2), encoding="utf-8")
+    before = where.read_bytes()
+
+    held = prof.records_in(where)
+
+    assert [one.workload for one in held] == [prof.ASK]
+    assert held[0].spec_draft_max == 4, "a draft depth kept under serve is still read"
+    assert held[0].sampling == {"temperature": 0.0}, "sampling kept under ask is still read"
+    assert held[0].batch is True
+    assert where.read_bytes() == before, "reading a record must not rewrite the file"
+
+
+def test_two_workloads_for_one_model_are_two_records(tmp_path):
+    add(measured(workload="ask", spec_draft_max=4))
+    add(measured(workload="ingest", spec_draft_max=2))
+
+    held = profiles()
+    assert sorted(one.workload for one in held) == ["ask", "ingest"]
+    assert profile_for(MODEL, workload="ask").spec_draft_max == 4
+    assert profile_for(MODEL, workload="ingest").spec_draft_max == 2
+
+
+def test_a_workload_with_no_record_falls_back_to_the_graph_asking_and_says_so():
+    add(measured(workload="ask", spec_draft_max=4))
+
+    found = profile_for(MODEL, workload="ingest")
+
+    assert found is not None and found.spec_draft_max == 4
+    assert "not for ingest" in found.note
+    assert "ask" in found.note
+    assert "not for ingest" in said(found)
+
+
+def test_a_model_nothing_measured_falls_back_to_nothing():
+    assert profile_for(MODEL, workload="ingest") is None
+
+
+def test_an_unknown_workload_is_refused_by_name():
+    with pytest.raises(ValueError, match="no such workload"):
+        profile_for(MODEL, workload="knitting")
+
+
+def test_a_record_writes_its_workload_and_reads_it_back(tmp_path):
+    one = measured(workload="ingest", spec_draft_max=2, spec_p_min=0.5)
+    where = tmp_path / "written.json"
+    written(where, one)
+
+    row = json.loads(where.read_text(encoding="utf-8"))[0]
+    assert row["workload"] == "ingest"
+    assert row["request"] == {"spec_draft_max": 2, "spec_p_min": 0.5,
+                              "sampling": {"temperature": 0.0}}
+    assert "spec_draft_max" not in row["serve"], "the draft depth rides on a request"
+    assert prof.records_in(where)[0] == one
+
+
+def test_the_request_half_travels_with_each_call():
+    one = measured(spec_draft_max=3, spec_p_min=0.4)
+    talking = one.talking()
+
+    assert talking.spec_draft_max == 3
+    assert talking.client()["spec_draft_max"] == 3
+    assert talking.client()["spec_p_min"] == 0.4
+
+
+def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():
+    one = measured(spec_draft_max=3)
+    assert one.shape(resolve=False).draft_n_max == 3, \
+        "a build with no per-request override serves the depth it was started with"

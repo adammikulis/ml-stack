@@ -38,7 +38,7 @@ _ASSISTANT_OPENERS = (
 _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "repeat_last_n", "mirostat", "mirostat_tau", "mirostat_eta",
                        "n_predict", "cache_prompt", "id_slot", "grammar",
-                       "chat_template_kwargs")
+                       "chat_template_kwargs", "speculative")
 
 APIS = ("llama", "openai", "ollama")
 
@@ -60,6 +60,16 @@ def parse_url(base_url: str, api: str | None) -> tuple[str, str, str | None]:
     if api not in APIS:
         raise ValueError(f"unknown api {api!r}; one of {', '.join(APIS)}")
     return url, api, model
+
+
+# Servers that refused a per-request speculative field, so it is asked once. A build
+# without the override ignores the field instead, and serves the depth it was started with.
+_NO_SPECULATIVE: set[str] = set()
+
+
+def forget_speculative() -> None:
+    """Ask every server again whether it takes a per-request draft depth."""
+    _NO_SPECULATIVE.clear()
 
 
 # What each server turned out to be serving, so it is asked once rather than per client.
@@ -111,6 +121,8 @@ class Client:
         top_k: int | None = None,
         min_p: float | None = None,
         n_predict: int = 16384,
+        spec_draft_max: int | None = None,
+        spec_p_min: float | None = None,
         timeout: float = 180.0,
         tries: int = 1,
         api_key: str | None = None,
@@ -142,6 +154,11 @@ class Client:
         # measured here gemma-4 filled 220 tokens with thought and returned empty content.
         # What a low ceiling cuts is always the answer, never the thinking.
         self.n_predict = n_predict
+        # The speculative settings llama-server takes per request, so one served model can
+        # guess ahead by a different number of tokens for each workload asking it. None
+        # leaves the server the depth it was started with.
+        self.asked_spec_draft_max = spec_draft_max
+        self.asked_spec_p_min = spec_p_min
         self.timeout = timeout
         self.tries = tries
         self.api_key = api_key
@@ -192,6 +209,33 @@ class Client:
                 out[name] = value
         out.setdefault("temperature", 0.0)
         return out
+
+    @property
+    def speculative(self) -> dict[str, Any]:
+        """What this request asks the draft head to do, or nothing.
+
+        Empty for a server that is not llama.cpp's and for one that has refused the field
+        once. A llama.cpp build compiled without the per-request override ignores it, and
+        the depth the server was started with stands.
+        """
+        if self.api != "llama" or self.base_url in _NO_SPECULATIVE:
+            return {}
+        out: dict[str, Any] = {}
+        if self.asked_spec_draft_max is not None:
+            out["n_max"] = int(self.asked_spec_draft_max)
+        if self.asked_spec_p_min is not None:
+            out["p_min"] = float(self.asked_spec_p_min)
+        return out
+
+    def _served_depth(self, body: dict[str, Any], exc: ServerError) -> dict[str, Any] | None:
+        """``body`` without the speculative field when ``exc`` is the server refusing it,
+        and None when the failure was something else."""
+        if "speculative" not in body or "speculative" not in str(exc).lower():
+            return None
+        _NO_SPECULATIVE.add(self.base_url)
+        logger.warning("%s refuses a per-request draft depth; the depth it was started "
+                       "with stands", self.base_url)
+        return {k: v for k, v in body.items() if k != "speculative"}
 
     @property
     def card(self) -> dict[str, Any]:
@@ -264,6 +308,8 @@ class Client:
             "n_predict": self.n_predict,
             "stream": stream,
         }
+        if spec := self.speculative:
+            body["speculative"] = spec
         if self.model:
             body["model"] = self.model
         if self.slot is not None:
@@ -341,22 +387,23 @@ class Client:
             if not isinstance(payload, dict):
                 raise ServerError(f"unexpected response shape: {type(payload).__name__}")
             return self.normalize(ollama.to_openai(payload), self.pinned_family or self.family)
+        where = f"{self.base_url}/v1/chat/completions"
         if on_delta is None:
-            payload = request_json(
-                f"{self.base_url}/v1/chat/completions",
-                payload=body,
-                timeout=timeout or self.timeout,
-                tries=self.tries,
-                headers=self._headers(),
-            )
-            return self.normalize(payload, self.pinned_family)
-        chunks = request_stream(
-            f"{self.base_url}/v1/chat/completions",
-            payload=body,
-            timeout=timeout or self.timeout,
-            headers=self._headers(),
-        )
-        assembled = gather_stream(chunks, on_delta, self.pinned_family)
+            return self.normalize(self._sent(where, body, timeout), self.pinned_family)
+
+        def streamed(sending: dict[str, Any]) -> Any:
+            return gather_stream(
+                request_stream(where, payload=sending, timeout=timeout or self.timeout,
+                               headers=self._headers()),
+                on_delta, self.pinned_family)
+
+        try:
+            assembled = streamed(body)
+        except ServerError as exc:
+            served = self._served_depth(body, exc)
+            if served is None:
+                raise
+            assembled = streamed(served)
         return self.normalize(assembled, self.pinned_family)
 
     def complete(
@@ -381,6 +428,8 @@ class Client:
             "n_predict": budget,
             "stream": False,
         }
+        if spec := self.speculative:
+            body["speculative"] = spec
         if grammar:
             body["grammar"] = grammar
         if self.slot is not None:
@@ -532,14 +581,21 @@ class Client:
         return ask, reject
 
     def _completion(self, body: dict[str, Any], timeout: float | None) -> dict[str, Any]:
-        payload = request_json(
-            f"{self.base_url}/completion",
-            payload=body,
-            timeout=timeout or self.timeout,
-            tries=self.tries,
-            headers=self._headers(),
-        )
+        payload = self._sent(f"{self.base_url}/completion", body, timeout)
         return payload if isinstance(payload, dict) else {}
+
+    def _sent(self, where: str, body: dict[str, Any], timeout: float | None) -> Any:
+        """One request, sent again without its speculative field if the server refuses
+        that field."""
+        try:
+            return request_json(where, payload=body, timeout=timeout or self.timeout,
+                                tries=self.tries, headers=self._headers())
+        except ServerError as exc:
+            served = self._served_depth(body, exc)
+            if served is None:
+                raise
+            return request_json(where, payload=served, timeout=timeout or self.timeout,
+                                tries=self.tries, headers=self._headers())
 
     def assert_grammar_support(self) -> None:
         """Fail now if constrained decoding is broken on this server."""
