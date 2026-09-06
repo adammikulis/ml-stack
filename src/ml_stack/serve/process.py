@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from ml_stack.units import human_bytes
@@ -20,6 +21,22 @@ def pid_exists(pid: int | None) -> bool:
         return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
     except Exception:
         return False
+
+
+def self_or_ancestor(pid: int | None) -> bool:
+    """Whether ``pid`` is this process or one of the processes that started it."""
+    if not isinstance(pid, int) or pid <= 0:
+        return False
+    if pid == os.getpid():
+        return True
+    try:
+        import psutil
+    except ImportError:
+        return pid == os.getppid()
+    try:
+        return any(parent.pid == pid for parent in psutil.Process(os.getpid()).parents())
+    except psutil.Error:
+        return pid == os.getppid()
 
 
 def kill_pid(pid: int, *, grace_s: float = 1.0) -> None:

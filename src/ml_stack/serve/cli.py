@@ -389,6 +389,10 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
              help=f"which workload the profile is for: "
                   f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())} "
                   f"(default: {ASK})"),
+        flag("--anyway", action="store_true",
+             help="start the server even while a measurement holds this card; both its "
+                  "timings and anything measured through this server are then two models "
+                  "sharing a GPU"),
     ])
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import UnknownFlag
@@ -431,6 +435,7 @@ def cmd_up(args: argparse.Namespace) -> int:
     try:
         started = ops.up(spec, manager=manager, timeout=args.timeout,
                          escalate=bool(getattr(args, "escalate", False)),
+                         anyway=bool(getattr(args, "anyway", False)),
                          root=args.root, say=warn, on_event=_print_event)
     except UnknownFlag as exc:
         # Refused before the load, not at the end of it: the build was asked what it

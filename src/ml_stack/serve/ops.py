@@ -464,14 +464,15 @@ def preflight(spec: ServerSpec, *, manager: ServerManager) -> Any:
 
 
 def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None,
-       escalate: bool = False, root: str = DEFAULT_ROOT,
+       escalate: bool = False, anyway: bool = False, root: str = DEFAULT_ROOT,
        say: Callable[[str], None] | None = None,
        on_event: Callable[[dict], None] | None = None) -> Started:
     """Lease a server for ``spec`` -- adopting one already up, or starting one -- record it
     under its own pid, and tell the fleet."""
     if say is not None:
         manager.say = say
-    info = manager.lease(spec, timeout=timeout, escalate=escalate, on_event=on_event)
+    info = manager.lease(spec, timeout=timeout, escalate=escalate, anyway=anyway,
+                         on_event=on_event)
     held = recorded_servers(lease_file()).get(info.port) or {}
     if not info.adopted or held.get("owner_pid") == os.getpid():
         # a server this process started, or an orphan it took over: on the record under the

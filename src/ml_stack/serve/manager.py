@@ -29,7 +29,7 @@ from ml_stack.serve.backend import (
     ServerSpec,
 )
 from ml_stack.serve.ports import free_port, port_is_free
-from ml_stack.serve.process import kill_process_tree, pid_exists
+from ml_stack.serve.process import kill_process_tree, pid_exists, self_or_ancestor
 from ml_stack.serve.ports import DEFAULT_HOST, reclaim_port
 from ml_stack.units import human_bytes
 
@@ -59,6 +59,31 @@ def _emit(on_event: Event | None, event: str, **fields: Any) -> None:
         on_event({"event": event, **fields})
     except Exception:  # noqa: BLE001 - a caller's display is not this lease's problem
         pass
+
+
+class Measuring(ServerFailed):
+    """A measurement holds the card, so no second model is loaded onto it."""
+
+
+def measurement_on_the_card() -> dict[str, Any] | None:
+    """The measurement holding the bench's lock, or None when nothing is or this process
+    is the holder."""
+    try:
+        from ml_stack.bench.run import measuring
+    except ImportError:
+        return None
+    held = measuring()
+    if not held or self_or_ancestor(held.get("pid")):
+        return None
+    return held
+
+
+def measurement_said(held: dict[str, Any]) -> str:
+    """The measurement named for a message: its command, its pid and when it started."""
+    argv = " ".join(str(a) for a in (held.get("argv") or []))
+    what = f"ml-stack-bench {argv}" if argv else "a measurement that wrote no record of itself"
+    since = f", started {held['started']}" if held.get("started") else ""
+    return f"{what} (pid {held.get('pid')}){since}"
 
 
 class EscalationRefused(ServerFailed):
@@ -237,7 +262,7 @@ class ServerManager:
 
     def lease(self, spec: ServerSpec, *, timeout: float | None = None,
               roam: bool = True, check_flags: bool = True, preflight: bool = True,
-              warmup_request: bool = True, escalate: bool = False,
+              warmup_request: bool = True, escalate: bool = False, anyway: bool = False,
               on_event: Event | None = None,
               say: Callable[[str], None] | None = None) -> ServerInfo:
         """A healthy server for ``spec``. Starts one only if there is not one already.
@@ -264,6 +289,10 @@ class ServerManager:
         ``scaled_timeout`` -- so a caller that never thought about it still gets a timeout
         sized for what it is actually waiting on. A caller that passes a number means it,
         and gets exactly that instead.
+
+        Starting a server is refused with `Measuring` while another process holds the
+        bench's measuring lock; adopting one already up is not. ``anyway=True`` starts it
+        regardless.
         """
         if escalate:
             # llama.cpp's slot-save file carries the cache's stream count, and a restore
@@ -305,11 +334,13 @@ class ServerManager:
                         return self.escalate(
                             running, add_seats=max(1, int(spec.parallel or 1))
                             - max(1, int(running.parallel or 1)),
-                            timeout=resolved_timeout, on_event=on_event, say=told)
+                            timeout=resolved_timeout, anyway=anyway, on_event=on_event,
+                            say=told)
                 if stray is None:
                     if not roam or not port_is_free(spec.port):
                         elsewhere = (self._beside(spec, timeout=resolved_timeout,
-                                                  on_event=on_event, **starting)
+                                                  on_event=on_event, anyway=anyway,
+                                                  **starting)
                                     if roam else None)
                         if elsewhere is not None:
                             return elsewhere
@@ -324,7 +355,9 @@ class ServerManager:
 
             try:
                 info = self._launch(spec, timeout=resolved_timeout, on_event=on_event,
-                                    **starting)
+                                    anyway=anyway, **starting)
+            except Measuring:
+                raise
             except ServerFailed:
                 self._forget(spec.port)
                 self._unavailable_until[spec.port] = time.monotonic() + UNAVAILABLE_COOLDOWN_S
@@ -335,13 +368,21 @@ class ServerManager:
             return info
 
     def _launch(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
-                **starting: Any) -> ServerInfo:
+                anyway: bool = False, **starting: Any) -> ServerInfo:
         """Start ``spec``, telling ``on_event`` when the load begins and ends.
 
         The one place a fresh process is asked for, so ``up``, an adopt that falls
         through to a real start, and :meth:`escalate`'s relaunch all say the same thing
-        the same way.
+        the same way. Refused with `Measuring` while somebody else measures this card,
+        unless ``anyway``.
         """
+        held = None if anyway else measurement_on_the_card()
+        if held is not None:
+            raise Measuring(
+                f"port {spec.port}: the card is being measured by "
+                f"{measurement_said(held)}. Loading a second model onto it would spoil "
+                f"that measurement and this one. Wait for it to finish, stop it with "
+                f"'ml-stack-bench stop', or pass --anyway to load beside it.")
         _emit(on_event, "loading", port=spec.port, model=Path(str(spec.model)).name,
               seats=max(1, int(spec.parallel or 1)))
         info = self.backend.start(spec, lease=self._pending(spec), timeout=timeout,
@@ -389,7 +430,7 @@ class ServerManager:
         self._save()
 
     def _beside(self, spec: ServerSpec, *, timeout: float, on_event: Event | None = None,
-                **starting: Any) -> ServerInfo | None:
+                anyway: bool = False, **starting: Any) -> ServerInfo | None:
         """Serve it next to whatever holds the port, when there is room. None when there is not.
 
         Room is judged against the weights on disk: a model is roughly its file size in
@@ -403,7 +444,10 @@ class ServerManager:
         moved = replace(spec, port=free_port())
         with self._port_lock(moved.port):
             try:
-                info = self._launch(moved, timeout=timeout, on_event=on_event, **starting)
+                info = self._launch(moved, timeout=timeout, on_event=on_event,
+                                    anyway=anyway, **starting)
+            except Measuring:
+                raise
             except ServerFailed:
                 self._forget(moved.port)
                 return None
@@ -434,7 +478,8 @@ class ServerManager:
         )
 
     def escalate(self, spec: ServerSpec, *, add_seats: int = 1, room: int | None = None,
-                timeout: float | None = None, on_event: Event | None = None,
+                timeout: float | None = None, anyway: bool = False,
+                on_event: Event | None = None,
                 say: Callable[[str], None] | None = None) -> ServerInfo:
         """Grow the server on ``spec.port`` by ``add_seats`` more concurrent conversations,
         keeping every one already live.
@@ -587,7 +632,8 @@ class ServerManager:
         new_spec = replace(spec, parallel=new_slots, context=new_context, kv_unified=True)
         resolved_timeout = (
             timeout if timeout is not None else scaled_timeout(weight_of(spec.model)))
-        info = self._launch(new_spec, timeout=resolved_timeout, on_event=on_event)
+        info = self._launch(new_spec, timeout=resolved_timeout, on_event=on_event,
+                            anyway=anyway)
         new_base = info.base_url
         # recorded now, not after every restore: a restore failure below must not leave a
         # live, healthy process this manager has forgotten it started
@@ -783,16 +829,16 @@ def serve(
     manager: ServerManager | None = None,
     roam: bool = True,
     escalate: bool = False,
+    anyway: bool = False,
     on_event: Event | None = None,
     say: Callable[[str], None] | None = None,
     **spec_kwargs: object,
 ) -> Iterator[ServerInfo]:
     """Run a server for the duration of the block, yielding its ``ServerInfo``.
 
-    ``roam``, ``escalate``, ``on_event`` and ``say`` go to :meth:`ServerManager.lease`.
+    ``roam``, ``escalate``, ``anyway``, ``on_event`` and ``say`` go to
+    :meth:`ServerManager.lease`.
     """
-    from ml_stack.serve.ports import free_port
-
     manager = manager or _DEFAULT
     spec = ServerSpec(
         model=model,
@@ -801,7 +847,7 @@ def serve(
         **spec_kwargs,  # type: ignore[arg-type]
     )
     info = manager.lease(spec, timeout=timeout, roam=roam, escalate=escalate,
-                         on_event=on_event, say=say)
+                         anyway=anyway, on_event=on_event, say=say)
     try:
         yield info
     finally:

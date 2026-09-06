@@ -20,6 +20,7 @@ from ml_stack.serve.binary import (
 )
 from ml_stack.serve.manager import (
     EscalationRefused,
+    Measuring,
     ServerManager,
     merge_state,
     model_matches,
@@ -51,6 +52,7 @@ __all__ = [
     "BinaryNotFound",
     "EscalationRefused",
     "LlamaServerBackend",
+    "Measuring",
     "ServerBackend",
     "ServerFailed",
     "ServerInfo",
