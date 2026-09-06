@@ -823,6 +823,20 @@ class TestPatches:
         assert build._apply_patches(source) == ["0001-x.patch"]
         assert (source / "a.txt").read_text().count("TWO") == 1
 
+    def test_a_changed_patch_set_does_not_land_on_the_last_one(self, tmp_path, monkeypatch):
+        """A checkout the previous build patched is reset before this one is applied; two
+        patch sets stacking is what makes a rebuild produce something neither describes."""
+        source = self._repo(tmp_path)
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        build._apply_patches(source)
+        assert "TWO" in (source / "a.txt").read_text()
+
+        other = self.BODY.replace("+TWO", "+DEUX")
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, other)))
+        build._apply_patches(source)
+        text = (source / "a.txt").read_text()
+        assert "DEUX" in text and "TWO" not in text
+
     def test_a_patch_that_does_not_apply_fails_the_build(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
         body = self.BODY.replace(" one\n-two", " ONE\n-two")

@@ -72,6 +72,11 @@ digest.
   started at.** They size one block up front, so a request asking for less gets the right
   number of tokens (`common_speculative_gen_draft` truncates) at the cost of the deeper
   draft. Depth sweeps over those two read acceptance correctly and latency optimistically.
+- [ ] **Only `speculative.n_max` is per-request; the other six fields upstream guarded read
+  their values once, when the implementations are built at server start.** Making `p_min`,
+  `n_min` or `type` per-request means giving every implementation per-sequence parameters,
+  which is a much larger change than this one. `Client` refuses those names rather than
+  sending something the server would drop.
 
 ## Measurements queued (each needs the GPU; sample first)
 

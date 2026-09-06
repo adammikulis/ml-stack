@@ -94,12 +94,12 @@ class TestBuildBody:
         body = Client("http://x", speculative={"n_max": 4}).build_body([])
         assert body["speculative.n_max"] == 4
 
-    def test_every_speculative_field_is_prefixed(self):
-        asked = {"n_max": 8, "n_min": 1, "p_min": 0.5, "type": "draft-mtp"}
-        body = Client("http://x", speculative=asked).build_body([])
-        assert {k: body[k] for k in body if k.startswith("speculative.")} == {
-            "speculative.n_max": 8, "speculative.n_min": 1,
-            "speculative.p_min": 0.5, "speculative.type": "draft-mtp"}
+    def test_a_field_the_server_reads_once_at_startup_is_refused(self):
+        """p_min and n_min configure implementations built when the server starts. Sending
+        one changes nothing, and a caller who thinks it did measures the wrong thing."""
+        for name in ("p_min", "n_min", "type"):
+            with pytest.raises(ValueError, match=name):
+                Client("http://x", speculative={name: 1})
 
     def test_a_misspelled_speculative_field_is_refused(self):
         """A server ignores a field it does not know, so a typo would measure nothing."""

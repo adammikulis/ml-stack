@@ -251,25 +251,19 @@ def patch_stamp(files: list[Path] | None = None) -> str:
     return "p" + digest.hexdigest()[:7]
 
 
-def _applies_cleanly(source: Path, patch: Path, *, reverse: bool = False) -> bool:
-    """Whether ``patch`` applies to ``source``, in reverse when asked."""
-    args = ["apply", "--check", *(["--reverse"] if reverse else []), str(patch)]
-    try:
-        _git(*args, cwd=source)
-    except BuildFailed:
-        return False
-    return True
-
-
 def _apply_patches(source: Path) -> list[str]:
-    """Apply every patch onto ``source``, returning their names."""
+    """Apply every patch onto ``source`` at the commit checked out, returning their names.
+
+    The tree is reset to HEAD first, so a patch set that changed since the last build does
+    not land on top of the one before it.
+    """
     files = patch_files()
+    if not files:
+        return []
+    say(f"  resetting {source.name} to HEAD before patching")
+    _git("reset", "--hard", "HEAD", cwd=source)
     applied: list[str] = []
     for item in files:
-        if _applies_cleanly(source, item, reverse=True):
-            say(f"  {item.name} is already applied")
-            applied.append(item.name)
-            continue
         say(f"  applying {item.name}")
         try:
             _git("apply", "--3way", str(item), cwd=source)

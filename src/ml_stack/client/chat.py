@@ -40,8 +40,10 @@ _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "n_predict", "cache_prompt", "id_slot", "grammar",
                        "chat_template_kwargs", "speculative")
 
-# llama-server's per-request speculative fields, without their `speculative.` prefix.
-SPECULATIVE_FIELDS = ("n_max", "n_min", "p_min", "type")
+# What llama-server reads per request, without its `speculative.` prefix. The other
+# speculative fields configure implementations built when the server starts, and a
+# request that set one would be answered as though it had not.
+SPECULATIVE_FIELDS = ("n_max",)
 
 APIS = ("llama", "openai", "ollama")
 
