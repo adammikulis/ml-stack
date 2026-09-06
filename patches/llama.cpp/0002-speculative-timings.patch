@@ -1,0 +1,121 @@
+diff --git a/tools/server/server-common.cpp b/tools/server/server-common.cpp
+index c30955e..fd10942 100644
+--- a/tools/server/server-common.cpp
++++ b/tools/server/server-common.cpp
+@@ -79,9 +79,14 @@ json server_slot_stats::to_json() const {
+         {"predicted_per_second",   n_gen_tps()},
+     };
+ 
++    base["verify_ms"] = 1e-3 * t_verify_us;
++    base["verify_n"]  = n_verify_steps;
++
+     if (n_draft_tokens > 0) {
+         base["draft_n"]          = n_draft_tokens;
+         base["draft_n_accepted"] = n_draft_accepted;
++        base["draft_n_verified"] = n_draft_verif_steps;
++        base["draft_ms"]         = 1e-3 * t_draft_us;
+     }
+ 
+     return base;
+diff --git a/tools/server/server-common.h b/tools/server/server-common.h
+index 6c681a2..40e6b83 100644
+--- a/tools/server/server-common.h
++++ b/tools/server/server-common.h
+@@ -360,6 +360,11 @@ struct server_slot_stats {
+     uint64_t n_draft_accepted    = 0;
+     uint64_t n_draft_verif_steps = 0;
+ 
++    // generation split into the draft model's passes and the target model's, in us
++    int64_t  t_draft_us     = 0;
++    int64_t  t_verify_us    = 0;
++    uint64_t n_verify_steps = 0; // target decodes that carried generation for this slot
++
+     // these are absolute timestamps (in us)
+     // note: must be signed - they are subtracted before the later ones are set
+     int64_t t_start       = 0;
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index 44679cb..5799d8b 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -678,6 +678,10 @@ struct server_slot {
+             SLT_INF(*this,
+                     "draft acceptance = %0.5f (%5d accepted / %5d generated), mean len = %5.2f\n",
+                     draft_ratio, n_draft_accepted, n_draft_total, mean_acc_len);
++            SLT_INF(*this,
++                    "  generation was = %8.2f ms drafting + %8.2f ms verifying (%5d passes) of %8.2f ms\n",
++                    1e-3 * stats.t_draft_us, 1e-3 * stats.t_verify_us,
++                    (int32_t) stats.n_verify_steps, stats.t_gen_ms());
+             SLT_TRC(*this,
+                     "     acc per pos = (%s)\n", acceptance_rates_per_pos.c_str());
+         }
+@@ -3017,9 +3021,18 @@ private:
+ 
+         // generate the actual drafts (if any)
+         if (!drafting.empty()) {
++            const int64_t t_start = ggml_time_us();
++
+             queue_tasks.yield_to_queue([&]() {
+                 common_speculative_draft(spec.get());
+             });
++
++            // one call drafts for every slot at once, so its cost is split evenly among them
++            const int64_t t_each = (ggml_time_us() - t_start) / (int64_t) drafting.size();
++
++            for (auto * slot : drafting) {
++                slot->stats.t_draft_us += t_each;
++            }
+         }
+ 
+         // make checkpoints if needed
+@@ -3619,6 +3632,36 @@ private:
+ 
+     // returns true = success ; false = retry with smaller batch size
+     // throw std::runtime_error on fatal error
++    // charges one decode to the slots that generated in it, split evenly
++    void charge_verify(int32_t off, int32_t n_tokens, int64_t t_us) {
++        std::vector<int32_t> ids;
++
++        for (int32_t i = off; i < off + n_tokens; ++i) {
++            const auto & tok = batch.tokens[i];
++
++            if (tok.is_prompt) {
++                continue;
++            }
++
++            if (std::find(ids.begin(), ids.end(), tok.id_slot) == ids.end()) {
++                ids.push_back(tok.id_slot);
++            }
++        }
++
++        if (ids.empty()) {
++            return;
++        }
++
++        const int64_t t_each = t_us / (int64_t) ids.size();
++
++        for (auto & slot : slots) {
++            if (std::find(ids.begin(), ids.end(), slot.id) != ids.end()) {
++                slot.stats.t_verify_us    += t_each;
++                slot.stats.n_verify_steps += 1;
++            }
++        }
++    }
++
+     bool decode(int32_t & n_batch, int32_t off, llama_batch & batch_view) {
+         SRV_DBG("n_batch (effective) = %d, off = %d\n", n_batch, off);
+ 
+@@ -3653,12 +3696,14 @@ private:
+         // yield to the queue, so we can still handle metrics tasks while decoding
+         // note: the sync is done here too, so that the wait is also covered by the yield
+         int ret = 0;
++        const int64_t t_start = ggml_time_us();
+         queue_tasks.yield_to_queue([&]() {
+             ret = llama_decode(ctx_tgt, batch_view);
+             if (ret == 0 && has_output) {
+                 llama_synchronize(ctx_tgt);
+             }
+         });
++        charge_verify(off, batch_view.n_tokens, ggml_time_us() - t_start);
+ 
+         if (ret != 0) {
+             {
