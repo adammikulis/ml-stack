@@ -200,23 +200,6 @@ time with the page's server down for the Ollama half.
   refuse a duplicate name at join, accept it and disambiguate in the listing, or accept it
   silently and fix only the keying.
 
-- [ ] **A machine that was away does not learn the pause.** `ml-stack-fleet pause` sends
-  the request to every peer it can see, so a machine that is off, asleep or unreachable
-  never hears it and takes work again the moment it returns; the command names it as
-  unreached and exits non-zero, which is the whole of what happens today. The agreed fix
-  is adopt-on-join rather than any central state: a daemon, before it accepts work, reads
-  the peers it discovers and takes the most restrictive pause still in the future. The
-  protocol already carries it -- `refresh(b)` in `daemon.serve_forever` puts
-  `availability` into the beacon and `Availability.public()` reports `paused`,
-  `paused_until` and `next_open`. Rules settled with Adam: adopt only the pause, never a
-  window or a reservation; latest expiry wins and an indefinite pause beats a timed one;
-  never shorten a pause this machine already set; carry the reason so `status` can say
-  why; bound the discovery so a machine with no peers still starts. Read the `paused`
-  boolean rather than `paused_until`, which is null both when there is no pause and when
-  it is indefinite. The asymmetry is deliberate: missing a pause lets a machine work when
-  it should not, missing a resume only leaves it idle, and it is fixed by resuming again
-  while it is present.
-
 - [ ] **A router across the fleet.** `ml-stack-fleet plan --apply` serves the placement;
   nothing yet sends a new session to a free seat on the best model. The daemon's `/infer`
   proxies by model name on one machine; the router picks the machine.

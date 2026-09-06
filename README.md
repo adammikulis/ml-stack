@@ -32,7 +32,8 @@ Everything runs on your own hardware. Nothing leaves the network.
   has actually been measured, per kind of work. A machine nobody has measured is tried,
   not skipped.
 - **Your machine stays yours.** Block out working hours, or hit pause when you start a
-  game — the run stops, requeues, and picks up from its last checkpoint.
+  game — the run stops, requeues, and picks up from its last checkpoint. Pause the whole
+  cluster and a machine that was switched off takes the pause when it comes back.
 - **Train without writing code.** Pick what you want it to learn, point it at your
   files, and it runs. Or drive it from Python if you would rather.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs

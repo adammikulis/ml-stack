@@ -83,6 +83,12 @@ a row is set aside for a growing cooldown rather than draining the queue.
 - **Pause.** Stops the machine taking work now. What is already running is stopped and
   requeued, so the machine comes back to you immediately and the run resumes from its
   last checkpoint. A pause survives a restart.
+- **Pause the whole fleet.** One command pauses every machine in the cluster, with a
+  reason and a length, and names any it could not reach. A machine that was off, asleep
+  or unplugged takes the pause from its neighbours when it starts, along with the reason,
+  so it does not come back in the middle of your evening and start a job. Resume works
+  the other way round: a machine that was away when you resumed stays paused until you
+  resume it while it is running.
 - **Reservations.** One machine can hold another for a while, with a ceiling so a
   forgotten reservation cannot take a machine out of the cluster permanently.
 

@@ -862,3 +862,34 @@ class TestStatusSaysWhoIsPaused:
         assert row["paused"] and "somebody is here" in row["paused_because"]
         text = table([row])
         assert "paused" in text and "somebody is here" in text
+
+    @pytest.mark.slow
+    def test_a_real_daemon_boots_into_a_paused_cluster_paused(self, cluster, tmp_path):
+        """The whole path: a daemon started as a process reads the beacons and writes
+        down the pause before it takes work."""
+        import os
+
+        from ml_stack.fleet.availability import Availability
+
+        made, key, udp, _ = cluster
+        made[1].schedule.pause(minutes=120, reason="somebody is at the desk")
+        root = tmp_path / "windermere"
+        env = {**os.environ, "ML_STACK_CLUSTER_KEY": str(key),
+               "ML_STACK_DISCOVERY_PORT": str(udp),
+               "PYTHONPATH": str(Path(joining.__file__).parents[2])}
+        code = ("from ml_stack.fleet.daemon import serve_forever;"
+                f"serve_forever(root={str(root)!r}, host='127.0.0.1',"
+                f" port={_free_tcp()}, name='windermere', web=False, announce=False)")
+        proc = subprocess.Popen([sys.executable, "-c", code], env=env,
+                                stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+        saved = root / "availability.json"
+        try:
+            deadline = time.time() + 90
+            while time.time() < deadline and not saved.exists():
+                time.sleep(0.2)
+            assert saved.exists(), "the daemon wrote down no pause"
+            back = Availability.load(saved)
+            assert back.paused and "somebody is at the desk" in back.may_start()[1]
+        finally:
+            proc.terminate()
+            proc.wait(timeout=30)
