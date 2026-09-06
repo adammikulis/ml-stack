@@ -94,13 +94,7 @@ class FakeToolchain:
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
     """Every managed path lives under tmp_path, never a real ~/.ml-stack."""
-    root = tmp_path / "ml-stack" / "llama.cpp"
-    monkeypatch.setattr(build, "ROOT", root)
-    monkeypatch.setattr(build, "SRC_DIR", root / "src")
-    monkeypatch.setattr(build, "BUILDS_DIR", root / "builds")
-    monkeypatch.setattr(build, "CURRENT_LINK", root / "current")
-    monkeypatch.setattr(build, "NAMED_DIR", root / "named")
-    monkeypatch.setattr(build, "NAMED_SRC_DIR", root / "named-src")
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
     monkeypatch.setattr(build, "PERSIST_PLIST",
                         tmp_path / "Library" / "LaunchAgents" / f"{build.PERSIST_LABEL}.plist")
     # No earlier build to compare against, unless a test says otherwise.
@@ -132,7 +126,7 @@ class TestSourceBuild:
         assert chain.calls.index(cmake_calls[0]) > chain.calls.index(
             next(c for c in chain.calls if Path(c[0]).name == "git" and c[1] == "clone"))
 
-        dest = build.BUILDS_DIR / "abc1234"
+        dest = build.builds_dir() / "abc1234"
         assert (dest / build._server_name()).is_file()
         assert (dest / "libllama.0.3.0.dylib").is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
@@ -142,7 +136,7 @@ class TestSourceBuild:
 
     def test_an_existing_checkout_is_fetched_and_fast_forwarded_not_cloned(
             self, monkeypatch):
-        (build.SRC_DIR / ".git").mkdir(parents=True)
+        (build.src_dir() / ".git").mkdir(parents=True)
         chain = FakeToolchain()
         monkeypatch.setattr(subprocess, "run", chain.run)
 
@@ -173,7 +167,7 @@ class TestSourceBuild:
         git_calls = [c[1:] for c in chain.calls if Path(c[0]).name == "git"]
         assert ["fetch", "--depth", "1", "origin", "deadbee"] in git_calls
         assert ["checkout", "FETCH_HEAD"] in git_calls
-        assert (build.BUILDS_DIR / "deadbee").is_dir()
+        assert (build.builds_dir() / "deadbee").is_dir()
 
     def test_an_already_built_commit_is_not_rebuilt_without_force(self, monkeypatch):
         chain = FakeToolchain()
@@ -197,7 +191,7 @@ class TestVerificationGatesTheSwitch:
     def test_a_build_that_reads_fewer_architectures_than_the_current_one_is_refused(
             self, monkeypatch, capsys):
         """The whole point: a new build must not cost an architecture the old one read."""
-        baseline_dir = build.ROOT.parent / "baseline"
+        baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build._server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp", "phi9"})
@@ -211,7 +205,7 @@ class TestVerificationGatesTheSwitch:
         assert code == 2
         err = capsys.readouterr().err
         assert "phi9" in err
-        assert not build.CURRENT_LINK.exists() and not build.CURRENT_LINK.is_symlink(), \
+        assert not build.current_link().exists() and not build.current_link().is_symlink(), \
             "a build that lost an architecture must not become current"
 
     def test_a_build_that_answers_no_help_is_refused(self, monkeypatch, capsys):
@@ -233,10 +227,10 @@ class TestVerificationGatesTheSwitch:
         code = build.cmd_build(_args())
         assert code == 2
         assert "did not answer --help" in capsys.readouterr().err
-        assert not build.CURRENT_LINK.exists() and not build.CURRENT_LINK.is_symlink()
+        assert not build.current_link().exists() and not build.current_link().is_symlink()
 
     def test_a_build_that_reads_a_superset_becomes_current(self, monkeypatch, capsys):
-        baseline_dir = build.ROOT.parent / "baseline"
+        baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build._server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4"})
@@ -247,8 +241,8 @@ class TestVerificationGatesTheSwitch:
         monkeypatch.setattr(subprocess, "run", chain.run)
 
         assert build.cmd_build(_args()) == 0
-        assert build.CURRENT_LINK.is_symlink()
-        assert build.CURRENT_LINK.resolve() == (build.BUILDS_DIR / "abc1234").resolve()
+        assert build.current_link().is_symlink()
+        assert build.current_link().resolve() == (build.builds_dir() / "abc1234").resolve()
         out = capsys.readouterr().out
         assert "superset of the current 1" in out
 
@@ -259,12 +253,12 @@ class TestVerificationGatesTheSwitch:
         a chat template, not a model architecture. A source checkout is what tells the
         difference; without one this heuristic cannot, so this is exactly what the source
         checkout `_arches_from_source` reads is for."""
-        (build.SRC_DIR / "src").mkdir(parents=True)
-        (build.SRC_DIR / "src" / "llama-arch.cpp").write_text(
+        (build.src_dir() / "src").mkdir(parents=True)
+        (build.src_dir() / "src" / "llama-arch.cpp").write_text(
             '{ LLM_ARCH_GEMMA4,   "gemma4"   },\n'
             '{ LLM_ARCH_QWEN4EXP, "qwen4exp" },\n')
 
-        baseline_dir = build.ROOT.parent / "baseline"
+        baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build._server_name())
         # The baseline has the false-positive string too -- exactly the real machine.
@@ -276,7 +270,7 @@ class TestVerificationGatesTheSwitch:
         monkeypatch.setattr(subprocess, "run", chain.run)
 
         assert build.cmd_build(_args()) == 0
-        assert build.CURRENT_LINK.resolve() == (build.BUILDS_DIR / "abc1234").resolve()
+        assert build.current_link().resolve() == (build.builds_dir() / "abc1234").resolve()
 
 
 class TestRollback:
@@ -286,9 +280,9 @@ class TestRollback:
             monkeypatch.setattr(subprocess, "run", chain.run)
             assert build.cmd_build(_args()) == 0
 
-        assert build.CURRENT_LINK.resolve() == (build.BUILDS_DIR / "second2").resolve()
+        assert build.current_link().resolve() == (build.builds_dir() / "second2").resolve()
         assert build.cmd_build(_args(rollback=True)) == 0
-        assert build.CURRENT_LINK.resolve() == (build.BUILDS_DIR / "first01").resolve()
+        assert build.current_link().resolve() == (build.builds_dir() / "first01").resolve()
 
     def test_rolling_back_with_nothing_earlier_fails_rather_than_doing_nothing_silently(
             self, monkeypatch, capsys):
@@ -306,11 +300,11 @@ class TestFindBinaryPrefersTheManagedBuild:
             self, tmp_path, monkeypatch):
         import ml_stack.serve.binary as binary_module
 
-        managed = tmp_path / "current"
-        managed.mkdir()
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+        managed = binary_module.managed_current()
+        managed.mkdir(parents=True)
         (managed / "llama-server").write_text("#!/bin/sh\nexit 0\n")
         (managed / "llama-server").chmod(0o755)
-        monkeypatch.setattr(binary_module, "MANAGED_CURRENT", managed)
 
         on_path = tmp_path / "path-bin" / "llama-server"
         on_path.parent.mkdir()
@@ -339,18 +333,16 @@ class TestFindBinaryPrefersTheManagedBuild:
             self, tmp_path, monkeypatch):
         import ml_stack.serve.binary as binary_module
 
-        current = tmp_path / "current"
-        current.mkdir()
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
+        current = binary_module.managed_current()
+        current.mkdir(parents=True)
         (current / "llama-server").write_text("#!/bin/sh\nexit 0\n")
         (current / "llama-server").chmod(0o755)
-        monkeypatch.setattr(binary_module, "MANAGED_CURRENT", current)
 
-        named_root = tmp_path / "named"
-        unsloth = named_root / "unsloth"
+        unsloth = binary_module.managed_named() / "unsloth"
         unsloth.mkdir(parents=True)
         (unsloth / "llama-server").write_text("#!/bin/sh\nexit 0\n")
         (unsloth / "llama-server").chmod(0o755)
-        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
 
         monkeypatch.delenv("LLAMA_CPP_SERVER", raising=False)
         monkeypatch.delenv("LLAMA_CPP_DIR", raising=False)
@@ -435,8 +427,8 @@ class TestAdopt:
         code = build.cmd_build(_args(adopt=str(source)))
         assert code == 0
 
-        dest = build.BUILDS_DIR / "62acc89"
-        assert build.CURRENT_LINK.resolve() == dest.resolve()
+        dest = build.builds_dir() / "62acc89"
+        assert build.current_link().resolve() == dest.resolve()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "62acc89"
         assert manifest["source"] == f"adopted from {source.resolve()}"
@@ -457,24 +449,24 @@ class TestAdopt:
         source = self._existing_dir(tmp_path, arches={"gemma4", "qwen4exp"})   # no phi4
         code = build.cmd_build(_args(adopt=str(source)))
         assert code == 2
-        assert not build.CURRENT_LINK.exists() and not build.CURRENT_LINK.is_symlink()
+        assert not build.current_link().exists() and not build.current_link().is_symlink()
         # but it is still registered as a build, ready for --rollback-style bookkeeping
         # once verified -- adoption itself (copying it in) is not what was refused
-        assert (build.BUILDS_DIR / "62acc89" / "BUILD.json").is_file()
+        assert (build.builds_dir() / "62acc89" / "BUILD.json").is_file()
 
     def test_the_commit_is_read_from_version_when_it_names_one(self, tmp_path, monkeypatch):
         monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(
             tmp_path, version="version: 0.3.0 (build 10621, commit c1d0e7a00)")
         assert build.cmd_build(_args(adopt=str(source))) == 0
-        assert (build.BUILDS_DIR / "c1d0e7a00").is_dir()
+        assert (build.builds_dir() / "c1d0e7a00").is_dir()
 
     def test_a_version_with_no_commit_falls_back_to_a_slug_rather_than_failing(
             self, tmp_path, monkeypatch):
         monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(tmp_path, version="llama-server v9.9.9")
         assert build.cmd_build(_args(adopt=str(source))) == 0
-        made = list(build.BUILDS_DIR.iterdir())
+        made = list(build.builds_dir().iterdir())
         assert len(made) == 1 and made[0].name
 
     def test_a_directory_with_no_server_binary_fails_rather_than_adopting_nothing(
@@ -611,22 +603,22 @@ class TestNamedBuild:
             _args(repo="unslothai/llama.cpp", ref="b10715-mix-86bd2d3", name="unsloth"))
         assert code == 0
 
-        dest = build.BUILDS_DIR / "unsloth-86bd2d3"
+        dest = build.builds_dir() / "unsloth-86bd2d3"
         assert (dest / build._server_name()).is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["repo"] == "unslothai/llama.cpp"
         assert manifest["ref"] == "b10715-mix-86bd2d3"
         assert manifest["name"] == "unsloth"
 
-        assert (build.NAMED_DIR / "unsloth").resolve() == dest.resolve()
-        assert not build.CURRENT_LINK.exists() and not build.CURRENT_LINK.is_symlink(), \
+        assert (build.named_dir() / "unsloth").resolve() == dest.resolve()
+        assert not build.current_link().exists() and not build.current_link().is_symlink(), \
             "a named build must never become 'current'"
 
     def test_a_named_build_missing_an_architecture_the_baseline_has_is_linked_anyway(
             self, monkeypatch, capsys):
         """The whole point of --name: a fork is not required to be a superset of master's
         own build, unlike the default build a bare 'ml-stack-serve build' would replace."""
-        baseline_dir = build.ROOT.parent / "baseline"
+        baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
         _fake_server_script(baseline_dir / build._server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp"})
@@ -640,8 +632,8 @@ class TestNamedBuild:
         assert code == 0
         out = capsys.readouterr().out
         assert "missing qwen4exp" in out
-        assert (build.NAMED_DIR / "unsloth").is_symlink()
-        assert not build.CURRENT_LINK.exists()
+        assert (build.named_dir() / "unsloth").is_symlink()
+        assert not build.current_link().exists()
 
     def test_name_without_repo_is_refused(self, capsys):
         code = build.cmd_build(_args(name="unsloth"))
@@ -684,7 +676,7 @@ class TestNamedBuild:
         assert code == 0
         assert downloaded == ["llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz"]
         manifest = json.loads(
-            (build.NAMED_DIR / "unsloth" / "BUILD.json").read_text())
+            (build.named_dir() / "unsloth" / "BUILD.json").read_text())
         assert manifest["commit"] == "b10715-mix-86bd2d3"
         assert manifest["source"] == "release"
         assert manifest["repo"] == "unslothai/llama.cpp"
@@ -766,7 +758,7 @@ class TestReleaseInstall:
         code = build.cmd_build(_args(source_kind="release"))
         assert code == 0
         assert downloaded == ["llama-b998-bin-macos-arm64.tar.gz"]
-        dest = build.BUILDS_DIR / "b998"
+        dest = build.builds_dir() / "b998"
         assert (dest / build._server_name()).is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "b998"

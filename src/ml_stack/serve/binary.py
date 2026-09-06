@@ -14,17 +14,21 @@ logger = logging.getLogger(__name__)
 
 SERVER_NAMES = ("llama-server", "llama-server.exe")
 
-# Where `ml-stack-serve build` installs what it builds or downloads, and which build is
-# trusted right now. `build.py` only repoints MANAGED_CURRENT once a new build answers
-# --help and reads every architecture the old one did -- so finding it here is finding
-# something already verified, never a build in progress.
-MANAGED_ROOT = home.state("llama.cpp")
-MANAGED_CURRENT = MANAGED_ROOT / "current"
 
-# A build kept beside `current` rather than replacing it -- a fork whose fixes have not
-# reached master, selected by name instead of becoming the default. `build.py --name NAME`
-# points `MANAGED_NAMED / NAME` at it once it is verified.
-MANAGED_NAMED = MANAGED_ROOT / "named"
+def managed_root() -> Path:
+    """Where `ml-stack-serve build` installs what it builds or downloads."""
+    return home.state("llama.cpp")
+
+
+def managed_current() -> Path:
+    """The managed build that is trusted right now."""
+    return managed_root() / "current"
+
+
+def managed_named() -> Path:
+    """Where builds kept beside `current` are pointed at, one link per name."""
+    return managed_root() / "named"
+
 
 # The repository `ml-stack-serve build` builds by default. A BUILD.json naming any other
 # `repo` is a fork, and a fork is the only kind of build that can load a draft head its
@@ -87,7 +91,7 @@ def find_binary(
         named = build or os.environ.get("MLSTACK_LLAMA_BUILD")
         if named:
             for candidate in candidates:
-                path = MANAGED_NAMED / named / candidate
+                path = managed_named() / named / candidate
                 if path.is_file():
                     return path.resolve()
             logger.debug("named build %r has no %s; falling through", named, name)
@@ -96,7 +100,7 @@ def find_binary(
         # bottle a release lags behind -- but never an explicit path or $LLAMA_CPP_SERVER,
         # both handled above.
         for candidate in candidates:
-            path = MANAGED_CURRENT / candidate
+            path = managed_current() / candidate
             if path.is_file():
                 return path.resolve()
 
@@ -121,7 +125,8 @@ def require_binary(name: str = "llama-server", **kwargs: object) -> Path:
         return found
     raise BinaryNotFound(
         f"{name} not found. Looked at: $LLAMA_CPP_SERVER, $LLAMA_CPP_DIR, a named build "
-        f"($MLSTACK_LLAMA_BUILD or build=) under {MANAGED_NAMED}, {MANAGED_CURRENT}, "
+        f"($MLSTACK_LLAMA_BUILD or build=) under {managed_named()}, "
+        f"{managed_current()}, "
         f"a vendor dir, PATH, {home.cache()}, and "
         f"{', '.join(str(d) for d in _LOGIN_SHELL_DIRS)}.\n"
         f"ml-stack-serve build   builds llama.cpp's own master (or downloads the newest "
@@ -166,7 +171,7 @@ def borrows(binary: str | Path | None) -> bool:
     binary is serving decides which head may be offered -- and this is the one place that
     decision is read off a binary.
 
-    A fork is a build kept under ``MANAGED_NAMED`` (`ml-stack-serve build --name NAME`), or
+    A fork is a build kept under ``managed_named()`` (`ml-stack-serve build --name NAME`), or
     one whose ``BUILD.json`` names a ``repo`` other than ``ggml-org/llama.cpp``. `current`,
     a brew bottle, a release, anything on PATH, and ``None`` are mainline.
     """
@@ -174,7 +179,7 @@ def borrows(binary: str | Path | None) -> bool:
         return False
     path = home.expand(binary)
     try:
-        path.relative_to(MANAGED_NAMED)
+        path.relative_to(managed_named())
         return True
     except ValueError:
         pass
@@ -186,15 +191,16 @@ def borrows(binary: str | Path | None) -> bool:
 def named_builds(name: str = "llama-server") -> list[tuple[str, Path]]:
     """Every named build on this machine as ``(name, binary)``, sorted by name.
 
-    Read off ``MANAGED_NAMED`` when asked, not at import, so a caller that points it
+    Read off ``managed_named()`` when asked, not at import, so a caller that points it
     elsewhere (a test, a machine with a different home) sees that. A link that no longer
     resolves -- its build directory removed by hand -- is skipped rather than reported as a
     build that is not there.
     """
-    if not MANAGED_NAMED.is_dir():
+    named = managed_named()
+    if not named.is_dir():
         return []
     out = []
-    for link in sorted(MANAGED_NAMED.iterdir()):
+    for link in sorted(named.iterdir()):
         for candidate in _name_variants(name):
             if (link.is_symlink() or link.is_dir()) and (link / candidate).is_file():
                 out.append((link.name, link / candidate))

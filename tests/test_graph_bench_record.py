@@ -79,15 +79,19 @@ class TestWhatWasShown:
 class TestOneAccessorEach:
 
     def test_the_build_is_the_name_a_serve_command_takes(self, monkeypatch):
+        import pathlib
+
         from ml_stack.serve import build as build_module
 
-        monkeypatch.setattr(build_module, "NAMED_DIR", "/opt/builds")
+        monkeypatch.setattr(build_module, "named_dir", lambda: pathlib.Path("/opt/builds"))
         assert Measured.from_dict(_run()).build == "thornfell"
 
     def test_a_binary_that_is_no_named_build_names_none(self, monkeypatch):
+        import pathlib
+
         from ml_stack.serve import build as build_module
 
-        monkeypatch.setattr(build_module, "NAMED_DIR", "/opt/builds")
+        monkeypatch.setattr(build_module, "named_dir", lambda: pathlib.Path("/opt/builds"))
         one = _run(server={"binary": "/usr/local/bin/llama-server"})
         assert Measured.from_dict(one).build == ""
 

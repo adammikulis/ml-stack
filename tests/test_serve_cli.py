@@ -661,14 +661,14 @@ class TestResolveModel:
         snapshot.mkdir(parents=True)
         gguf = snapshot / MODEL
         gguf.write_bytes(b"x")
-        monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+        monkeypatch.setattr(hub_module, "hub_cache", lambda: cache)
 
         assert cli.resolve_model(MODEL) == str(gguf.resolve())
 
     def test_a_bare_name_found_nowhere_is_returned_unchanged(self, tmp_path, monkeypatch):
         import ml_stack.hub as hub_module
 
-        monkeypatch.setattr(hub_module, "HUB_CACHE", tmp_path / "empty")
+        monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path / "empty")
         assert cli.resolve_model(MODEL) == MODEL
 
     def test_up_preflight_only_resolves_a_bare_name_and_reports_it(
@@ -684,7 +684,7 @@ class TestResolveModel:
             "general.architecture": "llama", "llama.block_count": 32,
             "llama.attention.head_count_kv": 8, "llama.attention.key_length": 128,
         })
-        monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+        monkeypatch.setattr(hub_module, "hub_cache", lambda: cache)
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
 
         binary = tmp_path / "llama-server"
@@ -811,7 +811,7 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     for n, blob in ((1, "aa" * 32), (2, "bb" * 32)):
         (blobs / blob).write_bytes(b"x" * (100 * n))
         (snapshot / f"big-Q4_K_M-0000{n}-of-00002.gguf").symlink_to(blobs / blob)
-    monkeypatch.setattr(hub_module, "HUB_CACHE", cache)
+    monkeypatch.setattr(hub_module, "hub_cache", lambda: cache)
 
     found = cli.resolve_model("big-Q4_K_M-00001-of-00002.gguf")
     assert found == str(snapshot / "big-Q4_K_M-00001-of-00002.gguf")
@@ -941,7 +941,7 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
     import types
 
     monkeypatch.setattr(cli, "ServerManager", Manager)
-    monkeypatch.setattr(hub_module, "HUB_CACHE", tmp_path)
+    monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
     model = tmp_path / "tiny.gguf"
     model.write_bytes(b"x")
     try:

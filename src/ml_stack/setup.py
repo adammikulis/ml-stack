@@ -750,7 +750,7 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
     working tree, the branch, worktrees, the editable install, the bench store, and the
     managed llama.cpp builds."""
     from ml_stack.bench import home_dir
-    from ml_stack.serve.binary import MANAGED_CURRENT, MANAGED_NAMED
+    from ml_stack.serve.binary import managed_current, managed_named
 
     out: list[Finding] = []
     seen_python: set[Path] = set()
@@ -775,8 +775,8 @@ def look_checkouts(repos: list[Path] | None = None, *, bench_home: Path | None =
             if found is not None:
                 out.append(found)
     out.extend(bench_of(home_dir() if bench_home is None else bench_home))
-    out.extend(builds_of(MANAGED_CURRENT if current is None else current,
-                         MANAGED_NAMED if named is None else named))
+    out.extend(builds_of(managed_current() if current is None else current,
+                         managed_named() if named is None else named))
     return out
 
 

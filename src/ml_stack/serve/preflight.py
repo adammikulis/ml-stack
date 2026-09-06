@@ -303,9 +303,9 @@ def known_architectures(binary: str | Path) -> set[str]:
 
 def source_dir() -> Path:
     """Where the managed build's source checkout lives; a seam so tests can point elsewhere."""
-    from ml_stack.serve.build import SRC_DIR
+    from ml_stack.serve.build import src_dir
 
-    return Path(SRC_DIR)
+    return Path(src_dir())
 
 
 # ---------------------------------------------------------------- fit (weights + kv + runtime)

@@ -243,13 +243,13 @@ def merge(base: str, adapter: Path | str, out: Path | str, *, device: str = "cpu
 def managed_source() -> Path:
     """The managed llama.cpp build's source checkout -- where its converter lives.
 
-    Read off ``serve.build.SRC_DIR`` when that import works, so there is one answer to
+    Read off ``serve.build.src_dir`` when that import works, so there is one answer to
     "which llama.cpp is this machine's", and the same path spelled out when it does not.
     """
     try:
-        from ml_stack.serve.build import SRC_DIR
+        from ml_stack.serve.build import src_dir
 
-        return Path(SRC_DIR)
+        return Path(src_dir())
     except Exception:                                       # noqa: BLE001 - a bare install
         return home.state("llama.cpp", "src")
 

@@ -609,9 +609,8 @@ class TestChooseHead:
         import ml_stack.serve.binary as binary_module
 
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
-        named_root = tmp_path / "named"
-        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
-        fork = self._binary(named_root / "forkname")
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+        fork = self._binary(binary_module.managed_named() / "forkname")
 
         chosen = hub.choose_head("hf:maker/flash-GGUF", binary=fork)
         assert chosen.path == "hf:maker/flash-GGUF/MTP/mtp-flash-shared-Q8_0.gguf"
@@ -622,7 +621,8 @@ class TestChooseHead:
 
     def test_a_manifest_naming_a_fork_borrows_wherever_it_lives(self, monkeypatch, tmp_path):
         """`find_binary` resolves the `named/` link into `builds/<name>-<commit>/`, so the
-        path handed over is not under MANAGED_NAMED; the BUILD.json beside it says fork."""
+        path handed over is not under `managed_named()`; the BUILD.json beside it says
+        fork."""
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
         fork = self._binary(tmp_path / "builds" / "forkname-abc1234",
                             {"commit": "abc1234", "repo": "someone/llama.cpp",
@@ -682,7 +682,7 @@ class TestChooseHead:
         snapshot = cache / "models--maker--flash-GGUF" / "snapshots" / "abc" / "UD-IQ4_XS"
         snapshot.mkdir(parents=True)
         (snapshot / "flash-UD-IQ4_XS-00001-of-00002.gguf").write_bytes(b"GGUF")
-        monkeypatch.setattr(hub, "HUB_CACHE", cache)
+        monkeypatch.setattr(hub, "hub_cache", lambda: cache)
         mainline = self._binary(tmp_path / "current")
         fork = self._binary(tmp_path / "fork", {"repo": "someone/llama.cpp"})
 
@@ -730,9 +730,8 @@ class TestChooseHead:
         monkeypatch.setattr(hub, "room", lambda: 0)
         monkeypatch.setattr(hub, "held", lambda: {})
         current = self._binary(tmp_path / "current")
-        named_root = tmp_path / "named"
-        self._binary(named_root / "forkname")
-        monkeypatch.setattr(binary_module, "MANAGED_NAMED", named_root)
+        monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+        self._binary(binary_module.managed_named() / "forkname")
         monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: current)
 
         assert hub.main(["files", "maker/flash-GGUF"]) == 0

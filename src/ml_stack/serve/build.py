@@ -37,31 +37,54 @@ from ml_stack import home
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 from ml_stack.serve.binary import (
-    MANAGED_CURRENT,
-    MANAGED_NAMED,
-    MANAGED_ROOT,
     child_env,
     find_binary,
     is_windows,
+    managed_current,
+    managed_named,
+    managed_root,
 )
 
 __all__ = [
-    "BuildFailed", "ROOT", "SRC_DIR", "BUILDS_DIR", "CURRENT_LINK", "NAMED_DIR",
-    "NAMED_SRC_DIR", "PERSIST_PLIST", "PERSIST_TASK", "WEEK_SECONDS", "cmd_build",
+    "BuildFailed", "PERSIST_PLIST", "PERSIST_TASK", "WEEK_SECONDS", "builds_dir",
+    "cmd_build", "current_link", "named_dir", "named_src_dir", "root", "src_dir",
 ]
 
 REPO_URL = "https://github.com/ggml-org/llama.cpp"
 LLAMA_RELEASES_API = "https://api.github.com/repos/ggml-org/llama.cpp/releases"
 CMAKE_TARGET = "llama-server"          # the cmake target name, the same on every platform
 
-# Where a managed build lives. `find_binary` checks CURRENT_LINK ahead of everything but an
-# explicit path and $LLAMA_CPP_SERVER, so nothing else has to change to prefer it.
-ROOT = MANAGED_ROOT
-SRC_DIR = ROOT / "src"
-BUILDS_DIR = ROOT / "builds"
-CURRENT_LINK = MANAGED_CURRENT
-NAMED_DIR = MANAGED_NAMED
-NAMED_SRC_DIR = ROOT / "named-src"
+
+
+def root() -> Path:
+    """Where a managed build lives."""
+    return managed_root()
+
+
+def src_dir() -> Path:
+    """The llama.cpp checkout `ml-stack-serve build` builds from."""
+    return root() / "src"
+
+
+def builds_dir() -> Path:
+    """The directory holding one directory per build made."""
+    return root() / "builds"
+
+
+def current_link() -> Path:
+    """The link naming the build `find_binary` prefers."""
+    return managed_current()
+
+
+def named_dir() -> Path:
+    """The directory of links to builds kept beside ``current``."""
+    return managed_named()
+
+
+def named_src_dir() -> Path:
+    """The directory holding one checkout per named build."""
+    return root() / "named-src"
+
 
 LIB_GLOBS = ("lib*.dylib", "lib*.so", "*.dll")
 
@@ -194,11 +217,11 @@ def _short_commit(source: Path) -> str:
 
 # -- a fork, kept beside `current` rather than replacing it ---------------------------
 def _named_source_dir(name: str) -> Path:
-    return NAMED_SRC_DIR / name
+    return named_src_dir() / name
 
 
 def _named_dest(name: str, commit: str) -> Path:
-    return BUILDS_DIR / f"{name}-{commit}"
+    return builds_dir() / f"{name}-{commit}"
 
 
 def _sync_named_source(source: Path, repo: str, ref: str) -> None:
@@ -305,14 +328,14 @@ def _install_source_build(build_dir: Path, dest: Path, commit: str, *,
 
 
 def _build_from_source(args) -> tuple[Path, str]:
-    source = Path(args.source).expanduser() if args.source else SRC_DIR
+    source = Path(args.source).expanduser() if args.source else src_dir()
     if not args.source:
         _sync_source(source)
     if args.commit:
         _checkout_commit(source, args.commit)
 
     commit = _short_commit(source)
-    dest = BUILDS_DIR / commit
+    dest = builds_dir() / commit
     if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
         say(f"{commit} is already built at {dest} -- pass --force to rebuild")
         return dest, commit
@@ -461,7 +484,7 @@ def _build_from_release(args) -> tuple[Path, str]:
             match = next((n for n in assets if fnmatch.fnmatch(n, pattern)), None)
             if match is None:
                 continue
-            dest = BUILDS_DIR / tag
+            dest = builds_dir() / tag
             if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
                 say(f"{tag} is already installed at {dest} -- pass --force to redo it")
                 return dest, tag
@@ -573,7 +596,7 @@ def _adopt(source_str: str) -> tuple[Path, str]:
         raise BuildFailed(f"{source / binary_name} did not answer --version")
     commit = _commit_from_version(version) or _slug(version) or "adopted"
 
-    dest = BUILDS_DIR / commit
+    dest = builds_dir() / commit
     dest.mkdir(parents=True, exist_ok=True)
     _copy_flat(source, dest)
     binary = dest / binary_name
@@ -624,7 +647,7 @@ def _relink(link: Path, target: Path) -> None:
 
 
 def _point_current(dest: Path) -> None:
-    _relink(CURRENT_LINK, dest)
+    _relink(current_link(), dest)
 
 
 def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> None:
@@ -652,7 +675,8 @@ def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> 
     # (a checkout with no readable llama-arch.cpp) is "could not read it", not "master has
     # none" -- restricting to nothing would make every comparison vacuously pass, which is
     # worse than the imprecise guess it would otherwise fall back to.
-    known = _arches_from_source(SRC_DIR) or None if SRC_DIR.is_dir() else None
+    source = src_dir()
+    known = _arches_from_source(source) or None if source.is_dir() else None
     new_arches = setup_module._arches(dest, known=known)
     baseline = find_binary("llama-server")
     old_arches = setup_module._arches(str(baseline), known=known) if baseline else set()
@@ -663,8 +687,8 @@ def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> 
             f"{len(new_arches)} architectures"
             + (f"; missing {', '.join(sorted(missing))} that the current build reads"
                  if missing else ""))
-        NAMED_DIR.mkdir(parents=True, exist_ok=True)
-        _relink(NAMED_DIR / named, dest)
+        named_dir().mkdir(parents=True, exist_ok=True)
+        _relink(named_dir() / named, dest)
         say(f"  named build {named!r} -> {dest} ({commit})")
         return
 
@@ -683,7 +707,7 @@ def _verify_and_switch(dest: Path, commit: str, *, named: str | None = None) -> 
 # -- rollback and --check -------------------------------------------------
 def _do_rollback() -> int:
     entries: list[tuple[str, Path]] = []
-    for manifest in sorted(BUILDS_DIR.glob("*/BUILD.json")):
+    for manifest in sorted(builds_dir().glob("*/BUILD.json")):
         try:
             info = json.loads(manifest.read_text())
         except (OSError, ValueError):
@@ -691,8 +715,8 @@ def _do_rollback() -> int:
         entries.append((str(info.get("built_at", "")), manifest.parent))
     entries.sort()
 
-    current = CURRENT_LINK.resolve() if CURRENT_LINK.is_symlink() or CURRENT_LINK.exists() \
-        else None
+    link = current_link()
+    current = link.resolve() if link.is_symlink() or link.exists() else None
     for _, build_dir in reversed(entries):
         if build_dir != current:
             _point_current(build_dir)
@@ -704,8 +728,9 @@ def _do_rollback() -> int:
 
 def _report(args) -> int:
     target: Path | None = None
-    if CURRENT_LINK.is_symlink() or CURRENT_LINK.exists():
-        target = CURRENT_LINK / _server_name()
+    link = current_link()
+    if link.is_symlink() or link.exists():
+        target = link / _server_name()
     else:
         found = find_binary("llama-server")
         target = Path(found) if found else None
@@ -725,12 +750,13 @@ def _report(args) -> int:
     else:
         say(f"{target}  {_version_of(target) or 'version unknown'} (not a managed build)")
 
-    if SRC_DIR.is_dir():
+    source = src_dir()
+    if source.is_dir():
         import ml_stack.setup as setup_module
 
-        master = _arches_from_source(SRC_DIR)
+        master = _arches_from_source(source)
         if not master:
-            say(f"could not read architecture names out of {SRC_DIR} -- "
+            say(f"could not read architecture names out of {source} -- "
                 "src/llama-arch.cpp may have moved or renamed its table")
         else:
             mine = setup_module._arches(str(target), known=master)
@@ -741,7 +767,7 @@ def _report(args) -> int:
             else:
                 say("reads every architecture master's own source does")
     else:
-        say(f"no source checkout at {SRC_DIR} to compare architectures against "
+        say(f"no source checkout at {source} to compare architectures against "
             "-- ml-stack-serve build --from source clones one")
     return 0
 
@@ -752,10 +778,11 @@ def _named_builds() -> list[tuple[str, Path]]:
     -- a link is only ever written once ``_verify_and_switch`` has already run for it -- but
     a link that no longer resolves (its build directory was removed by hand) is skipped
     rather than reported as a build that is not there."""
-    if not NAMED_DIR.is_dir():
+    named = named_dir()
+    if not named.is_dir():
         return []
     out = []
-    for link in sorted(NAMED_DIR.iterdir()):
+    for link in sorted(named.iterdir()):
         if (link.is_symlink() or link.is_dir()) and (link / _server_name()).exists():
             out.append((link.name, link))
     return out
@@ -780,8 +807,9 @@ def _cmd_list() -> int:
         repo = info.get("repo", "ggml-org/llama.cpp")
         return f"{label:14} {info.get('commit', '?'):12} {age:>4} old  {repo}"
 
-    if CURRENT_LINK.is_symlink() or CURRENT_LINK.exists():
-        say(_line("current", CURRENT_LINK))
+    link = current_link()
+    if link.is_symlink() or link.exists():
+        say(_line("current", link))
     else:
         say("current        not built yet -- ml-stack-serve build")
 
@@ -804,7 +832,7 @@ def _persist_argv() -> list[str]:
 def _install_persist_macos(*, every: int = WEEK_SECONDS) -> Path:
     import plistlib
 
-    log_dir = ROOT / "logs"
+    log_dir = root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     plist = {
         "Label": PERSIST_LABEL,

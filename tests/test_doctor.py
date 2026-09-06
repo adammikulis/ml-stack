@@ -392,10 +392,10 @@ def everything(tmp_path, monkeypatch):
     ask.write_text("")
     fake_python(repo, str(ask))
     home = make_bench(tmp_path / "bench", lock_pid=dead_pid())
-    current = make_build(tmp_path / "builds" / "old0000", commit="old0000", days_old=40)
     from ml_stack.serve import binary
-    monkeypatch.setattr(binary, "MANAGED_CURRENT", current)
-    monkeypatch.setattr(binary, "MANAGED_NAMED", tmp_path / "named")
+
+    monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
+    make_build(binary.managed_current(), commit="old0000", days_old=40)
     monkeypatch.setattr(doctor, "CHECKOUT", checkout)
     return repo, home
 
@@ -438,10 +438,7 @@ def test_yes_runs_the_fixes_it_can_and_does_not_touch_the_build(everything, caps
     assert [f.name for f in found if not f.good] == ["llama.cpp: current"]
 
 
-def test_a_path_that_is_not_a_repository_is_said(tmp_path, capsys, monkeypatch):
-    from ml_stack.serve import binary
-    monkeypatch.setattr(binary, "MANAGED_CURRENT", tmp_path / "no-current")
-    monkeypatch.setattr(binary, "MANAGED_NAMED", tmp_path / "no-named")
+def test_a_path_that_is_not_a_repository_is_said(tmp_path, capsys):
     where = tmp_path / "plain"
     where.mkdir()
     found = look([where], bench_home=tmp_path / "no-bench")

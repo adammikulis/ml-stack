@@ -191,7 +191,7 @@ class Measured:
         from pathlib import Path
 
         from ml_stack.bench.backends import describe
-        from ml_stack.serve.build import NAMED_DIR
+        from ml_stack.serve.build import named_dir
 
         record = self.served_by
         if isinstance(record, Mapping) and record.get("program"):
@@ -203,10 +203,10 @@ class Measured:
             return str(self.server["build"])
         binary = Path(self.binary or "")
         try:
-            named = binary.resolve().relative_to(Path(NAMED_DIR).resolve())
+            named = binary.resolve().relative_to(Path(named_dir()).resolve())
         except (OSError, ValueError):
             try:
-                named = binary.relative_to(Path(NAMED_DIR))
+                named = binary.relative_to(Path(named_dir()))
             except ValueError:
                 return ""
         return named.parts[0] if named.parts else ""

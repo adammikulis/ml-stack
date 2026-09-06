@@ -20,10 +20,11 @@ from ml_stack import home
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
-__all__ = ["Chosen", "DRAFT_MARK", "Found", "PREFER", "WEIGHT_SUFFIXES", "advice", "aside",
-           "beside", "builds", "card", "choose_head", "default_roots", "draft_for",
-           "draft_note", "fetch", "files", "find", "located", "main", "mmproj_for",
-           "DRAFT_KINDS", "held", "in_gguf", "ref", "repo_of", "room", "spec_for"]
+__all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "PREFER", "WEIGHT_SUFFIXES",
+           "advice", "aside", "beside", "builds", "card", "choose_head", "default_roots",
+           "draft_for", "draft_note", "fetch", "files", "find", "held", "hub_cache",
+           "in_gguf", "located", "main", "mmproj_for", "ref", "repo_of", "room",
+           "spec_for"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -446,14 +447,10 @@ def default_roots(root: Path | str) -> list[Path]:
     """Where model files live: the store's own, the llama.cpp cache, the Hub cache
     (``$HF_HOME/hub`` when set, ``~/.cache/huggingface/hub`` otherwise), ``~/models``."""
     account = home.user_home()
-    cache = account / ".cache" / "huggingface" / "hub"
-    named = os.environ.get("HF_HOME")
-    if named:
-        cache = home.expand(named) / "hub"
     return [
         home.expand(root) / "models",
         account / ".cache" / "llama.cpp",
-        cache,
+        hub_cache(),
         account / "models",
     ]
 
@@ -489,8 +486,11 @@ def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, 
                                     or name.rsplit("/", 1)[-1] == build)]
 
 
-HUB_CACHE = (home.expand(os.environ["HF_HOME"]) if os.environ.get("HF_HOME")
-             else home.user_home() / ".cache" / "huggingface") / "hub"
+def hub_cache() -> Path:
+    """The Hub's model cache: ``$HF_HOME/hub``, or ``~/.cache/huggingface/hub``."""
+    named = os.environ.get("HF_HOME")
+    root = home.expand(named) if named else home.user_home() / ".cache" / "huggingface"
+    return root / "hub"
 
 
 def located(name: str, *, cache: Path | None = None) -> Path | None:
@@ -511,7 +511,7 @@ def located(name: str, *, cache: Path | None = None) -> Path | None:
     quantisation itself is called, e.g. `thing-UD-Q4_K_XL.gguf`, rather than any one file
     inside it.
     """
-    root = Path(cache) if cache is not None else HUB_CACHE
+    root = Path(cache) if cache is not None else hub_cache()
     if not root.is_dir():
         return None
     wanted = Path(name).name

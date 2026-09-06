@@ -625,12 +625,12 @@ def test_report_with_no_runs_to_rank_says_so_rather_than_writing_nothing(tmp_pat
 
 def test_the_named_build_is_read_off_the_binary_a_run_started(tmp_path):
     from ml_stack.bench.record import of
-    from ml_stack.serve.build import NAMED_DIR
+    from ml_stack.serve.build import named_dir
 
     def build(server):
         return of({"server": server}).build
 
-    assert build({"binary": str(Path(NAMED_DIR) / "thornfell" / "bin" / "llama-server")}) \
+    assert build({"binary": str(Path(named_dir()) / "thornfell" / "bin" / "llama-server")}) \
         == "thornfell"
     assert build({"binary": "/usr/local/bin/llama-server"}) == "", \
         "the managed current build has no name to be asked for"
