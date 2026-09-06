@@ -32,7 +32,8 @@ from typing import Any, Callable, Mapping, Sequence
 from ml_stack.log import say, warn
 
 STAMP = "%Y%m%dT%H%M%S"                    # the log's filename
-ISO = "%FT%T"                              # `measuring.json`, the header, a run's `at`
+ISO = "%Y-%m-%dT%H:%M:%S"                  # `measuring.json`, the header, a run's `at`;
+#: spelled out because `time.strptime` takes no %F or %T, only `strftime` does
 HEADER_LINES = 12                          # how far into a log a header is looked for
 
 _HEADER = re.compile(r"^\s*#?\s*(argv|started|commit)\s*:\s*(.*?)\s*$")
@@ -146,7 +147,7 @@ def _read(log: Path, held: Mapping[str, Any], kept: Sequence[Mapping[str, Any]],
         except OSError:
             began = now
 
-    running = this_one and alive(held.get("pid"))
+    running = this_one and not held.get("ended") and alive(held.get("pid"))
     try:
         ended = now if running else log.stat().st_mtime
     except OSError:
