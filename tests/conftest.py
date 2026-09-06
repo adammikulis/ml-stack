@@ -121,8 +121,8 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     ``ML_STACK_HOME`` moves every home and record file at once, so the runs store a whole
     evening of measuring sits in, the fit and profile records and the job files are all in
-    ``tmp_path``. ``serving_lines`` and ``results_since`` read what is serving on this
-    machine right now and what the last job kept; the speech registries probe for whisper
+    ``tmp_path``. ``serving_lines``, ``beside_on_the_card`` and ``results_since`` read
+    what is serving on this machine right now and what the last job kept; the speech registries probe for whisper
     and speak out loud. The `MLSTACK_*` variables are deleted rather than set, so a shell
     that exports one cannot move a corner back out.
     """
@@ -135,6 +135,7 @@ def _no_machine_state(monkeypatch, tmp_path):
     running = sys.modules.get("ml_stack.bench.run") or importlib.import_module(
         "ml_stack.bench.run")
     monkeypatch.setattr(running, "serving_lines", lambda: [])
+    monkeypatch.setattr(running, "beside_on_the_card", lambda: [])
     monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
 
     # An empty speech registry per test: probing the real ones loads whisper and runs the

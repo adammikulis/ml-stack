@@ -32,6 +32,7 @@ from ml_stack.bench.keep import (
     _commit,
     empties,
     forget,
+    note_beside,
     read_back,
     resumable,
     save,
@@ -53,8 +54,10 @@ from ml_stack.client.chat import Client
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.vectors import MARGIN
 from ml_stack.log import say, warn
+from ml_stack.serve.ops import processes
 from ml_stack.serve.profile import ASK
 from ml_stack.serve.shape import DEFAULT_CACHE, SAMPLERS
+from ml_stack.units import human_bytes
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
 # `_ways`: a neighbourhood read whole, which a 256k window does not notice.
@@ -1680,6 +1683,32 @@ def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> lis
     return rows
 
 
+def beside_on_the_card() -> list[dict[str, Any]]:
+    """Every llama-server already running: its port, pid, model, memory, and whether a
+    lease records it."""
+    got = processes()
+    return [{"port": int(one["port"]), "pid": int(one["pid"]),
+             "model": Path(str(one.get("model") or "")).name,
+             "bytes": int(one.get("rss") or 0),
+             "leased": int(one["port"]) in got.leased}
+            for one in got.found if not one.get("defunct")]
+
+
+def note_beside_the_run() -> str:
+    """Record what else holds the card while this run measures, and say it. The line said,
+    or "" for a card this run has to itself."""
+    found = beside_on_the_card()
+    note_beside(found)
+    if not found:
+        return ""
+    each = ", ".join(f":{one['port']} {one['model'] or '?'} {human_bytes(one['bytes'])}"
+                     + ("" if one["leased"] else ", not leased") for one in found)
+    said = (f"{len(found)} server(s) already hold this card: {each}. Their memory and "
+            f"their work are in these timings, and in the run's record.")
+    warn(said)
+    return said
+
+
 def serving_lines() -> list[str]:
     """One line per port a server is answering on -- what `ml-stack-serve status` knows,
     for `status` here, so what is measuring and what it is measuring against are read
@@ -1978,6 +2007,7 @@ def main(argv: list[str] | None = None) -> int:
         with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
                       announce=lambda line: warn(line)):
             remember(rest, pid=os.getpid())
+            note_beside_the_run()
             try:
                 return _main(rest)
             finally:

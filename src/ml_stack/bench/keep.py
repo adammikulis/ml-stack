@@ -88,17 +88,35 @@ def _commit(root: Path | None = None) -> str:
     return out
 
 
+#: The servers already holding the card when this process took the measuring lock.
+_BESIDE: list[Mapping[str, Any]] = []
+
+
+def note_beside(found: Sequence[Mapping[str, Any]]) -> None:
+    """Record what else holds the card, for every run kept from here on."""
+    _BESIDE[:] = [dict(one) for one in found]
+
+
+def beside_the_run() -> list[Mapping[str, Any]]:
+    """What else held the card when this run took the measuring lock."""
+    return list(_BESIDE)
+
+
 def stamped(held: Mapping[str, Any] | None) -> dict[str, Any]:
-    """A run's ``server`` record with ``host`` and ``commit`` on it, unless it names them.
+    """A run's ``server`` record with ``host``, ``commit`` and ``beside`` on it, unless it
+    names them.
 
     Every run says which machine measured it and which code: a fleet gathers runs from
     several hosts into one store, and the table, the ranking and the frontier must tell
     them apart. A record that arrives with a host -- gathered from a peer, or measured
-    under ``--host`` -- keeps it; an empty one is filled in.
+    under ``--host`` -- keeps it; an empty one is filled in. ``beside`` is what else held
+    the card while it was measured, written only when something did.
     """
     out = dict(held or {})
     out.setdefault("host", socket.gethostname())
     out.setdefault("commit", _commit())
+    if beside := beside_the_run():
+        out.setdefault("beside", [dict(one) for one in beside])
     return out
 
 
