@@ -492,9 +492,10 @@ class TestThePage:
     def page(self, tmp_path, udp, monkeypatch, daemons):
         from test_fleet_ui import Serving
 
+        from ml_stack.fleet.availability import Availability
 
         monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "bench"))
-        s = Serving(tmp_path, name="studio")
+        s = Serving(tmp_path, name="studio", schedule=Availability())
         s.ui.peer_port = s.port
         s.ui.discovery_port = udp
         s.ui.root = tmp_path / "traind"
@@ -584,6 +585,34 @@ class TestThePage:
         for path in ("/ui/fleet", "/ui/bench/status", "/ui/bench/history"):
             status, _, _ = s.call(path)
             assert status == 401, path
+
+    @pytest.mark.slow
+    def test_pause_all_names_every_machine_and_the_one_that_did_not_answer(self, page):
+        from ml_stack.fleet.pausing import UNHEARD
+
+        s, cookie = page
+        status, body, _ = s.call("/ui/fleet/pause", method="POST", cookie=cookie,
+                                 body={"for": "soon"})
+        assert status == 400 and "not a length of time" in body["error"]
+
+        status, body, _ = s.call("/ui/fleet/pause", method="POST", cookie=cookie,
+                                 body={"for": "2h", "reason": "somebody is here"})
+        assert status == 200, body
+        said = {m["name"]: m for m in body["machines"]}
+        assert set(said) == {"studio", "larch"}
+        assert said["studio"]["ok"] and said["studio"]["is_self"]
+        assert said["studio"]["said"].startswith("paused until")
+        assert not said["larch"]["ok"], "the fake peer takes no availability request"
+        assert body["reached"] == 1 and body["total"] == 2
+
+        allowed, why = s.schedule.may_start()
+        assert not allowed and "somebody is here" in why, why
+
+        status, body, _ = s.call("/ui/fleet/pause", method="POST", cookie=cookie,
+                                 body={"resume": True})
+        assert status == 200 and body["reached"] == 1
+        assert s.schedule.may_start() == (True, "")
+        assert said["larch"]["said"] == UNHEARD or not said["larch"]["ok"]
 
 
 # -- the whole fleet at once -----------------------------------------------------------

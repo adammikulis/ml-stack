@@ -22,6 +22,7 @@ from .discovery import (
     load_cluster_key,
 )
 from .page import COMPONENTS, render
+from .pausing import minutes_of
 from .session import parse_cookie
 
 ASSETS = Path(__file__).parent / "web"
@@ -701,7 +702,22 @@ class ClusterRoutes:
             return True
         if self.path == "/ui/fleet/join" and self.method == "POST":
             return self._join_fleet()
+        if self.path == "/ui/fleet/pause" and self.method == "POST":
+            return self._pause_fleet()
         return super().route()
+
+    def _pause_fleet(self) -> bool:
+        req = self.body()
+        span = str(req.get("for") or "")
+        minutes = minutes_of(span)
+        if span and minutes is None:
+            self.send(400, {"error": f"{span!r} is not a length of time; "
+                                     "try '2h', '90m' or '45s'"})
+            return True
+        self.send(200, self.ui.pause_fleet(resume=bool(req.get("resume")),
+                                           minutes=minutes,
+                                           reason=str(req.get("reason") or "")))
+        return True
 
     def _clusters(self) -> bool:
         from .discovery import join, leave, memberships

@@ -4,6 +4,7 @@
     <h1>Cluster</h1>
     <p class="sub" id="cluster-sub"></p>
     <div class="stat" id="cluster-stat"></div>
+    <div class="group" id="cluster-pause"></div>
     <div id="cluster-cards"></div>
     <div class="group" id="cluster-joined"></div>
     <div class="group" id="cluster-sweep"></div>
@@ -98,9 +99,12 @@
           el("div", { class: "fill util", style: `width:${Math.min(100, d.gpu_util_pct)}%` }))));
     }
 
-    const state = free === 0
-      ? { cls: "busy", text: queued ? `working · ${queued} waiting` : "working" }
-      : { cls: "", text: running ? `${running} running · ${free} free` : "idle" };
+    const held = (d.availability || {}).paused;
+    const state = held
+      ? { cls: "busy", text: (d.availability.unavailable_because || "paused") }
+      : free === 0
+        ? { cls: "busy", text: queued ? `working · ${queued} waiting` : "working" }
+        : { cls: "", text: running ? `${running} running · ${free} free` : "idle" };
 
     return el("div", { class: `peer${p.is_self ? " self" : ""}` },
       el("div", { class: "row" },
@@ -157,11 +161,15 @@
 
       this.querySelector("#cluster-sub").textContent =
         peers.length === 1 ? "One machine." : `${peers.length} machines on this network.`;
+      const paused = peers.filter((p) => ((p.device || {}).availability || {}).paused);
+      this.drawPause(peers.length, paused.length);
       this.querySelector("#cluster-stat").replaceChildren(
         el("div", {}, el("div", { class: "n" }, peers.length),
            el("div", { class: "k" }, "machines")),
         el("div", {}, el("div", { class: "n" }, `${busy}/${totalSlots}`),
            el("div", { class: "k" }, "slots in use")),
+        el("div", {}, el("div", { class: "n" }, `${paused.length}/${peers.length}`),
+           el("div", { class: "k" }, "paused")),
         el("div", {}, el("div", { class: "n" },
              peers.filter((p) => M.vendorOf(p.device || {}).key !== "cpu").length),
            el("div", { class: "k" }, "with a GPU")));
@@ -184,6 +192,63 @@
 
       clearTimeout(this.timer);
       this.timer = setTimeout(() => this.draw(), 4000);
+    }
+
+    // Stopping every machine at once, and what each one said.
+    drawPause(total, paused) {
+      if (this.pauseNote === undefined) this.pauseNote = null;
+      const span = el("select", { id: "pause-for" },
+        [["2h", "for 2 hours"], ["30m", "for 30 minutes"], ["8h", "for 8 hours"],
+         ["", "until I resume them"]].map(([v, t]) =>
+          el("option", { value: v }, t)));
+      span.value = this.pauseFor === undefined ? "2h" : this.pauseFor;
+      span.onchange = () => { this.pauseFor = span.value; };
+      const why = el("input", { type: "text", id: "pause-why",
+        placeholder: "why (optional)", value: this.pauseWhy || "" });
+      why.oninput = () => { this.pauseWhy = why.value; };
+      const note = el("div", {}, this.pauseNote);
+      const send = async (resume, button) => {
+        button.disabled = true;
+        note.replaceChildren(el("div", { class: "hint" }, el("span", { class: "spin" }),
+          resume ? " Asking every machine to take work again…" : " Asking every machine to stop…"));
+        const got = await api("/ui/fleet/pause", { method: "POST",
+          body: JSON.stringify({ resume, for: resume ? "" : span.value,
+                                 reason: resume ? "" : why.value.trim() }) });
+        button.disabled = false;
+        if (got.error) {
+          this.pauseNote = el("div", { class: "err" }, got.error);
+        } else {
+          const missed = (got.machines || []).filter((m) => !m.ok);
+          this.pauseNote = el("div", {},
+            el("div", { class: missed.length ? "hint" : "ok" },
+              `${resume ? "Taking work again" : "Paused"} on ${got.reached} of ${got.total}`
+              + ` machine${got.total === 1 ? "" : "s"}.`),
+            ...(got.machines || []).map((m) => el("div", { class: "row" },
+              el("span", {}, el("b", {}, m.name + (m.is_self ? " (this machine)" : "")),
+                el("span", { class: m.ok ? "why" : "err" }, m.said)))),
+            missed.length
+              ? el("div", { class: "hint" },
+                  "A machine that is off or asleep never heard this, and takes work as "
+                  + "soon as it is running again. Do this once more when it is back.")
+              : null);
+        }
+        note.replaceChildren(this.pauseNote);
+        this.draw();
+      };
+      const stop = el("button", { class: "ghost small" }, "Pause every machine");
+      stop.onclick = () => send(false, stop);
+      const go = el("button", { class: "ghost small" }, "Take work again");
+      go.onclick = () => send(true, go);
+
+      this.querySelector("#cluster-pause").replaceChildren(
+        el("h2", {}, "Everyone's machines"),
+        el("div", { class: "hint" },
+          paused
+            ? `${paused} of ${total} machine${total === 1 ? "" : "s"} ${paused === 1 ? "is" : "are"} paused.`
+              + " A paused machine stops what it is running, keeps its progress and waits."
+            : `All ${total} machine${total === 1 ? "" : "s"} ${total === 1 ? "is" : "are"} taking work.`),
+        el("div", { class: "searchrow" }, span, why, stop, go),
+        note);
     }
 
     // Which clusters this machine is in, and the way in and out of one.

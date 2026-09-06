@@ -11,6 +11,7 @@ from typing import Any
 
 from ml_stack.http import ServerError, open_stream
 
+from . import pausing
 from .discovery import (
     DiscoveryError,
     check_passphrase,
@@ -20,7 +21,9 @@ from .discovery import (
     in_cluster,
     join_cluster,
     load_cluster_key,
+    memberships,
 )
+from .join import DEFAULT_ROOT
 from .page import FIT_ONLY
 from .routes import ASSETS, UI_HEADER, asset_bytes, routes, write, write_json
 from .session import Sessions, Throttle, parse_cookie
@@ -67,7 +70,7 @@ class UI:
 
     def __init__(self, *, name: str = "", cluster_key_path: Path | str | None = None,
                  peer_port: int = 8770, setup_token: str = "",
-                 on_join: "Any | None" = None) -> None:
+                 on_join: Any | None = None) -> None:
         self.runner: Any = None
         self.parts: Any = None
         """The page's components, `page.COMPONENTS` unless a caller leaves some out."""
@@ -317,7 +320,7 @@ class UI:
                    name: str = "") -> dict[str, Any]:
         """The Join button: `join.join_machine`, with this daemon as the one already up."""
         from .discovery import join as join_cluster
-        from .join import DEFAULT_ROOT, join_machine
+        from .join import join_machine
 
         def enrol(words: str, named: str) -> None:
             join_cluster(words, group=named, path=self.cluster_key_path)
@@ -332,6 +335,26 @@ class UI:
                               discovery_port=self.discovery_port)
         self._peers = (0.0, [])
         return {**joined.public(), "said": said}
+
+    def with_self(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The peers, with this machine among them even if its own beacon was not heard."""
+        if any(r.get("is_self") for r in rows):
+            return rows
+        return [{"name": self.name, "clusters": [m.group for m in
+                                                 memberships(self.cluster_key_path)],
+                 "base_url": f"http://127.0.0.1:{self.peer_port}", "is_self": True},
+                *rows]
+
+    def pause_fleet(self, *, resume: bool = False, minutes: float | None = None,
+                    reason: str = "") -> dict[str, Any]:
+        """Pause or resume every machine this one can see, and what each of them said."""
+        answers = pausing.pause_fleet(
+            pausing.Fanout(self.root or DEFAULT_ROOT, resume=resume, minutes=minutes,
+                   reason=reason, cluster_key_path=self.cluster_key_path),
+            self.with_self(self.peers(force=True)))
+        self._peers = (0.0, [])
+        return {"machines": [a.public() for a in answers],
+                "reached": sum(1 for a in answers if a.ok), "total": len(answers)}
 
     def bench_state(self) -> dict[str, Any]:
         """What ``ml-stack-bench status`` says, for the page. The bench's home is
@@ -538,7 +561,7 @@ def _looks_like_dns(host: str) -> bool:
 class _Loopback(BaseHTTPRequestHandler):
     """The handler `serve_page` mounts: `routes` and nothing else."""
 
-    ui: "UI"
+    ui: UI
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:

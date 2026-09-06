@@ -18,6 +18,7 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 import pytest
+
 from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
 from ml_stack.fleet.discovery import in_cluster, primary_ip
 from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
@@ -41,7 +42,8 @@ def _free_port() -> int:
 class Serving:
     """A real daemon with the UI mounted, bound on every interface."""
 
-    def __init__(self, tmp_path, name="studio", setup_token=""):
+    def __init__(self, tmp_path, name="studio", setup_token="", schedule=None):
+        self.schedule = schedule
         root = tmp_path / "traind"
         self.files = root / "files"
         self.files.mkdir(parents=True)
@@ -58,8 +60,17 @@ class Serving:
         self.port = _free_port()
         self.httpd = ThreadingHTTPServer(
             ("0.0.0.0", self.port),
-            make_handler(self.runner, self.files, token, name, ui=self.ui))
+            make_handler(self.runner, self.files, token, name, ui=self.ui,
+                         schedule=schedule, tokens=self._cluster_tokens,
+                         cluster_key_path=self.keyfile,
+                         schedule_path=(root / "availability.json") if schedule else None))
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def _cluster_tokens(self):
+        """Every token this daemon answers to, the way the real one works it out."""
+        from ml_stack.fleet.discovery import derive_token, memberships
+
+        return {derive_token(m.key) for m in memberships(self.keyfile)}
 
     def call(self, path, *, method="GET", body=None, host="127.0.0.1",
              headers=None, ui_header=True, cookie=""):
