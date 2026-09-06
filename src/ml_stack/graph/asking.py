@@ -29,11 +29,12 @@ class Asking:
     constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
 
     @classmethod
-    def for_model(cls, model: str) -> Asking:
-        """The way a named model measured best, or the default way when nothing measured it."""
+    def for_model(cls, model: str, *, workload: str = "") -> Asking:
+        """The way a named model measured best at ``workload`` -- the graph asking when
+        none is named -- or the default way when nothing measured it."""
         from ml_stack.serve.profile import profile_for
 
-        found = profile_for(str(model))
+        found = profile_for(str(model), workload=workload)
         return found.asked() if found is not None else cls()
 
     def tools(self) -> dict[str, Any]:

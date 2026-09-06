@@ -743,3 +743,73 @@ def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():
     one = measured(spec_draft_max=3)
     assert one.shape(resolve=False).draft_n_max == 3, \
         "a build with no per-request override serves the depth it was started with"
+
+
+# -- saying which workload a server is for ------------------------------------------------
+
+def test_up_for_a_workload_serves_that_workloads_record(leases, tmp_path):
+    add(measured(workload="ask", mmproj="", spec_draft_max=4))
+    add(measured(workload="ingest", mmproj="", spec_draft_max=2, build="hollowmere",
+                 seat_context=8192))
+    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+
+    spec = leases[0]
+    assert spec.spec_draft_max == 2, "the depth the server starts with is the ingest one"
+    assert spec.context == 16384, "and the cache the ingest record measured, not the ask one"
+
+
+def test_up_with_no_workload_named_serves_the_graph_asking(leases, tmp_path):
+    add(measured(workload="ask", mmproj="", spec_draft_max=4))
+    add(measured(workload="ingest", mmproj="", spec_draft_max=2))
+    assert serve_cli.main(upped("--profile", root=tmp_path)) == 0
+    assert leases[0].spec_draft_max == 4
+
+
+def test_up_for_an_unmeasured_workload_says_which_record_it_fell_back_to(leases, tmp_path,
+                                                                        capsys):
+    add(measured(workload="ask", mmproj="", spec_draft_max=4))
+    assert serve_cli.main(upped("--profile", "--for", "ingest", root=tmp_path)) == 0
+
+    said_out = capsys.readouterr().err
+    assert "not for ingest" in said_out
+    assert leases[0].spec_draft_max == 4
+
+
+def test_profile_prints_one_block_per_workload_and_names_the_gaps(capsys):
+    add(measured(workload="ask"))
+    add(measured(workload="ingest"))
+    assert serve_cli.main(["profile", MODEL]) == 0
+
+    out = capsys.readouterr().out
+    assert out.count("  for  ") == 2
+    assert "for         ask" in out and "for         ingest" in out
+    assert "nothing has measured" in out and "for chat" in out
+
+
+def test_profile_for_one_workload_prints_only_that_one(capsys):
+    add(measured(workload="ask"))
+    add(measured(workload="ingest"))
+    assert serve_cli.main(["profile", MODEL, "--for", "ingest"]) == 0
+
+    out = capsys.readouterr().out
+    assert "for         ingest" in out and "for         ask" not in out
+
+
+def test_profile_for_a_workload_with_no_record_says_what_it_fell_back_to(capsys):
+    add(measured(workload="ask"))
+    assert serve_cli.main(["profile", MODEL, "--for", "ingest"]) == 0
+    assert "not for ingest" in capsys.readouterr().out
+
+
+def test_an_ingest_reads_the_ingest_record(monkeypatch):
+    """The extraction path asks for its own workload, not the graph asking's."""
+    from ml_stack.ingest import serving
+
+    add(measured(workload="ask", spec_draft_max=4))
+    add(measured(workload="ingest", spec_draft_max=2))
+    monkeypatch.setattr("ml_stack.ingest._find_model", lambda named: MODEL)
+
+    run, found = serving._run(SimpleNamespace(model=MODEL, profile=True), resolve=False)
+
+    assert found is not None and found.workload == "ingest"
+    assert run.talking.spec_draft_max == 2, "the depth goes out with each call"

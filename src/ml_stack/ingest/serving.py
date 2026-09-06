@@ -88,7 +88,7 @@ def _run(args: Any, *, resolve: bool = True,
     if model and getattr(args, "profile", True):
         from ml_stack.serve.profile import profile_for
 
-        measured = profile_for(found)
+        measured = profile_for(found, workload="ingest")
     if measured is not None:
         run = measured.run(port=port, seats=seats, resolve=resolve,
                            n_predict=n_predict, timeout=timeout)

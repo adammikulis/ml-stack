@@ -32,7 +32,7 @@ def _serving_seam(monkeypatch, seen, *, draft):
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr(ex, "find_model", lambda m: "x.gguf")
 
     def fake_serve(model, manager=None, **lease):

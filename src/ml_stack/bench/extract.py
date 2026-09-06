@@ -1047,7 +1047,7 @@ def main(args: Any) -> int:
         if getattr(args, "profile", True):
             from ml_stack.serve.profile import profile_for
 
-            measured = profile_for(str(found))
+            measured = profile_for(str(found), workload="ingest")
             if measured is not None:
                 shape = measured.shape(port=args.serve_port, seats=args.parallel)
                 lease = {**lease, **{k: v for k, v in shape.lease().items()

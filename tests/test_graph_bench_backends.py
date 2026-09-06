@@ -547,7 +547,7 @@ def test_a_sweep_serves_without_the_head_and_labels_the_runs_so(tmp_path, monkey
     measured = record("tiny.gguf", seat_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
-                        lambda m: replace(measured, served=str(m)))
+                        lambda m, **_: replace(measured, served=str(m)))
     seen = _serving(monkeypatch, tmp_path)
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--no-draft", "--serve-label", "flash",
                         "--plain-only", "--smoke", *seen["common"]]) == 0

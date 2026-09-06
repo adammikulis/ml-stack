@@ -454,20 +454,36 @@ def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None
     return Started(info, spec, announce(root, spec))
 
 
-def shapes(model: str = "") -> list[Any]:
-    """The measured shapes: every record, or the one for ``model``.
+def shapes(model: str = "", *, workload: str = "") -> list[Any]:
+    """The measured shapes: every record, one workload's, or one model's -- with no
+    workload named, every record that model has of its own, in workload order.
 
     Raises `Refused` when a model is named and nothing has measured it.
     """
     every = profile_mod.profiles()
+    if workload:
+        named = profile_mod.workload_named(workload)
+        if not model:
+            return [one for one in every if one.workload == named]
+        found = profile_mod.profile_for(model, workload=named, records=every)
+        if found is None:
+            raise Refused(f"nothing measured for {model.rsplit('/', 1)[-1]} doing {named}, "
+                          f"and nothing measured it for {profile_mod.ASK} either. "
+                          "`ml-stack-bench sweep` measures it and `ml-stack-bench report "
+                          "--profile` writes the record.")
+        return [found]
     if not model:
         return every
-    found = profile_mod.profile_for(model, records=every)
-    if found is None:
+    mine = []
+    for named in profile_mod.WORKLOADS:
+        found = profile_mod.profile_for(model, workload=named, records=every)
+        if found is not None and found.workload == named:
+            mine.append(found)
+    if not mine:
         raise Refused(f"nothing measured for {model.rsplit('/', 1)[-1]}. "
                       "`ml-stack-bench sweep` measures it and `ml-stack-bench report "
                       "--profile` writes the record.")
-    return [found]
+    return mine
 
 
 def tensors(models: Iterable[str]) -> list[str]:

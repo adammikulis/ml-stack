@@ -133,6 +133,8 @@ class FakeClient:
         top_k: int | None = None,
         min_p: float | None = None,
         n_predict: int = 16384,
+        spec_draft_max: int | None = None,
+        spec_p_min: float | None = None,
         timeout: float = 180.0,
         tries: int = 1,
         api_key: str | None = None,
@@ -154,6 +156,8 @@ class FakeClient:
         self.asked_top_k = top_k
         self.asked_min_p = min_p
         self.n_predict = n_predict
+        self.asked_spec_draft_max = spec_draft_max
+        self.asked_spec_p_min = spec_p_min
         self.timeout = timeout
         self.tries = tries
         self.api_key = api_key

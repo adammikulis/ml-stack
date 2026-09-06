@@ -20,6 +20,7 @@ from ml_stack.serve.backend import ServerFailed, ServerSpec, parse_context
 from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import DEFAULT_TIMEOUT_S
 from ml_stack.serve.ops import DEFAULT_ROOT, Refused, base_url_for
+from ml_stack.serve.profile import ASK, WORKLOADS
 from ml_stack.units import human_bytes
 
 __all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
@@ -152,15 +153,18 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
-def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, list[str]]:
-    """Fill every flag ``up`` was not given from this model's measured profile.
+def from_profile(args: argparse.Namespace, model: str,
+                 workload: str = "") -> tuple[object | None, list[str]]:
+    """Fill every flag ``up`` was not given from this model's profile for ``workload``.
 
-    "Not given" is "still the parser's own default", which is the only thing argparse can
-    be asked afterwards. Returns the profile (or None) and one line per field it filled.
+    Only the startup half: the draft depth goes in as the server's default, and a caller
+    that can override it per request sends its own. "Not given" is "still the parser's own
+    default", which is the only thing argparse can be asked afterwards. Returns the profile
+    (or None) and one line per field it filled.
     """
     from ml_stack.serve.profile import profile_for, resolved
 
-    found = profile_for(model)
+    found = profile_for(model, workload=workload or ASK)
     if found is None:
         return None, []
     # One seat holds the whole measured cache unless --parallel was given, in which case
@@ -345,6 +349,11 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
                   "build, head, cache, thinking and llama-server flags that answered best "
                   "(`ml-stack-serve profile MODEL` prints it). A flag given wins over the "
                   "record"),
+        flag("--for", dest="workload", default=ASK, choices=sorted(WORKLOADS),
+             metavar="WORKLOAD",
+             help=f"which workload the profile is for: "
+                  f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())} "
+                  f"(default: {ASK})"),
     ])
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import UnknownFlag
@@ -355,12 +364,15 @@ def cmd_up(args: argparse.Namespace) -> int:
 
     profile = None
     if getattr(args, "profile", False):
-        profile, took = from_profile(args, model)
+        wanted = str(getattr(args, "workload", "") or ASK)
+        profile, took = from_profile(args, model, wanted)
         if profile is None:
-            warn(f"no measured profile for {model.rsplit('/', 1)[-1]}; serving as asked "
-                 "-- `ml-stack-bench report --profile` writes one from the store")
+            warn(f"no measured profile for {model.rsplit('/', 1)[-1]} doing {wanted}; "
+                 "serving as asked -- `ml-stack-bench report --profile` writes one from "
+                 "the store")
         else:
-            warn(f"profile {profile.model}: " + (", ".join(took) or "nothing left to fill"))
+            warn(f"profile {profile.model} for {profile.workload}: "
+                 + (", ".join(took) or "nothing left to fill"))
             if profile.note:
                 warn(f"  {profile.note}")
 
@@ -419,22 +431,29 @@ def cmd_up(args: argparse.Namespace) -> int:
 
 
 @COMMANDS.command(
-    "profile", help="the shape a model measured best in: what to serve it with, and how to "
-                    "ask it",
+    "profile", help="the shape a model measured best in for each workload: what to serve "
+                    "it with, and how to ask it",
     options=[
         flag("model", nargs="?", default="",
              help="a model file, path or hf: reference; every record with none"),
+        flag("--for", dest="workload", default="", choices=sorted(WORKLOADS),
+             metavar="WORKLOAD",
+             help=f"one workload rather than all of them: "
+                  f"{'; '.join(f'{k}, {v}' for k, v in WORKLOADS.items())}"),
         option("json", help="the records as JSON, exactly as they are kept"),
     ])
 def cmd_profile(args: argparse.Namespace) -> int:
-    """``ml-stack-serve profile [MODEL]`` -- the shape a model measured best in.
+    """``ml-stack-serve profile [MODEL] [--for WORKLOAD]`` -- the shape a model measured
+    best in, one block per workload.
 
-    Exit 1 when a model was named and nothing has measured it.
+    Exit 1 when a model was named and nothing has measured it for any workload.
     """
     from ml_stack.serve.profile import said
 
+    model = str(getattr(args, "model", "") or "")
+    wanted = str(getattr(args, "workload", "") or "")
     try:
-        chosen = ops.shapes(str(getattr(args, "model", "") or ""))
+        chosen = ops.shapes(model, workload=wanted)
     except Refused as no:
         warn(no.lines[0])
         return 1
@@ -446,6 +465,12 @@ def cmd_profile(args: argparse.Namespace) -> int:
             "`ml-stack-bench report --profile` writes the record.")
         return 0
     say("\n\n".join(said(one) for one in chosen))
+    if model and not wanted:
+        held = {one.workload for one in chosen}
+        for named in (w for w in WORKLOADS if w not in held):
+            say(f"\nnothing has measured {model.rsplit('/', 1)[-1]} for {named} "
+                f"({WORKLOADS[named]}); `--for {named}` serves the {ASK} record and "
+                f"says so")
     return 0
 
 

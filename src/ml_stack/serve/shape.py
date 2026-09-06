@@ -237,6 +237,10 @@ class Run:
         A sampler setting no field names -- ``temperature``, ``top_k`` -- goes into
         ``talking.sampling``. A name no section knows is a `TypeError` here rather than a
         keyword the client refuses at the far end of a load.
+
+        ``draft_n_max`` reaches both sections: the depth a server starts with and the depth
+        a request asks for are one measurement, and a run whose two disagree measures the
+        request's. Taking the head away takes the request's depth with it.
         """
         parts: dict[str, dict[str, Any]] = {"shape": {}, "asking": {}, "talking": {}}
         sampling = dict(self.talking.sampling)
@@ -251,6 +255,10 @@ class Run:
                 sampling[name] = value
             else:
                 raise TypeError(f"no such run field: {name}")
+        if "draft_n_max" in fields:
+            parts["talking"]["spec_draft_max"] = fields["draft_n_max"]
+        elif fields.get("draft") == "" and fields.get("spec_type") == "":
+            parts["talking"]["spec_draft_max"] = None
         if sampling != dict(self.talking.sampling):
             parts["talking"]["sampling"] = sampling
         return replace(self, **{name: replace(getattr(self, name), **taken)

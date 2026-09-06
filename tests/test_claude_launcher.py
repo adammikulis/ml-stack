@@ -37,7 +37,7 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
 
     profile = record("kestrel-8B-UD-Q4_K_XL.gguf", cache_type="q8_0", tight=True, batch=True)
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: profile)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: profile)
     monkeypatch.setattr("ml_stack.bench.serve.find_model", lambda m: "/models/kestrel-8B-UD-Q4_K_XL.gguf")
     monkeypatch.setattr(claude, "alias_of", lambda url, model: "kestrel-8B")
     binary = tmp_path / "claude"
@@ -77,7 +77,7 @@ def test_seats_asked_for_reach_the_lease(monkeypatch, tmp_path):
 
     profile = record("kestrel-8B-UD-Q4_K_XL.gguf", seat_context=32768, parallel=2)
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: profile)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: profile)
     monkeypatch.setattr("ml_stack.bench.serve.find_model",
                         lambda m: "/models/kestrel-8B-UD-Q4_K_XL.gguf")
     monkeypatch.setattr(claude, "alias_of", lambda url, model: "kestrel-8B")

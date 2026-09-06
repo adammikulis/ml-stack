@@ -289,7 +289,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
     measured = record("tiny.gguf", seat_context=4096, cache_type="q8_0",
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
-                        lambda m: replace(measured, served=str(m)))
+                        lambda m, **_: replace(measured, served=str(m)))
     seen = {"kwargs": [], "clients": []}
     _preflight_ok(monkeypatch)
 

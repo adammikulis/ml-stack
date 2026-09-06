@@ -460,7 +460,7 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr(ex, "find_model", lambda m: "x.gguf")
 
     class Server:

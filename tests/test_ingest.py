@@ -789,7 +789,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
     monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
 
@@ -822,7 +822,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
     measured = Profile(model="kestrel-8B-UD-Q4_K_XL.gguf", seat_context=16384, parallel=4,
                        cache_type="q8_0", sampling={"temperature": 1.0})
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
-                        lambda m: replace(measured, served=str(m)))
+                        lambda m, **_: replace(measured, served=str(m)))
     monkeypatch.setattr(ingest, "_find_model", lambda m: "kestrel-8B-UD-Q4_K_XL.gguf")
     seen = {}
 
@@ -953,7 +953,7 @@ def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
         def said(self):
             return "measured"
 
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: Found())
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
     monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
 
@@ -1485,7 +1485,7 @@ def _gold_with_a_fake_model(tmp_path, monkeypatch):
         yield Up()
 
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: None)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
     monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
     monkeypatch.setattr("ml_stack.ingest.cli.gold_score",
                         lambda *a, **k: ingest.Scored())

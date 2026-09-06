@@ -89,7 +89,10 @@ class ScriptedModel:
         _bind(base_url, settings)
         self.base_url = base_url
         self.timeout = settings.get("timeout", 180.0)
-        self.sampling: dict[str, Any] = dict(settings)
+        # the speculative settings are the server's, not the sampler's; the real client
+        # keeps them out of `sampling` and so out of a run's identity
+        self.sampling: dict[str, Any] = {k: v for k, v in settings.items()
+                                         if k not in ("spec_draft_max", "spec_p_min")}
         self.card: dict[str, Any] = {"temperature": 1.0, "top_k": 64}
         self.text = "compilers"
         self.seen: list[list[dict[str, Any]]] = []
@@ -123,7 +126,10 @@ class ScriptedReader:
         _bind(base_url, settings)
         self.base_url = base_url
         self.timeout = settings.get("timeout", 180.0)
-        self.sampling: dict[str, Any] = dict(settings)
+        # the speculative settings are the server's, not the sampler's; the real client
+        # keeps them out of `sampling` and so out of a run's identity
+        self.sampling: dict[str, Any] = {k: v for k, v in settings.items()
+                                         if k not in ("spec_draft_max", "spec_p_min")}
         self.seen: list[list[dict[str, Any]]] = []
 
     def chat(self, messages: Sequence[Mapping[str, Any]], **_: Any) -> Any:

@@ -303,3 +303,25 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
     assert changed.asking.said() == {"tight": True, "terse": False, "kinds": True,
                                      "few": True, "summary": True}, \
         "batch off, few on, in one place"
+
+
+def test_a_new_draft_depth_reaches_the_server_and_the_request():
+    from ml_stack.serve.shape import Run, Shape, Talking
+
+    run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_n_max=4),
+              talking=Talking(spec_draft_max=4))
+    deeper = run.over(draft_n_max=8)
+
+    assert deeper.shape.draft_n_max == 8
+    assert deeper.talking.spec_draft_max == 8, \
+        "a request that still asked for 4 would measure 4, whatever the server started at"
+
+
+def test_taking_the_head_away_takes_the_requests_depth_with_it():
+    from ml_stack.serve.shape import Run, Shape, Talking
+
+    run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_n_max=4),
+              talking=Talking(spec_draft_max=4))
+    bare = run.over(draft="", spec_type="")
+
+    assert bare.talking.spec_draft_max is None

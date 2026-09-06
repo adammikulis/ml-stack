@@ -4673,7 +4673,7 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
                       draft="/models/mtp-tiny.gguf", spec_type="draft-mtp", spec_draft_max=4,
                       reasoning_budget=0, extra_args=("-ub", "2048"), batch=True)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
-                        lambda m: replace(measured, served=str(m)))
+                        lambda m, **_: replace(measured, served=str(m)))
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
     asked = tmp_path / "q.jsonl"

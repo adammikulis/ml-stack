@@ -165,7 +165,7 @@ def _leased(monkeypatch):
             released.append(True)
 
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
-    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m: None)
+    monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
     monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
     return released
 
