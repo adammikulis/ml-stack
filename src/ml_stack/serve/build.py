@@ -400,7 +400,6 @@ def _build_from_source(args) -> tuple[Path, str]:
     if args.commit:
         _checkout_commit(source, args.commit)
 
-    applied = _apply_patches(source)
     commit = _short_commit(source)
     stamp = patch_stamp()
     tag = f"{commit}-{stamp}" if stamp else commit
@@ -409,6 +408,7 @@ def _build_from_source(args) -> tuple[Path, str]:
         say(f"{tag} is already built at {dest} -- pass --force to rebuild")
         return dest, tag
 
+    applied = _apply_patches(source)
     jobs = args.jobs or (os.cpu_count() or 4)
     say(f"configuring {tag} ({', '.join(_cmake_flags()) or 'CPU only'})")
     _configure(source)
@@ -425,7 +425,6 @@ def _build_from_source_named(args) -> tuple[Path, str]:
     source = _named_source_dir(args.name)
     _sync_named_source(source, args.repo, args.ref)
 
-    applied = _apply_patches(source)
     commit = _short_commit(source)
     stamp = patch_stamp()
     commit = f"{commit}-{stamp}" if stamp else commit
@@ -434,6 +433,7 @@ def _build_from_source_named(args) -> tuple[Path, str]:
         say(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
         return dest, commit
 
+    applied = _apply_patches(source)
     jobs = args.jobs or (os.cpu_count() or 4)
     say(f"configuring {args.name}-{commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
     _configure(source)
