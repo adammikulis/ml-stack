@@ -514,6 +514,19 @@ worth taking, in this order:
   two are a page and a request handler leasing a server, which is what the machine layer is
   for.
 
+## Finding a model
+
+- [ ] **Two callers still decide for themselves what an `hf:` reference means.**
+  `hub.located` is the one finder now, and it answers `None` for an `hf:` reference
+  because the bench and `ml-stack-serve up` hand that string to llama.cpp for it to
+  download. `fleet/bench.py:_local_path` wants the opposite -- the file an already-fetched
+  reference points at -- so it strips the reference to a filename and asks `located` for
+  that; `serve/profile.py:_heads` skips `located` for anything starting `hf:`. Folding
+  either into `located` means deciding whether a fetched reference resolves to its local
+  path, which changes what a sweep serves, so it is a measurement question, not a
+  refactor. Whoever takes it should check `bench.serve.served` and
+  `serve/preflight.py` first.
+
 ## Verifying
 
 ```bash
