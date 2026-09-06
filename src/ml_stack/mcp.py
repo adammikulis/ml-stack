@@ -42,8 +42,19 @@ from typing import Any, TextIO
 from ml_stack.home import state
 from ml_stack.log import say
 
-__all__ = ["mcp_home", "PROTOCOL", "Tool", "TOOLS", "build_sdk_server", "detached",
-           "handle", "main", "schema_of", "serve", "sdk_available"]
+__all__ = [
+    "PROTOCOL",
+    "TOOLS",
+    "Tool",
+    "build_sdk_server",
+    "detached",
+    "handle",
+    "main",
+    "mcp_home",
+    "schema_of",
+    "sdk_available",
+    "serve",
+]
 
 PROTOCOL = "2024-11-05"
 def mcp_home() -> Path:
@@ -119,7 +130,7 @@ def detached(module: str, argv: list[str], *, name: str,
     command = [sys.executable, "-m", module, *argv]
     with log.open("ab") as out:
         out.write((f"command: {' '.join(command)}\nstarted: {time.strftime('%FT%T')}\n")
-                  .encode("utf-8"))
+                  .encode())
         out.flush()
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
                                  stderr=subprocess.STDOUT,
@@ -156,12 +167,12 @@ def _plain(value: Any) -> Any:
 def serve_status(port: int = 8080) -> list[dict[str, Any]]:
     """What is serving on this machine: every recorded server and ``port``, each with its
     model, context, slots and lease -- what ``ml-stack-serve status`` prints."""
-    from ml_stack.serve import cli
+    from ml_stack.serve import ops
 
-    records = cli.recorded_servers(cli.lease_file())
+    records = ops.recorded_servers(ops.lease_file())
     found = []
     for one in sorted({*records, int(port)}):
-        snapshot = cli.look(one, records)
+        snapshot = ops.look(one, records)
         if snapshot is not None:
             found.append(_plain(snapshot))
     return found
@@ -189,10 +200,18 @@ def serve_up(model: str, port: int = 8080, context: int = 0, parallel: int = 1,
 
 
 def serve_down(port: int = 8080) -> dict[str, Any]:
-    """Stop the server this machine started on ``port`` (``ml-stack-serve down``)."""
-    from ml_stack.serve.cli import main as serve_main
+    """Stop the server this machine started on ``port`` (``ml-stack-serve down``); says
+    whether a process was still running, and why it would not act when it would not."""
+    from ml_stack.serve import ops
 
-    return _captured(lambda: serve_main(["down", "--port", str(port)]))
+    try:
+        stopped, fleet = ops.down(int(port))
+    except ops.Refused as no:
+        return {"port": int(port), "stopped": False, "why": [line.strip() for line in no.lines
+                                                             if line.strip()]}
+    return {"port": stopped.port, "base_url": stopped.base_url, "pid": stopped.pid,
+            "stopped": stopped.was_running,
+            **({"fleet": fleet.strip()} if fleet.strip() else {})}
 
 
 def serve_escalate(port: int = 8080, add: int = 1) -> dict[str, Any]:
@@ -303,15 +322,10 @@ def world_make(kind: str = "company", size: str = "small", seed: int = 0,
     """Invent an organised group as a graph with people who could talk
     (``ml-stack-world make``); ``out`` is the directory written (default: under
     ``~/.ml-stack/worlds``)."""
-    from ml_stack.world.cli import main as world_main
+    from ml_stack.world.ops import invent
 
-    where = out or str(Path("~/.ml-stack/worlds").expanduser() / f"{kind}-{size}-{seed}")
-    got = _captured(lambda: world_main(["make", "--kind", kind, "--size", size, "--seed",
-                                        str(seed), "--out", where, "--json"]))
-    try:
-        return {**json.loads(got["output"].strip().splitlines()[-1]), "exit": got["exit"]}
-    except (ValueError, IndexError):
-        return got
+    where = out or str(state("worlds") / f"{kind}-{size}-{seed}")
+    return invent(kind=kind, size=size, seed=int(seed), out=where)
 
 
 def setup_look() -> list[dict[str, Any]]:

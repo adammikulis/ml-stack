@@ -90,10 +90,10 @@ class TestTheProtocol:
 
 class TestTheTools:
     def test_serve_status_calls_the_look_the_command_calls(self, monkeypatch):
-        from ml_stack.serve import cli
+        from ml_stack.serve import cli, ops
 
-        monkeypatch.setattr(cli, "recorded_servers", lambda state: {8083: {"model": "x"}})
-        monkeypatch.setattr(cli, "look", lambda port, records: cli.Snapshot(
+        monkeypatch.setattr(ops, "recorded_servers", lambda state: {8083: {"model": "x"}})
+        monkeypatch.setattr(ops, "look", lambda port, records: ops.Snapshot(
             port=port, base_url=f"http://127.0.0.1:{port}", model="quince-2b.gguf",
             context=8192, slots=1, recorded=port in records) if port == 8083 else None)
         (reply,) = drive(rpc(1, "tools/call", name="serve_status", arguments={"port": 8080}))
