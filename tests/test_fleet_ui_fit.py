@@ -490,10 +490,11 @@ class TestTheTelemetryView:
     def test_it_is_offered_beside_what_fits_and_what_it_cost(self):
         from ml_stack.fleet.page import COMPONENTS_DIR
 
-        html = (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
-        views = re.search(r"const VIEWS = \[(.+?)\];", html, re.S)
+        model = (COMPONENTS_DIR / "fit-model.html").read_text(encoding="utf-8")
+        views = re.search(r"FM\.VIEWS = \[(.+?)\];", model, re.S)
         assert views and '"telemetry"' in views.group(1)
-        assert "/ui/telemetry.json" in html, "the view reads no route"
+        tele = (COMPONENTS_DIR / "telemetry-view.html").read_text(encoding="utf-8")
+        assert "/ui/telemetry.json" in tele, "the view reads no route"
 
     def test_a_daemon_that_answers_nothing_says_so_rather_than_showing_zeros(self, page):
         """Zeros would read as a server that answered nothing; this one was never asked."""

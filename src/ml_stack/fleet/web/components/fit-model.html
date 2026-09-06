@@ -1,0 +1,88 @@
+<!-- fit-model: the formatting, the chart geometry and which of the three fit screens is showing -->
+<script>
+(function () {
+  const FM = window.fitModel = {};
+
+  FM.GB = 1024 ** 3;
+  FM.W = 620; FM.H = 380; FM.IX0 = 52; FM.IX1 = FM.W - 18; FM.IY0 = 16; FM.IY1 = FM.H - 34;
+
+  // the same rule as ml_stack.hub.pretty_name: path, .gguf, shard suffix and UD- go, the
+  // quantisation moves into brackets -- "Qwen3.8-Flash-Next (IQ4_XS)"
+  function prettyName(name) {
+    let text = String(name || "").split(/[\\/]/).pop().replace(/\.gguf$/i, "")
+      .replace(/-\d{5}-of-\d{5}$/, "");
+    const m = text.match(/-(?:UD-)?((?:IQ|Q)\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)/i);
+    if (!m) return text;
+    text = (text.slice(0, m.index) + text.slice(m.index + m[0].length)).replace(/^-+|-+$/g, "");
+    return text + " (" + m[1] + ")";
+  }
+  FM.prettyName = prettyName;
+
+  FM.human = (size) => {
+    let v = Number(size);
+    for (const unit of ["B", "K", "M", "G", "T"]) {
+      if (v < 1024 || unit === "T") return unit === "B" ? `${v.toFixed(0)}B` : `${v.toFixed(1)}${unit}`;
+      v /= 1024;
+    }
+    return `${v.toFixed(1)}T`;
+  };
+  FM.kTokens = (n) => (n >= 1024 && n % 1024 === 0 ? `${n / 1024}k` : n.toLocaleString());
+  FM.commas = (n) => Math.round(n).toLocaleString();
+
+  /** The legend name: the model, its cache type when that is not f16, and whether a draft
+      head was served -- `label_of` in fit.py says exactly this. */
+  FM.labelOf = function (f) {
+    const parts = [FM.prettyName(f.model)];
+    if (f.cache_type && f.cache_type !== "f16") parts.push(f.cache_type);
+    if (f.spec) parts.push("+draft");
+    return parts.join(" ");
+  };
+  FM.shortName = (f) => FM.labelOf(f).replace(/-0*\d+-of-0*\d+/, "");
+
+  // A colour per record, stable across every redraw, legible on both themes.
+  FM.COLOURS = ["#35d6c3", "#f2b544", "#5b8dd6", "#f2685c", "#4ad07f", "#c58af9",
+                "#e08b4c", "#7fd8cd", "#9aa7f5", "#d97fb0"];
+
+  const NS = "http://www.w3.org/2000/svg";
+  FM.svgEl = function svgEl(tag, attrs = {}, text = null) {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text !== null) n.textContent = text;
+    return n;
+  };
+
+  FM.secs = (s) => (s === null || s === undefined ? "—"
+    : s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Number(s).toFixed(1)}s`);
+  FM.rate = (v, digits = 1) => (v === null || v === undefined ? "—" : Number(v).toFixed(digits));
+
+  /** The part of the segment `(x0,y0)-(x1,y1)` that is inside `[0, top]`, or null. */
+  FM.clip = function clip(x0, y0, x1, y1, top) {
+    const slope = (y1 - y0) / Math.max(1e-9, x1 - x0);
+    if (slope <= 0) return y0 > top ? null : [x0, y0, x1, y1];
+    const b = Math.min(x1, x0 + (top - y0) / slope);
+    if (b <= x0) return null;
+    return [x0, y0, b, y0 + (b - x0) * slope];
+  };
+
+  // -------------------------------------------------- which of the three fit screens is showing
+  FM.VIEWS = [["fit", "What fits"], ["rates", "What it cost to be right"],
+              ["telemetry", "What it has spent"]];
+  const watchers = [];
+  FM.view = "fit";
+
+  /** Switch the fit sub-view, and tell every component that is watching. */
+  FM.showView = function (name) {
+    FM.view = name;
+    for (const fn of watchers) fn(name);
+  };
+
+  /** Run `fn` whenever the fit sub-view changes, and now with the current one. */
+  FM.onView = function (fn) {
+    watchers.push(fn);
+    fn(FM.view);
+  };
+
+  class FitModel extends HTMLElement {}
+  customElements.define("fit-model", FitModel);
+})();
+</script>

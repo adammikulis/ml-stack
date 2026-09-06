@@ -16,9 +16,10 @@ WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
 COMPONENTS = ("fleet-model", "fleet-nav", "sign-in", "first-run", "cluster-view",
-              "chat-view", "models-view", "settings-view", "fit-view", "close-sheet")
-#: the fit view on its own, for a machine running no daemon
-FIT_ONLY = ("fleet-model", "fit-view")
+              "chat-view", "models-view", "settings-view", "fit-model", "fit-view",
+              "rates-view", "telemetry-view", "close-sheet")
+#: the fit screen on its own, for a machine running no daemon
+FIT_ONLY = ("fleet-model", "fit-model", "fit-view", "rates-view", "telemetry-view")
 
 
 def components(names: Sequence[str | Component] = COMPONENTS) -> list[Component]:

@@ -1,0 +1,262 @@
+<!-- rates-view: what it cost to be right, mounted into the frame fit-view keeps -->
+<template>
+  <div class="controls" id="rate-controls" hidden></div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const FM = window.fitModel;
+  const el = M.el;
+  const { GB, W, H, IX0, IX1, IY0, IY1, commas, svgEl } = FM;
+
+  class RatesView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#rate-controls");
+      this.body = document.getElementById("fit-body");
+      this.ref = {};
+      this.state = {
+        runs: null, axes: {}, keys: {}, cost: "seconds", showing: "both", hotRun: null,
+        ratesError: "",
+      };
+      FM.onView((view) => { if (view === "rates") this.enter(); });
+    }
+
+    async enter() {
+      await this.loadRates();
+      if (!this.ref.showButtons) this.buildRateControls();
+      this.draw();
+    }
+
+    // ------------------------------------------------------------------ the measurements
+    //
+    // Every number comes off `/ui/rates.json`, which is `score.derived` and `show.pareto`
+    // over the kept store, with the frontier worked out for all three costs.
+    async loadRates() {
+      const s = this.state;
+      if (s.runs !== null) return;
+      try {
+        const r = await fetch("/ui/rates.json", { headers: M.headers });
+        const got = await r.json();
+        if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
+        s.runs = (got.runs || []).map((p, i) => ({ ...p, i, colour: FM.COLOURS[i % FM.COLOURS.length] }));
+        s.axes = got.axes || {};
+        s.keys = got.keys || {};
+        s.ratesError = got.error || "";
+      } catch (e) {
+        s.runs = [];
+        s.ratesError = e.message;
+      }
+    }
+
+    shownRuns() {
+      const s = this.state;
+      return (s.runs || []).filter((p) =>
+        s.showing === "both" || (s.showing === "composed" ? p.composed : !p.composed));
+    }
+
+    /** What a cost reads as on the axis: seconds, tokens, and bytes shown as GB. */
+    saidCost(p) {
+      const s = this.state;
+      return s.cost === "kv_bytes" ? `${(p.kv_bytes / GB).toFixed(1)} GB`
+        : s.cost === "paid_tokens" ? `${commas(p.paid_tokens)} tok`
+        : `${p.seconds.toFixed(1)} s`;
+    }
+
+    // the key the frontier was worked out on: per question for time and tokens, a total
+    // for memory
+    costOf(p) {
+      const s = this.state;
+      return s.cost === "kv_bytes" ? p.kv_bytes / GB
+        : p[(s.keys || {})[s.cost] || s.cost] || 0;
+    }
+
+    panelRates(points, tip) {
+      const s = this.state;
+      const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
+      const top = Math.max(0.01, ...points.map((p) => this.costOf(p))) * 1.08;
+      const px = (c) => IX0 + c / top * (IX1 - IX0);
+      const py = (right) => IY1 - Math.max(0, Math.min(1, right)) * (IY1 - IY0);
+
+      for (let i = 0; i <= 5; i += 1) {
+        const y = i / 5;
+        svg.append(svgEl("line", { class: "grid", x1: IX0, x2: IX1, y1: py(y), y2: py(y) }));
+        svg.append(svgEl("text", { x: IX0 - 8, y: py(y) + 3, "text-anchor": "end" },
+                         `${(y * 100).toFixed(0)}%`));
+      }
+      for (let i = 0; i <= 5; i += 1) {
+        const c = top * i / 5;
+        svg.append(svgEl("line", { class: "grid", x1: px(c), x2: px(c), y1: IY0, y2: IY1 }));
+        svg.append(svgEl("text", { x: px(c), y: IY1 + 14, "text-anchor": "middle" },
+                         s.cost === "paid_tokens" ? commas(c) : c.toFixed(1)));
+      }
+      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
+      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
+      svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
+                                 class: "title" }, s.axes[s.cost] || s.cost));
+      svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title",
+                                 "text-anchor": "middle",
+                                 transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
+                       "answers right (F1)"));
+
+      // the frontier, joined: nothing on it is both more accurate and cheaper than another
+      const front = points.filter((p) => (p.front || []).includes(s.cost))
+                          .sort((a, b) => this.costOf(a) - this.costOf(b));
+      if (front.length > 1) {
+        svg.append(svgEl("path", { class: "front",
+          d: front.map((p, i) =>
+            `${i ? "L" : "M"}${px(this.costOf(p)).toFixed(1)},${py(p.right).toFixed(1)}`).join("") }));
+      }
+      for (const p of points) {
+        const on = (p.front || []).includes(s.cost);
+        // a composed point is a square: it is a model, not a run -- accuracy from its
+        // largest run and cost from its fastest one that held that accuracy
+        const x = px(this.costOf(p)), y = py(p.right);
+        const mark = p.composed
+          ? svgEl("rect", { x: x - 4, y: y - 4, width: 8, height: 8, class: "point",
+                            fill: on ? "#4ad07f" : p.colour })
+          : svgEl("circle", { cx: x, cy: y, r: on ? 5.5 : 4, class: "point",
+                              fill: on ? "#4ad07f" : p.colour });
+        mark.dataset.run = p.i;
+        svg.append(mark);
+      }
+
+      svg.addEventListener("mouseleave", () => {
+        s.hotRun = null; tip.style.opacity = 0; this.paintHotRun();
+      });
+      svg.addEventListener("mousemove", (e) => {
+        const box = svg.getBoundingClientRect();
+        const mx = (e.clientX - box.left) / box.width * W;
+        const my = (e.clientY - box.top) / box.height * H;
+        let best = null, gap = Infinity;
+        for (const p of points) {
+          const near = Math.hypot(px(this.costOf(p)) - mx, py(p.right) - my);
+          if (near < gap) { gap = near; best = p; }
+        }
+        s.hotRun = best && gap < 24 ? best.i : null;
+        this.paintHotRun();
+        if (s.hotRun === null) { tip.style.opacity = 0; return; }
+        tip.replaceChildren(...M.kids(
+          el("div", {}, el("b", {}, best.label + (best.composed ? " (composed)" : ""))),
+          el("div", {}, el("span", {}, "F1 "), el("b", {}, `${(best.right * 100).toFixed(0)}%`),
+             el("span", {}, "  over "), el("b", {}, `${commas(best.questions)} questions`)),
+          el("div", {}, el("span", {}, (s.axes[s.cost] || s.cost) + " "),
+             el("b", {}, this.saidCost(best))),
+          (best.front || []).includes(s.cost)
+            ? el("div", {}, el("b", { style: "color:#4ad07f" }, "on the frontier")) : null,
+          best.host ? el("div", {}, el("span", {}, "measured on "), el("b", {}, best.host)) : null));
+        const host = svg.parentElement.getBoundingClientRect();
+        tip.style.left = `${Math.max(4, Math.min(e.clientX - host.left + 14, host.width - 250))}px`;
+        tip.style.top = `${e.clientY - host.top + 14}px`;
+        tip.style.opacity = 1;
+      });
+      return svg;
+    }
+
+    paintHotRun() {
+      const s = this.state;
+      for (const mark of document.querySelectorAll("svg .point")) {
+        mark.classList.toggle("hot", s.hotRun === Number(mark.dataset.run));
+        mark.setAttribute("opacity",
+          s.hotRun !== null && s.hotRun !== Number(mark.dataset.run) ? "0.3" : "1");
+      }
+      for (const tr of document.querySelectorAll("table.rates tbody tr")) {
+        tr.classList.toggle("hot", s.hotRun === Number(tr.dataset.run));
+      }
+    }
+
+    ratesTable(points) {
+      const s = this.state;
+      const num = (v, digits = 2) => (v === undefined || v === null ? "—" : v.toFixed(digits));
+      const body = el("tbody", {});
+      for (const p of points) {
+        const tr = el("tr", {
+          onmouseenter: () => { s.hotRun = p.i; this.paintHotRun(); },
+          onmouseleave: () => { s.hotRun = null; this.paintHotRun(); } },
+          el("td", { class: "name" }, el("i", { class: "sw", style: `background:${p.colour}` }),
+             p.label + (p.composed ? " =" : "")),
+          el("td", {}, p.host || "—"),
+          el("td", {}, commas(p.questions)),
+          el("td", {}, `${(p.right * 100).toFixed(0)}%`),
+          el("td", {}, `${(p.recall * 100).toFixed(0)}%`),
+          el("td", {}, `${(p.precision * 100).toFixed(0)}%`),
+          el("td", {}, num(p.right_per_minute)),
+          el("td", {}, num(p.right_per_1k, 4)),
+          el("td", {}, num(p.right_per_gb, 3)),
+          el("td", {}, num(p.seconds_per_right, 1)),
+          el("td", { class: "mark" }, (p.front || []).includes(s.cost) ? "★" : ""));
+        tr.dataset.run = p.i;
+        body.append(tr);
+      }
+      return el("table", { class: "fit rates" },
+        el("thead", {}, el("tr", {},
+          el("th", {}, "run"), el("th", {}, "host"), el("th", {}, "n"), el("th", {}, "F1"),
+          el("th", {}, "recall"), el("th", {}, "prec"), el("th", {}, "F1/min"),
+          el("th", {}, "F1/1k tok"), el("th", {}, "F1/GB"), el("th", {}, "s per right"),
+          el("th", {}, "frontier"))),
+        body);
+    }
+
+    buildRateControls() {
+      const s = this.state, ref = this.ref;
+      const box = this.box;
+      const sel = el("select", { onchange: (e) => { s.cost = e.target.value; this.draw(); } },
+        ...Object.entries(s.axes).map(([key, said]) => el("option", { value: key }, said)));
+      sel.value = s.cost;
+      box.append(el("div", { class: "ctl" },
+        el("div", { class: "cap" }, el("span", {}, "accuracy against")),
+        el("div", { class: "pair" }, sel),
+        el("div", { class: "hint" }, "which scarcity is short here — the frontier is drawn "
+                                     + "against this one")));
+
+      ref.showButtons = [];
+      const mk = (key, said) => {
+        const b = el("button", { onclick: () => { s.showing = key; this.draw(); } }, said);
+        b.dataset.key = key;
+        ref.showButtons.push(b);
+        return b;
+      };
+      box.append(el("div", { class: "ctl" },
+        el("div", { class: "cap" }, el("span", {}, "points")),
+        el("div", { class: "toggle" }, mk("both", "both"), mk("runs", "runs"),
+                                       mk("composed", "models")),
+        el("div", { class: "hint" }, "a model composed is one point: accuracy from its "
+                                     + "largest run, cost from its fastest run that held it")));
+    }
+
+    draw() {
+      const s = this.state;
+      FM.paintChrome("rates");
+      s.hotRun = null;
+      for (const b of (this.ref.showButtons || [])) {
+        b.classList.toggle("on", b.dataset.key === s.showing);
+      }
+      const points = this.shownRuns();
+      if (!points.length) {
+        this.body.replaceChildren(el("p", { class: "empty" }, s.ratesError
+          || "Nothing has been measured into the runs store yet. "
+             + "ml-stack-bench sweep --smoke asks two questions through the whole path."));
+        return;
+      }
+      const tip = el("div", { class: "tip" });
+      const panel = el("div", { class: "panel" },
+        el("h2", {}, "What it cost to be right"),
+        el("div", { class: "sub" },
+           "green is the frontier for this cost: nothing there is both more accurate and "
+           + "cheaper, so choosing among them is choosing a budget. A square is a model "
+           + "composed, a circle is one run."));
+      panel.append(this.panelRates(points, tip), tip);
+      this.body.replaceChildren(
+        el("div", { class: "panels", style: "grid-template-columns: 1fr" }, panel),
+        this.ratesTable(points),
+        el("p", { class: "note" },
+          "The same runs `ml-stack-bench show --rates` prints, from the same store. Raw "
+          + "runs describe one machine and one llama.cpp build and are not committed; what "
+          + "is committed is the ranking they support."));
+      this.paintHotRun();
+    }
+  }
+  customElements.define("rates-view", RatesView);
+})();
+</script>

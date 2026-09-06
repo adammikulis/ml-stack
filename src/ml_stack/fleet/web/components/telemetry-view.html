@@ -1,0 +1,184 @@
+<!-- telemetry-view: what it has spent, mounted into the frame fit-view keeps -->
+<template>
+  <div class="controls" id="tele-controls" hidden></div>
+</template>
+<script>
+(function () {
+  const M = window.fleetModel;
+  const FM = window.fitModel;
+  const el = M.el;
+  const { commas, secs, rate, prettyName } = FM;
+  const TELE_EVERY_MS = 3000;
+
+  class TelemetryView extends HTMLElement {
+    connectedCallback() {
+      if (this.wired) return;
+      this.wired = true;
+      this.box = this.querySelector("#tele-controls");
+      this.body = document.getElementById("fit-body");
+      this.ref = {};
+      this.state = {
+        tele: null, teleFrom: "", teleNote: "", teleError: "", teleTimer: null,
+        teleWatch: true,
+      };
+      FM.onView((view) => {
+        if (view === "telemetry") this.enter(); else this.watching(false);
+      });
+      // returning to the fit route resumes the timer and redraws stale data, but does
+      // not fetch again -- nothing changed while it was stopped
+      M.onRoute((route) => {
+        if (route !== "fit") { this.watching(false); return; }
+        if (FM.view === "telemetry") { this.watching(true); this.draw(); }
+      });
+    }
+
+    async enter() {
+      if (!this.ref.teleUrl) this.buildTeleControls();
+      await this.loadTelemetry();
+      this.watching(true);
+      this.draw();
+    }
+
+    // ------------------------------------------------------------------ what it has spent
+    //
+    // `AskRoutes.metrics` -- one JSON body per answering process. The daemon usually
+    // answers nothing itself, so the interesting case is the second one: type a page's
+    // /metrics address and the *daemon* fetches it, because a page on loopback has no
+    // reason to allow a cross-origin read from here.
+    async loadTelemetry() {
+      const s = this.state;
+      const where = "/ui/telemetry.json"
+        + (s.teleFrom ? "?from=" + encodeURIComponent(s.teleFrom) : "");
+      s.teleError = s.teleNote = "";
+      try {
+        const r = await fetch(where, { headers: M.headers });
+        const got = await r.json();
+        if (!r.ok) throw new Error(got.error || `the route answered ${r.status}`);
+        s.tele = got.metrics || null;
+        s.teleNote = got.note || "";
+        s.teleError = got.error || "";
+      } catch (e) {
+        s.tele = null;
+        s.teleError = e.message;
+      }
+    }
+
+    /** Poll while the view is open, and stop the moment it is not: a timer left running on
+        a background tab is a request per three seconds forever, at a page nobody reads. */
+    watching(on) {
+      const s = this.state;
+      if (s.teleTimer) { clearInterval(s.teleTimer); s.teleTimer = null; }
+      if (on && s.teleWatch) {
+        s.teleTimer = setInterval(async () => {
+          if (FM.view !== "telemetry" || this.box.hidden) { this.watching(false); return; }
+          await this.loadTelemetry();
+          this.draw();
+        }, TELE_EVERY_MS);
+      }
+    }
+
+    buildTeleControls() {
+      const s = this.state, ref = this.ref;
+      const box = this.box;
+      ref.teleUrl = el("input", { type: "text", placeholder: "http://127.0.0.1:8099/metrics",
+        value: s.teleFrom });
+      const go = async () => {
+        s.teleFrom = ref.teleUrl.value.trim();
+        await this.loadTelemetry();
+        this.draw();
+      };
+      ref.teleUrl.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
+      box.append(el("div", { class: "ctl wide" },
+        el("div", { class: "cap" }, el("span", {}, "read from")),
+        el("div", { class: "pair" }, ref.teleUrl,
+           el("button", { class: "go", onclick: go }, "read")),
+        el("div", { class: "hint" }, "empty for this daemon's own answers — otherwise the "
+                                     + "/metrics address of a page that answers questions; "
+                                     + "this machine fetches it, not your browser")));
+
+      ref.teleWatch = el("input", { type: "checkbox", onchange: (e) => {
+        s.teleWatch = e.target.checked;
+        this.watching(FM.view === "telemetry");
+      } });
+      ref.teleWatch.checked = s.teleWatch;
+      box.append(el("div", { class: "ctl" },
+        el("div", { class: "cap" }, el("span", {}, "keep looking")),
+        el("label", {}, ref.teleWatch, " re-read every three seconds"),
+        el("div", { class: "hint" }, "the ring holds the last two hundred answers; a "
+                                     + "counter that stops moving is a server that stopped "
+                                     + "answering")));
+    }
+
+    teleStats(m) {
+      const t = m.totals || {};
+      const stat = (cap, big, sub) => el("div", { class: "stat" },
+        el("div", { class: "cap" }, cap), el("div", { class: "big" }, big),
+        sub ? el("div", { class: "sub" }, sub) : null);
+      const kept = t.read_tokens + t.cached_tokens;
+      return el("div", { class: "stats" },
+        stat("answers", commas(m.answers || 0), `${commas(m.kept || 0)} kept in the ring`),
+        stat("calls", commas(t.calls || 0), `${secs(t.seconds)} of wall clock`),
+        stat("wrote", commas(t.completion_tokens || 0) + " tok",
+             `${rate(t.decode_tokens_per_second)} tok/s decoding`),
+        stat("read", commas(t.read_tokens || 0) + " tok",
+             kept ? `${((t.cached_tokens / kept) * 100).toFixed(0)}% came from the cache`
+                  : "nothing yet"),
+        stat("drafted", t.draft_tokens ? `${(t.acceptance * 100).toFixed(0)}%` : "—",
+             t.draft_tokens ? `${commas(t.draft_taken)} of ${commas(t.draft_tokens)} accepted`
+                            : "no draft head"),
+        stat("context peak", commas(t.context_peak || 0),
+             `mean ${commas(t.context_mean || 0)} — what one slot held`),
+        stat("uptime", secs(m.uptime), m.ready ? String(m.ready) : "answering"));
+    }
+
+    teleTable(rows) {
+      const body = el("tbody", {});
+      for (const r of [...rows].reverse()) {
+        const kept = (r.read_tokens || 0) + (r.cached_tokens || 0);
+        body.append(el("tr", {},
+          el("td", { class: "name" }, prettyName(r.model) || "—"),
+          el("td", {}, r.thread || "—"),
+          el("td", {}, commas(r.calls || 0)),
+          el("td", {}, secs(r.seconds)),
+          el("td", {}, rate(r.decode_tokens_per_second)),
+          el("td", {}, secs((r.prompt_ms || 0) / 1000)),
+          el("td", {}, kept ? `${((r.cached_tokens / kept) * 100).toFixed(0)}%` : "—"),
+          el("td", {}, r.draft_tokens ? `${(r.acceptance * 100).toFixed(0)}%` : "—"),
+          el("td", {}, commas(r.context_peak || 0))));
+      }
+      return el("table", { class: "fit" },
+        el("thead", {}, el("tr", {},
+          ...["model", "thread", "calls", "took", "wrote at tok/s", "read for",
+              "prompt cached", "drafted", "context peak"].map((h) => el("th", {}, h)))),
+        body);
+    }
+
+    draw() {
+      const s = this.state;
+      FM.paintChrome("telemetry");
+      const m = s.tele;
+      if (!m) {
+        this.body.replaceChildren(el("p", { class: "empty" },
+          s.teleError ? `Could not read it: ${s.teleError}`
+                      : s.teleNote || "Nothing has answered anything here yet."));
+        return;
+      }
+      const where = s.teleFrom || m.url || "this process";
+      this.body.replaceChildren(
+        el("p", { class: "note" },
+          `${prettyName(m.model) || "no model named"} · ${where}`
+          + (m.threads && Object.keys(m.threads).length
+             ? ` · ${Object.keys(m.threads).length} conversation(s)` : "")),
+        this.teleStats(m),
+        (m.recent || []).length ? this.teleTable(m.recent)
+          : el("p", { class: "empty" }, "Up, and asked nothing yet."),
+        el("p", { class: "note" },
+          "Every row is one answer a person actually asked for, off the same `Spent` record "
+          + "the page's footer shows and the bench sums per question. The same numbers are "
+          + "at /metrics.prom in the Prometheus text format, so a scraper already installed "
+          + "can watch this without knowing anything about it."));
+    }
+  }
+  customElements.define("telemetry-view", TelemetryView);
+})();
+</script>

@@ -767,15 +767,15 @@ class TestPrettyName:
         from ml_stack.graph.page import template
         from ml_stack.hub import pretty_name
 
-        fit_view = (COMPONENTS_DIR / "fit-view.html").read_text(encoding="utf-8")
-        for text in (fit_view, template()):
+        fit_model = (COMPONENTS_DIR / "fit-model.html").read_text(encoding="utf-8")
+        for text in (fit_model, template()):
             assert "(?:UD-)?((?:IQ|Q)\\d(?:_[A-Z0-9]+)+|mxfp4|BF16|F16|F32)" in text
         node = shutil.which("node")
         if not node:
             pytest.skip("no node to run the page's copy")
         names = ["a/b/thing-Flash-UD-IQ4_XS-00001-of-00003.gguf", "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
                  "gpt-oss-120b-mxfp4-00001-of-00003.gguf", "mtp-thing-shared-Q8_0.gguf", "plain.gguf"]
-        text = fit_view
+        text = fit_model
         start = text.index("function prettyName")
         end = text.index("\n  }\n", start) + 4
         script = text[start:end] + "\nconsole.log(JSON.stringify(" + json.dumps(names) + ".map(prettyName)))"
