@@ -547,6 +547,32 @@ worth taking, in this order:
   refactor. Whoever takes it should check `bench.serve.served` and
   `serve/preflight.py` first.
 
+## The shared fakes
+
+- [ ] **`tests/test_serve_preflight.py` still writes its own model server as a shell
+  script.** `fake_server_process` there builds an executable out of a string of Python
+  source, answering `--help` and then `/health`, `/props`, `/v1/models` and `/completion`.
+  `ml_stack.testing.fakes.fake_llama_binary` is the same executable with every route the
+  clients read, a `--help` covering every flag `ServerSpec` emits, and a process name
+  `serve.process.every_server` matches; the swap is one call and a deletion of the
+  fixture.
+
+- [ ] **Eighteen tests monkeypatch `serve()` with a `fake_serve` of their own.** Each takes
+  `**lease` and records the dict, which is the shape that lets a keyword `ServerSpec` does
+  not have through unnoticed; `ml_stack.testing.fakes.FakeServe` builds a real `ServerSpec`
+  instead and puts it in `leased`. They are in `tests/test_ingest.py` (4),
+  `tests/test_graph_bench.py` (5), `tests/test_bench_extract.py`,
+  `tests/test_bench_extract_n_max.py`, `tests/test_bench_selfcheck.py`,
+  `tests/test_claude_launcher.py` (2), `tests/test_graph_bench_speed.py`,
+  `tests/test_harness.py`, `tests/test_ingest_server_gone.py` and
+  `tests/test_serve_shape.py`. Each needs its assertions moved off the recorded dict and
+  onto the spec.
+
+- [ ] **Three tests define a `FakeClient` of their own** -- `tests/test_do.py:533`,
+  `tests/test_entities_edits.py:150`, `tests/test_vision.py:172`. The shared one carries
+  `Client.__init__`'s signature and `tests/test_testing_fakes.py` diffs it against the real
+  one every run, so a keyword the real `Client` would refuse is refused there too.
+
 ## Verifying
 
 ```bash
