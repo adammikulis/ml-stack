@@ -97,7 +97,8 @@ def _say_processes(as_json: bool) -> int:
 
 
 @COMMANDS.command(
-    "status", help="what is serving, and what a lease would do",
+    "status", help="what is serving, what its draft head is keeping, and what a lease "
+                   "would do",
     options=[
         option("port", default=DEFAULT_PORT,
                help=f"port to check besides the recorded ones (default: {DEFAULT_PORT})"),
