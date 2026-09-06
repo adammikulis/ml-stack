@@ -1445,18 +1445,41 @@ def measuring_file() -> Path:
     return bench.home_dir() / "measuring.json"
 
 
+def measuring_lock_file() -> Path:
+    """Where the run holding the measuring lock is named, whatever else it wrote."""
+    return bench.home_dir() / "measuring.lock"
+
+
+def _locked_by() -> int | None:
+    """The pid written into the measuring lock, or None."""
+    try:
+        said = measuring_lock_file().read_text(encoding="utf-8").split()
+    except OSError:
+        return None
+    return int(said[-1]) if said and said[-1].isdigit() else None
+
+
 def measuring() -> dict[str, Any] | None:
     """The measurement still running, or None. Read from `measuring_file`; a record marked
-    ended, or one whose pid has gone, is a measurement that finished."""
+    ended, or one whose pid has gone, is a measurement that finished.
+
+    A live lock with no record of its own is still a measurement, reported with the little
+    the lock knows: a machine whose GPU is busy must never read as idle.
+    """
     from ml_stack.serve.process import pid_exists
 
     try:
         held = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        held = None
+    if isinstance(held, dict) and not held.get("ended") and pid_exists(held.get("pid")):
+        return held
+    pid = _locked_by()
+    if pid is None or not pid_exists(pid) \
+            or (isinstance(held, dict) and held.get("pid") == pid):
         return None
-    if not isinstance(held, dict) or held.get("ended") or not pid_exists(held.get("pid")):
-        return None
-    return held
+    return {"pid": pid, "argv": [], "log": "", "how": {},
+            "started": "", "lock_only": True}
 
 
 def asking_said(argv: Sequence[str]) -> dict[str, Any]:
@@ -1805,6 +1828,10 @@ def _status_line() -> str:
                           f"{' '.join(last.get('argv') or ())} -- started "
                           f"{last.get('started', '?')} and has ended.",
                           *_log_said(str(last.get("log") or ""))])
+    if held.get("lock_only"):
+        return (f"measuring (pid {held['pid']}), which wrote no record of itself: the "
+                f"measuring lock is held and that process is alive. Nothing here says what "
+                f"it is asking or where its log is.")
     began = _epoch(str(held.get("started") or ""))
     return "\n".join([f"measuring {f'for {_span(time.time() - began)}, ' if began else ''}"
                       f"since {held.get('started', '?')} (pid {held.get('pid')}):",

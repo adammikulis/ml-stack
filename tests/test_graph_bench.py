@@ -4793,3 +4793,44 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
     assert "constrain_ids" not in plain.asking
     assert asked_as({"asking": ask.asking}) == "+ids"
     assert asked_as({"asking": plain.asking}) == "tight"
+
+
+def test_a_held_measuring_lock_with_no_record_still_reads_as_measuring(tmp_path, monkeypatch):
+    """A machine whose GPU is busy must never read as idle. The lock names a live pid; the
+    record beside it can be missing, and the answer is still "measuring"."""
+    import os
+
+    from ml_stack import bench
+    from ml_stack.bench import run as running
+
+    monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
+    assert running.measuring() is None, "no lock, nothing measuring"
+
+    (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
+    held = running.measuring()
+    assert held is not None and held["pid"] == os.getpid() and held["lock_only"]
+    assert "measuring" in running._status_line()
+    assert "nothing is measuring" not in running._status_line()
+
+    (tmp_path / "measuring.lock").write_text("pid 2147483")   # nobody
+    assert running.measuring() is None, "a lock whose holder has gone is not a measurement"
+
+
+def test_a_record_beats_the_lock_it_was_written_beside(tmp_path, monkeypatch):
+    """The record says what is being asked; the lock only says who. A live record wins, and
+    an ended one does not resurrect itself through its own lock."""
+    import json
+    import os
+
+    from ml_stack import bench
+    from ml_stack.bench import run as running
+
+    monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
+    (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
+    (tmp_path / "measuring.json").write_text(json.dumps(
+        {"pid": os.getpid(), "argv": ["sweep"], "log": "", "started": "", "how": {}}))
+    assert running.measuring()["argv"] == ["sweep"]
+
+    (tmp_path / "measuring.json").write_text(json.dumps(
+        {"pid": os.getpid(), "argv": ["sweep"], "ended": True}))
+    assert running.measuring() is None, "its own lock is not another measurement"
