@@ -21,7 +21,7 @@
   "ruff-other": 948,
   "ruff-security": 136,
   "subprocess-spawns": 9,
-  "unversioned-records": 6,
+  "unversioned-records": 5,
   "urlopen-calls": 2,
   "wide-signatures": 44
 }

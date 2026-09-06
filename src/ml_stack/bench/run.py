@@ -39,6 +39,7 @@ from ml_stack.bench.keep import (
     save,
 )
 from ml_stack.bench.estimate import ceiling_default, estimate
+from ml_stack.bench.history import _epoch, _span
 from ml_stack.bench.measure import (
     PER_QUESTION,
     _how_many,
@@ -50,9 +51,11 @@ from ml_stack.bench.measure import (
 from ml_stack.bench.score import NOISE, _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, missed, plot, rates, shape, table
+from ml_stack.client.chat import Client
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.vectors import MARGIN
 from ml_stack.log import say, warn
+from ml_stack.serve.shape import DEFAULT_CACHE, SAMPLERS
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
 # `_ways`: a neighbourhood read whole, which a 256k window does not notice.
@@ -1432,22 +1435,82 @@ _WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DET
 
 
 def measuring_file() -> Path:
-    """Where the detached measurement's pid, argv, log and start time are written."""
+    """Where the run holding the measuring lock writes its pid, argv, log, start time and
+    how it is asking."""
     return bench.home_dir() / "measuring.json"
 
 
 def measuring() -> dict[str, Any] | None:
-    """The detached measurement still running, or None. Read from `measuring_file`; a
-    record whose pid has gone is a measurement that finished, not one that is running."""
+    """The measurement still running, or None. Read from `measuring_file`; a record marked
+    ended, or one whose pid has gone, is a measurement that finished."""
     from ml_stack.serve.process import pid_exists
 
     try:
         held = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
-    if not isinstance(held, dict) or not pid_exists(held.get("pid")):
+    if not isinstance(held, dict) or held.get("ended") or not pid_exists(held.get("pid")):
         return None
     return held
+
+
+def asking_said(argv: Sequence[str]) -> dict[str, Any]:
+    """How a run started with ``argv`` will ask: the sampling, the draft head and its
+    depth, the cache type, the thinking budget, the context and the seats."""
+    try:
+        args = _parser().parse_args([a for a in argv if a not in ("--detach", "--no-queue")])
+    except SystemExit:
+        return {}
+    asked = sampling_from(args)
+    sampling = dict(Client(**{k: v for k, v in asked.items() if k in SAMPLERS}).sampling)
+    if asked.get("n_predict") is not None:
+        sampling["n_predict"] = asked["n_predict"]
+    named = [*(getattr(args, "serve_draft", []) or []), *(getattr(args, "draft", []) or [])]
+    heads = ([] if getattr(args, "no_draft", False)
+             else [str(h).rsplit("/", 1)[-1] or "none" for h in named])
+    ahead = getattr(args, "n_max", None)
+    return {"sampling": sampling, "card": bool(getattr(args, "card", False)),
+            "head": ", ".join(heads),
+            "head_ahead": ", ".join(str(n) for n in ahead) if isinstance(ahead, list) else ahead,
+            "cache_type": str(getattr(args, "serve_kv", "") or "") or DEFAULT_CACHE,
+            "reasoning_budget": getattr(args, "reasoning_budget", None),
+            "context": int(getattr(args, "context", 0) or 0),
+            "slots": max(1, int(getattr(args, "parallel", 1) or 1))}
+
+
+def remember(argv: Sequence[str], *, pid: int, log: str = "", started: str = "",
+             commit: str | None = None) -> dict[str, Any]:
+    """Write `measuring_file` for the run named by ``argv``, and return what was written.
+
+    A log already recorded under this pid is kept, so a detached child taking the lock
+    does not lose the log its parent opened for it.
+    """
+    was: dict[str, Any] = {}
+    try:
+        found = json.loads(measuring_file().read_text(encoding="utf-8"))
+        was = found if isinstance(found, dict) and found.get("pid") == pid else {}
+    except (OSError, ValueError):
+        pass
+    held = {"pid": int(pid), "argv": list(argv),
+            "log": str(log or was.get("log") or ""),
+            "started": started or str(was.get("started") or time.strftime("%FT%T")),
+            "commit": _commit() if commit is None else commit,
+            "how": asking_said(argv)}
+    measuring_file().parent.mkdir(parents=True, exist_ok=True)
+    measuring_file().write_text(json.dumps(held, indent=1), encoding="utf-8")
+    return held
+
+
+def ended() -> None:
+    """Mark this process's record finished, so nothing reads it as a live measurement."""
+    try:
+        held = json.loads(measuring_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if not isinstance(held, dict) or held.get("pid") != os.getpid():
+        return
+    held["ended"] = time.strftime("%FT%T")
+    measuring_file().write_text(json.dumps(held, indent=1), encoding="utf-8")
 
 
 def _named_in(argv: Sequence[str]) -> str:
@@ -1491,9 +1554,7 @@ def detach(argv: Sequence[str]) -> Path:
         child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
                                  stderr=subprocess.STDOUT,
                                  env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
-    measuring_file().write_text(json.dumps({
-        "pid": child.pid, "argv": list(rest), "log": str(log),
-        "started": started, "commit": commit}, indent=1), encoding="utf-8")
+    remember(rest, pid=child.pid, log=str(log), started=started, commit=commit)
     from ml_stack import jobs
 
     # bench queues a second `--detach` behind the measuring lock rather than refusing it
@@ -1690,6 +1751,44 @@ def status(*, results: bool = True) -> str:
     return text
 
 
+def _sampling_said(sampling: Mapping[str, Any]) -> str:
+    """The sampler settings as one phrase, temperature first; a zero is named greedy."""
+    if not sampling:
+        return "unrecorded"
+    greedy = float(sampling.get("temperature", 1.0)) == 0.0
+    order = [*SAMPLERS, *sorted(k for k in sampling if k not in SAMPLERS)]
+    return ", ".join(f"{name} {sampling[name]}"
+                     + (" (greedy)" if greedy and name == "temperature" else "")
+                     for name in order if name in sampling)
+
+
+def _how_said(how: Mapping[str, Any]) -> list[str]:
+    """The `asking:` and `shape:` lines for a record's ``how``; nothing when it has none."""
+    if not how:
+        return []
+    said = _sampling_said(how.get("sampling") or {})
+    if how.get("card"):
+        said += ", over what the model's card asks for"
+    head, ahead = str(how.get("head") or ""), how.get("head_ahead")
+    context, seats = int(how.get("context") or 0), int(how.get("slots") or 1)
+    shape = [f"draft head{'s' if ', ' in head else ''} {head}" if head else "no draft head"]
+    if ahead:
+        shape.append(f"{ahead} ahead")
+    shape.append(f"{how.get('cache_type') or '?'} cache")
+    if how.get("reasoning_budget") is not None:
+        shape.append(f"thinking budget {int(how['reasoning_budget'])}")
+    shape.append((f"{context // 1024}k context" if context else "the model's own context")
+                 + f" across {seats} seat" + ("s" if seats != 1 else ""))
+    return [f"  asking: {said}", "  shape: " + "; ".join(shape)]
+
+
+def _log_said(log: str) -> list[str]:
+    """The `log:` and `last:` lines for a run's log, or where to read it when it has none."""
+    if not log:
+        return ["  log: none -- it prints to the terminal it was started in"]
+    return [f"  log: {log}", f"  last: {_last_line(Path(log))}"]
+
+
 def _status_line() -> str:
     held = measuring()
     if held is None:
@@ -1697,13 +1796,16 @@ def _status_line() -> str:
             last = json.loads(measuring_file().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return "nothing is measuring"
-        return (f"nothing is measuring; the last one -- ml-stack-bench "
-                f"{' '.join(last.get('argv') or ())} -- started {last.get('started', '?')} and "
-                f"has ended.\n  log: {last.get('log', '?')}\n  last: {_last_line(Path(str(last.get('log', ''))))}")
-    return (f"measuring since {held.get('started', '?')} (pid {held.get('pid')}):\n"
-            f"  ml-stack-bench {' '.join(held.get('argv') or ())}\n"
-            f"  log: {held.get('log', '?')}\n"
-            f"  last: {_last_line(Path(str(held.get('log', ''))))}")
+        return "\n".join([f"nothing is measuring; the last one -- ml-stack-bench "
+                          f"{' '.join(last.get('argv') or ())} -- started "
+                          f"{last.get('started', '?')} and has ended.",
+                          *_log_said(str(last.get("log") or ""))])
+    began = _epoch(str(held.get("started") or ""))
+    return "\n".join([f"measuring {f'for {_span(time.time() - began)}, ' if began else ''}"
+                      f"since {held.get('started', '?')} (pid {held.get('pid')}):",
+                      f"  ml-stack-bench {' '.join(held.get('argv') or ())}",
+                      *_how_said(held.get("how") or {}),
+                      *_log_said(str(held.get("log") or ""))])
 
 
 def _latest_log() -> Path | None:
@@ -1874,7 +1976,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with only_one(bench.home_dir() / "measuring.lock", wait=not refuse,
                       announce=lambda line: warn(line)):
-            return _main(rest)
+            # the record is written and retired by the lock's own block, so what `status`
+            # calls live is whoever holds the GPU, however the run was started
+            remember(rest, pid=os.getpid())
+            try:
+                return _main(rest)
+            finally:
+                ended()
     except Busy as why:
         warn(f"error: {why}. Another measurement is running; wait for it, or pass "
              f"--no-queue to fail fast rather than queue.")
