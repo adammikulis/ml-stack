@@ -23,8 +23,8 @@ from ml_stack.units import human_bytes
 
 __all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "Head", "PREFER",
            "WEIGHT_SUFFIXES", "advice", "aside", "base_words", "beside", "borrowed_head",
-           "builds", "card", "choose_head", "default_roots", "draft_for", "draft_note",
-           "drafts_for", "fetch", "files", "find", "forks", "heads_for", "held", "hub_cache",
+           "builds", "card", "choose_head", "DRAFT_DEPTH", "NO_HEAD", "default_roots", "draft_for", "draft_note", "drafting",
+           "drafts_for", "fetch", "files", "find", "forks", "head_choice", "heads_for", "held", "hub_cache",
            "in_gguf", "is_head", "located", "main", "mmproj_for", "ref", "repo_of", "room",
            "spec_for", "weight_paths"]
 
@@ -587,6 +587,25 @@ def forks(binary: str | Path | None = None,
     return False, sorted(found, key=lambda name: (name not in measured, name))
 
 
+DRAFT_DEPTH = 4
+"""Tokens a chosen draft head guesses ahead of the model it drafts for."""
+
+NO_HEAD = ("serving without a draft head: nothing guesses tokens ahead for the model to "
+           "check in one pass, which is slower")
+
+
+def drafting(draft: str = "", spec_type: str = "", depth: int | None = None,
+             build: str = "", size: int = 0) -> str:
+    """One line naming the draft head a model serves with, or that it serves without one."""
+    if not draft:
+        return NO_HEAD
+    memory = f" ({human_bytes(size)} of memory)" if size else ""
+    kind = f", {spec_type}" if spec_type else ""
+    ahead = f", {depth} tokens ahead" if depth else ""
+    on = f", on build {build}" if build else ""
+    return f"drafting ahead with {Path(draft).name}{memory}{kind}{ahead}{on}"
+
+
 @dataclass(frozen=True)
 class Head:
     """A draft head on this machine: what to serve, how big, and which build loads it."""
@@ -595,6 +614,7 @@ class Head:
     bytes: int
     spec_type: str
     build: str = ""
+    depth: int = DRAFT_DEPTH
 
     @property
     def name(self) -> str:
@@ -605,15 +625,46 @@ class Head:
         extra = f", needs --build {self.build}" if self.build else ""
         return f"{self.name} ({human_bytes(self.bytes)} of memory{extra})"
 
+    def serving(self) -> str:
+        """One line naming what the model is drafting ahead with."""
+        return drafting(self.path, self.spec_type, self.depth, self.build, self.bytes)
+
+    def over(self) -> dict[str, object]:
+        """The `Run.over` fields that serve this head."""
+        return {"draft": self.path, "spec_type": self.spec_type, "build": self.build,
+                "draft_n_max": self.depth}
+
+
+def head_choice(model: str | Path, asked: str = "auto", *,
+                files: Sequence[Path] | None = None,
+                heads: Sequence[Head] | None = None) -> Head | None:
+    """The draft head to serve with ``model``, or None for none.
+
+    'auto' takes the smallest head on this machine; 'none' takes no head; anything else
+    names one of the heads found.
+    """
+    want = str(asked).strip().lower()
+    if want in ("none", "no", "off", ""):
+        return None
+    found = list(heads) if heads is not None else heads_for(model, files=files)
+    if want == "auto":
+        return found[0] if found else None
+    wanted = Path(str(asked)).name.lower()
+    for one in found:
+        if one.name.lower() == wanted:
+            return one
+    named = ", ".join(one.name for one in found) or "none"
+    raise ValueError(f"no draft head called {asked!r} for that model; here there is {named}")
+
 
 def heads_for(model: str | Path, *, files: Sequence[Path] | None = None,
               builds: Sequence[tuple[str, Path]] | None = None,
               binary: str | Path | None = None) -> list[Head]:
-    """The draft heads this machine could serve with ``model``, cheapest first.
+    """The draft heads this machine could serve with ``model``, smallest first.
 
-    A draft step costs about what it takes to read the head, so the smallest head drafts
-    fastest. A head that borrows its target's embeddings is named for the fork build that
-    loads it, and is left out when this machine has no such build.
+    The size is what the head adds to memory. A head that borrows its target's embeddings
+    is named for the fork build that loads it, and is left out when this machine has no
+    such build.
     """
     here, named = forks(binary, builds)
     fork = named[0] if named else ""
