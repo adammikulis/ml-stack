@@ -17,12 +17,13 @@ from importlib.metadata import entry_points
 from pathlib import Path
 from typing import Callable
 
+from ml_stack.cli.reference import HELP
 from ml_stack.log import say, warn
 
 __all__ = ["PREFIX", "commands", "load", "main"]
 
 PREFIX = "ml-stack-"
-PYPROJECT = Path(__file__).resolve().parents[2] / "pyproject.toml"
+PYPROJECT = Path(__file__).resolve().parents[3] / "pyproject.toml"
 
 
 def commands() -> dict[str, str]:
@@ -47,6 +48,7 @@ def load(target: str) -> Callable[..., int | None]:
 
 
 def _first_help_line(target: str) -> str:
+    """The first line of a command's own ``--help``, for one no registry entry names."""
     out = io.StringIO()
     try:
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
@@ -88,18 +90,17 @@ def _unknown(words: list[str], table: dict[str, str]) -> int:
     return 2
 
 
-HELP_LINE = "every command with the first line of its help, or one command's own help"
-
-
 def listing(table: dict[str, str] | None = None) -> str:
-    """Every command, one line each: the word as `ml-stack` takes it and the first line of
-    its help. `help` itself is described in a sentence rather than asked, or it would ask
-    itself forever."""
+    """Every command, one line each: the word as `ml-stack` takes it and what it does.
+
+    The line comes from `ml_stack.cli.reference`; a command another package installed is
+    imported and asked, because nothing here knows about it.
+    """
     table = commands() if table is None else table
     width = max((len(w) for w in table), default=0)
     return "\n".join(
         f"{word.replace('-', ' '):<{width}}  "
-        + (HELP_LINE if word == "help" else _first_help_line(table[word]))
+        + (HELP[word] if word in HELP else _first_help_line(table[word]))
         for word in sorted(table))
 
 
@@ -153,9 +154,5 @@ def main(argv: list[str] | None = None) -> int:
     if known.list:
         say(listing(table))
         return 0
-    from .fleet.launch import main as app
+    from ml_stack.fleet.launch import main as app
     return app(rest)
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

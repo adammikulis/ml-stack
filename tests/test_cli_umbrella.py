@@ -35,15 +35,19 @@ def _fake_target(monkeypatch, name: str, calls: list, *, returns: int = 0,
 
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
-    """Three invented commands registered as entry points, and no pyproject to fall back on."""
+    """Three invented commands registered as entry points, and no pyproject to fall back on.
+
+    None is in `ml_stack.cli.reference`, so each is imported and asked for its help -- what
+    happens to a command another package installs.
+    """
     calls: list = []
     points = [
         EntryPoint("ml-stack-quince", _fake_target(monkeypatch, "quince", calls, returns=3),
                    "console_scripts"),
-        EntryPoint("ml-stack-train", _fake_target(monkeypatch, "train", calls, about="Trains."),
+        EntryPoint("ml-stack-medlar", _fake_target(monkeypatch, "medlar", calls, about="Trains."),
                    "console_scripts"),
-        EntryPoint("ml-stack-train-run",
-                   _fake_target(monkeypatch, "train_run", calls, about="Runs one."),
+        EntryPoint("ml-stack-medlar-run",
+                   _fake_target(monkeypatch, "medlar_run", calls, about="Runs one."),
                    "console_scripts"),
         EntryPoint("ml-stack", "ml_stack.cli:main", "console_scripts"),
         EntryPoint("unrelated-tool", "quince:main", "console_scripts"),
@@ -59,9 +63,9 @@ def test_a_word_runs_the_hyphenated_command_in_process(fake):
 
 
 def test_words_join_with_hyphens_longest_match_first(fake):
-    assert cli.main(["train", "run", "--steps", "1"]) == 0
-    assert cli.main(["train", "--dry-run"]) == 0
-    assert fake == [("train_run", ["--steps", "1"]), ("train", ["--dry-run"])]
+    assert cli.main(["medlar", "run", "--steps", "1"]) == 0
+    assert cli.main(["medlar", "--dry-run"]) == 0
+    assert fake == [("medlar_run", ["--steps", "1"]), ("medlar", ["--dry-run"])]
 
 
 def test_the_targets_help_is_returned_unchanged(fake, capsys):
@@ -82,7 +86,7 @@ def test_list_prints_every_command_with_the_first_line_of_its_help(fake, capsys)
     assert cli.main(["--list"]) == 0
     out = capsys.readouterr().out
     assert "quince" in out and "Counts quinces." in out
-    assert "train run" in out and "Runs one." in out
+    assert "medlar run" in out and "Runs one." in out
     assert "unrelated" not in out
     assert fake == []
 
@@ -93,7 +97,7 @@ def test_help_lists_the_subcommands(fake, capsys):
     assert left.value.code == 0
     out = capsys.readouterr().out
     assert "usage:" in out
-    for word in ("quince", "train", "train run"):
+    for word in ("quince", "medlar", "medlar run"):
         assert word in out
 
 
@@ -108,26 +112,26 @@ def test_bare_and_its_flags_reach_the_app(fake, monkeypatch):
 
 def test_an_uninstalled_checkout_dispatches_from_its_pyproject(monkeypatch, tmp_path):
     calls: list = []
-    target = _fake_target(monkeypatch, "medlar", calls)
+    target = _fake_target(monkeypatch, "quince", calls)
     (tmp_path / "pyproject.toml").write_text(
-        f'[project.scripts]\nml-stack = "ml_stack.cli:main"\nml-stack-medlar = "{target}"\n')
+        f'[project.scripts]\nml-stack = "ml_stack.cli:main"\nml-stack-quince = "{target}"\n')
     monkeypatch.setattr(cli, "entry_points", lambda group: [])
     monkeypatch.setattr(cli, "PYPROJECT", tmp_path / "pyproject.toml")
-    assert cli.main(["medlar", "x"]) == 0
-    assert calls == [("medlar", ["x"])]
+    assert cli.main(["quince", "x"]) == 0
+    assert calls == [("quince", ["x"])]
 
 
 def test_a_checkout_beats_a_stale_installed_entry_point(monkeypatch, tmp_path):
     calls: list = []
-    target = _fake_target(monkeypatch, "medlar", calls)
+    target = _fake_target(monkeypatch, "quince", calls)
     (tmp_path / "pyproject.toml").write_text(
-        f'[project.scripts]\nml-stack-medlar = "{target}"\n')
+        f'[project.scripts]\nml-stack-quince = "{target}"\n')
     monkeypatch.setattr(cli, "entry_points", lambda group: [
-        EntryPoint("ml-stack-medlar", "ml_stack.gone.medlar:main", "console_scripts")])
+        EntryPoint("ml-stack-quince", "ml_stack.gone.quince:main", "console_scripts")])
     monkeypatch.setattr(cli, "PYPROJECT", tmp_path / "pyproject.toml")
-    assert cli.commands()["medlar"] == target
-    assert cli.main(["medlar", "x"]) == 0
-    assert calls == [("medlar", ["x"])]
+    assert cli.commands()["quince"] == target
+    assert cli.main(["quince", "x"]) == 0
+    assert calls == [("quince", ["x"])]
 
 
 def test_every_command_in_pyproject_resolves_to_a_main():
@@ -139,7 +143,7 @@ def test_every_command_in_pyproject_resolves_to_a_main():
         word = name[len(cli.PREFIX):]
         assert word in words, f"{name} is not a subcommand of ml-stack"
         assert callable(cli.load(words[word])), f"{name} -> {target} has no main"
-    assert "bench" in words and "train-run" in words
+    assert "serve" in words and "bench" in words and "train-run" in words
 
 
 def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
