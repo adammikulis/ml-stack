@@ -634,16 +634,16 @@ class _DraftingClient:
 
     drafts = 6
     honours = True
-    asked_of_each: ClassVar[list[dict]] = []
+    asked_of_each: ClassVar[list[int | None]] = []
 
     def __init__(self, base_url="http://x", **settings):
         self.base_url, self.api, self.model = base_url, "llama", None
         self.timeout, self.api_key, self.pinned_family = 30.0, None, None
-        self.asked = dict(settings.get("speculative") or {})
+        self.asked = settings.get("spec_draft_max")
         type(self).asked_of_each.append(self.asked)
 
     def chat(self, messages):
-        depth = self.asked.get("n_max") if self.honours else None
+        depth = self.asked if self.honours else None
         drafted = self.drafts if depth is None else min(self.drafts, int(depth))
         return _Reply({"timings": {"draft_n": drafted, "draft_n_accepted": drafted}})
 
@@ -657,7 +657,7 @@ def test_a_server_that_obeys_a_requested_draft_depth_is_read_as_obeying():
 
     made = _drafting(honours=True)
     assert draft_depth_support(made()) == DRAFT_OBEYED
-    assert made.asked_of_each[-2:] == [{}, {"n_max": 0}], \
+    assert made.asked_of_each[-2:] == [None, 0], \
         "one call without the field, one asking for no drafting at all"
 
 

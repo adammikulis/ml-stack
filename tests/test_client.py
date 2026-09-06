@@ -91,24 +91,21 @@ class TestBuildBody:
         assert not [key for key in body if key.startswith("speculative.")]
 
     def test_a_draft_depth_is_sent_under_the_servers_own_name(self):
-        body = Client("http://x", speculative={"n_max": 4}).build_body([])
+        """The server registers a flat field; a nested object is dropped in silence."""
+        body = Client("http://x", spec_draft_max=4).build_body([])
         assert body["speculative.n_max"] == 4
+        assert "speculative" not in body
 
-    def test_a_field_the_server_reads_once_at_startup_is_refused(self):
-        """p_min and n_min configure implementations built when the server starts. Sending
-        one changes nothing, and a caller who thinks it did measures the wrong thing."""
-        for name in ("p_min", "n_min", "type"):
-            with pytest.raises(ValueError, match=name):
-                Client("http://x", speculative={name: 1})
-
-    def test_a_misspelled_speculative_field_is_refused(self):
-        """A server ignores a field it does not know, so a typo would measure nothing."""
-        with pytest.raises(ValueError, match="n_maximum"):
-            Client("http://x", speculative={"n_maximum": 4})
+    def test_a_setting_the_server_reads_once_at_startup_is_refused(self):
+        """The draft implementations copy p_min in when they are built at server start.
+        Sending it changes nothing, and a caller who thinks it did measures the wrong
+        thing."""
+        with pytest.raises(ValueError, match="not a per-request setting"):
+            Client("http://x", spec_p_min=0.5)
 
     def test_speculative_fields_are_stripped_for_hosted_openai(self):
         body = Client("https://api.openai.com/v1",
-                      speculative={"n_max": 4}).build_body([])
+                      spec_draft_max=4).build_body([])
         assert not [key for key in body if key.startswith("speculative.")]
 
 
@@ -1258,9 +1255,10 @@ def test_think_becomes_the_familys_template_flag_and_never_a_body_key():
 def test_a_measured_draft_depth_goes_out_with_the_request():
     from ml_stack.client.chat import Client
 
-    body = Client("http://127.0.0.1:1", spec_draft_max=2, spec_p_min=0.5).build_body(
+    body = Client("http://127.0.0.1:1", spec_draft_max=2).build_body(
         [{"role": "user", "content": "hi"}])
-    assert body["speculative"] == {"n_max": 2, "p_min": 0.5}
+    assert body["speculative.n_max"] == 2
+    assert "speculative" not in body, "the server registers a flat field, not an object"
 
 
 def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
@@ -1268,7 +1266,8 @@ def test_a_hosted_endpoint_is_never_asked_to_guess_ahead():
 
     client = Client("https://api.openai.com/v1", spec_draft_max=2, api="openai")
     assert client.speculative == {}
-    assert "speculative" not in client.build_body([{"role": "user", "content": "hi"}])
+    body = client.build_body([{"role": "user", "content": "hi"}])
+    assert not [key for key in body if key.startswith("speculative")]
 
 
 def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
@@ -1280,14 +1279,15 @@ def test_a_server_that_refuses_the_depth_is_asked_again_without_it(monkeypatch):
 
     def answering(url, *, payload, **_):
         sent.append(dict(payload))
-        if "speculative" in payload:
-            raise chat_mod.ServerError("400: unknown field 'speculative'")
+        if any(key.startswith("speculative.") for key in payload):
+            raise chat_mod.ServerError("400: unknown field 'speculative.n_max'")
         return {"choices": [{"message": {"content": "ok"}}]}
 
     monkeypatch.setattr(chat_mod, "request_json", answering)
     client = chat_mod.Client("http://127.0.0.1:1", spec_draft_max=2)
     assert client.chat([{"role": "user", "content": "hi"}]).content == "ok"
-    assert len(sent) == 2 and "speculative" not in sent[1]
+    assert len(sent) == 2
+    assert not [key for key in sent[1] if key.startswith("speculative.")]
 
     sent.clear()
     chat_mod.Client("http://127.0.0.1:1",

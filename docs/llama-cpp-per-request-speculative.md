@@ -113,3 +113,11 @@ answered `200 OK` rather than the `400` the patched build returns.
 A caller therefore cannot tell from a successful response whether the depth took.
 `ml_stack.bench.backends.draft_depth_support` measures it instead, with one call carrying no
 field and one asking for depth 0, and reads `obeyed`, `ignored` or `no drafting`.
+
+## The field is flat, not an object
+
+The schema registers the literal key `"speculative.n_max"`, and the driver asks each
+registered field whether the body contains its own name. A body carrying
+`{"speculative": {"n_max": 1}}` therefore matches nothing. Measured against the patched
+build, started at depth 8: the flat form drafted 52 tokens and accepted 42, while the
+nested form drafted 150 and accepted 76 -- the same as sending no field at all.

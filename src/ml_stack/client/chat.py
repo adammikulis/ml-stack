@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,11 +39,6 @@ _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "repeat_last_n", "mirostat", "mirostat_tau", "mirostat_eta",
                        "n_predict", "cache_prompt", "id_slot", "grammar",
                        "chat_template_kwargs", "speculative")
-
-# What llama-server reads per request, without its `speculative.` prefix. The other
-# speculative fields configure implementations built when the server starts, and a
-# request that set one would be answered as though it had not.
-SPECULATIVE_FIELDS = ("n_max",)
 
 APIS = ("llama", "openai", "ollama")
 
@@ -113,17 +108,6 @@ def strip_thinking(text: str | None) -> tuple[str | None, str | None]:
     return families.split_inline(text)
 
 
-def prefixed_speculative(asked: Mapping[str, Any] | None) -> dict[str, Any]:
-    """``{"n_max": 4}`` as the server's own ``{"speculative.n_max": 4}``."""
-    if not asked:
-        return {}
-    unknown = sorted(set(asked) - set(SPECULATIVE_FIELDS))
-    if unknown:
-        raise ValueError(f"unknown speculative field(s): {', '.join(unknown)} -- "
-                         f"known are {', '.join(SPECULATIVE_FIELDS)}")
-    return {f"speculative.{name}": value for name, value in asked.items()}
-
-
 class Client:
     """A local model server, over HTTP. Standard library only."""
 
@@ -147,7 +131,6 @@ class Client:
         model: str | None = None,
         context: int | None = None,
         keep_alive: str | int | None = None,
-        speculative: Mapping[str, Any] | None = None,
     ) -> None:
         self.base_url, self.api, found = parse_url(base_url, api)
         # The model tag, where the server wants one named per request (openai, ollama).
@@ -165,7 +148,6 @@ class Client:
         self.asked_top_p = top_p
         self.asked_top_k = top_k
         self.asked_min_p = min_p
-        self.asked_speculative = prefixed_speculative(speculative)
         # A ceiling, not a budget: nothing is spent that is not generated, so a high one
         # costs nothing and a low one truncates. 512 was set when a reply was a sentence;
         # a thinking model spends most of a turn reasoning before it writes anything, and
@@ -175,8 +157,12 @@ class Client:
         # The speculative settings llama-server takes per request, so one served model can
         # guess ahead by a different number of tokens for each workload asking it. None
         # leaves the server the depth it was started with.
+        if spec_p_min is not None:
+            raise ValueError(
+                "spec_p_min is not a per-request setting: the draft implementations read "
+                "it once, when the server starts. Serve with --spec-draft-p-min instead")
         self.asked_spec_draft_max = spec_draft_max
-        self.asked_spec_p_min = spec_p_min
+        self.asked_spec_p_min = None
         self.timeout = timeout
         self.tries = tries
         self.api_key = api_key
@@ -232,28 +218,27 @@ class Client:
     def speculative(self) -> dict[str, Any]:
         """What this request asks the draft head to do, or nothing.
 
-        Empty for a server that is not llama.cpp's and for one that has refused the field
-        once. A llama.cpp build compiled without the per-request override ignores it, and
-        the depth the server was started with stands.
+        Empty for a server that is not llama.cpp's. A llama.cpp build without the
+        per-request override drops the field without a word and the depth the server was
+        started with stands, so a caller who must know asks
+        `ml_stack.bench.backends.draft_depth_support`.
         """
-        if self.api != "llama" or self.base_url in _NO_SPECULATIVE:
+        if self.api != "llama" or self.asked_spec_draft_max is None \
+                or self.base_url in _NO_SPECULATIVE:
             return {}
-        out: dict[str, Any] = {}
-        if self.asked_spec_draft_max is not None:
-            out["n_max"] = int(self.asked_spec_draft_max)
-        if self.asked_spec_p_min is not None:
-            out["p_min"] = float(self.asked_spec_p_min)
-        return out
+        # the server registers a flat field name, not a nested object
+        return {"speculative.n_max": int(self.asked_spec_draft_max)}
 
     def _served_depth(self, body: dict[str, Any], exc: ServerError) -> dict[str, Any] | None:
         """``body`` without the speculative field when ``exc`` is the server refusing it,
         and None when the failure was something else."""
-        if "speculative" not in body or "speculative" not in str(exc).lower():
+        sent = [key for key in body if key.startswith("speculative.")]
+        if not sent or "speculative" not in str(exc).lower():
             return None
         _NO_SPECULATIVE.add(self.base_url)
         logger.warning("%s refuses a per-request draft depth; the depth it was started "
                        "with stands", self.base_url)
-        return {k: v for k, v in body.items() if k != "speculative"}
+        return {k: v for k, v in body.items() if k not in sent}
 
     @property
     def card(self) -> dict[str, Any]:
@@ -323,12 +308,10 @@ class Client:
         body: dict[str, Any] = {
             "messages": messages,
             **self.sampling,
-            **self.asked_speculative,
             "n_predict": self.n_predict,
             "stream": stream,
         }
-        if spec := self.speculative:
-            body["speculative"] = spec
+        body.update(self.speculative)
         if self.model:
             body["model"] = self.model
         if self.slot is not None:
@@ -362,7 +345,7 @@ class Client:
             # The hosted API has no template flags; harmony's `reasoning_effort` is the one
             # thinking switch it reads, so only that one survives.
             effort = (body.get("chat_template_kwargs") or {}).get("reasoning_effort")
-            for key in (*_OPENAI_UNSUPPORTED, *self.asked_speculative):
+            for key in (*_OPENAI_UNSUPPORTED, *self.speculative):
                 body.pop(key, None)
             if effort is not None:
                 body["reasoning_effort"] = effort
@@ -447,8 +430,7 @@ class Client:
             "n_predict": budget,
             "stream": False,
         }
-        if spec := self.speculative:
-            body["speculative"] = spec
+        body.update(self.speculative)
         if grammar:
             body["grammar"] = grammar
         if self.slot is not None:

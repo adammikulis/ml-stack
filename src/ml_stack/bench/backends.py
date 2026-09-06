@@ -286,13 +286,13 @@ def draft_depth_support(client: Any, *, n_predict: int = 24) -> str:
     it, ``DRAFT_IGNORED`` when it drafts regardless, ``DRAFT_NONE`` when the server drafts
     nothing either way and there is no depth to ask for.
     """
-    def drafted(speculative: dict[str, Any] | None) -> int | None:
+    def drafted(depth: int | None) -> int | None:
         probe = client_for(str(client.base_url), client=type(client), n_predict=n_predict,
                            model=getattr(client, "model", None) or None,
-                           speculative=speculative)
+                           spec_draft_max=depth)
         return timings_of(probe.chat(list(_PROBE))).get("draft_n")
 
     free = drafted(None)
     if not free:
         return DRAFT_NONE
-    return DRAFT_OBEYED if not drafted({"n_max": 0}) else DRAFT_IGNORED
+    return DRAFT_OBEYED if not drafted(0) else DRAFT_IGNORED
