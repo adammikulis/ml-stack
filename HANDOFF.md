@@ -339,6 +339,45 @@ worth taking, in this order:
   and `graph/cache.py:fingerprint` puts those bytes in the answer-cache key that 290 kept
   runs were measured against.
 
+## The commands
+
+- [ ] **Twenty commands still build their own parser and keep their work in the handler.**
+  `ml_stack.command` holds the shared options and a `Group` that collects subcommands and
+  answers as `main`; `ml_stack.cli.reference` holds one line per command and the README's
+  table, and `tests/test_cli_reference.py` fails when the two disagree. On it so far:
+  `ml-stack-serve` (work in `serve/ops.py`), `ml-stack-world` (`world/ops.py`) and
+  `ml-stack-jobs`. The pattern, per command: make a `<package>/ops.py` whose functions take
+  typed arguments and return values, raising rather than printing (`serve.ops.Refused`
+  carries the lines); leave the handler to parse and print; declare each subcommand with
+  `@COMMANDS.command(name, help=..., options=[option("port", ...), flag("--own", ...)])` in
+  the order the old parser added them, so `--help` is unchanged; set `main = COMMANDS.run`
+  and delete the `def main`. Diff every subcommand's `--help` and the command's own output
+  against `main` before and after -- that is what catches a moved flag.
+  Worth doing next in this order: `ml-stack-bench` (1,886 lines, two `main`s, and the last
+  screen-scrape in `mcp.bench_show` and `do.bench_cli` is waiting on it), `ml-stack-setup`
+  and `ml-stack-doctor` (one module, two entry points), `ml-stack-ingest`,
+  `ml-stack-models`, `ml-stack-store`, `ml-stack-speech`, `ml-stack-train-run`,
+  `ml-stack-train-tools`, `ml-stack-do`, `ml-stack-claude`, `ml-stack-agent`,
+  `ml-stack-graph`, `ml-stack-audit`, `ml-stack-suite`, `ml-stack-fleet`,
+  `ml-stack-peers`, `ml-stack-traind`. A command whose row in the README's table changes
+  is a change to `ml_stack.cli.reference` and `scripts/reference --write`.
+
+## Where state lives
+
+- [ ] **`ML_STACK_HOME` does not move the llama.cpp builds.** `ml_stack.home` reads the
+  environment when it is called, so every home and record file follows the variable -- but
+  `serve/binary.py` still binds `MANAGED_ROOT`, `MANAGED_CURRENT` and `MANAGED_NAMED` at
+  import, and `serve/build.py` derives `ROOT`, `SRC_DIR`, `BUILDS_DIR`, `CURRENT_LINK`,
+  `NAMED_DIR` and `NAMED_SRC_DIR` from them, so a process that sets the variable after
+  import still finds the builds under the old root. `hub.HUB_CACHE` is the same shape for
+  `$HF_HOME`. Making them functions is about 40 call sites in `build.py` and eight
+  `monkeypatch.setattr` in `test_serve_build.py`, `test_hub.py` and `test_doctor.py`.
+- [ ] **`limits.json` and `idle.json` are under the cache root, not the state root.** What
+  this machine is set to allow, and how long each server has been idle, are both state a
+  person would lose by clearing caches -- the same reason `servers.json` moved to
+  `~/.ml-stack`. Moving them needs the same read-the-old-path-once step `manager.lease_file`
+  does, and `MLSTACK_LIMITS_FILE` keeps working either way.
+
 ## Layers
 
 - [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
