@@ -18,7 +18,7 @@
   "pyright-errors": 2,
   "ruff-blind-except": 23,
   "ruff-bugbear": 70,
-  "ruff-other": 937,
+  "ruff-other": 929,
   "ruff-security": 135,
   "subprocess-spawns": 4,
   "unversioned-records": 5,
