@@ -52,6 +52,27 @@ ten questions, unconfirmed.
   --out ~/.ml-stack/sources.ladybug` re-folds every source from its reads (no model,
   minutes) and writes the log; it rewrites the store, so take a copy beside it first.
 
+## Per-request draft depth
+
+`docs/llama-cpp-per-request-speculative.md` is the patch written up as a pull request would
+put it. `patches/llama.cpp/0001-speculative-per-request.patch` is the patch;
+`ml-stack-serve build --from source` applies it and names the build directory after its
+digest.
+
+- [ ] **Adam's call: send it to `ggml-org/llama.cpp`.** Nothing has been opened. The write-up
+  is what a pull request would say.
+- [ ] **Flash-Next's MTP head still needs the unsloth fork, and this machine's `unsloth`
+  build is a downloaded release, so it carries no patch.** Serving Flash-Next therefore
+  still takes a depth at startup, which is the workload the per-request depth was wanted
+  for. Building the fork from source applies the patch the same way
+  (`ml-stack-serve build --from source --repo unslothai/llama.cpp --name unsloth --ref
+  <tag>`), but the patch has not been tried against that tree and may need rebasing onto
+  it.
+- [ ] **The dflash and dspark draft implementations still draft the depth the server
+  started at.** They size one block up front, so a request asking for less gets the right
+  number of tokens (`common_speculative_gen_draft` truncates) at the cost of the deeper
+  draft. Depth sweeps over those two read acceptance correctly and latency optimistically.
+
 ## Measurements queued (each needs the GPU; sample first)
 
 - [ ] **Nothing has measured any model for `ingest` or `chat`.** The record now holds a
