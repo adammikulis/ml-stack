@@ -103,7 +103,7 @@ class Idleness:
 
     def __init__(self, *, clock: Callable[[], float] = time.time,
                  probe: Callable[[str], bool | None] = busy_now,
-                 state: Path | str | None | _Default = DEFAULT,
+                 state: Path | str | _Default | None = DEFAULT,
                  trust: float = TRUST_S) -> None:
         self.clock = clock
         self.probe = probe
