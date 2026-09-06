@@ -1,0 +1,10 @@
+# The ruff and pyright the ruff-* and pyright-errors budgets in budgets.json were counted
+# with. Each release of either finds sites the last one did not, so an unpinned install
+# makes the same tree score differently in two places.
+#
+# To raise a pin: change the version here, install it, run `scripts/budgets --update`
+# (`--allow-increase` if the new release finds more), and commit budgets.json with this
+# file. A version other than these two leaves their metrics uncounted rather than counted
+# against a budget recorded by a different tool.
+ruff==0.13.3
+pyright==1.1.411

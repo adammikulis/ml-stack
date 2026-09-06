@@ -3,38 +3,24 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
-import sys
-from functools import cache
 from pathlib import Path
 
-from . import Finding
+from . import Finding, _pins
 from ._util import rel
-
-
-@cache
-def command() -> tuple[str, ...] | None:
-    """How to run pyright here, or None when it is not installed."""
-    found = shutil.which("pyright")
-    if found:
-        return (found,)
-    probe = subprocess.run([sys.executable, "-m", "pyright", "--version"],
-                           capture_output=True, text=True, check=False)
-    if probe.returncode == 0:
-        return (sys.executable, "-m", "pyright")
-    return None
-
 
 NAME = "pyright-errors"
 OWNER = ""
 
 
+def command() -> tuple[str, ...] | None:
+    """How to run pyright here, or None when it is not installed."""
+    return _pins.tool("pyright")
+
+
 def skip() -> str:
     """Why pyright cannot be counted here, empty when it can."""
-    if command() is None:
-        return "pyright is not installed; pip install pyright"
-    return ""
+    return _pins.skip("pyright")
 
 
 def describe() -> str:

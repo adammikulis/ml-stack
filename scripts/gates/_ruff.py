@@ -3,36 +3,24 @@
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
-import sys
 from functools import cache
 from pathlib import Path
 
-from . import Finding
+from . import Finding, _pins
 from ._util import rel
 
 ROOTS = ("src", "tests", "scripts", "packaging")
 
 
-@cache
 def command() -> tuple[str, ...] | None:
     """How to run ruff here, or None when it is not installed."""
-    found = shutil.which("ruff")
-    if found:
-        return (found,)
-    probe = subprocess.run([sys.executable, "-m", "ruff", "--version"],
-                           capture_output=True, text=True, check=False)
-    if probe.returncode == 0:
-        return (sys.executable, "-m", "ruff")
-    return None
+    return _pins.tool("ruff")
 
 
 def skip() -> str:
     """Why the ruff metrics cannot be counted here, empty when they can."""
-    if command() is None:
-        return "ruff is not installed; pip install ruff"
-    return ""
+    return _pins.skip("ruff")
 
 
 @cache

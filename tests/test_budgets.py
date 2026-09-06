@@ -12,6 +12,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
 import gates  # noqa: E402
+from gates import _pins  # noqa: E402
 
 BUDGETS = REPO / "budgets.json"
 FOUND = gates.run(REPO)
@@ -117,3 +118,24 @@ def test_the_hook_counts_what_a_commit_deletes(tmp_path):
     done = subprocess.run([sys.executable, str(hook)], cwd=tmp_path,
                           capture_output=True, text=True)
     assert done.returncode == 0, done.stderr
+
+
+def test_the_workflow_installs_the_checkers_the_budgets_were_counted_with() -> None:
+    """An unpinned ruff scores the same tree differently on a runner and on a laptop."""
+    workflow = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "scripts/gates/pinned.txt" in workflow
+    for line in workflow.splitlines():
+        if "pip install" not in line:
+            continue
+        named = [word for word in line.split() if word in ("ruff", "pyright")]
+        assert not named, f"{' and '.join(named)} installed unpinned: {line.strip()}"
+
+
+def test_a_tool_at_another_version_leaves_its_metric_uncounted(monkeypatch) -> None:
+    """Counting 0.14's sites against 0.13's budget fails a gate no code change touched."""
+    monkeypatch.setattr(_pins, "tool", lambda name: ("ruff",))
+    monkeypatch.setattr(_pins, "version", lambda name: "9.9.9")
+    reason = _pins.skip("ruff")
+    assert "9.9.9" in reason and _pins.pins()["ruff"] in reason
+    monkeypatch.setattr(_pins, "version", lambda name: _pins.pins()["ruff"])
+    assert _pins.skip("ruff") == ""

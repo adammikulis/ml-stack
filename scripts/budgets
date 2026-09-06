@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import gates
+from gates import _pins
 
 ROOT = Path(__file__).resolve().parent.parent
 BUDGETS = ROOT / "budgets.json"
@@ -60,6 +61,7 @@ def table(found: dict[str, list[gates.Finding]], allowed: dict[str, int]) -> int
 
     for name in sorted(absent):
         print(f"{name.ljust(width)}  {str(allowed.get(name, '-')):>6}  {'?':>6}  {absent[name]}")
+    print(f"\nruff and pyright metrics measured with {_pins.measured_with()}")
 
     over = [r for r in rows if r[0] > 0]
     if not over:
