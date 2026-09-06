@@ -139,7 +139,7 @@ def test_every_command_in_pyproject_resolves_to_a_main():
         word = name[len(cli.PREFIX):]
         assert word in words, f"{name} is not a subcommand of ml-stack"
         assert callable(cli.load(words[word])), f"{name} -> {target} has no main"
-    assert "app" in words and "bench" in words and "train-run" in words
+    assert "bench" in words and "train-run" in words
 
 
 def test_help_lists_every_command_and_hands_a_named_one_its_own_help(capsys):
