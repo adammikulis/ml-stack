@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import inspect
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -143,10 +143,12 @@ class FakeClient:
         model: str | None = None,
         context: int | None = None,
         keep_alive: str | int | None = None,
+        speculative: Mapping[str, Any] | None = None,
     ) -> None:
-        from ml_stack.client.chat import parse_url
+        from ml_stack.client.chat import parse_url, prefixed_speculative
 
         self.base_url, self.api, found = parse_url(base_url, api)
+        self.asked_speculative = prefixed_speculative(speculative)
         self.model = model or found
         self.context = context
         self.keep_alive = keep_alive
