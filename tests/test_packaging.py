@@ -77,7 +77,8 @@ def test_every_console_script_points_at_something_that_exists():
         path = where / "__init__.py" if where.is_dir() else where.with_suffix(".py")
         assert path.exists(), f"{name} points at {module}, which is neither module nor package"
         text = path.read_text()
-        held = f"def {attr}(" in text or f" {attr} as {attr}," in text
+        held = (f"def {attr}(" in text or f" {attr} as {attr}," in text
+                or f"\n{attr} = " in text)
         assert held, f"{module} has no {attr}()"
 
 
