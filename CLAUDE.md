@@ -61,6 +61,8 @@ the other does not import it back. `KNOWN` lists what still crosses; it only shr
 script, or be named in `STANDALONE` with a reason. Code nothing calls is a gap to close,
 never a reason to delete.
 
+The size gates cover both halves of the tree: `deep-files` for Python, `deep-components` for the HTML, JavaScript and CSS a page is assembled from.
+
 `scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
 that quietly tightens is caught.
