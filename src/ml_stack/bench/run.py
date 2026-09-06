@@ -332,9 +332,12 @@ def _parser() -> argparse.ArgumentParser:
                             "are. Every label ends -rbN")
     heads.add_argument("--n-max", action="append", type=int, default=[], metavar="N",
                        help="how many tokens a head guesses ahead per pass "
-                            "(--spec-draft-n-max); repeat to serve each head once per "
-                            "value, labelled draft:<head>@nN. Without it, once at the "
-                            "build's own default")
+                            "(--spec-draft-n-max); repeat to measure each, labelled "
+                            "draft:<head>@nN. Without it, once at the build's own default")
+    heads.add_argument("--server-per-depth", action="store_true",
+                       help="load the model again for each --n-max, rather than asking one "
+                            "load for each depth. A build carrying the per-request "
+                            "speculative fields is asked per depth unless this says not to")
     heads.add_argument("--serve-kv", default="", metavar="TYPE",
                        help="how the served model's KV cache is stored (q8_0 unless said; "
                             "f16, q4_0); a label ends -kv-TYPE for anything but q8_0 and "
@@ -1141,6 +1144,7 @@ def _run(args: Any) -> int:
                       kept=args.kept, store=args.store or None,
                       embed_url=args.embed_url, embed_model=args.embed_model,
                       n_max=list(getattr(args, "n_max", []) or []) or [None],
+                      per_request=False if getattr(args, "server_per_depth", False) else None,
                       smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
         say()
         if getattr(args, "smoke", False):

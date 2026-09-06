@@ -2021,8 +2021,8 @@ def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_pa
 
 def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, monkeypatch,
                                                                      capsys):
-    """`--spec-draft-n-max` is bound at start like the head, so N lengths is N servers --
-    labelled so the table shows acceptance and wall per (head, n-max)."""
+    """With `--server-per-depth` the depth is bound at start like the head, so N lengths is
+    N servers -- labelled so the table shows acceptance and wall per (head, n-max)."""
     import ml_stack.bench as bench
 
     seen = _serving(monkeypatch, tmp_path)
@@ -2031,7 +2031,8 @@ def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, 
     asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
                      + "\n")
     assert bench._main(["drafts", "tiny.gguf", "--draft", "", "--draft", "mtp-tiny.gguf",
-                        "--n-max", "4", "--n-max", "8", "--smoke", "--kept", str(kept),
+                        "--n-max", "4", "--n-max", "8", "--smoke", "--server-per-depth",
+                        "--kept", str(kept),
                         "--questions", str(asked), "--port", "1"]) == 0
     said = capsys.readouterr().out
     assert sorted(r["label"] for r in runs(kept)) == sorted(
@@ -2061,6 +2062,60 @@ def test_drafts_serves_each_head_once_per_n_max_and_the_baseline_once(tmp_path, 
     capsys.readouterr()
     assert seen["models"] == ["tiny.gguf"] and "spec_draft_max" not in seen["kwargs"][0]
     assert len(runs(kept, "draft:mtp-tiny")) == 1
+
+
+def test_drafts_asks_one_load_for_every_depth_when_the_server_takes_one_per_request(
+        tmp_path, monkeypatch, capsys):
+    """A build carrying the per-request speculative fields is served once per head at the
+    deepest draft asked for, and each depth is a way put to that one load."""
+    import ml_stack.bench as bench
+    from ml_stack.bench import serve as serving
+
+    seen = _serving(monkeypatch, tmp_path)
+    monkeypatch.setattr(serving, "draft_depth_support", lambda client, **_: "obeyed")
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    assert bench._main(["drafts", "tiny.gguf", "--draft", "", "--draft", "mtp-tiny.gguf",
+                        "--n-max", "4", "--n-max", "8", "--no-smoke", "--kept", str(kept),
+                        "--questions", str(asked), "--port", "1"]) == 0
+
+    assert seen["models"] == ["tiny.gguf"] * 2, "the baseline, and one load for both depths"
+    assert [kw.get("spec_draft_max") for kw in seen["kwargs"]] == [None, 8], \
+        "served at the deepest asked for, since a request may only draft less"
+    assert sorted(r["label"] for r in runs(kept)) == sorted(
+        ["draft:none", "draft:mtp-tiny@n4", "draft:mtp-tiny@n8"]), \
+        "the same labels the server-per-depth path writes, so the two compare"
+    by_label = {r["label"]: r["server"] for r in runs(kept)}
+    assert by_label["draft:mtp-tiny@n4"]["spec_draft_max_asked"] == 4
+    assert by_label["draft:mtp-tiny@n8"]["spec_draft_max_asked"] == 8, \
+        "the depth asked for, not the one the server started at"
+
+
+def test_drafts_falls_back_to_a_server_per_depth_when_the_field_is_dropped(
+        tmp_path, monkeypatch, capsys):
+    """A server that ignores the field would measure the same depth three times and call it
+    a sweep, so the reading is taken on the load and the restart path used instead."""
+    import ml_stack.bench as bench
+    from ml_stack.bench import serve as serving
+
+    seen = _serving(monkeypatch, tmp_path)
+    monkeypatch.setattr(serving, "draft_depth_support", lambda client, **_: "ignored")
+    kept = tmp_path / "runs.ladybug"
+    asked = tmp_path / "q.jsonl"
+    asked.write_text(json.dumps({"q": "who works on compilers?", "expect": ["topic:compiler"]})
+                     + "\n")
+    assert bench._main(["drafts", "tiny.gguf", "--draft", "mtp-tiny.gguf",
+                        "--n-max", "4", "--n-max", "8", "--no-smoke", "--kept", str(kept),
+                        "--questions", str(asked), "--port", "1"]) == 0
+
+    said = capsys.readouterr().out
+    assert "ignored the per-request depth" in said
+    assert [kw.get("spec_draft_max") for kw in seen["kwargs"]] == [8, 4, 8], \
+        "the refused load, then one server per depth"
+    assert sorted(r["label"] for r in runs(kept)) == \
+        sorted(["draft:mtp-tiny@n4", "draft:mtp-tiny@n8"])
 
 
 def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path, monkeypatch,
@@ -3735,11 +3790,21 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     seen = []
     monkeypatch.setattr(bench, "served",
                         lambda run, *a, **k: seen.append(
-                            (k.get("label"), run.shape.draft, run.shape.spec_type)) or [])
+                            (k.get("label"), run.shape.draft, run.shape.spec_type,
+                             run.shape.draft_n_max, k.get("ways"))) or [])
     bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
-                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="")
-    assert seen == [("draft:none", "", ""), ("draft:embedded-mtp@n2", "", "draft-mtp"),
-                    ("draft:embedded-mtp@n8", "", "draft-mtp")]
+                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=True)
+    assert [row[:4] for row in seen] == [("draft:none", "", "", None),
+                                         ("draft:embedded-mtp", "", "draft-mtp", 8)]
+    assert seen[-1][4] == [{"label": "@n2", "spec_draft_max": 2},
+                           {"label": "@n8", "spec_draft_max": 8}]
+
+    seen.clear()
+    bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
+                 {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=False)
+    assert [row[:4] for row in seen] == [("draft:none", "", "", None),
+                                         ("draft:embedded-mtp@n2", "", "draft-mtp", 2),
+                                         ("draft:embedded-mtp@n8", "", "draft-mtp", 8)]
 
 
 def test_a_head_that_held_its_f1_but_runs_slower_than_none_is_not_recommended():

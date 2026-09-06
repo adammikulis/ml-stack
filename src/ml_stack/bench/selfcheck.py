@@ -91,6 +91,7 @@ class ScriptedModel:
         self.timeout = settings.get("timeout", 180.0)
         # the speculative settings are the server's, not the sampler's; the real client
         # keeps them out of `sampling` and so out of a run's identity
+        self.asked_spec_draft_max = settings.get("spec_draft_max")
         self.sampling: dict[str, Any] = {k: v for k, v in settings.items()
                                          if k not in ("spec_draft_max", "spec_p_min")}
         self.card: dict[str, Any] = {"temperature": 1.0, "top_k": 64}

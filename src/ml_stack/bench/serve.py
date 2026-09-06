@@ -19,6 +19,7 @@ from typing import Any
 # `bench.footprint`, `bench.served` -- so anything patchable is looked up there at call
 # time, never bound here at import.
 from ml_stack import bench
+from ml_stack.bench.backends import DRAFT_OBEYED, draft_depth_support
 from ml_stack.bench.keep import read_back, save
 from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
@@ -223,6 +224,10 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         yield server, held
 
 
+class DraftDepthIgnored(RuntimeError):
+    """A server that drops ``speculative.n_max`` instead of drafting to it."""
+
+
 def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str, Any], *,
            label: str = "", binary: str = "", kept: str | Path = "", shortlist: int = 0,
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
@@ -230,7 +235,8 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
            serve_timeout: float = 900.0,
            already: Callable[[str], Mapping[str, Any] | None] | None = None,
            trace: bool | None = None,
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "") -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
+           needs_draft_depth: bool = False) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
     ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the shape the
@@ -293,7 +299,10 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
 
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")
-        return (f"{name}-{tag}" if tag else name) + suffix
+        if not tag:
+            return name + suffix
+        # a tag already punctuated -- "@n4" -- reads as part of the name, not beside it
+        return f"{name}{'' if tag.startswith('@') else '-'}{tag}" + suffix
 
     every = list(ways) or [{}]
     if already is not None:
@@ -317,6 +326,12 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
             loaded = float(held_up.pop("loaded", 0.0))
             before_load = held_up.pop("baseline", None)
             load_s = held_up.get("load_s")
+
+            if needs_draft_depth:
+                reading = draft_depth_support(run.client(server.base_url))
+                say(f"      per-request draft depth: {reading}")
+                if reading != DRAFT_OBEYED:
+                    raise DraftDepthIgnored(reading)
 
             def ask_every(asking_these: Sequence[Mapping[str, Any]],
                           *, smoking: bool) -> tuple[list[Row], list[str]]:
@@ -356,6 +371,9 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                             "finder": getattr(ask, "finder", ""), **held_up}
                     if host:
                         held["host"] = host
+                    asked_depth = getattr(client, "asked_spec_draft_max", None)
+                    if asked_depth is not None:
+                        held["spec_draft_max_asked"] = int(asked_depth)
                     if kept:
                         keys.append(save(kept, got,
                                          held={**held, "sampling": dict(client.sampling)},
@@ -389,7 +407,8 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
            graph: Mapping[str, Any], *, binary: str = "", kept: str | Path = "",
            store: str | Path | None = None, embed_url: str = "", embed_model: str = "",
            serve_timeout: float = 900.0, n_max: Sequence[int | None] = (None,),
-           smoke: Sequence[Mapping[str, Any]] = (), host: str = "") -> list[Row]:
+           smoke: Sequence[Mapping[str, Any]] = (), host: str = "",
+           per_request: bool | None = None) -> list[Row]:
     """Serve one model with each draft head in turn and measure what each is worth.
 
     ``run`` is the configuration every head is measured against; each head is that run
@@ -408,11 +427,16 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
     Pass "" as a head to measure the model with no draft at all, which is the baseline
     every other row has to beat.
 
-    ``n_max`` is how many tokens a head guesses ahead per pass, one served configuration
-    per value -- `--spec-draft-n-max` is bound when the server starts, like the head -- and
-    the run is labelled ``draft:<head>@n8`` so the table shows acceptance and wall clock
-    per (head, n-max). ``None`` is the build's own default and adds nothing to the label.
-    The baseline with no head is measured once: there is nothing to guess ahead with.
+    ``n_max`` is how many tokens a head guesses ahead per pass, and the run is labelled
+    ``draft:<head>@n8`` so the table shows acceptance and wall clock per (head, n-max).
+    ``None`` is the build's own default and adds nothing to the label. The baseline with
+    no head is measured once: there is nothing to guess ahead with.
+
+    ``per_request`` is whether the depths share one server. A build carrying the
+    per-request speculative fields takes a depth per request, so every depth for a head is
+    asked of one load; a build without them binds the depth at startup and needs a server
+    each. ``None`` measures which this is on the first load and falls back when the server
+    turns out to drop the field.
 
     When the runs are ``kept``, it ends by printing `drafted`: one row per (head, n-max)
     with its speedup over the baseline as a number, and which configuration to serve.
@@ -424,17 +448,33 @@ def drafts(run: Any, heads: Sequence[str], questions: Sequence[Mapping[str, Any]
     out: list[Row] = []
     lengths = list(n_max) or [None]
     before = {r.get("key") for r in bench._kept(kept)} if kept else set()
+    shared = per_request
+    each = {"binary": binary, "kept": kept, "store": store, "embed_url": embed_url,
+            "embed_model": embed_model, "serve_timeout": serve_timeout, "smoke": smoke,
+            "host": host}
     for head in heads:
         name = "none" if not head else "embedded-mtp" if head == EMBEDDED else \
             str(head).rsplit("/", 1)[-1].removesuffix(".gguf")
-        for length in (lengths if head else [None]):
+        depths = list(lengths) if head else [None]
+        if head and shared is not False and len(depths) > 1 and None not in depths:
+            say(f"\n--- draft: {name}, {len(depths)} depths on one load")
+            try:
+                out += bench.served(
+                    drafted_by(run, head).over(draft_n_max=max(depths)), questions, graph,
+                    label=f"draft:{name}", needs_draft_depth=shared is None,
+                    ways=[{"label": f"@n{d}", "spec_draft_max": d} for d in depths],
+                    **each)
+                shared = True
+                continue
+            except DraftDepthIgnored as reading:
+                shared = False
+                say(f"      this build {reading} the per-request depth; "
+                    f"a server per depth instead")
+        for length in depths:
             tagged = f"{name}@n{length}" if length is not None else name
             say(f"\n--- draft: {tagged}")
             out += bench.served(drafted_by(run, head).over(draft_n_max=length),
-                                questions, graph, label=f"draft:{tagged}", binary=binary,
-                          kept=kept, store=store, embed_url=embed_url,
-                          embed_model=embed_model, serve_timeout=serve_timeout,
-                          smoke=smoke, host=host)
+                                questions, graph, label=f"draft:{tagged}", **each)
     if kept and out:
         # the speedup as a number, against the baseline this call measured -- or, given
         # only heads, the newest undrafted run of this model and size already kept. The
