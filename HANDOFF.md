@@ -318,12 +318,6 @@ worth taking, in this order:
 
 ## The interface
 
-- [ ] **`fit-view` is three screens in one component, 1,150 lines.** What fits, what it cost
-  to be right and what it has spent share a header, a tooltip and a set of SVG helpers, and
-  are the only component over 500 lines. The split is a `fit-model` holding the geometry,
-  the formatting and the shared state, with `rates-view` and `telemetry-view` mounting into
-  the frame `fit-view` keeps; `ml_stack.ui.assemble` already supports the mount comment that
-  needs.
 - [ ] **Nobody has drawn 3,000 nodes in the page.** The page ships the whole graph as one
   JSON blob and lays it out in the browser; the biggest graph it has held is a few hundred
   nodes. `ml-stack-world make --size 5000` gives one to try, and `most_messages` already
