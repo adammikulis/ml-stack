@@ -415,6 +415,21 @@ class LlamaServerBackend(ServerBackend):
         return require_binary("llama-server", explicit=self._explicit,
                               vendor_dir=self._vendor_dir, build=self._build)
 
+    def checked(self, argv: list[str]) -> list[str]:
+        """``argv`` against this build's own flags, with ``--metrics`` where it has it.
+
+        Raises `UnknownFlag` for anything the build does not list. ``--metrics`` carries the
+        speculative counters and the route 501s without it, but a build that lacks the flag
+        is served without it rather than refused.
+        """
+        known = flags_of(self.binary)
+        lacking = unknown_flags(argv, known)
+        if lacking:
+            raise UnknownFlag("\n".join(
+                f"this llama-server has no {flag}" + (f"; it has {near}" if near else "")
+                for flag, near in lacking))
+        return [*argv, "--metrics"] if "--metrics" in known else argv
+
     def command(self, spec: ServerSpec) -> list[str]:
         """Build the argv."""
         argv = [str(self.binary), "--host", DEFAULT_HOST, "--port", str(spec.port)]
@@ -508,8 +523,6 @@ class LlamaServerBackend(ServerBackend):
             argv += ["-fa", "on"]
         if spec.jinja and not spec.embedding:
             argv += ["--jinja"]
-        # /metrics carries the speculative counters; without this flag the route 501s
-        argv += ["--metrics"]
         if spec.cache_type_k:
             argv += ["--cache-type-k", str(spec.cache_type_k)]
         if spec.cache_type_v:
@@ -613,11 +626,7 @@ class LlamaServerBackend(ServerBackend):
 
         argv = self.command(spec)
         if check_flags:
-            lacking = unknown_flags(argv, flags_of(self.binary))
-            if lacking:
-                raise UnknownFlag("\n".join(
-                    f"this llama-server has no {flag}" + (f"; it has {near}" if near else "")
-                    for flag, near in lacking))
+            argv = self.checked(argv)
 
         if lease.port != spec.port:
             raise ServerFailed(f"the lease is for port {lease.port}, not {spec.port}: a server "
