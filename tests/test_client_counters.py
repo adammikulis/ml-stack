@@ -18,6 +18,7 @@ from ml_stack.client.counters import (
     read_speculative,
     sampling_named,
 )
+from ml_stack.http import Reply, ServerError
 
 METRICS = """\
 # HELP llamacpp:prompt_tokens_total Number of prompt tokens processed.
@@ -64,10 +65,9 @@ def served(monkeypatch):
     def _bytes(url, **_):
         assert url.endswith("/metrics"), url
         if body["text"] is None:
-            from ml_stack.http import ServerError
-
             raise ServerError("501 metrics endpoint is disabled")
-        return body["text"].encode()
+        # the real request_bytes hands back a Reply, not the bytes
+        return Reply(200, body["text"].encode(), {})
 
     monkeypatch.setattr("ml_stack.client.counters.request_bytes", _bytes)
     return body

@@ -117,10 +117,10 @@ def read_speculative(base_url: str, *, timeout: float = 5.0) -> Speculative | No
     older than the counters, and a server with no draft head.
     """
     try:
-        body = request_bytes(f"{base_url.rstrip('/')}{METRICS_PATH}", timeout=timeout)
+        reply = request_bytes(f"{base_url.rstrip('/')}{METRICS_PATH}", timeout=timeout)
     except (ServerError, OSError):
         return None
-    return _parse(body.decode("utf-8", "replace"))
+    return _parse(reply.body.decode("utf-8", "replace"))
 
 
 def _parse(text: str) -> Speculative | None:
