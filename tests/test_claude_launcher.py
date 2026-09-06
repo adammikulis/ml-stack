@@ -182,3 +182,51 @@ class TestServingWithTheHead:
                                    ["quince-2b", "--draft", "mtp-brack.gguf"], [])
         assert "lease" not in seen, "nothing is served"
         assert any("no draft head called" in one for one in said)
+
+
+class TestJoiningAServerAlreadyUp:
+    """Weights already loaded on the port are talked to, not loaded a second time."""
+
+    def test_the_server_on_the_port_is_used_and_left_running(self, monkeypatch, tmp_path):
+        from ml_stack.serve import manager
+
+        seen: dict = {}
+        monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
+        monkeypatch.setattr(manager, "already_up",
+                            lambda model, port, **_: {"base_url": f"http://127.0.0.1:{port}",
+                                                      "pid": 1, "model": model})
+        monkeypatch.setattr("ml_stack.serve.shape.shape_said", lambda url: "1 slot x 32k")
+        monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
+        monkeypatch.setattr("ml_stack.hub.located",
+                            lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))
+        monkeypatch.setattr("ml_stack.hub.heads_for", lambda *a, **k: [])
+        monkeypatch.setattr(claude, "alias_of", lambda url, model: "quince-2b")
+        binary = tmp_path / "claude"
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        said: list[str] = []
+        where: dict = {}
+        claude.launch(["quince-2b", "--port", "8123", "--claude", str(binary)],
+                      say=said.append,
+                      run_claude=lambda cmd, env: where.update(env=env) or 0)
+        assert "lease" not in seen, "the weights are not loaded a second time"
+        assert any("already up on 8123" in one and "left running" in one for one in said)
+        assert where["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8123"
+
+    def test_nothing_up_on_the_port_leases_the_model(self, monkeypatch, tmp_path):
+        from ml_stack.serve import manager
+
+        seen: dict = {}
+        monkeypatch.setattr("ml_stack.serve.manager.serve", _leases(seen))
+        monkeypatch.setattr(manager, "already_up", lambda model, port, **_: None)
+        monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
+        monkeypatch.setattr("ml_stack.hub.located",
+                            lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))
+        monkeypatch.setattr("ml_stack.hub.heads_for", lambda *a, **k: [])
+        monkeypatch.setattr(claude, "alias_of", lambda url, model: "quince-2b")
+        binary = tmp_path / "claude"
+        binary.write_text("#!/bin/sh\nexit 0\n")
+        binary.chmod(0o755)
+        claude.launch(["quince-2b", "--claude", str(binary)], say=lambda _: None,
+                      run_claude=lambda cmd, env: 0)
+        assert "lease" in seen

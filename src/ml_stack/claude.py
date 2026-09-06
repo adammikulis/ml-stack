@@ -176,10 +176,12 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
 
     from ml_stack.serve import chat_template, manager, profile
     from ml_stack.serve.recent import note
-    from ml_stack.serve.shape import Run, Shape, drafted
+    from ml_stack.serve.shape import Run, Shape, drafted, served
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="claude")
+    # a server already holding these weights is joined, so nothing below is what it serves
+    leasing = say if manager.already_up(found, args.port) is None else (lambda _line: None)
     measured = None if args.no_profile else profile.profile_for(found)
     if measured is not None:
         run = measured.run(port=args.port, seats=args.seats, model=found)
@@ -187,36 +189,35 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
             from dataclasses import replace
 
             run = replace(run, shape=replace(run.shape, seat_context=whole // max(1, args.seats)))
-        say(f"serving in its measured shape: {profile.said(measured)}")
+        leasing(f"serving in its measured shape: {profile.said(measured)}")
         if whole:
-            say(f"  with the model's whole {whole:,}-token window, not the measured cache")
-        run = drafted(run, "none", say=say)
+            leasing(f"  with the model's whole {whole:,}-token window, not the "
+                    f"measured cache")
+        run = drafted(run, "none", say=leasing)
     else:
         seat = chat_template.trained_context(found) or BARE_CONTEXT
         run = Run(shape=Shape(model=found, port=args.port, seats=args.seats,
                               seat_context=seat))
-        say(f"serving bare: no measured shape for this model, {seat:,} tokens a seat")
+        leasing(f"serving bare: no measured shape for this model, {seat:,} tokens a seat")
         try:
-            run = drafted(run, args.draft, say=say)
+            run = drafted(run, args.draft, say=leasing)
         except ValueError as why:
             say(f"error: {why}")
             return 2
     patched = chat_template.written_beside(found)
     if patched is not None:
-        say("this model's template refuses a system message after the first; serving with "
-            f"one that renders it instead ({patched.name})")
+        leasing("this model's template refuses a system message after the first; serving "
+                f"with one that renders it instead ({patched.name})")
     began = time.time()
-    with manager.serve(run.model, manager=run.shape.manager(), **run.lease(), timeout=900.0,
-               cache_reuse=256, warmup=False, escalate=True,
-               chat_template_file=patched,
-               on_event=lambda e: say(f"  {e.get('event')}: "
-                                      + ", ".join(f"{k}={v}" for k, v in e.items()
-                                                  if k != "event"))) as server:
-        alias = alias_of(server.base_url, found)
-        env = environment(server.base_url, alias, offline=not args.online,
+    with served(run, say=say, timeout=900.0, cache_reuse=256, warmup=False,
+                        escalate=True, chat_template_file=patched,
+                        on_event=lambda e: say(f"  {e.get('event')}: "
+                                               + ", ".join(f"{k}={v}" for k, v in e.items()
+                                                           if k != "event"))) as base_url:
+        alias = alias_of(base_url, found)
+        env = environment(base_url, alias, offline=not args.online,
                           context=run.shape.context)
-        say(f"claude on {server.base_url} as {alias!r}, up in {time.time() - began:.0f}s; "
-            f"the server goes when claude exits")
+        say(f"claude on {base_url} as {alias!r}, up in {time.time() - began:.0f}s")
         command = [binary, "--settings", settings(), *extra]
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))
         return int(runner(command, env))

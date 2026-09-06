@@ -41,16 +41,18 @@ from __future__ import annotations
 
 import contextlib
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack.client.health import serving_params
 from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
 __all__ = ["Run", "Shape", "Talking", "draft_for", "drafted", "held", "projector_for",
-           "release_all", "said_cache", "seat", "split_cache_type"]
+           "release_all", "said_cache", "seat", "served", "shape_said",
+           "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
 SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
@@ -172,10 +174,9 @@ class Shape:
         """
         if not self.build:
             return None
-        from ml_stack.serve.backend import LlamaServerBackend
-        from ml_stack.serve.manager import ServerManager
+        from ml_stack.serve import backend, manager
 
-        return ServerManager(LlamaServerBackend(build=self.build))
+        return manager.ServerManager(backend.LlamaServerBackend(build=self.build))
 
 
 @dataclass(frozen=True)
@@ -357,6 +358,38 @@ def drafted(run: Run, asked: str = "auto", *,
     head = head_choice(run.model, asked)
     say(head.serving() if head is not None else drafting())
     return run.over(**head.over()) if head is not None else run
+
+
+def shape_said(base_url: str) -> str:
+    """``2 slots x 32k`` as the server on ``base_url`` reports it, or ``shape unknown``."""
+    params = serving_params(base_url, timeout=5.0)
+    if params is None or not params.total_slots or not params.n_ctx:
+        return "shape unknown"
+    slots = int(params.total_slots)
+    return f"{slots} slot{'s' if slots != 1 else ''} x {int(params.n_ctx) // 1024}k"
+
+
+@contextlib.contextmanager
+def served(run: Run, *, say: Callable[[str], None] | None = None,
+           **over: Any) -> Iterator[str]:
+    """The base URL of a server holding ``run``'s model, for the duration of the block.
+
+    The server already up on ``run``'s port serving those weights is used as it stands and
+    left up; otherwise ``run`` is leased and the lease goes when the block ends. ``over``
+    goes to :func:`ml_stack.serve.serve`.
+    """
+    from ml_stack.serve.manager import already_up, serve
+
+    told = say or (lambda _line: None)
+    up = already_up(run.model, run.port)
+    if up is not None:
+        base_url = str(up["base_url"])
+        told(f"using the server already up on {run.port} ({shape_said(base_url)}); "
+             f"it is left running")
+        yield base_url
+        return
+    with serve(run.model, manager=run.shape.manager(), **run.lease(), **over) as server:
+        yield server.base_url
 
 
 def draft_for(model: str, asked: str, *, build: str = "",
