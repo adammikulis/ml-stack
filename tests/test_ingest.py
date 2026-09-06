@@ -18,7 +18,7 @@ import pytest
 from conftest import json_reply
 from test_sources_pdf import a_textbook
 
-from ml_stack import ingest, jobs
+from ml_stack import hub, ingest, jobs
 from ml_stack.contracts import grammar_for
 
 pytest.importorskip("pymupdf")
@@ -791,7 +791,7 @@ def test_extraction_serves_one_slot_with_the_whole_context(monkeypatch, tmp_path
 
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
-    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease
@@ -823,7 +823,7 @@ def test_the_ingest_leases_one_run_and_the_record_reads_the_serving_off_it(monke
                        cache_type="q8_0", sampling={"temperature": 1.0})
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
                         lambda m, **_: replace(measured, served=str(m)))
-    monkeypatch.setattr(ingest, "_find_model", lambda m: "kestrel-8B-UD-Q4_K_XL.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("kestrel-8B-UD-Q4_K_XL.gguf"))
     seen = {}
 
     class Up:
@@ -955,7 +955,7 @@ def test_n_max_lengthens_the_profiles_draft_for_the_run(monkeypatch, tmp_path):
 
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
     monkeypatch.setattr("ml_stack.serve.profile.said", lambda m: "measured")
-    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease
@@ -1486,7 +1486,7 @@ def _gold_with_a_fake_model(tmp_path, monkeypatch):
 
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
-    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
     monkeypatch.setattr("ml_stack.ingest.cli.gold_score",
                         lambda *a, **k: ingest.Scored())
     monkeypatch.setattr("ml_stack.ingest.cli.gold_lines", lambda scored: [])

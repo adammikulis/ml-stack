@@ -11,6 +11,7 @@ from dataclasses import replace
 
 import pytest
 
+from ml_stack import hub
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
 from ml_stack.graph.asking import Asking
@@ -1325,7 +1326,7 @@ def test_a_sweep_that_serves_summarises_one_row_per_variant(tmp_path, monkeypatc
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     _preflight_ok(monkeypatch)
@@ -1428,7 +1429,7 @@ def test_a_served_sweep_with_a_store_keeps_every_way_and_reads_each_back(tmp_pat
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
                                                           "slots": 1, "model": "tiny.gguf"})
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     _preflight_ok(monkeypatch)
@@ -1704,7 +1705,7 @@ def test_a_measuring_command_takes_sigterm_as_an_exit_so_its_server_comes_down(t
         raise AssertionError("SIGTERM should have raised before this")
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "measure", fake_measure)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
@@ -1748,7 +1749,7 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     _preflight_ok(monkeypatch)
@@ -1841,7 +1842,7 @@ def _serving(monkeypatch, tmp_path, *, load_s=12.5, warmup_s=1.2, fail_for=()):
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url, "context": 32768,
                                                           "slots": 1, "model": "tiny.gguf"})
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", _ServedModel)
     graph = tmp_path / "g.json"
@@ -2196,7 +2197,7 @@ def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_mod, "drafts", fake_drafts)
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     kept = str(tmp_path / "runs.ladybug")
     store = str(tmp_path / "graph.ladybug")
     bench._main(["drafts", "tiny.gguf", "--draft", "", "--kept", kept, "--store", store,
@@ -2874,7 +2875,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     monkeypatch.setattr(ml_stack.client, "Client", Strict)
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda *a, **k: (lambda *x, **y: None))
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
     ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
@@ -3595,7 +3596,7 @@ def test_the_estimate_is_seconds_per_question_from_the_kept_run_at_the_same_cont
     import ml_stack.bench as bench
     from ml_stack.bench import estimate, history
 
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     kept = [_stamped_run("quill-plain", model="quill.gguf", per_question=65.0, load_s=41.6,
                          at="2026-09-01T12:00:00"),
             _stamped_run("quill-plain", model="quill.gguf", per_question=2.0, context=8192,
@@ -3637,7 +3638,7 @@ def test_a_model_with_no_run_kept_is_guessed_from_its_weights_and_the_line_says_
     import ml_stack.bench as bench
     from ml_stack.bench import estimate
 
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     sized = tmp_path / "sized.gguf"
     with sized.open("wb") as fh:
         fh.truncate(3_000_000_000)                       # sparse: 3G on paper, no disk
@@ -3663,7 +3664,7 @@ def test_every_measuring_subcommand_estimates_its_own_shape(tmp_path, monkeypatc
     import ml_stack.bench as bench
     from ml_stack.bench import estimate
 
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     parse = bench._parser().parse_args
     heads = estimate(parse(["drafts", "tiny.gguf", "--draft", "mtp-a.gguf", "--draft", "",
                             "--n-max", "4", "--n-max", "8", "--sample", "5"]), [])
@@ -3777,7 +3778,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     monkeypatch.setattr(ml_stack.client, "Client", FakeClient.scripted([]))
     monkeypatch.setattr(bench, "measure", lambda ask, questions, **k: [])
     monkeypatch.setattr(bench, "asking", lambda *a, **k: (lambda *x, **y: None))
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
     bare = Run(shape=Shape(model="tiny.gguf"))

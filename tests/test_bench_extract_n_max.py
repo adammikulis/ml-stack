@@ -2,7 +2,9 @@
 that repeats what it just read."""
 
 import contextlib
+from pathlib import Path
 
+from ml_stack import hub
 from tests.test_bench_extract import _world_dir
 
 
@@ -21,7 +23,6 @@ def _args(tmp_path, **over):
 
 
 def _serving_seam(monkeypatch, seen, *, draft):
-    from ml_stack.bench import extract as ex
     from ml_stack.serve import Shape
 
     class Found:
@@ -33,7 +34,7 @@ def _serving_seam(monkeypatch, seen, *, draft):
             return "measured"
 
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
-    monkeypatch.setattr(ex, "find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     def fake_serve(model, manager=None, **lease):
         seen["lease"] = lease

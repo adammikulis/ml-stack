@@ -491,8 +491,8 @@ def test_a_task_with_no_model_serves_the_best_measured_one_on_this_disk(monkeypa
                Profile(model="quince-2b.gguf", questions=100, right=0.4),
                Profile(model="ember-1b.gguf", questions=2, right=0.99)]
     monkeypatch.setattr("ml_stack.serve.profile.profiles", lambda **_: records)
-    monkeypatch.setattr("ml_stack.bench.serve.find_model",
-                        lambda name: str(here) if name == "quince-2b.gguf" else name)
+    monkeypatch.setattr("ml_stack.hub.located",
+                        lambda name, **k: here if name == "quince-2b.gguf" else None)
     chosen = do.best_on_disk()
     assert chosen is not None and chosen[0].model == "quince-2b.gguf" and chosen[1] == str(here)
 
@@ -524,7 +524,7 @@ def test_a_model_already_up_on_the_port_is_used_as_it_stands(monkeypatch, tmp_pa
 
     here = tmp_path / "quince-2b.gguf"
     here.write_bytes(b"gguf")
-    monkeypatch.setattr("ml_stack.bench.serve.find_model", lambda name: str(here))
+    monkeypatch.setattr("ml_stack.hub.located", lambda *a, **k: here)
     monkeypatch.setattr("ml_stack.serve.manager.already_up",
                         lambda model, port, **_: {"base_url": "http://127.0.0.1:8080", "slots": 2,
                                                   "model": str(here), "pid": 1})

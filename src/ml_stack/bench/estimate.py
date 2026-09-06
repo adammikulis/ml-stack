@@ -20,9 +20,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-# The package is the namespace the tests and `selfcheck` patch -- `bench.find_model` -- so
+# The package is the namespace the tests and `selfcheck` patch -- `bench.measure` -- so
 # anything patchable is looked up there at call time, never bound here at import.
-from ml_stack import bench
+from ml_stack import hub
 from ml_stack.bench.keep import SMOKE
 
 # A model nothing is known about: no run kept and no weights on disk to size it by.
@@ -215,7 +215,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         context = int(getattr(args, "context", 0) or 0) or 32768 * max(
             1, int(getattr(args, "parallel", 1) or 1))
         for wanted in getattr(args, "serve", None) or []:
-            model = bench.find_model(wanted)
+            model = str(hub.located(wanted, loose=True) or wanted)
             stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
             ways = len(_asked(args, halves(args, f"{wanted} {model}")))
             models.append(_one(kept, name=stem, model=model, labels=[stem], questions=q,
@@ -227,7 +227,8 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
             models.append(_one(kept, name=name, labels=[name], questions=q,
                                ways=len(halves(args, name)), served=False))
     elif cmd == "drafts":
-        model = bench.find_model(getattr(args, "model", ""))
+        wanted = getattr(args, "model", "")
+        model = str(hub.located(wanted, loose=True) or wanted)
         stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
         asked = SMOKE if smoke else int(getattr(args, "sample", 0) or 0)
         q = asked + (SMOKE if wants_smoke(args) else 0)
@@ -254,7 +255,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         per = sum(p / GUESS_PREFILL_TPS * 2 + generate / GUESS_DECODE_TPS for p in prompts) \
             / max(1, len(prompts))
         for wanted in getattr(args, "serve", None) or []:
-            model = bench.find_model(wanted)
+            model = str(hub.located(wanted, loose=True) or wanted)
             stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14]
             models.append(ModelEstimate(stem, cells, 1, per, GUESS_LOAD_S,
                                         "a guess from the grid, no run of it timed", guessed=True))
@@ -275,7 +276,7 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
         from ml_stack.bench.extract import SMOKE_MESSAGES, only
 
         serving = list(getattr(args, "serve", None) or [])
-        model = bench.find_model(serving[0]) if serving else ""
+        model = str(hub.located(serving[0], loose=True) or serving[0]) if serving else ""
         stem = str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
         n = SMOKE_MESSAGES if smoke else int(getattr(args, "sample", 0) or 0)
         ways = 2 if getattr(args, "twice", False) else 1

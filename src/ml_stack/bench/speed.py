@@ -26,7 +26,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from ml_stack import bench
+from ml_stack import bench, hub
 from ml_stack.bench.backends import client_for, describe, http_of, timings_of
 from ml_stack.bench.keep import read_back, save
 from ml_stack.client.tokens import CHARS_PER_TOKEN
@@ -399,12 +399,10 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     per_seat = int(getattr(args, "context", 0) or 0) // seats if getattr(args, "context", 0) \
         else max(4096, ((max(prompts) + int(args.generate) + 512 + 1023) // 1024) * 1024)
     for n, wanted in enumerate(list(getattr(args, "serve", []) or [])):
-        model = bench.find_model(wanted)
+        model = str(hub.located(wanted, loose=True) or wanted)
         heads = list(getattr(args, "serve_draft", []) or [])
         head = heads[n] if n < len(heads) else ""
         if head.lower() == "auto":
-            from ml_stack import hub
-
             chosen = hub.choose_head(model, binary=args.binary or None)
             head = chosen.path
             say(f"    draft head: {head or 'none'} -- {chosen.why}")

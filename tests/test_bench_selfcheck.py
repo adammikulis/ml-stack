@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from ml_stack import bench
+from ml_stack import bench, hub
 from ml_stack.bench.selfcheck import (
     ScriptedModel,
     ScriptedReader,
@@ -206,7 +206,7 @@ def test_an_extract_that_serves_smokes_first_on_the_one_load_and_stops_when_it_f
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(ml_stack.client, "Client", Watched)
     monkeypatch.setattr(bx, "footprint", lambda url: {"base_url": url, "model": "tiny.gguf"})
-    monkeypatch.setattr(bx, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     world = _scratch_world(tmp_path / "world")
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["extract", "reading", "--world", str(world), "--serve", "tiny.gguf",

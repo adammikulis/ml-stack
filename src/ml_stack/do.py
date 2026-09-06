@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TextIO
 
-from ml_stack import mcp
+from ml_stack import hub, mcp
 from ml_stack.client import ollama
 from ml_stack.log import say
 
@@ -324,26 +324,14 @@ def _matches(words: str, name: str) -> bool:
     return all(_key(w) in haystack for w in words.split() if _key(w))
 
 
-def gguf_files() -> list[Path]:
-    """Every GGUF under the roots this machine keeps models in."""
-    from ml_stack.hub import default_roots
-
-    found: list[Path] = []
-    for root in default_roots(Path("~/.ml-stack")):
-        if root.is_dir():
-            found.extend(p for p in sorted(root.rglob("*.gguf")) if p.is_file())
-    return found
-
-
 def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list[dict[str, Any]]:
     """The GGUF weights this machine holds whose name has every word of ``words``, each
     with the draft head (``mtp-``, ``eagle3-``, ``.draft``) and the ``mmproj`` projector
     kept beside it -- in its own directory, or in a sibling directory of the same
     repository, where a Hub snapshot keeps its ``MTP/`` folder -- the first shard standing
     for a sharded file."""
-    from ml_stack.hub import DRAFT_MARK
-
-    every = [Path(p) for p in (files if files is not None else gguf_files())]
+    every = [q for q in (Path(p) for p in (files if files is not None else hub.weight_paths()))
+             if q.suffix.lower() == ".gguf"]
     by_dir: dict[Path, list[Path]] = {}
     for path in every:
         by_dir.setdefault(path.parent, []).append(path)
@@ -352,7 +340,7 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
     for path in every:
         name = path.name
         low = name.lower()
-        if Path(name).suffix.lower() != ".gguf" or DRAFT_MARK in path.suffixes:
+        if hub.DRAFT_MARK in path.suffixes:
             continue
         if low.startswith(_HEAD) or low.startswith("mmproj") or low.startswith("imatrix"):
             continue
@@ -366,7 +354,7 @@ def models_on_disk(words: str = "", files: Sequence[Path] | None = None) -> list
         heads = [p.name for p in beside if p.name.lower().startswith(_HEAD)]
         heads += [p.name for p in by_dir.get(path.parent.parent, [])
                   if p.name.lower().startswith(_HEAD) and p.name not in heads]
-        marked = path.with_suffix(DRAFT_MARK + path.suffix)
+        marked = path.with_suffix(hub.DRAFT_MARK + path.suffix)
         if marked in beside:
             heads.append(marked.name)
         projectors = [p.name for p in beside if p.name.lower().startswith("mmproj")]
@@ -632,17 +620,16 @@ def run(task: str, client: Any, *,
 # -- the command ------------------------------------------------------------------------
 def best_on_disk() -> tuple[Any, str] | None:
     """The model that measured best among those whose weights are on this machine: the
-    profile with the highest F1 over at least twenty questions whose file `find_model`
+    profile with the highest F1 over at least twenty questions whose file `hub.located`
     can put a path to. What `ml-stack-do` serves when nobody named one. None when no
     measured model is here."""
     from pathlib import Path
 
-    from ml_stack.bench.serve import find_model
     from ml_stack.serve.profile import profiles
 
     ranked = sorted((p for p in profiles() if p.questions >= 20), key=lambda p: -p.right)
     for record in ranked:
-        path = find_model(record.model)
+        path = str(hub.located(record.model, loose=True) or record.model)
         if path != record.model and Path(path).exists():
             return record, path
     return None
@@ -658,12 +645,11 @@ def client_for(args: argparse.Namespace) -> Any:
     from pathlib import Path
 
     from ml_stack.client import Client
-    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.shape import Run, Shape, seat
 
-    found = str(find_model(args.model))
+    found = str(hub.located(args.model, loose=True) or args.model)
     up = already_up(found, args.port)
     if up is not None:
         # the weights are up already, in whatever shape: use them rather than reload them

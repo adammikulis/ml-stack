@@ -211,7 +211,6 @@ from ml_stack.ingest.run import (
 from ml_stack.ingest.serving import (
     EXTRACT_SAMPLING as EXTRACT_SAMPLING,
     _alive as _alive,
-    _find_model as _find_model,
     _run as _run,
     _sampling as _sampling,
     _serving as _serving,

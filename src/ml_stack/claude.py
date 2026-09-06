@@ -36,6 +36,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 
+from ml_stack import hub
 from ml_stack.log import say
 
 __all__ = ["choices", "environment", "launch", "main", "pick", "settings"]
@@ -164,11 +165,10 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))
         return int(runner(command, env))
 
-    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import serve
     from ml_stack.serve.profile import profile_for, said
 
-    found = str(find_model(args.model))
+    found = str(hub.located(args.model, loose=True) or args.model)
     measured = None if args.no_profile else profile_for(found)
     if measured is not None:
         from ml_stack.serve.chat_template import trained_context as _trained

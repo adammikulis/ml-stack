@@ -315,8 +315,7 @@ def leases(monkeypatch, tmp_path):
                                    pid=None, adopted=True)
 
     monkeypatch.setattr(serve_ops, "ServerManager", Manager)
-    monkeypatch.setattr(serve_ops, "resolve_model", lambda named: named)
-    monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
+    monkeypatch.setattr("ml_stack.hub.located", lambda name, **k: Path(f"/models/{name}"))
     return seen
 
 
@@ -807,7 +806,7 @@ def test_an_ingest_reads_the_ingest_record(monkeypatch):
 
     add(measured(workload="ask", spec_draft_max=4))
     add(measured(workload="ingest", spec_draft_max=2))
-    monkeypatch.setattr("ml_stack.ingest._find_model", lambda named: MODEL)
+    monkeypatch.setattr("ml_stack.hub.located", lambda *a, **k: Path(MODEL))
 
     run, found = serving._run(SimpleNamespace(model=MODEL, profile=True), resolve=False)
 

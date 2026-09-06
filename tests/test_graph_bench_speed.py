@@ -11,6 +11,7 @@ import time
 
 import pytest
 
+from ml_stack import hub
 from ml_stack.bench import runs
 from ml_stack.bench.speed import (
     KIND,
@@ -306,7 +307,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
             seen["clients"].append(self)
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(bench, "find_model", lambda named: named)
+    monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint",
                         lambda url, client=None: {"base_url": url, "model": "tiny.gguf"})
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack import ingest, jobs
+from ml_stack import hub, ingest, jobs
 from tests.test_ingest import a_reading
 
 
@@ -166,7 +166,7 @@ def _leased(monkeypatch):
 
     monkeypatch.setattr("ml_stack.serve.manager.serve", fake_serve)
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
-    monkeypatch.setattr(ingest, "_find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
     return released
 
 

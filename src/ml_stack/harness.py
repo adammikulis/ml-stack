@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
+from ml_stack import hub
 from ml_stack.claude import DEFAULT_PORT, DEFAULT_SEATS, alias_of, environment
 from ml_stack.log import say
 
@@ -138,11 +139,10 @@ def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
     """Lease ``model`` in its measured shape and yield a :class:`Harness` on it; the server
     goes when the block ends. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
-    from ml_stack.bench.serve import find_model
     from ml_stack.serve.manager import serve
     from ml_stack.serve.profile import profile_for, said
 
-    found = str(find_model(model))
+    found = str(hub.located(model, loose=True) or model)
     measured = profile_for(found) if profile else None
     if measured is not None:
         run = measured.run(port=port, seats=seats, model=found)

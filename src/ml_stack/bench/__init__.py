@@ -194,7 +194,6 @@ from ml_stack.bench.serve import (
     SmokeFailed,
     drafted_by,
     drafts,
-    find_model,
     prefetch,
     references_in,
     served,

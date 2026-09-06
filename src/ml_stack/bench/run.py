@@ -25,9 +25,9 @@ from pathlib import Path
 from typing import Any
 
 # The package is the namespace the tests and `selfcheck` patch -- `bench.served`,
-# `bench.find_model`, `bench.home_dir()` -- so anything patchable is looked up there at call
+# `bench.home_dir()` -- so anything patchable is looked up there at call
 # time, never bound here at import.
-from ml_stack import bench
+from ml_stack import bench, hub
 from ml_stack.bench.keep import (
     SHORT,
     SMOKE,
@@ -1002,15 +1002,13 @@ def _run(args: Any) -> int:
         # then unpacked its characters. Every `sweep --serve` answered its questions and
         # crashed while summarising, and the smoke run is what caught it.
         for n, wanted in enumerate(getattr(args, "serve", []) or []):
-            model = bench.find_model(wanted)
+            model = str(hub.located(wanted, loose=True) or wanted)
             heads = getattr(args, "serve_draft", []) or []
             head = heads[n] if n < len(heads) else ""
             if head.lower() == "auto":
                 # the one resolver (`hub.choose_head`): told which binary will serve, so
                 # a head that borrows its target's embeddings is withheld from mainline
                 # rather than found out at the far end of an 87G load
-                from ml_stack import hub
-
                 chosen = hub.choose_head(model, binary=args.binary or None)
                 head = chosen.path
                 say(f"    draft head: {head or 'none'} -- {chosen.why}"
@@ -1136,7 +1134,7 @@ def _run(args: Any) -> int:
         everything = read_questions(args.questions) if args.questions else QUESTIONS
         asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
         before = {r["key"] for r in bench._kept(args.kept)}
-        model = bench.find_model(args.model)
+        model = str(hub.located(args.model, loose=True) or args.model)
         rows = drafts(swept(args, model, None, context=args.context, head=None,
                             port=args.port),
                       args.draft or [""], asked, invented(),

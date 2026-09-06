@@ -10,6 +10,7 @@ import pytest
 
 from conftest import on_a_fresh_thread
 from ml_stack import harness
+from pathlib import Path
 
 
 class _Text:
@@ -88,7 +89,8 @@ def test_session_leases_the_measured_shape_and_the_command_prints_the_answer(fak
     monkeypatch.setattr("ml_stack.serve.profile.profile_for",
                         lambda m, **_: record("kestrel-8B-UD-Q4_K_XL.gguf",
                                               cache_type="q8_0"))
-    monkeypatch.setattr("ml_stack.bench.serve.find_model", lambda m: "/m/kestrel-8B-UD-Q4_K_XL.gguf")
+    monkeypatch.setattr("ml_stack.hub.located",
+                        lambda *a, **k: Path("/m/kestrel-8B-UD-Q4_K_XL.gguf"))
     monkeypatch.setattr(harness, "alias_of", lambda url, model: "kestrel-8B")
     # the model's template refuses a late system message; the lease carries a forgiving one
     monkeypatch.setattr("ml_stack.serve.chat_template.written_beside",

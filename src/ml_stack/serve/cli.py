@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
 from ml_stack.serve import build, ops
@@ -393,7 +393,7 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
 def cmd_up(args: argparse.Namespace) -> int:
     from ml_stack.serve.backend import UnknownFlag
 
-    model = ops.resolve_model(str(args.model))
+    model = str(hub.located(args.model) or args.model)
     if model != str(args.model):
         warn(f"resolved {args.model} -> {model}")
 

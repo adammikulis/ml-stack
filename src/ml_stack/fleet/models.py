@@ -121,34 +121,24 @@ class Models:
 
     def all(self) -> list[Model]:
         seen: dict[str, Model] = {}
-        for root in self.roots:
-            if not root.is_dir():
+        for path in hub.weight_paths(self.roots):
+            if hub.DRAFT_MARK in path.suffixes or path.name in seen:
                 continue
-            for path in sorted(root.rglob("*")):
-                if not path.is_file() or path.suffix.lower() not in hub.WEIGHT_SUFFIXES:
-                    continue
-                if hub.DRAFT_MARK in path.suffixes:
-                    continue
-                try:
-                    stat = path.stat()
-                except OSError:
-                    continue
-                if stat.st_size < MIN_SIZE:
-                    continue
-                if path.name not in seen:
-                    seen[path.name] = Model(path.name, path, stat.st_size,
-                                            stat.st_mtime)
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+            if stat.st_size >= MIN_SIZE:
+                seen[path.name] = Model(path.name, path, stat.st_size, stat.st_mtime)
         return sorted(seen.values(), key=lambda m: m.name.lower())
 
     def find(self, name: str) -> Model | None:
-        needle = name.strip().lower()
-        for model in self.all():
-            if model.name.lower() == needle:
-                return model
-        for model in self.all():
-            if needle in model.name.lower():
-                return model
-        return None
+        """The model file this machine holds under that name, or ``None``."""
+        found = hub.located(name.strip(), roots=self.roots, loose=True, min_size=MIN_SIZE)
+        if found is None:
+            return None
+        stat = found.stat()
+        return Model(found.name, found, stat.st_size, stat.st_mtime)
 
     def find_draft(self, name: str) -> Model | None:
         """A draft by its exact filename. Drafts are fetched, never listed."""

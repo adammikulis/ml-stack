@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack import jobs
+from ml_stack import hub, jobs
 from ml_stack.graph.asking import Asking
 from ml_stack.home import state
 from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
@@ -475,7 +475,7 @@ def _ask_run(args: Any) -> int:
     say(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
     # the asking comes from the same profile the serving does, so a model measured with
     # one way of asking is not served in its shape and asked in somebody else's
-    measured = ingest._find_model(args.model) if args.model else None
+    measured = str(hub.located(args.model, loose=True) or args.model) if args.model else None
     how = Asking.for_model(measured) if measured else None
     try:
         with _stopping(), ingest._serving(args) as client:

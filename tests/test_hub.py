@@ -420,9 +420,50 @@ class TestFetch:
 
 
 class TestLocated:
-    """A bare model name resolved against the Hub cache -- what fixed 'up' reading a name
-    copied out of `ml-stack-models files` as a relative path and reporting shards missing
-    for a model that was on the machine the whole time."""
+    """The one way a name becomes a model file: the bench, the serve preflight, the fleet
+    and `ml-stack-do` all ask this, so it has to answer for a name copied out of
+    `ml-stack-models files`, a path, an `hf:` reference and a half-typed name alike."""
+
+    def test_a_path_is_returned_expanded_and_an_hf_reference_is_not_a_local_file(self, tmp_path):
+        import ml_stack.hub as hub
+
+        here = tmp_path / "thing-Q4_K_M.gguf"
+        here.write_bytes(b"x")
+        assert hub.located(str(here)) == here
+        assert hub.located("hf:maker/thing-GGUF/thing.gguf") is None
+        assert hub.located("") is None
+
+    def test_every_model_root_is_searched_not_only_the_hub_cache(self, tmp_path):
+        import ml_stack.hub as hub
+
+        beside = tmp_path / "models"
+        beside.mkdir()
+        (beside / "quince-2b-Q4_K_M.gguf").write_bytes(b"x")
+        assert hub.located("quince-2b-Q4_K_M.gguf", roots=[tmp_path / "hub", beside]) \
+            == beside / "quince-2b-Q4_K_M.gguf"
+
+    def test_a_half_typed_name_matches_only_when_loose_is_asked_for(self, tmp_path):
+        import ml_stack.hub as hub
+
+        (tmp_path / "quince-2b-UD-Q4_K_XL.gguf").write_bytes(b"x")
+        assert hub.located("quince", roots=[tmp_path]) is None
+        assert hub.located("quince", roots=[tmp_path], loose=True) \
+            == tmp_path / "quince-2b-UD-Q4_K_XL.gguf"
+
+    def test_a_draft_head_answers_only_a_name_that_asks_for_one(self, tmp_path):
+        import ml_stack.hub as hub
+
+        (tmp_path / "quince-2b.draft.gguf").write_bytes(b"x")
+        assert hub.located("quince", roots=[tmp_path], loose=True) is None
+        assert hub.located("quince-2b.draft.gguf", roots=[tmp_path]) \
+            == tmp_path / "quince-2b.draft.gguf"
+
+    def test_a_file_under_min_size_is_passed_over(self, tmp_path):
+        import ml_stack.hub as hub
+
+        (tmp_path / "quince-2b.gguf").write_bytes(b"x" * 16)
+        assert hub.located("quince-2b.gguf", roots=[tmp_path]) is not None
+        assert hub.located("quince-2b.gguf", roots=[tmp_path], min_size=1 << 20) is None
 
     def test_an_exact_filename_is_found_as_the_link_whose_size_reads_through(self, tmp_path):
         import ml_stack.hub as hub
@@ -435,7 +476,7 @@ class TestLocated:
         snapshot.mkdir(parents=True)
         (snapshot / "thing-Q4_K_M.gguf").symlink_to(blob)
 
-        found = hub.located("thing-Q4_K_M.gguf", cache=cache)
+        found = hub.located("thing-Q4_K_M.gguf", roots=[cache])
         # the link, by name -- what llama.cpp needs to find a sharded model's other
         # shards -- with the blob's size readable through it
         assert found == snapshot / "thing-Q4_K_M.gguf" and found.is_symlink()
@@ -451,14 +492,14 @@ class TestLocated:
         for shard in ("thing-00001-of-00002.gguf", "thing-00002-of-00002.gguf"):
             (snapshot / shard).write_bytes(b"x")
 
-        found = hub.located("thing.gguf", cache=cache)
+        found = hub.located("thing.gguf", roots=[cache])
         assert found is not None and found.name == "thing-00001-of-00002.gguf"
 
     def test_a_name_that_matches_nothing_is_none_not_an_error(self, tmp_path):
         import ml_stack.hub as hub
 
-        assert hub.located("nowhere.gguf", cache=tmp_path) is None
-        assert hub.located("nowhere.gguf", cache=tmp_path / "does-not-exist") is None
+        assert hub.located("nowhere.gguf", roots=[tmp_path]) is None
+        assert hub.located("nowhere.gguf", roots=[tmp_path / "does-not-exist"]) is None
 
 
 class TestDraftNote:

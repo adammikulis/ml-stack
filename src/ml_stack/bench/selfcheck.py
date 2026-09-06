@@ -352,8 +352,7 @@ def _faked(args: argparse.Namespace, home: Path, built: list[Any]):
     with contextlib.ExitStack() as patched:
         patch = patched.enter_context
         patch(mock.patch.dict(os.environ, {"MLSTACK_BENCH_HOME": str(home)}))
-        patch(mock.patch.object(bench, "find_model", lambda named: named))
-        patch(mock.patch.object(bench_extract, "find_model", lambda named: named))
+        patch(mock.patch.object(ml_stack.hub, "located", lambda *a, **k: None))
         patch(mock.patch.object(bench, "busy", lambda url: 0))
         patch(mock.patch.object(bench, "slot_count", lambda url: 1))
         patch(mock.patch.object(bench, "footprint", fake_footprint))

@@ -13,6 +13,7 @@ import ctypes
 import os
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +25,7 @@ __all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "PREFER", "WEIGHT_SUF
            "advice", "aside", "beside", "builds", "card", "choose_head", "default_roots",
            "draft_for", "draft_note", "fetch", "files", "find", "held", "hub_cache",
            "in_gguf", "located", "main", "mmproj_for", "ref", "repo_of", "room",
-           "spec_for"]
+           "spec_for", "weight_paths"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
 # that has a model wins. Override with --prefer; pass --prefer '' to rank by downloads alone.
@@ -455,6 +456,23 @@ def default_roots(root: Path | str) -> list[Path]:
     ]
 
 
+def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
+    """Every weight file under ``roots`` (the model roots by default), in root order.
+
+    A Hub cache keeps a snapshot of symlinks into ``blobs/``; the link is returned, never
+    the blob it points at, and a caller reading a size ``stat()``s through it.
+    """
+    where = list(roots) if roots is not None else default_roots(home.home())
+    out: list[Path] = []
+    for root in where:
+        try:
+            found = sorted(Path(root).rglob("*")) if Path(root).is_dir() else []
+        except OSError:
+            continue
+        out.extend(p for p in found if p.suffix.lower() in WEIGHT_SUFFIXES and p.is_file())
+    return out
+
+
 def held() -> dict[str, int]:
     """Every model file already on this machine, by filename, with its real size.
 
@@ -462,20 +480,13 @@ def held() -> dict[str, int]:
     `ls -l` reports 79 bytes for a 46G shard.
     """
     out: dict[str, int] = {}
-    for root in default_roots(home.home()):
+    for path in weight_paths():
+        if path.name in out or DRAFT_MARK in path.suffixes:
+            continue
         try:
-            found = sorted(root.rglob("*")) if root.is_dir() else []
+            out[path.name] = path.resolve().stat().st_size
         except OSError:
             continue
-        for path in found:
-            if path.suffix.lower() not in WEIGHT_SUFFIXES or path.name in out:
-                continue
-            if DRAFT_MARK in path.suffixes:
-                continue
-            try:
-                out[path.name] = path.resolve().stat().st_size
-            except OSError:
-                continue
     return out
 
 
@@ -493,47 +504,49 @@ def hub_cache() -> Path:
     return root / "hub"
 
 
-def located(name: str, *, cache: Path | None = None) -> Path | None:
-    """A model already in the Hub cache, found by its exact filename, or ``None``.
+def _big_enough(path: Path, floor: int) -> bool:
+    if floor <= 0:
+        return True
+    try:
+        return path.stat().st_size >= floor
+    except OSError:
+        return False
 
-    A name copied out of `ml-stack-models files` -- no directory, no `hf:` -- names a file
-    already downloaded, but `ml-stack-serve up` used to read anything without a `/` or an
-    `hf:` prefix as a relative path and report "shards missing" for a model that was on the
-    machine the whole time. `bench.find_model` already solved this for the bench by
-    asking `fleet.models` where the file is; this is the same idea narrowed to the Hub cache
-    itself and to an *exact* filename match, which is what a preflight is actually handed.
 
-    The `snapshots/<rev>/` path itself -- a symlink into `blobs/` -- never the blob: the
-    name is what llama.cpp needs to find a sharded model's other shards, and a size read
-    off the link with `stat()` (which follows it) is the weights it stands for.
+def located(name: str | Path, *, roots: Sequence[Path] | None = None, loose: bool = False,
+            min_size: int = 0) -> Path | None:
+    """The file a model name stands for -- an existing path, or a filename found under
+    ``roots`` (the model roots by default) by exact match, then by a sharded build's first
+    shard, then with ``loose`` by the first name containing it, weights before the
+    projectors and heads beside them -- or ``None``.
 
-    A sharded build's first shard is found when ``name`` is the shard-less stem -- what the
-    quantisation itself is called, e.g. `thing-UD-Q4_K_XL.gguf`, rather than any one file
-    inside it.
+    A draft head is passed over unless ``name`` carries ``.draft``; so is a file under
+    ``min_size`` bytes; an ``hf:`` reference is not a local file and is ``None``.
     """
-    root = Path(cache) if cache is not None else hub_cache()
-    if not root.is_dir():
+    text = str(name).strip()
+    if not text or text.startswith("hf:"):
         return None
-    wanted = Path(name).name
-
-    def _search(pattern: str) -> Path | None:
-        for snapshot in sorted(root.glob("*/snapshots/*")):
-            if not snapshot.is_dir():
-                continue
-            for candidate in sorted(snapshot.rglob(pattern)):
-                if candidate.is_file():
-                    # the snapshot path, not the blob it links to: llama.cpp finds a
-                    # sharded model's other shards by the name -- handed the blob hash it
-                    # says "invalid split file name" (gpt-oss-120b, 2026-09-02). Sizes
-                    # must still be read through the link; callers `stat()` the target.
-                    return candidate
+    where = home.expand(text)
+    if where.is_file():
+        return where
+    if "/" in text or os.sep in text:
         return None
-
-    found = _search(wanted)
-    if found is not None:
-        return found
+    wanted = Path(text).name
+    drafts = DRAFT_MARK in Path(wanted).suffixes
+    every = [p for p in weight_paths(roots)
+             if (drafts or DRAFT_MARK not in p.suffixes) and _big_enough(p, min_size)]
     base = wanted[: -len(".gguf")] if wanted.lower().endswith(".gguf") else wanted
-    return _search(f"{base}-00001-of-*.gguf")
+    # a Hub match is the snapshot symlink, never the blob: llama.cpp reads a sharded
+    # model's other shards off that name and refuses a blob hash
+    shard = re.compile(rf"^{re.escape(base)}-00001-of-\d+\.gguf$", re.IGNORECASE)
+    for match in (lambda p: p.name == wanted, lambda p: bool(shard.match(p.name))):
+        found = next((p for p in every if match(p)), None)
+        if found is not None:
+            return found
+    needle = wanted.lower()
+    # weights before the projectors and heads that travel with them
+    ranked = sorted(every, key=lambda p: aside(p.name))
+    return next((p for p in ranked if needle in p.name.lower()), None) if loose else None
 
 
 _DRAFT_NOTES: dict[str, str] = {}
@@ -580,21 +593,21 @@ def draft_note(repo: str) -> str:
     return note
 
 
-def repo_of(model: str | Path, *, cache: Path | None = None) -> str:
+def repo_of(model: str | Path) -> str:
     """The Hub repository ``model`` came from, as ``owner/name``, or ''.
 
     An `hf:` reference names it outright. A path inside the Hub cache names it too --
     the cache keeps one directory per repository, `models--owner--name/snapshots/<rev>/`,
     so a file downloaded through `ml-stack-models fetch` or a lease still knows where it
-    came from and can be asked what shipped with it. A bare filename is looked up in the
-    cache first (`located`). A path anywhere else came from nowhere the Hub can say.
+    came from and can be asked what shipped with it. A bare filename is looked up with
+    `located`. A path anywhere else came from nowhere the Hub can say.
     """
     text = str(model)
     if text.startswith("hf:"):
         return "/".join(text[3:].split("/")[:2])
     where = Path(text).expanduser()
     if "/" not in text and not where.is_file():
-        found = located(text, cache=cache)
+        found = located(text)
         if found is None:
             return ""
         where = found
@@ -887,10 +900,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "layout":
             import struct
 
-            from ml_stack.serve.ops import resolve_model
             from ml_stack.serve.layout import layout, render
 
-            named = resolve_model(args.model)
+            named = str(located(args.model) or args.model)
             if named.startswith("hf:"):
                 named = str(fetch(named))
             try:

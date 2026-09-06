@@ -647,10 +647,11 @@ class TestResolveModel:
     """A bare model name -- no `/`, no `hf:` -- used to be read as a relative path and fail
     preflight saying 'shards missing' for a model already in the Hub cache."""
 
-    def test_a_path_or_hf_reference_is_used_exactly_as_given(self):
-        assert ops.resolve_model("hf:maker/thing-GGUF/thing.gguf") == \
-            "hf:maker/thing-GGUF/thing.gguf"
-        assert ops.resolve_model("some/dir/thing.gguf") == "some/dir/thing.gguf"
+    def test_a_path_or_hf_reference_is_not_a_file_this_machine_holds(self):
+        import ml_stack.hub as hub_module
+
+        assert hub_module.located("hf:maker/thing-GGUF/thing.gguf") is None
+        assert hub_module.located("some/dir/thing.gguf") is None
 
     def test_a_bare_name_found_in_the_hub_cache_resolves_to_its_real_path(
             self, tmp_path, monkeypatch):
@@ -661,15 +662,15 @@ class TestResolveModel:
         snapshot.mkdir(parents=True)
         gguf = snapshot / MODEL
         gguf.write_bytes(b"x")
-        monkeypatch.setattr(hub_module, "hub_cache", lambda: cache)
+        monkeypatch.setattr(hub_module, "default_roots", lambda root: [cache])
 
-        assert ops.resolve_model(MODEL) == str(gguf.resolve())
+        assert str(hub_module.located(MODEL)) == str(gguf.resolve())
 
-    def test_a_bare_name_found_nowhere_is_returned_unchanged(self, tmp_path, monkeypatch):
+    def test_a_bare_name_found_nowhere_is_none(self, tmp_path, monkeypatch):
         import ml_stack.hub as hub_module
 
-        monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path / "empty")
-        assert ops.resolve_model(MODEL) == MODEL
+        monkeypatch.setattr(hub_module, "default_roots", lambda root: [tmp_path / "empty"])
+        assert hub_module.located(MODEL) is None
 
     def test_up_preflight_only_resolves_a_bare_name_and_reports_it(
             self, tmp_path, monkeypatch, capsys):
@@ -811,9 +812,9 @@ def test_a_sharded_model_in_the_hub_cache_resolves_to_its_name_not_its_blob(tmp_
     for n, blob in ((1, "aa" * 32), (2, "bb" * 32)):
         (blobs / blob).write_bytes(b"x" * (100 * n))
         (snapshot / f"big-Q4_K_M-0000{n}-of-00002.gguf").symlink_to(blobs / blob)
-    monkeypatch.setattr(hub_module, "hub_cache", lambda: cache)
+    monkeypatch.setattr(hub_module, "default_roots", lambda root: [cache])
 
-    found = ops.resolve_model("big-Q4_K_M-00001-of-00002.gguf")
+    found = str(hub_module.located("big-Q4_K_M-00001-of-00002.gguf"))
     assert found == str(snapshot / "big-Q4_K_M-00001-of-00002.gguf")
     assert Path(found).is_symlink() and Path(found).stat().st_size == 100
 

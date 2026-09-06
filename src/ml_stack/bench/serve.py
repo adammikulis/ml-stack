@@ -2,8 +2,8 @@
 
 `served` preflights the load, smokes every way first on the same server, asks the
 questions, keeps each run and reads it back; `drafts` does that once per draft head and
-says which head to serve. Before any of it, `find_model` turns a name into a path and
-`prefetch` brings every `hf:` reference down outside the timed window.
+says which head to serve. Before any of it, `hub.located` turns a name into a path
+and `prefetch` brings every `hf:` reference down outside the timed window.
 """
 
 from __future__ import annotations
@@ -26,27 +26,6 @@ from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
 from ml_stack.log import say, warn
 from ml_stack.serve.profile import ASK
-
-
-def find_model(named: str) -> str:
-    """A model by name, path or `hf:` reference -- whichever the caller has to hand.
-
-    `fleet.models` has known where the files are all along, and looking one up by hand with
-    `find ~/.cache/... -name '*.gguf'` was done six times in an afternoon before this
-    existed. A name that matches nothing is returned unchanged, so a path still works and a
-    typo still fails where it would have anyway.
-    """
-    if not named or named.startswith("hf:") or "/" in named:
-        return named
-    try:
-        from ml_stack.fleet.models import Models
-        from ml_stack.hub import default_roots
-
-        home = Path("~/.ml-stack").expanduser()
-        found = Models(roots=default_roots(home), store=home).find(named)
-    except Exception:  # noqa: BLE001 - a machine that cannot look is not a failed run
-        return named
-    return str(found.path) if found else named
 
 
 def references_in(args: Any) -> list[str]:

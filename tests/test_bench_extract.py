@@ -14,11 +14,13 @@ import random
 
 import pytest
 
+from ml_stack import hub
 from ml_stack.client.families import GENERIC
 from ml_stack.bench import extract as bx
 from ml_stack.bench import MEASURING, RunNotKept, _parser, runs
 from ml_stack.world.organisation import make
 from ml_stack.world.simulate import simulate
+from pathlib import Path
 
 
 # -- a tiny world with messages -----------------------------------------------------------------
@@ -461,7 +463,7 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
             return "measured"
 
     monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: Found())
-    monkeypatch.setattr(ex, "find_model", lambda m: "x.gguf")
+    monkeypatch.setattr(hub, "located", lambda *a, **k: Path("x.gguf"))
 
     class Server:
         base_url = "http://127.0.0.1:1"

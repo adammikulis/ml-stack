@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
-from ml_stack import home
+from ml_stack import home, hub
 from ml_stack.client import is_healthy, reported_models
 from ml_stack.client.counters import Speculative, read_speculative
 from ml_stack.client.health import serving_params
@@ -51,7 +51,7 @@ __all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Li
            "Status", "Stopped", "alongside", "announce", "base_url_for", "beacon",
            "cache_of", "down", "drafted", "escalate", "fit_markdown", "fit_page", "judge",
            "limits", "look", "manager_for", "measure", "memory", "orphans", "preflight",
-           "processes", "reclaim", "reclaim_once", "resolve_model", "resolve_spec", "shapes",
+           "processes", "reclaim", "reclaim_once", "resolve_spec", "shapes",
            "status", "tensors", "up", "withdraw", "write_plist"]
 
 PROBE_TIMEOUT = 2.0
@@ -395,20 +395,6 @@ def drafted(model: str, asked: str, *, borrows: bool | None = None,
     return chosen.path
 
 
-def resolve_model(named: str) -> str:
-    """A bare model name found in the Hub cache; a path or an ``hf:`` reference as given.
-
-    A name copied out of `ml-stack-models files` used to be read as a relative path and
-    fail preflight with "shards missing" for a model that was on the machine.
-    """
-    if not named or named.startswith("hf:") or "/" in named:
-        return named
-    from ml_stack.hub import located
-
-    found = located(named)
-    return str(found) if found is not None else named
-
-
 def manager_for(binary: str = "", build: str = "") -> ServerManager:
     """A manager over the named binary or build, or over whichever one is current."""
     from ml_stack.serve import backend as backend_module
@@ -533,7 +519,7 @@ def tensors(models: Iterable[str]) -> list[str]:
     out = []
     for one in models:
         try:
-            out.append(fit_mod.render_tensors(resolve_model(one)))
+            out.append(fit_mod.render_tensors(str(hub.located(one) or one)))
         except (OSError, ValueError, struct.error) as exc:
             raise Refused(f"cannot read {one}: {exc}") from exc
     return out
@@ -547,7 +533,7 @@ def measure(names: Sequence[str], *, spec: ServerSpec, backend: LlamaServerBacke
 
     out: list[Recorded] = []
     for named in names:
-        model = resolve_model(str(named))
+        model = str(hub.located(named) or named)
         # told which binary serves, as `up` is: a head that borrows its target's embeddings
         # is offered to a fork build and withheld from mainline
         try:

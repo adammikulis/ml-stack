@@ -7,9 +7,10 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
 
+from ml_stack import hub
 from ml_stack.log import say
 
-__all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_find_model", "_run", "_sampling",
+__all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_run", "_sampling",
            "_serving", "_serving_said"]
 
 
@@ -70,11 +71,10 @@ def _run(args: Any, *, resolve: bool = True,
     the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
     and the samplers the client's.
     """
-    from ml_stack import ingest
     from ml_stack.serve.shape import Run, Shape
 
     model = str(getattr(args, "model", "") or "")
-    found = str(ingest._find_model(model)) if model else ""
+    found = str(hub.located(model, loose=True) or model) if model else ""
     port = int(getattr(args, "serve_port", 8080) or 8080)
     # One slot, one unit at a time. Adam: "we shouldn't be handling parallel requests while
     # extracting. In fact, we should never be splitting the GPU like that" -- and the run
@@ -174,11 +174,3 @@ def _serving_said(args: Any) -> str:
     except Exception:  # noqa: BLE001 - a record, never a reason not to read
         return "unknown"
 
-
-def _find_model(named: str) -> str:
-    """A model by name, path or ``hf:`` reference, the way every other command finds one."""
-    try:
-        from ml_stack.bench.serve import find_model
-    except ImportError:  # pragma: no cover - the bench's extras are not required here
-        return named
-    return find_model(named)

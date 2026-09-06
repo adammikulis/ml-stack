@@ -47,6 +47,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack import hub
 from ml_stack.entities.spelling import close
 from ml_stack.bench import (
     home_dir,
@@ -56,7 +57,6 @@ from ml_stack.bench import (
     _idle,
     _shown,
     _which,
-    find_model,
     footprint,
     runs,
     sampling_from,
@@ -1006,7 +1006,8 @@ def main(args: Any) -> int:
               "gold": {b: len(held["nodes"][b]) for b in BUCKETS} | {
                   "others": len(held["others"]), "relations": len(held["relations"])}}
 
-    model = (str(find_model(args.serve[0])).rsplit("/", 1)[-1].removesuffix(".gguf")
+    model = (str(hub.located(args.serve[0], loose=True) or args.serve[0])
+             .rsplit("/", 1)[-1].removesuffix(".gguf")
              if args.serve else "")
     if not args.serve:
         model = str(footprint(args.base_url).get("model") or "").removesuffix(".gguf") or args.label
@@ -1038,7 +1039,7 @@ def main(args: Any) -> int:
     if args.serve:
         from ml_stack.serve import serve
 
-        found = find_model(args.serve[0])
+        found = str(hub.located(args.serve[0], loose=True) or args.serve[0])
         began = time.time()
         # the model's measured shape -- its build, head, cache type, thinking budget, raw
         # flags -- unless told to serve it bare: an extraction measured on mainline without
