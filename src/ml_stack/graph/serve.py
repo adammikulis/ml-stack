@@ -1093,6 +1093,8 @@ def parser() -> argparse.ArgumentParser:
     serve.add_argument("--model", default="",
                        help="the model that answers, as ml-stack-serve up names it "
                             "(a path or hf:owner/repo/file); leased on the first question")
+    serve.add_argument("--draft", default="auto", metavar="HEAD",
+                       help="the draft head that guesses tokens ahead for the model to check in one pass: 'auto' takes the smallest one on this machine, 'none' serves without one, or name a head shipped with the model (default: %(default)s)")
     serve.add_argument("--model-port", type=int, default=8080,
                        help="the port the model is served on (default 8080)")
     serve.add_argument("--graph", type=Path,
@@ -1134,9 +1136,10 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     args = parser().parse_args(argv)
     run = None
     if args.model:
-        from ml_stack.serve.shape import Run, Shape
+        from ml_stack.serve.shape import Run, Shape, drafted
 
-        run = Run(shape=Shape(model=str(args.model), port=int(args.model_port)))
+        run = drafted(Run(shape=Shape(model=str(args.model), port=int(args.model_port))),
+                      str(getattr(args, "draft", "auto") or "auto"))
     graph = None
     if args.graph:
         graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))

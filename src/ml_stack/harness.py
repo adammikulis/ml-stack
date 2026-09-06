@@ -134,31 +134,34 @@ def _usage_of(message: Any) -> Usage:
 
 @contextmanager
 def session(model: str, *, port: int = DEFAULT_PORT, seats: int = DEFAULT_SEATS,
-            profile: bool = True, offline: bool = True,
+            profile: bool = True, offline: bool = True, draft: str = "auto",
             say: Callable[[str], None] = lambda _line: None, **options: Any) -> Iterator[Harness]:
     """Lease ``model`` in its measured shape and yield a :class:`Harness` on it; the server
-    goes when the block ends. ``options`` are `ClaudeAgentOptions` fields (cwd,
+    goes when the block ends. ``draft`` is the head to guess tokens ahead with -- 'auto'
+    takes the smallest one on this machine, 'none' takes none -- and a measured record's
+    own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
     allowed_tools, permission_mode, max_turns, system_prompt, mcp_servers, hooks...)."""
-    from ml_stack.serve.manager import serve
-    from ml_stack.serve.profile import profile_for, said
+    from ml_stack.serve import chat_template, manager
+    from ml_stack.serve import profile as records
+    from ml_stack.serve.recent import note
+    from ml_stack.serve.shape import Run, Shape, drafted
 
     found = str(hub.located(model, loose=True) or model)
-    measured = profile_for(found) if profile else None
+    note(found, by="agent")
+    measured = records.profile_for(found) if profile else None
     if measured is not None:
         run = measured.run(port=port, seats=seats, model=found)
-        say(f"serving in its measured shape: {said(measured)}")
+        say(f"serving in its measured shape: {records.said(measured)}")
+        run = drafted(run, "none", say=say)
     else:
-        from ml_stack.serve.shape import Run, Shape
-
         run = Run(shape=Shape(model=found, port=port, seats=seats))
-    from ml_stack.serve.chat_template import written_beside
-
-    patched = written_beside(found)
+        run = drafted(run, draft, say=say)
+    patched = chat_template.written_beside(found)
     if patched is not None:
         say("this model's template refuses a system message after the first; serving with "
             f"one that renders it instead ({patched.name})")
-    with serve(run.model, manager=run.shape.manager(), **run.lease(), timeout=900.0,
-               cache_reuse=256, warmup=False, chat_template_file=patched) as server:
+    with manager.serve(run.model, manager=run.shape.manager(), **run.lease(), timeout=900.0,
+                       cache_reuse=256, warmup=False, chat_template_file=patched) as server:
         alias = alias_of(server.base_url, found)
         say(f"the harness on {server.base_url} as {alias!r}")
         yield Harness(server.base_url, alias, offline=offline, options=options)
@@ -181,6 +184,11 @@ def parser() -> argparse.ArgumentParser:
                     help="a tool to allow without asking; repeatable")
     ap.add_argument("--permission-mode", default=None)
     ap.add_argument("--no-profile", action="store_true")
+    ap.add_argument("--draft", default="auto", metavar="HEAD",
+                    help="the draft head that guesses tokens ahead for the model to check "
+                         "in one pass: 'auto' takes the smallest one on this machine, "
+                         "'none' serves without one, or name a head shipped with the "
+                         "model (default: %(default)s)")
     ap.add_argument("--online", action="store_true")
     return ap
 
@@ -197,7 +205,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.permission_mode:
         options["permission_mode"] = args.permission_mode
     with session(args.model, port=args.port, seats=args.seats, profile=not args.no_profile,
-                 offline=not args.online, say=print, **options) as agent:
+                 offline=not args.online, draft=args.draft, say=say, **options) as agent:
         answer = agent.ask(args.prompt)
     say(answer.text)
     say(f"spent: {answer.spent.said()}")

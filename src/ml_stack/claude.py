@@ -29,19 +29,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import PurePath
 
 from ml_stack import hub
 from ml_stack.log import say
 
-__all__ = ["choices", "drafted", "environment", "head_line", "launch", "main",
-           "pick", "pick_head", "settings"]
+__all__ = ["environment", "launch", "main", "settings"]
 
 DEFAULT_PORT = 8080
 
@@ -133,24 +130,6 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
-def drafted(run, asked: str = "auto", *, say: Callable[[str], None] = say):
-    """``run`` serving with the draft head ``asked`` names, and one line saying which.
-
-    A run that already carries a head keeps it. 'auto' takes the smallest head on this
-    machine for the model, 'none' takes none, and anything else names one of the heads
-    found -- a name matching none of them raises `ValueError`.
-    """
-    from ml_stack.hub import drafting, head_choice
-
-    if run.shape.draft:
-        say(drafting(run.shape.draft, run.shape.spec_type, run.talking.spec_draft_max,
-                     run.shape.build))
-        return run
-    head = head_choice(run.model, asked)
-    say(head.serving() if head is not None else drafting())
-    return run.over(**head.over()) if head is not None else run
-
-
 def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = say,
            run_claude: Callable[..., int] | None = None) -> int:
     """Lease the model, run ``claude`` inside the lease, return its exit code."""
@@ -170,6 +149,8 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         if not sys.stdin.isatty():
             say("error: name a model to serve, or --on URL for a server already running")
             return 2
+        from ml_stack.serve.recent import choices, pick, pick_head
+
         chosen = pick(choices(), say=say)
         if chosen is None:
             return 1
@@ -194,9 +175,11 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         return int(runner(command, env))
 
     from ml_stack.serve import chat_template, manager, profile
-    from ml_stack.serve.shape import Run, Shape
+    from ml_stack.serve.recent import note
+    from ml_stack.serve.shape import Run, Shape, drafted
 
     found = str(hub.located(args.model, loose=True) or args.model)
+    note(found, by="claude")
     measured = None if args.no_profile else profile.profile_for(found)
     if measured is not None:
         run = measured.run(port=args.port, seats=args.seats, model=found)
@@ -245,129 +228,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
-
-def choices() -> list[dict]:
-    """What a person could run Claude Code on: servers already up, then models on disk.
-
-    A server already serving costs nothing to join. A model with a measured record is
-    offered before one without, best first; a shard after the first is not a choice. Each
-    model carries the draft heads on this machine that could serve with it, cheapest first.
-    """
-    from ml_stack.hub import heads_for, held, pretty_name, weight_paths
-    from ml_stack.serve.process import every_server
-    from ml_stack.serve.profile import profile_for, profiles
-
-    out: list[dict] = []
-    try:
-        for one in every_server():
-            if one.get("defunct"):
-                continue
-            out.append({"kind": "server", "port": int(one["port"]),
-                        "url": f"http://127.0.0.1:{one['port']}",
-                        "name": pretty_name(str(one.get("model") or "")) or "a model",
-                        "note": "already running"})
-    except Exception:  # noqa: BLE001 - no psutil, or a machine that will not say
-        pass
-
-    files = weight_paths()
-    where: dict[str, object] = {}
-    for path in files:
-        where.setdefault(path.name, path)
-    ranked = {p.model: p for p in profiles()}
-    for name in sorted(k for k in held() if k.endswith(".gguf")):
-        if re.search(r"-0000[2-9]-of-", name):
-            continue
-        record = ranked.get(name) or profile_for(name)
-        out.append({"kind": "model", "name": name, "record": record,
-                    "heads": heads_for(where.get(name, name), files=files),
-                    "note": (f"{record.right:.0%} F1 measured" if record is not None
-                             and getattr(record, "right", None) else "")})
-    out.sort(key=lambda c: (c["kind"] != "server",
-                            -(getattr(c.get("record"), "right", 0) or 0), c["name"]))
-    return out
-
-
-def head_line(one: dict) -> str:
-    """What a model would guess ahead with, or that it would run without guessing."""
-    heads = list(one.get("heads") or [])
-    record = one.get("record")
-    if record is not None:
-        head = str(getattr(record, "draft", "") or "")
-        if head:
-            return f"drafts ahead with {PurePath(head).name}, from its measured record"
-        idle = f", though {heads[0].said()} is on this machine" if heads else ""
-        return f"its measured record serves it without a draft head{idle}"
-    if not heads:
-        return "no draft head on this machine: it runs without speculative decoding"
-    more = f", or {len(heads) - 1} more" if len(heads) > 1 else ""
-    return f"drafts ahead with {heads[0].said()}{more}"
-
-
-def pick_head(heads: Sequence, *, say: Callable[[str], None] = say,
-              ask: Callable[[str], str] | None = None):
-    """The draft head to serve with, chosen by the person. None for no head at all."""
-    from ml_stack.hub import NO_HEAD
-
-    kept = list(heads)
-    if not kept:
-        say(NO_HEAD)
-        return None
-    say("draft heads on this machine for it, smallest first; the size is what the head "
-        "adds to memory:")
-    for n, one in enumerate(kept, 1):
-        say(f"  {n:2}  {one.said()}")
-    say(f"  {0:2}  none -- serve without speculative decoding, which is slower")
-    reader = ask or input
-    try:
-        said = reader("which head? [1] ").strip()
-    except (EOFError, KeyboardInterrupt):
-        say("")
-        return None
-    if not said:
-        return kept[0]
-    if said == "0" or said.lower() == "none":
-        return None
-    if said.isdigit() and 1 <= int(said) <= len(kept):
-        return kept[int(said) - 1]
-    named = [one for one in kept if said.lower() in one.name.lower()]
-    if len(named) == 1:
-        return named[0]
-    say(f"not a choice: {said!r}; serving with {kept[0].name}")
-    return kept[0]
-
-
-def pick(options: list[dict], *, say: Callable[[str], None] = say,
-         ask: Callable[[str], str] | None = None) -> dict | None:
-    """One of ``options``, chosen by the person. None when they choose nothing."""
-    if not options:
-        say("nothing to run: no server is up and no .gguf is on this machine")
-        return None
-    running = [c for c in options if c["kind"] == "server"]
-    if running:
-        say("already running:")
-        for n, c in enumerate(options, 1):
-            if c["kind"] == "server":
-                say(f"  {n:2}  {c['name']}  on {c['url']}  -- joined as it stands")
-    say("on this disk:" if running else "models on this machine:")
-    shown = [c for c in options if c["kind"] == "model"][:12]
-    for c in shown:
-        say(f"  {options.index(c) + 1:2}  {c['name']}" + (f"   {c['note']}" if c["note"] else ""))
-        say(f"        {head_line(c)}")
-    if len(options) - len(running) > len(shown):
-        say(f"      ... and {len(options) - len(running) - len(shown)} more; name one to skip this")
-    reader = ask or input
-    try:
-        said = reader(f"which? [{1 if options else ''}] ").strip()
-    except (EOFError, KeyboardInterrupt):
-        say("")
-        return None
-    if not said:
-        return options[0]
-    if said.isdigit() and 1 <= int(said) <= len(options):
-        return options[int(said) - 1]
-    named = [c for c in options if said.lower() in c["name"].lower()]
-    if len(named) == 1:
-        return named[0]
-    say(f"not a choice: {said!r}")
-    return None

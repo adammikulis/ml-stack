@@ -647,9 +647,11 @@ def client_for(args: argparse.Namespace) -> Any:
     from ml_stack.client import Client
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
-    from ml_stack.serve.shape import Run, Shape, seat
+    from ml_stack.serve.recent import note
+    from ml_stack.serve.shape import Run, Shape, drafted, seat
 
     found = str(hub.located(args.model, loose=True) or args.model)
+    note(found, by="do")
     up = already_up(found, args.port)
     if up is not None:
         # the weights are up already, in whatever shape: use them rather than reload them
@@ -662,9 +664,11 @@ def client_for(args: argparse.Namespace) -> Any:
                              timeout=args.timeout)
         say(f"serving alone, one seat of {run.shape.seat_context} tokens "
             f"({run.shape.note}): {said(measured)}")
+        run = drafted(run, "none", say=say)
     else:
         run = Run(shape=Shape(model=found, port=args.port, seats=1, seat_context=32768,
                               reasoning_budget=0))
+        run = drafted(run, args.draft, say=say)
     return seat(run, index=0)
 
 
@@ -681,6 +685,11 @@ def parser() -> argparse.ArgumentParser:
     which.add_argument("--url", default="", help="a server already up, e.g. "
                                                  "http://127.0.0.1:8080")
     ap.add_argument("--port", type=int, default=8080, help="where --model is served")
+    ap.add_argument("--draft", default="auto", metavar="HEAD",
+                    help="the draft head that guesses tokens ahead for the model to check "
+                         "in one pass: 'auto' takes the smallest one on this machine, "
+                         "'none' serves without one, or name a head shipped with the "
+                         "model (default: %(default)s)")
     ap.add_argument("--yes", action="store_true",
                     help="the plan runs without asking go; the questions still come")
     ap.add_argument("--dry-run", action="store_true",

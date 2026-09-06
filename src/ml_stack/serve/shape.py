@@ -47,8 +47,9 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.graph.asking import Asking
+from ml_stack.log import say
 
-__all__ = ["Run", "Shape", "Talking", "draft_for", "held", "projector_for",
+__all__ = ["Run", "Shape", "Talking", "draft_for", "drafted", "held", "projector_for",
            "release_all", "said_cache", "seat", "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
@@ -337,6 +338,25 @@ def release_all() -> None:
         _URLS.clear()
     for stack in stacks:
         stack.close()
+
+
+def drafted(run: Run, asked: str = "auto", *,
+            say: Callable[[str], None] = say) -> Run:
+    """``run`` serving with the draft head ``asked`` names, and one line saying which.
+
+    A run that already carries a head keeps it. 'auto' takes the smallest head on this
+    machine for the model, 'none' takes none, and anything else names one of the heads
+    found -- a name matching none of them raises `ValueError`.
+    """
+    from ml_stack.hub import drafting, head_choice
+
+    if run.shape.draft:
+        say(drafting(run.shape.draft, run.shape.spec_type, run.talking.spec_draft_max,
+                     run.shape.build))
+        return run
+    head = head_choice(run.model, asked)
+    say(head.serving() if head is not None else drafting())
+    return run.over(**head.over()) if head is not None else run
 
 
 def draft_for(model: str, asked: str, *, build: str = "",

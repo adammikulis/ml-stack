@@ -282,6 +282,8 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
                     help="exit 1 when --gold scores below this F1 (0-1), reading a gold set "
                          "or asking one")
+    ap.add_argument("--draft", default="auto", metavar="HEAD",
+                    help="the draft head that guesses tokens ahead for the model to check in one pass: 'auto' takes the smallest one on this machine, 'none' serves without one, or name a head shipped with the model (default: %(default)s)")
     ap.add_argument("--n-max", type=int, default=None, metavar="N",
                     help="tokens the draft head guesses ahead each step, over the profile's "
                          "measured length -- extraction accepts far more of them than "

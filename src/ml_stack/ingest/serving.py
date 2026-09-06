@@ -71,7 +71,7 @@ def _run(args: Any, *, resolve: bool = True,
     the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
     and the samplers the client's.
     """
-    from ml_stack.serve.shape import Run, Shape
+    from ml_stack.serve.shape import Run, Shape, drafted
 
     model = str(getattr(args, "model", "") or "")
     found = str(hub.located(model, loose=True) or model) if model else ""
@@ -93,9 +93,13 @@ def _run(args: Any, *, resolve: bool = True,
         run = measured.run(port=port, seats=seats, resolve=resolve,
                            n_predict=n_predict, timeout=timeout)
         say(f"    serving in its measured shape: {_said(measured)}")
+        run = drafted(run, "none", say=lambda line: say(f"    {line}"))
     else:
         run = Run(shape=Shape(model=found, port=port, seats=seats)).over(
             n_predict=n_predict, timeout=timeout)
+        if found:
+            asked = str(getattr(args, "draft", "auto") or "auto")
+            run = drafted(run, asked, say=lambda line: say(f"    {line}"))
 
     # The whole --context is the one seat's: a 2,500-token unit with four figures through
     # the projector and a reply of several thousand tokens overran a 16k seat on the first
