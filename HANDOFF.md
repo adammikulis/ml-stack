@@ -9,8 +9,9 @@ before it is paid for; nothing is pushed without Adam's go-ahead (a push cuts a 
 The app that drives this library is `~/ai_ceo`; its `HANDOFF.md` holds what is
 Slack-specific. What was measured on 2026-09-02 and what it settled is
 `docs/report-2026-09-02.md`, `docs/model-ranking.md`, `docs/architectures/` and
-`src/ml_stack/data/profiles.json` (a model's measured shape, read by `ml-stack-serve up
---profile`, `sweep`, `extract` and `converse`).
+`src/ml_stack/data/profiles.json` (the shape a model measured best in for one workload --
+`ask`, `ingest` or `chat` -- read by `ml-stack-serve up --profile --for WORKLOAD`, `sweep`,
+`extract` and `converse`).
 
 Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% node / 76%
 relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
@@ -52,6 +53,17 @@ ten questions, unconfirmed.
   minutes) and writes the log; it rewrites the store, so take a copy beside it first.
 
 ## Measurements queued (each needs the GPU; sample first)
+
+- [ ] **Nothing has measured any model for `ingest` or `chat`.** The record now holds a
+  shape per workload and the five shipped records are all `ask`, so `ml-stack-serve up
+  --profile --for ingest` serves the graph-asking shape and says so. What is missing is a
+  measurement: `ml-stack-bench extract` records `workload: ingest` and `report --profile`
+  writes that slot, so a sampled extraction run over Flash-Next at draft depths 2, 4 and 8
+  would fill it. Flash-Next answering measured 86% draft acceptance at depth 2 falling to
+  54% at 8, with depth 2 the fastest arm while the record serves 4; extraction copies
+  definitions off the page and accepted 97% on a biology chapter, so its best depth is
+  likely higher, not lower. `chat` has no bench of its own -- the world writer and
+  `fleet.chat` both point at a server already up -- so measuring it needs a command first.
 
 Adam, 2026-09-04: "we're never going to have that many users, so flash-next is the way to
 go (with shared MTP) always." So ranking a second model is not worth GPU: `gpt-oss-20b`

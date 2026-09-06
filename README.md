@@ -567,9 +567,9 @@ tool choice degrades with the offer wants `few` and more rounds still — and wh
 is a number in a store, not a taste. The same goes for sampling: a model is measured at the
 temperature, top-p and top-k that suit *it*, not at one setting shared by all. So the choice
 lives in the model's **profile** (`ml_stack/data/profiles.json`,
-`ml_stack.serve.profile`, "A model's measured shape" below):
+`ml_stack.serve.profile`, "The shape a model measured best in, for one kind of work" below):
 `ml-stack-bench report --profile`
-writes, per model, the asking and the sampling of the fastest row whose F1 the questions
+writes, per model and workload, the asking and the sampling of the fastest row whose F1 the questions
 could not tell apart from the best — F1 alone would trade real seconds for a hundredth of a
 point it cannot see — with the label of the row that set it. `converse(question, graph, client,
 asking=Asking.for_model(MODEL))` then asks that way, and `ml-stack-serve profile MODEL`
@@ -751,7 +751,7 @@ command.
 | `ml-stack-serve fit` | how many people fit at a given context, and the longest context one person can have -- from **measured** per-model KV numbers, not a formula: `--measure` serves a model once at `-lv 4` and records what llama.cpp says it allocated; `--room 24G` asks about a machine that is not this one; `--per-user N` sets the contexts in the table; `--plot FILE.png` draws who fits against the context and what the memory costs as the users arrive, with the familiar card sizes behind it, so a large model with a tiny cache can be seen overtaking a small one with a fat cache; `--write FILE` writes the Markdown; `--ui` puts the same two panels up as an interactive page on loopback (also the app's **Fit** view) |
 | `ml-stack-serve limits [--memory 90G] [--servers N] [--seats N] [--idle 10m]` | how much of this machine ml-stack may take, written down once and read everywhere: the memory cap rides on `hub.room`, so every preflight, fit and lease honours it without being handed it; the server and seat caps refuse a lease **before** a process is started, naming what to stop or what to raise; `--idle` is what `reclaim` and the fleet daemon act on. Every limit is off until one is set, so a machine nobody has told anything about behaves exactly as it did; `--clear` takes them all off |
 | `ml-stack-serve reclaim [--idle 10m] [--watch]` | stop the model servers nobody is using, so the memory they hold goes back. Idleness is **asked** of each server (`/slots`) rather than remembered, since a written-down 'last used' is only as good as every caller remembering to write it and an adopted server has no caller here at all; a server that does not answer is left alone, and a long single answer is never mistaken for idleness. What each look found is kept, so idleness adds up across looks and a pass can act on what the daemon has been watching -- but only over intervals short enough to be an observation: a gap in the looking is a gap in the evidence, and a pass after a silent afternoon reports nearly nothing and stops nothing |
-| `ml-stack-serve status\|up\|down\|profile\|build\|escalate\|memory` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in and `up --profile` fills every flag not given from it; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary`; `escalate --add N` grows a running server's seats in place, carrying its conversations over; `memory` says how much a model may use here and `--persist` makes that survive a reboot |
+| `ml-stack-serve status\|up\|down\|profile\|build\|escalate\|memory` | one model per port, in one shape; refuses a mismatched lease; announces to the fleet; `--draft auto` and `--mmproj auto` find the speculative head and the vision projector shipped with the weights; `--spec` chooses draft or n-gram guessing; `profile` prints the shape a model measured best in for each workload -- asking, ingesting or chatting -- and `up --profile --for WORKLOAD` fills every flag not given from that record; `build` compiles or downloads a current llama-server and switches to it once verified, so a release lagging master by an architecture is a permanent fix rather than a one-off `--binary`; `escalate --add N` grows a running server's seats in place, carrying its conversations over; `memory` says how much a model may use here and `--persist` makes that survive a reboot |
 | `ml-stack-bench prepare\|run\|sweep\|drafts\|concurrent\|show\|report` | time and score a graph's answers — wall clock, calls, cached tokens against read ones, KV cost, draft acceptance, and how much of the expected answer was shown; `show --rates` adds accuracy per second, per 1k tokens and per GB with the Pareto frontier, `--plot` draws it; `report` composes every run, every draft head and the measured memory into one document per model, ending in the line to serve it by (`--text`, `--md FILE`, `--room`, `--at`). `--on NAME=URL` measures a server somebody else started -- a llama-server by `http://`, Ollama by `ollama://host:port/model`, an OpenAI-style server by `openai://host/model` -- and every run records what served it (program, version, format, runtime, quant), the process tree's resident peak sampled every second, and None rather than 0 for any figure that program does not report; `sweep --no-draft` serves a model in its measured shape minus the head, `--serve-label` names the runs |
 | `ml-stack-bench queue FILE` | an evening of measurements as a file rather than the ninth zsh script of the night: one `ml-stack-bench` line per step, `#` comments, `set VAR=` with `${VAR}`, and `smoke:`/`then:` pairs where a failed smoke skips the run it guards and says so; every line is checked against the parser before the first model loads (`--dry-run` prints the plan), `--yes` and `--ceiling` are given once at the top, `--resume` skips what the store already holds since the queue started, `--detach` puts the whole evening in one background log and `status` says which step is running and what is left. Each step is its own process, so it takes the measuring lock itself and two steps never share the GPU |
 | `ml-stack-claude MODEL [-- claude args]` | Claude Code on a model this machine serves, in its measured shape: the lease is taken, every model variable names the served alias, telemetry and betas a local server lacks are off, and the server goes when claude exits. With no MODEL it lists the servers already up and the models on this disk, best measured first, and takes a number or a name; `--on URL` talks to a server as it stands and leaves it up afterwards; the served model's own chat template is rewritten first, so Claude Code's mid-conversation system messages render rather than fail |
@@ -1000,30 +1000,51 @@ A port already serving something else is refused, with the field that differs na
 the model, the number of slots, or the context each slot gets. Adopting a server of the
 wrong shape hands back a lease that cannot do what was asked of it.
 
-### A model's measured shape
+### The shape a model measured best in, for one kind of work
 
 The `Shape` above was typed out by hand, and every value in it came from a bench run
 somebody remembered. A **profile** is that shape written down instead: one record per model
-file of the serving and the asking that measured best, and the row of the store that set
-it. `ml_stack/data/profiles.json` ships them and `~/.ml-stack/profiles.json`
+file **and workload** of the serving and the asking that measured best, and the row of the
+store that set it. `ml_stack/data/profiles.json` ships them and `~/.ml-stack/profiles.json`
 (`$MLSTACK_PROFILES_FILE`) layers this machine's own over them, exactly as `fit.json` does.
+
+There are three workloads, because the best shape depends on what the model is doing:
+`ask` (tool-calling over a graph), `ingest` (documents into JSON under a schema) and `chat`
+(prose, under no schema). A tool call is mostly JSON skeleton and repeated key names, so a
+draft head guesses it right most of the time; free prose it guesses wrong, and every wrong
+guess costs a verification pass. `--for` says which record is wanted, and the graph asking
+is what it means when nothing is said.
 
 ```
 ml-stack-serve profile
 ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
-ml-stack-serve up model.gguf --profile
+ml-stack-serve profile Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --for ingest
+ml-stack-serve up model.gguf --profile --for ingest
 ml-stack-bench report --profile
 ```
 
 ```
 Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+  for         ask -- tool-calling over a graph
   serve with  --context 32768 --build unsloth --draft mtp-…-shared-Q8_0.gguf
               --spec draft-mtp --spec-n-max 4 --kv q8_0 --mmproj auto --reasoning-budget 0
               and -ub 2048 --spec-draft-p-min 0.5 -- llama-server's own, passed by --profile
   measured at --parallel 2, 16384 per seat
+  per request draft 4 ahead, greedy -- sent with each call, where the build takes it
   ask with    tight + batch + kinds + summary + greedy
   measured    85% F1 (89% recall, 83% precision) at 26.0 s/question over 10 question(s)
 ```
+
+A record has a **startup half** and a **request half**. The build, the draft head file, the
+cache type, the context and the seats are what a server is told once; the draft depth, its
+confidence floor and the sampling ride on each call, so one served model can guess four
+tokens ahead for a tool call and two for a document. A build without llama.cpp's
+per-request speculative override ignores those fields and serves the depth it was started
+with, which is the one on the `serve with` line; a server that refuses them is asked again
+without them and says so.
+
+Ask for a workload nothing has measured and the graph-asking record is served, with a
+`note` saying which workload measured it and which one it was asked for — never silently.
 
 Another record in the same file is asked nothing like it, which is the point. Where a model
 measured better on a short offer, more turns and its publisher's own sampling, its `ask with`
@@ -1047,7 +1068,8 @@ From Python, both ends read the same record:
 from ml_stack.serve import profile_for, seat
 from ml_stack.graph.ask import converse
 
-found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf")
+found = profile_for("hf:unsloth/Qwen3.8-Flash-Next-GGUF/Qwen3.8-Flash-Next-UD-Q4_K_XL.gguf",
+                    workload="ask")
 run = found.run(port=8080, n_predict=16384)
 client = seat(run, index=request_number)
 answer = converse(question, graph, client, asking=run.asking)
@@ -1068,13 +1090,13 @@ asking reached `Client.__init__` and took an 87G load down with it, and how two 
 could lease one port two ways — which llama.cpp answers by stopping the server and loading
 the weights again.
 
-`Asking.for_model(name)` is the way that model measured best, and `Profile.asked()` is the
-same record's. A model matched only by family (the same weights at another
-quantisation) comes back with `note` saying so: a shape measured on Q4_K_XL is the right
-place to start for IQ4_XS and is not a measurement of it.
+`Asking.for_model(name, workload=...)` is the way that model measured best at that work, and
+`Profile.asked()` is the same record's. A model matched only by family (the same weights at
+another quantisation) comes back with `note` saying so: a shape measured on Q4_K_XL is the
+right place to start for IQ4_XS and is not a measurement of it.
 
-Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model, **the
-fastest row whose F1 the questions could not tell apart from the best** — among that model's
+Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model **and
+workload**, **the fastest row whose F1 the questions could not tell apart from the best** — among that model's
 longest runs, held is `score.held_up`, the two 95% bands overlapping — and writes the build,
 head, cache, thinking, context, asking and sampling it was served and asked with, saying in
 the record which row it was. Best F1 alone would trade real seconds for a hundredth of a
@@ -1085,8 +1107,8 @@ vision projector) are carried from the record already there rather than erased.
 The asking a record carries is the whole asking: `tight`, `batch`, `single`, `few`, `kinds`,
 `summary`, `rich`, `terse`, `reach` and `rounds`, plus the sampling — so a model measured on
 three tools, twenty rounds and its publisher's temperature is served and asked exactly that,
-while the next model in the same file is asked the opposite. One asking per model, and every
-one of them a number somebody paid for.
+while the next model in the same file is asked the opposite. One asking per model and
+workload, and every one of them a number somebody paid for.
 
 **Every load preflights first.** Before a process starts, `LlamaServerBackend.start` checks
 that every shard of the GGUF is present and complete (an `hf:` reference is resolved through

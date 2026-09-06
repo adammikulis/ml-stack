@@ -1093,14 +1093,20 @@ def _():
 
 
 # -- measuring models ------------------------------------------------------
-@check("Measuring", "a model's measured shape is on file, not remembered")
+@check("Measuring", "a model's measured shape is on file per workload, not remembered")
 def _():
     from ml_stack.serve import profile_for
-    found = profile_for("Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf")
+    named = "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"
+    found = profile_for(named)
     assert found is not None, "no shipped profile for the flagship"
+    assert found.workload == "ask", "the shipped records measured the graph asking"
     assert found.right > 0 and found.questions > 0, "the record does not say what measured it"
-    return (f"one seat at {found.seat_context}, F1 {found.right:.0%} over "
-            f"{found.questions} questions, on {found.host or 'a measured host'}")
+    fell_back = profile_for(named, workload="ingest")
+    assert fell_back is not None and "not for ingest" in fell_back.note, \
+        "a workload with no record of its own must say what it fell back to"
+    return (f"{found.workload}: one seat at {found.seat_context}, F1 {found.right:.0%} over "
+            f"{found.questions} questions, on {found.host or 'a measured host'}; "
+            f"ingest falls back and says so")
 
 
 @check("Measuring", "an evening of measurement is a file checked before the first model loads")

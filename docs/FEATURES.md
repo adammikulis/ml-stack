@@ -364,8 +364,9 @@ entries by name or by the words attached to them, read what is held on them, rea
 neighbourhood at once, trace how two connect, read out everything of one kind, and say which
 entries the answer is about — and what it touched comes back with the words, so a caller can
 show the working rather than a second guess at it. An id the model invents is refused in one
-place. The way it is asked is per model, not one size: what a model measured best is kept as
-its **profile**, and asking through the profile asks that way.
+place. The way it is asked is per model and per kind of work, not one size: what a model
+measured best at each is kept as its **profile**, and asking through the profile asks that
+way.
 
 **Looking at it.** One self-contained page: force layout in two dimensions and three, labels
 that do not collide and that hold their place as the camera turns, a legend that filters, a
@@ -410,9 +411,13 @@ Serving and asking a model well is a measurement per model, not a habit.
 - **One load, asked several ways.** A sweep puts a model up once and answers the same
   questions under each asking worth trying, so the comparison is of askings rather than of
   cold loads.
-- **A profile is the shape a model measured best in** — the cache, the draft head, the
-  thinking budget, the asking, the sampling — kept with the run that set it. Serving,
-  benching and answering read the same record, so what was measured is what is used.
+- **A profile is the shape a model measured best in for one kind of work** — the cache, the
+  draft head, the thinking budget, the draft depth, the asking, the sampling — kept with the
+  run that set it. There is a record per model and workload, because the shape that answers
+  questions fastest is not the shape that reads documents fastest: a tool call is mostly
+  skeleton a draft head guesses right, prose is not. Serving, benching and answering read
+  the same record, so what was measured is what is used, and asking for a workload nothing
+  has measured says so rather than serving somebody else's shape.
 - **A night of measurement is a file**, checked line by line before the first model loads:
   a smoke guards the run under it, resuming skips what the store already holds, and one
   background log says what is running and what is left.
