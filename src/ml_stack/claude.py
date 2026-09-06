@@ -227,7 +227,7 @@ def choices() -> list[dict]:
     offered before one without, best first; a shard after the first is not a choice.
     """
     from ml_stack.hub import held, pretty_name
-    from ml_stack.serve.cli import every_server
+    from ml_stack.serve.process import every_server
     from ml_stack.serve.profile import profile_for, profiles
 
     out: list[dict] = []

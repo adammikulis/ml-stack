@@ -355,16 +355,14 @@ class TestTheCliFlag:
         said = capsys.readouterr().err
         assert seen["url"] in said, "it never said where the page is"
 
-    def test_the_flag_is_parsed_not_merely_handled(self, monkeypatch):
+    def test_the_flag_is_parsed_not_merely_handled(self):
         """A flag argparse has not been told about is a flag argparse refuses, however
         carefully `cmd_fit` reads for it."""
         from ml_stack.serve import cli
 
-        called: list[argparse.Namespace] = []
-        monkeypatch.setattr(cli, "cmd_fit", lambda args: called.append(args) or 0)
-        assert cli.main(["fit", "--ui"]) == 0
-        assert called and called[0].ui is True
-        assert cli.main(["fit"]) == 0 and called[1].ui is False
+        parser = cli.COMMANDS.parser()
+        assert parser.parse_args(["fit", "--ui"]).ui is True
+        assert parser.parse_args(["fit"]).ui is False
 
     def test_a_server_it_puts_up_answers_only_loopback(self):
         """There is no cluster passphrase behind this page, so there had better be no

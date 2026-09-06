@@ -19,7 +19,7 @@ import pytest
 from ml_stack.client import Reply
 from ml_stack.graph.ask import converse
 from ml_stack.graph.asking import Asking
-from ml_stack.serve import cli as serve_cli
+from ml_stack.serve import cli as serve_cli, ops as serve_ops
 from ml_stack.serve import profile as prof
 from ml_stack.serve.fit import Fit
 from ml_stack.serve.profile import Profile, add, profile_for, profiles, record, said
@@ -314,8 +314,8 @@ def leases(monkeypatch, tmp_path):
             return SimpleNamespace(base_url=f"http://127.0.0.1:{spec.port}", port=spec.port,
                                    pid=None, adopted=True)
 
-    monkeypatch.setattr(serve_cli, "ServerManager", Manager)
-    monkeypatch.setattr(serve_cli, "resolve_model", lambda named: named)
+    monkeypatch.setattr(serve_ops, "ServerManager", Manager)
+    monkeypatch.setattr(serve_ops, "resolve_model", lambda named: named)
     monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
     return seen
 

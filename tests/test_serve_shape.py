@@ -128,17 +128,17 @@ def test_letting_go_releases_every_held_server(leases):
 
 def test_a_draft_that_cannot_be_found_is_served_without_it_out_loud(monkeypatch):
     """Said in silence once, and a model ran undrafted for an hour with nothing to show."""
-    import ml_stack.serve.cli as cli
+    import ml_stack.serve.ops as ops
 
     said: list[str] = []
-    monkeypatch.setattr(cli, "drafted", lambda *a, **k: (_ for _ in ()).throw(
+    monkeypatch.setattr(ops, "drafted", lambda *a, **k: (_ for _ in ()).throw(
         RuntimeError("no repository listing")))
     assert draft_for("/models/weights.gguf", "auto", log=said.append) == ""
     assert said == ["no draft head: no repository listing"]
 
 
 def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
-    import ml_stack.serve.cli as cli
+    import ml_stack.serve.ops as ops
 
     asked: list[tuple] = []
 
@@ -146,7 +146,7 @@ def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
         asked.append((model, want, binary))
         return "/models/mtp-Q8_0.gguf"
 
-    monkeypatch.setattr(cli, "drafted", fake_drafted)
+    monkeypatch.setattr(ops, "drafted", fake_drafted)
     from ml_stack.serve import backend
 
     monkeypatch.setattr(backend.LlamaServerBackend, "binary",
@@ -157,7 +157,7 @@ def test_a_draft_is_resolved_for_the_build_that_has_to_load_it(monkeypatch):
 
 
 def test_auto_takes_the_most_precise_projector_and_a_missing_one_is_no_projector(monkeypatch):
-    import ml_stack.serve.cli as cli
+    import ml_stack.serve.ops as ops
 
     asked: list[tuple] = []
 
@@ -165,11 +165,11 @@ def test_auto_takes_the_most_precise_projector_and_a_missing_one_is_no_projector
         asked.append((model, wanted, prefix, best))
         return "/models/mmproj-BF16.gguf"
 
-    monkeypatch.setattr(cli, "alongside", fake_alongside)
+    monkeypatch.setattr(ops, "alongside", fake_alongside)
     assert projector_for("/models/weights.gguf", "auto") == "/models/mmproj-BF16.gguf"
     assert asked == [("/models/weights.gguf", "auto", "mmproj-", True)]
 
-    monkeypatch.setattr(cli, "alongside", lambda *a, **k: (_ for _ in ()).throw(OSError("gone")))
+    monkeypatch.setattr(ops, "alongside", lambda *a, **k: (_ for _ in ()).throw(OSError("gone")))
     said: list[str] = []
     assert projector_for("/models/weights.gguf", "auto", log=said.append) == ""
     assert said == ["no projector: gone"]
@@ -189,11 +189,11 @@ def shipped(monkeypatch):
     resolve against fakes, so nothing looks in a Hub cache.
     """
     import ml_stack.hub
-    import ml_stack.serve.cli as cli
+    import ml_stack.serve.ops as ops
     from ml_stack.serve.profile import package_file, profile_for, records_in
 
     monkeypatch.setattr(ml_stack.hub, "located", lambda name: Path(f"/models/{name}"))
-    monkeypatch.setattr(cli, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
+    monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
     return found.run(port=8099, seats=2)

@@ -1,126 +1,45 @@
-"""``ml-stack-serve`` -- see what is serving, put a model up, take one down."""
+"""``ml-stack-serve`` -- see what is serving, put a model up, take one down.
+
+Every subcommand parses its arguments and prints; the work is in `ml_stack.serve.ops`.
+"""
 
 from __future__ import annotations
 
 import argparse
-import os
-import platform
-import pathlib
 import json
+import platform
 import time
-from typing import Any
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict
 from pathlib import Path
 
 from ml_stack import home
-from ml_stack.client import is_healthy, reported_models
-from ml_stack.client.health import serving_params
-from ml_stack.fleet.serving import Serving
+from ml_stack.command import Group, flag, option
 from ml_stack.log import say, warn
-from ml_stack.serve import build
-from ml_stack.serve.backend import (
-    default_slot_save_path,
-    LlamaServerBackend,
-    ServerFailed,
-    ServerInfo,
-    ServerSpec,
-    parse_context,
-)
+from ml_stack.serve import build, ops
+from ml_stack.serve.backend import ServerFailed, ServerSpec, parse_context
 from ml_stack.serve.binary import BinaryNotFound
-from ml_stack.serve.manager import (
-    DEFAULT_TIMEOUT_S,
-    lease_file,
-    ServerManager,
-    orphaned,
-    recorded_servers,
-)
-from ml_stack.serve.ports import DEFAULT_HOST, server_pids_on_port
-from ml_stack.serve.process import pid_exists
+from ml_stack.serve.manager import DEFAULT_TIMEOUT_S
+from ml_stack.serve.ops import DEFAULT_ROOT, Refused, base_url_for
 from ml_stack.units import human_bytes
+
+__all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
 
 _SPEC = ServerSpec(model="")
 DEFAULT_PORT = _SPEC.port
 DEFAULT_CONTEXT = _SPEC.context
 DEFAULT_PARALLEL = _SPEC.parallel
 DEFAULT_TIMEOUT = DEFAULT_TIMEOUT_S
-PROBE_TIMEOUT = 2.0
 # The per-user contexts `fit` tabulates unless told otherwise; named here so --help can
 # say them without importing the module that measures.
 FIT_PER_USER = (4096, 8192, 16384, 32768, 65536, 131072)
 
-
-@dataclass(frozen=True, slots=True)
-class Snapshot:
-    """One server that is answering, and what a lease for it would do."""
-
-    port: int
-    base_url: str
-    model: str | None = None
-    quant: str | None = None
-    context: int | None = None
-    slots: int | None = None
-    pid: int | None = None
-    owner_pid: int | None = None
-    holder_running: bool = False
-    recorded: bool = False
-    load_s: float | None = None
-    warmup_s: float | None = None
-    verdict: str = ""
-    reason: str = ""
+COMMANDS = Group(
+    "ml-stack-serve",
+    "See which model is being served on this machine, put one up, take it down.")
+main = COMMANDS.run
 
 
-def base_url_for(port: int) -> str:
-    return f"http://{DEFAULT_HOST}:{port}"
-
-
-def _int_or_none(value: object) -> int | None:
-    return value if isinstance(value, int) else None
-
-
-def _float_or_none(value: object) -> float | None:
-    return float(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
-
-
-def look(port: int, records: dict[int, dict]) -> Snapshot | None:
-    """What is serving on ``port``, or ``None`` when nothing answers there."""
-    url = base_url_for(port)
-    if not is_healthy(url, timeout=PROBE_TIMEOUT):
-        return None
-
-    params = serving_params(url)
-    models = reported_models(url)
-    entry = records.get(port) or {}
-
-    reported = (params.model if params else None) or (models[0] if models else None)
-    reported = reported or entry.get("model")
-    owner = _int_or_none(entry.get("owner_pid"))
-
-    return Snapshot(
-        port=port,
-        base_url=url,
-        model=Path(str(reported)).name if reported else None,
-        quant=params.quant if params else None,
-        context=params.n_ctx if params else None,
-        slots=params.total_slots if params else None,
-        pid=_int_or_none(entry.get("pid")),
-        owner_pid=owner,
-        holder_running=pid_exists(owner),
-        recorded=bool(entry),
-        load_s=_float_or_none(entry.get("load_s")),
-        warmup_s=_float_or_none(entry.get("warmup_s")),
-    )
-
-
-def judge(manager: ServerManager, snapshot: Snapshot, spec: ServerSpec) -> Snapshot:
-    """``snapshot`` with the verdict a lease for ``spec`` would reach."""
-    try:
-        info = manager.adopt(spec)
-    except ServerFailed as exc:
-        return replace(snapshot, verdict="refuse", reason=str(exc))
-    return replace(snapshot, verdict="adopt" if info is not None else "start")
-
-
-def _lease_line(snapshot: Snapshot) -> str:
+def _lease_line(snapshot: ops.Snapshot) -> str:
     if not snapshot.recorded:
         return "none on record -- 'ml-stack-serve down' will not stop this server"
     pid = f"server pid {snapshot.pid}" if snapshot.pid else "server pid not recorded"
@@ -134,7 +53,7 @@ def _lease_line(snapshot: Snapshot) -> str:
             "has gone; 'ml-stack-serve down --orphans' stops it")
 
 
-def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
+def _verdict_line(snapshot: ops.Snapshot, model: str, parallel: int) -> str:
     seats = f" --parallel {parallel}" if int(parallel or 1) != 1 else ""
     ask = f"'ml-stack-serve up {model}{seats}'"
     if snapshot.verdict == "adopt":
@@ -144,147 +63,76 @@ def _verdict_line(snapshot: Snapshot, model: str, parallel: int) -> str:
     return f"{ask} would start its own server"
 
 
-def every_server() -> list[dict]:
-    """Every llama-server process on this machine, leased or not: pid, port, model, memory.
-    A server nobody recorded -- a Homebrew one from before the managed build, a hand start
-    -- holds memory `status` cannot otherwise see, and `pgrep` by hand is what the guard
-    refuses."""
-    try:
-        import psutil
-    except ImportError:
-        return []
-    out = []
-    for proc in psutil.process_iter(["pid", "name", "cmdline", "memory_info"]):
-        try:
-            argv = list(proc.info.get("cmdline") or [])
-            name = str(proc.info.get("name") or "")
-        except (psutil.Error, OSError):
+def _say_processes(as_json: bool) -> int:
+    """``status --every``: every llama-server on this machine, leased or not."""
+    from ml_stack.fleet.models import sized
+    from ml_stack.hub import pretty_name
+
+    got = ops.processes()
+    if as_json:
+        say(json.dumps({"serving": bool(got.found), "servers": list(got.found),
+                        "foreign": list(got.foreign)}, indent=2))
+        return 0 if got.found else 1
+    if not got.found:
+        say("no llama-server is running on this machine.")
+        return 1
+    for one in got.found:
+        if one.get("defunct"):
+            # a zombie holds no memory and answers no port; it is waiting to be reaped
+            say(f"  pid {one['pid']}  defunct -- exited, not yet reaped; holds nothing")
             continue
-        head = Path(argv[0]).name if argv else name
-        if "llama-server" not in head and "llama-server" not in name:
-            continue
-
-        def after(flag: str, short: str = "") -> str:
-            for i, a in enumerate(argv[:-1]):
-                if a == flag or (short and a == short):
-                    return argv[i + 1]
-                if a.startswith(flag + "="):
-                    return a.split("=", 1)[1]
-            return ""
-
-        mem = proc.info.get("memory_info")
-        try:
-            state = str(proc.status())
-        except (psutil.Error, OSError):
-            state = ""
-        rss = int(getattr(mem, "rss", 0) or 0)
-        if isinstance(proc, psutil.Process):
-            from ml_stack.bench.measure import footprint_of
-
-            rss = footprint_of(proc) or rss
-        out.append({"pid": int(proc.info["pid"]), "port": int(after("--port") or 8080),
-                    "defunct": state == psutil.STATUS_ZOMBIE,
-                    "model": after("--model", "-m") or after("-hf") or "",
-                    "binary": argv[0] if argv else name,
-                    "rss": rss})
-    return sorted(out, key=lambda r: r["port"])
+        leased = "leased" if one["port"] in got.leased else "NOT leased -- nobody records it"
+        rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
+        say(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
+            f"{rss} resident  {leased}  ({one['binary']})")
+        cache = ops.cache_of(one["model"])
+        if cache is not None:
+            say(f"      cache  {cache[0]}  ({sized(cache[1])})")
+        if one["port"] not in got.leased:
+            say(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
+    if got.strays:
+        say(f"  {len(got.strays)} not leased: 'ml-stack-serve down --port N' stops one")
+    return 0
 
 
-def cache_of(model: str) -> tuple[Path, int] | None:
-    """The model root ``model`` lies under, with its weight bytes; the file's own
-    directory when it is under none; None when neither is there."""
-    from ml_stack.fleet.models import holding
-    from ml_stack.hub import default_roots
-
-    path = home.expand(str(model or ""))
-    if not str(model or "").strip():
-        return None
-    for root in default_roots(home.home()):
-        try:
-            path.relative_to(root)
-        except ValueError:
-            continue
-        if root.is_dir():
-            return root, holding(root)[1]
-    if path.parent.is_dir() and str(path.parent) not in ("", "."):
-        return path.parent, holding(path.parent)[1]
-    return None
-
-
+@COMMANDS.command(
+    "status", help="what is serving, and what a lease would do",
+    options=[
+        option("port", default=DEFAULT_PORT,
+               help=f"port to check besides the recorded ones (default: {DEFAULT_PORT})"),
+        option("model", help="ask what leasing this model would do (default: whatever is "
+                             "already serving)"),
+        option("context", type=parse_context, default=DEFAULT_CONTEXT,
+               help=f"the context that lease would ask for -- 32768, 256k, 1m "
+                    f"(default: {DEFAULT_CONTEXT})"),
+        option("parallel", default=DEFAULT_PARALLEL,
+               help=f"the slots that lease would ask for (default: {DEFAULT_PARALLEL})"),
+        flag("--every", action="store_true",
+             help="every llama-server process on this machine, leased or not -- a stray "
+                  "one holds memory a lease cannot see"),
+        option("json", help="print one JSON object instead of the human listing"),
+    ])
 def cmd_status(args: argparse.Namespace) -> int:
-    records = recorded_servers(lease_file())
     if getattr(args, "every", False):
-        from ml_stack.hub import pretty_name
+        return _say_processes(bool(args.json))
 
-        found = every_server()
-        strays = [o for o in found if o["port"] not in records and not o.get("defunct")]
-        foreign = [{"port": o["port"], "pid": o["pid"]} for o in strays]
-        if args.json:
-            say(json.dumps({"serving": bool(found), "servers": found, "foreign": foreign},
-                             indent=2))
-            return 0 if found else 1
-        if not found:
-            say("no llama-server is running on this machine.")
-            return 1
-        for one in found:
-            if one.get("defunct"):
-                # a zombie holds no memory and answers no port; it is waiting to be reaped
-                say(f"  pid {one['pid']}  defunct -- exited, not yet reaped; holds nothing")
-                continue
-            leased = "leased" if one["port"] in records else "NOT leased -- nobody records it"
-            rss = f"{one['rss'] / 2**30:.1f}G" if one["rss"] else "?"
-            say(f"  :{one['port']}  pid {one['pid']}  {pretty_name(one['model']) or '?'}  "
-                f"{rss} resident  {leased}  ({one['binary']})")
-            cache = cache_of(one["model"])
-            if cache is not None:
-                from ml_stack.fleet.models import sized
-
-                say(f"      cache  {cache[0]}  ({sized(cache[1])})")
-            if one["port"] not in records:
-                say(f"    foreign -- pid {one['pid']}, not started by ml-stack; left alone")
-        if strays:
-            say(f"  {len(strays)} not leased: 'ml-stack-serve down --port N' stops one")
-        return 0
-    ports = sorted({*records, args.port})
-    manager = ServerManager(state_file=lease_file())
-
-    found: list[Snapshot] = []
-    foreign: list[dict[str, int]] = []
-    for port in ports:
-        snapshot = look(port, records)
-        if snapshot is None:
-            continue
-        if not snapshot.recorded:
-            # a health-answering server this machine never leased -- the backend never
-            # kills one (`ports.reclaim_port`), so it is reported and left alone rather
-            # than judged for adopting or starting over
-            pids = server_pids_on_port(port)
-            if pids:
-                foreign.extend({"port": port, "pid": pid} for pid in pids)
-                continue
-        model = args.model or snapshot.model
-        if model:
-            snapshot = judge(
-                manager,
-                snapshot,
-                ServerSpec(model=model, port=port, context=args.context,
-                           parallel=args.parallel),
-            )
-        found.append(snapshot)
-
+    found = ops.status(port=args.port, model=args.model, context=args.context,
+                       parallel=args.parallel)
     if args.json:
         say(json.dumps(
-            {"serving": bool(found) or bool(foreign), "ports_checked": ports,
-             "servers": [asdict(s) for s in found], "foreign": foreign},
+            {"serving": bool(found.servers) or bool(found.foreign),
+             "ports_checked": list(found.ports),
+             "servers": [asdict(s) for s in found.servers],
+             "foreign": list(found.foreign)},
             indent=2))
-        return 0 if (found or foreign) else 1
+        return 0 if (found.servers or found.foreign) else 1
 
-    if not found and not foreign:
-        say("nothing is serving on port " + ", ".join(str(p) for p in ports) + ".")
+    if not found.servers and not found.foreign:
+        say("nothing is serving on port " + ", ".join(str(p) for p in found.ports) + ".")
         say(f"  'ml-stack-serve up <model>' would start one on port {args.port}.")
         return 1
 
-    for snapshot in found:
+    for snapshot in found.servers:
         quant = f"  ({snapshot.quant})" if snapshot.quant else ""
         say(snapshot.base_url)
         say(f"  model    {snapshot.model or 'not reported'}{quant}")
@@ -297,135 +145,18 @@ def cmd_status(args: argparse.Namespace) -> int:
             say(f"  loaded   in {snapshot.load_s:.1f}s{warm}")
         if snapshot.verdict:
             say("  " + _verdict_line(snapshot, args.model or snapshot.model or "<model>",
-                                       args.parallel))
-    for held in foreign:
+                                     args.parallel))
+    for held in found.foreign:
         say(base_url_for(held["port"]))
         say(f"  foreign -- pid {held['pid']}, not started by ml-stack; left alone")
     return 0
-
-
-# Where the daemon keeps the list of what this machine is serving. Peers read it to find a
-# machine that already has a model loaded, so a server nobody announced is a server nobody
-# else can use.
-DEFAULT_ROOT = "~/.ml-stack/traind"
-
-
-def beacon(root: str) -> Serving | None:
-    """This machine's beacon, or None when no fleet was ever set up here.
-
-    A machine with no daemon has no beacon to write to, and creating one would advertise a
-    model to nobody through a file nothing reads. Announcing is for machines in a fleet.
-    """
-    where = Path(root).expanduser()
-    return Serving(where / "serving.json") if where.is_dir() else None
-
-
-def announce(args: argparse.Namespace, spec: ServerSpec) -> str:
-    """Tell the fleet this machine is serving it. Returns a line to print, or ''."""
-    try:
-        known = beacon(args.root)
-        if known is None:
-            return ""
-        known.register(spec.port, models=[str(spec.model)], slots=spec.parallel)
-        return f"announced to the fleet on port {spec.port}"
-    except Exception as exc:  # noqa: BLE001 - a server that works unannounced still works
-        return f"could not announce it to the fleet: {exc}"
-
-
-def alongside(model: str, asked: str, prefix: str, *, best: bool = False) -> str:
-    """A file shipped with ``model`` whose name starts with ``prefix``, resolving 'auto'.
-
-    An `hf:` reference is asked of the Hub; a local path is answered by looking in the
-    model's own directory, because a cached repository puts what travels with the weights
-    beside them. Anything else is taken as written.
-
-    ``best`` picks the most precise of several, which is what a vision projector wants and
-    what plain alphabetical order gets wrong: sorted by name, `mmproj-BF16` beats
-    `mmproj-F32` on the letter B.
-    """
-    if asked.lower() != "auto":
-        return asked
-    from ml_stack.hub import _precision, beside
-
-    reference = str(model)
-    if reference.startswith("hf:"):
-        return beside("/".join(reference[3:].split("/")[:2]), prefix, best=best)
-    # "Shipped with this model" means in this repository, not in this directory, and not
-    # even in this revision of it. A Hub cache keeps one folder per revision, so weights
-    # fetched in August and a draft head fetched today land in different ones -- which is
-    # exactly what happened, and `--draft auto` reported no head for a model that ships
-    # three. A sharded download also puts the weights in a per-quantisation subfolder and
-    # leaves the projector at the snapshot root.
-    #
-    # So: beside the file, then the directory above, then every revision of the same
-    # repository. Widening, and stopping at the first place that has one.
-    where = pathlib.Path(reference).expanduser().parent
-    places: list[tuple[pathlib.Path, str]] = [(where, f"{prefix}*.gguf"),
-                                              (where.parent, f"{prefix}*.gguf")]
-    for parent in where.parents:
-        if parent.name == "snapshots":
-            places.append((parent, f"*/**/{prefix}*.gguf"))
-            break
-    for here, pattern in places:
-        found = sorted(here.glob(pattern))
-        if found:
-            return str(min(found, key=lambda f: _precision(f.name)) if best else found[0])
-    return ""
-
-
-def drafted(model: str, asked: str, *, borrows: bool | None = None,
-            binary: str | Path | None = None) -> str:
-    """The draft head to serve with ``model``, resolving 'auto'.
-
-    'auto' is `hub.choose_head`'s decision -- the one resolver `up`, the bench and the app
-    share -- made for ``binary`` (``None``: the one `find_binary` would pick), and its
-    reason is printed to stderr so a head withheld from mainline is withheld out loud.
-    ``borrows`` overrides what the binary says, for a caller that knows better.
-
-    Anything other than 'auto' is taken as written. A head is named by the method it
-    implements -- `mtp-` for multi-token prediction, `eagle3-` for EAGLE3 -- and
-    `hub.spec_for` reads which `--spec-type` the one chosen needs.
-    """
-    if asked.lower() != "auto":
-        return asked
-    from ml_stack.hub import choose_head
-
-    chosen = choose_head(model, binary=binary, borrows=borrows)
-    warn(f"draft head: {chosen.path or 'none'} -- {chosen.why}")
-    return chosen.path
-
-
-def resolve_model(named: str) -> str:
-    """A bare model name, found in the Hub cache -- a path or an ``hf:`` reference is used
-    exactly as given.
-
-    A name copied straight out of `ml-stack-models files` -- no directory, no `hf:` prefix
-    -- used to be read as a relative path and fail preflight with "shards missing" for a
-    model that was on the machine the whole time: `up gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-    --preflight-only` did exactly that. `bench.find_model` already solved the same
-    problem for the bench by asking `fleet.models` where a bare name lives; `hub.located`
-    is the same idea, narrowed to the Hub cache and an exact filename -- what `up` is
-    actually handed.
-    """
-    if not named or named.startswith("hf:") or "/" in named:
-        return named
-    from ml_stack.hub import located
-
-    found = located(named)
-    return str(found) if found is not None else named
 
 
 def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, list[str]]:
     """Fill every flag ``up`` was not given from this model's measured profile.
 
     "Not given" is "still the parser's own default", which is the only thing argparse can
-    be asked afterwards -- so a flag typed out with the value it already had is not
-    distinguished from one left alone, and neither is a mistake: the value is the same.
-    Anything typed differently wins, because a person naming a flag is overruling a
-    measurement on purpose.
-
-    Returns the profile (or None) and one line per field it filled, so `up` can say what
-    it took rather than serving a shape nobody asked for in silence.
+    be asked afterwards. Returns the profile (or None) and one line per field it filled.
     """
     from ml_stack.serve.profile import profile_for, resolved
 
@@ -436,16 +167,14 @@ def from_profile(args: argparse.Namespace, model: str) -> tuple[object | None, l
     # each of those seats gets what one measured seat got.
     seats = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
     shape = found.shape(seats=seats, resolve=False)
-    context = shape.context
-    # The head is recorded by file name -- that is what a kept run knows it as -- and
-    # llama-server needs a path. 'auto' is left alone: `cmd_up` answers it below, and it is
-    # the one resolution that has to know which binary will serve.
+    # The head is recorded by file name and llama-server needs a path. 'auto' is left
+    # alone: `resolve_spec` answers it, and it has to know which binary will serve.
     head = found.draft
     if head and head.lower() != "auto":
         head = resolved(model, head, "", build=found.build)[0]
     # dest -> the value the profile would have, for the flags whose default `up` defines
     wanted = {
-        "context": context,
+        "context": shape.context,
         "parallel": max(1, seats),
         "build": found.build,
         "draft": head,
@@ -490,16 +219,137 @@ _EVENT_LINES = {
 
 
 def _print_event(event: dict) -> None:
-    """One line per step, as it happens -- ``ml-stack-serve up``'s and ``escalate``'s own
-    progress, in the words ``ServerManager`` already emits them in."""
+    """One line per step, as it happens -- ``up``'s and ``escalate``'s own progress."""
     said = _EVENT_LINES.get(str(event.get("event")))
     warn(said(event) if said else str(event.get("event")))
 
 
-def cmd_up(args: argparse.Namespace) -> int:
-    from ml_stack.serve.backend import LlamaServerBackend, UnknownFlag
+def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) -> ServerSpec:
+    """The spec ``up`` was asked for, before 'auto' is answered."""
+    kv = str(getattr(args, "kv", "") or "")
+    return ServerSpec(
+        model=model, port=args.port, context=args.context, parallel=args.parallel,
+        draft=str(getattr(args, "draft", "") or "") or None,
+        mmproj=str(getattr(args, "mmproj", "") or "") or None,
+        spec_type=str(getattr(args, "spec", "") or ""),
+        cache_type_k=kv, cache_type_v=kv,
+        kv_unified=getattr(args, "kv_unified", None),
+        embedding=bool(getattr(args, "embedding", False)),
+        spec_draft_max=getattr(args, "spec_n_max", None),
+        spec_draft_ngl=getattr(args, "draft_ngl", None),
+        lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
+        override_tensor=tuple(getattr(args, "on_cpu", []) or ()),
+        reasoning_budget=getattr(args, "reasoning_budget", None),
+        # llama-server's own flags, which only a profile carries: `up` has no flag of its
+        # own for `-ub 2048`
+        extra_args=extra,
+        cpu_moe=bool(getattr(args, "cpu_moe", False)))
 
-    model = resolve_model(str(args.model))
+
+@COMMANDS.command(
+    "up", help="serve a model, or adopt the one already serving it",
+    options=[
+        flag("model", help="path to a .gguf file, or hf:owner/repo/file.gguf"),
+        option("port", default=DEFAULT_PORT,
+               help=f"port to serve on (default: {DEFAULT_PORT})"),
+        option("context", type=parse_context, default=DEFAULT_CONTEXT,
+               help=f"tokens across all slots -- 32768, 256k, 1m (default: "
+                    f"{DEFAULT_CONTEXT}). Beyond what the model trained at, YaRN is "
+                    "turned on by itself; it scales every position, so shorter "
+                    "conversations on this server pay for it too"),
+        option("parallel", default=DEFAULT_PARALLEL,
+               help=f"slots to serve at once (default: {DEFAULT_PARALLEL})"),
+        flag("--escalate", action="store_true",
+             help="when a server is already up with fewer slots than --parallel asks for, "
+                  "grow (or split, or summarise and split) it rather than refusing -- "
+                  "keeps every live conversation"),
+        option("timeout",
+               help="seconds to wait for it to load (default: scales with the weights on "
+                    f"disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)"),
+        option("json", help="print one JSON object instead of the human line"),
+        flag("--preflight-only", action="store_true",
+             help="run every check a load would run -- shards present, architecture this "
+                  "build reads, an estimate against what this machine may use, every flag "
+                  "the build accepts -- and print the report without starting or adopting "
+                  "anything. Exits 0 or 1"),
+        flag("--root", default=DEFAULT_ROOT,
+             help=f"the fleet root whose beacon to announce in, when there is one "
+                  f"(default: {DEFAULT_ROOT})"),
+        flag("--binary", default="", metavar="PATH",
+             help="the llama-server to run, when the one on PATH cannot read this model. A "
+                  "release lags master by an architecture or two: gemma-4 and qwen3moe are "
+                  "in the current release, qwen4exp is not, so Qwen3.8-Flash-Next needs a "
+                  "build from master and says 'unknown model architecture' without one"),
+        flag("--build", default="", metavar="NAME",
+             help="serve with a named build 'ml-stack-serve build --name NAME' made -- a "
+                  "fork kept beside 'current' rather than replacing it, e.g. a fork whose "
+                  "fixes have not reached mainline yet. Ignored if --binary is also given"),
+        flag("--mmproj", default="", metavar="PATH_OR_AUTO",
+             help="the vision projector, so the model can read a picture -- a path, an hf: "
+                  "reference, or 'auto' to take the most precise one shipped with the "
+                  "weights. An hf: model already pulls a projector by itself, so 'auto' is "
+                  "for choosing a better one than it would: a projector is a fraction of "
+                  "the weights and carries all of the seeing, so quantising it is a false "
+                  "economy"),
+        flag("--spec", default="", metavar="TYPE",
+             help="how to guess ahead: an ngram-* kind needs no second model at all, "
+                  "proposing tokens it has already seen in the prompt, which suits work "
+                  "that copies from its context and costs no memory. ngram-simple, "
+                  "ngram-map-k, ngram-map-k4v, ngram-mod, ngram-cache, or a draft-* kind "
+                  "with --draft. Left unset, the server decides"),
+        flag("--spec-n-max", type=int, default=None, metavar="N",
+             help="tokens guessed ahead each step (server default 3)"),
+        flag("--on-cpu", action="append", default=[], metavar="PATTERN=BUFFER",
+             help="keep tensors matching a pattern off the GPU, e.g. "
+                  "'per_layer_token_embd=CPU' for Qwen3.8-Flash-Next's 27G n-gram table on "
+                  "a discrete GPU whose VRAM it would not fit beside the weights. Never on "
+                  "unified memory (a Mac): there the CPU and GPU halves are the same RAM, "
+                  "the build already places the table where a gather is cheapest, and "
+                  "forcing it buys nothing. ml-stack sets none of these by itself. "
+                  "Repeatable. Read the tensor names from the model rather than guessing "
+                  "at the pattern"),
+        flag("--cpu-moe", action="store_true",
+             help="keep every Mixture-of-Experts weight on the CPU, which is how a 35B with "
+                  "3B active fits a machine that could not hold it all"),
+        flag("--lookup-cache", default="", metavar="FILE",
+             help="an n-gram cache kept on disk and updated as it generates, so what was "
+                  "learnt answering one question speculates the next. Only the ngram-cache "
+                  "kind uses it; the other ngram kinds look up the prompt itself and keep "
+                  "nothing"),
+        flag("--draft-ngl", type=int, default=None, metavar="N",
+             help="layers of the draft model to put on the GPU. Without it the draft runs "
+                  "where the server puts it by default, which can be the CPU -- and a "
+                  "draft slower than the model it is guessing for is a loss"),
+        flag("--embedding", action="store_true",
+             help="serve an embedding model (llama-server --embedding), the way the graph's "
+                  "vectors and the thread's recall want one"),
+        flag("--kv", default="q8_0", metavar="TYPE",
+             help="what the KV cache is stored as (default q8_0: measured 2026-09-02 on "
+                  "Flash-Next, F1 unchanged, faster, half the cache; the recurrent state is "
+                  "not the KV and stays); f16 is the full-size cache"),
+        flag("--kv-unified", action=argparse.BooleanOptionalAction, default=None,
+             help="one cache pool for every slot, masked per sequence, rather than a cache "
+                  "per slot; --no-kv-unified asks for the latter outright. Left unset, the "
+                  "build decides"),
+        flag("--draft", default="", metavar="MODEL_OR_AUTO",
+             help="a small model to guess ahead, which the large one checks in one pass -- "
+                  "a path, an hf: reference, or 'auto' to use the draft head shipped beside "
+                  "the weights (the mtp- file in a QAT repository)"),
+        flag("--reasoning-budget", type=int, default=None, metavar="TOKENS",
+             dest="reasoning_budget",
+             help="how many tokens a turn may think for before it is made to answer; 0 "
+                  "turns the thinking off. A ceiling on n_predict cuts the answer instead, "
+                  "which is the wrong end"),
+        flag("--profile", action="store_true",
+             help="fill every flag not given from this model's measured profile -- the "
+                  "build, head, cache, thinking and llama-server flags that answered best "
+                  "(`ml-stack-serve profile MODEL` prints it). A flag given wins over the "
+                  "record"),
+    ])
+def cmd_up(args: argparse.Namespace) -> int:
+    from ml_stack.serve.backend import UnknownFlag
+
+    model = ops.resolve_model(str(args.model))
     if model != str(args.model):
         warn(f"resolved {args.model} -> {model}")
 
@@ -515,89 +365,26 @@ def cmd_up(args: argparse.Namespace) -> int:
                 warn(f"  {profile.note}")
 
     chosen = str(getattr(args, "binary", "") or "")
-    build_name = str(getattr(args, "build", "") or "")
-    manager = ServerManager(
-        LlamaServerBackend(binary=chosen or None, build=build_name or None)
-        if (chosen or build_name) else None,
-        state_file=lease_file())
-    asked = str(getattr(args, "draft", "") or "")
-    draft = asked
-    if asked.lower() == "auto":
-        # The chooser is told which binary will serve: a named fork build is the only case
-        # a head that borrows its target's embeddings can load, and offering one to
-        # 'current' is offering something that fails at the far end of a multi-gigabyte
-        # load. Which binary that is, it reads off the path -- not off the flags.
-        from ml_stack.hub import choose_head
-
-        try:
-            binary_path: Path | None = manager.backend.binary
-        except (BinaryNotFound, OSError):
-            binary_path = None
-        chosen = choose_head(model, binary=binary_path)
-        draft = chosen.path
-        build_said = "a fork build" if chosen.borrows else "mainline"
-        if draft:
-            warn(f"draft head: {draft} -- {chosen.why} (serving with {build_said})")
-        else:
-            warn(f"no draft head served -- {chosen.why}")
-        if chosen.note:
-            hint = "" if chosen.borrows else " Serve with --build NAME to use one."
-            warn(f"  {chosen.note}{hint}")
-    seeing = alongside(model, str(getattr(args, "mmproj", "") or ""), "mmproj-",
-                       best=True)
-    # A head implements one method and says which in its name. Serving an EAGLE3 head
-    # without --spec-type draft-eagle3 is asking it to do something it does not do.
-    kind = str(getattr(args, "spec", "") or "")
-    if draft and not kind:
-        from ml_stack.hub import spec_for
-
-        kind = spec_for(draft)
-    if str(getattr(args, "mmproj", "")).lower() == "auto" and not seeing:
-        warn("no vision projector is shipped beside that model; it will not read pictures")
-    kv = str(getattr(args, "kv", "") or "")
-    spec = ServerSpec(model=model, port=args.port, context=args.context,
-                      parallel=args.parallel, draft=draft or None, mmproj=seeing or None,
-                      spec_type=kind, cache_type_k=kv, cache_type_v=kv,
-                      kv_unified=getattr(args, "kv_unified", None),
-                      embedding=bool(getattr(args, "embedding", False)),
-                      spec_draft_max=getattr(args, "spec_n_max", None),
-                      spec_draft_ngl=getattr(args, "draft_ngl", None),
-                      lookup_dynamic=str(getattr(args, "lookup_cache", "") or "") or None,
-                      override_tensor=tuple(getattr(args, "on_cpu", []) or ()),
-                      reasoning_budget=getattr(args, "reasoning_budget", None),
-                      # llama-server's own flags, which only a profile carries: `up` has no
-                      # flag of its own for `-ub 2048`, and a measurement that found one
-                      # worth 4.69x has to be able to reach the server somehow
-                      extra_args=tuple(profile.extra_args) if profile is not None else (),
-                      cpu_moe=bool(getattr(args, "cpu_moe", False)))
-
-    spec, yarn_said = LlamaServerBackend.resolved_context(spec)
-    if yarn_said:
-        warn(yarn_said)
+    manager = ops.manager_for(chosen, str(getattr(args, "build", "") or ""))
+    extra = tuple(profile.extra_args) if profile is not None else ()
+    resolved = ops.resolve_spec(_asked_spec(args, model, extra), manager=manager)
+    for note in resolved.notes:
+        warn(note)
+    spec = resolved.spec
 
     if getattr(args, "preflight_only", False):
-        from ml_stack.hub import room
-        from ml_stack.serve.preflight import Preflight
-
         try:
-            binary_path = manager.backend.binary
+            report = ops.preflight(spec, manager=manager)
         except (BinaryNotFound, OSError) as exc:
             warn(f"error: {exc}")
             return 2
-        # a draft named by hf: file is fetched and served by path, exactly as start() does;
-        # a preflight of the unresolved reference refused it instead (measured 2026-09-01)
-        from ml_stack.serve.backend import LlamaServerBackend
-
-        spec = LlamaServerBackend.resolved_draft(spec)
-        report = Preflight(spec, binary=binary_path, limit_bytes=room())
         say(report.said())
         return 0 if report.ok else 1
 
-    manager.say = lambda line: warn(line)
     try:
-        info = manager.lease(spec, timeout=args.timeout,
-                             escalate=bool(getattr(args, "escalate", False)),
-                             on_event=_print_event)
+        started = ops.up(spec, manager=manager, timeout=args.timeout,
+                         escalate=bool(getattr(args, "escalate", False)),
+                         root=args.root, say=warn, on_event=_print_event)
     except UnknownFlag as exc:
         # Refused before the load, not at the end of it: the build was asked what it
         # accepts and the answer is printed one flag per line, with the nearest it has.
@@ -607,20 +394,13 @@ def cmd_up(args: argparse.Namespace) -> int:
         warn(f"error: {exc}")
         return 2
 
-    held = recorded_servers(lease_file()).get(info.port) or {}
-    if not info.adopted or held.get("owner_pid") == os.getpid():
-        # a server this process started, or an orphan it took over: on the record under
-        # the server's own pid once this command has exited
-        manager.detach(info)
-
-    told = announce(args, spec)
-
+    info, told = started.info, started.announced
     if args.json:
         say(json.dumps({"base_url": info.base_url, "port": info.port, "pid": info.pid,
-                          "adopted": info.adopted, "model": str(spec.model),
-                          "context": spec.context, "parallel": spec.parallel,
-                          "draft": str(spec.draft or ""),
-                          "announced": told.startswith("announced")}, indent=2))
+                        "adopted": info.adopted, "model": str(spec.model),
+                        "context": spec.context, "parallel": spec.parallel,
+                        "draft": str(spec.draft or ""),
+                        "announced": told.startswith("announced")}, indent=2))
         return 0
 
     where = f" (pid {info.pid})" if info.pid else ""
@@ -638,39 +418,197 @@ def cmd_up(args: argparse.Namespace) -> int:
     return 0
 
 
+@COMMANDS.command(
+    "profile", help="the shape a model measured best in: what to serve it with, and how to "
+                    "ask it",
+    options=[
+        flag("model", nargs="?", default="",
+             help="a model file, path or hf: reference; every record with none"),
+        option("json", help="the records as JSON, exactly as they are kept"),
+    ])
+def cmd_profile(args: argparse.Namespace) -> int:
+    """``ml-stack-serve profile [MODEL]`` -- the shape a model measured best in.
+
+    Exit 1 when a model was named and nothing has measured it.
+    """
+    from ml_stack.serve.profile import said
+
+    try:
+        chosen = ops.shapes(str(getattr(args, "model", "") or ""))
+    except Refused as no:
+        warn(no.lines[0])
+        return 1
+    if getattr(args, "json", False):
+        say(json.dumps([one.as_dict() for one in chosen], indent=2))
+        return 0
+    if not chosen:
+        say("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
+            "`ml-stack-bench report --profile` writes the record.")
+        return 0
+    say("\n\n".join(said(one) for one in chosen))
+    return 0
+
+
+def _fit_ui() -> int:
+    """``fit --ui``: the interactive page, on loopback, until Ctrl-C."""
+    from ml_stack.platform import open_path
+
+    server = ops.fit_page()
+    where = f"http://127.0.0.1:{server.server_port}/ui/fit"
+    warn(f"the fit page is at {where}\n(loopback only; Ctrl-C to stop)")
+    warn(f"opened with {open_path(where)}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        warn("\nstopped")
+    finally:
+        server.server_close()
+    return 0
+
+
+def _measure_each(args: argparse.Namespace, *, room: int) -> int:
+    """Serve each named model once and record what it allocated. Returns an exit code."""
+    from ml_stack.serve.backend import LlamaServerBackend
+
+    binary = str(getattr(args, "binary", "") or "")
+    build_name = str(getattr(args, "build", "") or "")
+    backend = (LlamaServerBackend(binary=binary or None, build=build_name or None)
+               if (binary or build_name) else LlamaServerBackend())
+    kv = str(getattr(args, "kv", "") or "")
+    spec = ServerSpec(model="", port=args.port, context=args.context,
+                      parallel=max(1, int(getattr(args, "parallel", 1) or 1)),
+                      cache_type_k=kv, cache_type_v=kv, warmup=False)
+    try:
+        recorded = ops.measure(
+            list(args.model), spec=spec, backend=backend, timeout=args.timeout, room=room,
+            draft=str(getattr(args, "draft", "") or ""),
+            resident=(int(getattr(args, "resident_peak", 0) or 0),
+                      int(getattr(args, "resident_after", 0) or 0)))
+    except Refused as no:
+        warn(f"error: {no.lines[0]}")
+        return 2
+    for one in recorded:
+        warn(f"measured {one.model}: {one.said}")
+        warn(f"  recorded in {one.where}")
+    return 0
+
+
+@COMMANDS.command(
+    "fit", help="how many people fit at a given context, from measured KV numbers",
+    options=[
+        flag("model", nargs="*",
+             help="which measured models to report (a bare name, a path, or an hf: "
+                  "reference). Default: every model that has been measured"),
+        flag("--measure", action="store_true",
+             help="serve each named model once at -lv 4, read what llama.cpp says it "
+                  "allocated -- the base cache per token, the sliding-window and recurrent "
+                  "caches per sequence, the compute buffers -- and record it. This is the "
+                  "only way the numbers get in: a formula over the GGUF header counts every "
+                  "layer as full attention, and gemma4 (18 layers share a cache, the rest "
+                  "slide), gpt-oss (every other layer slides) and qwen4exp (three layers in "
+                  "four are recurrent) each disagree with that differently"),
+        flag("--tensors", action="store_true",
+             help="what the model file is made of, from its GGUF header alone -- no server, "
+                  "no GPU. The largest tensors with their type and shape, the totals per "
+                  "tensor type, and the totals per role (gathered table, experts, "
+                  "attention, embedding). This is the answer to 'the file is 103.7G and the "
+                  "process holds 90G, what is the rest': a gathered lookup table -- "
+                  "Flash-Next's `per_layer_token_embd.weight` is one 26.8G n-gram table -- "
+                  "is paged a row at a time and most of it never becomes resident"),
+        flag("--resident-peak", dest="resident_peak", type=int, default=0, metavar="BYTES",
+             help="with --measure: the peak RSS the served process actually reached during "
+                  "a real run (the bench reports one). Recorded as a weights figure, with "
+                  "the compute buffers and that run's own caches taken back off, and used "
+                  "as the intercept in preference to anything read off the load log -- a "
+                  "paged lookup table only becomes resident as it is walked, so this is the "
+                  "one number the arithmetic cannot derive"),
+        flag("--resident-after", dest="resident_after", type=int, default=0, metavar="N",
+             help="with --resident-peak: how many questions had been answered when that "
+                  "peak was taken. A resident figure with no run length beside it cannot be "
+                  "argued with -- a table paged a row at a time reads low after two "
+                  "questions and high after two hundred"),
+        flag("--draft", default="", metavar="MODEL_OR_AUTO",
+             help="measure it with a draft head as well -- a path, an hf: reference, or "
+                  "'auto'. A draft *model* keeps its own cache at the same context, which "
+                  "is the real cost of drafting with one"),
+        flag("--kv", default="q8_0", metavar="TYPE",
+             help="measure with the main model's KV cache stored as this: q8_0 (the "
+                  "default), f16, q4_0. A record is kept per cache type, because that is "
+                  "what changes the per-token cost"),
+        flag("--room", action="append", default=[], metavar="SIZE",
+             help="ask about a machine with this much memory instead of this one -- 24G, "
+                  "24576M, or a plain number of bytes. Default: what `ml-stack-serve "
+                  "memory` says a model may use here. Repeatable: the listing answers for "
+                  "the first, and --plot draws every one of them, solid then dashed, so a "
+                  "laptop and a card can be compared in the same picture"),
+        flag("--per-user", type=int, action="append", dest="per_user", default=[],
+             metavar="N",
+             help="a per-user context to put in the table. Repeatable; default "
+                  f"{', '.join(str(n) for n in FIT_PER_USER)}"),
+        option("parallel", default=1, metavar="N",
+               help="also say the longest context N users could each be given (default: 1, "
+                    "which is the line every block prints anyway). With --measure, the "
+                    "slots the model is served on"),
+        flag("--plot", default="", metavar="FILE.png",
+             help="draw it: two panels, one figure -- how many users fit against the "
+                  "context each gets, and what the memory costs as they arrive. The second "
+                  "is the one worth having: a large model with a small cache starts higher "
+                  "and climbs more slowly than a small model with a fat one, and the "
+                  "picture is where they cross. .png, .svg or .pdf; needs matplotlib"),
+        flag("--open", action="store_true",
+             help="with --plot: open the picture when it is drawn"),
+        flag("--ui", action="store_true",
+             help="put the same two panels up as a page you can move: a room slider, a "
+                  "per-user context slider, a users slider and a model per checkbox, "
+                  "redrawn as you drag. Serves on loopback, opens a browser at it, and "
+                  "stays up until Ctrl-C. The fleet app shows the same page under Fit"),
+        flag("--at", type=int, default=32768, metavar="N",
+             help="the per-user context the second panel charges at (default: 32768)"),
+        flag("--md", action="store_true",
+             help="print Markdown rather than the plain listing"),
+        flag("--write", default="", metavar="FILE",
+             help="write the Markdown for every record to a file -- at this machine's room, "
+                  "and at --room's as a second section"),
+        option("context", type=parse_context, default=32768, metavar="N",
+               help="the context to measure at -- 32768, 256k, 1m (default: 32768). The "
+                    "per-token cost does not depend on it; a long one just measures it "
+                    "precisely"),
+        option("port", default=DEFAULT_PORT,
+               help=f"the port to measure on (default: {DEFAULT_PORT})"),
+        option("timeout",
+               help="seconds to wait for the measured load (default: scales with the "
+                    "weights on disk)"),
+        flag("--binary", default="", metavar="PATH",
+             help="the llama-server to measure with, when the one on PATH cannot read this "
+                  "model"),
+        flag("--build", default="", metavar="NAME",
+             help="measure with a named build, the way `up --build NAME` serves with one"),
+    ])
 def cmd_fit(args: argparse.Namespace) -> int:
     """``ml-stack-serve fit`` -- how many people fit on this machine, at what context.
 
-    Reads the measured records rather than a formula: `preflight`'s estimate counts every
-    layer as full attention, and gemma4, gpt-oss and qwen4exp each disagree with that in a
-    different way. `--measure` serves a model once at `-lv 4`, reads what llama.cpp says it
-    allocated, and writes that into the source of truth.
-
-    `--tensors` is the other half of the same question and needs nothing running: a model
-    is reliably smaller in memory than on disk, and the GGUF header says what the missing
-    part is made of.
+    Reads the measured records rather than a formula. `--measure` serves a model once at
+    `-lv 4` and writes what llama.cpp says it allocated; `--tensors` reads the GGUF header
+    and needs nothing running.
     """
-    import struct
-
     from ml_stack.hub import room as machine_room
     from ml_stack.serve import fit as fit_mod
 
     if getattr(args, "ui", False):
         return _fit_ui()
 
+    named = [str(m) for m in (getattr(args, "model", None) or [])]
     if getattr(args, "tensors", False):
-        # A header read, not a load: no server, no GPU, no lease. This is the command for
-        # "the file is 103.7G and the process holds 90G -- what is the other 13G of".
-        named = [str(m) for m in (getattr(args, "model", None) or [])]
+        # A header read, not a load: no server, no GPU, no lease.
         if not named:
             warn("error: --tensors needs a model to look inside")
             return 2
-        for one in named:
-            try:
-                say(fit_mod.render_tensors(resolve_model(one)))
-            except (OSError, ValueError, struct.error) as exc:
-                warn(f"error: cannot read {one}: {exc}")
-                return 2
+        try:
+            for said in ops.tensors(named):
+                say(said)
+        except Refused as no:
+            warn(f"error: {no.lines[0]}")
+            return 2
         return 0
 
     asked_rooms: list[int] = []
@@ -681,11 +619,11 @@ def cmd_fit(args: argparse.Namespace) -> int:
             warn(f"error: {exc}")
             return 2
     # The listing answers for one machine -- the first room named, or this one. The chart
-    # draws every room asked for, which is the whole point of naming more than one.
+    # draws every room asked for.
     room = asked_rooms[0] if asked_rooms else machine_room()
 
     per_user = [int(n) for n in (getattr(args, "per_user", None) or [])]
-    wanted = [Path(str(m)).name.lower() for m in (getattr(args, "model", None) or [])]
+    wanted = [Path(m).name.lower() for m in named]
 
     if getattr(args, "measure", False):
         if not wanted:
@@ -702,7 +640,7 @@ def cmd_fit(args: argparse.Namespace) -> int:
         if not rows:
             warn("nothing measured for " + ", ".join(wanted)
                  + " -- `ml-stack-serve fit MODEL --measure` serves it once and records "
-                    "what it allocated.")
+                   "what it allocated.")
             return 1
 
     contexts = per_user or list(fit_mod.DEFAULT_PER_USER)
@@ -736,274 +674,33 @@ def cmd_fit(args: argparse.Namespace) -> int:
 
     where = str(getattr(args, "write", "") or "")
     if where:
-        every = fit_mod.records()
-        head = (
-            "# What fits\n\nMeasured at load, not estimated -- see "
-            "`src/ml_stack/data/fit.json`.\n"
-            "\nA model is smaller in memory than it is on disk, and the gap is tens of "
-            "gigabytes on the models worth serving. llama.cpp mmaps the GGUF and copies "
-            "into a device buffer only the tensors the backend takes; the rest stay mapped "
-            "in the file and are paged, so they never appear in 'Real Mem'. Where a block "
-            "below says *on disk / in GPU memory / mapped on the CPU*, those three numbers "
-            "come from the load log's own `load_tensors: ... model buffer size` lines, and "
-            "the one that has to fit beside the KV cache is the middle one.\n"
-            "\nThe usual culprits are a lookup table that is gathered rather than "
-            "multiplied (`Qwen3.8-Flash-Next`'s `per_layer_token_embd.weight` is a single "
-            "26.8G n-gram table, paged a row at a time as distinct n-grams turn up), a "
-            "tensor type the backend has no kernel for, an output layer that was not "
-            "offloaded, and anything past `--n-gpu-layers`. "
-            "`ml-stack-serve fit MODEL --tensors` totals a file's tensors by type and by "
-            "what they are for, and needs nothing running.\n")
-        if drawn:
-            # The chart sits beside the file it is named in, so the Markdown refers to it
-            # by name alone and the pair can be moved together.
-            head += f"\n![How many fit, and what it costs]({Path(drawn).name})\n"
-        parts = [head + f"\n## This machine ({human_bytes(machine_room())})\n\n"
-                 + fit_mod.render(every, contexts, machine_room(), True)]
-        for asked in asked_rooms:
-            if asked != machine_room():
-                parts.append(f"## A machine with {human_bytes(asked)}\n\n"
-                             + fit_mod.render(every, contexts, asked, True))
-        Path(where).expanduser().write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+        home.expand(where).write_text(
+            ops.fit_markdown(contexts, asked_rooms, here=machine_room(), drawn=drawn),
+            encoding="utf-8")
         warn(f"\nwrote {where}")
     return 0
 
 
-def _fit_ui() -> int:
-    """``fit --ui``: the interactive page, on loopback, until Ctrl-C.
-
-    Not a second implementation of anything -- `fleet.ui.serve_page` mounts the same route
-    table the app mounts, so `/ui/fit` and `/ui/fit.json` are the app's, and a machine with
-    no daemon running still gets the page.
-    """
-    from ml_stack.fleet.ui import serve_page
-    from ml_stack.platform import open_path
-
-    server = serve_page(name=platform.node() or "this machine")
-    where = f"http://127.0.0.1:{server.server_port}/ui/fit"
-    warn(f"the fit page is at {where}\n(loopback only; Ctrl-C to stop)")
-    warn(f"opened with {open_path(where)}")
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        warn("\nstopped")
-    finally:
-        server.server_close()
-    return 0
-
-
-def _measure_each(args: argparse.Namespace, *, room: int) -> int:
-    """Serve each named model once and record what it allocated. Returns an exit code."""
-    from ml_stack.serve import fit as fit_mod
-    from ml_stack.serve.backend import LlamaServerBackend
-    from ml_stack.serve.manager import weight_of
-    from ml_stack.serve.preflight import _ref_bytes, _shards_of
-
-    binary = str(getattr(args, "binary", "") or "")
-    build_name = str(getattr(args, "build", "") or "")
-    backend = (LlamaServerBackend(binary=binary or None, build=build_name or None)
-               if (binary or build_name) else LlamaServerBackend())
-
-    slots = max(1, int(getattr(args, "parallel", 1) or 1))
-    kv = str(getattr(args, "kv", "") or "")
-
-    for named in args.model:
-        model = resolve_model(str(named))
-        # told which binary serves, as `up` does: a head that borrows its target's embeddings
-        # is offered to a fork build and withheld from mainline -- asked without it, the
-        # Flash-Next head was withheld from the fork and the drafted record never existed
-        try:
-            serving_binary: Path | None = backend.binary
-        except Exception:  # noqa: BLE001 - no binary is choose_head's problem, said out loud
-            serving_binary = None
-        draft = drafted(model, str(getattr(args, "draft", "") or ""), binary=serving_binary)
-        kind = ""
-        if draft:
-            from ml_stack.hub import spec_for
-
-            kind = spec_for(draft)
-        spec = ServerSpec(model=model, port=args.port, context=args.context,
-                          parallel=slots, draft=draft or None, spec_type=kind,
-                          cache_type_k=kv, cache_type_v=kv, warmup=False)
-        try:
-            measured = fit_mod.measure(spec, backend=backend, timeout=args.timeout)
-        except Exception as exc:  # noqa: BLE001 - whatever the load said, say it here
-            warn(f"error: could not measure {Path(model).name}: {exc}")
-            return 2
-        if not measured.measured:
-            warn(f"error: {Path(model).name} loaded but its log said nothing about a "
-                 "cache. That is what a build too old for `-lv 4` looks like; nothing "
-                 "was recorded.")
-            return 2
-        record = fit_mod.Fit.of(
-            # named as the person named it: a bare file name, the file in an hf: reference,
-            # or a path's last part -- never the Hub cache's blob hash `located` resolves to
-            measured, model=Path(str(named).rsplit("/", 1)[-1]).name,
-            weights=_shards_of(spec)[0] or weight_of(model),
-            draft=_ref_bytes(draft or None), room=room,
-            cache_type=kv or measured.cache_type, spec=kind, context=args.context,
-            parallel=slots,
-            # from the header, not the log: how much of this file is a gathered table, and
-            # so how much of the file size is paged a row at a time rather than loaded
-            table_bytes=fit_mod.table_bytes(model),
-            resident_peak=int(getattr(args, "resident_peak", 0) or 0),
-            resident_after=int(getattr(args, "resident_after", 0) or 0))
-        where = fit_mod.add(record)
-        warn(f"measured {record.model}: {measured.said()}")
-        warn(f"  recorded in {where}")
-    return 0
-
-
-PLIST = """<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>stack.ml.wired-limit</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/sbin/sysctl</string>
-    <string>-w</string>
-    <string>iogpu.wired_limit_mb={mb}</string>
-  </array>
-  <key>RunAtLoad</key><true/>
-</dict>
-</plist>
-"""
-
-
-def machine_memory() -> dict | None:
-    """What the machine holds: total, used, wired, free, the llama-servers' resident total,
-    everything else's, and the five largest non-server processes -- from psutil, or None
-    without it."""
-
-    try:
-        import psutil
-    except ImportError:
-        return None
-    try:
-        vm = psutil.virtual_memory()
-    except Exception:  # noqa: BLE001
-        return None
-    servers = 0
-    rest: list[tuple[int, str]] = []
-    for proc in psutil.process_iter(["name", "cmdline", "memory_info"]):
-        try:
-            mem = proc.info.get("memory_info")
-            rss = int(getattr(mem, "rss", 0) or 0)
-            argv = list(proc.info.get("cmdline") or [])
-            head = Path(argv[0]).name if argv else str(proc.info.get("name") or "")
-        except (psutil.Error, OSError):
-            continue
-        if "llama-server" in head:
-            servers += rss
-        elif rss:
-            rest.append((rss, head))
-    rest.sort(reverse=True)
-    return {"total": int(vm.total), "used": int(vm.total - vm.available),
-            "wired": int(getattr(vm, "wired", 0) or 0), "free": int(vm.available),
-            "servers": servers, "others": sum(r for r, _ in rest),
-            "largest": [f"{name} {human_bytes(r)}" for r, name in rest[:5]]}
-
-
-def cmd_limits(args: argparse.Namespace) -> int:
-    """``ml-stack-serve limits`` -- how much of this machine ml-stack may take.
-
-    Set nothing and it prints what is set. Every limit is off until somebody sets one, so
-    a machine nobody has told anything about behaves exactly as it did.
-    """
-    from ml_stack.bench.history import parse_duration
-    from ml_stack.hub import machine_room
-    from ml_stack.serve.fit import parse_room
-    from ml_stack.serve.limits import changed, clear, read, where
-
-    if args.clear:
-        say(f"every limit is off; {clear()} says so")
-        return 0
-
-    asked: dict[str, Any] = {}
-    if args.memory:
-        try:
-            asked["memory_bytes"] = parse_room(args.memory)
-        except ValueError as why:
-            warn(f"error: {why}")
-            return 2
-    if args.idle:
-        seconds = parse_duration(args.idle)
-        if seconds is None:
-            warn(f"error: cannot read {args.idle!r} as a length of time; try 10m")
-            return 2
-        asked["idle_s"] = seconds
-    for name, value in (("servers", args.servers), ("seats", args.seats)):
-        if value is not None:
-            asked[name] = int(value)
-    if asked:
-        changed(**asked)
-
-    limits = read()
-    lines = limits.said()
-    machine = machine_room()
-    if lines:
-        say(f"what ml-stack may take here ({where()}):")
-        for line in lines:
-            say(f"  {line}")
-    else:
-        say("nothing is limited here; ml-stack may use whatever this machine allows")
-    if machine:
-        say(f"\nthis machine allows {human_bytes(machine)}; a model may use "
-            f"{human_bytes(limits.room(machine))}")
-    return 0
-
-
-def cmd_reclaim(args: argparse.Namespace) -> int:
-    """``ml-stack-serve reclaim`` -- stop the servers nobody is using.
-
-    Idleness is asked of each server and what the looks found is kept, so a pass adds
-    `--settle` seconds of its own watching to whatever the daemon has already seen.
-    `--watch` keeps looking for as long as it runs.
-    """
-    from ml_stack.bench.history import parse_duration
-    from ml_stack.serve.limits import read
-    from ml_stack.serve.reclaim import Idleness, reclaim_idle, watching
-
-    older = parse_duration(args.idle) if args.idle else read().idle_s
-    if not older:
-        warn("no idle time given and none is set; nothing to reclaim "
-             "(ml-stack-serve limits --idle 10m)")
-        return 2
-    watcher = Idleness()
-    if args.watch:
-        every = parse_duration(args.every) or 60.0
-        say(f"watching every {every:.0f}s, reclaiming after {older:.0f}s idle; "
-            "Ctrl-C to stop", flush=True)
-        try:
-            with watching(older_than=older, every=every, idleness=watcher, say=print):
-                while True:
-                    time.sleep(3600)
-        except KeyboardInterrupt:
-            return 0
-    watcher.look(dict(recorded_servers(lease_file())))
-    settle = parse_duration(args.settle) or 0.0
-    if settle:
-        time.sleep(settle)
-    stopped = reclaim_idle(older_than=older, idleness=watcher, say=print)
-    if not stopped:
-        say("nothing has been idle that long")
-    return 0
-
-
+@COMMANDS.command(
+    "memory", help="how much a model may use here, and whether that survives a reboot",
+    options=[
+        flag("--persist", nargs="?", const="", default=None, metavar="MB",
+             help="write a boot-time setting for the wiring limit; the megabytes default "
+                  "to whatever is set now"),
+        flag("--write", default="", metavar="FILE",
+             help="where to write it (default: ./stack.ml.wired-limit.plist)"),
+        flag("--limit", type=int, default=0, metavar="MB",
+             help="preview: what the rest of the machine would have under this wiring "
+                  "limit, against what it holds now"),
+    ])
 def cmd_memory(args: argparse.Namespace) -> int:
     """``ml-stack-serve memory`` -- what this machine will let a model use, and for how long.
 
-    On unified memory the ceiling that matters is not how much RAM there is, it is how much
-    of it Metal will wire: a model and its KV cache have to fit under `iogpu.wired_limit_mb`.
-    That setting is a runtime one and **goes back to the default on every reboot**, so a
-    model that loaded yesterday can fail today with an error that never mentions memory.
+    On unified memory the ceiling that matters is `iogpu.wired_limit_mb`: a runtime setting
+    that goes back to the default on every reboot.
     """
-    from ml_stack.hub import room, total_memory
-
-    total = total_memory()
-    now = room()
+    machine = ops.memory()
+    total, now = machine.total, machine.room
     if not now:
         say("this machine does not report a wiring limit; nothing to do here")
         return 0
@@ -1018,11 +715,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
         else:
             say(f"  this is the default share; {human_bytes(total)} is installed")
 
-    # What the rest of the machine holds right now, so a higher limit is chosen against
-    # what it would take from the desktop rather than guessed (Adam, 2026-09-02: "take a
-    # look at what os and apps are using, can we increase vram from 110 to something
-    # higher or is that our ceiling?")
-    held = machine_memory()
+    held = machine.held
     if held:
         say(f"\nright now: {human_bytes(held['used'])} used of {human_bytes(held['total'])} "
             f"({human_bytes(held['wired'])} wired, {human_bytes(held['free'])} free)")
@@ -1035,7 +728,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
             say(f"  the limit leaves {human_bytes(headroom)} for everything else; the rest of "
                 f"the machine holds {human_bytes(others)} now"
                 + (" -- room to raise it" if others < headroom * 0.6
-                     else " -- close to it; raising it means swapping when a model fills it"))
+                   else " -- close to it; raising it means swapping when a model fills it"))
         want_mb = int(getattr(args, "limit", 0) or 0)
         if want_mb and total:
             left = int(total) - want_mb * 1024 * 1024
@@ -1047,8 +740,7 @@ def cmd_memory(args: argparse.Namespace) -> int:
         return 0
 
     mb = int(want) if want else now // (1024 * 1024)
-    where = Path(args.write or "./stack.ml.wired-limit.plist")
-    where.write_text(PLIST.format(mb=mb), encoding="utf-8")
+    where = ops.write_plist(Path(args.write or "./stack.ml.wired-limit.plist"), mb)
     say(f"\nwrote {where} -- it sets iogpu.wired_limit_mb={mb} at every boot.")
     say("Installing it needs root, so it is left to you:")
     say(f"  sudo cp {where} /Library/LaunchDaemons/stack.ml.wired-limit.plist")
@@ -1060,140 +752,163 @@ def cmd_memory(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_profile(args: argparse.Namespace) -> int:
-    """``ml-stack-serve profile [MODEL]`` -- the shape a model measured best in.
+@COMMANDS.command(
+    "limits", help="how much of this machine ml-stack may take",
+    options=[
+        flag("--memory", default="", metavar="SIZE",
+             help="the most a model and its caches may use here -- 90G, 24576M, a plain "
+                  "number of bytes. Every preflight, fit and lease reads it"),
+        flag("--servers", type=int, default=None, metavar="N",
+             help="the most model servers to run at once"),
+        flag("--seats", type=int, default=None, metavar="N",
+             help="the most conversations one server may hold"),
+        flag("--idle", default="", metavar="TIME",
+             help="stop a server unused for this long -- 10m, 1h, 600. "
+                  "`ml-stack-serve reclaim` and the fleet daemon act on it"),
+        flag("--clear", action="store_true", help="take every limit off this machine"),
+    ])
+def cmd_limits(args: argparse.Namespace) -> int:
+    """``ml-stack-serve limits`` -- how much of this machine ml-stack may take.
 
-    Reads the records and prints them; measures nothing, serves nothing. With no model,
-    every record there is, so "what has been worked out about anything" is one command.
-    Exit 1 when a model was named and nothing has measured it -- a script asking whether a
-    shape is known gets an answer it can branch on.
+    Set nothing and it prints what is set; every limit is off until somebody sets one.
     """
-    from ml_stack.serve.profile import profile_for, profiles, said
-
-    named = str(getattr(args, "model", "") or "")
-    every = profiles()
-    if named:
-        found = profile_for(named, records=every)
-        if found is None:
-            warn(f"nothing measured for {named.rsplit('/', 1)[-1]}. "
-                 "`ml-stack-bench sweep` measures it and `ml-stack-bench report --profile` "
-                 "writes the record.")
-            return 1
-        chosen = [found]
-    else:
-        chosen = every
-    if getattr(args, "json", False):
-        say(json.dumps([one.as_dict() for one in chosen], indent=2))
-        return 0
-    if not chosen:
-        say("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
-            "`ml-stack-bench report --profile` writes the record.")
-        return 0
-    say("\n\n".join(said(one) for one in chosen))
-    return 0
-
-
-def _withdraw(args: argparse.Namespace, port: int) -> None:
-    """Take ``port`` out of the fleet's beacon, when there is one."""
-    # A registration outlives the server it describes, and the beacon then sends work to a
-    # port nothing answers on. `live()` probes before advertising, so a stale entry is not
-    # fatal -- but leaving one behind means every peer pays a timeout to find that out.
     try:
-        known = beacon(args.root)
-        if known is not None:
-            known.unregister(port)
-    except Exception as exc:  # noqa: BLE001
-        warn(f"  could not withdraw it from the fleet: {exc}")
+        limits = ops.limits(memory_size=args.memory, servers=args.servers,
+                            seats=args.seats, idle=args.idle, clear=bool(args.clear))
+    except Refused as no:
+        warn(f"error: {no.lines[0]}")
+        return 2
 
-
-def cmd_down_orphans(args: argparse.Namespace, records: dict[int, dict]) -> int:
-    """Stop every recorded server whose leasing process has gone; leave every other."""
-    found = [(port, entry) for port, entry in sorted(records.items()) if orphaned(entry)]
-    if not found:
-        say("no orphaned server on record.")
+    if args.clear:
+        say(f"every limit is off; {limits.where} says so")
         return 0
-    manager = ServerManager(state_file=lease_file())
-    for port, entry in found:
-        url = base_url_for(port)
-        pid = int(entry["pid"])
-        manager.release(ServerInfo(base_url=str(entry.get("base_url") or url), port=port,
-                                   pid=pid, backend=str(entry.get("backend") or "")))
-        _withdraw(args, port)
-        say(f"stopped {url} (pid {pid}), orphaned by pid {entry['owner_pid']}")
-    return 0
 
-
-def cmd_down(args: argparse.Namespace) -> int:
-    records = recorded_servers(lease_file())
-    if getattr(args, "orphans", False):
-        return cmd_down_orphans(args, records)
-    entry = records.get(args.port)
-    url = base_url_for(args.port)
-
-    if entry is None:
-        if not is_healthy(url, timeout=PROBE_TIMEOUT):
-            say(f"nothing is serving on port {args.port}.")
-            return 1
-        held = server_pids_on_port(args.port)
-        where = f" (pid {held[0]})" if held else ""
-        warn(f"error: something is serving on {url}{where}, and this machine has no "
-             "record of starting it.")
-        warn("  stop it the way it was started.")
-        return 2
-
-    owner = _int_or_none(entry.get("owner_pid"))
-    pid = _int_or_none(entry.get("pid"))
-    if owner is not None and owner != pid and pid_exists(owner):
-        warn(f"error: {url} is held by process {owner}, which is still running.")
-        warn("  that process started it and will stop it.")
-        return 2
-
-    running = pid_exists(pid)
-    ServerManager(state_file=lease_file()).release(
-        ServerInfo(base_url=str(entry.get("base_url") or url), port=args.port, pid=pid,
-                   backend=str(entry.get("backend") or "")))
-    _withdraw(args, args.port)
-
-    if running:
-        say(f"stopped {url} (pid {pid})")
+    if limits.lines:
+        say(f"what ml-stack may take here ({limits.where}):")
+        for line in limits.lines:
+            say(f"  {line}")
     else:
-        say(f"nothing was running on port {args.port}; removed the record")
+        say("nothing is limited here; ml-stack may use whatever this machine allows")
+    if limits.machine:
+        say(f"\nthis machine allows {human_bytes(limits.machine)}; a model may use "
+            f"{human_bytes(limits.room)}")
     return 0
 
 
-def cmd_escalate(args: argparse.Namespace) -> int:
-    """``ml-stack-serve escalate`` -- grow a running server's seats in place, keeping
-    every live conversation."""
-    manager = ServerManager(state_file=lease_file())
-    base_url = f"http://{DEFAULT_HOST}:{args.port}"
-    if not is_healthy(base_url, timeout=PROBE_TIMEOUT):
-        warn(f"error: nothing is answering on port {args.port} to escalate")
-        return 2
-    params = serving_params(base_url)
-    if params is None or not params.model or params.n_ctx is None or params.total_slots is None:
-        warn(f"error: port {args.port} does not say enough about its own shape to "
-             "escalate -- is /props answering, with --slots enabled?")
-        return 2
+@COMMANDS.command(
+    "reclaim", help="stop the servers nobody is using",
+    options=[
+        flag("--idle", default="", metavar="TIME",
+             help="how long unused is idle (default: what `limits --idle` set)"),
+        flag("--settle", default="30", metavar="TIME",
+             help="how long to watch before deciding, on top of what earlier looks found "
+                  "(default: %(default)ss)"),
+        flag("--watch", action="store_true",
+             help="keep looking rather than making one pass"),
+        flag("--every", default="60", metavar="TIME",
+             help="with --watch: how often to look (default: %(default)ss)"),
+    ])
+def cmd_reclaim(args: argparse.Namespace) -> int:
+    """``ml-stack-serve reclaim`` -- stop the servers nobody is using.
 
-    save_path = (str(getattr(args, "slot_save_path", "") or "")
-                 or str(default_slot_save_path()))
-    current = ServerSpec(model=params.model, port=args.port,
-                         context=int(params.n_ctx) * int(params.total_slots),
-                         parallel=int(params.total_slots), slot_save_path=save_path)
-    room = None
-    asked_room = str(getattr(args, "room", "") or "")
-    if asked_room:
-        from ml_stack.serve.fit import parse_room
+    Idleness is asked of each server and what the looks found is kept, so a pass adds
+    `--settle` seconds of its own watching to whatever the daemon has already seen.
+    """
+    from ml_stack.bench.history import parse_duration
+    from ml_stack.serve.reclaim import watching
 
+    try:
+        older, watcher = ops.reclaim(idle=args.idle)
+    except Refused as no:
+        warn(no.lines[0])
+        return 2
+    if args.watch:
+        every = parse_duration(args.every) or 60.0
+        say(f"watching every {every:.0f}s, reclaiming after {older:.0f}s idle; "
+            "Ctrl-C to stop", flush=True)
         try:
-            room = parse_room(asked_room)
-        except ValueError as exc:
-            warn(f"error: {exc}")
-            return 2
+            with watching(older_than=older, every=every, idleness=watcher, say=print):
+                while True:
+                    time.sleep(3600)
+        except KeyboardInterrupt:
+            return 0
+    stopped = ops.reclaim_once(older, watcher, settle=parse_duration(args.settle) or 0.0)
+    if not stopped:
+        say("nothing has been idle that long")
+    return 0
+
+
+@COMMANDS.command(
+    "down", help="stop a server started on this machine",
+    options=[
+        option("port", default=DEFAULT_PORT,
+               help=f"port of the server to stop (default: {DEFAULT_PORT})"),
+        flag("--orphans", action="store_true",
+             help="instead of a port: stop every recorded server whose leasing process has "
+                  "gone, and nothing else"),
+        flag("--root", default=DEFAULT_ROOT,
+             help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})"),
+    ])
+def cmd_down(args: argparse.Namespace) -> int:
+    if getattr(args, "orphans", False):
+        found = ops.orphans(root=args.root)
+        if not found:
+            say("no orphaned server on record.")
+            return 0
+        for stopped, said in found:
+            if said:
+                warn(said)
+            say(f"stopped {stopped.base_url} (pid {stopped.pid}), orphaned by pid "
+                f"{stopped.owner_pid}")
+        return 0
+
     try:
-        info = manager.escalate(current, add_seats=max(1, int(args.add)), room=room,
-                                timeout=args.timeout, on_event=_print_event)
-    except ServerFailed as exc:
+        stopped, said = ops.down(args.port, root=args.root)
+    except Refused as no:
+        if len(no.lines) == 1:
+            say(no.lines[0])
+            return 1
+        warn(f"error: {no.lines[0]}")
+        for line in no.lines[1:]:
+            warn(line)
+        return 2
+    if said:
+        warn(said)
+    if stopped.was_running:
+        say(f"stopped {stopped.base_url} (pid {stopped.pid})")
+    else:
+        say(f"nothing was running on port {stopped.port}; removed the record")
+    return 0
+
+
+@COMMANDS.command(
+    "escalate",
+    help="grow the seats a running server holds, keeping every live conversation",
+    options=[
+        option("port", default=DEFAULT_PORT,
+               help=f"port of the server to grow (default: {DEFAULT_PORT})"),
+        flag("--add", type=int, default=1, metavar="N",
+             help="how many more seats to ask for (default: 1)"),
+        flag("--slot-save-path", default="", metavar="PATH",
+             help="where the running server saves slots, if it was not started through 'up "
+                  "--escalate' (default: this manager's own)"),
+        option("timeout",
+               help="seconds to wait for the relaunch to load (default: scales with the "
+                    "weights on disk)"),
+        flag("--room", default="", metavar="SIZE",
+             help="judge the grow-vs-split decision against this much room (e.g. 24G) "
+                  "instead of what this machine actually has"),
+        option("json", help="print one JSON object instead of the human lines"),
+    ])
+def cmd_escalate(args: argparse.Namespace) -> int:
+    """``ml-stack-serve escalate`` -- grow a running server's seats in place."""
+    try:
+        info = ops.escalate(args.port, add=args.add,
+                            room=str(getattr(args, "room", "") or ""),
+                            timeout=args.timeout,
+                            slot_save_path=str(getattr(args, "slot_save_path", "") or ""),
+                            on_event=_print_event)
+    except (Refused, ServerFailed, ValueError) as exc:
         warn(f"error: {exc}")
         return 2
 
@@ -1204,358 +919,55 @@ def cmd_escalate(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-serve",
-        description="See which model is being served on this machine, put one up, take it down.")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    status = sub.add_parser("status", help="what is serving, and what a lease would do")
-    status.add_argument("--port", type=int, default=DEFAULT_PORT,
-                        help=f"port to check besides the recorded ones (default: {DEFAULT_PORT})")
-    status.add_argument("--model", default="",
-                        help="ask what leasing this model would do (default: whatever is "
-                             "already serving)")
-    status.add_argument("--context", type=parse_context, default=DEFAULT_CONTEXT,
-                        help=f"the context that lease would ask for -- 32768, 256k, 1m "
-                             f"(default: {DEFAULT_CONTEXT})")
-    status.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
-                        help=f"the slots that lease would ask for (default: "
-                             f"{DEFAULT_PARALLEL})")
-    status.add_argument("--every", action="store_true",
-                        help="every llama-server process on this machine, leased or not -- "
-                             "a stray one holds memory a lease cannot see")
-    status.add_argument("--json", action="store_true",
-                        help="print one JSON object instead of the human listing")
-
-    up = sub.add_parser("up", help="serve a model, or adopt the one already serving it")
-    up.add_argument("model", help="path to a .gguf file, or hf:owner/repo/file.gguf")
-    up.add_argument("--port", type=int, default=DEFAULT_PORT,
-                    help=f"port to serve on (default: {DEFAULT_PORT})")
-    up.add_argument("--context", type=parse_context, default=DEFAULT_CONTEXT,
-                    help=f"tokens across all slots -- 32768, 256k, 1m (default: "
-                         f"{DEFAULT_CONTEXT}). Beyond what the model trained at, YaRN is "
-                         "turned on by itself; it scales every position, so shorter "
-                         "conversations on this server pay for it too")
-    up.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL,
-                    help=f"slots to serve at once (default: {DEFAULT_PARALLEL})")
-    up.add_argument("--escalate", action="store_true",
-                    help="when a server is already up with fewer slots than --parallel "
-                         "asks for, grow (or split, or summarise and split) it rather "
-                         "than refusing -- keeps every live conversation")
-    up.add_argument("--timeout", type=float, default=None,
-                    help="seconds to wait for it to load (default: scales with the "
-                         f"weights on disk -- 60s + 1.5s/GB, floor {DEFAULT_TIMEOUT:.0f}s)")
-    up.add_argument("--json", action="store_true",
-                    help="print one JSON object instead of the human line")
-    up.add_argument("--preflight-only", action="store_true",
-                    help="run every check a load would run -- shards present, "
-                         "architecture this build reads, an estimate against what this "
-                         "machine may use, every flag the build accepts -- and print the "
-                         "report without starting or adopting anything. Exits 0 or 1")
-    up.add_argument("--root", default=DEFAULT_ROOT,
-                    help=f"the fleet root whose beacon to announce in, when there is one "
-                         f"(default: {DEFAULT_ROOT})")
-    up.add_argument("--binary", default="", metavar="PATH",
-                    help="the llama-server to run, when the one on PATH cannot read this "
-                         "model. A release lags master by an architecture or two: gemma-4 "
-                         "and qwen3moe are in the current release, qwen4exp is not, so "
-                         "Qwen3.8-Flash-Next needs a build from master and says "
-                         "'unknown model architecture' without one")
-    up.add_argument("--build", default="", metavar="NAME",
-                    help="serve with a named build 'ml-stack-serve build --name NAME' made "
-                         "-- a fork kept beside 'current' rather than replacing it, e.g. a "
-                         "fork whose fixes have not reached mainline yet. Ignored if "
-                         "--binary is also given")
-    up.add_argument("--mmproj", default="", metavar="PATH_OR_AUTO",
-                    help="the vision projector, so the model can read a picture -- a path, "
-                         "an hf: reference, or 'auto' to take the most precise one shipped "
-                         "with the weights. An hf: model already pulls a projector by "
-                         "itself, so 'auto' is for choosing a better one than it would: a "
-                         "projector is a fraction of the weights and carries all of the "
-                         "seeing, so quantising it is a false economy")
-    up.add_argument("--spec", default="", metavar="TYPE",
-                    help="how to guess ahead: an ngram-* kind needs no second model at all, "
-                         "proposing tokens it has already seen in the prompt, which suits "
-                         "work that copies from its context and costs no memory. "
-                         "ngram-simple, ngram-map-k, ngram-map-k4v, ngram-mod, ngram-cache, "
-                         "or a draft-* kind with --draft. Left unset, the server decides")
-    up.add_argument("--spec-n-max", type=int, default=None, metavar="N",
-                    help="tokens guessed ahead each step (server default 3)")
-    up.add_argument("--on-cpu", action="append", default=[], metavar="PATTERN=BUFFER",
-                    help="keep tensors matching a pattern off the GPU, e.g. "
-                         "'per_layer_token_embd=CPU' for Qwen3.8-Flash-Next's 27G n-gram "
-                         "table on a discrete GPU whose VRAM it would not fit beside the "
-                         "weights. Never on unified memory (a Mac): there the CPU and GPU "
-                         "halves are the same RAM, the build already places the table "
-                         "where a gather is cheapest, and forcing it buys nothing. "
-                         "ml-stack sets none of these by itself. Repeatable. Read the tensor "
-                         "names from the model rather than guessing at the pattern")
-    up.add_argument("--cpu-moe", action="store_true",
-                    help="keep every Mixture-of-Experts weight on the CPU, which is how a "
-                         "35B with 3B active fits a machine that could not hold it all")
-    up.add_argument("--lookup-cache", default="", metavar="FILE",
-                    help="an n-gram cache kept on disk and updated as it generates, so what "
-                         "was learnt answering one question speculates the next. Only the "
-                         "ngram-cache kind uses it; the other ngram kinds look up the "
-                         "prompt itself and keep nothing")
-    up.add_argument("--draft-ngl", type=int, default=None, metavar="N",
-                    help="layers of the draft model to put on the GPU. Without it the draft "
-                         "runs where the server puts it by default, which can be the CPU -- "
-                         "and a draft slower than the model it is guessing for is a loss")
-    up.add_argument("--embedding", action="store_true",
-                    help="serve an embedding model (llama-server --embedding), the way the "
-                         "graph's vectors and the thread's recall want one")
-    up.add_argument("--kv", default="q8_0", metavar="TYPE",
-                    help="what the KV cache is stored as (default q8_0: measured 2026-09-02 "
-                         "on Flash-Next, F1 unchanged, faster, half the cache; the recurrent "
-                         "state is not the KV and stays); f16 is the full-size cache")
-    up.add_argument("--kv-unified", action=argparse.BooleanOptionalAction, default=None,
-                    help="one cache pool for every slot, masked per sequence, rather than a "
-                         "cache per slot; --no-kv-unified asks for the latter outright. "
-                         "Left unset, the build decides")
-    up.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
-                    help="a small model to guess ahead, which the large one checks in one "
-                         "pass -- a path, an hf: reference, or 'auto' to use the draft head "
-                         "shipped beside the weights (the mtp- file in a QAT repository)")
-    up.add_argument("--reasoning-budget", type=int, default=None, metavar="TOKENS",
-                    dest="reasoning_budget",
-                    help="how many tokens a turn may think for before it is made to answer; "
-                         "0 turns the thinking off. A ceiling on n_predict cuts the answer "
-                         "instead, which is the wrong end")
-    up.add_argument("--profile", action="store_true",
-                    help="fill every flag not given from this model's measured profile -- "
-                         "the build, head, cache, thinking and llama-server flags that "
-                         "answered best (`ml-stack-serve profile MODEL` prints it). A flag "
-                         "given wins over the record")
-
-    prof = sub.add_parser("profile", help="the shape a model measured best in: what to "
-                                          "serve it with, and how to ask it")
-    prof.add_argument("model", nargs="?", default="",
-                      help="a model file, path or hf: reference; every record with none")
-    prof.add_argument("--json", action="store_true",
-                      help="the records as JSON, exactly as they are kept")
-
-    fit_p = sub.add_parser(
-        "fit", help="how many people fit at a given context, from measured KV numbers")
-    fit_p.add_argument("model", nargs="*",
-                       help="which measured models to report (a bare name, a path, or an "
-                            "hf: reference). Default: every model that has been measured")
-    fit_p.add_argument("--measure", action="store_true",
-                       help="serve each named model once at -lv 4, read what llama.cpp says "
-                            "it allocated -- the base cache per token, the sliding-window "
-                            "and recurrent caches per sequence, the compute buffers -- and "
-                            "record it. This is the only way the numbers get in: a formula "
-                            "over the GGUF header counts every layer as full attention, and "
-                            "gemma4 (18 layers share a cache, the rest slide), gpt-oss "
-                            "(every other layer slides) and qwen4exp (three layers in four "
-                            "are recurrent) each disagree with that differently")
-    fit_p.add_argument("--tensors", action="store_true",
-                       help="what the model file is made of, from its GGUF header alone -- "
-                            "no server, no GPU. The largest tensors with their type and "
-                            "shape, the totals per tensor type, and the totals per role "
-                            "(gathered table, experts, attention, embedding). This is the "
-                            "answer to 'the file is 103.7G and the process holds 90G, what "
-                            "is the rest': a gathered lookup table -- Flash-Next's "
-                            "`per_layer_token_embd.weight` is one 26.8G n-gram table -- is "
-                            "paged a row at a time and most of it never becomes resident")
-    fit_p.add_argument("--resident-peak", dest="resident_peak", type=int, default=0,
-                       metavar="BYTES",
-                       help="with --measure: the peak RSS the served process actually "
-                            "reached during a real run (the bench reports one). Recorded "
-                            "as a weights figure, with the compute buffers and that run's "
-                            "own caches taken back off, and used as the intercept in "
-                            "preference to anything read off the load log -- a paged "
-                            "lookup table only becomes resident as it is walked, so this "
-                            "is the one number the arithmetic cannot derive")
-    fit_p.add_argument("--resident-after", dest="resident_after", type=int, default=0,
-                       metavar="N",
-                       help="with --resident-peak: how many questions had been answered "
-                            "when that peak was taken. A resident figure with no run "
-                            "length beside it cannot be argued with -- a table paged a row "
-                            "at a time reads low after two questions and high after two "
-                            "hundred")
-    fit_p.add_argument("--draft", default="", metavar="MODEL_OR_AUTO",
-                       help="measure it with a draft head as well -- a path, an hf: "
-                            "reference, or 'auto'. A draft *model* keeps its own cache at "
-                            "the same context, which is the real cost of drafting with one")
-    fit_p.add_argument("--kv", default="q8_0", metavar="TYPE",
-                       help="measure with the main model's KV cache stored as this: q8_0 "
-                            "(the default), f16, q4_0. A record is kept per cache type, "
-                            "because that is what changes the per-token cost")
-    fit_p.add_argument("--room", action="append", default=[], metavar="SIZE",
-                       help="ask about a machine with this much memory instead of this one "
-                            "-- 24G, 24576M, or a plain number of bytes. Default: what "
-                            "`ml-stack-serve memory` says a model may use here. Repeatable: "
-                            "the listing answers for the first, and --plot draws every one "
-                            "of them, solid then dashed, so a laptop and a card can be "
-                            "compared in the same picture")
-    fit_p.add_argument("--per-user", type=int, action="append", dest="per_user",
-                       default=[], metavar="N",
-                       help="a per-user context to put in the table. Repeatable; default "
-                            f"{', '.join(str(n) for n in FIT_PER_USER)}")
-    fit_p.add_argument("--parallel", type=int, default=1, metavar="N",
-                       help="also say the longest context N users could each be given "
-                            "(default: 1, which is the line every block prints anyway). "
-                            "With --measure, the slots the model is served on")
-    fit_p.add_argument("--plot", default="", metavar="FILE.png",
-                       help="draw it: two panels, one figure -- how many users fit against "
-                            "the context each gets, and what the memory costs as they "
-                            "arrive. The second is the one worth having: a large model with "
-                            "a small cache starts higher and climbs more slowly than a small "
-                            "model with a fat one, and the picture is where they cross. "
-                            ".png, .svg or .pdf; needs matplotlib")
-    fit_p.add_argument("--open", action="store_true",
-                       help="with --plot: open the picture when it is drawn")
-    fit_p.add_argument("--ui", action="store_true",
-                       help="put the same two panels up as a page you can move: a room "
-                            "slider, a per-user context slider, a users slider and a model "
-                            "per checkbox, redrawn as you drag. Serves on loopback, opens a "
-                            "browser at it, and stays up until Ctrl-C. The fleet app shows "
-                            "the same page under Fit")
-    fit_p.add_argument("--at", type=int, default=32768, metavar="N",
-                       help="the per-user context the second panel charges at "
-                            "(default: 32768)")
-    fit_p.add_argument("--md", action="store_true",
-                       help="print Markdown rather than the plain listing")
-    fit_p.add_argument("--write", default="", metavar="FILE",
-                       help="write the Markdown for every record to a file -- at this "
-                            "machine's room, and at --room's as a second section")
-    fit_p.add_argument("--context", type=parse_context, default=32768, metavar="N",
-                       help="the context to measure at -- 32768, 256k, 1m (default: 32768). "
-                            "The per-token cost does not depend on it; a long one just "
-                            "measures it precisely")
-    fit_p.add_argument("--port", type=int, default=DEFAULT_PORT,
-                       help=f"the port to measure on (default: {DEFAULT_PORT})")
-    fit_p.add_argument("--timeout", type=float, default=None,
-                       help="seconds to wait for the measured load (default: scales with "
-                            "the weights on disk)")
-    fit_p.add_argument("--binary", default="", metavar="PATH",
-                       help="the llama-server to measure with, when the one on PATH cannot "
-                            "read this model")
-    fit_p.add_argument("--build", default="", metavar="NAME",
-                       help="measure with a named build, the way `up --build NAME` serves "
-                            "with one")
-
-    memory = sub.add_parser("memory", help="how much a model may use here, and whether that "
-                                           "survives a reboot")
-    memory.add_argument("--persist", nargs="?", const="", default=None, metavar="MB",
-                        help="write a boot-time setting for the wiring limit; the megabytes "
-                             "default to whatever is set now")
-    memory.add_argument("--write", default="", metavar="FILE",
-                        help="where to write it (default: ./stack.ml.wired-limit.plist)")
-    memory.add_argument("--limit", type=int, default=0, metavar="MB",
-                        help="preview: what the rest of the machine would have under this "
-                             "wiring limit, against what it holds now")
-
-    limits_p = sub.add_parser("limits", help="how much of this machine ml-stack may take")
-    limits_p.add_argument("--memory", default="", metavar="SIZE",
-                          help="the most a model and its caches may use here -- 90G, "
-                               "24576M, a plain number of bytes. Every preflight, fit and "
-                               "lease reads it")
-    limits_p.add_argument("--servers", type=int, default=None, metavar="N",
-                          help="the most model servers to run at once")
-    limits_p.add_argument("--seats", type=int, default=None, metavar="N",
-                          help="the most conversations one server may hold")
-    limits_p.add_argument("--idle", default="", metavar="TIME",
-                          help="stop a server unused for this long -- 10m, 1h, 600. "
-                               "`ml-stack-serve reclaim` and the fleet daemon act on it")
-    limits_p.add_argument("--clear", action="store_true",
-                          help="take every limit off this machine")
-
-    reclaim_p = sub.add_parser("reclaim", help="stop the servers nobody is using")
-    reclaim_p.add_argument("--idle", default="", metavar="TIME",
-                           help="how long unused is idle (default: what `limits --idle` set)")
-    reclaim_p.add_argument("--settle", default="30", metavar="TIME",
-                           help="how long to watch before deciding, on top of what earlier "
-                                "looks found (default: %(default)ss)")
-    reclaim_p.add_argument("--watch", action="store_true",
-                           help="keep looking rather than making one pass")
-    reclaim_p.add_argument("--every", default="60", metavar="TIME",
-                           help="with --watch: how often to look (default: %(default)ss)")
-
-    down = sub.add_parser("down", help="stop a server started on this machine")
-    down.add_argument("--port", type=int, default=DEFAULT_PORT,
-                      help=f"port of the server to stop (default: {DEFAULT_PORT})")
-    down.add_argument("--orphans", action="store_true",
-                      help="instead of a port: stop every recorded server whose leasing "
-                           "process has gone, and nothing else")
-    down.add_argument("--root", default=DEFAULT_ROOT,
-                      help=f"the fleet root to withdraw it from (default: {DEFAULT_ROOT})")
-
-    escalate = sub.add_parser(
-        "escalate", help="grow the seats a running server holds, keeping every live "
-                         "conversation")
-    escalate.add_argument("--port", type=int, default=DEFAULT_PORT,
-                          help=f"port of the server to grow (default: {DEFAULT_PORT})")
-    escalate.add_argument("--add", type=int, default=1, metavar="N",
-                          help="how many more seats to ask for (default: 1)")
-    escalate.add_argument("--slot-save-path", default="", metavar="PATH",
-                          help="where the running server saves slots, if it was not "
-                               "started through 'up --escalate' (default: this manager's "
-                               "own)")
-    escalate.add_argument("--timeout", type=float, default=None,
-                          help="seconds to wait for the relaunch to load (default: "
-                               "scales with the weights on disk)")
-    escalate.add_argument("--room", default="", metavar="SIZE",
-                          help="judge the grow-vs-split decision against this much room "
-                               "(e.g. 24G) instead of what this machine actually has")
-    escalate.add_argument("--json", action="store_true",
-                          help="print one JSON object instead of the human lines")
-
-    build_p = sub.add_parser(
-        "build", help="build llama-server from llama.cpp's own master (or download the "
-                      "newest release), and switch to it once it is verified")
-    build_p.add_argument("--from", dest="source_kind", default="", choices=["source", "release"],
-                         help="'source' compiles master with cmake, 'release' downloads the "
-                              "newest GitHub release with an asset for this machine. "
-                              "Default: source when a compiler is on PATH, release otherwise")
-    build_p.add_argument("--commit", default="", metavar="SHA",
-                         help="build this commit instead of master's tip (--from source only)")
-    build_p.add_argument("--jobs", type=int, default=0, metavar="N",
-                         help="parallel compile jobs (default: every core)")
-    build_p.add_argument("--source", default="", metavar="DIR",
-                         help="reuse a checkout here instead of cloning/updating the "
-                              "managed one")
-    build_p.add_argument("--force", action="store_true",
-                         help="rebuild or redownload even if this commit/release is "
-                              "already installed")
-    build_p.add_argument("--check", action="store_true",
-                         help="report the installed build's commit, age and "
-                              "architectures -- builds nothing")
-    build_p.add_argument("--rollback", action="store_true",
-                         help="point 'current' back at the previous verified build")
-    build_p.add_argument("--persist", action="store_true",
-                         help="install a weekly refresh (a LaunchAgent on macOS, a "
-                              "Scheduled Task on Windows) that reruns this on its own")
-    build_p.add_argument("--adopt", default="", metavar="DIR",
-                         help="register a flat build directory that already exists -- a "
-                              "hand-built binary, or a release zip unpacked by hand -- as "
-                              "a managed build, verify it, and switch to it now, without "
-                              "compiling or downloading anything")
-    build_p.add_argument("--repo", default="", metavar="OWNER/REPO",
-                         help="build a fork instead of ggml-org/llama.cpp's own master -- "
-                              "combine with --name to keep it beside 'current' instead of "
-                              "replacing it, e.g. --repo unslothai/llama.cpp --name unsloth")
-    build_p.add_argument("--ref", default="", metavar="TAG_OR_BRANCH_OR_SHA",
-                         help="the fork's ref to build (--from source, with --repo; "
-                              "default: its default branch's tip)")
-    build_p.add_argument("--tag", default="", metavar="TAG",
-                         help="the fork's release tag to download (--from release, with "
-                              "--repo; default: the newest release with a matching asset)")
-    build_p.add_argument("--name", default="", metavar="NAME",
-                         help="keep this build at ~/.ml-stack/llama.cpp/named/NAME instead "
-                              "of replacing 'current' -- requires --repo. Select it with "
-                              "'ml-stack-serve up --build NAME' or $MLSTACK_LLAMA_BUILD=NAME")
-    build_p.add_argument("--list", action="store_true",
-                         help="show 'current' and every named build, with commit, age and "
-                              "repo -- builds nothing")
-
-    args = ap.parse_args(argv)
-    return {"status": cmd_status, "up": cmd_up, "down": cmd_down, "escalate": cmd_escalate,
-            "memory": cmd_memory, "fit": cmd_fit, "profile": cmd_profile,
-            "limits": cmd_limits, "reclaim": cmd_reclaim,
-            "build": build.cmd_build}[args.cmd](args)
+@COMMANDS.command(
+    "build",
+    help="build llama-server from llama.cpp's own master (or download the newest release), "
+         "and switch to it once it is verified",
+    options=[
+        flag("--from", dest="source_kind", default="", choices=["source", "release"],
+             help="'source' compiles master with cmake, 'release' downloads the newest "
+                  "GitHub release with an asset for this machine. Default: source when a "
+                  "compiler is on PATH, release otherwise"),
+        flag("--commit", default="", metavar="SHA",
+             help="build this commit instead of master's tip (--from source only)"),
+        flag("--jobs", type=int, default=0, metavar="N",
+             help="parallel compile jobs (default: every core)"),
+        flag("--source", default="", metavar="DIR",
+             help="reuse a checkout here instead of cloning/updating the managed one"),
+        flag("--force", action="store_true",
+             help="rebuild or redownload even if this commit/release is already installed"),
+        flag("--check", action="store_true",
+             help="report the installed build's commit, age and architectures -- builds "
+                  "nothing"),
+        flag("--rollback", action="store_true",
+             help="point 'current' back at the previous verified build"),
+        flag("--persist", action="store_true",
+             help="install a weekly refresh (a LaunchAgent on macOS, a Scheduled Task on "
+                  "Windows) that reruns this on its own"),
+        flag("--adopt", default="", metavar="DIR",
+             help="register a flat build directory that already exists -- a hand-built "
+                  "binary, or a release zip unpacked by hand -- as a managed build, verify "
+                  "it, and switch to it now, without compiling or downloading anything"),
+        flag("--repo", default="", metavar="OWNER/REPO",
+             help="build a fork instead of ggml-org/llama.cpp's own master -- combine with "
+                  "--name to keep it beside 'current' instead of replacing it, e.g. --repo "
+                  "unslothai/llama.cpp --name unsloth"),
+        flag("--ref", default="", metavar="TAG_OR_BRANCH_OR_SHA",
+             help="the fork's ref to build (--from source, with --repo; default: its "
+                  "default branch's tip)"),
+        flag("--tag", default="", metavar="TAG",
+             help="the fork's release tag to download (--from release, with --repo; "
+                  "default: the newest release with a matching asset)"),
+        flag("--name", default="", metavar="NAME",
+             help="keep this build at ~/.ml-stack/llama.cpp/named/NAME instead of replacing "
+                  "'current' -- requires --repo. Select it with 'ml-stack-serve up --build "
+                  "NAME' or $MLSTACK_LLAMA_BUILD=NAME"),
+        flag("--list", action="store_true",
+             help="show 'current' and every named build, with commit, age and repo -- "
+                  "builds nothing"),
+    ])
+def cmd_build(args: argparse.Namespace) -> int:
+    return build.cmd_build(args)
 
 
 if __name__ == "__main__":

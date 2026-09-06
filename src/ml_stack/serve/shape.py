@@ -314,7 +314,7 @@ def draft_for(model: str, asked: str, *, build: str = "",
     A head that cannot be found is served without, out loud: ``log`` is told why. Said in
     silence once, and a model ran undrafted for an hour with nothing to show for it.
     """
-    from ml_stack.serve.cli import drafted
+    from ml_stack.serve.ops import drafted
 
     try:
         binary: str | Path | None = None
@@ -339,7 +339,7 @@ def projector_for(model: str, asked: str, *,
     the *most precise* projector found -- quantising one costs sight out of all proportion
     to what it saves.
     """
-    from ml_stack.serve.cli import alongside
+    from ml_stack.serve.ops import alongside
 
     try:
         return alongside(str(model), asked, "mmproj-", best=True)

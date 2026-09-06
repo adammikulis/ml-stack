@@ -149,7 +149,7 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
         # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
         # file to load -- it picked the MTP head and died (2026-09-02)
-        from ml_stack.serve.cli import alongside
+        from ml_stack.serve.ops import alongside
 
         found = alongside(str(model), "auto", "mmproj-", best=True)
         if not found:

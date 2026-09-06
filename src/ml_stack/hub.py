@@ -643,7 +643,7 @@ def choose_head(model: str | Path, *, binary: str | Path | None, prefer: tuple[s
     cache's directory name, `repo_of`), or a bare filename (`located`). The repository's
     listing is asked first, because that is where the publisher's own preference and the
     README's warning are; a path outside the cache, or a listing that cannot be fetched,
-    is answered from the disk beside the weights the way `serve.cli.alongside` looks.
+    is answered from the disk beside the weights the way `serve.ops.alongside` looks.
 
     ``prefer`` narrows several heads by substring (`beside`). Unset, a fork build takes
     unsloth's recommendation for Flash-Next -- `shared-Q8_0` -- and a mainline build
@@ -671,7 +671,7 @@ def choose_head(model: str | Path, *, binary: str | Path | None, prefer: tuple[s
         if "/" not in text and not local.is_file():
             local = located(text) or local
         if local.is_file():
-            from ml_stack.serve.cli import alongside
+            from ml_stack.serve.ops import alongside
 
             for prefix in DRAFT_KINDS:
                 found = alongside(str(local), "auto", prefix)
@@ -887,7 +887,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "layout":
             import struct
 
-            from ml_stack.serve.cli import resolve_model
+            from ml_stack.serve.ops import resolve_model
             from ml_stack.serve.layout import layout, render
 
             named = resolve_model(args.model)

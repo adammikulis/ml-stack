@@ -699,7 +699,7 @@ def test_the_most_precise_projector_is_taken_not_the_first_alphabetically():
     import tempfile
     from pathlib import Path
 
-    from ml_stack.serve.cli import alongside
+    from ml_stack.serve.ops import alongside
 
     with tempfile.TemporaryDirectory() as d:
         where = Path(d)
