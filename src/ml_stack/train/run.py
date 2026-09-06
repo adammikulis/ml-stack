@@ -18,9 +18,6 @@ beside a run still going is refused, because the two would share one GPU.
 from __future__ import annotations
 
 import json
-import os
-import platform
-import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
@@ -49,9 +46,6 @@ KIND = "train"
 WORDS = ("wait", "stop", "status", "parity")
 """What the command does instead of training, when one is written where the flags go."""
 
-_WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-
-
 def _home() -> Path:
     """Where a detached run's log and its record of itself live."""
     return home_dir()
@@ -63,32 +57,10 @@ def _jobs_home(home: Path | None = None) -> Path:
 
 
 def detach(argv: Sequence[str]) -> Path:
-    """Run ``ml-stack-train-run argv`` in the background, owned by no terminal; return the
-    log it writes into.
-
-    A fine-tune is hours. A child of a shell -- `nohup`, `&`, a redirect into a scratch
-    directory -- dies with the shell, or with the agent that opened it, so the command
-    re-runs itself in a new session with its output in a log under ``HOME/logs`` and gives
-    the shell back at once. The pid, the argv and the log are recorded through
-    `ml_stack.jobs`, which refuses a second one beside a run still going.
-    """
+    """Run ``ml-stack-train-run argv`` owned by no terminal, and return the log it writes."""
     rest = [a for a in argv if a != "--detach"]
-    logs = _home() / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    started = time.strftime("%FT%T")
-    log = logs / f"train-{time.strftime('%Y%m%dT%H%M%S')}.log"
-    command = [sys.executable, "-m", "ml_stack.train.run", *rest]
-    extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
-                             if platform.system() == "Windows" else {"start_new_session": True})
-    with log.open("ab") as out:
-        out.write(f"argv: {' '.join(rest)}\nstarted: {started}\n".encode())
-        out.flush()
-        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
-                                 stderr=subprocess.STDOUT,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
-    jobs.record(KIND, pid=child.pid, argv=rest, log=str(log), started=started,
-                home=_jobs_home())
-    return log
+    log = _home() / "logs" / f"train-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    return jobs.detach("ml_stack.train.run", rest, log=log, kind=KIND, home=_jobs_home()).log
 
 
 def wait(*, say: Callable[[str], None] = say, home: Path | None = None,

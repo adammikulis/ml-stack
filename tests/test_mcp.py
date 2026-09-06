@@ -103,7 +103,7 @@ class TestTheTools:
 
     def test_bench_run_detaches_and_returns_the_handle(self, tmp_path, monkeypatch):
         """The measurement is hours; the call is milliseconds and hands back where to look."""
-        from ml_stack.bench import run
+        import subprocess
 
         spawned: list[list[str]] = []
 
@@ -115,7 +115,7 @@ class TestTheTools:
                 assert kw.get("start_new_session") or "creationflags" in kw, \
                     "a measurement owned by this process dies with it"
 
-        monkeypatch.setattr(run.subprocess, "Popen", Child)
+        monkeypatch.setattr(subprocess, "Popen", Child)
         argv = ["sweep", "--serve", "quince-2b.gguf", "--smoke"]
         (reply,) = drive(rpc(1, "tools/call", name="bench_run", arguments={"argv": argv}))
         handle = said(reply)
@@ -156,19 +156,23 @@ class TestTheTools:
         assert reply["result"]["isError"]
         assert "somebody else's machine" in reply["result"]["content"][0]["text"]
 
-    def test_detached_writes_the_command_at_the_top_of_its_log(self, tmp_path, monkeypatch):
+    def test_detached_writes_the_command_in_the_header_of_its_log(self, tmp_path, monkeypatch):
+        import subprocess
+
         class Child:
             pid = 77
 
             def __init__(self, command, **kw):
                 pass
 
-        monkeypatch.setattr(server.subprocess, "Popen", Child)
+        monkeypatch.setattr(subprocess, "Popen", Child)
         got = server.detached("ml_stack.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
                               name="fetch-larch", home=tmp_path / "mcp")
         assert got["pid"] == 77
-        first = Path(got["log"]).read_text().splitlines()[0]
-        assert first.startswith("command:") and "ml_stack.hub fetch" in first
+        header = Path(got["log"]).read_text().splitlines()
+        assert header[0] == "argv: fetch hf:pellard/larch/larch.gguf"
+        said = next(line for line in header if line.startswith("command:"))
+        assert "ml_stack.hub fetch" in said
 
 
 class TestTheSpeechTools:

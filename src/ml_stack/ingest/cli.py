@@ -4,9 +4,6 @@ detached run's record."""
 from __future__ import annotations
 
 import argparse
-import os
-import platform
-import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -36,9 +33,6 @@ def home_dir() -> Path:
     return state("ingest")
 """Where a detached run's log and its record of itself live. Not the store: the store is
 the caller's, named by ``--out``."""
-
-
-_WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
 
 
 KIND = "ingest"
@@ -74,32 +68,10 @@ def _adopt(home: Path | None = None) -> None:
 
 
 def detach(argv: Sequence[str]) -> Path:
-    """Run ``ml-stack-ingest argv`` in the background, owned by no terminal; return its log.
-
-    A run over a directory of documents is hours. A child of a shell -- `nohup`, `&`, a
-    redirect into a
-    scratch directory -- dies with the shell, or with the agent that opened it, so the
-    command re-runs itself in a new session with its output in a log under ``HOME/logs``
-    and gives the shell back at once. The pid is recorded through `ml_stack.jobs`, which
-    refuses a second one beside a run still going; ``status`` reads the progress file the
-    run writes.
-    """
+    """Run ``ml-stack-ingest argv`` owned by no terminal, and return the log it writes."""
     rest = [a for a in argv if a != "--detach"]
-    logs = _home() / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    log = logs / f"ingest-{time.strftime('%Y%m%dT%H%M%S')}.log"
-    command = [sys.executable, "-m", "ml_stack.ingest", *rest]
-    extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
-                             if platform.system() == "Windows" else {"start_new_session": True})
-    with log.open("ab") as out:
-        out.write((f"argv: {' '.join(rest)}\nstarted: {time.strftime('%FT%T')}\n")
-                  .encode("utf-8"))
-        out.flush()
-        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
-                                 stderr=subprocess.STDOUT,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
-    jobs.record(KIND, pid=child.pid, argv=rest, log=str(log), home=_jobs_home())
-    return log
+    log = _home() / "logs" / f"ingest-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    return jobs.detach("ml_stack.ingest", rest, log=log, kind=KIND, home=_jobs_home()).log
 
 
 def retry(out: str | Path, *, say: Callable[[str], None] = say) -> int:

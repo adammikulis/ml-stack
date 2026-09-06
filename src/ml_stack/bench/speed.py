@@ -23,7 +23,6 @@ import argparse
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 from ml_stack import bench, hub

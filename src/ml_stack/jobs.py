@@ -1,6 +1,7 @@
-"""A record for a command that outlives the terminal that started it.
+"""Starting a command that outlives the terminal, and the record it leaves.
 
-One JSON file per *kind* of long command -- ``bench``, ``ingest``, ``train`` -- holding the
+`detach` re-runs a module in a session of its own with its output in a log and writes the
+record; `status`, `wait` and `stop` read it back. One JSON file per *kind* of long command -- ``bench``, ``ingest``, ``train`` -- holding the
 pid, the argv, the log and when it started, so ``wait`` and ``stop`` never need a
 hand-written ``pgrep`` loop and a command that chains after another is always
 ``wait && next``. ``ml-stack-jobs status`` prints every kind under one home at once.
@@ -11,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import signal
+import subprocess
+import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -32,8 +35,10 @@ STOP_WAIT = 60.0
 
 __all__ = [
     "STOP_WAIT",
+    "Detached",
     "Job",
     "alive",
+    "detach",
     "held",
     "home_dir",
     "main",
@@ -133,6 +138,44 @@ def record(kind: str, *, pid: int, argv: Sequence[str] = (), log: str = "", star
               started=started or time.strftime("%FT%T"), home=home)
     _path(kind, home).write_text(json.dumps(job.as_dict(), indent=1), encoding="utf-8")
     return job
+
+
+@dataclass(frozen=True, slots=True)
+class Detached:
+    """A command now running on its own: its pid, log, full command and start time."""
+
+    pid: int
+    log: Path
+    command: tuple[str, ...]
+    started: str
+
+
+def detach(module: str, argv: Sequence[str], *, log: Path, lines: Sequence[str] = (),
+           kind: str = "", home: Path | None = None) -> Detached:
+    """Run ``python -m module argv`` owned by no terminal, its output appended to ``log``,
+    whose header is its ``argv:`` and ``started:`` lines and then ``lines``.
+
+    With a ``kind`` the run is recorded under ``home``, so `status`, `wait` and `stop`
+    find it; without one the caller keeps whatever record it keeps.
+    """
+    from ml_stack.platform import detached_kwargs
+
+    started = time.strftime("%FT%T")
+    rest = [str(a) for a in argv]
+    command = [sys.executable, "-m", module, *rest]
+    log = Path(log)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    head = [f"argv: {' '.join(rest)}", f"started: {started}", *lines]
+    with log.open("ab") as out:
+        out.write(("\n".join(head) + "\n").encode("utf-8"))
+        out.flush()
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
+                                 stderr=subprocess.STDOUT,
+                                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                                 **detached_kwargs())
+    if kind:
+        record(kind, pid=child.pid, argv=rest, log=str(log), started=started, home=home)
+    return Detached(pid=child.pid, log=log, command=tuple(command), started=started)
 
 
 def wait(kind: str, *, say: Callable[[str], None] = say, every: float = 60.0,

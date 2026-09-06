@@ -183,6 +183,18 @@ class TestProcessGroups:
 
         assert process_group_kwargs() == {"start_new_session": True}
 
+    def test_a_detached_job_also_leaves_the_console_on_windows(self, windows):
+        from ml_stack.platform import CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS, detached_kwargs
+
+        assert detached_kwargs() == {
+            "creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}
+        assert DETACHED_PROCESS == 0x8, "Win32's own value, the same everywhere"
+
+    def test_a_detached_job_on_posix_is_a_session_of_its_own(self):
+        from ml_stack.platform import detached_kwargs
+
+        assert detached_kwargs() == {"start_new_session": True}
+
     def test_a_windows_job_is_asked_to_stop_with_ctrl_break(self, windows):
         from ml_stack.platform import CTRL_BREAK_EVENT, stop_gently
 

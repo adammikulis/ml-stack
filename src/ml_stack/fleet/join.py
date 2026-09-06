@@ -18,7 +18,6 @@ import argparse
 import contextlib
 import json
 import os
-import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -27,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.http import ServerError, ServerUnreachable, request_bytes
+from ml_stack.jobs import detach
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
@@ -194,28 +194,16 @@ def started_file(root: Path | str) -> Path:
 
 
 def start_daemon(port: int, root: Path | str, name: str = "") -> int:
-    """Start ``ml-stack-traind`` in its own session, its output in a log under ``root``.
-
-    A child of this shell dies with it, and a daemon that dies when the terminal closes is
-    a peer that vanishes the moment someone logs out. Returns the pid, which is also
-    written to `started_file` for ``leave``.
-    """
+    """Start ``ml-stack-traind`` owned by no terminal, its log under ``root``; the pid,
+    which is also written to `started_file` for ``leave``."""
     root = Path(root).expanduser()
     root.mkdir(parents=True, exist_ok=True)
-    log = root / "traind.log"
-    argv = [sys.executable, "-m", "ml_stack.fleet.daemon", "--port", str(port),
-            "--root", str(root)]
-    if name:
-        argv += ["--name", name]
-    from ml_stack.platform import process_group_kwargs
-
-    with log.open("ab") as out:
-        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out,
-                                 stderr=subprocess.STDOUT, **process_group_kwargs())
+    argv = ["--port", str(port), "--root", str(root)] + (["--name", name] if name else [])
+    ran = detach("ml_stack.fleet.daemon", argv, log=root / "traind.log")
     started_file(root).write_text(json.dumps({
-        "pid": child.pid, "argv": argv, "log": str(log),
-        "started": time.strftime("%FT%T")}, indent=1), encoding="utf-8")
-    return child.pid
+        "pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
+        "started": ran.started}, indent=1), encoding="utf-8")
+    return ran.pid
 
 
 def remember_track(root: Path | str, branch: str) -> str:

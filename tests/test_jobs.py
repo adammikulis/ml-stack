@@ -3,8 +3,10 @@ stop, status -- against a real sleeping child, in ``tmp_path``, never ``~/.ml-st
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -139,3 +141,61 @@ def test_status_lists_every_kind_recorded_under_home(tmp_path, capsys):
     finally:
         live.kill()
         live.wait(timeout=10)
+
+
+@pytest.mark.slow
+def test_detach_starts_a_real_child_in_its_own_session_and_stop_ends_it(
+        tmp_path, capsys, monkeypatch):
+    """The one launcher, driven: a module run detached writes its header, keeps running
+    when this process would not, is recorded for `status`, and `stop` ends it."""
+    module = tmp_path / "sleeper" / "__init__.py"
+    module.parent.mkdir()
+    (module.parent / "__main__.py").write_text(
+        "import sys, time\nprint('awake', flush=True)\ntime.sleep(120)\n")
+    module.write_text("")
+    monkeypatch.setenv("PYTHONPATH", str(tmp_path))
+
+    log = tmp_path / "logs" / "sleeper.log"
+    ran = jobs.detach("sleeper", ["--quietly"], log=log, lines=["commit: 0f1e2d3"],
+                      kind="sleeper", home=tmp_path)
+    try:
+        assert ran.pid > 0 and ran.log == log
+        assert ran.command[1:] == ("-m", "sleeper", "--quietly")
+        header = log.read_text().splitlines()
+        assert header[:3] == ["argv: --quietly", f"started: {ran.started}", "commit: 0f1e2d3"]
+        assert os.getsid(ran.pid) == ran.pid, "a session of its own, owned by no terminal"
+        assert jobs.alive("sleeper", home=tmp_path) == ran.pid
+
+        _until(lambda: "awake" in log.read_text(), "the child never wrote to the log")
+        assert jobs.status(home=tmp_path) == 0
+        assert f"sleeper: running (pid {ran.pid})" in capsys.readouterr().out
+
+        assert jobs.stop("sleeper", home=tmp_path, wait=10.0) == 0
+        assert jobs.alive("sleeper", home=tmp_path) == 0
+        assert not (tmp_path / "sleeper.json").exists()
+    finally:
+        with contextlib.suppress(OSError):
+            os.kill(ran.pid, signal.SIGKILL)
+
+
+def test_detach_without_a_kind_writes_no_record(tmp_path, monkeypatch):
+    """`mcp.detached` and the fleet daemon keep records of their own; `status` is not theirs."""
+    seen: dict = {}
+
+    class Child:
+        pid = 4242
+
+        def __init__(self, command, **kw):
+            seen["command"], seen["kw"] = list(command), kw
+
+    monkeypatch.setattr(subprocess, "Popen", Child)
+    ran = jobs.detach("ml_stack.hub", ["fetch", "hf:pellard/larch/larch.gguf"],
+                      log=tmp_path / "logs" / "fetch.log")
+
+    assert ran.pid == 4242 and seen["command"][1:3] == ["-m", "ml_stack.hub"]
+    assert seen["kw"]["stdin"] is subprocess.DEVNULL
+    assert seen["kw"]["stderr"] is subprocess.STDOUT
+    assert seen["kw"]["env"]["PYTHONUNBUFFERED"] == "1"
+    assert seen["kw"].get("start_new_session") or "creationflags" in seen["kw"]
+    assert list(tmp_path.glob("*.json")) == [], "no record without a kind"
+    assert jobs.status(home=tmp_path) == 0

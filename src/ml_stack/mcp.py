@@ -29,8 +29,6 @@ import dataclasses
 import inspect
 import io
 import json
-import os
-import subprocess
 import sys
 import time
 import typing
@@ -119,24 +117,14 @@ def detached(module: str, argv: list[str], *, name: str,
     """Run ``python -m module argv`` in its own session and return its log and pid.
 
     The same shape ``ml-stack-bench --detach`` makes, for the commands that have no
-    ``--detach`` of their own: a server coming up, a download. The first line of the log
-    is the command, so a log found later says what it was.
+    ``--detach`` of their own: a server coming up, a download. The log's header names the
+    module and its arguments, so a log found later says what it was.
     """
-    logs = (home or mcp_home()) / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
-    log = logs / f"{name}-{time.strftime('%Y%m%dT%H%M%S')}.log"
-    from ml_stack.platform import process_group_kwargs
+    from ml_stack import jobs
 
-    command = [sys.executable, "-m", module, *argv]
-    with log.open("ab") as out:
-        out.write((f"command: {' '.join(command)}\nstarted: {time.strftime('%FT%T')}\n")
-                  .encode())
-        out.flush()
-        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
-                                 stderr=subprocess.STDOUT,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
-                                 **process_group_kwargs())
-    return {"log": str(log), "pid": child.pid, "command": " ".join(command)}
+    log = (home or mcp_home()) / "logs" / f"{name}-{time.strftime('%Y%m%dT%H%M%S')}.log"
+    ran = jobs.detach(module, argv, log=log, lines=[f"command: {module} {' '.join(argv)}"])
+    return {"log": str(ran.log), "pid": ran.pid, "command": " ".join(ran.command)}
 
 
 def _captured(fn: Callable[[], int]) -> dict[str, Any]:

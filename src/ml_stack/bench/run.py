@@ -14,10 +14,8 @@ import argparse
 import importlib
 import json
 import os
-import platform
 import re
 import signal
-import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -27,7 +25,7 @@ from typing import Any
 # The package is the namespace the tests and `selfcheck` patch -- `bench.served`,
 # `bench.home_dir()` -- so anything patchable is looked up there at call
 # time, never bound here at import.
-from ml_stack import bench, hub
+from ml_stack import bench, hub, jobs
 from ml_stack.bench.keep import (
     SHORT,
     SMOKE,
@@ -1433,10 +1431,6 @@ def _fleet_sweep(args: Any) -> int:
 MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
 
 
-# Windows has no sessions; a child that survives its parent's console is asked for by flag.
-_WINDOWS_DETACHED = 0x00000200 | 0x00000008     # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
-
-
 def measuring_file() -> Path:
     """Where the run holding the measuring lock writes its pid, argv, log, start time and
     how it is asking."""
@@ -1552,43 +1546,20 @@ def _named_in(argv: Sequence[str]) -> str:
 
 
 def detach(argv: Sequence[str]) -> Path:
-    """Run ``ml-stack-bench argv`` in the background, owned by no terminal, and return its log.
-
-    A measurement is hours, and a child of a shell -- `nohup`, `&`, a hand-made redirect
-    into a scratch directory -- dies with the shell, or with the agent that opened it.
-    A ranking sweep was killed that way, thirty minutes in. So the command re-runs itself
-    in a new session with its output in a log under the bench's own home, writes down the
-    pid it started and what it started, and gives the shell back at once. `status`,
-    `tail -f` and `stop` read the same file.
-    """
+    """Run ``ml-stack-bench argv`` owned by no terminal, and return the log it writes."""
     rest = [a for a in argv if a != "--detach"]
-    logs = bench.home_dir() / "logs"
-    logs.mkdir(parents=True, exist_ok=True)
     cmd = next((a for a in rest if a in MEASURING), "bench")
-    log = logs / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log"
-    command = [sys.executable, "-m", "ml_stack.bench", *rest]
-    extra: dict[str, Any] = ({"creationflags": _WINDOWS_DETACHED}
-                             if platform.system() == "Windows" else {"start_new_session": True})
-    started = time.strftime("%FT%T")
+    log = (bench.home_dir() / "logs"
+           / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log")
     commit = _commit()
-    with log.open("ab") as out:
-        # the log's first lines are its record -- `history` reads them back when
-        # `measuring.json` has moved on to the next run
-        out.write((f"argv: {' '.join(rest)}\nstarted: {started}\n"
-                   + (f"commit: {commit}\n" if commit else "")).encode("utf-8"))
-        out.flush()
-        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=out,
-                                 stderr=subprocess.STDOUT,
-                                 env={**os.environ, "PYTHONUNBUFFERED": "1"}, **extra)
-    remember(rest, pid=child.pid, log=str(log), started=started, commit=commit)
-    from ml_stack import jobs
-
-    # bench queues a second `--detach` behind the measuring lock rather than refusing it
-    # (the child waits on `only_one`), so this never raises `Busy` the way a caller with no
-    # queue of its own would want it to.
-    jobs.record("bench", pid=child.pid, argv=rest, log=str(log), started=started,
-               home=bench.home_dir() / "jobs", refuse_if_alive=False)
-    return log
+    # `history` reads the log's header back once `measuring.json` has moved on; a second
+    # `--detach` queues behind the measuring lock rather than being refused here
+    ran = jobs.detach("ml_stack.bench", rest, log=log,
+                      lines=[f"commit: {commit}"] if commit else [])
+    remember(rest, pid=ran.pid, log=str(ran.log), started=ran.started, commit=commit)
+    jobs.record("bench", pid=ran.pid, argv=rest, log=str(ran.log), started=ran.started,
+                home=bench.home_dir() / "jobs", refuse_if_alive=False)
+    return ran.log
 
 
 def _last_line(log: Path) -> str:

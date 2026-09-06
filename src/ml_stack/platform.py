@@ -12,7 +12,9 @@ What differs, and what Windows gets instead:
 
 - a job started in its own process group so a stop reaches it and nothing else:
   ``start_new_session=True`` on POSIX, ``creationflags=CREATE_NEW_PROCESS_GROUP`` on
-  Windows (``process_group_kwargs``);
+  Windows (``process_group_kwargs``); the same with ``DETACHED_PROCESS`` as well for a job
+  that outlives the terminal, which on Windows also means leaving its console
+  (``detached_kwargs``);
 - asking a job to stop so it can checkpoint: ``SIGTERM`` on POSIX, ``CTRL_BREAK_EVENT``
   on Windows -- the one console signal that can be aimed at a single process group,
   which is why the group above matters -- falling back to ``TerminateProcess`` when the
@@ -38,6 +40,7 @@ from pathlib import Path
 from typing import Any
 
 __all__ = [
+    "detached_kwargs",
     "is_windows",
     "on_quit",
     "private_file",
@@ -49,6 +52,7 @@ __all__ = [
 
 # subprocess only defines these on Windows; the values are Win32's own and do not change.
 CREATE_NEW_PROCESS_GROUP = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
+DETACHED_PROCESS = getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
 CTRL_BREAK_EVENT = getattr(signal, "CTRL_BREAK_EVENT", 1)
 
 
@@ -70,6 +74,19 @@ def process_group_kwargs() -> dict[str, Any]:
     """
     if is_windows():
         return {"creationflags": CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def detached_kwargs() -> dict[str, Any]:
+    """The ``Popen`` keywords for a child that outlives the terminal that started it.
+
+    `process_group_kwargs` plus ``DETACHED_PROCESS`` on Windows, which takes the child off
+    the console altogether so closing the window does not end it. A child started this way
+    has no console to receive ``CTRL_BREAK_EVENT``, so `stop_gently` falls through to
+    ``TerminateProcess`` for it.
+    """
+    if is_windows():
+        return {"creationflags": CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS}
     return {"start_new_session": True}
 
 
