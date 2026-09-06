@@ -678,6 +678,10 @@ def _trace_lines(entry: Mapping[str, Any]) -> list[str]:
     if int(timings.get("draft_n") or 0):
         taken, guessed = int(timings.get("draft_n_accepted") or 0), int(timings["draft_n"])
         drafted = f", accepted {taken}/{guessed}"
+        if timings.get("draft_ms") is not None:
+            drafted += (f" ({float(timings['draft_ms']):.0f}ms drafting"
+                        f" + {float(timings.get('verify_ms') or 0):.0f}ms checking"
+                        f" over {int(timings.get('verify_n') or 0)} pass(es))")
     head = f"{int(entry.get('call') or 0):3}"
     lines = []
     for call in entry.get("tool_calls") or []:

@@ -22,19 +22,24 @@ from ml_stack.telemetry import ARGS_CAP, Call, args_summary
 
 def reply(*, content="ok", model="tiny-Q4.gguf", prompt_n=300, cache_n=600, predicted_n=40,
           prompt_ms=100.0, predicted_ms=400.0, draft_n=0, draft_taken=0, prompt_tokens=900,
-          completion_tokens=40, finish="stop", thinking="", tool=None, args="{}"):
+          completion_tokens=40, finish="stop", thinking="", tool=None, args="{}",
+          draft_ms=None, verify_ms=None, verify_n=None, draft_n_verified=None):
     """A reply shaped exactly as llama.cpp's ``/v1/chat/completions`` sends one."""
     calls = ([{"id": "call_1", "type": "function",
                "function": {"name": tool, "arguments": args}}] if tool else None)
+    timings = {"prompt_ms": prompt_ms, "predicted_ms": predicted_ms,
+               "prompt_n": prompt_n, "cache_n": cache_n, "predicted_n": predicted_n,
+               "draft_n": draft_n, "draft_n_accepted": draft_taken}
+    for key, value in (("draft_ms", draft_ms), ("verify_ms", verify_ms),
+                       ("verify_n", verify_n), ("draft_n_verified", draft_n_verified)):
+        if value is not None:
+            timings[key] = value
     return Reply(content=content, tool_calls=calls, finish_reason=finish,
                  thinking=thinking or None,
                  raw={"model": model,
                       "usage": {"prompt_tokens": prompt_tokens,
                                 "completion_tokens": completion_tokens},
-                      "timings": {"prompt_ms": prompt_ms, "predicted_ms": predicted_ms,
-                                  "prompt_n": prompt_n, "cache_n": cache_n,
-                                  "predicted_n": predicted_n,
-                                  "draft_n": draft_n, "draft_n_accepted": draft_taken}})
+                      "timings": timings})
 
 
 # -- the record ---------------------------------------------------------------------------
@@ -222,7 +227,8 @@ class TestSpentIsTheSumOfItsCalls:
             "first_token", "prompt_tokens", "completion_tokens", "read_tokens",
             "cached_tokens", "draft_tokens", "draft_taken", "finish", "truncated",
             "thinking_chars", "answer_chars", "tool_calls", "context_peak", "context_last",
-            "parts", "drafted", "acceptance", "tokens_per_second",
+            "parts", "drafted", "acceptance", "tokens_per_second", "tokens_per_pass",
+            "draft_ms", "verify_ms", "verify_n",
             "decode_tokens_per_second", "prompt_tokens_per_second"}
 
     def test_the_totals_over_a_session_read_the_same_records(self):
@@ -233,6 +239,58 @@ class TestSpentIsTheSumOfItsCalls:
         assert got["answers"] == 2 and got["calls"] == 2
         assert got["read_tokens"] == 400 and got["completion_tokens"] == 60
         assert got["models"] == ["tiny-Q4.gguf"]
+
+
+# -- generation split into drafting and checking -----------------------------------------
+class TestTheDraftHeadsShareOfGeneration:
+    """``predicted_ms`` is one lump: a draft head running N times per pass is inside it
+    alongside the model checking those guesses. A build that times them apart says so in
+    ``draft_ms``, ``verify_ms`` and ``verify_n``, and the record carries all three."""
+
+    def test_a_call_keeps_the_split_the_server_reported(self):
+        one = Call.from_reply(reply(predicted_n=40, draft_n=32, draft_taken=28,
+                                    predicted_ms=400.0, draft_ms=150.0, verify_ms=230.0,
+                                    verify_n=12, draft_n_verified=11), 0.5)
+        assert (one.draft_ms, one.verify_ms) == (150.0, 230.0)
+        assert (one.verify_n, one.draft_n_verified) == (12, 11)
+        assert one.draft_ms + one.verify_ms <= one.predicted_ms
+
+    def test_a_build_that_does_not_time_them_apart_leaves_none_not_zero(self):
+        """Absent is not zero. A build with no clock over drafting reports nothing, and
+        zero passes would be a claim the model never ran."""
+        one = Call.from_reply(reply(draft_n=32, draft_taken=28), 0.5)
+        assert (one.draft_ms, one.verify_ms, one.verify_n) == (None, None, None)
+
+    def test_a_server_that_says_it_cannot_measure_leaves_none(self):
+        cannot = Reply(content="ok", raw={"timings": {"predicted_n": 4, "draft_ms": None,
+                                                      "verify_ms": None, "verify_n": None}})
+        one = Call.from_reply(cannot, 0.1)
+        assert (one.draft_ms, one.verify_ms, one.verify_n) == (None, None, None)
+        assert one.public()["draft_ms"] is None
+
+    def test_the_totals_add_the_split_up_and_divide_the_tokens_by_the_passes(self):
+        s = Spent()
+        s.note(reply(completion_tokens=40, draft_ms=150.0, verify_ms=230.0, verify_n=10,
+                     draft_n=32, draft_taken=28), 0.5)
+        s.note(reply(completion_tokens=20, draft_ms=70.0, verify_ms=120.0, verify_n=5,
+                     draft_n=16, draft_taken=14), 0.3)
+        assert (s.draft_ms, s.verify_ms, s.verify_n) == (220.0, 350.0, 15)
+        assert s.tokens_per_pass == 4.0
+        assert Spent.totals([s.public()])["tokens_per_pass"] == 4.0
+
+    def test_tokens_per_pass_is_none_where_no_build_counted_the_passes(self):
+        s = Spent()
+        s.note(reply(draft_n=32, draft_taken=28), 0.5)
+        assert s.tokens_per_pass is None and s.public()["tokens_per_pass"] is None
+
+    def test_one_unmeasured_call_leaves_the_whole_total_unmeasured(self):
+        """Half a session's drafting time is not the session's drafting time."""
+        s = Spent()
+        s.note(reply(draft_n=32, draft_taken=28, draft_ms=150.0, verify_ms=230.0,
+                     verify_n=10), 0.5)
+        s.note(reply(draft_n=16, draft_taken=14), 0.3)
+        assert (s.draft_ms, s.verify_ms, s.verify_n) == (None, None, None)
+        assert s.tokens_per_pass is None
 
 
 # -- what a backend cannot measure ------------------------------------------------------

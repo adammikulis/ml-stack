@@ -43,6 +43,9 @@ class Row:
     answer_chars: int = 0
     draft_tokens: int | None = 0   # guessed ahead by a draft model, when one is served
     draft_taken: int | None = 0    # of those, how many the large model kept
+    draft_ms: float | None = 0.0   # time the draft model's own passes took
+    verify_ms: float | None = 0.0  # time the large model spent checking them
+    verify_n: int | None = 0       # how many passes it made
     # Per call, ``[cached, processed]`` as the server reported them, and from those
     # whether the prompt cache's prefix survived from each call to the next -- see
     # `prefix_kept`. `prefix_hits` is kept over turns, None for a question of one call
@@ -789,6 +792,9 @@ def _flat(one: Mapping[str, Any], among: Sequence[Mapping[str, Any]] = ()) -> di
         "written_tokens": int(_total(rows, "completion_tokens")),
         "draft_offered": int(_total(rows, "draft_tokens")),
         "draft_kept": int(_total(rows, "draft_taken")),
+        "draft_ms": round(_total(rows, "draft_ms"), 1),
+        "verify_ms": round(_total(rows, "verify_ms"), 1),
+        "verify_passes": int(_total(rows, "verify_n")),
         # None for an undrafted run, or one whose baseline is not among the runs
         "speedup": round(faster, 3) if faster is not None else None,
         "timed_out": sum(1 for r in rows if r.get("timed_out")),

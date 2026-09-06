@@ -238,6 +238,31 @@ def test_llama_cpp_timings_are_read_whole_and_a_missing_draft_is_zero():
     assert got["load_ms"] is None
 
 
+def test_the_time_drafting_and_the_time_checking_are_read_apart():
+    """A build that times the two halves of generation reports both, plus how many passes
+    the model made. ``predicted_ms`` still covers them both."""
+    from ml_stack.bench.backends import timings_of
+
+    got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
+                                         "prompt_n": 90, "cache_n": 10, "predicted_n": 40,
+                                         "draft_n": 32, "draft_n_accepted": 28,
+                                         "draft_n_verified": 9, "draft_ms": 300.0,
+                                         "verify_ms": 450.0, "verify_n": 10}}))
+    assert got["draft_ms"] == 300.0 and got["verify_ms"] == 450.0
+    assert got["verify_n"] == 10 and got["draft_n_verified"] == 9
+    assert got["draft_ms"] + got["verify_ms"] <= got["predicted_ms"]
+
+
+def test_a_build_that_does_not_split_generation_reports_zero_for_both_halves():
+    from ml_stack.bench.backends import timings_of
+
+    got = timings_of(_Reply({"timings": {"prompt_ms": 120.0, "predicted_ms": 800.0,
+                                         "prompt_n": 90, "predicted_n": 40}}))
+    assert got["draft_ms"] is None and got["verify_ms"] is None
+    assert got["verify_n"] is None and got["draft_n_verified"] is None, \
+        "no clock over drafting is not zero passes"
+
+
 def test_a_reply_with_no_timings_at_all_is_none_everywhere():
     from ml_stack.bench.backends import timings_of
 

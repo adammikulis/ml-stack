@@ -168,6 +168,9 @@ class Counting:
         self.cached_tokens: int | None = None
         self.draft_tokens: int | None = None
         self.draft_taken: int | None = None
+        self.draft_ms: float | None = None
+        self.verify_ms: float | None = None
+        self.verify_n: int | None = None
         # Per call, ``(cached, processed)`` as the server reported them: the totals above
         # cannot say whether the prefix survived from one call to the next, and that --
         # see `prefix_kept` -- is the cheapest speed lever there is.
@@ -248,7 +251,8 @@ class Counting:
                        "completion": int(usage.get("completion_tokens") or 0)},
             "timings": {k: (float(timings[k]) if k.endswith("_ms") else int(timings[k]))
                         for k in ("prompt_ms", "predicted_ms", "prompt_n", "cache_n",
-                                  "predicted_n", "draft_n", "draft_n_accepted")
+                                  "predicted_n", "draft_n", "draft_n_accepted",
+                                  "draft_n_verified", "draft_ms", "verify_ms", "verify_n")
                         if timings.get(k) is not None},
         }
         if cut:
@@ -317,6 +321,11 @@ class Counting:
         if timings["draft_n"] is not None:
             self.draft_tokens = (self.draft_tokens or 0) + int(timings["draft_n"])
             self.draft_taken = (self.draft_taken or 0) + int(timings["draft_n_accepted"] or 0)
+        # A build with no clock over drafting reports none of these, and counts toward none.
+        if timings.get("verify_n") is not None:
+            self.draft_ms = (self.draft_ms or 0.0) + float(timings.get("draft_ms") or 0.0)
+            self.verify_ms = (self.verify_ms or 0.0) + float(timings.get("verify_ms") or 0.0)
+            self.verify_n = (self.verify_n or 0) + int(timings["verify_n"])
         return reply
 
     def __getattr__(self, name: str) -> Any:
@@ -500,6 +509,9 @@ def _ask_once(ask: Callable[..., Any], one: Mapping[str, Any], *, label: str, cl
     row.completion_tokens = counting.completion_tokens
     row.draft_tokens = counting.draft_tokens
     row.draft_taken = counting.draft_taken
+    row.draft_ms = counting.draft_ms
+    row.verify_ms = counting.verify_ms
+    row.verify_n = counting.verify_n
     row.cache_calls = [[c, p] for c, p in counting.per_call]
     row.prompts = counting.prompts
     row.trace = counting.trace

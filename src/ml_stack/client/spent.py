@@ -16,12 +16,14 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from ml_stack.telemetry import Call
 
+_N = TypeVar("_N", int, float)
 
-def _summed(total: int | None, count: int | None) -> int | None:
+
+def _summed(total: _N | None, count: _N | None) -> _N | None:
     """``total + count``, or ``None`` once either side was not measured."""
     if total is None or count is None:
         return None
@@ -45,6 +47,9 @@ class Spent:
     cached_tokens: int | None = 0   # what it kept from the call before (timings.cache_n)
     draft_tokens: int | None = 0    # guessed ahead by a draft head
     draft_taken: int | None = 0     # and accepted
+    draft_ms: float | None = 0.0    # time the draft head's own passes took
+    verify_ms: float | None = 0.0   # time the model spent checking them
+    verify_n: int | None = 0        # how many times it checked, None on a build that cannot say
     finish: str = ""                # the last reply's finish_reason
     truncated: bool = False         # any reply cut by the ceiling
     thinking_chars: int = 0
@@ -107,6 +112,9 @@ class Spent:
                              else max(self.context_peak, call.held))
         self.draft_tokens = _summed(self.draft_tokens, call.draft_n)
         self.draft_taken = _summed(self.draft_taken, call.draft_n_accepted)
+        self.draft_ms = _summed(self.draft_ms, call.draft_ms)
+        self.verify_ms = _summed(self.verify_ms, call.verify_ms)
+        self.verify_n = _summed(self.verify_n, call.verify_n)
         if call.finish:
             self.finish = call.finish
             self.truncated = self.truncated or call.finish == "length"
@@ -133,6 +141,13 @@ class Spent:
         if not self.draft_tokens or self.draft_taken is None:
             return None
         return self.draft_taken / self.draft_tokens
+
+    @property
+    def tokens_per_pass(self) -> float | None:
+        """Tokens written per pass the model made over a draft, or None without a draft head."""
+        if not self.verify_n:
+            return None
+        return self.completion_tokens / self.verify_n
 
     @property
     def tokens_per_second(self) -> float | None:
@@ -163,8 +178,10 @@ class Spent:
         summed: dict[str, Any] = {k: 0 for k in (
             "calls", "seconds", "generating_ms", "prompt_ms", "predicted_ms", "prompt_tokens",
             "completion_tokens", "read_tokens", "cached_tokens", "draft_tokens", "draft_taken",
-            "thinking_chars", "answer_chars", "tool_calls")}
-        unmeasured = ("cached_tokens", "draft_tokens", "draft_taken")
+            "draft_ms", "verify_ms", "verify_n", "thinking_chars", "answer_chars",
+            "tool_calls")}
+        unmeasured = ("cached_tokens", "draft_tokens", "draft_taken", "draft_ms", "verify_ms",
+                      "verify_n")
         models: list[str] = []
         answers = 0
         truncated = 0
@@ -204,6 +221,8 @@ class Spent:
         out["acceptance"] = (round(summed["draft_taken"] / summed["draft_tokens"], 3)
                              if summed["draft_tokens"] and summed["draft_taken"] is not None
                              else None)
+        out["tokens_per_pass"] = (round(summed["completion_tokens"] / summed["verify_n"], 2)
+                                  if summed["verify_n"] else None)
         out["tokens_per_second"] = (round(summed["completion_tokens"]
                                           / (summed["generating_ms"] / 1000), 1)
                                     if summed["generating_ms"] and summed["completion_tokens"]
@@ -234,6 +253,8 @@ class Spent:
         out["generating_ms"] = round(self.generating_ms, 1)
         out["drafted"] = self.drafted
         out["acceptance"] = (round(self.acceptance, 3) if self.acceptance is not None else None)
+        out["tokens_per_pass"] = (round(self.tokens_per_pass, 2)
+                                  if self.tokens_per_pass is not None else None)
         out["tokens_per_second"] = (round(self.tokens_per_second, 1)
                                     if self.tokens_per_second is not None else None)
         out["decode_tokens_per_second"] = (round(self.decode_tokens_per_second, 1)

@@ -234,10 +234,24 @@ def _read_run(args: Any) -> int:
         f"{(time.time() - started) / 60:.1f} min; {spent.calls} calls, "
         f"{spent.prompt_tokens} prompt and {spent.completion_tokens} completion tokens"
         + (f"; {totals['failed']} failed" if totals["failed"] else ""))
+    if spent.drafted:
+        say(_drafting_line(spent))
     if stopped:
         say("stopped: what was read is folded into the store; "
             f"the same command with --resume reads on ({args.out})")
     return code
+
+
+def _drafting_line(spent: Any) -> str:
+    """What the draft head guessed, what was kept, and the time each half took."""
+    line = (f"drafted {spent.draft_tokens}, kept {spent.draft_taken}"
+            f" ({(spent.acceptance or 0) * 100:.1f}%)")
+    if spent.verify_n:
+        line += f" over {spent.verify_n} pass(es), {spent.tokens_per_pass:.2f} tokens each"
+    if spent.draft_ms:
+        line += (f"; {spent.draft_ms / 1000:.1f}s drafting"
+                 f" + {(spent.verify_ms or 0) / 1000:.1f}s checking")
+    return line
 
 
 def _fold_interval(seconds: float, *, every: int | None = None,

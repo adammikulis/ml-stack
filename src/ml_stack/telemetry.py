@@ -82,6 +82,12 @@ def _counted(timings: Mapping[str, Any], key: str) -> int | None:
     return int(timings.get(key) or 0)
 
 
+def _measured(timings: Mapping[str, Any], key: str, cast: Any) -> Any:
+    """``timings[key]`` cast, or ``None`` where the server did not report it at all."""
+    value = timings.get(key)
+    return None if value is None else cast(value)
+
+
 def _asked(reply: Any, *, cap: int = ARGS_CAP) -> list[dict[str, Any]]:
     """The tool calls on one reply as ``[{"name", "args"}]``, arguments parsed.
 
@@ -131,6 +137,12 @@ class Call:
     predicted_n: int = 0
     draft_n: int | None = 0         # guessed ahead by a draft head
     draft_n_accepted: int | None = 0  # and accepted
+    # Generation split in two: the draft head guessing, and the model checking. A server
+    # that does not time them apart writes null, and `predicted_ms` stays the one lump.
+    draft_ms: float | None = None   # the draft head's own passes
+    verify_ms: float | None = None  # the model's, over the guesses and the prompt's last token
+    verify_n: int | None = None     # how many times it checked
+    draft_n_verified: int | None = None  # of those, the checks that had a guess to check
     # The usage totals as well as the timings: a conversation re-sends everything every
     # turn, so `prompt_tokens` counts the same words over and over while `prompt_n` counts
     # what was actually read. `Spent` sums both, and cannot be the sum of its calls unless
@@ -185,6 +197,10 @@ class Call:
             predicted_n=int(timings.get("predicted_n") or 0),
             draft_n=_counted(timings, "draft_n"),
             draft_n_accepted=_counted(timings, "draft_n_accepted"),
+            draft_ms=_measured(timings, "draft_ms", float),
+            verify_ms=_measured(timings, "verify_ms", float),
+            verify_n=_measured(timings, "verify_n", int),
+            draft_n_verified=_measured(timings, "draft_n_verified", int),
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
             seconds=float(took),
@@ -288,6 +304,8 @@ class Call:
         out["seconds"] = round(self.seconds, 3)
         out["prompt_ms"] = round(self.prompt_ms, 1)
         out["predicted_ms"] = round(self.predicted_ms, 1)
+        out["draft_ms"] = None if self.draft_ms is None else round(self.draft_ms, 1)
+        out["verify_ms"] = None if self.verify_ms is None else round(self.verify_ms, 1)
         out["generating_ms"] = round(self.generating_ms, 1)
         out["waited_ms"] = self.waited_ms
         out["first_token"] = self.first_token

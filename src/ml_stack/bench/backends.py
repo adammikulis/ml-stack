@@ -25,7 +25,8 @@ SCHEMES = {"ollama": "ollama", "openai": "openai"}
 
 # Every timing a reply may carry, in the words llama.cpp uses for them.
 TIMING_KEYS = ("prompt_ms", "predicted_ms", "prompt_n", "cache_n", "predicted_n", "draft_n",
-               "draft_n_accepted", "load_ms")
+               "draft_n_accepted", "draft_n_verified", "draft_ms", "verify_ms", "verify_n",
+               "load_ms")
 
 # Ollama's own names for the same figures, and what each is in: durations in nanoseconds.
 _OLLAMA = {"prompt_eval_count": "prompt_n", "eval_count": "predicted_n"}
@@ -217,7 +218,7 @@ def timings_of(reply: Any) -> dict[str, float | int | None]:
     if isinstance(timings, Mapping):
         # a key written as null is a figure this program does not measure; a key left
         # out is llama.cpp with nothing to say -- no head, nothing cached -- which is 0
-        for key in ("prompt_ms", "predicted_ms", "load_ms"):
+        for key in ("prompt_ms", "predicted_ms", "load_ms", "draft_ms", "verify_ms"):
             if timings.get(key) is not None:
                 out[key] = float(timings[key])
         for key in ("prompt_n", "cache_n", "predicted_n"):
@@ -226,6 +227,10 @@ def timings_of(reply: Any) -> dict[str, float | int | None]:
         for key in ("draft_n", "draft_n_accepted"):
             out[key] = None if (key in timings and timings[key] is None) \
                 else int(timings.get(key) or 0)
+        # A build that never split generation reports none of these, and that is not zero
+        # passes: it is a build that cannot say.
+        for key in ("draft_n_verified", "verify_n"):
+            out[key] = None if timings.get(key) is None else int(timings[key])
         if out["cache_n"] is None and "cache_n" not in timings:
             usage = raw.get("usage") or {}
             cached = (usage.get("prompt_tokens_details") or {}).get("cached_tokens")

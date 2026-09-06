@@ -143,7 +143,8 @@ def _one(client: Any, text: str, *, generate: int) -> dict[str, Any]:
                                                  if usage.get("completion_tokens") is not None
                                                  else None)}
     for key in ("prompt_ms", "predicted_ms", "prompt_n", "cache_n", "predicted_n",
-                "draft_n", "draft_n_accepted"):
+                "draft_n", "draft_n_accepted", "draft_n_verified", "draft_ms", "verify_ms",
+                "verify_n"):
         out[key] = timings.get(key)
     if first:
         out["ttft_s"], out["ttft_from"] = round(first[0], 4), "stream"
@@ -215,6 +216,9 @@ def cell(client: Any, *, tokens: int, streams: int, generate: int, seed: int = 0
         "ttft_from": ttft_from,
         "draft_tokens": _sum([r["draft_n"] for r in got]),
         "draft_taken": _sum([r["draft_n_accepted"] for r in got]),
+        "draft_ms": _sum([r["draft_ms"] for r in got]),
+        "verify_ms": _sum([r["verify_ms"] for r in got]),
+        "verify_n": _sum([r["verify_n"] for r in got]),
         "errors": sum(1 for r in got if r["error"]),
         "requests": [dict(r) for r in got],
     }
