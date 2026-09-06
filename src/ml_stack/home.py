@@ -10,8 +10,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "state",
-           "user_home"]
+__all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "moved",
+           "state", "user_home"]
 
 ROOT_ENV = "ML_STACK_HOME"
 """Moves the state root."""
@@ -63,3 +63,20 @@ def cache(*parts: str) -> Path:
     named = os.environ.get(CACHE_ENV)
     root = expand(named) if named else user_home() / ".cache" / "ml_stack"
     return root.joinpath(*parts)
+
+
+def moved(*parts: str) -> Path:
+    """A state path, taking an older copy under the cache root across the first time it is
+    asked for, and reading it where it is when the move fails."""
+    current = state(*parts)
+    if current.exists():
+        return current
+    older = cache(*parts)
+    if not older.exists():
+        return current
+    try:
+        current.parent.mkdir(parents=True, exist_ok=True)
+        older.replace(current)
+    except OSError:
+        return older
+    return current

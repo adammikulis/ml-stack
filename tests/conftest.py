@@ -460,13 +460,28 @@ def truncated_logs(before: dict[str, tuple[int, int]],
     return sorted(out)
 
 
+def settings_bytes(paths) -> dict[str, bytes | None]:
+    """What each of ``paths`` holds right now, None for one that cannot be read.
+
+    The settings files `home.moved` carries from the cache root to the state root: a test
+    that escaped isolation would move a real one rather than only writing to it.
+    """
+    out: dict[str, bytes | None] = {}
+    for one in paths:
+        try:
+            out[str(one)] = one.read_bytes()
+        except OSError:
+            out[str(one)] = None
+    return out
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _real_cache_and_state_untouched():
     """Fails the run if a test wrote into the real ml_stack cache or server state.
 
-    Snapshots the log directory and the lease file -- resolved once at session start,
-    before any per-test fixture moves the state or cache root -- and compares again once
-    every test in the session has run. Safe when neither path exists.
+    Snapshots the log directory, the lease file and the two settings files -- resolved
+    once at session start, before any per-test fixture moves the state or cache root --
+    and compares again once every test in the session has run. Safe when no path exists.
 
     The log directory holds one append-only file per server this machine is running, so a
     file that got *shorter* is a truncation and nothing but a test does that; a file that
@@ -479,6 +494,8 @@ def _real_cache_and_state_untouched():
     log_dir = cache("logs")
     lease_file = state("servers.json")
     older_lease = cache("servers.json")
+    settings = [where(name) for name in ("limits.json", "idle.json")
+                for where in (state, cache)]
 
     def log_sizes() -> dict[str, tuple[int, int]]:
         if not log_dir.is_dir():
@@ -523,8 +540,10 @@ def _real_cache_and_state_untouched():
             return owner == os.getpid()
 
     before_logs, before_state = log_sizes(), state_entries()
+    before_settings = settings_bytes(settings)
     yield
     after_logs, after_state = log_sizes(), state_entries()
+    after_settings = settings_bytes(settings)
 
     problems = []
     cut = truncated_logs(before_logs, after_logs)
@@ -541,6 +560,8 @@ def _real_cache_and_state_untouched():
         appeared = (before_state is None) != (after_state is None)
         if mine or (appeared and not touched):
             problems.append(f"{lease_file}: changed (entries {sorted(mine) or 'created/removed'})")
+    problems.extend(f"{where}: changed" for where, held in before_settings.items()
+                    if after_settings.get(where) != held)
     if problems:
         pytest.fail("real ml_stack state changed during the run: " + "; ".join(problems),
                     pytrace=False)

@@ -6,7 +6,7 @@ and until now there was nowhere to put it: a laptop shared with somebody else's 
 workstation that must keep memory for a desktop, a machine that will serve two models and
 no more.
 
-That decision lives here, in one file (`FILE`), and everything that could exceed it reads
+That decision lives here, in one file (`where()`), and everything that could exceed it reads
 the same record:
 
 * `hub.room` caps the memory a model may use, so every preflight, fit and lease already
@@ -87,7 +87,7 @@ class Limits:
 
 
 _DOC: Document[Limits] = Document(
-    default=lambda: home.cache("limits.json"), env="MLSTACK_LIMITS_FILE",
+    default=lambda: home.moved("limits.json"), env="MLSTACK_LIMITS_FILE",
     build=lambda held: Limits(**{f: held[f] for f in Limits.__dataclass_fields__
                                  if f in held}),
     unbuild=asdict, empty=Limits)

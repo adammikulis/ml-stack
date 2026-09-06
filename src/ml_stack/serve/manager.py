@@ -66,23 +66,8 @@ class EscalationRefused(ServerFailed):
     summarising it did not rescue that. The saved cache named in the message is kept."""
 
 def lease_file() -> Path:
-    """The file recording which model servers this machine is running.
-
-    A record left at the older `~/.cache/ml_stack/servers.json` is moved under the state
-    root the first time this is asked for, and read where it is if the move fails.
-    """
-    current = home.state("servers.json")
-    if current.exists():
-        return current
-    older = home.cache("servers.json")
-    if not older.exists():
-        return current
-    try:
-        current.parent.mkdir(parents=True, exist_ok=True)
-        older.replace(current)
-    except OSError:
-        return older
-    return current
+    """The file recording which model servers this machine is running."""
+    return home.moved("servers.json")
 UNAVAILABLE_COOLDOWN_S = 3.0
 STATE_LOCK_TIMEOUT_S = 30.0
 

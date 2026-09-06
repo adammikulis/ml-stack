@@ -92,12 +92,13 @@ leaves a symlink behind, so your own tools keep working and every file still exi
 Declining leaves your cache alone. It never copies.
 
 Everything ml-stack keeps for itself is under `~/.ml-stack`: the measured records, the runs
-store, the llama.cpp builds it made, the record of which model servers are running, and one
-directory per long command's logs. `ML_STACK_HOME` moves the lot somewhere else -- a second
+store, the llama.cpp builds it made, the record of which model servers are running, and how
+much of this machine it may take. `ML_STACK_HOME` moves the lot somewhere else -- a second
 disk, a shared volume -- and each of `MLSTACK_BENCH_HOME`, `MLSTACK_INGEST_HOME`,
 `MLSTACK_JOBS_HOME`, `MLSTACK_TRAIN_HOME`, `MLSTACK_FIT_FILE`, `MLSTACK_PROFILES_FILE` and
-`MLSTACK_LIMITS_FILE` moves one corner of it on its own. What can be fetched or rebuilt lives
-under `~/.cache/ml_stack`, which `ML_STACK_CACHE` moves and which is safe to delete.
+`MLSTACK_LIMITS_FILE` moves one corner of it on its own. What can be fetched or rebuilt --
+downloads, one directory per long command's logs -- lives under `~/.cache/ml_stack`, which
+`ML_STACK_CACHE` moves and which is safe to delete.
 
 Unattended, for a machine you are setting up from a script: `ML_STACK_NAME`,
 `ML_STACK_PASSPHRASE`, `ML_STACK_CLUSTER`, `ML_STACK_MODE`, `ML_STACK_MODELS`,

@@ -14,7 +14,7 @@ processing throughout.
 
 **What the looks find is kept, so a later pass is not starting from nothing.** One look can
 only ever report zero, which would make a single pass useless against any real threshold.
-So each look writes what it saw (`STATE`) and idleness adds up across looks.
+So each look writes what it saw (`state_path()`) and idleness adds up across looks.
 
 **A gap in the looking is a gap in the evidence.** Only an interval short enough to be an
 observation counts (`TRUST_S`): a server not seen busy at nine and not seen busy at five was
@@ -63,7 +63,7 @@ DEFAULT = _Default()
 
 def state_path() -> Path:
     """Where the looks are kept, so a later pass is not starting from nothing."""
-    return home.cache("idle.json")
+    return home.moved("idle.json")
 
 
 def busy_now(base_url: str, *, timeout: float = 2.0) -> bool | None:
