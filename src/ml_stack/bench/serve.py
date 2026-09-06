@@ -301,7 +301,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
         tag = str(way.get("label", "") or "")
         if not tag:
             return name + suffix
-        # a tag already punctuated -- "@n4" -- reads as part of the name, not beside it
+        # a tag beginning with @ joins the name directly, everything else with a dash
         return f"{name}{'' if tag.startswith('@') else '-'}{tag}" + suffix
 
     every = list(ways) or [{}]
