@@ -559,7 +559,7 @@ def test_up_refuses_a_flag_the_build_lacks_before_loading(tmp_path, monkeypatch,
     from ml_stack.serve.backend import flags_of
 
     monkeypatch.setattr(ops, "lease_file", lambda: tmp_path / "servers.json")
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     binary = tmp_path / "llama-server"
     binary.write_text("#!/bin/sh\nif [ \"$1\" = --help ]; then cat <<'HELP'\n"
                       "-m,    --model FNAME                    model path\n"
@@ -1050,3 +1050,42 @@ def test_up_kv_stores_the_cache_as_asked(tmp_path, monkeypatch):
     except SystemExit:
         pass
     assert seen["spec"].embedding is True
+
+
+def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypatch):
+    """`--draft-kv` sets the head's cache and leaves `--kv`'s alone; without it the build
+    keeps its own, which is the full-size one."""
+    import contextlib
+    import types
+
+    import ml_stack.hub as hub_module
+
+    seen = {}
+
+    class Manager:
+        def __init__(self, *a, **k):
+            self.backend = types.SimpleNamespace(binary=None)
+
+        def lease(self, spec, **kw):
+            seen["spec"] = spec
+            raise SystemExit(0)
+
+    monkeypatch.setattr(ops, "ServerManager", Manager)
+    monkeypatch.setattr(hub_module, "hub_cache", lambda: tmp_path)
+    model = tmp_path / "tiny.gguf"
+    model.write_bytes(b"x")
+    head = tmp_path / "mtp-tiny.gguf"
+    head.write_bytes(b"x")
+
+    for asked, want in (("q4_0", ("q4_0", "q4_0")), ("q8_0/q4_0", ("q8_0", "q4_0"))):
+        with contextlib.suppress(SystemExit):
+            cli.main(["up", str(model), "--draft", str(head), "--kv", "q8_0",
+                      "--draft-kv", asked, "--port", "1"])
+        spec = seen["spec"]
+        assert (spec.spec_draft_type_k, spec.spec_draft_type_v) == want
+        assert spec.cache_type_k == "q8_0", "the target's cache is a different setting"
+
+    with contextlib.suppress(SystemExit):
+        cli.main(["up", str(model), "--draft", str(head), "--port", "1"])
+    assert seen["spec"].spec_draft_type_k == ""
+    assert seen["spec"].spec_draft_type_v == ""

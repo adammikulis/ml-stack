@@ -125,7 +125,7 @@ def test_a_flag_the_build_lacks_is_reported_with_the_nearest_it_has(tmp_path, mo
     import ml_stack.setup as setup
     from ml_stack.serve import backend
 
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n"
                                            "--kv-unified   one cache for every slot\n")
@@ -143,13 +143,13 @@ def test_a_build_that_answers_every_flag_is_not_mentioned(tmp_path, monkeypatch)
     from ml_stack.serve import backend
     from ml_stack.serve.backend import LlamaServerBackend, emitted_flags
 
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     quiet = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
     everything = "\n".join(f"{flag} X   described" for flag in
                            emitted_flags(LlamaServerBackend(binary=quiet))) + "\n"
     stand_in = _server_answering(tmp_path, everything)
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
     assert not [f for f in setup.look() if f.name == "flags this build lacks"]
 
@@ -178,7 +178,7 @@ def test_lacking_flags_offer_the_build_fix(tmp_path, monkeypatch):
     import ml_stack.setup as setup
     from ml_stack.serve import backend
 
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: {"gemma4"})
     stand_in = _server_answering(tmp_path, "-m, --model FNAME   model path\n")
     monkeypatch.setattr(binary_module, "find_binary", lambda *a, **k: stand_in)
@@ -219,7 +219,7 @@ def test_a_build_that_prints_no_help_is_not_accused_of_lacking_anything(tmp_path
     import ml_stack.setup as setup
     from ml_stack.serve import backend
 
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
     monkeypatch.setattr(setup, "_arches", lambda binary: set())
     silent = tmp_path / "llama-server"
     silent.write_text("#!/bin/sh\nexit 0\n")

@@ -533,12 +533,41 @@ def _measured_fit_check(spec, limit_bytes: int,
 
 # ---------------------------------------------------------------- flags (reuses backend.py)
 
+# The cache-type flags and the spec field each one carries: the main model, then the draft.
+CACHE_TYPE_FLAGS = (("--cache-type-k", "cache_type_k"), ("--cache-type-v", "cache_type_v"),
+                    ("--spec-draft-type-k", "spec_draft_type_k"),
+                    ("--spec-draft-type-v", "spec_draft_type_v"))
+
+
+def wrong_cache_types(spec, binary: str | Path, *,
+                      values: Callable[..., frozenset[str]]) -> list[str]:
+    """One line per cache type this spec asks for that the build's ``--help`` does not list.
+
+    ``values`` is `ml_stack.serve.backend.values_of`. A flag whose help names no list is
+    skipped, the way an unreadable ``--help`` is.
+    """
+    reader = values
+    wrong = []
+    for flag, field_name in CACHE_TYPE_FLAGS:
+        asked = str(getattr(spec, field_name, "") or "")
+        allowed = reader(binary, flag) if asked else frozenset()
+        if allowed and asked not in allowed:
+            wrong.append(f"{flag} {asked} is not one of {', '.join(sorted(allowed))}")
+    return wrong
+
+
 def _flags_check(spec, binary: str | Path, *,
                  flags: Callable[[str | Path], frozenset[str]] | None = None) -> Check:
-    """Every flag ``command(spec)`` emits is one the build's ``--help`` lists. ``flags``
-    stands in for `flags_of` when handed in (`Preflight`'s seam); the argv is always built
-    for real, because building it is where a spec the backend refuses is found out."""
-    from ml_stack.serve.backend import LlamaServerBackend, flags_of, unknown_flags
+    """Every flag ``command(spec)`` emits, and every cache type it names, is one the
+    build's ``--help`` lists. ``flags`` stands in for `flags_of` when handed in
+    (`Preflight`'s seam); the argv is always built for real, because building it is where a
+    spec the backend refuses is found out."""
+    from ml_stack.serve.backend import (
+        LlamaServerBackend,
+        flags_of,
+        unknown_flags,
+        values_of,
+    )
 
     known = (flags or flags_of)(binary)
     if not known:
@@ -553,11 +582,13 @@ def _flags_check(spec, binary: str | Path, *,
         spec = replace(spec, draft=Path("draft-head.gguf"))
     argv = LlamaServerBackend(binary=binary).command(spec)
     lacking = unknown_flags(argv, known)
-    if lacking:
-        detail = "; ".join(f"no {flag}" + (f", it has {near}" if near else "")
-                           for flag, near in lacking)
+    wrong = wrong_cache_types(spec, binary, values=values_of)
+    if lacking or wrong:
+        detail = "; ".join([*(f"no {flag}" + (f", it has {near}" if near else "")
+                              for flag, near in lacking), *wrong])
         return Check("flags", False, detail)
-    return Check("flags", True, "every flag this spec would emit is one this build accepts")
+    return Check("flags", True, "every flag and cache type this spec would emit is one "
+                                "this build accepts")
 
 
 # ---------------------------------------------------------------- the whole thing

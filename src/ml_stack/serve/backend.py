@@ -47,14 +47,38 @@ class UnknownFlag(ValueError):
     """
 
 
-# The option strings a build accepts, keyed by (resolved path, mtime) so a rebuilt binary
-# at the same path is read again and an unchanged one is never read twice.
-_FLAGS: dict[tuple[str, float], frozenset[str]] = {}
+# A build's `--help`, keyed by (resolved path, mtime) so a rebuilt binary at the same path
+# is read again and an unchanged one is never read twice.
+_HELP: dict[tuple[str, float], str] = {}
 
 # A flag at the start of a help line, or after a comma: llama-server prints
 # `-c,    --ctx-size N`, and `-hfd, -hfrd, --hf-repo-draft REPO`. The first character after
 # the dashes must be a letter, so `(default: -1)` reads as a number and not a flag.
 _FLAG_IN_HELP = re.compile(r"(?:^|,)\s*(-{1,2}[A-Za-z][\w-]*)")
+
+# `                    allowed values: f32, f16, bf16, q8_0, q4_0` under the flag it belongs to.
+_ALLOWED_IN_HELP = re.compile(r"allowed values:\s*(.+?)\s*$")
+
+
+def help_of(binary: str | Path, *, timeout: float = 20.0) -> str:
+    """A build's ``--help``, stdout and stderr together; ``""`` when it cannot be read."""
+    path = Path(binary)
+    try:
+        key = (str(path.resolve()), path.stat().st_mtime)
+    except OSError:
+        return ""
+    if key in _HELP:
+        return _HELP[key]
+    try:
+        got = subprocess.run([str(path), "--help"], capture_output=True, text=True,
+                             errors="replace", timeout=timeout, env=child_env(path))
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    text = got.stdout + "\n" + got.stderr
+    if not text.strip():
+        return ""
+    _HELP[key] = text
+    return text
 
 
 def flags_of(binary: str | Path, *, timeout: float = 20.0) -> frozenset[str]:
@@ -64,30 +88,33 @@ def flags_of(binary: str | Path, *, timeout: float = 20.0) -> frozenset[str]:
     like usage -- and an unknown build is given no opinion, never "supports none". Reading
     help costs a fraction of a second where loading a model to find out costs minutes.
     """
-    path = Path(binary)
-    try:
-        key = (str(path.resolve()), path.stat().st_mtime)
-    except OSError:
-        return frozenset()
-    if key in _FLAGS:
-        return _FLAGS[key]
-    try:
-        got = subprocess.run([str(path), "--help"], capture_output=True, text=True,
-                             errors="replace", timeout=timeout, env=child_env(path))
-    except (OSError, subprocess.SubprocessError):
-        return frozenset()
     found: set[str] = set()
-    for line in (got.stdout + "\n" + got.stderr).splitlines():
+    for line in help_of(binary, timeout=timeout).splitlines():
         # A retired flag stays in the parser only to say so: llama.cpp 0.3.0 lists
         # `--draft, --draft-n, --draft-max N  the argument has been removed. use
         # --spec-draft-n-max`, and passing it is an error just the same. Not known.
         if "has been removed" in line:
             continue
         found.update(_FLAG_IN_HELP.findall(line))
-    if not found:
-        return frozenset()
-    _FLAGS[key] = frozenset(found)
-    return _FLAGS[key]
+    return frozenset(found)
+
+
+def values_of(binary: str | Path, flag: str, *, timeout: float = 20.0) -> frozenset[str]:
+    """The values a build's ``--help`` lists as allowed for ``flag``.
+
+    Empty is no opinion: the build could not be read, has no such flag, or names no list
+    for it. A flag's aliases share one list, so ``--spec-draft-type-k`` and
+    ``--cache-type-k-draft`` answer the same.
+    """
+    named: set[str] = set()
+    for line in help_of(binary, timeout=timeout).splitlines():
+        if line[:1] not in (" ", "\t") and line.strip().startswith("-"):
+            named = set(_FLAG_IN_HELP.findall(line))
+        allowed = _ALLOWED_IN_HELP.search(line)
+        if allowed and flag in named:
+            return frozenset(word.strip() for word in allowed.group(1).split(",")
+                             if word.strip())
+    return frozenset()
 
 
 def unknown_flags(argv: list[str], known: frozenset[str] | set[str]) -> list[tuple[str, str]]:

@@ -408,6 +408,7 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
         spec_draft_max=(int(server["spec_draft_max"])
                         if server.get("spec_draft_max") is not None else None),
         cache_type=str(server.get("cache_type") or ""),
+        draft_cache_type=str(server.get("draft_cache_type") or ""),
         reasoning_budget=(int(server["reasoning_budget"])
                           if server.get("reasoning_budget") is not None else None),
         seat_context=(context // slots) if context else 32768,

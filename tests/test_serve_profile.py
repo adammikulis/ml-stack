@@ -844,3 +844,25 @@ def test_a_run_with_no_workload_writes_the_graph_asking_record():
 
     assert workload_of({"label": "a", "server": {}}) == "ask"
     assert workload_of({"label": "a", "workload": "ingest", "server": {}}) == "ingest"
+
+
+def test_a_record_keeps_the_drafts_own_cache_type():
+    """The head's cache is a measured setting like any other, and a record that lost it
+    would serve the head at f16 again."""
+    from ml_stack.serve.profile import Profile, _flags
+
+    one = Profile(model="m.gguf", draft="h.gguf", cache_type="q8_0",
+                  draft_cache_type="q4_0")
+    assert Profile.from_dict(one.as_dict()).draft_cache_type == "q4_0"
+    assert one.shape(resolve=False).draft_cache_type == "q4_0"
+    assert "--draft-kv q4_0" in _flags(one)
+
+
+def test_a_rewrite_that_cannot_see_the_drafts_cache_keeps_it():
+    """`/props` does not report it, so a record rewritten from a bench run would erase it."""
+    from ml_stack.serve.profile import Profile
+
+    older = Profile(model="m.gguf", draft="h.gguf", draft_cache_type="q4_0")
+    assert Profile(model="m.gguf").carrying(older).draft_cache_type == "q4_0"
+    assert Profile(model="m.gguf", draft_cache_type="q5_1").carrying(
+        older).draft_cache_type == "q5_1"

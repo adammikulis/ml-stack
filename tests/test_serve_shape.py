@@ -325,3 +325,48 @@ def test_taking_the_head_away_takes_the_requests_depth_with_it():
     bare = run.over(draft="", spec_type="")
 
     assert bare.talking.spec_draft_max is None
+
+
+class TestDraftCacheType:
+    """The draft's own KV cache: a second cache llama.cpp stores at f16 whatever the
+    target's is stored as, so a shape that wants it smaller has to say so."""
+
+    def test_it_reaches_the_lease_as_both_halves(self):
+        lease = Shape(model="m.gguf", draft="h.gguf", draft_cache_type="q4_0").lease()
+        assert lease["spec_draft_type_k"] == "q4_0"
+        assert lease["spec_draft_type_v"] == "q4_0"
+
+    def test_the_two_halves_can_differ(self):
+        lease = Shape(model="m.gguf", draft="h.gguf", draft_cache_type="q8_0/q4_0").lease()
+        assert (lease["spec_draft_type_k"], lease["spec_draft_type_v"]) == ("q8_0", "q4_0")
+
+    def test_it_is_left_out_where_nothing_guesses_ahead(self):
+        lease = Shape(model="m.gguf", draft_cache_type="q4_0").lease()
+        assert "spec_draft_type_k" not in lease
+
+    def test_a_head_inside_the_weights_still_gets_it(self):
+        lease = Shape(model="m.gguf", spec_type="draft-mtp",
+                      draft_cache_type="q4_0").lease()
+        assert lease["spec_draft_type_k"] == "q4_0"
+
+    def test_the_targets_cache_is_a_different_setting(self):
+        lease = Shape(model="m.gguf", draft="h.gguf", cache_type="q8_0",
+                      draft_cache_type="q4_0").lease()
+        assert lease["cache_type_k"] == "q8_0"
+        assert lease["spec_draft_type_k"] == "q4_0"
+
+    def test_a_run_lays_it_over_the_shape(self):
+        from ml_stack.serve.shape import Run
+
+        run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
+        assert run.over(draft_cache_type="q4_0").shape.draft_cache_type == "q4_0"
+
+
+def test_one_cache_type_reads_both_ways():
+    from ml_stack.serve.shape import said_cache, split_cache_type
+
+    assert split_cache_type("q8_0") == ("q8_0", "q8_0")
+    assert split_cache_type("q8_0/q4_0") == ("q8_0", "q4_0")
+    assert split_cache_type("") == ("", "")
+    assert said_cache("q8_0", "q8_0") == "q8_0"
+    assert said_cache("q8_0", "q4_0") == "q8_0/q4_0"

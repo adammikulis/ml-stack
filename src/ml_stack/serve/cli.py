@@ -21,6 +21,7 @@ from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import DEFAULT_TIMEOUT_S
 from ml_stack.serve.ops import DEFAULT_ROOT, Refused, base_url_for
 from ml_stack.serve.profile import ASK, WORKLOADS
+from ml_stack.serve.shape import said_cache, split_cache_type
 from ml_stack.units import human_bytes
 
 __all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
@@ -220,12 +221,13 @@ def from_profile(args: argparse.Namespace, model: str,
         "spec": found.spec_type,
         "spec_n_max": found.spec_draft_max,
         "kv": found.cache_type,
+        "draft_kv": found.draft_cache_type,
         "mmproj": found.mmproj,
         "reasoning_budget": found.reasoning_budget,
     }
     defaults = {"context": DEFAULT_CONTEXT, "parallel": DEFAULT_PARALLEL, "build": "",
-                "draft": "", "spec": "", "spec_n_max": None, "kv": "", "mmproj": "",
-                "reasoning_budget": None}
+                "draft": "", "spec": "", "spec_n_max": None, "kv": "", "draft_kv": "",
+                "mmproj": "", "reasoning_budget": None}
     took: list[str] = []
     for dest, value in wanted.items():
         if value in (None, "", ()) or getattr(args, dest, None) != defaults[dest]:
@@ -266,12 +268,14 @@ def _print_event(event: dict) -> None:
 def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) -> ServerSpec:
     """The spec ``up`` was asked for, before 'auto' is answered."""
     kv = str(getattr(args, "kv", "") or "")
+    draft_k, draft_v = split_cache_type(str(getattr(args, "draft_kv", "") or ""))
     return ServerSpec(
         model=model, port=args.port, context=args.context, parallel=args.parallel,
         draft=str(getattr(args, "draft", "") or "") or None,
         mmproj=str(getattr(args, "mmproj", "") or "") or None,
         spec_type=str(getattr(args, "spec", "") or ""),
         cache_type_k=kv, cache_type_v=kv,
+        spec_draft_type_k=draft_k, spec_draft_type_v=draft_v,
         kv_unified=getattr(args, "kv_unified", None),
         embedding=bool(getattr(args, "embedding", False)),
         spec_draft_max=getattr(args, "spec_n_max", None),
@@ -370,6 +374,13 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
              help="one cache pool for every slot, masked per sequence, rather than a cache "
                   "per slot; --no-kv-unified asks for the latter outright. Left unset, the "
                   "build decides"),
+        flag("--draft-kv", default="", metavar="TYPE",
+             help="what the draft head's own KV cache is stored as. It is a second cache, "
+                  "not the one --kv sets, and llama.cpp stores it at full size whatever "
+                  "--kv says. The head only proposes and the model checks every token, so "
+                  "a smaller cache here costs acceptance and never correctness. The types "
+                  "this build takes are in its --help; f16 is its default. One value sets "
+                  "both halves, K/V sets them apart"),
         flag("--draft", default="", metavar="MODEL_OR_AUTO",
              help="a small model to guess ahead, which the large one checks in one pass -- "
                   "a path, an hf: reference, or 'auto' to use the draft head shipped beside "
@@ -452,6 +463,8 @@ def cmd_up(args: argparse.Namespace) -> int:
                         "adopted": info.adopted, "model": str(spec.model),
                         "context": spec.context, "parallel": spec.parallel,
                         "draft": str(spec.draft or ""),
+                        "draft_cache_type": said_cache(spec.spec_draft_type_k,
+                                                       spec.spec_draft_type_v),
                         "announced": told.startswith("announced")}, indent=2))
         return 0
 
@@ -461,6 +474,8 @@ def cmd_up(args: argparse.Namespace) -> int:
         say(f"  with {chosen}")
     if spec.draft:
         say(f"  guessing ahead with {str(spec.draft).rsplit('/', 1)[-1]}")
+    if spec.spec_draft_type_k or spec.spec_draft_type_v:
+        say(f"  the draft's own cache stored as {said_cache(spec.spec_draft_type_k, spec.spec_draft_type_v)}")
     if spec.mmproj:
         say(f"  reading pictures with {str(spec.mmproj).rsplit('/', 1)[-1]}")
     if spec.spec_type:
@@ -540,9 +555,11 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
     backend = (LlamaServerBackend(binary=binary or None, build=build_name or None)
                if (binary or build_name) else LlamaServerBackend())
     kv = str(getattr(args, "kv", "") or "")
+    draft_k, draft_v = split_cache_type(str(getattr(args, "draft_kv", "") or ""))
     spec = ServerSpec(model="", port=args.port, context=args.context,
                       parallel=max(1, int(getattr(args, "parallel", 1) or 1)),
-                      cache_type_k=kv, cache_type_v=kv, warmup=False)
+                      cache_type_k=kv, cache_type_v=kv,
+                      spec_draft_type_k=draft_k, spec_draft_type_v=draft_v, warmup=False)
     try:
         recorded = ops.measure(
             list(args.model), spec=spec, backend=backend, timeout=args.timeout, room=room,
@@ -600,6 +617,11 @@ def _measure_each(args: argparse.Namespace, *, room: int) -> int:
              help="measure with the main model's KV cache stored as this: q8_0 (the "
                   "default), f16, q4_0. A record is kept per cache type, because that is "
                   "what changes the per-token cost"),
+        flag("--draft-kv", default="", metavar="TYPE",
+             help="with --draft: measure with the head's own KV cache stored as this. It "
+                  "is a second cache the head keeps at the same context, and llama.cpp "
+                  "stores it at full size whatever --kv says, so this is where a drafted "
+                  "model's cache cost is decided"),
         flag("--room", action="append", default=[], metavar="SIZE",
              help="ask about a machine with this much memory instead of this one -- 24G, "
                   "24576M, or a plain number of bytes. Default: what `ml-stack-serve "

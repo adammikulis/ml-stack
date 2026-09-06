@@ -99,7 +99,7 @@ SAMPLERS = (("temperature", "temperature"), ("top_p", "top-p"), ("top_k", "top-k
 # What a kept bench run cannot see about the serving, and so must never erase when it
 # rewrites a record: llama-server's own extra flags and the vision projector are in the
 # spec that started the server, not in anything `/props` reports back.
-UNSEEN = ("extra_args", "mmproj")
+UNSEEN = ("extra_args", "mmproj", "draft_cache_type")
 
 
 @dataclass(frozen=True)
@@ -119,6 +119,7 @@ class Profile:
     draft: str = ""                      # the head's file name, path, or hf: reference
     spec_type: str = ""                  # draft-mtp, draft-eagle3; "" reads it off the name
     cache_type: str = ""                 # "" leaves the shape's own, q8_0
+    draft_cache_type: str = ""           # the draft's own cache; "" leaves the build's f16
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
     extra_args: tuple[str, ...] = ()     # -ub 2048, --spec-draft-p-min 0.5
@@ -202,6 +203,7 @@ class Profile:
         return Shape(model=served, port=port, seats=taken,
                      seat_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
+                     draft_cache_type=self.draft_cache_type,
                      spec_type=self.spec_type, mmproj=seeing,
                      reasoning_budget=self.reasoning_budget, build=self.build,
                      extra_args=tuple(self.extra_args), note=note)
@@ -257,6 +259,7 @@ class Profile:
         serve: dict[str, Any] = {"build": self.build, "draft": self.draft,
                                  "spec_type": self.spec_type,
                                  "cache_type": self.cache_type,
+                                 "draft_cache_type": self.draft_cache_type,
                                  "reasoning_budget": self.reasoning_budget,
                                  "mmproj": self.mmproj,
                                  "extra_args": list(self.extra_args),
@@ -590,6 +593,8 @@ def _flags(profile: Profile) -> str:
         parts.append(f"--spec-n-max {profile.spec_draft_max}")
     if profile.cache_type:
         parts.append(f"--kv {profile.cache_type}")
+    if profile.draft_cache_type:
+        parts.append(f"--draft-kv {profile.draft_cache_type}")
     if profile.mmproj:
         parts.append(f"--mmproj {profile.mmproj}")
     if profile.reasoning_budget is not None:

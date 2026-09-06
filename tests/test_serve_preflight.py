@@ -42,7 +42,7 @@ LLAMA_META = {
 
 @pytest.fixture(autouse=True)
 def _fresh_flag_cache(monkeypatch):
-    monkeypatch.setattr(backend_module, "_FLAGS", {})
+    monkeypatch.setattr(backend_module, "_HELP", {})
 
 
 class TestReadGGUFHeader:

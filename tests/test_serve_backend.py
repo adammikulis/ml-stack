@@ -22,6 +22,7 @@ from ml_stack.serve.backend import (
     parse_context,
     trained_context,
     unknown_flags,
+    values_of,
 )
 from tests.conftest import leased, write_gguf
 
@@ -41,6 +42,20 @@ common params:
        --jinja                          use jinja template for chat (default: enabled)
        --mmproj FILE                    path to a multimodal projector file
 -md,   --model-draft FNAME              draft model for speculative decoding (default: unused)
+-ctk,  --cache-type-k TYPE              KV cache data type for K
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+-ctv,  --cache-type-v TYPE              KV cache data type for V
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+--spec-draft-type-k, -ctkd, --cache-type-k-draft TYPE
+                                        KV cache data type for K for the draft model
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
+--spec-draft-type-v, -ctvd, --cache-type-v-draft TYPE
+                                        KV cache data type for V for the draft model
+                                        allowed values: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1
+                                        (default: f16)
 --spec-draft-n-max N                    number of tokens to draft for speculative decoding (default: 3)
 --spec-draft-n-min N                    minimum number of draft tokens to use for speculative decoding
 --draft, --draft-n, --draft-max N       the argument has been removed. use --spec-draft-n-max or
@@ -68,7 +83,7 @@ def fake_server(tmp_path, help_text: str = HELP, *, name: str = "llama-server"):
 
 @pytest.fixture(autouse=True)
 def _fresh_cache(monkeypatch):
-    monkeypatch.setattr(backend, "_FLAGS", {})
+    monkeypatch.setattr(backend, "_HELP", {})
 
 
 class TestFlagsOf:
@@ -519,3 +534,65 @@ def test_a_draft_named_by_file_is_fetched_and_served_by_path(monkeypatch, tmp_pa
         be.LlamaServerBackend(binary=binary).command(spec)
     quant = be.ServerSpec(model=tmp_path / "m.gguf", draft="hf:owner/repo-GGUF")
     assert "-hfd" in be.LlamaServerBackend(binary=binary).command(quant)
+
+
+class TestValuesOf:
+    """What a flag will take, read out of the same help the flag names come from."""
+
+    def test_it_reads_the_allowed_values_under_a_flag(self, tmp_path):
+        assert values_of(fake_server(tmp_path), "--cache-type-k") == frozenset(
+            {"f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1"})
+
+    def test_the_draft_cache_flags_have_their_own_list(self, tmp_path):
+        binary = fake_server(tmp_path)
+        assert "q4_0" in values_of(binary, "--spec-draft-type-k")
+        assert "q4_0" in values_of(binary, "--spec-draft-type-v")
+
+    def test_an_alias_answers_the_same_list(self, tmp_path):
+        binary = fake_server(tmp_path)
+        assert values_of(binary, "--cache-type-k-draft") == values_of(
+            binary, "--spec-draft-type-k")
+
+    def test_a_flag_that_names_no_list_has_no_opinion(self, tmp_path):
+        assert values_of(fake_server(tmp_path), "--ctx-size") == frozenset()
+
+    def test_a_flag_the_build_does_not_have_has_no_opinion(self, tmp_path):
+        assert values_of(fake_server(tmp_path), "--no-such-flag") == frozenset()
+
+    def test_a_binary_that_prints_no_help_has_no_opinion(self, tmp_path):
+        silent = tmp_path / "llama-server"
+        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.chmod(0o755)
+        assert values_of(silent, "--cache-type-k") == frozenset()
+
+
+class TestDraftCacheType:
+    """The draft head keeps a second KV cache; these are the flags that size it."""
+
+    def test_the_spec_emits_both_halves(self, tmp_path):
+        model = write_gguf(tmp_path / "model.gguf", {})
+        head = write_gguf(tmp_path / "draft.gguf", {})
+        argv = LlamaServerBackend(binary=fake_server(tmp_path)).command(
+            ServerSpec(model=model, draft=head, spec_draft_type_k="q4_0",
+                       spec_draft_type_v="q5_1"))
+        assert argv[argv.index("--spec-draft-type-k") + 1] == "q4_0"
+        assert argv[argv.index("--spec-draft-type-v") + 1] == "q5_1"
+
+    def test_a_cache_type_the_build_will_not_take_is_refused_before_the_load(self, tmp_path):
+        from ml_stack.serve.preflight import wrong_cache_types
+
+        binary = fake_server(tmp_path)
+        spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
+                          spec_draft_type_k="q3_K", spec_draft_type_v="q8_0")
+        said = wrong_cache_types(spec, binary, values=values_of)
+        assert len(said) == 1
+        assert "--spec-draft-type-k q3_K" in said[0]
+        assert "q8_0" in said[0]
+
+    def test_a_cache_type_the_build_takes_passes(self, tmp_path):
+        from ml_stack.serve.preflight import wrong_cache_types
+
+        spec = ServerSpec(model=write_gguf(tmp_path / "model.gguf", {}),
+                          cache_type_k="q8_0", cache_type_v="q8_0",
+                          spec_draft_type_k="q4_0", spec_draft_type_v="q4_0")
+        assert wrong_cache_types(spec, fake_server(tmp_path), values=values_of) == []

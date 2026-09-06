@@ -49,7 +49,7 @@ from typing import Any
 from ml_stack.graph.asking import Asking
 
 __all__ = ["Run", "Shape", "Talking", "draft_for", "held", "projector_for",
-           "release_all", "seat"]
+           "release_all", "said_cache", "seat", "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
 SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
@@ -57,6 +57,18 @@ SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
 
 #: how the KV cache is stored unless a shape says otherwise
 DEFAULT_CACHE = "q8_0"
+
+
+def split_cache_type(asked: str) -> tuple[str, str]:
+    """``(K, V)`` from one cache type, or from ``K/V`` where the two differ."""
+    k, _, v = str(asked or "").strip().partition("/")
+    return k.strip(), (v.strip() or k.strip())
+
+
+def said_cache(type_k: str, type_v: str) -> str:
+    """One cache type from its two halves: ``q8_0``, or ``q8_0/q4_0`` where they differ."""
+    k, v = str(type_k or ""), str(type_v or "")
+    return k if k == v else "/".join(part for part in (k, v) if part)
 
 
 @dataclass(frozen=True)
@@ -81,6 +93,10 @@ class Shape:
     # needs is read from what it is called, so a head is never served as the wrong method.
     draft: str = ""
     draft_n_max: int | None = None      # tokens guessed ahead; None leaves the default
+    # How the draft's own KV cache is stored. It is a second cache, not the target's, and
+    # llama.cpp stores it as f16 whatever `cache_type` says. One value sets both halves;
+    # `K/V` sets them apart; "" leaves the build's own.
+    draft_cache_type: str = ""
     # Which method the head implements. "" reads it off the head's own name, which is right
     # whenever the name says so; a profile that measured one says it outright, and a head
     # that lives inside the weights -- `--spec-type draft-mtp` with no `-md` -- can only be
@@ -132,6 +148,9 @@ class Shape:
             out["spec_type"] = self.spec_type
             if self.draft_n_max is not None:
                 out["spec_draft_max"] = self.draft_n_max
+        if (self.draft or self.spec_type) and self.draft_cache_type:
+            out["spec_draft_type_k"], out["spec_draft_type_v"] = \
+                split_cache_type(self.draft_cache_type)
         if self.mmproj:
             out["mmproj"] = self.mmproj
         if self.reasoning_budget is not None:
