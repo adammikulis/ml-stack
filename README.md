@@ -615,6 +615,11 @@ and edge by key *and* by scan and prints one line per disagreement (exit 1 on an
 `--fix` rewrites a document the scan lost and checks again rather than announcing a repair,
 and `ml-stack-store docs PATH` lists the documents with their sizes.
 
+**How much memory a store takes is yours to set.** Left alone the engine claims a share of
+the machine's, which is what one store on one machine wants and four at once do not:
+`GraphStore(path, buffer_pool_size=N)`, or `$MLSTACK_STORE_MEMORY=N` for every store a
+process opens, caps it at N bytes.
+
 **Two processes cannot corrupt one.** The database's own lock stops the second writer with an
 IO error; what `ml_stack.graph.access` adds is knowing whose lock it is, waiting for a turn,
 and letting go of a read handle when a writer wants in.
