@@ -76,6 +76,8 @@ __all__ = ["BUCKETS", "GUESS_SECONDS", "INSTRUCTIONS", "KIND", "MessageRow", "SA
 # The record's `kind`, which is what tells an extraction run from an answering one in the
 # one store both are kept in.
 KIND = "extract"
+# The workload these runs measure, which is the profile slot `report --profile` writes.
+WORKLOAD = "ingest"
 SAMPLE = 40
 # Three, not `bench.SMOKE`'s two: two messages can both land in one stratum, and a smoke
 # run exists to prove the path -- the stratified sample included.
@@ -734,7 +736,8 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
     from ml_stack.graph.store import GraphStore
 
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"
-    record = _plain({"at": time.strftime("%FT%T"), "label": label, "kind": KIND, "model": model,
+    record = _plain({"at": time.strftime("%FT%T"), "label": label, "kind": KIND,
+                     "workload": WORKLOAD, "model": model,
                      "world": dict(world), "sample": dict(sample), "server": stamped(held),
                      "scores": dict(scores), "rows": [asdict(r) for r in rows]})
     record = json.loads(json.dumps(record))

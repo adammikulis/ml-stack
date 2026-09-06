@@ -77,3 +77,40 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
     got = profile_for("flash.gguf", records=records_in(where))
     assert got.label == "flash--bare" and got.batch is False and got.summary is False
     assert "predates" not in got.note
+
+
+def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
+    """One model measured two ways writes two records, and neither overwrites the other."""
+    from ml_stack.bench.report import write_profiles
+    from ml_stack.serve.profile import profile_for, records_in
+
+    where = tmp_path / "profiles.json"
+    store = tmp_path / "runs.ladybug"
+    save(store, scored_rows("flash--asking", questions=100, hits=80, seconds=2700.0),
+         held={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 4},
+         asking={"tight": True}, workload="ask")
+    save(store, scored_rows("flash--reading", questions=100, hits=90, seconds=1800.0),
+         held={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 2},
+         asking={"tight": True}, workload="ingest")
+
+    written = write_profiles(runs(store), path=where)
+
+    assert sorted((w.model, w.workload) for w, _ in written) == [
+        ("flash.gguf", "ask"), ("flash.gguf", "ingest")]
+    held = records_in(where)
+    assert profile_for("flash.gguf", workload="ask", records=held).spec_draft_max == 4
+    assert profile_for("flash.gguf", workload="ingest", records=held).spec_draft_max == 2
+    assert profile_for("flash.gguf", workload="ingest", records=held).label == "flash--reading"
+
+
+def test_a_store_of_runs_that_name_no_workload_writes_the_graph_asking_record(tmp_path):
+    from ml_stack.bench.report import write_profiles
+    from ml_stack.serve.profile import records_in
+
+    where = tmp_path / "profiles.json"
+    store = tmp_path / "runs.ladybug"
+    _run(store, "flash--plain", questions=100, hits=80, seconds=2700.0)
+
+    write_profiles(runs(store), path=where)
+
+    assert [one.workload for one in records_in(where)] == ["ask"]

@@ -181,7 +181,8 @@ def asked_with(asking: Mapping[str, Any] | None,
 
 
 def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None = None,
-         asking: Mapping[str, Any] | None = None, kind: str = "", label: str = "") -> str:
+         asking: Mapping[str, Any] | None = None, kind: str = "", label: str = "",
+         workload: str = "") -> str:
     """Keep a run where it can be compared with another one, later, by anybody.
 
     Then read it back the way `runs` will, on a fresh handle, and refuse to return until
@@ -201,6 +202,10 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
     cells it measured rather than questions -- and ``label`` names it, since such a row
     carries no label of its own. The answering table leaves those out and each kind has
     a table of its own.
+
+    ``workload`` is what the run measured the model doing -- ``ask``, ``ingest``, ``chat``
+    -- and is what `report --profile` writes the record into. Written only when there is
+    one, so a run kept before workloads reads back as it was kept.
     """
     from ml_stack.bench.score import prefix_hits
     from ml_stack.graph.store import GraphStore
@@ -223,6 +228,7 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
     asked = asked_with(asking, server)
     record = _plain({"at": time.strftime("%FT%T"), "label": named,
                      **({"kind": kind} if kind else {}),
+                     **({"workload": workload} if workload else {}),
                      "server": server, **({"asking": asked} if asked else {}),
                      # what the model was shown, so an edited prompt is a different run
                      **({"prompts": shown} if shown else {}),

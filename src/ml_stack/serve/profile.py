@@ -479,6 +479,8 @@ def record(model: str, **fields: Any) -> Profile:
     unknown = sorted(set(fields) - known)
     if unknown:
         raise TypeError(f"no such profile field: {', '.join(unknown)}")
+    if "workload" in fields:
+        fields["workload"] = workload_named(str(fields["workload"]))
     if "extra_args" in fields:
         fields["extra_args"] = tuple(str(a) for a in (fields["extra_args"] or ()))
     return Profile(model=str(model), **fields)

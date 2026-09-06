@@ -55,6 +55,7 @@ from ml_stack.client.chat import Client
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.vectors import MARGIN
 from ml_stack.log import say, warn
+from ml_stack.serve.profile import ASK
 from ml_stack.serve.shape import DEFAULT_CACHE, SAMPLERS
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
@@ -1090,7 +1091,7 @@ def _run(args: Any) -> int:
                 saved.append(save(args.kept, rows,
                                   held={**bench.footprint(url), "sampling": used,
                                         "graph": _which(graph), "finder": ask.finder},
-                                  asking=getattr(ask, "asking", None)))
+                                  asking=getattr(ask, "asking", None), workload=ASK))
         say()
         table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
         return 0
@@ -1191,7 +1192,7 @@ def _run(args: Any) -> int:
         key = save(args.kept, rows,
                    held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
                          "graph": _which(graph), "finder": ask.finder},
-                   asking=getattr(ask, "asking", None))
+                   asking=getattr(ask, "asking", None), workload=ASK)
         say(f"kept as {key}")
         if args.smoke:
             table(read_back(args.kept, [key]))
@@ -1305,7 +1306,7 @@ def _run(args: Any) -> int:
     key = save(args.kept, rows,
                held={**bench.footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found},
-               asking=getattr(ask, "asking", None))
+               asking=getattr(ask, "asking", None), workload=ASK)
     say(f"kept as {key}")
     if args.smoke:
         table(read_back(args.kept, [key]))

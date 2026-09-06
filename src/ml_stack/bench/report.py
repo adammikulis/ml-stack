@@ -54,13 +54,14 @@ from ml_stack.bench.score import (
 )
 from ml_stack.bench.show import _gb, drafted, kv_short
 from ml_stack.log import say, warn
+from ml_stack.serve.profile import ASK
 from ml_stack.units import human_bytes
 
 __all__ = ["ASKINGS", "Doc", "MIN_MESSAGES", "WAYS", "across", "answering", "asking_of",
            "best_extractor", "by_model", "cache_of", "extract_model_of",
            "extractions", "fit_for", "fits_named", "measured_best", "model_of",
            "profile_of", "read_messages", "recommended_head", "report", "thinking_of",
-           "ways_of", "write_profiles"]
+           "ways_of", "workload_of", "write_profiles"]
 
 
 # The words a sweep puts in a label for the way it asked (`bench.halves`, `bench._ways`).
@@ -372,6 +373,12 @@ def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
                                     str(o.get("at") or "")))
 
 
+def workload_of(one: Mapping[str, Any]) -> str:
+    """The workload a run measured. A run kept before workloads measured the graph asking,
+    which is what every answering run in a store is."""
+    return str(of(one).workload or ASK)
+
+
 def profile_of(model: str, one: Mapping[str, Any]) -> Any:
     """The measured shape a run records, as a `ml_stack.serve.profile.Profile`.
 
@@ -394,6 +401,7 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
     sampling = asked.get("sampling") or server.get("sampling")
     return record(
         model,
+        workload=workload_of(one),
         build=kept.build,
         draft=head,
         spec_type=spec_for(head) if head else "",
@@ -422,7 +430,8 @@ def profile_of(model: str, one: Mapping[str, Any]) -> Any:
 
 def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
                    path: Path | None = None) -> list[tuple[Any, Path]]:
-    """Write one record per model, from the row `across` ranks it by. Returns what it wrote.
+    """Write one record per model and workload, from the row `across` ranks it by. Returns
+    what it wrote.
 
     The ranking fixes the *order* and `measured_best` fixes the *row*. They are not the
     same question: the ranking asks which model answers best, and a record asks how this
@@ -430,33 +439,38 @@ def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
     settled by the seconds rather than by a hundredth of an F1. Both read only a model's
     longest runs, so a profile is never a shape chosen by a coin toss over two questions.
     """
+    grouped = by_model(kept)
+    out = []
+    for model, _ranked in across(kept, full_n=full_n):
+        mine = grouped.get(model) or []
+        for workload in sorted({workload_of(r) for r in mine}):
+            one = measured_best([r for r in mine if workload_of(r) == workload],
+                                full_n=full_n)
+            if one is None:
+                continue
+            out.append(_written(model, workload, one, path))
+    return out
+
+
+def _written(model: str, workload: str, one: Mapping[str, Any],
+             path: Path | None) -> tuple[Any, Path]:
+    """One record, written from ``one`` into the ``model`` and ``workload`` slot."""
     from dataclasses import replace
 
     from ml_stack.serve.profile import WAYS, add, profile_for, records_in, writable_file
 
-    grouped = by_model(kept)
-    out = []
-    for model, _ranked in across(kept, full_n=full_n):
-        one = measured_best(grouped.get(model) or (), full_n=full_n)
-        if one is None:
-            continue
-        made_one = profile_of(model, one)
-        if not asked_recorded(one):
-            # The run predates asking records, so its label is all `ways_of` could read,
-            # and a label says nothing about the globals the sweep rode on every way. The
-            # evening this was learned, the hundred-question row asked with batch, kinds
-            # and summary rewrote the record as asked with none of them, and the page
-            # served the 70% shape under the 80% number. What the record already says
-            # about the asking is measured too, and it is kept.
-            older = profile_for(model, records=records_in(path or writable_file()))
-            if older is not None:
-                asked = {way: getattr(older, way) for way in WAYS}
-                asked.update(reach=older.reach, rounds=older.rounds)
-                made_one = replace(made_one, **asked,
-                                   note=(made_one.note + " -- asked as the record already "
-                                         "said: this run predates asking records"))
-        out.append((made_one, add(made_one, path=path)))
-    return out
+    made_one = profile_of(model, one)
+    if not asked_recorded(one):
+        # a run whose label is all `ways_of` could read keeps the asking the record holds
+        older = profile_for(model, workload=workload,
+                            records=records_in(path or writable_file()))
+        if older is not None and older.workload == workload:
+            asked = {way: getattr(older, way) for way in WAYS}
+            asked.update(reach=older.reach, rounds=older.rounds)
+            made_one = replace(made_one, **asked,
+                               note=(made_one.note + " -- asked as the record already "
+                                     "said: this run predates asking records"))
+    return made_one, add(made_one, path=path)
 
 
 def asked_recorded(one: Mapping[str, Any]) -> bool:

@@ -1,9 +1,10 @@
 """One measurement run as one record: what identifies it, what it describes, and its spread.
 
 `Measured` is what `keep.save` writes and every reader reads: the model and what served
-it, the serve shape, the `Asking`, the sampling, a digest of the system prompt and the
-tool schemas (`prompt_digest`), the commit and the host, the timing, the per-question
-rows, and -- for a run measured over several seeds -- a `Spread` per metric. Its accessors
+it, the workload it measured, the serve shape, the `Asking`, the sampling, a digest of the
+system prompt and the tool schemas (`prompt_digest`), the commit and the host, the timing,
+the per-question rows, and -- for a run measured over several seeds -- a `Spread` per
+metric. Its accessors
 are the one answer each question has: `build`, `head`, `made`, `identity`.
 
 `ml_stack.serve.shape.Run` is the other kind of run: a model to serve, asked one way. That
@@ -93,6 +94,7 @@ class Measured:
     at: str = ""
     kind: str = ""
     key: str = ""
+    workload: str = ""                   # ask, ingest or chat; "" for a run kept before them
     model: str = ""
     binary: str = ""
     served_by: Mapping[str, Any] | None = None
@@ -125,8 +127,8 @@ class Measured:
         server = dict(one.get("server") or {})
         asked = one.get("asking") if isinstance(one.get("asking"), Mapping) else None
         sampling = dict((asked or {}).get("sampling") or server.get("sampling") or {})
-        known = {"at", "label", "kind", "key", "server", "asking", "rows", "prompts",
-                 "seeds", "metrics", "failures", "seconds"}
+        known = {"at", "label", "kind", "key", "workload", "server", "asking", "rows",
+                 "prompts", "seeds", "metrics", "failures", "seconds"}
         metrics = {str(k): Spread.from_dict(v) if isinstance(v, Mapping) else Spread()
                    for k, v in (one.get("metrics") or {}).items()}
         return cls(
@@ -134,6 +136,7 @@ class Measured:
             at=str(one.get("at") or ""),
             kind=str(one.get("kind") or ""),
             key=str(one.get("key") or ""),
+            workload=str(one.get("workload") or ""),
             model=str(server.get("model") or ""),
             binary=str(server.get("binary") or ""),
             served_by=(dict(server["served_by"])
@@ -165,6 +168,8 @@ class Measured:
         out: dict[str, Any] = {"at": self.at, "label": self.label}
         if self.kind:
             out["kind"] = self.kind
+        if self.workload:
+            out["workload"] = self.workload
         out["server"] = dict(self.server)
         if self.ways:
             out["asking"] = dict(self.ways)
@@ -283,11 +288,11 @@ class Measured:
         """Everything that makes this a different measurement from another one.
 
         Two runs with the same identity asked the same questions of the same model, served
-        and prompted the same way; two runs whose system prompts differ by a character do
-        not.
+        and prompted the same way, for the same workload; two runs whose system prompts
+        differ by a character do not.
         """
         return (*self.serving, self.graph, self.finder, _frozen(self.ways),
-                _frozen(self.sampling), self.prompts)
+                _frozen(self.sampling), self.prompts, self.workload)
 
     @property
     def fingerprint(self) -> str:

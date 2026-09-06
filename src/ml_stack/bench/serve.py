@@ -24,6 +24,7 @@ from ml_stack.bench.measure import found as finder_of
 from ml_stack.bench.score import Row, _which
 from ml_stack.bench.show import drafted
 from ml_stack.log import say, warn
+from ml_stack.serve.profile import ASK
 
 
 def find_model(named: str) -> str:
@@ -359,7 +360,8 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
                         keys.append(save(kept, got,
                                          held={**held, "sampling": dict(client.sampling)},
                                          # the way, beside what was serving: see `save`
-                                         asking=getattr(ask, "asking", None)))
+                                         asking=getattr(ask, "asking", None),
+                                         workload=ASK))
                     got_all += got
                 return got_all, keys
 

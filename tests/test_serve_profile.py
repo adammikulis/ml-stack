@@ -813,3 +813,35 @@ def test_an_ingest_reads_the_ingest_record(monkeypatch):
 
     assert found is not None and found.workload == "ingest"
     assert run.talking.spec_draft_max == 2, "the depth goes out with each call"
+
+
+# -- what a run says it measured ------------------------------------------------------
+
+def test_a_record_refuses_a_workload_that_is_not_one():
+    with pytest.raises(ValueError, match="no such workload"):
+        record(MODEL, workload="knitting")
+
+
+def test_a_run_records_the_workload_it_measured():
+    from ml_stack.bench.record import Measured
+
+    run = Measured(label="a", workload="ingest")
+    assert run.to_dict()["workload"] == "ingest"
+    assert Measured.from_dict(run.to_dict()).workload == "ingest"
+    assert "workload" not in Measured(label="a").to_dict(), \
+        "a run that measured no named workload keeps no key that says nothing"
+
+
+def test_two_workloads_are_two_measurements():
+    from ml_stack.bench.record import Measured
+
+    asked = Measured(label="a", model=MODEL, workload="ask")
+    read = Measured(label="a", model=MODEL, workload="ingest")
+    assert asked.identity != read.identity
+
+
+def test_a_run_with_no_workload_writes_the_graph_asking_record():
+    from ml_stack.bench.report import workload_of
+
+    assert workload_of({"label": "a", "server": {}}) == "ask"
+    assert workload_of({"label": "a", "workload": "ingest", "server": {}}) == "ingest"
