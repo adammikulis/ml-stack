@@ -227,11 +227,18 @@ def _cost_said(stats: Any) -> list[str]:
            + (f"; asked at {_asked_said(stats.sampling)}" if stats.sampling else "")]
     if not stats.spent.calls:
         return [*out, "  speed     no call reached the server, so nothing was measured"]
-    return [*out, *_speed_said(stats), *_drafting_said(stats),
-            f"  going     {_for_long(stats.going_seconds)} from the start "
-            f"({stats.started}) to the newest section ({stats.last_at})"
+    return [*out, *_speed_said(stats), *_drafting_said(stats), _going_said(stats)]
+
+
+def _going_said(stats: Any) -> str:
+    """How long the run has been going, and what is left at the rate it has managed."""
+    going = (f"{_for_long(stats.going_seconds)} from the start ({stats.started}) to the "
+             f"newest section ({stats.last_at})" if stats.last_at else
+             f"{_for_long(stats.seconds)} of reading; this progress file does not date "
+             f"its sections")
+    return (f"  going     {going}"
             + (f"; ~{_for_long(stats.left_seconds)} left at this rate"
-               if stats.left_seconds else "")]
+               if stats.left_seconds else ""))
 
 
 def _asked_said(sampling: Mapping[str, Any]) -> str:

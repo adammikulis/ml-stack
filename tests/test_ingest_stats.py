@@ -101,6 +101,20 @@ def test_status_says_the_speed_the_drafting_and_the_time(tmp_path, capsys):
     assert "left at this rate" in said
 
 
+def test_status_says_the_reading_time_when_the_sections_are_not_dated(tmp_path, capsys):
+    where = a_run(tmp_path, calls=[a_call()], rows=2)
+    held = ingest.Progress(ingest.Progress.beside(where))
+    for one in held.state["sources"].values():
+        for entry in one["done"].values():
+            entry.pop("at", None)
+    held.save()
+
+    assert status(where) == 0
+    said = capsys.readouterr().out
+    assert "this progress file does not date its sections" in said
+    assert "left at this rate" in said
+
+
 def test_status_says_there_is_no_draft_head_rather_than_printing_zeros(tmp_path, capsys):
     where = a_run(tmp_path, calls=[a_call(draft=0, accepted=0)])
 
