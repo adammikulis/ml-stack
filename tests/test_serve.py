@@ -670,13 +670,13 @@ class TestServingBeside:
             held.lease(ServerSpec(model=big, port=instance.port))
 
 
-def test_a_projector_reference_becomes_a_url_and_a_path_stays_a_path(fake_binary):
+def test_a_projector_reference_becomes_a_url_and_a_path_stays_a_path(binary):
     """`--mmproj` takes a file on disk. Handing it an `hf:` reference is a path that does
     not exist, and the server's complaint reads like a corrupt projector rather than a
     misspelled one."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    backend = LlamaServerBackend(binary=fake_binary)
+    backend = LlamaServerBackend(binary=binary)
 
     argv = backend.command(ServerSpec(model="hf:maker/thing-GGUF/w.gguf", port=1,
                                       mmproj="hf:maker/thing-GGUF/mmproj-F32.gguf"))
@@ -713,13 +713,13 @@ def test_the_most_precise_projector_is_taken_not_the_first_alphabetically():
         assert alongside(str(model), "auto", "mtp-").endswith("mtp-thing-Q4_0.gguf")
 
 
-def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked(fake_binary):
+def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked(binary):
     """`--spec-type` defaults to `none` on the server. An n-gram kind needs no second model,
     proposing tokens already seen in the prompt -- which is what suits work that copies from
     its context, and costs no weights and no memory where a draft head costs both."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    backend = LlamaServerBackend(binary=fake_binary)
+    backend = LlamaServerBackend(binary=binary)
 
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
     for flag in ("--spec-type", "--spec-draft-n-max", "--spec-ngram-mod-n-min",
@@ -741,12 +741,12 @@ def test_the_speculative_knobs_reach_the_command_line_and_stay_off_until_asked(f
         ServerSpec(model="/m/w.gguf", port=1, spec_draft_min=0))
 
 
-def test_the_lookup_cache_reaches_the_command_line(fake_binary):
+def test_the_lookup_cache_reaches_the_command_line(binary):
     """Only the ngram-cache kind keeps a table on disk. The other n-gram kinds look up the
     prompt they already hold and store nothing, which is why none of this is set by default."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    backend = LlamaServerBackend(binary=fake_binary)
+    backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1, spec_type="ngram-simple"))
     assert "--lookup-cache-dynamic" not in bare and "--lookup-cache-static" not in bare
 
@@ -758,14 +758,14 @@ def test_the_lookup_cache_reaches_the_command_line(fake_binary):
     assert pairs["--lookup-cache-dynamic"] == "/c/learnt.bin"
 
 
-def test_tensors_can_be_kept_off_the_gpu_by_pattern(fake_binary):
+def test_tensors_can_be_kept_off_the_gpu_by_pattern(binary):
     """Qwen3.8-Flash-Next's N-gram Embedding is 51B of lookup table whose addresses are known
     in advance, meant to sit in host memory and be prefetched rather than hold GPU. Naming
     its tensors is how that is arranged -- and it is a different thing from n-gram
     *speculation*, which is a decoding trick and touches no weights at all."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    backend = LlamaServerBackend(binary=fake_binary)
+    backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
     assert "--override-tensor" not in bare and "--cpu-moe" not in bare
 
@@ -780,7 +780,7 @@ def test_tensors_can_be_kept_off_the_gpu_by_pattern(fake_binary):
         ServerSpec(model="/m/w.gguf", port=1, cpu_moe=True))
 
 
-def test_the_serving_knobs_that_shorten_a_run(fake_binary):
+def test_the_serving_knobs_that_shorten_a_run(binary):
     """A benchmark sends the same system prompt and tool schemas ahead of every question, so
     the prefix is reprocessed twenty or thirty times a run without --cache-reuse. Reusing it
     is free: the tokens are identical, so the cache is valid.
@@ -791,7 +791,7 @@ def test_the_serving_knobs_that_shorten_a_run(fake_binary):
     was the table printing the context on every line."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    backend = LlamaServerBackend(binary=fake_binary)
+    backend = LlamaServerBackend(binary=binary)
     bare = backend.command(ServerSpec(model="/m/w.gguf", port=1))
     for flag in ("--cache-reuse", "--no-warmup", "--kv-unified-per-slot"):
         assert flag not in bare, f"{flag} must be asked for, not assumed"
@@ -827,7 +827,7 @@ def test_already_up_names_the_recorded_server_that_holds_the_same_weights(tmp_pa
     assert already_up("quince-2b.gguf", 8080, state_file=state) is None
 
 
-def test_no_test_finds_the_llama_server_this_machine_happens_to_have(fake_binary):
+def test_no_test_finds_the_llama_server_this_machine_happens_to_have(binary):
     """A laptop with brew's llama.cpp and a runner with nothing must score the same.
 
     Two tests passed here and failed on CI because `find_binary` reads a login shell's
@@ -837,18 +837,18 @@ def test_no_test_finds_the_llama_server_this_machine_happens_to_have(fake_binary
 
     assert machine_binary("llama-server", ("llama-server",)) is None
     assert find_binary("llama-server") is None
-    assert find_binary("llama-server", explicit=fake_binary) == fake_binary
+    assert find_binary("llama-server", explicit=binary) == binary
 
 
-def test_one_seat_says_so_rather_than_leaving_it_to_the_server(fake_binary):
+def test_one_seat_says_so_rather_than_leaving_it_to_the_server(binary):
     """llama-server's own --parallel default is -1, auto, which picked 4 on a 128 GB Mac."""
     from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 
-    argv = LlamaServerBackend(binary=fake_binary).command(
+    argv = LlamaServerBackend(binary=binary).command(
         ServerSpec(model="model.gguf", port=8080, context=32768))
     assert "-np" in argv and argv[argv.index("-np") + 1] == "1"
 
-    four = LlamaServerBackend(binary=fake_binary).command(
+    four = LlamaServerBackend(binary=binary).command(
         ServerSpec(model="model.gguf", port=8080, context=32768, parallel=4))
     assert four[four.index("-np") + 1] == "4"
 

@@ -4,7 +4,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from conftest import fake_binary
 
 import ml_stack.serve
 from ml_stack.serve import shape as shape_mod
@@ -195,6 +194,7 @@ def shipped(monkeypatch):
     import ml_stack.serve.ops as ops
     from ml_stack.serve.binary import managed_named
     from ml_stack.serve.profile import package_file, profile_for, records_in
+    from ml_stack.testing.fakes import fake_binary
 
     monkeypatch.setattr(ml_stack.hub, "located", lambda name: Path(f"/models/{name}"))
     monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
