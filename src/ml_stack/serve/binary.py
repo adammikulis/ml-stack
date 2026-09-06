@@ -104,11 +104,22 @@ def find_binary(
             if path.is_file():
                 return path.resolve()
 
-    for directory in (vendor_dir, home.cache(), *_LOGIN_SHELL_DIRS):
+    for directory in (vendor_dir, home.cache()):
         if directory is None:
             continue
         for candidate in candidates:
             path = home.expand(directory) / candidate
+            if path.is_file():
+                return path.resolve()
+
+    return machine_binary(name, candidates)
+
+
+def machine_binary(name: str, candidates: tuple[str, ...]) -> Path | None:
+    """``name`` as this machine installs it: a login shell's directories, then PATH."""
+    for directory in _LOGIN_SHELL_DIRS:
+        for candidate in candidates:
+            path = directory / candidate
             if path.is_file():
                 return path.resolve()
 

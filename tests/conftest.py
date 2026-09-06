@@ -119,6 +119,12 @@ _STEERING = ("MLSTACK_BENCH_CEILING", "MLSTACK_BENCH_HOME", "MLSTACK_BENCH_TRACE
              "MLSTACK_WEB_PROFILE", "MLSTACK_WHISPER_CPP_MODEL", "ML_STACK_RATES")
 
 
+#: What a store in the suite may hold in memory. Left to the engine it is a share of the
+#: machine's, which four xdist workers claim four times over: on a 16 GB runner the 10,000
+#: node probe died with "the buffer pool is full and no memory could be freed".
+STORE_MEMORY = 512 * 2**20
+
+
 @pytest.fixture(autouse=True)
 def _no_machine_state(monkeypatch, tmp_path):
     """Point the whole state root at an empty temporary directory, and stop machine reads.
@@ -131,6 +137,7 @@ def _no_machine_state(monkeypatch, tmp_path):
     that exports one cannot move a corner back out.
     """
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "machine-state"))
+    monkeypatch.setenv("MLSTACK_STORE_MEMORY", str(STORE_MEMORY))
     for name in _STEERING:
         monkeypatch.delenv(name, raising=False)
 
@@ -354,6 +361,37 @@ def _no_real_cache_or_ports(monkeypatch, tmp_path):
     keeps the cache and logs in tmp_path as well, so a test that reaches them fails here.
     """
     monkeypatch.setenv("ML_STACK_CACHE", str(tmp_path / "cache"))
+
+
+@pytest.fixture(autouse=True)
+def _no_machine_binary(monkeypatch):
+    """No test finds the llama-server this machine happens to have installed.
+
+    `find_binary` searches a login shell's directories and PATH after the state root, and
+    both are outside the temporary home the fixtures above set up, so a developer with
+    `brew install llama.cpp` had two tests pass here and fail on a runner. The machine's
+    own copy is withheld and a binary a test built for itself under the temporary
+    directory is handed back, which makes a test that needs one raise `BinaryNotFound`
+    everywhere rather than only where nobody had built llama.cpp.
+    """
+    import tempfile
+
+    from ml_stack.serve import binary as binary_module
+
+    real = binary_module.machine_binary
+    temp = Path(tempfile.gettempdir()).resolve()
+
+    def withheld(name, candidates):
+        found = real(name, candidates)
+        if found is None:
+            return None
+        try:
+            found.resolve().relative_to(temp)
+        except ValueError:
+            return None
+        return found
+
+    monkeypatch.setattr(binary_module, "machine_binary", withheld)
 
 
 # -- the fixtures above are trusted; these fail the run if that trust is misplaced ------

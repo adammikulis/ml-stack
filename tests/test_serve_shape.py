@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from conftest import fake_binary
 
 import ml_stack.serve
 from ml_stack.serve import shape as shape_mod
@@ -186,17 +187,25 @@ def shipped(monkeypatch):
 
     The packaged file only -- never this machine's `~/.ml-stack/profiles.json`, which would
     make the test read a measurement somebody else made -- and the head and the projector
-    resolve against fakes, so nothing looks in a Hub cache.
+    resolve against fakes, so nothing looks in a Hub cache. The build the record names is
+    written into the temporary state root, so the manager for it resolves on a machine
+    that has never built llama.cpp.
     """
     import ml_stack.hub
     import ml_stack.serve.ops as ops
+    from ml_stack.serve.binary import managed_named
     from ml_stack.serve.profile import package_file, profile_for, records_in
 
     monkeypatch.setattr(ml_stack.hub, "located", lambda name: Path(f"/models/{name}"))
     monkeypatch.setattr(ops, "alongside", lambda *a, **k: "/models/mmproj-BF16.gguf")
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
-    return found.run(port=8099, seats=2)
+    run = found.run(port=8099, seats=2)
+    if run.shape.build:
+        where = managed_named() / run.shape.build
+        where.mkdir(parents=True, exist_ok=True)
+        fake_binary(where)
+    return run
 
 
 def _bench_lease(run, monkeypatch, leased):

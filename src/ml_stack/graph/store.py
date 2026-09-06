@@ -19,6 +19,7 @@ migrate.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
@@ -250,10 +251,22 @@ def roll_back(snapshot_path: str | Path):
     return restore(snapshot_path, count=count_store, fold=fold_log)
 
 
+def store_memory() -> int:
+    """The buffer pool a store opens with, in bytes, from ``$MLSTACK_STORE_MEMORY``.
+
+    Zero leaves the engine to size it, which it does as a share of this machine's memory.
+    """
+    try:
+        return max(0, int(os.environ.get("MLSTACK_STORE_MEMORY", "") or 0))
+    except ValueError:
+        return 0
+
+
 class GraphStore:
     """Nodes and edges on disk, asked about in Cypher."""
 
-    def __init__(self, path: str | Path, *, read_only: bool = False) -> None:
+    def __init__(self, path: str | Path, *, read_only: bool = False,
+                 buffer_pool_size: int | None = None) -> None:
         try:
             import ladybug as lb
         except ImportError as exc:  # pragma: no cover - depends on what is installed
@@ -261,7 +274,8 @@ class GraphStore:
         self.path = Path(path).expanduser()
         if not read_only:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = lb.Database(str(self.path), read_only=read_only)
+        pool = store_memory() if buffer_pool_size is None else max(0, int(buffer_pool_size))
+        self._db = lb.Database(str(self.path), read_only=read_only, buffer_pool_size=pool)
         self._conn = lb.Connection(self._db)
         self.read_only = read_only
         self._in_tx = False
