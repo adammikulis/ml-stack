@@ -21,10 +21,11 @@ from ml_stack import home
 from ml_stack.log import say, warn
 from ml_stack.units import human_bytes
 
-__all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "PREFER", "WEIGHT_SUFFIXES",
-           "advice", "aside", "beside", "builds", "card", "choose_head", "default_roots",
-           "draft_for", "draft_note", "fetch", "files", "find", "held", "hub_cache",
-           "in_gguf", "located", "main", "mmproj_for", "ref", "repo_of", "room",
+__all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "Head", "PREFER",
+           "WEIGHT_SUFFIXES", "advice", "aside", "base_words", "beside", "borrowed_head",
+           "builds", "card", "choose_head", "default_roots", "draft_for", "draft_note",
+           "drafts_for", "fetch", "files", "find", "forks", "heads_for", "held", "hub_cache",
+           "in_gguf", "is_head", "located", "main", "mmproj_for", "ref", "repo_of", "room",
            "spec_for", "weight_paths"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
@@ -106,7 +107,7 @@ def aside(name: str) -> int:
     an afterthought. What a file *is* is in its name, not its folder.
     """
     plain = name.lower().rsplit("/", 1)[-1]
-    return 1 if plain.startswith(("mmproj", "mtp-", "imatrix")) else 0
+    return 1 if plain.startswith(("mmproj", "imatrix")) or is_head(plain) else 0
 
 
 # How a draft head names itself, and the `--spec-type` each one needs. A head is named by
@@ -473,21 +474,161 @@ def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
     return out
 
 
-def held() -> dict[str, int]:
+def held(*, alongside: bool = False) -> dict[str, int]:
     """Every model file already on this machine, by filename, with its real size.
 
     Sizes are resolved through symlinks: a Hub cache is symlinks into `blobs/`, so
-    `ls -l` reports 79 bytes for a 46G shard.
+    `ls -l` reports 79 bytes for a 46G shard. ``alongside`` includes the draft heads and
+    vision projectors that travel with a model; they are left out otherwise, since neither
+    is a model anybody serves on its own.
     """
     out: dict[str, int] = {}
     for path in weight_paths():
-        if path.name in out or DRAFT_MARK in path.suffixes:
+        if path.name in out or (not alongside and aside(path.name)):
             continue
         try:
             out[path.name] = path.resolve().stat().st_size
         except OSError:
             continue
     return out
+
+
+def is_head(name: str | Path) -> bool:
+    """Whether a file name is a draft head rather than a model to serve."""
+    plain = Path(str(name)).name
+    return plain.lower().startswith(tuple(DRAFT_KINDS)) or DRAFT_MARK in Path(plain).suffixes
+
+
+def borrowed_head(name: str | Path) -> bool:
+    """Whether a head borrows its target's embeddings, which only a fork build loads."""
+    return "shared" in Path(str(name)).name.lower()
+
+
+# Words that name a build rather than the model, dropped from both sides of a match.
+_NOT_THE_MODEL = frozenset({"shared", "qat", "ud"})
+
+
+def base_words(name: str | Path) -> tuple[str, ...]:
+    """The words that name the model a file is for, with quantisation and shard dropped.
+
+    ``mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf`` and
+    ``Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf`` both give
+    ``('qwen3', '8', 'flash', 'next')``, which is how a head on disk is matched to the
+    model it drafts for.
+    """
+    text = Path(str(name)).name
+    if text.lower().endswith(".gguf"):
+        text = text[:-5]
+    if text.lower().endswith(DRAFT_MARK):
+        text = text[: -len(DRAFT_MARK)]
+    text = QUANT.sub("", SHARD.sub("", text))
+    for prefix in DRAFT_KINDS:
+        if text.lower().startswith(prefix):
+            text = text[len(prefix):]
+            break
+    words = (w for w in re.split(r"[-_. ]+", text.lower()) if w)
+    return tuple(w for w in words if w not in _NOT_THE_MODEL)
+
+
+def drafts_for(model: str | Path, *, files: Sequence[Path] | None = None) -> tuple[Path, ...]:
+    """Every draft head on this machine that could draft for ``model``.
+
+    Two sources: a head shipped beside the weights -- the same directory, an ``MTP/``
+    folder under it, or the snapshot above it, which is where a Hub download of one
+    repository puts one -- and a head anywhere else under the model roots whose name says
+    it is for the same base model.
+    """
+    where = Path(str(model)).expanduser()
+    if "/" not in str(model) and not where.is_file():
+        where = located(str(model)) or where
+    wanted = base_words(where.name)
+    roots = {root.resolve() for root in default_roots(home.home())}
+    near = {where.parent}
+    if where.parent.resolve() not in roots:
+        near.add(where.parent.parent)
+    close: list[Path] = []
+    far: list[Path] = []
+    for path in (list(files) if files is not None else weight_paths()):
+        if not is_head(path.name):
+            continue
+        if path.parent in near or path.parent.parent in near:
+            close.append(path)
+            continue
+        words = base_words(path.name)
+        if wanted and words and words == wanted[: len(words)]:
+            far.append(path)
+    # a Hub cache reaches the same blob from more than one root, and only one is a choice
+    seen: dict[Path, Path] = {}
+    for path in close + far:
+        try:
+            seen.setdefault(path.resolve(), path)
+        except OSError:
+            continue
+    return tuple(seen.values())
+
+
+def forks(binary: str | Path | None = None,
+          builds: Sequence[tuple[str, Path]] | None = None) -> tuple[bool, list[str]]:
+    """Whether the binary that would serve loads a head that borrows its target's
+    embeddings, and the named builds here that do, the ones a record measured first.
+
+    ``binary`` None is the one `find_binary` would pick.
+    """
+    from ml_stack.serve import binary as builds_module
+
+    chosen = binary if binary is not None else builds_module.find_binary()
+    if builds_module.borrows(chosen):
+        return True, []
+    from ml_stack.serve import profile as records
+
+    measured = {str(one.build) for one in records.profiles() if one.build}
+    named = list(builds) if builds is not None else builds_module.named_builds()
+    found = [name for name, one in named if builds_module.borrows(one)]
+    return False, sorted(found, key=lambda name: (name not in measured, name))
+
+
+@dataclass(frozen=True)
+class Head:
+    """A draft head on this machine: what to serve, how big, and which build loads it."""
+
+    path: str
+    bytes: int
+    spec_type: str
+    build: str = ""
+
+    @property
+    def name(self) -> str:
+        return Path(self.path).name
+
+    def said(self) -> str:
+        """One line naming the head, its memory and the build it needs."""
+        extra = f", needs --build {self.build}" if self.build else ""
+        return f"{self.name} ({human_bytes(self.bytes)} of memory{extra})"
+
+
+def heads_for(model: str | Path, *, files: Sequence[Path] | None = None,
+              builds: Sequence[tuple[str, Path]] | None = None,
+              binary: str | Path | None = None) -> list[Head]:
+    """The draft heads this machine could serve with ``model``, cheapest first.
+
+    A draft step costs about what it takes to read the head, so the smallest head drafts
+    fastest. A head that borrows its target's embeddings is named for the fork build that
+    loads it, and is left out when this machine has no such build.
+    """
+    here, named = forks(binary, builds)
+    fork = named[0] if named else ""
+    out: list[Head] = []
+    for path in drafts_for(model, files=files):
+        needs = borrowed_head(path.name)
+        if needs and not here and not fork:
+            continue
+        try:
+            size = path.resolve().stat().st_size
+        except OSError:
+            continue
+        out.append(Head(path=str(path), bytes=size, spec_type=spec_for(path.name),
+                        build=fork if needs and not here else ""))
+    return sorted(out, key=lambda h: (h.bytes, h.name))
 
 
 def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, int]]:
@@ -664,11 +805,7 @@ def choose_head(model: str | Path, *, binary: str | Path | None, prefer: tuple[s
     that borrows is exactly what mainline cannot load.
     """
     if borrows is None:
-        from ml_stack.serve.binary import borrows as _borrows
-        from ml_stack.serve.binary import find_binary
-
-        chosen_binary = binary if binary is not None else find_binary()
-        borrows = _borrows(chosen_binary)
+        borrows = forks(binary)[0]
 
     words = tuple(prefer) or (("shared-q8_0", "shared") if borrows else ("q8_0",))
     avoid = () if borrows else ("shared",)

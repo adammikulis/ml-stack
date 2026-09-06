@@ -844,3 +844,103 @@ def test_an_iq_build_is_marked_as_the_slow_choice_on_a_mac_only():
     assert not iq_on_metal("thing-UD-Q4_K_XL", platform="darwin")
     assert not iq_on_metal("thing-UD-IQ4_XS", platform="linux")
     assert not iq_on_metal("thing-UD-IQ4_XS", platform="win32")
+
+
+class TestHeadsOnThisMachine:
+    """Which draft heads a model on this machine could be served with, cheapest first."""
+
+    def _machine(self, tmp_path, monkeypatch, names):
+        import ml_stack.hub as hub
+
+        root = tmp_path / "models"
+        (root / "MTP").mkdir(parents=True)
+        for name, size in names.items():
+            (root / name).write_bytes(b"x" * size)
+        monkeypatch.setattr(hub, "default_roots", lambda _root: [root])
+        return root
+
+    def test_a_head_is_not_offered_as_a_model_to_serve(self, tmp_path, monkeypatch):
+        import ml_stack.hub as hub
+
+        self._machine(tmp_path, monkeypatch, {"thing-Q4_K_M.gguf": 900,
+                                              "mtp-thing-Q8_0.gguf": 100,
+                                              "mmproj-thing-F32.gguf": 50})
+        assert sorted(hub.held()) == ["thing-Q4_K_M.gguf"]
+        assert len(hub.held(alongside=True)) == 3
+
+    def test_the_words_that_name_the_model_survive_quantisation_and_shards(self):
+        from ml_stack.hub import base_words
+
+        assert (base_words("mtp-Quince-9.9-Flash-shared-Q8_0.gguf")
+                == base_words("Quince-9.9-Flash-UD-Q4_K_XL-00001-of-00004.gguf"))
+        assert base_words("eagle3-quince-oss-20b-BF16.gguf") == ("quince", "oss", "20b")
+
+    def test_a_head_for_another_model_is_not_offered(self, tmp_path, monkeypatch):
+        from ml_stack.hub import heads_for
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-2b-it-qat-UD-Q4_K_XL.gguf": 900})
+        (root / "other" / "MTP").mkdir(parents=True)
+        (root / "other" / "MTP" / "mtp-quince-9b-it-Q8_0.gguf").write_bytes(b"x" * 100)
+        assert heads_for("quince-2b-it-qat-UD-Q4_K_XL.gguf", binary="") == []
+
+    def test_the_cheapest_head_is_offered_first_with_its_size(self, tmp_path, monkeypatch):
+        from ml_stack.hub import heads_for
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-9b-UD-Q4_K_XL.gguf": 9000,
+                              "mtp-quince-9b-BF16.gguf": 400,
+                              "mtp-quince-9b-Q4_K_M.gguf": 100,
+                              "mtp-quince-9b-Q8_0.gguf": 200})
+        found = heads_for(root / "quince-9b-UD-Q4_K_XL.gguf", binary="")
+        assert [h.name for h in found] == ["mtp-quince-9b-Q4_K_M.gguf",
+                                           "mtp-quince-9b-Q8_0.gguf",
+                                           "mtp-quince-9b-BF16.gguf"]
+        assert [h.bytes for h in found] == [100, 200, 400]
+        assert found[0].spec_type == "draft-mtp"
+        assert "100B of memory" in found[0].said()
+
+    def test_a_head_under_mtp_is_found_beside_the_weights(self, tmp_path, monkeypatch):
+        from ml_stack.hub import heads_for
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-9b-UD-Q4_K_XL.gguf": 9000,
+                              "MTP/mtp-quince-9b-Q8_0.gguf": 200})
+        found = heads_for(root / "quince-9b-UD-Q4_K_XL.gguf", binary="")
+        assert [h.name for h in found] == ["mtp-quince-9b-Q8_0.gguf"]
+
+    def test_a_borrowing_head_is_named_for_the_build_that_loads_it(self, tmp_path,
+                                                                   monkeypatch):
+        import ml_stack.hub as hub
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-9b-UD-Q4_K_XL.gguf": 9000,
+                              "mtp-quince-9b-shared-Q4_K_M.gguf": 100,
+                              "mtp-quince-9b-Q8_0.gguf": 200})
+        monkeypatch.setattr(hub, "forks", lambda *a, **k: (False, ["mended"]))
+        found = hub.heads_for(root / "quince-9b-UD-Q4_K_XL.gguf")
+        assert [(h.name, h.build) for h in found] == [
+            ("mtp-quince-9b-shared-Q4_K_M.gguf", "mended"), ("mtp-quince-9b-Q8_0.gguf", "")]
+        assert "needs --build mended" in found[0].said()
+
+    def test_a_borrowing_head_is_left_out_when_no_build_here_loads_it(self, tmp_path,
+                                                                     monkeypatch):
+        import ml_stack.hub as hub
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-9b-UD-Q4_K_XL.gguf": 9000,
+                              "mtp-quince-9b-shared-Q4_K_M.gguf": 100,
+                              "mtp-quince-9b-Q8_0.gguf": 200})
+        monkeypatch.setattr(hub, "forks", lambda *a, **k: (False, []))
+        assert [h.name for h in hub.heads_for(root / "quince-9b-UD-Q4_K_XL.gguf")] == [
+            "mtp-quince-9b-Q8_0.gguf"]
+
+    def test_a_fork_build_takes_the_borrowing_head_as_it_stands(self, tmp_path, monkeypatch):
+        import ml_stack.hub as hub
+
+        root = self._machine(tmp_path, monkeypatch,
+                             {"quince-9b-UD-Q4_K_XL.gguf": 9000,
+                              "mtp-quince-9b-shared-Q4_K_M.gguf": 100})
+        monkeypatch.setattr(hub, "forks", lambda *a, **k: (True, []))
+        found = hub.heads_for(root / "quince-9b-UD-Q4_K_XL.gguf")
+        assert [(h.name, h.build) for h in found] == [("mtp-quince-9b-shared-Q4_K_M.gguf", "")]
