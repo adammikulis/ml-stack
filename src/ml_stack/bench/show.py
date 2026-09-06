@@ -366,6 +366,9 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # readable only as a guess at the end of a label, and half of it was not in the label
     # either. `-` where a run kept no record of it: see `shape_of` and `asked_as`.
     #
+    # `beside` is what else held the card while the run was measured -- `2/61G`, servers
+    # and their resident total -- and `-` for a run that had it to itself.
+    #
     # `F1` carries the interval its own questions put around it -- `70% ±6` -- because a
     # mean over twenty questions moves five points between identical runs, and a table that
     # prints the mean alone invites a comparison the questions cannot support.
@@ -380,7 +383,8 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
             + f"{'ctx':>10} {'n':>3} {'shape':32} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'peak':>6} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
-            f"{'real':>9} {'mem':>9} {'wired':>8} {'kv+run':>8} {'per 1k':>8} {'F1':>8} "
+            f"{'real':>9} {'mem':>9} {'wired':>8} {'beside':>7} {'kv+run':>8} "
+            f"{'per 1k':>8} {'F1':>8} "
             f"{'rec':>5} {'prec':>5} "
             f"{'made':>5} {'t/o':>4}  {'sampling':14} {'served'}")
     say(head)
@@ -423,6 +427,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
             f"{str(server.get('finder') or '-'):>7} "
             f"{at_once(server):>5} "
             f"{_gb(rss):>9} {_gb(server.get('footprint_peak')):>9} {wired_of(server):>8} "
+            f"{of(one).beside_said:>7} "
             f"{(f'{beyond / 2**30:.2f}G' if beyond else ('mmap' if server.get('mmapped') else '-')):>8} "
             f"{(f'{per1k / 2**20:.1f}M' if per1k else '-'):>8} "
             f"{right:>8} {rec:>5} {prec:>5} {of(one).made:>5} {timeouts(one):>4}  "

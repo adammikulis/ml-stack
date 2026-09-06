@@ -111,6 +111,7 @@ class Measured:
     prompts: str = ""
     host: str = ""
     commit: str = ""
+    beside: tuple[Mapping[str, Any], ...] = ()
     seconds: float = 0.0
     rows: tuple[Mapping[str, Any], ...] = ()
     seeds: tuple[int, ...] = ()
@@ -154,6 +155,7 @@ class Measured:
             prompts=str(one.get("prompts") or ""),
             host=str(server.get("host") or ""),
             commit=str(server.get("commit") or ""),
+            beside=tuple(server.get("beside") or ()),
             seconds=float(one.get("seconds") or 0.0),
             rows=tuple(one.get("rows") or ()),
             seeds=tuple(int(s) for s in (one.get("seeds") or ())),
@@ -215,6 +217,15 @@ class Measured:
             except ValueError:
                 return ""
         return named.parts[0] if named.parts else ""
+
+    @property
+    def beside_said(self) -> str:
+        """What else held the card while this was measured -- ``2/61G`` -- or "-" for a
+        run that had it to itself."""
+        if not self.beside:
+            return "-"
+        total = sum(int(one.get("bytes") or 0) for one in self.beside)
+        return f"{len(self.beside)}/{total / 2 ** 30:.0f}G" if total else str(len(self.beside))
 
     @property
     def head_said(self) -> str:

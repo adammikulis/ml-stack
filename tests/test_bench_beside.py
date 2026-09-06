@@ -62,3 +62,21 @@ def test_a_run_measured_with_company_keeps_it():
              "leased": False}]
     finally:
         note_beside([])
+
+
+def test_a_kept_run_reads_back_what_shared_the_card(capsys):
+    from ml_stack.bench.record import Measured
+    from ml_stack.bench.show import table
+
+    kept = {"label": "a-run",
+            "server": {"model": "big.gguf",
+                       "beside": [{"port": 8081, "pid": 12, "model": "small.gguf",
+                                   "bytes": 2 ** 30, "leased": False}]},
+            "rows": [{"expected": ["x"], "found": ["x"], "right": 1.0, "seconds": 1.0}]}
+    assert Measured.from_dict(kept).beside_said == "1/1G"
+    assert Measured.from_dict({"server": {"model": "big.gguf"}}).beside_said == "-"
+
+    table([kept])
+    printed = capsys.readouterr().out
+    assert "beside" in printed.splitlines()[0]
+    assert "1/1G" in printed
