@@ -1,0 +1,85 @@
+diff --git a/common/json.cpp b/common/json.cpp
+index 37713ce..10dcc72 100644
+--- a/common/json.cpp
++++ b/common/json.cpp
+@@ -405,6 +405,7 @@ template <> common_json common_json::get<common_json>() const {
+ #define COMMON_JSON_GET(...) template <> __VA_ARGS__ common_json::get<__VA_ARGS__>() const { return guard([&] { return as_json(this).get<__VA_ARGS__>(); }); }
+ 
+ COMMON_JSON_GET(bool)
++COMMON_JSON_GET(unsigned short)
+ COMMON_JSON_GET(int)
+ COMMON_JSON_GET(unsigned int)
+ COMMON_JSON_GET(long)
+diff --git a/common/speculative.cpp b/common/speculative.cpp
+index 851a47b..d0b411b 100644
+--- a/common/speculative.cpp
++++ b/common/speculative.cpp
+@@ -810,7 +810,8 @@ struct common_speculative_impl_draft_eagle3 : public common_speculative_impl {
+ 
+                 result.push_back(id);
+ 
+-                if (params.n_max <= (int) result.size()) {
++                if ((params.n_max <= (int) result.size()) ||
++                    (dp.n_max > 0 && dp.n_max <= (int) result.size())) {
+                     drafting[seq_id] = false;
+                     n_drafting--;
+                     continue;
+@@ -1691,7 +1692,8 @@ struct common_speculative_impl_draft_mtp : public common_speculative_impl {
+ 
+                 result.push_back(id);
+ 
+-                if (params.n_max <= (int) result.size()) {
++                if ((params.n_max <= (int) result.size()) ||
++                    (dp.n_max > 0 && dp.n_max <= (int) result.size())) {
+                     drafting[seq_id] = false;
+                     n_drafting--;
+                     continue;
+diff --git a/tools/server/server-context.cpp b/tools/server/server-context.cpp
+index f547735..44679cb 100644
+--- a/tools/server/server-context.cpp
++++ b/tools/server/server-context.cpp
+@@ -496,6 +496,8 @@ struct server_slot {
+             n_draft_max = std::min(n_draft_max, n_remaining() - 1);
+         }
+ 
++        n_draft_max = std::min(n_draft_max, task->params.speculative.draft.n_max);
++
+         SLT_DBG(*this, "max possible draft: %d\n", n_draft_max);
+ 
+         return n_draft_max;
+diff --git a/tools/server/server-schema.cpp b/tools/server/server-schema.cpp
+index 64b9251..a6c97a6 100644
+--- a/tools/server/server-schema.cpp
++++ b/tools/server/server-schema.cpp
+@@ -194,22 +194,18 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+     // Speculative decoding params
+     //
+ 
+-    // TODO: to keep things simple, we disable speculative parameter adjustments for now
+-#if 0
+-    // TODO: for now, be able to adjust only the draft-model based speculative parameters
+     add((new field_num("speculative.n_max", params.speculative.draft.n_max))
+         ->set_hard_limits(0, INT32_MAX)
+         ->set_desc("Maximum number of tokens to draft during speculative decoding"));
+ 
+     add((new field_num("speculative.n_min", params.speculative.draft.n_min))
+         ->set_hard_limits(0, INT32_MAX)
+-        ->set_desc("Minimum number of draft tokens to use for speculative decoding");
++        ->set_desc("Minimum number of draft tokens to use for speculative decoding"));
+ 
+     add((new field_num("speculative.p_min", params.speculative.draft.p_min))
+         ->set_hard_limits(0.0f, 1.0f)
+         ->set_desc("Minimum speculative decoding probability for draft tokens (0 = greedy)"));
+ 
+-
+     add((new field_str("speculative.type"))
+         ->set_desc("Speculative decoding method (for debugging and research purposes)")
+         ->set_handler([&](field_eval_context & ctx, const json & data) {
+@@ -224,7 +220,6 @@ std::vector<std::unique_ptr<field>> make_llama_cmpl_schema(const common_params &
+ 
+     add((new field_num("speculative.ngram_min_hits", params.speculative.ngram_simple.min_hits))
+         ->set_desc("Minimum hits at ngram lookup for mgram to be proposed"));
+-#endif
+ 
+     add((new field_json("lora"))
+         ->set_desc("A list of LoRA adapters to apply to this request. Each entry must have `id` and `scale` fields. Adapters not listed default to scale 0.0")

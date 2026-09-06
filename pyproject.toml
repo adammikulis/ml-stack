@@ -143,6 +143,7 @@ packages = ["src/ml_stack"]
 # build time. No copy is kept in the source tree, so there is nothing to drift.
 [tool.hatch.build.targets.wheel.force-include]
 "contracts" = "ml_stack/contracts/_data"
+"patches" = "ml_stack/serve/_patches"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

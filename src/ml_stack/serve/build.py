@@ -22,6 +22,7 @@ untouched, which is what makes ``--persist``'s weekly, unattended rerun safe.
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import json
 import os
 import platform
@@ -47,7 +48,8 @@ from ml_stack.serve.binary import (
 
 __all__ = [
     "BuildFailed", "PERSIST_PLIST", "PERSIST_TASK", "WEEK_SECONDS", "builds_dir",
-    "cmd_build", "current_link", "named_dir", "named_src_dir", "root", "src_dir",
+    "cmd_build", "current_link", "named_dir", "named_src_dir", "patch_files",
+    "patch_stamp", "patches_dir", "root", "src_dir",
 ]
 
 REPO_URL = "https://github.com/ggml-org/llama.cpp"
@@ -215,6 +217,69 @@ def _short_commit(source: Path) -> str:
     return _git("rev-parse", "--short", "HEAD", cwd=source).stdout.strip()
 
 
+# -- patches carried on top of upstream ----------------------------------------------
+def patches_dir() -> Path:
+    """The directory the llama.cpp patches are read from."""
+    override = os.environ.get("MLSTACK_LLAMA_PATCHES", "")
+    if override:
+        return Path(override).expanduser()
+    packaged = Path(__file__).resolve().parent / "_patches" / "llama.cpp"
+    if packaged.is_dir():
+        return packaged
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / "patches" / "llama.cpp"
+        if candidate.is_dir():
+            return candidate
+    return packaged
+
+
+def patch_files() -> list[Path]:
+    """Every patch a source build applies, in name order."""
+    where = patches_dir()
+    return sorted(where.glob("*.patch")) if where.is_dir() else []
+
+
+def patch_stamp(files: list[Path] | None = None) -> str:
+    """A short digest of the patch set, empty when there are none."""
+    files = patch_files() if files is None else files
+    if not files:
+        return ""
+    digest = hashlib.sha256()
+    for item in files:
+        digest.update(item.name.encode())
+        digest.update(item.read_bytes())
+    return "p" + digest.hexdigest()[:7]
+
+
+def _applies_cleanly(source: Path, patch: Path, *, reverse: bool = False) -> bool:
+    """Whether ``patch`` applies to ``source``, in reverse when asked."""
+    args = ["apply", "--check", *(["--reverse"] if reverse else []), str(patch)]
+    try:
+        _git(*args, cwd=source)
+    except BuildFailed:
+        return False
+    return True
+
+
+def _apply_patches(source: Path) -> list[str]:
+    """Apply every patch onto ``source``, returning their names."""
+    files = patch_files()
+    applied: list[str] = []
+    for item in files:
+        if _applies_cleanly(source, item, reverse=True):
+            say(f"  {item.name} is already applied")
+            applied.append(item.name)
+            continue
+        say(f"  applying {item.name}")
+        try:
+            _git("apply", "--3way", str(item), cwd=source)
+        except BuildFailed as exc:
+            raise BuildFailed(
+                f"{item.name} does not apply to this checkout: {exc}") from None
+        applied.append(item.name)
+    return applied
+
+
 # -- a fork, kept beside `current` rather than replacing it ---------------------------
 def _named_source_dir(name: str) -> Path:
     return named_src_dir() / name
@@ -320,7 +385,8 @@ def _install_source_build(build_dir: Path, dest: Path, commit: str, *,
     if not is_windows():
         binary.chmod(binary.stat().st_mode | 0o111)
     version = _version_of(binary)
-    info = {"commit": commit, "built_at": _now_iso(), "version": version, "source": "source"}
+    info = {"commit": commit, "built_at": _now_iso(), "version": version, "source": "source",
+            "patches": []}
     if extra:
         info.update(extra)
     (dest / "BUILD.json").write_text(json.dumps(info, indent=2))
@@ -334,20 +400,23 @@ def _build_from_source(args) -> tuple[Path, str]:
     if args.commit:
         _checkout_commit(source, args.commit)
 
+    applied = _apply_patches(source)
     commit = _short_commit(source)
-    dest = builds_dir() / commit
+    stamp = patch_stamp()
+    tag = f"{commit}-{stamp}" if stamp else commit
+    dest = builds_dir() / tag
     if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
-        say(f"{commit} is already built at {dest} -- pass --force to rebuild")
-        return dest, commit
+        say(f"{tag} is already built at {dest} -- pass --force to rebuild")
+        return dest, tag
 
     jobs = args.jobs or (os.cpu_count() or 4)
-    say(f"configuring {commit} ({', '.join(_cmake_flags()) or 'CPU only'})")
+    say(f"configuring {tag} ({', '.join(_cmake_flags()) or 'CPU only'})")
     _configure(source)
     say(f"building ({jobs} jobs) -- this takes several minutes")
     _compile(source, jobs)
     say("installing")
-    _install_source_build(source / "build", dest, commit)
-    return dest, commit
+    _install_source_build(source / "build", dest, tag, extra={"patches": applied})
+    return dest, tag
 
 
 def _build_from_source_named(args) -> tuple[Path, str]:
@@ -356,7 +425,10 @@ def _build_from_source_named(args) -> tuple[Path, str]:
     source = _named_source_dir(args.name)
     _sync_named_source(source, args.repo, args.ref)
 
+    applied = _apply_patches(source)
     commit = _short_commit(source)
+    stamp = patch_stamp()
+    commit = f"{commit}-{stamp}" if stamp else commit
     dest = _named_dest(args.name, commit)
     if dest.is_dir() and (dest / "BUILD.json").is_file() and not args.force:
         say(f"{args.name}-{commit} is already built at {dest} -- pass --force to rebuild")
@@ -370,7 +442,7 @@ def _build_from_source_named(args) -> tuple[Path, str]:
     say("installing")
     _install_source_build(source / "build", dest, commit,
                           extra={"repo": args.repo, "ref": args.ref or commit,
-                                 "name": args.name})
+                                 "name": args.name, "patches": applied})
     return dest, commit
 
 
@@ -504,7 +576,7 @@ def _build_from_release(args) -> tuple[Path, str]:
             version = _version_of(binary)
             (dest / "BUILD.json").write_text(json.dumps(
                 {"commit": tag, "built_at": _now_iso(), "version": version,
-                 "source": "release", "asset": match}, indent=2))
+                 "source": "release", "asset": match, "patches": []}, indent=2))
             return dest, tag
 
     raise BuildFailed(
@@ -549,7 +621,7 @@ def _build_from_release_named(args) -> tuple[Path, str]:
             (dest / "BUILD.json").write_text(json.dumps(
                 {"commit": tag, "built_at": _now_iso(), "version": version,
                  "source": "release", "asset": match, "repo": args.repo,
-                 "ref": wanted_tag or tag, "name": args.name}, indent=2))
+                 "ref": wanted_tag or tag, "name": args.name, "patches": []}, indent=2))
             return dest, tag
         if wanted_tag:
             break
@@ -909,6 +981,9 @@ def cmd_build(args) -> int:
         return 2
 
     kind = args.source_kind or ("source" if _can_build_from_source() else "release")
+    if kind == "release" and patch_files():
+        warn(f"a downloaded release carries none of the {len(patch_files())} patches in "
+             f"{patches_dir()}; build --from source for those")
     try:
         if name:
             if kind == "release":

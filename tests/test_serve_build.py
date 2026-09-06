@@ -99,6 +99,8 @@ def _isolated(tmp_path, monkeypatch):
                         tmp_path / "Library" / "LaunchAgents" / f"{build.PERSIST_LABEL}.plist")
     # No earlier build to compare against, unless a test says otherwise.
     monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+    # No patches, unless a test points this at a directory holding some.
+    monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(tmp_path / "no-patches"))
     yield
 
 
@@ -772,3 +774,68 @@ class TestReleaseInstall:
                             lambda *a, **k: [{"tag_name": "b1", "assets": []}])
         code = build.cmd_build(_args(source_kind="release"))
         assert code == 2
+
+
+class TestPatches:
+    """The patches a source build carries on top of upstream."""
+
+    @staticmethod
+    def _repo(tmp_path: Path) -> Path:
+        source = tmp_path / "src"
+        source.mkdir()
+        (source / "a.txt").write_text("one\ntwo\nthree\n")
+        for args in (("init", "-q"), ("add", "a.txt"),
+                     ("-c", "user.email=t@t", "-c", "user.name=t",
+                      "commit", "-qm", "first")):
+            _REAL_RUN(["git", *args], cwd=source, check=True, capture_output=True)
+        return source
+
+    @staticmethod
+    def _patch(tmp_path: Path, body: str) -> Path:
+        where = tmp_path / "patches"
+        where.mkdir(exist_ok=True)
+        (where / "0001-x.patch").write_text(body)
+        return where
+
+    BODY = ("diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n"
+            "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n")
+
+    def test_the_shipped_patch_set_is_found_and_stamped(self, monkeypatch):
+        monkeypatch.delenv("MLSTACK_LLAMA_PATCHES")
+        names = [f.name for f in build.patch_files()]
+        assert "0001-speculative-per-request.patch" in names
+        assert build.patch_stamp().startswith("p")
+
+    def test_no_patches_means_no_stamp(self):
+        assert build.patch_stamp() == ""
+        assert build.patch_files() == []
+
+    def test_a_patch_is_applied_to_the_checkout(self, tmp_path, monkeypatch):
+        source = self._repo(tmp_path)
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        assert build._apply_patches(source) == ["0001-x.patch"]
+        assert "TWO" in (source / "a.txt").read_text()
+
+    def test_applying_twice_is_not_an_error(self, tmp_path, monkeypatch):
+        source = self._repo(tmp_path)
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        build._apply_patches(source)
+        assert build._apply_patches(source) == ["0001-x.patch"]
+        assert (source / "a.txt").read_text().count("TWO") == 1
+
+    def test_a_patch_that_does_not_apply_fails_the_build(self, tmp_path, monkeypatch):
+        source = self._repo(tmp_path)
+        body = self.BODY.replace(" one\n-two", " ONE\n-two")
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, body)))
+        with pytest.raises(build.BuildFailed, match="does not apply"):
+            build._apply_patches(source)
+
+    def test_the_stamp_names_the_build_directory(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
+        chain = FakeToolchain()
+        monkeypatch.setattr(subprocess, "run", chain.run)
+        monkeypatch.setattr(build, "_apply_patches", lambda source: ["0001-x.patch"])
+        dest, tag = build._build_from_source(_args())
+        assert tag.endswith("-" + build.patch_stamp())
+        assert dest.name == tag
+        assert json.loads((dest / "BUILD.json").read_text())["patches"] == ["0001-x.patch"]
