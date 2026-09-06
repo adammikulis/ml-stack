@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +39,9 @@ _OPENAI_UNSUPPORTED = ("top_k", "min_p", "typical_p", "repeat_penalty",
                        "repeat_last_n", "mirostat", "mirostat_tau", "mirostat_eta",
                        "n_predict", "cache_prompt", "id_slot", "grammar",
                        "chat_template_kwargs", "speculative")
+
+# llama-server's per-request speculative fields, without their `speculative.` prefix.
+SPECULATIVE_FIELDS = ("n_max", "n_min", "p_min", "type")
 
 APIS = ("llama", "openai", "ollama")
 
@@ -108,6 +111,17 @@ def strip_thinking(text: str | None) -> tuple[str | None, str | None]:
     return families.split_inline(text)
 
 
+def prefixed_speculative(asked: Mapping[str, Any] | None) -> dict[str, Any]:
+    """``{"n_max": 4}`` as the server's own ``{"speculative.n_max": 4}``."""
+    if not asked:
+        return {}
+    unknown = sorted(set(asked) - set(SPECULATIVE_FIELDS))
+    if unknown:
+        raise ValueError(f"unknown speculative field(s): {', '.join(unknown)} -- "
+                         f"known are {', '.join(SPECULATIVE_FIELDS)}")
+    return {f"speculative.{name}": value for name, value in asked.items()}
+
+
 class Client:
     """A local model server, over HTTP. Standard library only."""
 
@@ -131,6 +145,7 @@ class Client:
         model: str | None = None,
         context: int | None = None,
         keep_alive: str | int | None = None,
+        speculative: Mapping[str, Any] | None = None,
     ) -> None:
         self.base_url, self.api, found = parse_url(base_url, api)
         # The model tag, where the server wants one named per request (openai, ollama).
@@ -148,6 +163,7 @@ class Client:
         self.asked_top_p = top_p
         self.asked_top_k = top_k
         self.asked_min_p = min_p
+        self.asked_speculative = prefixed_speculative(speculative)
         # A ceiling, not a budget: nothing is spent that is not generated, so a high one
         # costs nothing and a low one truncates. 512 was set when a reply was a sentence;
         # a thinking model spends most of a turn reasoning before it writes anything, and
@@ -305,6 +321,7 @@ class Client:
         body: dict[str, Any] = {
             "messages": messages,
             **self.sampling,
+            **self.asked_speculative,
             "n_predict": self.n_predict,
             "stream": stream,
         }
@@ -343,7 +360,7 @@ class Client:
             # The hosted API has no template flags; harmony's `reasoning_effort` is the one
             # thinking switch it reads, so only that one survives.
             effort = (body.get("chat_template_kwargs") or {}).get("reasoning_effort")
-            for key in _OPENAI_UNSUPPORTED:
+            for key in (*_OPENAI_UNSUPPORTED, *self.asked_speculative):
                 body.pop(key, None)
             if effort is not None:
                 body["reasoning_effort"] = effort

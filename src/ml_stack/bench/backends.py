@@ -270,3 +270,29 @@ def _reported(call: Any, key: str) -> bool:
     if field.default is None:
         return True
     return bool(getattr(call, key, 0))
+
+
+DRAFT_OBEYED = "obeyed"
+DRAFT_IGNORED = "ignored"
+DRAFT_NONE = "no drafting"
+
+_PROBE = [{"role": "user", "content": "Count from one to twenty."}]
+
+
+def draft_depth_support(client: Any, *, n_predict: int = 24) -> str:
+    """Whether this server honours ``speculative.n_max``, measured with two short calls.
+
+    ``DRAFT_OBEYED`` when asking for depth 0 stops the drafting the same call ran without
+    it, ``DRAFT_IGNORED`` when it drafts regardless, ``DRAFT_NONE`` when the server drafts
+    nothing either way and there is no depth to ask for.
+    """
+    def drafted(speculative: dict[str, Any] | None) -> int | None:
+        probe = client_for(str(client.base_url), client=type(client), n_predict=n_predict,
+                           model=getattr(client, "model", None) or None,
+                           speculative=speculative)
+        return timings_of(probe.chat(list(_PROBE))).get("draft_n")
+
+    free = drafted(None)
+    if not free:
+        return DRAFT_NONE
+    return DRAFT_OBEYED if not drafted({"n_max": 0}) else DRAFT_IGNORED

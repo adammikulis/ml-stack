@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sys
 import types
+from typing import ClassVar
 
 import pytest
 
@@ -624,3 +625,50 @@ def test_a_sweep_on_an_ollama_url_builds_the_client_for_it_and_records_what_serv
     row = one["rows"][0]
     assert row["cached_tokens"] is None and row["draft_tokens"] is None
     assert row["processed_tokens"] == 40 * row["calls"] and row["queued"] is not None
+
+
+# -- whether a server honours a per-request draft depth -----------------------------------
+
+class _DraftingClient:
+    """A stand-in llama-server: ``drafts`` tokens a call, honouring the asked depth or not."""
+
+    drafts = 6
+    honours = True
+    asked_of_each: ClassVar[list[dict]] = []
+
+    def __init__(self, base_url="http://x", **settings):
+        self.base_url, self.api, self.model = base_url, "llama", None
+        self.timeout, self.api_key, self.pinned_family = 30.0, None, None
+        self.asked = dict(settings.get("speculative") or {})
+        type(self).asked_of_each.append(self.asked)
+
+    def chat(self, messages):
+        depth = self.asked.get("n_max") if self.honours else None
+        drafted = self.drafts if depth is None else min(self.drafts, int(depth))
+        return _Reply({"timings": {"draft_n": drafted, "draft_n_accepted": drafted}})
+
+
+def _drafting(**over):
+    return type("_Fake", (_DraftingClient,), {"asked_of_each": [], **over})
+
+
+def test_a_server_that_obeys_a_requested_draft_depth_is_read_as_obeying():
+    from ml_stack.bench.backends import DRAFT_OBEYED, draft_depth_support
+
+    made = _drafting(honours=True)
+    assert draft_depth_support(made()) == DRAFT_OBEYED
+    assert made.asked_of_each[-2:] == [{}, {"n_max": 0}], \
+        "one call without the field, one asking for no drafting at all"
+
+
+def test_a_server_that_drafts_regardless_is_read_as_ignoring():
+    """The field a server does not know is dropped in silence, not refused."""
+    from ml_stack.bench.backends import DRAFT_IGNORED, draft_depth_support
+
+    assert draft_depth_support(_drafting(honours=False)()) == DRAFT_IGNORED
+
+
+def test_a_server_with_no_draft_head_is_read_as_not_drafting():
+    from ml_stack.bench.backends import DRAFT_NONE, draft_depth_support
+
+    assert draft_depth_support(_drafting(drafts=0)()) == DRAFT_NONE

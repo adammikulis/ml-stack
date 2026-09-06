@@ -86,6 +86,31 @@ class TestBuildBody:
         assert "tools" not in Client("http://x").build_body([])
         assert Client("http://x").build_body([], tools=[tool])["tool_choice"] == "auto"
 
+    def test_no_speculative_fields_unless_asked(self):
+        body = Client("http://x").build_body([])
+        assert not [key for key in body if key.startswith("speculative.")]
+
+    def test_a_draft_depth_is_sent_under_the_servers_own_name(self):
+        body = Client("http://x", speculative={"n_max": 4}).build_body([])
+        assert body["speculative.n_max"] == 4
+
+    def test_every_speculative_field_is_prefixed(self):
+        asked = {"n_max": 8, "n_min": 1, "p_min": 0.5, "type": "draft-mtp"}
+        body = Client("http://x", speculative=asked).build_body([])
+        assert {k: body[k] for k in body if k.startswith("speculative.")} == {
+            "speculative.n_max": 8, "speculative.n_min": 1,
+            "speculative.p_min": 0.5, "speculative.type": "draft-mtp"}
+
+    def test_a_misspelled_speculative_field_is_refused(self):
+        """A server ignores a field it does not know, so a typo would measure nothing."""
+        with pytest.raises(ValueError, match="n_maximum"):
+            Client("http://x", speculative={"n_maximum": 4})
+
+    def test_speculative_fields_are_stripped_for_hosted_openai(self):
+        body = Client("https://api.openai.com/v1",
+                      speculative={"n_max": 4}).build_body([])
+        assert not [key for key in body if key.startswith("speculative.")]
+
 
 class TestNormalize:
     def test_lifts_a_legacy_function_call_into_tool_calls(self):
