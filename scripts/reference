@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Print the README's command table, or write it back into the file.
+"""Print the command table, or write it back into `docs/commands.md`.
 
     scripts/reference            prints the table
-    scripts/reference --write    replaces the table under "## The commands"
+    scripts/reference --write    replaces the table under "# The commands"
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ sys.path.insert(0, str(REPO / "src"))
 
 from ml_stack.cli.reference import table  # noqa: E402
 
-SECTION = "## The commands"
+SECTION = "# The commands"
 
 
 def replaced(text: str, made: str) -> str:
@@ -31,14 +31,14 @@ def replaced(text: str, made: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="scripts/reference", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--write", action="store_true", help="write it into README.md")
-    ap.add_argument("--readme", default=str(REPO / "README.md"), help="which file")
+    ap.add_argument("--write", action="store_true", help="write it into docs/commands.md")
+    ap.add_argument("--page", default=str(REPO / "docs" / "commands.md"), help="which file")
     args = ap.parse_args(argv)
     made = table()
     if not args.write:
         print(made)
         return 0
-    where = Path(args.readme)
+    where = Path(args.page)
     where.write_text(replaced(where.read_text(encoding="utf-8"), made), encoding="utf-8")
     print(f"wrote the command table into {where}")
     return 0

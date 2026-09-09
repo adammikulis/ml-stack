@@ -1,4 +1,4 @@
-"""The README's command table is the registry's, and the registry names every command."""
+"""The commands page's table is the registry's, and the registry names every command."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ from ml_stack.cli import PREFIX, commands
 from ml_stack.cli.reference import HELP, TABLE, table
 
 REPO = Path(__file__).resolve().parent.parent
-README = REPO / "README.md"
+PAGE = REPO / "docs" / "commands.md"
 
 
 def committed() -> list[str]:
-    """The table as README.md carries it, under "## The commands"."""
-    lines = README.read_text(encoding="utf-8").splitlines()
-    start = lines.index("## The commands")
+    """The table as docs/commands.md carries it, under "# The commands"."""
+    lines = PAGE.read_text(encoding="utf-8").splitlines()
+    start = lines.index("# The commands")
     first = next(i for i in range(start, len(lines)) if lines[i].startswith("| "))
     last = next(i for i in range(first, len(lines)) if not lines[i].startswith("| "))
     return lines[first:last]
@@ -25,7 +25,7 @@ def committed() -> list[str]:
 
 def test_the_committed_table_is_the_one_the_registry_makes():
     assert committed() == table().splitlines(), (
-        "README.md's command table and ml_stack.cli.reference disagree; "
+        "docs/commands.md's table and ml_stack.cli.reference disagree; "
         "scripts/reference --write writes the registry's")
 
 
@@ -45,10 +45,10 @@ def test_every_row_names_a_command_that_exists():
 def test_every_command_has_a_row_of_its_own():
     named = {row.command for row in TABLE}
     missing = sorted(w for w in HELP if f"{PREFIX}{w}" not in named)
-    assert not missing, f"no row in the README's table for: {missing}"
+    assert not missing, f"no row in the command table for: {missing}"
 
 
-def test_the_script_prints_what_the_readme_holds():
+def test_the_script_prints_what_the_page_holds():
     ran = subprocess.run([sys.executable, str(REPO / "scripts" / "reference")],
                          capture_output=True, text=True, check=True)
     assert ran.stdout.splitlines() == committed()

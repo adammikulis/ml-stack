@@ -1,8 +1,8 @@
-"""Every ml-stack command: the line `ml-stack --list` prints, and the README's table.
+"""Every ml-stack command: the line `ml-stack --list` prints, and `docs/commands.md`.
 
 `HELP` is one line per command, so the umbrella lists them without importing any.
-`TABLE` is the rows of the README's "The commands" section, in its order;
-`scripts/reference` prints them and `tests/test_cli_reference.py` holds the file to it.
+`TABLE` is the rows of the commands page, in its order; `scripts/reference` prints them
+and `tests/test_cli_reference.py` holds the file to it.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ __all__ = ["HELP", "TABLE", "Row", "table"]
 
 @dataclass(frozen=True, slots=True)
 class Row:
-    """One row of the README's command table: how it is invoked, and what it does."""
+    """One row of the command table: how it is invoked, and what it does."""
 
     invocation: str
     about: str
@@ -102,7 +102,7 @@ TABLE: tuple[Row, ...] = (
     Row("ml-stack-mcp",
         "the same functions, as MCP tools over stdio for an agent to drive -- `serve_*`, `models_*`, `bench_*`, `fleet_*`, `world_make`, `speech_*`, `setup_look`, `doctor`; anything long detaches and returns its log and pid; `--list` prints the tools"),
     Row("ml-stack <command>",
-        "runs any `ml-stack-<command>` below (`ml-stack do ...`, `ml-stack bench sweep ...`, `ml-stack train run ...`); `--list` prints each with the first line of its help; bare, the daemon and your browser on it"),
+        "runs any `ml-stack-<command>` listed here (`ml-stack do ...`, `ml-stack bench sweep ...`, `ml-stack train run ...`); `--list` prints each with the first line of its help; bare, the daemon and your browser on it"),
     Row("ml-stack-graph geocode --graph FILE --cache FILE.json",
         "every entry that names a place given a point through Nominatim, cached so a place is asked about once, written back onto the node as `lat`/`lon` -- which is what the page's map draws. `--near K` joins each placed entry to its K closest with a `near` edge weighted 1/(1+km), `--out` writes elsewhere than over the graph"),
     Row("ml-stack-graph serve --site FILE",
@@ -139,11 +139,11 @@ TABLE: tuple[Row, ...] = (
     Row("ml-stack-help [<command>...]",
         "every command with the first line of its help, or one command's own help -- also `ml-stack help bench sweep`"),
 )
-"""The README's command table, one entry per row, in the order it prints."""
+"""The command table, one entry per row, in the order it prints."""
 
 
 def table() -> str:
-    """The command table as Markdown, exactly as the README carries it."""
+    """The command table as Markdown, exactly as `docs/commands.md` carries it."""
     head = "| | |\n| --- | --- |"
     rows = "\n".join(f"| `{row.invocation}` | {row.about} |" for row in TABLE)
     return f"{head}\n{rows}"

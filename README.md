@@ -37,12 +37,12 @@ Everything runs on your own hardware. Nothing leaves the network.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
 
-[The full list of what it does](docs/FEATURES.md), every claim with a check behind it.
+[Full list of what it does](docs/FEATURES.md).
 
 ## Install
 
-One line per platform. It installs the app and a daemon, and re-running it upgrades in
-place.
+One script per platform, and re-running it upgrades in place. The default is the app: a
+window, and the daemon behind it.
 
 **macOS and Linux:**
 
@@ -56,21 +56,22 @@ curl -fsSL https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging
 irm https://raw.githubusercontent.com/adammikulis/ml-stack/main/packaging/install.ps1 | iex
 ```
 
-**If you write Python**, the library on its own — no dependencies, so the machine you
+Do the same on every machine you want to work with, typing the same passphrase. They find
+each other on their own.
+
+**If you write Python**, the library on its own has no dependencies, so the machine you
 drive from needs no CUDA, no MLX and no training stack:
 
 ```
 pip install ml-stack
 ```
 
-Do the same on every machine you want to work with, typing the same passphrase. They find
-each other on their own.
+There are three other modes -- a machine with no screen, a machine that starts at boot
+before anyone logs in, and a git checkout that follows `main` -- and one model cache per
+machine whichever you pick. [Installing](docs/install.md) has all of it, and how a script
+answers every prompt without a terminal to type at.
 
-[Installing](docs/install.md) has the rest: a machine with no screen, a machine that
-starts at boot, a checkout that follows `main`, where the model cache lives, and how to
-answer every prompt from the environment for a machine set up by a script.
-
-## Getting started
+## Starting it
 
 Make this machine a peer, and see who else answers:
 
@@ -86,24 +87,24 @@ ml-stack-serve up hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-Q4_K_M.g
 ml-stack-serve status
 ```
 
-`ml-stack` on its own opens the interface in your browser, and `ml-stack --list` prints
-every command with the first line of its help.
+`ml-stack` on its own starts the daemon and opens the interface in your browser;
+`ml-stack --list` prints every command with the first line of its help.
 
-## Documentation
+## The rest of it
 
 | | |
 | --- | --- |
 | [What it does](docs/FEATURES.md) | every feature, each with a check in `docs/verify_release.py` |
-| [Installing](docs/install.md) | the four install modes, the model cache, Windows, unattended setup |
+| [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
 | [The fleet](docs/fleet.md) | joining, seating people across machines, following a branch, and running work on peers from Python |
-| [Finding and serving a model](docs/serving.md) | the server lifecycle, the shape each model measured best in, how many people fit in a card, llama.cpp builds and draft heads |
-| [Working with a graph](docs/graph.md) | storing, searching, asking and drawing a graph; the tools a model is given; conversations of any length; the web as tools |
-| [Documents into a graph](docs/ingest.md) | PDFs read section by section, with the page and the model behind every claim |
-| [Training](docs/training.md) | the loop, the recipes, and fine-tuning a model to call a project's own tools |
-| [Measuring](docs/bench.md) | timing and scoring a model's answers, what that measured here, and an evening of runs as a file |
-| [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the shape a corpus takes when it is exported -- for a demo and a benchmark that involve nobody real |
-| [Packages](docs/packages.md) | what each module is, and the extras it needs |
+| [Finding and serving a model](docs/serving.md) | one manager per machine, the shape each model measured best in, how many people fit in a card, llama.cpp builds and draft heads |
+| [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
+| [Documents into a graph](docs/ingest.md) | a book read section by section, with the page and the model behind every claim |
+| [Training](docs/training.md) | the loop, the recipes, and a fine-tune that ends in a model calling your own tools |
+| [Measuring](docs/bench.md) | timing and scoring a model's answers, what that settled here, and an evening of runs as a file |
+| [An invented world](docs/world.md) | a community with people who talk, the days they talk over, and the exports their corpus arrives as; nobody real in any of it |
+| [Packages](docs/packages.md) | what each module is, and the extras it carries |
 | [Model ranking](docs/model-ranking.md) | one line per model: its best run, and what that run cost |
 | [Architectures](docs/architectures/README.md) | the models that behave unlike a dense transformer when served |
 | [Working on ml-stack](docs/development.md) | `contracts/`, the git hooks, and how the tests are written |
