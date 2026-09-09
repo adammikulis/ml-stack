@@ -72,10 +72,12 @@ both: `ruff-blind-except`, `ruff-bugbear`, `ruff-security`, `ruff-other`, `pyrig
 Neither tool is a dependency, so a checker that cannot find its tool prints why and its
 metric is left out rather than counted as zero.
 
-`scripts/hooks/pre-push` refuses a push. release-please reads the subjects on `main`, so a
-push moves the release pull request and a `main` that is ahead publishes every commit on it
-at once; `ML_STACK_PUSH=yes git push` is how a person pushes on purpose. The Bash guard
-refuses the command as well, so an agent is told before it runs.
+`scripts/hooks/pre-push` refuses a push from an agent and lets your own through: Claude Code
+sets `CLAUDECODE` for every command it runs and a terminal sets nothing, so the hook can tell
+them apart. release-please reads the subjects on `main`, so a push moves the release pull
+request and a `main` that is ahead publishes every commit on it at once; an agent told to
+push anyway runs `ML_STACK_PUSH=yes git push`. The Bash guard refuses the command as well, so
+an agent is told before it runs.
 
 `scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
 raw HTTP call, a docstring over twelve lines and a signature over eight parameters, at the

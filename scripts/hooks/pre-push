@@ -1,13 +1,7 @@
 #!/bin/sh
-# Refuse a push that nobody asked for.
-#
-# release-please reads the subjects on `main`, so a push moves the release PR; and a
-# checkout that is many commits behind its remote publishes all of them at once. An agent
-# landing a branch into local `main` is finished there.
-#
-# A person pushing on purpose sets ML_STACK_PUSH=yes for that one command:
-#
-#     ML_STACK_PUSH=yes git push
+# Refuse a push from an agent. Claude Code sets CLAUDECODE for every command it runs, and
+# a person's shell does not; ML_STACK_PUSH=yes pushes anyway.
+[ -z "$CLAUDECODE" ] && exit 0
 [ "$ML_STACK_PUSH" = yes ] && exit 0
 cat >&2 <<'WHY'
 pre-push: refused.
