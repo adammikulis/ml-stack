@@ -167,7 +167,8 @@ def _out_of(argv: Iterable[str]) -> str:
     return ""
 
 
-_WORDS = ("status", "show", "sources", "ask", "fold", "import", "retry", "tidy", "migrate")
+_WORDS = ("status", "show", "sources", "ask", "fold", "import", "retry", "tidy", "migrate",
+          "embed")
 """What a run does instead of reading a document, when one is named where a PDF would be."""
 
 
@@ -196,6 +197,8 @@ def parser() -> argparse.ArgumentParser:
                "  migrate  bring a store written before sources were called sources up to\n"
                "           date: `book:` node ids, their edges, the unit documents, the\n"
                "           progress file and the reads files\n"
+               "  embed    embed every node into the store's vector index --\n"
+               "           `embed --out STORE --embed-url URL --embed-model M`\n"
                "  stop     end the detached run, after it has folded what it has read\n"
                "  wait     block until the detached run has ended\n")
     ap.add_argument("docs", nargs="*", metavar="DOC",
@@ -300,6 +303,15 @@ def parser() -> argparse.ArgumentParser:
                     help="context of the one slot a --model is served with -- extraction "
                          "reads one unit at a time and never splits the GPU (default: "
                          "%(default)s)")
+    ap.add_argument("--embed-url", default="", metavar="URL",
+                    help="with embed: a server that embeds, so the store gets a vector "
+                         "index a search can vote with")
+    ap.add_argument("--embed-model", default="", metavar="M",
+                    help="with embed: the model that embeds (default: %(default)s)")
+    ap.add_argument("--smooth", type=int, default=0, metavar="N",
+                    help="with embed: spread each vector over N hops of neighbours "
+                         "afterwards, so a node with no text of its own is still findable "
+                         "(default: %(default)s)")
     ap.add_argument("--serve-port", type=int, default=8099)
     ap.add_argument("--no-queue", action="store_true",
                     help="refuse at once when the bench is measuring, instead of waiting "
@@ -379,6 +391,17 @@ def _dispatch(args: Any, rest: list[str]) -> int:
             return retry(args.out)
         if word == "migrate":
             return migrate(args.out)
+        if word == "embed":
+            if not args.embed_url:
+                warn("error: embed needs --embed-url URL")
+                return 2
+            from ml_stack.ingest.embed import embed_store
+
+            written = embed_store(args.out, base_url=args.embed_url,
+                                  model=args.embed_model or "embed",
+                                  smooth_hops=args.smooth, log=say)
+            say(f"{written} embedded")
+            return 0
         if word == "tidy":
             # the hygiene pass is graph.tidy's -- a book, a Slack community, any store --
             # and lives beside the fold here only so the ingest commands are in one place

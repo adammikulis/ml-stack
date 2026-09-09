@@ -63,7 +63,8 @@ and extension), `fold` (extractions into a graph, and into the store), `progress
 a run has got), `sources` (what has been read), `migrate` (a store written before the
 rename, brought up to date), `judge` (the run record and the judge a fold hands close
 spellings to), `gold` (the extraction scored), `ask` (the store asked questions),
-`serving` (the model a run reads with), `run` (the read run) and `cli` (the command).
+`serving` (the model a run reads with), `run` (the read run), `embed` (the store given a
+vector index) and `cli` (the command).
 Everything a caller needs is re-exported here.
 """
 
@@ -92,6 +93,11 @@ from ml_stack.ingest.cli import (
     _out_of as _out_of,
     _parsed as _parsed,
     _recorded_alive as _recorded_alive,
+)
+from ml_stack.ingest.embed import (
+    MOST_CHARS as MOST_CHARS,
+    embed_store as embed_store,
+    texts_for as texts_for,
 )
 from ml_stack.ingest.extract import (
     CORE_KINDS as CORE_KINDS,
@@ -231,16 +237,16 @@ from ml_stack.ingest.vocabulary import (
 )
 
 __all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS",
-           "INSTRUCTIONS", "KINDS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
+           "INSTRUCTIONS", "KINDS", "MOST_CHARS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
            "Imported", "Progress", "RunStats", "Scored", "Source", "Sources", "Stopped",
            "Vocabulary",
            "ask", "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs",
-           "detach", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
-           "gold_score", "graph_of", "home_dir", "import_lines", "imported",
+           "detach", "embed_store", "extract_unit", "fenced", "fold", "fold_into",
+           "fold_source", "gold_score", "graph_of", "home_dir", "import_lines", "imported",
            "instructions", "main", "marked", "migrate", "read_asked", "read_gold",
            "reader_for",
            "run_attrs", "run_stats",
            "sayable", "schema",
-           "score_asked", "show", "sources", "status", "unit_of", "units_of", "vague",
-           "verb_for",
+           "score_asked", "show", "sources", "status", "texts_for", "unit_of", "units_of",
+           "vague", "verb_for",
            "write"]

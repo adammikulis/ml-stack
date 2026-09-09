@@ -1100,7 +1100,6 @@ def _run(args: Any) -> int:
     if args.cmd == "prepare":
         from ml_stack.graph.community import graph as invented
         from ml_stack.graph.store import replace
-        from ml_stack.graph.vectors import remember
 
         graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
         if getattr(args, "mix", False):
@@ -1119,14 +1118,10 @@ def _run(args: Any) -> int:
         if not args.embed_url:
             say("  no --embed-url, so no vectors: search will be words only")
             return 0
-        from ml_stack.graph.store import GraphStore
+        from ml_stack.ingest.embed import embed_store
 
-        texts = {n["id"]: (n["label"] + " — " + " ".join(
-            (graph.get("messages", {}).get(m) or {}).get("text", "")
-            for m in (n.get("messages") or [])))[:1400] for n in graph["nodes"]}
-        with GraphStore(args.store) as held:
-            written = remember(held, texts, base_url=args.embed_url,
-                               model=args.embed_model or "embed", log=print)
+        written = embed_store(args.store, base_url=args.embed_url,
+                              model=args.embed_model or "embed", log=print)
         say(f"  {written} embedded")
         return 0
     if args.cmd == "drafts":
