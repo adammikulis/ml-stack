@@ -9,6 +9,7 @@ from ml_stack.graph.ask import (Answer, converse, look_around, look_at, look_up,
                                 path_between)
 from ml_stack.graph.asking import Asking
 from ml_stack.graph.concerns import concerns
+from ml_stack.graph.drift import resting_on, superseded
 from ml_stack.graph.page import kinds_of, render, world_outline
 from ml_stack.graph.places import geocode, places_in, points
 from ml_stack.graph.propose import Change, apply, proposing, tools_for
@@ -100,6 +101,7 @@ __all__ = [
     "replace",
     "require_topological_order",
     "resolvent_sweep",
+    "resting_on",
     "restore",
     "roll_back",
     "rrf",
@@ -112,6 +114,7 @@ __all__ = [
     "snapshots",
     "spatial_window_edges",
     "StoreNeedsUpgrade",
+    "superseded",
     "take",
     "tensors",
     "DOCUMENT",

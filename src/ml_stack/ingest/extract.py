@@ -43,6 +43,7 @@ VERBS: dict[str, str] = {
     "created_by": "written, proposed, discovered or built by a person or body (the declaration created_by its author)",
     "adopted_by": "enacted, ratified or taken up by a body (the declaration adopted_by the congress)",
     "member_of": "one of a group, class or body (a delegate member_of the congress)",
+    "supersedes": "replaces an earlier edition, version or ruling (the 2020 charter supersedes the 1998 charter)",
 }
 """The core relation vocabulary, each verb glossed with the sense the model should take.
 

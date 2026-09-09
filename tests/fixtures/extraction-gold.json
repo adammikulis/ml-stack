@@ -810,7 +810,7 @@
   {
    "passage_id": "thallow-scale",
    "source": "Marl Flats Biology -- Chapter 3: The Shell",
-   "text": "The Thallow scale grades shell hardness from one to nine. It was proposed by the Marl Survey and adopted by the Council of Terrace Naturalists. Shell hardness is measured in thallows, and a plate above seven thallows is called armour grade.",
+   "text": "The Thallow scale grades shell hardness from one to nine. It was proposed by the Marl Survey and adopted by the Council of Terrace Naturalists. Shell hardness is measured in thallows, and a plate above seven thallows is called armour grade. The Thallow scale supersedes the earlier Marl hardness marks, and armour grade itself supersedes the older plating class it replaced.",
    "triples": [
     {
      "subject": "shell hardness",
@@ -873,6 +873,26 @@
      "object_aliases": [
       "above seven thallows",
       "a plate above seven thallows"
+     ]
+    },
+    {
+     "subject": "Thallow scale",
+     "predicate": "supersedes",
+     "object": "Marl hardness marks",
+     "subject_aliases": [
+      "the scale"
+     ],
+     "object_aliases": [
+      "the marks"
+     ]
+    },
+    {
+     "subject": "armour grade",
+     "predicate": "supersedes",
+     "object": "plating class",
+     "object_aliases": [
+      "the older plating class",
+      "older plating class"
      ]
     }
    ]

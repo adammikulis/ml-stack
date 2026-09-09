@@ -28,6 +28,7 @@ INVERSES: dict[str, frozenset[str]] = {
     "produces": frozenset({"produced_by", "made_by"}),
     "precedes": frozenset({"follows", "after"}),
     "requires": frozenset({"required_by", "enables"}),
+    "supersedes": frozenset({"superseded_by", "replaced_by"}),
 }
 """What each verb says when the ends are swapped: `X created_by Y` is `Y authored X`.
 

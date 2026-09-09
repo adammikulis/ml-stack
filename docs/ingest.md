@@ -39,7 +39,7 @@ renamed by whoever downloaded it says nothing.
 
 `ml-stack-ingest` is the other half. Each unit goes through `Client.extract` against
 `contracts/extraction-document.schema.json` -- concepts with a kind and a one-line definition
-*in the book's words or empty*, relations whose verb phrase is one of eighteen glossed core
+*in the book's words or empty*, relations whose verb phrase is one of nineteen glossed core
 ones or, where none of those says what the page says, one the model names itself in the same
 snake_case shape, what each figure shows and which concepts it illustrates, and the key terms
 -- and the extractions are folded into one graph per source with `entities.fold`, so
@@ -85,7 +85,7 @@ and `read_from` edges, the same `<source>:<chapter>:<section>` unit ids behind e
 and `sources`, `show`, `tidy` and `ask` work over it unchanged. The model and run id on the
 rows become a `run` node the units point at, so `origin()` still says which model said this.
 
-The two vocabularies are joined by a table. This library sets eighteen verbs itself; an
+The two vocabularies are joined by a table. This library sets nineteen verbs itself; an
 extractor free to choose its own writes thousands -- one anatomy textbook carries 2,110
 distinct predicates. A predicate with a counterpart is normalised onto that verb, subject
 and object swapped where the natural reading is the inverse: `includes` is `has_part`,

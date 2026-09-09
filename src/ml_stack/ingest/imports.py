@@ -5,9 +5,9 @@ schema's shape -- and folded in by `ingest.fold_into`, so an imported source is 
 thing in the store as a read one: the same node and edge shape, the same unit ids in its
 provenance, the same commands over it.
 
-`RELATIONS` is the table between the two vocabularies. This library sets eighteen verbs
+`RELATIONS` is the table between the two vocabularies. This library sets nineteen verbs
 itself -- `fold.CORE`; an extractor with an open vocabulary writes thousands. Each entry
-maps one predicate onto one of the eighteen, swapping subject and object where the natural
+maps one predicate onto one of the nineteen, swapping subject and object where the natural
 reading is the inverse (``includes`` is ``has_part``; ``defines`` is ``defined_by`` the
 other way round), or onto nothing where the predicate has no counterpart among them.
 
@@ -188,6 +188,8 @@ RELATIONS: dict[str, tuple[str, bool] | None] = {
     "ratified_by": ("adopted_by", False), "adopted": ("adopted_by", True),
     "member_of": ("member_of", False), "is_member_of": ("member_of", False),
     "belongs_to_class": ("member_of", False), "has_member": ("member_of", True),
+    "supersedes": ("supersedes", False), "replaces": ("supersedes", False),
+    "superseded_by": ("supersedes", True), "replaced_by": ("supersedes", True),
     # the same things said again, in the words this material happens to use
     "are_part_of": ("part_of", False), "may_include": ("has_part", False),
     "is_a_type_of": ("is_a", False), "example_is": ("example_of", True),
@@ -204,7 +206,7 @@ RELATIONS: dict[str, tuple[str, bool] | None] = {
     "impairs": ("regulates", False), "helps_maintain": ("regulates", False),
     "requires_knowledge_of": ("requires", False),
     "requires_understanding_of": ("requires", False),
-    # named, and with no counterpart among the eighteen: each is written as it stands
+    # named, and with no counterpart among the nineteen: each is written as it stands
     "related_to": None, "relates_to": None, "associated_with": None, "describes": None,
     "described_by": None, "shows": None,
     "supports": None, "involves": None, "involved_in": None, "participates_in": None,
@@ -235,7 +237,7 @@ RELATIONS: dict[str, tuple[str, bool] | None] = {
     "applies": None, "underlies": None, "powers": None, "articulates_with": None,
     "processes": None, "removes": None, "outlines": None, "states": None,
 }
-"""``predicate -> (one of the eighteen, whether the ends swap)``, or None for a predicate
+"""``predicate -> (one of the nineteen, whether the ends swap)``, or None for a predicate
 the table names and has no counterpart for."""
 
 
@@ -314,7 +316,7 @@ class Imported:
 
     @property
     def core(self) -> int:
-        """Relations written under one of the eighteen."""
+        """Relations written under one of the nineteen."""
         return self.relations - sum(self.extensions.values())
 
     @property
@@ -400,7 +402,7 @@ def imported(nodes: str | Path, edges: str | Path, *, slug: str = "",
     """One nodes/edges CSV pair as a source's reads, and what the predicate table did to it.
 
     Every row under ``confidence`` is left, and every provisional row when ``provisional``
-    is false. A predicate `RELATIONS` maps onto one of the eighteen is written as that verb;
+    is false. A predicate `RELATIONS` maps onto one of the nineteen is written as that verb;
     a specific one it does not is written as it stands and counted in ``extensions``, and
     left under ``core_only``. A predicate `VAGUE` names is counted in ``vague`` and not
     carried across, and written -- marked ``vague`` -- only under ``keep_vague``.

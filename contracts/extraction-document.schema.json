@@ -88,9 +88,10 @@
               "converts",
               "created_by",
               "adopted_by",
-              "member_of"
+              "member_of",
+              "supersedes"
             ],
-            "$comment": "A snake_case verb phrase. The eighteen in `examples` are the core vocabulary, shared across every book and preferred wherever one of them states what the text states; ingest.VERBS glosses each and a test keeps the two lists equal. A relation none of them states is named in the same shape, and the fold marks the edge `extension`."
+            "$comment": "A snake_case verb phrase. The nineteen in `examples` are the core vocabulary, shared across every book and preferred wherever one of them states what the text states; ingest.VERBS glosses each and a test keeps the two lists equal. A relation none of them states is named in the same shape, and the fold marks the edge `extension`."
           },
           "to": {
             "type": "string",

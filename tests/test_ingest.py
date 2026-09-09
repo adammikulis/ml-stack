@@ -85,7 +85,7 @@ def test_the_document_schema_compiles_to_a_grammar():
 
 
 def test_the_schema_takes_a_verb_and_a_kind_the_model_coined_and_refuses_another_shape():
-    """A book states relations the core eighteen have no word for. The shape is the fence,
+    """A book states relations the core nineteen have no word for. The shape is the fence,
     not the list."""
     validate = pytest.importorskip("jsonschema").validate
     ValidationError = pytest.importorskip("jsonschema").ValidationError

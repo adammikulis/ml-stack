@@ -93,13 +93,14 @@ INVERSES: dict[str, frozenset[str]] = {
     "produces": frozenset({"produced_by", "made_by"}),
     "created_by": frozenset({"authored", "wrote", "created", "built", "proposed"}),
     "requires": frozenset({"required_by", "enables"}),
+    "supersedes": frozenset({"superseded_by", "replaced_by"}),
 }
 """``{canonical verb: the verbs that state it with the ends swapped}``. ``X has_part Y`` is
 ``Y part_of X``; the pass keeps the left-hand form."""
 
 #: The relations that say one thing is under another, each of which must be a DAG: nothing
 #: is part of itself at one remove, and nobody reports to somebody who reports to them.
-HIERARCHY: tuple[str, ...] = ("part_of", "reports_to", "contains", "member_of")
+HIERARCHY: tuple[str, ...] = ("part_of", "reports_to", "contains", "member_of", "supersedes")
 
 # What is kept off the "no edge but its source" count: the links that say where a node came
 # from rather than what it stands in relation to.
