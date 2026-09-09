@@ -1,4 +1,4 @@
-"""Every ``ml-stack`` command answers ``--help``, and the README names only flags that exist.
+"""Every ``ml-stack`` command answers ``--help``, and the docs name only flags that exist.
 
 Nothing else in the suite catches a flag that does not exist. Three silent edits in one
 afternoon left ``--sample`` and ``--short`` documented but never added to the bench, so
@@ -22,6 +22,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 README = REPO / "README.md"
+DOCS = REPO / "docs"
 
 
 def _scripts() -> dict[str, str]:
@@ -145,23 +146,17 @@ def test_the_top_level_help_names_every_subcommand(command, capsys):
                 f"the usage line of {command} --help does not name its subcommand {path!r}"
 
 
-# -- the README ------------------------------------------------------------------------
+# -- the docs ------------------------------------------------------------------------
 
 FLAG = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 CODE_SPAN = re.compile(r"`([^`]*)`")
 
 
-def _sections(text: str) -> dict[str, list[tuple[int, str]]]:
-    """README ``##`` sections, each as numbered lines."""
-    out: dict[str, list[tuple[int, str]]] = {}
-    title = ""
-    for number, line in enumerate(text.splitlines(), start=1):
-        if line.startswith("## "):
-            title = line[3:].strip()
-            out[title] = []
-        elif title:
-            out[title].append((number, line))
-    return out
+def _pages() -> list[Path]:
+    """The README, and every page under ``docs/`` it links to."""
+    text = README.read_text()
+    linked = [DOCS / name for name in re.findall(r"\]\(docs/([^)]+\.md)\)", text)]
+    return [README, *[page for page in linked if page.is_file()]]
 
 
 def _command_lines(text: str) -> list[tuple[int, str]]:
@@ -188,49 +183,54 @@ def _command_lines(text: str) -> list[tuple[int, str]]:
 
 
 def _documented() -> list[tuple[str, str, tuple[str, ...], set[str]]]:
-    """``(where, command, subcommand paths, flags)`` for every place the README names a flag.
+    """``(where, command, subcommand paths, flags)`` for every place the docs name a flag.
 
     Two places: a line of a fenced code block, which names its subcommand and so is held to
-    that subcommand's parser; and a row of "The commands" table, held to the whole command.
-    Prose is not scanned: "Serving a model" rightly names llama-server's own flags, the
-    ones ``ServerSpec`` emits, and no parser here is meant to accept those.
+    that subcommand's parser; and a table row opening with a command, held to the whole
+    command. Prose is not scanned: "Serving a model" rightly names llama-server's own flags,
+    the ones ``ServerSpec`` emits, and no parser here is meant to accept those.
     """
-    text = README.read_text()
-    sections = _sections(text)
     found = []
+    for page in _pages():
+        where = page.relative_to(REPO)
+        text = page.read_text()
 
-    for number, line in _command_lines(text):
-        words = shlex.split(line, posix=True)
-        command, rest = words[0], words[1:]
-        if command not in SCRIPTS:
-            continue
-        subs = [rest[0]] if rest and rest[0] in parsers_of(PARSERS[command]) else []
-        flags = {w for w in rest if FLAG.fullmatch(w)}
-        if flags:
-            found.append((f"README.md:{number}", command, tuple(subs), flags))
+        for number, line in _command_lines(text):
+            words = shlex.split(line, posix=True)
+            command, rest = words[0], words[1:]
+            if command not in SCRIPTS:
+                continue
+            subs = [rest[0]] if rest and rest[0] in parsers_of(PARSERS[command]) else []
+            flags = {w for w in rest if FLAG.fullmatch(w)}
+            if flags:
+                found.append((f"{where}:{number}", command, tuple(subs), flags))
 
-    for number, line in sections.get("The commands", []):
-        if not line.startswith("| `ml-stack"):
-            continue
-        command = line.split("`", 2)[1].split()[0]
-        flags = {f for span in CODE_SPAN.findall(line) for f in FLAG.findall(span)}
-        if flags:
-            found.append((f"README.md:{number}", command, (), flags))
+        for number, line in enumerate(text.splitlines(), start=1):
+            if not line.startswith("| `ml-stack"):
+                continue
+            command = line.split("`", 2)[1].split()[0]
+            if command not in SCRIPTS:
+                continue
+            flags = {f for span in CODE_SPAN.findall(line) for f in FLAG.findall(span)}
+            if flags:
+                found.append((f"{where}:{number}", command, (), flags))
     return found
 
 
 DOCUMENTED = _documented()
 
 
-def test_the_readme_was_read():
+def test_the_docs_were_read():
     """A regex that matches nothing would make the test below pass by saying nothing."""
+    pages = {page.name for page in _pages()}
+    assert {"install.md", "commands.md", "serving.md", "bench.md"} <= pages
     assert any(cmd == "ml-stack-serve" and subs == ("up",) for _, cmd, subs, _ in DOCUMENTED)
     assert any(cmd == "ml-stack-bench" and "--rates" in flags for _, cmd, _, flags in DOCUMENTED)
 
 
 @pytest.mark.parametrize(("where", "command", "subs", "flags"), DOCUMENTED,
                          ids=[f"{w} {c}" for w, c, _, _ in DOCUMENTED])
-def test_every_flag_the_readme_names_is_one_the_command_accepts(where, command, subs, flags):
+def test_every_flag_the_docs_name_is_one_the_command_accepts(where, command, subs, flags):
     accepted = flags_of(PARSERS[command], *subs)
     missing = flags - accepted
     assert not missing, (f"{where} documents {sorted(missing)} for {command} "
