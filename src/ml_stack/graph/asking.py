@@ -24,6 +24,7 @@ class Asking:
     summary: bool = False                # the `summarise` tool, named as the bench is
     rich: bool = False
     terse: bool = False                  # `tools_for`'s schemas, not `converse`'s
+    cite: bool = False                   # where every entry was read, and the `quote` tool
     reach: int | None = None             # tokens one tool result may carry
     rounds: int | None = None            # tool-calling turns one question may spend
     constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
@@ -40,15 +41,14 @@ class Asking:
     def tools(self) -> dict[str, Any]:
         """The keyword arguments :func:`~ml_stack.graph.ask.tools_for` takes about the
         asking -- the terse set is chosen outside `converse` and handed in."""
-        return {"tight": bool(self.tight), "reach": self.reach,
-                "batch": bool(self.batch), "single": bool(self.single),
-                "few": bool(self.few), "summary": bool(self.summary)}
+        return {"asking": self, "cite": bool(self.cite)}
 
     def said(self) -> dict[str, Any]:
         """The way itself, in the words the bench keeps beside its rows: ``summary`` under
         its own name, ``terse`` said outright, and nothing that was not asked for."""
         out: dict[str, Any] = {"tight": bool(self.tight), "terse": bool(self.terse)}
-        for way in ("rich", "batch", "kinds", "summary", "single", "few", "constrain_ids"):
+        for way in ("rich", "batch", "kinds", "summary", "single", "few", "cite",
+                    "constrain_ids"):
             if getattr(self, way):
                 out[way] = True
         if self.reach:

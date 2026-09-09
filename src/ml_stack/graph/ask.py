@@ -78,7 +78,7 @@ REPEATS = 2
 # the tools block is rendered before every message, so a turn offering a different list
 # loses the prompt cache from the first byte and re-reads the whole conversation.
 SEARCHING = frozenset({"look_up", "look_at", "look_around", "path_between", "list_kind",
-                       "summarise", "web_search", "web_read", "web_look"})
+                       "summarise", "quote", "web_search", "web_read", "web_look"})
 # What the last turn is told as the user, and what a search called on it is answered with.
 OVER = "The searching is over. Answer now with what you have."
 # Openings that mean the model is planning rather than answering. gpt-oss puts its analysis
@@ -179,6 +179,9 @@ AROUND_ENTRIES = 24
 # The flat cut on one tool result: the characters a tool message has always been trimmed to.
 # A conversation given a `reach` cuts by tokens instead -- see `_cut`.
 CUT = 6000
+# How many units a cited entry names, and how many passages `quote` returns per entry.
+CITED = 2
+QUOTED = 2
 
 # Every example below is invented, and deliberately shares no name with the community the
 # bench asks its questions of: an example that used the bench's own people would be teaching
@@ -699,6 +702,28 @@ def summarise(graph: Mapping[str, Any], *, top: int = SUMMARY_TOP,
     return "\n".join(lines)
 
 
+QUOTE_SCHEMA: dict[str, Any] = {"type": "function", "function": {
+    "name": "quote",
+    "description": "Read the source's own words behind entries you have looked at: the "
+                   "passage itself, and the source, section and pages it was read at. Call "
+                   "it before you quote or claim anything, and write only what the passage "
+                   "says. An entry that comes back with no passage has nothing behind it -- "
+                   "say so rather than filling the gap. Example: quote with "
+                   "{\"ids\": [\"concept:glimmer-node\"]}.",
+    "parameters": {"type": "object", "properties": {
+        "ids": {"type": "array", "items": {"type": "string"},
+                "description": "entry ids to read the passage behind, e.g. "
+                               "[\"concept:glimmer-node\"]"}},
+        "required": ["ids"]}}}
+# What a model is told when it is answering with citations: the tools carry where every
+# entry was read, and an answer says it.
+CITE_SYSTEM_SENTENCE = (
+    "Every entry you read says where it was read: the source, the section and the pages. "
+    "Name that source in your answer for each thing you say, and call quote to read the "
+    "passage behind an entry before you put its words in quotation marks. An entry that "
+    "says where it came from can be cited; one that does not cannot, and a claim you "
+    "cannot cite does not go in the answer.")
+
 SUMMARY_SCHEMA: dict[str, Any] = {"type": "function", "function": {
     "name": "summarise",
     "description": "Read the whole graph at a glance: how many entries of each kind there "
@@ -1006,13 +1031,67 @@ def _defined(node: Mapping[str, Any], *, chars: int = DEFINED_CHARS,
     return [f'{indent}defined: "{text[:chars]}"'] if text else []
 
 
+def _read_at(where: Mapping[str, Any], unit_id: str) -> str:
+    """One unit as a reader would name it: the source, the section, the pages."""
+    said = str(where.get("source") or "") or str(unit_id)
+    for key in ("section", "title"):
+        if where.get(key):
+            said += f" {where[key]}"
+    pages = [p for p in (where.get("pages") or ()) if p]
+    if pages:
+        said += (f", p. {pages[0]}" if len(set(pages)) == 1
+                 else f", pp. {pages[0]}-{pages[-1]}")
+    return said
+
+
+def _cited(graph: Mapping[str, Any], thing: Mapping[str, Any]) -> str:
+    """Where an entry was read, on one line; empty when it points at nothing."""
+    units = graph.get("units") or {}
+    return "; ".join(_read_at(units.get(u) or {}, str(u))
+                     for u in (thing.get("provenance") or ())[:CITED])
+
+
+def _text_of(texts: Any, unit_id: str) -> str:
+    """One unit's own text, from a mapping or a lookup the graph carries."""
+    if texts is None:
+        return ""
+    found = texts(unit_id) if callable(texts) else texts.get(unit_id)
+    return str(found or "")
+
+
+def quotes(graph: Mapping[str, Any], ids: Sequence[str], *,
+           budget: int | None = None) -> list[dict[str, Any]]:
+    """The words behind those entries: the passage, the entry it belongs to, and where it
+    was read."""
+    by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
+    units, texts = graph.get("units") or {}, graph.get("texts")
+    rows: list[dict[str, Any]] = []
+    for node_id in ids:
+        node = by_id.get(str(node_id))
+        if node is None:
+            continue
+        spans = node.get("spans") or {}
+        said = " ".join(str((node.get("attrs") or {}).get("definition") or "").split())
+        held = list(node.get("provenance") or ())[:QUOTED] or [""]
+        for unit_id in held:
+            span = spans.get(unit_id)
+            text = _text_of(texts, unit_id) if span else ""
+            words = text[int(span[0]):int(span[1])] if text else ""
+            rows.append({"id": str(node_id), "label": str(node.get("label") or ""),
+                         "quote": " ".join((words or said).split())[:DEFINED_CHARS],
+                         "read_at": _read_at(units.get(unit_id) or {}, str(unit_id))
+                                    if unit_id else ""})
+    return _within(rows, budget) if budget is not None else rows
+
+
 def look_at(graph: Mapping[str, Any], ids: Sequence[str], *,
-            budget: int | None = None) -> str:
+            budget: int | None = None, cite: bool = False) -> str:
     """What the graph holds on those entries, as text a model can answer from.
 
     ``budget`` is a conversation's `reach`: a ceiling in tokens on what one tool result may
     carry. Without one nothing is packed and nothing is dropped -- what a caller asked for
-    is what it gets. See `_packed`.
+    is what it gets. See `_packed`. ``cite`` puts where each entry was read on its first
+    line, from the unit documents the graph carries under ``units``.
     """
     by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
     messages = graph.get("messages") or {}
@@ -1029,6 +1108,8 @@ def look_at(graph: Mapping[str, Any], ids: Sequence[str], *,
                    for e in (graph.get("edges") or ())
                    if e.get("target") == node_id and e.get("source") in by_id]
         line = f"- {node.get('label')} ({attrs.get('type') or node.get('kind') or 'entry'})"
+        if cite and (read_at := _cited(graph, node)):
+            line += f" [read at {read_at}]"
         for key in ("role", "location"):
             if attrs.get(key):
                 line += f", {attrs[key]}"
@@ -1069,7 +1150,7 @@ def _edges_around(graph: Mapping[str, Any], node_id: str) -> list[tuple[str, str
 
 def look_around(graph: Mapping[str, Any], ids: Sequence[str], *, hops: int = 1,
                 joined: int = AROUND, entries: int = AROUND_ENTRIES,
-                budget: int | None = None) -> str:
+                budget: int | None = None, cite: bool = False) -> str:
     """The neighbourhood of those entries, read out in one call.
 
     Each entry as `look_at` gives it -- label, kind, what is held on it, what it said -- and
@@ -1085,6 +1166,7 @@ def look_around(graph: Mapping[str, Any], ids: Sequence[str], *, hops: int = 1,
     suits it: one fat result instead of five thin ones, since a tool call costs a round trip
     through the slow half of the model and reading the answer back costs the fast half.
     ``budget`` -- a conversation's `reach` -- is what keeps that from being unbounded.
+    ``cite`` puts where each entry was read on its first line.
     """
     by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
     messages = graph.get("messages") or {}
@@ -1104,6 +1186,8 @@ def look_around(graph: Mapping[str, Any], ids: Sequence[str], *, hops: int = 1,
             attrs = node.get("attrs") or {}
             head = (f"- {node.get('label')} [{node_id}] "
                     f"({attrs.get('type') or node.get('kind') or 'entry'})")
+            if cite and (read_at := _cited(graph, node)):
+                head += f" [read at {read_at}]"
             for key in sorted(attrs):
                 if key != "type" and str(attrs[key]).strip():
                     head += f", {key}: {attrs[key]}"
@@ -1252,6 +1336,10 @@ def _ids_in(text: str) -> list[str]:
     return out
 
 
+#: the way a question is asked when nobody says
+ASKING = Asking()
+
+
 def _schema(name: str, among: Sequence[Mapping[str, Any]] = TOOLS) -> dict[str, Any]:
     """The tool schema called ``name``.
 
@@ -1304,42 +1392,23 @@ def _asked(schemas: Sequence[Mapping[str, Any]], asking: Asking) -> list[dict[st
     return out
 
 
-def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
-              terse: bool = False, rich: bool = False,
-              tight: bool = True, reach: int | None = None,
-              batch: bool = False, single: bool = False, few: bool = False,
-              summary: bool = False) -> list[tuple[dict[str, Any], Any]]:
+def tools_for(graph: Mapping[str, Any], *, asking: Asking = ASKING, finder: Any = None,
+              terse: bool = False, cite: bool = False
+              ) -> list[tuple[dict[str, Any], Any]]:
     """The built-in tools over that graph, as ``(schema, callable)`` pairs.
 
     Each callable takes the parsed arguments mapping. ``finder`` replaces how look_up looks:
-    it takes the text and returns ``[{"id", "label", "kind"}, ...]``.
+    it takes the text and returns ``[{"id", "label", "kind"}, ...]``. ``asking`` is the
+    :class:`~ml_stack.graph.Asking` these are offered under -- ``rich``, ``tight``,
+    ``reach``, ``batch``, ``single``, ``few`` and ``summary`` between them decide what each
+    schema says and how much one result may carry; `Asking.tools` is the same thing as
+    keyword arguments. ``terse`` chooses the short set.
 
-    ``rich`` is a retrieval change still being measured, so it is off unless asked for:
-    each look_up hit then says why it matched (``score``, ``matched``) and, when it is not a
-    person, who is joined to it (``joined``), and the look_up description says so. Off,
-    nothing observable changes -- the same descriptions byte for byte, the same result
-    shape -- so a sweep of the current behaviour stays comparable with one before it.
-
-    ``tight`` is how these are asked for -- on by default: show's description, on a copy,
-    says to light only what answers the question, see `TIGHT_SHOW`. The rest of what tight
-    does (the nudge, the system sentence, the cap on what is lit) is `converse`'s.
-    ``tight=False`` is the loose asking kept as a control: the sets themselves, unchanged.
-
-    ``reach`` is how much one tool result may carry, in tokens: `look_at`, `look_around`
-    and `list_kind` pack up to it instead of stopping at a fixed number of entries. Without
-    it they behave exactly as they did, which is what a model with a small window and an
-    expensive cache wants; with it a model whose context is cheap takes more per call and
-    makes fewer calls. See `converse`.
-
-    ``batch`` shows each searching tool a three-entry call, on a copy -- the rest of what
-    it does is `converse`'s. ``single`` is its opposite and shows each of them a one-entry
-    call, for the model that loses the thread of a long result. ``few`` takes away every
-    way of looking but `look_up` and `look_at`, and tells look_up what the offer no longer
-    has, for the model whose tool choice degrades with the number of schemas; a tool that
-    does not search is kept whoever added it. ``summary`` adds the `summarise` tool: the
-    whole graph at a glance, computed without a model, for the broad question no search
-    reaches -- and `few`, offering three, takes it away again.
+    ``cite`` renders where each entry was read into every `look_at` and `look_around`
+    result and offers `quote`, the source's own words behind an entry.
     """
+    rich, reach = bool(asking.rich), asking.reach
+
     def find(args: Mapping[str, Any]) -> Any:
         # one word or several: a staffing question needs a lookup per skill, and doing them
         # one round at a time is what spent every turn a question had
@@ -1359,7 +1428,8 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
                                 "Try different words, or answer with what you already have."}
 
     def read(args: Mapping[str, Any]) -> str:
-        return look_at(graph, [str(i) for i in (args.get("ids") or ())], budget=reach)
+        return look_at(graph, [str(i) for i in (args.get("ids") or ())], budget=reach,
+                       cite=cite)
 
     def around(args: Mapping[str, Any]) -> str:
         try:
@@ -1367,7 +1437,7 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
         except (TypeError, ValueError):
             hops = 1                  # a model that wrote "one" meant one, not an error
         return look_around(graph, [str(i) for i in (args.get("ids") or ())],
-                           hops=max(1, min(hops, 3)), budget=reach)
+                           hops=max(1, min(hops, 3)), budget=reach, cite=cite)
 
     def trace(args: Mapping[str, Any]) -> dict[str, Any]:
         return path_between(graph, str(args.get("from_id") or ""), str(args.get("to_id") or ""))
@@ -1382,19 +1452,19 @@ def tools_for(graph: Mapping[str, Any], *, finder: Any = None,
     def glance(args: Mapping[str, Any]) -> str:
         return summarise(graph)
 
+    def said(args: Mapping[str, Any]) -> list[dict[str, Any]]:
+        return quotes(graph, [str(i) for i in (args.get("ids") or ())], budget=reach)
+
     does = {"look_up": find, "look_at": read, "look_around": around, "path_between": trace,
-            "list_kind": listing, "show": light, "summarise": glance}
+            "list_kind": listing, "show": light, "summarise": glance, "quote": said}
     base: Sequence[Mapping[str, Any]] = TERSE if terse else TOOLS
-    if summary:
+    if asking.summary:
         base = [*base, SUMMARY_SCHEMA]
-    schemas = _asked(base, Asking(rich=rich, tight=tight, batch=batch, single=single,
-                                  few=few))
+    if cite:
+        base = [*base, QUOTE_SCHEMA]
+    schemas = _asked(base, asking)
     # in the order the schemas are written, which is the order a model reads them in
     return [(schema, does[str(schema["function"]["name"])]) for schema in schemas]
-
-
-#: the way a question is asked when nobody says
-ASKING = Asking()
 
 
 def converse(question: str, graph: Mapping[str, Any], client: Any, *,
@@ -1453,7 +1523,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
 def _call_detail(name: str, args: Mapping[str, Any]) -> str:
     if name == "look_up":
         return repr(str(args.get("text") or ""))
-    if name in ("look_at", "show"):
+    if name in ("look_at", "show", "quote"):
         ids = list(args.get("ids") or ())
         return f"{len(ids)} id" + ("" if len(ids) == 1 else "s")
     if name == "look_around":
@@ -1656,9 +1726,7 @@ def _offer(graph: Mapping[str, Any], tools: Sequence[tuple[Mapping[str, Any], An
            *, finder: Any, asking: Asking) -> list[tuple[Mapping[str, Any], Any]]:
     """The ``(schema, callable)`` pairs one question is answered with."""
     if tools is None:
-        return tools_for(graph, finder=finder, rich=asking.rich, tight=asking.tight,
-                         reach=asking.reach, batch=asking.batch, single=asking.single,
-                         few=asking.few, summary=asking.summary)
+        return tools_for(graph, asking=asking, finder=finder, cite=asking.cite)
     if finder is not None:
         instead = _finding(graph, finder, rich=asking.rich)
         tools = [(schema, fn) if (schema.get("function") or {}).get("name") != "look_up"
@@ -1684,6 +1752,8 @@ def _telling(system: str, *, asking: Asking, known: set[str], graph: Mapping[str
     if asking.tight:
         system = (system.replace(SHOW_PARAGRAPH, TIGHT_SHOW_PARAGRAPH)
                   + " " + TIGHT_SYSTEM_SENTENCE)
+    if asking.cite:
+        system = system + "\n\n" + CITE_SYSTEM_SENTENCE
     if asking.batch:
         system = system + "\n\n" + BATCH_SYSTEM_SENTENCE
     if asking.single:
@@ -1761,6 +1831,10 @@ def _recorded(out: Answer, name: str, args: Mapping[str, Any], result: Any,
     elif name == "path_between":
         _note(out.path, result.get("path") or [], known)
         out.steps.append("traced a path" if result.get("path") else "found no path")
+    elif name == "quote":
+        ids, real = _read_ids(args, known)
+        _note(out.read, ids, known)
+        out.steps.append(f"quoted {real} entr" + ("y" if real == 1 else "ies"))
     elif name == "summarise":
         # everything it named is bracketed, as look_around brackets its neighbours, so an
         # entry the summary read out counts as found and may be selected

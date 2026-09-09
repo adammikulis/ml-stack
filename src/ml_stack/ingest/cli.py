@@ -4,6 +4,7 @@ detached run's record."""
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import sys
 import time
 from collections.abc import Callable, Iterable, Sequence
@@ -282,6 +283,10 @@ def parser() -> argparse.ArgumentParser:
                          "triples -- recall, precision and the misses -- instead of reading "
                          "anything. With `ask`, a set of questions with the entries each "
                          "answer should select: {\"question\", \"expected\": [ids or labels]}")
+    ap.add_argument("--cite", action="store_true",
+                    help="with `ask`, every entry the model reads says which source, "
+                         "section and pages it was read at, and a `quote` tool gives it the "
+                         "passage behind an entry to answer from")
     ap.add_argument("--fail-under", type=float, default=None, metavar="F1",
                     help="exit 1 when --gold scores below this F1 (0-1), reading a gold set "
                          "or asking one")
@@ -465,7 +470,7 @@ def _ask_run(args: Any) -> int:
     if not Path(args.out).expanduser().exists():
         warn(f"error: no store at {args.out}")
         return 2
-    graph = graph_of(args.out)
+    graph = graph_of(args.out, cite=bool(args.cite))
     if not graph["nodes"]:
         warn(f"error: nothing in {args.out} to ask about")
         return 2
@@ -474,6 +479,8 @@ def _ask_run(args: Any) -> int:
     # one way of asking is not served in its shape and asked in somebody else's
     measured = str(hub.located(args.model, loose=True) or args.model) if args.model else None
     how = Asking.for_model(measured) if measured else None
+    if args.cite:
+        how = dataclasses.replace(how or Asking(), cite=True)
     try:
         with _stopping(), ingest._serving(args) as client:
             if not args.gold:

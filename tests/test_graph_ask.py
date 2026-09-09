@@ -815,8 +815,8 @@ def test_the_tools_can_be_said_briefly_or_at_length():
     # tight is the asking now and hands out copies; loose -- tight=False, the control --
     # is the sets themselves. Either way look_up is word for word its own: tight changes
     # what show says and nothing else.
-    assert tools_for(graph, terse=True, tight=False)[0][0] is TERSE[0]
-    assert tools_for(graph, tight=False)[0][0] is TOOLS[0]
+    assert tools_for(graph, terse=True, asking=Asking(tight=False))[0][0] is TERSE[0]
+    assert tools_for(graph, asking=Asking(tight=False))[0][0] is TOOLS[0]
     assert tools_for(graph, terse=True)[0][0] == TERSE[0]
     assert tools_for(graph)[0][0] == TOOLS[0]
 
@@ -1189,7 +1189,7 @@ def test_with_rich_off_look_up_returns_exactly_what_it_always_did():
 
     from ml_stack.graph.ask import RICH_SENTENCE, TOOLS
 
-    assert tools_for(GRAPH, tight=False)[0][0] is TOOLS[0]
+    assert tools_for(GRAPH, asking=Asking(tight=False))[0][0] is TOOLS[0]
     assert tools_for(GRAPH)[0][0] == TOOLS[0]
     assert RICH_SENTENCE not in TOOLS[0]["function"]["description"]
     model = ScriptedModel([call("look_up", text="compilers")])
@@ -1204,7 +1204,7 @@ def test_a_rich_topic_hit_says_why_and_brings_its_people_most_mentioned_first_an
     from ml_stack.graph.ask import JOINED_HITS, joined_people
 
     graph = _staffing_graph()
-    find = tools_for(graph, rich=True)[0][1]
+    find = tools_for(graph, asking=Asking(rich=True))[0][1]
     rows = find({"text": "welding"})
     assert rows[0]["id"] == "topic:welding"
     assert rows[0]["score"] == 4 and rows[0]["matched"] == ["label"]
@@ -1222,7 +1222,7 @@ def test_a_rich_topic_hit_says_why_and_brings_its_people_most_mentioned_first_an
 
 def test_a_rich_person_hit_has_no_joined_list():
     graph = _staffing_graph()
-    find = tools_for(graph, rich=True)[0][1]
+    find = tools_for(graph, asking=Asking(rich=True))[0][1]
     rows = find({"text": "Orla"})
     assert rows[0]["id"] == "person:loner"
     assert "joined" not in rows[0]
@@ -1240,14 +1240,14 @@ def test_a_finder_that_does_not_say_why_still_brings_the_people():
 
     plain = tools_for(graph, finder=finder)[0][1]({"text": "x"})
     assert all(set(r) == {"id", "label", "kind"} for r in plain)
-    rich = tools_for(graph, finder=finder, rich=True)[0][1]({"text": "x"})
+    rich = tools_for(graph, finder=finder, asking=Asking(rich=True))[0][1]({"text": "x"})
     assert set(rich[0]) == {"id", "label", "kind", "joined"}
     assert len(rich[0]["joined"]) == 8
     assert set(rich[1]) == {"id", "label", "kind"}
     # a finder that does say why keeps its word, and the finder's own rows are untouched
     said = [{"id": "topic:welding", "label": "welding", "kind": "topic",
              "score": 0.033, "matched": ["label", "words"]}]
-    out = tools_for(graph, finder=lambda t: said, rich=True)[0][1]({"text": "x"})
+    out = tools_for(graph, finder=lambda t: said, asking=Asking(rich=True))[0][1]({"text": "x"})
     assert out[0]["matched"] == ["label", "words"] and out[0]["score"] == 0.033
     assert "joined" in out[0] and "joined" not in said[0]
 
@@ -1256,7 +1256,7 @@ def test_the_rich_sentence_is_only_in_the_rich_schema():
     from ml_stack.graph.ask import RICH_SENTENCE, TERSE, TOOLS
 
     for terse, base in ((False, TOOLS), (True, TERSE)):
-        rich = tools_for(GRAPH, terse=terse, rich=True)[0][0]
+        rich = tools_for(GRAPH, terse=terse, asking=Asking(rich=True))[0][0]
         assert rich is not base[0]
         assert rich["function"]["description"].endswith(RICH_SENTENCE)
         assert RICH_SENTENCE not in base[0]["function"]["description"]
@@ -1264,7 +1264,7 @@ def test_the_rich_sentence_is_only_in_the_rich_schema():
         assert rich["function"]["description"] == \
             base[0]["function"]["description"] + " " + RICH_SENTENCE
         # the other four are the same words
-        for r, b in zip(tools_for(GRAPH, terse=terse, rich=True)[1:],
+        for r, b in zip(tools_for(GRAPH, terse=terse, asking=Asking(rich=True))[1:],
                         tools_for(GRAPH, terse=terse)[1:], strict=True):
             assert r[0] == b[0]
 
@@ -1329,9 +1329,9 @@ def test_tight_is_the_default_asking_and_tight_off_is_the_old_one():
                                     TIGHT_SENTENCE, TIGHT_SHOW, TIGHT_SHOW_PARAGRAPH,
                                     TIGHT_SYSTEM_SENTENCE, TOOLS, tools_for)
 
-    for got, base in zip(tools_for(GRAPH, tight=False), TOOLS, strict=True):
+    for got, base in zip(tools_for(GRAPH, asking=Asking(tight=False)), TOOLS, strict=True):
         assert got[0] is base
-    for got, base in zip(tools_for(GRAPH, terse=True, tight=False), TERSE, strict=True):
+    for got, base in zip(tools_for(GRAPH, terse=True, asking=Asking(tight=False)), TERSE, strict=True):
         assert got[0] is base
     assert TIGHT_SENTENCE not in TOOLS[-1]["function"]["description"]
     assert TIGHT_SENTENCE not in TERSE[-1]["function"]["description"]
@@ -1362,7 +1362,7 @@ def test_tight_changes_what_show_says_on_a_copy_of_every_set():
                                     TIGHT_SHOW_TERSE, TOOLS, tools_for)
 
     for terse, base, want in ((False, TOOLS, TIGHT_SHOW), (True, TERSE, TIGHT_SHOW_TERSE)):
-        got = tools_for(GRAPH, terse=terse, tight=True)
+        got = tools_for(GRAPH, terse=terse, asking=Asking(tight=True))
         show = got[-1][0]
         assert show is not base[-1]
         assert show["function"]["name"] == "show"
@@ -1373,7 +1373,7 @@ def test_tight_changes_what_show_says_on_a_copy_of_every_set():
         for g, b in zip(got[:-1], base[:-1], strict=True):
             assert g[0] == b
     # rich and tight compose: look_up says what its hits carry, show says what to light
-    both = tools_for(GRAPH, rich=True, tight=True)
+    both = tools_for(GRAPH, asking=Asking(rich=True, tight=True))
     assert both[0][0]["function"]["description"].endswith(RICH_SENTENCE)
     assert both[-1][0]["function"]["description"] == TIGHT_SHOW
     # the full description still shows a call, like every other, and names the tool
@@ -1391,13 +1391,13 @@ def test_tight_nudge_and_system_carry_the_new_sentences_only_when_asked():
     assert TIGHT_NUDGE.startswith("Now call show once with only the entries that answer the")
     assert "which-of-a-kind" in TIGHT_NUDGE and "chain" in TIGHT_NUDGE
     assert model.seen[-1][-1]["content"] == TIGHT_NUDGE
-    assert model.offered[-1] == [s for s, _ in tools_for(GRAPH, tight=True)], \
+    assert model.offered[-1] == [s for s, _ in tools_for(GRAPH, asking=Asking(tight=True))], \
         "the nudge offers the same tools as every other call"
     assert _show_of(model.offered[-1])["function"]["description"] == TIGHT_SHOW
     # a caller's own tools are told too: the terse set handed in -- built loose, as a
     # caller assembling its own set has it -- gets the terse tight show
     handed = SayingModel([call("look_at", ids=["person:ada"])], "Ada Lovelace does compilers.")
-    converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True, tight=False),
+    converse("who?", GRAPH, handed, tools=tools_for(GRAPH, terse=True, asking=Asking(tight=False)),
              asking=Asking(tight=True))
     first = handed.offered[0]
     assert next(s for s in first if s["function"]["name"] == "show")["function"]["description"] \
@@ -1921,7 +1921,7 @@ def test_the_batch_sentence_and_the_worked_calls_are_said_only_when_asked_for():
     assert BATCH_SYSTEM_SENTENCE not in quiet.seen[0][0]["content"]
 
     batched = {t["function"]["name"]: t["function"]["description"]
-               for t, _fn in tools_for(GRAPH, batch=True)}
+               for t, _fn in tools_for(GRAPH, asking=Asking(batch=True))}
     for name, example in BATCH_EXAMPLES.items():
         assert batched[name].endswith(example)
         assert example not in _schema_text(TOOLS, name), "the base set is untouched"
@@ -1985,7 +1985,7 @@ def test_the_single_sentence_and_the_one_entry_calls_are_said_only_when_asked_fo
     assert SINGLE_SYSTEM_SENTENCE not in quiet.seen[0][0]["content"]
 
     singly = {t["function"]["name"]: t["function"]["description"]
-              for t, _fn in tools_for(GRAPH, single=True)}
+              for t, _fn in tools_for(GRAPH, asking=Asking(single=True))}
     for name, example in SINGLE_EXAMPLES.items():
         assert singly[name].endswith(example)
         assert example not in _schema_text(TOOLS, name), "the base set is untouched"
@@ -1998,14 +1998,14 @@ def test_few_offers_three_tools_and_takes_the_rest_of_the_looking_away():
     tool a caller added that does not search -- it is not a choice between ways to look."""
     from ml_stack.graph.ask import FEW_SENTENCE, TOOLS, tools_for
 
-    offered = [t["function"]["name"] for t, _fn in tools_for(GRAPH, few=True)]
+    offered = [t["function"]["name"] for t, _fn in tools_for(GRAPH, asking=Asking(few=True))]
     assert offered == ["look_up", "look_at", "show"]
-    assert [t["function"]["name"] for t, _fn in tools_for(GRAPH, few=True, summary=True)] \
+    assert [t["function"]["name"] for t, _fn in tools_for(GRAPH, asking=Asking(few=True, summary=True))] \
         == ["look_up", "look_at", "show"], "summarise is a way of looking too"
 
     # the sentence is on a copy: the base look_up is untouched
     assert FEW_SENTENCE in {t["function"]["name"]: t["function"]["description"]
-                            for t, _fn in tools_for(GRAPH, few=True)}["look_up"]
+                            for t, _fn in tools_for(GRAPH, asking=Asking(few=True))}["look_up"]
     assert FEW_SENTENCE not in _schema_text(TOOLS, "look_up")
 
 
@@ -2189,7 +2189,7 @@ def test_the_summary_tool_is_offered_only_when_asked_for_and_goes_away_last():
     assert "summarise" not in {t["function"]["name"] for t in TOOLS}
     assert "summarise" not in {s["function"]["name"] for s, _fn in tools_for(GRAPH)}
     assert "summarise" in {s["function"]["name"]
-                           for s, _fn in tools_for(GRAPH, summary=True)}
+                           for s, _fn in tools_for(GRAPH, asking=Asking(summary=True))}
     # a model that may still summarise will summarise instead of answering
     assert "summarise" in SEARCHING
 

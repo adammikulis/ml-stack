@@ -15,18 +15,44 @@ __all__ = ["ask", "asked_f1", "asked_lines", "graph_of", "read_asked", "score_as
            "spent_line"]
 
 
-def graph_of(out: str | Path) -> dict[str, Any]:
+def graph_of(out: str | Path, *, cite: bool = False) -> dict[str, Any]:
     """The store's graph in the shape `graph.ask` takes: ``{"nodes": [...], "edges": [...]}``.
 
     The hidden nodes -- the run each unit was read by -- and the edges that touch them are
     left out, as `graph.page.shown` leaves them out of a page: they are the record of the
-    reading, not the thing being asked about.
+    reading, not the thing being asked about. ``cite`` adds ``units`` -- where each unit
+    was read -- and ``texts``, the documents read again a unit at a time, which is what
+    `graph.ask.tools_for(cite=True)` renders and quotes from.
     """
     from ml_stack.graph.page import shown
     from ml_stack.graph.store import GraphStore
 
     with GraphStore(out, read_only=True) as store:
-        return shown({"nodes": store.nodes(), "edges": store.edges()})
+        graph = shown({"nodes": store.nodes(), "edges": store.edges()})
+        if not cite:
+            return graph
+        graph["units"] = _units_in(store)
+    from ml_stack.ingest.judge import sources_for
+
+    graph["texts"] = sources_for(out)
+    return graph
+
+
+def _units_in(store: Any) -> dict[str, dict[str, Any]]:
+    """``{unit id: where it was read}`` for every unit document the store holds."""
+    out: dict[str, dict[str, Any]] = {}
+    for key in store.doc_keys():
+        if not key.startswith("ingest:unit:"):
+            continue
+        doc = store.get_doc(key) or {}
+        where = doc.get("where") or {}
+        out[key[len("ingest:unit:"):]] = {
+            "source": str(doc.get("source") or where.get("source") or ""),
+            "title": str(doc.get("title") or ""),
+            "chapter": str(where.get("chapter") or ""),
+            "section": str(where.get("section") or ""),
+            "pages": list(where.get("pages") or ())}
+    return out
 
 
 def spent_line(spent: Any) -> str:
