@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.ingest.extract import WITH_IMAGES, instructions, schema
-from ml_stack.ingest.sources import Sources
+from ml_stack.ingest.progress import Progress
 
 __all__ = ["located", "origin", "quote", "run_record", "sources_for", "write_run"]
 
@@ -137,7 +137,7 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
     from ml_stack.ingest.run import _read_local
     from ml_stack.sources import units as source_units
 
-    view = Sources(out)
+    held = Progress(Progress.beside(out)).state["sources"]
     known: dict[str, str] = dict(texts or {})
     read: set[str] = set()
 
@@ -148,10 +148,10 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
         if slug in read:
             return ""
         read.add(slug)
-        held = view.source(slug)
-        if held is None or not held.path or not expand(held.path).is_file():
+        where = str((held.get(slug) or {}).get("path") or "")
+        if not where or not expand(where).is_file():
             return ""
-        document = _read_local(held.path, images=False, chapter=None)
+        document = _read_local(where, images=False, chapter=None)
         for unit in source_units.units(document, keep_questions=True):
             known.setdefault(unit.id, unit.text)
         return known.get(unit_id, "")

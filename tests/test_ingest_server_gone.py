@@ -190,7 +190,8 @@ def _gold(tmp_path):
 def _ask(tmp_path, monkeypatch):
     (tmp_path / "s").mkdir()
     monkeypatch.setattr("ml_stack.ingest.cli.graph_of",
-                        lambda out: {"nodes": [{"id": "concept:glimmer-node"}], "edges": []})
+                        lambda out, cite=False: {"nodes": [{"id": "concept:glimmer-node"}],
+                                                 "edges": []})
     return ["ask", "--out", str(tmp_path / "s"), "--model", "x", "what flows?"]
 
 

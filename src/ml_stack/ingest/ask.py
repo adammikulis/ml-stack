@@ -9,6 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.ingest.judge import sources_for
 from ml_stack.log import say
 
 __all__ = ["ask", "asked_f1", "asked_lines", "graph_of", "read_asked", "score_asked",
@@ -32,8 +33,6 @@ def graph_of(out: str | Path, *, cite: bool = False) -> dict[str, Any]:
         if not cite:
             return graph
         graph["units"] = _units_in(store)
-    from ml_stack.ingest.judge import sources_for
-
     graph["texts"] = sources_for(out)
     return graph
 

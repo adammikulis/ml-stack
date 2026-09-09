@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.ingest.extract import CORE_KINDS, VERBS
+from ml_stack.ingest.judge import sources_for
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
 from ml_stack.ingest.spans import locate, sentence_span, spans_for
@@ -528,8 +529,6 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
 
 def _texts_of(out: str | Path, units: Mapping[str, Any]) -> Callable[[str], str]:
     """``unit id -> its text``: the units in hand, and the document read again for the rest."""
-    from ml_stack.ingest.judge import sources_for
-
     held = {uid: text for uid, u in units.items()
             if (text := str(getattr(u, "text", "") or ""))}
     return sources_for(out, texts=held)
