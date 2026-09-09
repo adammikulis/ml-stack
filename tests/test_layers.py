@@ -18,7 +18,7 @@ ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("backend", "command", "contracts", "data", "entities", "files", "geo",
-              "home", "http", "jobs", "jsonl", "lock", "log", "media", "paths",
+              "home", "http", "jobs", "jsonl", "lock", "log", "markup", "media", "paths",
               "platform", "redact", "scrape", "records", "telemetry", "ui", "units")),
     ("model", ("client", "gguf", "hub", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
@@ -40,14 +40,12 @@ KNOWN = {
     ("hub", "serve"),
     ("ingest", "bench"),
     ("ingest", "serve"),
-    ("ingest", "web"),
     ("serve", "bench"),
     ("serve", "fleet"),
     ("serve", "setup"),
     ("setup", "bench"),
     ("setup", "fleet"),
     ("setup", "serve"),
-    ("sources", "web"),
     ("sources", "world"),
     ("world", "sources"),
 }

@@ -2,7 +2,7 @@
 
 `read` finds a page's `<h1>`-`<h3>` headings, tests each against a `SectionRule` and reads
 `(number, title)` out of the ones that match; the text between two matched headings is its
-section, cleaned with `ml_stack.web.extract`. `read_xml` walks an XML tree instead of
+section, cleaned with `ml_stack.markup.extract`. `read_xml` walks an XML tree instead of
 guessing from headings: each `section_tag` element is a section, numbered by its
 `id_attr`. Both give back the `Document` of `Chapter`s of `Section`s that
 `ml_stack.sources.pdf` does, so `ml_stack.sources.units.units` splits either one the same
@@ -82,9 +82,9 @@ def read(source: str | Path, *, url: str = "",
 
     ``sections`` picks which headings start a section and reads its number and title out of
     one; the default takes every heading. ``source`` is a path to a file or a string of
-    markup. Body text goes through `ml_stack.web.extract`.
+    markup. Body text goes through `ml_stack.markup.extract`.
     """
-    from ml_stack.web import extract
+    from ml_stack.markup import extract
 
     rule = sections or DEFAULT_RULE
     markup, path = _markup(source)

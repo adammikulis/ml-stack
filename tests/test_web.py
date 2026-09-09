@@ -15,10 +15,23 @@ import urllib.request
 
 import pytest
 
-from ml_stack import web
+from ml_stack import http, web
 from ml_stack.scrape.browser import BrowserUnavailable
-from ml_stack.web import (ENGINES, PROMPTS, SCHEMAS, Refused, SearchUnavailable, check, cut,
-                          extract, look, read, search, searxng_engine, tools)
+from ml_stack.web import (
+    ENGINES,
+    PROMPTS,
+    SCHEMAS,
+    Refused,
+    SearchUnavailable,
+    check,
+    cut,
+    extract,
+    look,
+    read,
+    search,
+    searxng_engine,
+    tools,
+)
 
 PAGE = ("<html><head><title>Quenlow Robotics - About</title></head><body><nav>Home</nav>"
         "<h1>About the Quenlow works</h1>"
@@ -36,7 +49,7 @@ def public_dns(monkeypatch):
     """Every invented host resolves somewhere public, except *.internal, which is a LAN."""
     def addresses(host):
         return ["10.0.0.5"] if host.endswith(".internal") else ["1.2.3.4"]
-    monkeypatch.setattr(web, "_addresses", addresses)
+    monkeypatch.setattr(http, "_addresses", addresses)
 
 
 def fetching(pages):
@@ -379,18 +392,18 @@ def test_prompts_are_questions_for_every_tool_and_none_reach_the_model():
 def test_the_search_tool_says_so_when_the_engine_will_not_answer():
     def limited(query, limit):
         raise SearchUnavailable("202 Ratelimit")
-    pairs = dict(zip(names(tools(engine=limited)), (c for _, c in tools(engine=limited))))
+    pairs = dict(zip(names(tools(engine=limited)), (c for _, c in tools(engine=limited)), strict=False))
     got = pairs["web_search"]({"query": "Quenlow Robotics"})
     assert got == {"none": "search unavailable: 202 Ratelimit"}
     assert pairs["web_search"]({"query": ""}) == {"none": "nothing to search for: pass a query"}
 
 
 def test_the_search_tool_says_nothing_matched_rather_than_returning_a_list():
-    pairs = dict(zip(names(tools(engine=lambda q, n: [])), (c for _, c in tools(engine=lambda q, n: []))))
+    pairs = dict(zip(names(tools(engine=lambda q, n: [])), (c for _, c in tools(engine=lambda q, n: [])), strict=False))
     got = pairs["web_search"]({"query": "kilns"})
     assert "none" in got and "kilns" in got["none"]
     pairs = dict(zip(names(tools(engine=lambda q, n: [{"title": "t", "url": "https://tessyn.example/", "snippet": "s"}])),
-                     (c for _, c in tools(engine=lambda q, n: [{"title": "t", "url": "https://tessyn.example/", "snippet": "s"}]))))
+                     (c for _, c in tools(engine=lambda q, n: [{"title": "t", "url": "https://tessyn.example/", "snippet": "s"}])), strict=False))
     assert pairs["web_search"]({"query": "kilns"}) == [
         {"title": "t", "url": "https://tessyn.example/", "snippet": "s"}]
 

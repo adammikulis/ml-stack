@@ -33,20 +33,16 @@ returns the plain text and ``web_look`` says there is no browser.
 from __future__ import annotations
 
 import contextlib
-import ipaddress
 import json
 import os
-import re
-import socket
 import urllib.parse
 from collections.abc import Callable, Mapping
-from html import unescape
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 from ml_stack.home import state
-from ml_stack.http import Retry, ServerError, open_stream
+from ml_stack.http import Refused, Retry, ServerError, check, open_stream
+from ml_stack.markup import cut, extract
 
 Engine = Callable[[str, int], list[dict[str, Any]]]
 """``(query, limit) -> [{"title", "url", "snippet"}, ...]``; may raise SearchUnavailable."""
@@ -71,10 +67,6 @@ def profile_dir() -> Path:
 
 class SearchUnavailable(RuntimeError):
     """The search engine would not answer: rate-limited, timed out, offline, or missing."""
-
-
-class Refused(ValueError):
-    """A URL this module will not fetch: not http(s), or a host on this machine's side."""
 
 
 # --- search -------------------------------------------------------------------------------
@@ -156,41 +148,7 @@ def search(query: str, *, limit: int = 8, engine: Engine | None = None) -> list[
     return out
 
 
-# --- fetching, and what may be fetched ----------------------------------------------------
-
-
-def _addresses(host: str) -> list[str]:
-    """Every address a host name resolves to. Separate so a test can answer for DNS."""
-    try:
-        return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
-    except socket.gaierror as exc:
-        raise Refused(f"cannot resolve {host!r}: {exc}") from exc
-
-
-def check(url: str) -> str:
-    """The URL, if it may be fetched; ``Refused`` otherwise.
-
-    http(s) only, and only to a host whose every address is a public one. ``file:``,
-    ``localhost``, ``127.0.0.0/8``, ``10.0.0.0/8``, ``192.168.0.0/16``, ``172.16.0.0/12``,
-    link-local and the IPv6 equivalents are all refused, by what the name resolves to.
-    """
-    parts = urllib.parse.urlsplit((url or "").strip())
-    if parts.scheme not in ("http", "https"):
-        raise Refused(f"only http(s) is read, not {parts.scheme or 'a bare path'}: {url!r}")
-    host = (parts.hostname or "").strip("[]").casefold()
-    if not host:
-        raise Refused(f"no host in {url!r}")
-    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
-        raise Refused(f"{host} is this machine")
-    try:
-        addresses = [str(ipaddress.ip_address(host))]
-    except ValueError:
-        addresses = _addresses(host)
-    for address in addresses:
-        ip = ipaddress.ip_address(address.split("%")[0])
-        if not ip.is_global:
-            raise Refused(f"{host} resolves to {ip}, which is not on the public internet")
-    return urllib.parse.urlunsplit(parts)
+# --- fetching -------------------------------------------------------------------------------
 
 
 def _http(url: str, *, accept: str = "*/*", most: int = MOST_BYTES) -> bytes:
@@ -226,86 +184,6 @@ def _fetch(url: str) -> str:
 def _fetch_bytes(url: str) -> bytes:
     """A picture's bytes, after the same check as a page."""
     return _get(url, accept="image/*")
-
-
-class _Stripper(HTMLParser):
-    """The words of a page, without its scripts, styles or tags. The fallback reader."""
-
-    SKIP = {"script", "style", "noscript", "template", "svg"}
-    BREAK = {"p", "div", "br", "li", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "section",
-             "article", "header", "footer", "nav", "blockquote", "pre"}
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.title: list[str] = []
-        self.parts: list[str] = []
-        self._skip = 0
-        self._in_title = False
-
-    def handle_starttag(self, tag: str, attrs: Any) -> None:
-        if tag in self.SKIP:
-            self._skip += 1
-        elif tag == "title":
-            self._in_title = True
-        elif tag in self.BREAK:
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in self.SKIP and self._skip:
-            self._skip -= 1
-        elif tag == "title":
-            self._in_title = False
-        elif tag in self.BREAK:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str) -> None:
-        if self._in_title:
-            self.title.append(data)
-        elif not self._skip:
-            self.parts.append(data)
-
-
-def extract(html: str, url: str = "") -> tuple[str, str]:
-    """``(title, text)`` read out of a page: trafilatura when installed, tags stripped when not."""
-    try:
-        import trafilatura
-    except ImportError:
-        trafilatura = None
-    title, text = "", ""
-    if trafilatura is not None:
-        with contextlib.suppress(Exception):
-            doc = trafilatura.bare_extraction(html, url=url or None, with_metadata=True)
-            if doc is not None:
-                title, text = str(doc.title or ""), str(doc.text or "")
-    if not text:
-        stripper = _Stripper()
-        with contextlib.suppress(Exception):
-            stripper.feed(html)
-        title = title or " ".join(unescape("".join(stripper.title)).split())
-        lines = [" ".join(unescape(line).split()) for line in "".join(stripper.parts).split("\n")]
-        text = "\n".join(line for line in lines if line)
-    return title.strip(), text.strip()
-
-
-_SENTENCE_END = re.compile(r"[.!?…]['\")\]]?(?=\s)|\n")
-
-
-def cut(text: str, limit: int) -> tuple[str, bool]:
-    """``text`` no longer than ``limit``, ended at a sentence when one is near enough.
-
-    A page cut mid-word reads as broken; a page cut mid-sentence reads as a claim that was
-    never made. So the cut goes back to the last sentence end in the second half of the
-    window, then to the last space, and only then to the character.
-    """
-    if len(text) <= limit:
-        return text, False
-    window = text[:limit]
-    ends = [m.end() for m in _SENTENCE_END.finditer(window)]
-    at = ends[-1] if ends and ends[-1] >= limit // 2 else 0
-    if not at:
-        space = window.rfind(" ")
-        at = space if space >= limit // 2 else limit
-    return window[:at].rstrip(), True
 
 
 # --- reading ------------------------------------------------------------------------------

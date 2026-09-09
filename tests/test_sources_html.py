@@ -114,11 +114,11 @@ def test_reader_for_picks_the_reader_by_suffix(tmp_path, monkeypatch):
 
 
 def test_reader_for_fetches_a_url_and_dispatches_on_what_came_down(tmp_path, monkeypatch):
+    import ml_stack.http as http
     import ml_stack.media.download as download
-    import ml_stack.web as web
 
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(web, "check", lambda url: url)
+    monkeypatch.setattr(http, "check", lambda url: url)
 
     fetched = []
 

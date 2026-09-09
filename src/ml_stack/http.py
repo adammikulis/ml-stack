@@ -1,10 +1,14 @@
-"""Stdlib HTTP: JSON, bytes, and open bodies a caller reads itself."""
+"""Stdlib HTTP: JSON, bytes, open bodies a caller reads itself, and which URLs may be
+fetched at all."""
 
 from __future__ import annotations
 
+import ipaddress
 import json
+import socket
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
@@ -29,6 +33,10 @@ class ServerError(RuntimeError):
 
 class ServerUnreachable(ServerError):
     """Nothing is listening, or the connection died mid-request."""
+
+
+class Refused(ValueError):
+    """A URL this module will not fetch: not http(s), or a host on this machine's side."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -159,3 +167,40 @@ def request_stream(url: str, *, payload: dict[str, Any], timeout: float = 180.0,
                     continue
     except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as exc:
         raise ServerUnreachable(f"cannot reach {url} ({exc})") from exc
+
+
+# --- what may be fetched -------------------------------------------------------------------
+
+
+def _addresses(host: str) -> list[str]:
+    """Every address a host name resolves to. Separate so a test can answer for DNS."""
+    try:
+        return sorted({info[4][0] for info in socket.getaddrinfo(host, None)})
+    except socket.gaierror as exc:
+        raise Refused(f"cannot resolve {host!r}: {exc}") from exc
+
+
+def check(url: str) -> str:
+    """The URL, if it may be fetched; ``Refused`` otherwise.
+
+    http(s) only, and only to a host whose every address is a public one. ``file:``,
+    ``localhost``, ``127.0.0.0/8``, ``10.0.0.0/8``, ``192.168.0.0/16``, ``172.16.0.0/12``,
+    link-local and the IPv6 equivalents are all refused, by what the name resolves to.
+    """
+    parts = urllib.parse.urlsplit((url or "").strip())
+    if parts.scheme not in ("http", "https"):
+        raise Refused(f"only http(s) is read, not {parts.scheme or 'a bare path'}: {url!r}")
+    host = (parts.hostname or "").strip("[]").casefold()
+    if not host:
+        raise Refused(f"no host in {url!r}")
+    if host == "localhost" or host.endswith(".localhost") or host.endswith(".local"):
+        raise Refused(f"{host} is this machine")
+    try:
+        addresses = [str(ipaddress.ip_address(host))]
+    except ValueError:
+        addresses = _addresses(host)
+    for address in addresses:
+        ip = ipaddress.ip_address(address.split("%")[0])
+        if not ip.is_global:
+            raise Refused(f"{host} resolves to {ip}, which is not on the public internet")
+    return urllib.parse.urlunsplit(parts)

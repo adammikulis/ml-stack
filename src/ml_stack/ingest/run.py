@@ -82,7 +82,7 @@ def reader_for(where: str, *, images: bool = False, chapter: str | int | None = 
     """The reader for ``where``: a PDF, an HTML or XML file, or a URL fetched first.
 
     ``.pdf`` reads through `ml_stack.sources.pdf`; ``.html``, ``.htm`` and ``.xml`` through
-    `ml_stack.sources.html`. http(s) is checked by `ml_stack.web.check`, fetched by
+    `ml_stack.sources.html`. http(s) is checked by `ml_stack.http.check`, fetched by
     `ml_stack.media.download.fetch` into ``cache_dir`` (the state root by default), and
     dispatched the same way once it is down.
     """
@@ -108,9 +108,9 @@ def _read_url(url: str, *, images: bool, chapter: str | int | None,
              cache_dir: str | Path | None) -> Any:
     """A document fetched from the web, then dispatched by what came down."""
     from ml_stack.home import state
+    from ml_stack.http import check
     from ml_stack.media.download import fetch
     from ml_stack.sources import html, pdf
-    from ml_stack.web import check
 
     safe = check(url)
     root = expand(cache_dir) if cache_dir else state("ingest", "downloads")
@@ -161,10 +161,10 @@ def _stopping() -> Any:
 def _read_run(args: Any) -> int:
     from ml_stack import ingest
     from ml_stack.client.spent import Spent
+    from ml_stack.http import Refused
     from ml_stack.ingest.vocabulary import Vocabulary
     from ml_stack.media.download import DownloadError
     from ml_stack.sources import units as source_units
-    from ml_stack.web import Refused
 
     progress = Progress(Progress.beside(args.out))
     spent = Spent()
