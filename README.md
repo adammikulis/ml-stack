@@ -34,6 +34,9 @@ Everything runs on your own hardware. Nothing leaves the network.
   cluster and a machine that was switched off takes the pause when it comes back.
 - **Train without writing code.** Pick what you want it to learn, point it at your
   files, and it runs. Or drive it from Python if you would rather.
+- **Not only text.** A model with a projector is handed the pictures themselves, and a
+  recording is transcribed on whichever machine is free. It checks a model can see
+  before it believes what it says about a page.
 - **Mixed hardware is the normal case.** NVIDIA, AMD ROCm, Apple silicon and plain CPUs
   in one cluster, each reporting its own temperature, clocks and throttle state.
 
@@ -89,6 +92,60 @@ ml-stack-serve status
 
 `ml-stack` on its own starts the daemon and opens the interface in your browser;
 `ml-stack --list` prints every command with the first line of its help.
+
+## Work that runs while you do something else
+
+A job here is a command you start and walk away from, not a chat window you sit in front
+of. Point it at what you have:
+
+```
+ml-stack-ingest ~/texts/*.pdf --out ./sources.ladybug --images --resume --detach
+ml-stack-ingest status --out ./sources.ladybug
+ml-stack-ingest ask --out ./sources.ladybug "how is heart rate controlled"
+```
+
+Chapters, sections and figures come out of each PDF, a model reads each section into one
+graph, and every claim keeps the page and the model behind it. A run is hours, so
+`--detach` gives the shell straight back and puts the run in its own session with a log;
+`status` says how far it has got, how fast the model is reading and how long is left;
+`--resume` starts where a killed run stopped. `ml-stack-jobs wait ingest` blocks until it
+has ended, so the next step is `wait && next` rather than a loop you wrote by hand.
+
+`ml-stack-do "..."` takes the task in words instead: a model on your own hardware, holding
+every command here as a tool, asks what the task leaves open, prints a plan, waits for the
+go, runs it and says where the results are. `ml-stack-mcp` hands the same functions to an
+agent over MCP, and anything long returns a log and a pid rather than blocking the call.
+
+## Pictures and speech
+
+A model with a projector is given the picture, not a description of one. `--mmproj auto`
+finds the projector shipped beside the weights, `ml-stack-ingest --images` hands the model
+each section's figures rather than only their captions, `graph.tree.read(client, ORG,
+images=[chart])` reads an org chart or a family tree out of a photograph, and `web_look`
+brings back a full-page screenshot with the page's largest pictures. A tool of your own
+that returns pictures puts them in front of the model the same way. A second model can
+transcribe first and the first one structure what it said, which is the slot a document
+model -- DeepSeek-OCR, GLM-OCR, surya -- is good in.
+
+**Then it checks the model can see.** `ml_stack.vision.VisionGate` draws a PNG of coloured
+bands, asks the model to name them left to right, and raises rather than let a run believe
+a model that is answering from the words alone. A server started without a projector says
+so instead of quietly reading captions.
+
+Speech is three protocols and one resolver, so the engine is a detail:
+
+```
+ml-stack-speech providers
+ml-stack-speech transcribe recording.m4a
+ml-stack-speech say "the run has finished" --out done.wav
+```
+
+faster-whisper, whisper.cpp, Whisper through transformers, piper, kokoro, the operating
+system's own voice, Silero and an energy detector that needs nothing installed --
+`providers` says which could run here and which is picked when none is named, and
+`regions FILE` gives the seconds somebody is speaking. Audio is anything ffmpeg reads,
+a video file's track included. A peer transcribes what it is sent, so the hearing happens
+on whichever machine is free rather than the one you are typing at.
 
 ## The rest of it
 
