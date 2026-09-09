@@ -904,13 +904,21 @@ class TestTheStartedProcess:
             manager.release(info)
 
     def test_a_server_that_exits_on_its_own_is_reaped(self, running):
+        """``waitid`` with ``WNOWAIT`` blocks until the child has exited and leaves it
+        unreaped, so ``_save`` is the only thing that can have reaped it below.
+
+        ``pid_exists`` is false for a zombie *and* for a pid psutil cannot read, so waiting
+        on it returned the moment the kill was delivered rather than when the child had
+        gone; on Linux ``_save`` then found a process still running and reaped nothing.
+        """
         import signal
 
+        if os.name != "posix":
+            pytest.skip("SIGKILL and waitid are POSIX")
         manager, info = running
         os.kill(info.pid, signal.SIGKILL)
-        deadline = time.monotonic() + 10.0
-        while pid_exists(info.pid) and time.monotonic() < deadline:
-            time.sleep(0.05)
+        os.waitid(os.P_PID, info.pid, os.WEXITED | os.WNOWAIT)
+        assert not pid_exists(info.pid)
         manager._save()
         with pytest.raises(ChildProcessError):
             os.waitpid(info.pid, os.WNOHANG)
