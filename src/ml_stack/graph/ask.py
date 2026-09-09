@@ -707,8 +707,10 @@ QUOTE_SCHEMA: dict[str, Any] = {"type": "function", "function": {
     "description": "Read the source's own words behind entries you have looked at: the "
                    "passage itself, and the source, section and pages it was read at. Call "
                    "it before you quote or claim anything, and write only what the passage "
-                   "says. An entry that comes back with no passage has nothing behind it -- "
-                   "say so rather than filling the gap. Example: quote with "
+                   "says. Quotation marks belong only around a passage that came back with "
+                   "\"verbatim\": true; one without it is the graph's own wording, and an "
+                   "entry with no passage at all has nothing behind it -- say so rather "
+                   "than filling the gap. Example: quote with "
                    "{\"ids\": [\"concept:glimmer-node\"]}.",
     "parameters": {"type": "object", "properties": {
         "ids": {"type": "array", "items": {"type": "string"},
@@ -1061,8 +1063,8 @@ def _text_of(texts: Any, unit_id: str) -> str:
 
 def quotes(graph: Mapping[str, Any], ids: Sequence[str], *,
            budget: int | None = None) -> list[dict[str, Any]]:
-    """The words behind those entries: the passage, the entry it belongs to, and where it
-    was read."""
+    """The words behind those entries: the passage, whether it is the source's own words,
+    the entry it belongs to, and where it was read."""
     by_id = {str(n["id"]): n for n in (graph.get("nodes") or ())}
     units, texts = graph.get("units") or {}, graph.get("texts")
     rows: list[dict[str, Any]] = []
@@ -1070,8 +1072,11 @@ def quotes(graph: Mapping[str, Any], ids: Sequence[str], *,
         node = by_id.get(str(node_id))
         if node is None:
             continue
+        attrs = node.get("attrs") or {}
         spans = node.get("spans") or {}
-        said = " ".join(str((node.get("attrs") or {}).get("definition") or "").split())
+        # what the entry records is only quotable when the fold found it in the source
+        said = "" if attrs.get("unsourced") else \
+            " ".join(str(attrs.get("definition") or "").split())
         held = list(node.get("provenance") or ())[:QUOTED] or [""]
         for unit_id in held:
             span = spans.get(unit_id)
@@ -1079,6 +1084,7 @@ def quotes(graph: Mapping[str, Any], ids: Sequence[str], *,
             words = text[int(span[0]):int(span[1])] if text else ""
             rows.append({"id": str(node_id), "label": str(node.get("label") or ""),
                          "quote": " ".join((words or said).split())[:DEFINED_CHARS],
+                         "verbatim": bool(words),
                          "read_at": _read_at(units.get(unit_id) or {}, str(unit_id))
                                     if unit_id else ""})
     return _within(rows, budget) if budget is not None else rows

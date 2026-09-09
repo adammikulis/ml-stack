@@ -74,13 +74,25 @@ def test_a_tool_result_is_still_trimmed_to_the_budget_with_citations_on():
 def test_quote_gives_the_source_words_the_span_points_at():
     rows = quotes(GRAPH, ["concept:glimmer-node"])
     assert rows[0]["quote"] == "a point of the lattice that holds charge between pulses"
+    assert rows[0]["verbatim"] is True
     assert rows[0]["read_at"] == "lattice-studies 2.1 Glimmer Nodes, pp. 40-42"
 
 
-def test_quote_falls_back_to_what_the_entry_holds_when_there_is_no_span():
+def test_quote_falls_back_to_what_the_entry_holds_and_says_it_is_not_the_source():
     rows = quotes({**GRAPH, "texts": {}}, ["concept:glimmer-node"])
     assert rows[0]["quote"] == "a point of the lattice that holds charge between pulses"
+    assert rows[0]["verbatim"] is False
     assert quotes(GRAPH, ["concept:cinder-vault"])[0]["quote"] == ""
+
+
+def test_a_definition_the_fold_could_not_find_in_the_source_is_not_quotable():
+    """The one thing worse than no quote is an invented one in quotation marks."""
+    made_up = {"id": "concept:sablon", "kind": "substance", "label": "sablon", "mentions": 1,
+               "attrs": {"definition": "the grey mineral nobody mentions", "unsourced": True},
+               "provenance": ["lattice:2:2.1"]}
+    graph = {**GRAPH, "nodes": [*GRAPH["nodes"], made_up]}
+    row = quotes(graph, ["concept:sablon"])[0]
+    assert row["quote"] == "" and row["verbatim"] is False
 
 
 def test_a_text_the_graph_looks_up_rather_than_holds_is_read_the_same_way():

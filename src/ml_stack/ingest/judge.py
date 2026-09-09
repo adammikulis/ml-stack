@@ -87,18 +87,23 @@ def located(store: Any, thing: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def quote(store: Any, thing: Mapping[str, Any], *, texts: Mapping[str, str] | None = None
           ) -> list[dict[str, Any]]:
-    """`located`, each row with the ``quote`` its span cuts out of the unit's own text.
+    """`located`, each row with the ``quote`` its span cuts out of the unit's own text and
+    ``verbatim`` saying whether those are the source's words.
 
     A row with no span, or a unit whose document is no longer where it was read from,
-    quotes the definition the fold recorded instead."""
-    said = " ".join(str((thing.get("attrs") or {}).get("definition") or "").split())
+    quotes the definition the fold recorded; one the fold marked ``unsourced`` quotes
+    nothing."""
+    attrs = thing.get("attrs") or {}
+    said = "" if attrs.get("unsourced") else \
+        " ".join(str(attrs.get("definition") or "").split())
     rows = located(store, thing)
     text_of = (sources_for(getattr(store, "path", ""), texts=texts)
                if any(r["span"] for r in rows) else None)
     for row in rows:
         span = row["span"]
         text = text_of(row["unit"]) if (span and text_of is not None) else ""
-        row["quote"] = (text[span[0]:span[1]] if text else "") or said
+        words = text[span[0]:span[1]] if text else ""
+        row["quote"], row["verbatim"] = words or said, bool(words)
     return rows
 
 
