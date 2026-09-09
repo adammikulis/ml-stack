@@ -1,6 +1,6 @@
 [package]
 name = "ml-stack-app"
-version = "0.1.7"  # x-release-please-version
+version = "0.1.8"  # x-release-please-version
 description = "A native window on the ml-stack interface."
 edition = "2021"
 rust-version = "1.82"
