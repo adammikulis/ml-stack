@@ -13,7 +13,7 @@ from typing import Any
 from ml_stack.ingest.extract import WITH_IMAGES, instructions, schema
 from ml_stack.ingest.sources import Sources
 
-__all__ = ["located", "origin", "run_record", "sources_for", "write_run"]
+__all__ = ["located", "origin", "quote", "run_record", "sources_for", "write_run"]
 
 
 def write_run(out: str | Path, record: Mapping[str, Any]) -> str:
@@ -64,14 +64,18 @@ def run_record(args: Any, *, model: str = "", serving: str = "") -> dict[str, An
 
 
 def located(store: Any, thing: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """Where a node or edge was read: ``[{source, title, chapter, section, pages, unit}]``,
-    one per unit in its provenance, resolved through the unit documents -- the pointers
-    turned back into pages. A unit the store no longer holds comes back as its id alone."""
+    """Where a node or edge was read: ``[{source, title, chapter, section, pages, span,
+    unit}]``, one per unit in its provenance, resolved through the unit documents -- the
+    pointers turned back into pages. ``span`` is the character offsets into that unit's
+    text, None when the fold could not find the words. A unit the store no longer holds
+    comes back as its id alone."""
     out = []
+    spans = thing.get("spans") or {}
     for unit_id in thing.get("provenance") or ():
         doc = store.get_doc(f"ingest:unit:{unit_id}") or {}
         where = doc.get("where") or {}
-        out.append({"unit": unit_id,
+        found = spans.get(unit_id)
+        out.append({"unit": unit_id, "span": list(found) if found else None,
                     "source": str(doc.get("source") or where.get("source") or ""),
                     "title": str(doc.get("title") or ""),
                     "chapter": str(where.get("chapter") or ""),
@@ -79,6 +83,23 @@ def located(store: Any, thing: Mapping[str, Any]) -> list[dict[str, Any]]:
                     "pages": list(where.get("pages") or ()) or ([where["page"]]
                                                                 if where.get("page") else [])})
     return out
+
+
+def quote(store: Any, thing: Mapping[str, Any], *, texts: Mapping[str, str] | None = None
+          ) -> list[dict[str, Any]]:
+    """`located`, each row with the ``quote`` its span cuts out of the unit's own text.
+
+    A row with no span, or a unit whose document is no longer where it was read from,
+    quotes the definition the fold recorded instead."""
+    said = " ".join(str((thing.get("attrs") or {}).get("definition") or "").split())
+    rows = located(store, thing)
+    text_of = (sources_for(getattr(store, "path", ""), texts=texts)
+               if any(r["span"] for r in rows) else None)
+    for row in rows:
+        span = row["span"]
+        text = text_of(row["unit"]) if (span and text_of is not None) else ""
+        row["quote"] = (text[span[0]:span[1]] if text else "") or said
+    return rows
 
 
 def origin(store: Any, thing: Mapping[str, Any]) -> list[dict[str, Any]]:

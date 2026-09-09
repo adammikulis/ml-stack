@@ -123,6 +123,7 @@ from ml_stack.ingest.fold import (
     fold_into as fold_into,
     marked as marked,
     plurals as plurals,
+    unsourced as unsourced,
     write as write,
     _apply as _apply,
     _drop_source as _drop_source,
@@ -162,6 +163,7 @@ from ml_stack.ingest.imports import (
 from ml_stack.ingest.judge import (
     located as located,
     origin as origin,
+    quote as quote,
     run_record as run_record,
     sources_for as sources_for,
     write_run as write_run,
@@ -232,21 +234,22 @@ from ml_stack.ingest.sources import (
     _label as _label,
     _run_said as _run_said,
 )
+from ml_stack.ingest.spans import (
+    locate as locate,
+    sentence_span as sentence_span,
+    spans_for as spans_for,
+)
 from ml_stack.ingest.vocabulary import (
     Vocabulary as Vocabulary,
 )
 
-__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS",
-           "INSTRUCTIONS", "KINDS", "MOST_CHARS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS",
-           "Imported", "Progress", "RunStats", "Scored", "Source", "Sources", "Stopped",
-           "Vocabulary",
-           "ask", "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs",
-           "detach", "embed_store", "extract_unit", "fenced", "fold", "fold_into",
-           "fold_source", "gold_score", "graph_of", "home_dir", "import_lines", "imported",
-           "instructions", "main", "marked", "migrate", "read_asked", "read_gold",
-           "reader_for",
-           "run_attrs", "run_stats",
-           "sayable", "schema",
-           "score_asked", "show", "sources", "status", "texts_for", "unit_of", "units_of",
-           "vague", "verb_for",
-           "write"]
+__all__ = ["CONFIDENCE", "CORE", "CORE_KINDS", "FOLD_EVERY", "FOLD_SECONDS", "INSTRUCTIONS",
+           "KINDS", "MOST_CHARS", "PER_SECTION", "RELATIONS", "VAGUE", "VERBS", "Imported",
+           "Progress", "RunStats", "Scored", "Source", "Sources", "Stopped", "Vocabulary", "ask",
+           "asked_lines", "bring", "build", "closed", "core_kinds", "core_verbs", "detach",
+           "embed_store", "extract_unit", "fenced", "fold", "fold_into", "fold_source",
+           "gold_score", "graph_of", "home_dir", "import_lines", "imported", "instructions",
+           "locate", "main", "marked", "migrate", "quote", "read_asked", "read_gold",
+           "reader_for", "run_attrs", "run_stats", "sayable", "schema", "score_asked",
+           "sentence_span", "show", "sources", "spans_for", "status", "texts_for", "unit_of",
+           "units_of", "unsourced", "vague", "verb_for", "write"]

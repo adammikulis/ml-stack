@@ -11,10 +11,11 @@ from typing import Any
 from ml_stack.ingest.extract import CORE_KINDS, VERBS
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _slug, unit_of, units_of
+from ml_stack.ingest.spans import locate, sentence_span, spans_for
 from ml_stack.log import say
 
 __all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "marked", "plurals",
-           "write"]
+           "unsourced", "write"]
 
 
 CORE = frozenset(VERBS) | {"illustrates", "read_from"}
@@ -45,18 +46,45 @@ def marked(nodes: Iterable[dict[str, Any]], edges: Iterable[dict[str, Any]]) -> 
             attrs["extension_kind"] = True
 
 
-def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
+def _at(thing: dict[str, Any], unit_id: str, span: tuple[int, int] | None) -> None:
+    """Record where in ``unit_id`` this node or edge was read, when it was found."""
+    if span is None:
+        return
+    thing.setdefault("spans", {})[unit_id] = [int(span[0]), int(span[1])]
+
+
+def _spans(*things: Mapping[str, Any] | None) -> dict[str, list[int]]:
+    """The spans of those nodes or edges in one mapping, the first of each unit kept."""
+    out: dict[str, list[int]] = {}
+    for thing in things:
+        for unit_id, span in ((thing or {}).get("spans") or {}).items():
+            out.setdefault(str(unit_id), list(span))
+    return out
+
+
+def unsourced(nodes: Iterable[Mapping[str, Any]]) -> list[str]:
+    """The labels of the concepts whose definition is not in the text they were read from."""
+    return sorted(str(n.get("label") or n.get("id") or "") for n in nodes
+                  if (n.get("attrs") or {}).get("unsourced"))
+
+
+def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = "", text: str = ""
           ) -> tuple[dict[str, dict[str, Any]], dict[tuple[str, str, str], dict[str, Any]]]:
     """One extraction as ``(nodes by id, edges by triple)``, every one pointing at where it came from.
 
     Names are the ids: two sections that both name the same concept are one node whose
-    provenance lists both, which is the whole reason to read a source section by section
-    rather than a page at a time. Provenance is pointers and nothing else -- unit ids --
-    because Adam: "provenance should always be pointers to the textbook". The unit
-    document holds the source, chapter, section and pages, and points at the run that read
-    it; `located()` and `origin()` follow the pointers back.
+    provenance lists both. Provenance is pointers and nothing else -- unit ids -- because
+    Adam: "provenance should always be pointers to the textbook". The unit document holds
+    the source, chapter, section and pages and points at the run that read it;
+    `located()` and `origin()` follow the pointers back.
+
+    ``spans`` sits beside provenance -- ``{unit id: [start, end]}`` into that unit's
+    text -- and a definition not in that text marks its node ``unsourced``. ``text`` is
+    the unit's text when the unit itself does not carry one.
     """
     where = unit.where
+    said = str(text or getattr(unit, "text", "") or "")
+    found = spans_for(extraction, unit, text=said)
     nodes: dict[str, dict[str, Any]] = {}
     edges: dict[tuple[str, str, str], dict[str, Any]] = {}
 
@@ -72,7 +100,10 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
         held["mentions"] += 1
         if where["unit"] not in held["provenance"]:
             held["provenance"].append(where["unit"])
+        _at(held, where["unit"], found.get(clean))
         attrs = held["attrs"]
+        if clean in found and found[clean] is None:
+            attrs["unsourced"] = True
         if more.get("definition") and not attrs["definition"]:
             attrs["definition"] = str(more["definition"])[:400]
             # the unit it was defined in, by pointer: `located()` turns it into a page
@@ -114,7 +145,8 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
         held["weight"] += 1
         if where["unit"] not in held["provenance"]:
             held["provenance"].append(where["unit"])
-
+        _at(held, where["unit"], sentence_span(said, relation.get("from", ""),
+                                               relation.get("to", "")))
 
     for order, figure in enumerate(extraction.get("figures") or (), start=1):
         if not isinstance(figure, Mapping):
@@ -128,6 +160,8 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
                           "mentions": 1,
                           "attrs": {"caption": caption, "shows": str(figure.get("shows") or "")},
                           "provenance": [where["unit"]]}
+        shown = locate(said, caption) if (said and caption) else None
+        _at(nodes[node_id], where["unit"], shown)
         for name in figure.get("concepts") or ():
             target = put(name, "concept")
             if target:
@@ -137,12 +171,14 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = ""
                 edges[key]["weight"] += 1
                 if where["unit"] not in edges[key]["provenance"]:
                     edges[key]["provenance"].append(where["unit"])
+                _at(edges[key], where["unit"], shown)
     marked(nodes.values(), edges.values())
     return nodes, edges
 
 
 def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, Any], *,
-                book_title: str = "", log: Callable[[str], None] | None = None
+                book_title: str = "", texts: Callable[[str], str] | None = None,
+                log: Callable[[str], None] | None = None
                 ) -> dict[str, Any]:
     """Every section of one source, folded into one graph.
 
@@ -164,7 +200,9 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
         unit = units_by_id.get(str(read.get("unit") or ""))
         if unit is None or read.get("error") or not read.get("extracted"):
             continue
-        got_nodes, got_edges = build(read["extracted"], unit, book_title=book_title)
+        said = texts(str(read.get("unit") or "")) if texts is not None else ""
+        got_nodes, got_edges = build(read["extracted"], unit, book_title=book_title,
+                                     text=said)
         for node_id, node in got_nodes.items():
             held = nodes.get(node_id)
             if held is None:
@@ -172,6 +210,8 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
                 continue
             held["mentions"] += node["mentions"]
             held["provenance"] = list(dict.fromkeys(held["provenance"] + node["provenance"]))
+            if held.get("spans") or node.get("spans"):
+                held["spans"] = _spans(held, node)
             for key, value in node["attrs"].items():
                 if key == "aliases":
                     held["attrs"]["aliases"] = list(dict.fromkeys(
@@ -185,7 +225,8 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
                 continue
             held["weight"] += edge["weight"]
             held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
-
+            if held.get("spans") or edge.get("spans"):
+                held["spans"] = _spans(held, edge)
 
     edges, relation_folds = fold_edges(
         edges, log=log, label="relations", provenance="provenance",
@@ -243,6 +284,8 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
         kept["mentions"] = int(kept.get("mentions") or 0) + int(node["mentions"])
         kept["provenance"] = list(dict.fromkeys(list(kept.get("provenance") or [])
                                                 + node["provenance"]))
+        if kept.get("spans") or node.get("spans"):
+            kept["spans"] = _spans(kept, node)
         aliases = kept.setdefault("attrs", {}).setdefault("aliases", [])
         for alias in [node["label"], *node["attrs"].get("aliases", [])]:
             if alias and alias != kept.get("label") and alias not in aliases:
@@ -266,6 +309,8 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
             continue
         held["weight"] += edge["weight"]
         held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
+        if held.get("spans") or edge.get("spans"):
+            held["spans"] = _spans(held, edge)
     return out_nodes, out_edges
 
 
@@ -343,6 +388,10 @@ def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, source:
     prefix = f"{source}:"
     other = [u for u in existing.get("provenance") or () if not str(u).startswith(prefix)]
     mine = [u for u in node.get("provenance") or () if str(u).startswith(prefix)]
+    spans = {u: sp for u, sp in (existing.get("spans") or {}).items()
+             if not str(u).startswith(prefix)}
+    spans.update({u: sp for u, sp in (node.get("spans") or {}).items()
+                  if str(u).startswith(prefix)})
     attrs = dict(existing.get("attrs") or {})
     for key, value in (node.get("attrs") or {}).items():
         if key != "aliases" and (value or key not in attrs):
@@ -352,8 +401,11 @@ def _joined(node: Mapping[str, Any], existing: Mapping[str, Any] | None, source:
         if alias and alias != node.get("label") and alias not in aliases:
             aliases.append(alias)
     attrs["aliases"] = aliases
-    return {**node, "mentions": max(before - was, 0) + share, "attrs": attrs,
-            "provenance": list(dict.fromkeys([*other, *mine]))}
+    out = {**node, "mentions": max(before - was, 0) + share, "attrs": attrs,
+           "provenance": list(dict.fromkeys([*other, *mine]))}
+    if spans:
+        out["spans"] = spans
+    return out
 
 
 def _drop_source(store: Any, source: str, *, keep_units: Iterable[str] | None = None) -> int:
@@ -435,7 +487,8 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     name = title or str(held.get("title") or "") or slug
     units = {**units_of(rows), **dict(units_by_id or {})}
     began = time.time()
-    graph = fold_source(rows, units, book_title=name, log=log)
+    texts = None if dry_run else _texts_of(out, units)
+    graph = fold_source(rows, units, book_title=name, texts=texts, log=log)
     new_nodes, new_edges = _missing_from(out, graph)
     folds = len(graph["folds"].get("concepts") or ()) + len(graph["folds"].get("relations") or ())
     wanted = int(held.get("sections") or 0)
@@ -444,6 +497,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
            "wanted": wanted, "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
            "new_nodes": new_nodes, "new_edges": new_edges,
            "folds": folds, "partial": wanted > len(rows),
+           "unsourced": len(unsourced(graph["nodes"])),
            "seconds": round(time.time() - began, 2)}
     if dry_run:
         return got
@@ -453,7 +507,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
         from ml_stack.graph.tidy import absorb
 
         with GraphStore(out) as store:
-            taken = absorb(store, graph, judge=judge, sources=_texts_of(units), log=log)
+            taken = absorb(store, graph, judge=judge, sources=texts, log=log)
         graph = taken.graph
         for gone, kept in taken.mapping.items():
             shares[kept] = shares.get(kept, 0) + shares.pop(gone, 0)
@@ -472,14 +526,13 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     return got
 
 
-def _texts_of(units: Mapping[str, Any]) -> Callable[[str], str] | None:
-    """The unit text the judge may read, when the units in hand carry it (a run's do; a
-    fold from the reads file alone does not, and then the judge reads the document again
-    through `sources_for`)."""
-    held = {uid: str(getattr(u, "text", "") or "") for uid, u in units.items()}
-    if not any(held.values()):
-        return None
-    return lambda unit_id: held.get(unit_id, "")
+def _texts_of(out: str | Path, units: Mapping[str, Any]) -> Callable[[str], str]:
+    """``unit id -> its text``: the units in hand, and the document read again for the rest."""
+    from ml_stack.ingest.judge import sources_for
+
+    held = {uid: text for uid, u in units.items()
+            if (text := str(getattr(u, "text", "") or ""))}
+    return sources_for(out, texts=held)
 
 
 def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
@@ -537,7 +590,9 @@ def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: b
         what = ("would add" if dry_run else "rebuilt with" if rebuild else "added")
         say(f"{got['title']}: {got['read']} of {got['wanted'] or '?'} units read, "
             f"{got['nodes']} nodes, {got['edges']} edges, {got['folds']} fold(s); "
-            f"{what} {got['new_nodes']} node(s) and {got['new_edges']} edge(s)"
+            + (f"{got['unsourced']} definition(s) not in the source text; "
+               if got.get("unsourced") else "")
+            + f"{what} {got['new_nodes']} node(s) and {got['new_edges']} edge(s)"
             + (f" into {out}" if not dry_run else "")
             + ("  -- partial" if got["partial"] else ""))
     if not dry_run:

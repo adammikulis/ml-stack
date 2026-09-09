@@ -303,9 +303,9 @@ def test_the_provenance_points_at_units_the_way_a_read_source_does(tmp_path):
         where = ingest.located(held, node)
         origin = ingest.origin(held, node)
     assert node["provenance"] == ["velthorne-open-texts:1:1.1"]
-    assert where == [{"unit": "velthorne-open-texts:1:1.1", "source": "velthorne-open-texts",
-                      "title": "Glimmer Nodes", "chapter": "1", "section": "1.1",
-                      "pages": [2, 3]}]
+    assert where == [{"unit": "velthorne-open-texts:1:1.1", "span": None,
+                      "source": "velthorne-open-texts", "title": "Glimmer Nodes",
+                      "chapter": "1", "section": "1.1", "pages": [2, 3]}]
     assert origin[0]["model"] == "quill:8b" and origin[0]["started"] == "2026-01-14T01:19:52"
 
 

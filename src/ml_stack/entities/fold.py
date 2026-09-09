@@ -91,7 +91,8 @@ def fold_edges(edges: Mapping[tuple[str, str, str], dict[str, Any]],
 
     Each edge carries a ``weight`` (how often it was said) and ``provenance`` (a list of the
     records that said it); two edges that become the same triple are one edge whose weight
-    is the sum and whose provenance is the union, in the order first seen. ``field`` is the
+    is the sum and whose provenance is the union, in the order first seen; a mapping an
+    edge carries is merged, the kept edge's entries winning. ``field`` is the
     key inside the edge that repeats the relation, rewritten to the name it folded into.
     Returns the folded edges and the fold records, which is what makes a fold reviewable.
     """
@@ -108,6 +109,9 @@ def fold_edges(edges: Mapping[tuple[str, str, str], dict[str, Any]],
             kept = out[key]
             kept["weight"] += e["weight"]
             kept[provenance] = list(dict.fromkeys(kept[provenance] + e[provenance]))
+            for key_name, value in e.items():
+                if isinstance(value, dict) and isinstance(kept.get(key_name), dict):
+                    kept[key_name] = {**value, **kept[key_name]}
         else:
             out[key] = {**e, field: name}
     return out, folds
