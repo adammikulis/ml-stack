@@ -3,9 +3,11 @@ it goes, tidied at the end of each source, and stoppable."""
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+import urllib.parse
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -17,6 +19,7 @@ from ml_stack.client.counters import (
     sampling_named,
     survival_lines,
 )
+from ml_stack.home import expand
 from ml_stack.ingest.extract import schema
 from ml_stack.ingest.fold import fold_into
 from ml_stack.ingest.judge import run_record, write_run
@@ -26,7 +29,7 @@ from ml_stack.ingest.serving import _sampling
 from ml_stack.log import say, warn
 from ml_stack.serve.profile import INGEST
 
-__all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit"]
+__all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit", "reader_for"]
 
 
 FOLD_EVERY = 25
@@ -74,6 +77,68 @@ def read_unit(client: Any, unit: Any, shape: Mapping[str, Any], **asking: Any) -
     return row
 
 
+def reader_for(where: str, *, images: bool = False, chapter: str | int | None = None,
+              cache_dir: str | Path | None = None) -> Callable[[], Any]:
+    """The reader for ``where``: a PDF, an HTML or XML file, or a URL fetched first.
+
+    ``.pdf`` reads through `ml_stack.sources.pdf`; ``.html``, ``.htm`` and ``.xml`` through
+    `ml_stack.sources.html`. http(s) is checked by `ml_stack.web.check`, fetched by
+    `ml_stack.media.download.fetch` into ``cache_dir`` (the state root by default), and
+    dispatched the same way once it is down.
+    """
+    text = str(where)
+    if urllib.parse.urlsplit(text).scheme in ("http", "https"):
+        return lambda: _read_url(text, images=images, chapter=chapter, cache_dir=cache_dir)
+    return lambda: _read_local(text, images=images, chapter=chapter)
+
+
+def _read_local(where: str, *, images: bool, chapter: str | int | None) -> Any:
+    """A PDF, HTML or XML file, read by its suffix."""
+    from ml_stack.sources import html, pdf
+
+    suffix = Path(where).suffix.casefold()
+    if suffix in (".html", ".htm"):
+        return html.read(where)
+    if suffix == ".xml":
+        return html.read_xml(where)
+    return pdf.read(where, images=images, chapter=chapter)
+
+
+def _read_url(url: str, *, images: bool, chapter: str | int | None,
+             cache_dir: str | Path | None) -> Any:
+    """A document fetched from the web, then dispatched by what came down."""
+    from ml_stack.home import state
+    from ml_stack.media.download import fetch
+    from ml_stack.sources import html, pdf
+    from ml_stack.web import check
+
+    safe = check(url)
+    root = expand(cache_dir) if cache_dir else state("ingest", "downloads")
+    local = fetch(safe, root / _cache_name(safe))
+    suffix = local.suffix.casefold()
+    if suffix in (".html", ".htm"):
+        return html.read(local, url=safe)
+    if suffix == ".xml":
+        return html.read_xml(local, url=safe)
+    return pdf.read(local, images=images, chapter=chapter)
+
+
+def _cache_name(url: str) -> str:
+    """A filename for a downloaded document: its own name, deduped by a hash of the url."""
+    parts = urllib.parse.urlsplit(url)
+    name = Path(parts.path).name or "download"
+    stem, suffix = Path(name).stem or "download", Path(name).suffix
+    return f"{stem}-{hashlib.sha256(url.encode()).hexdigest()[:16]}{suffix}"
+
+
+def _opened(text: str, *, images: bool, chapter: str | int | None) -> Any:
+    """One of `args.docs`, read into a `Document`; `FileNotFoundError` for a local path
+    that is not one."""
+    if urllib.parse.urlsplit(text).scheme not in ("http", "https") and not expand(text).is_file():
+        raise FileNotFoundError(f"no such document: {expand(text)}")
+    return reader_for(text, images=images, chapter=chapter)()
+
+
 @contextmanager
 def _stopping() -> Any:
     """Turn SIGTERM into `Stopped` for the length of a run, and put the old handler back."""
@@ -97,7 +162,9 @@ def _read_run(args: Any) -> int:
     from ml_stack import ingest
     from ml_stack.client.spent import Spent
     from ml_stack.ingest.vocabulary import Vocabulary
-    from ml_stack.sources import pdf
+    from ml_stack.media.download import DownloadError
+    from ml_stack.sources import units as source_units
+    from ml_stack.web import Refused
 
     progress = Progress(Progress.beside(args.out))
     spent = Spent()
@@ -137,23 +204,23 @@ def _read_run(args: Any) -> int:
                                run_record(args, serving=ingest._serving_said(args)))
             say(f"  run {run_id}: units read now point at it")
             for path in args.docs:
-                where = Path(path).expanduser()
-                if not where.is_file():
-                    warn(f"error: no such document: {where}")
+                text = str(path)
+                began = time.time()
+                try:
+                    document = _opened(text, images=args.images, chapter=args.chapter or None)
+                except (FileNotFoundError, Refused, DownloadError, ValueError) as why:
+                    warn(f"error: {why}")
                     code = 2
                     continue
-                began = time.time()
-                document = pdf.read(where, images=args.images,
-                                    chapter=args.chapter or None)
-                wanted = pdf.units(document, **({"max_tokens": args.max_tokens}
-                                                if args.max_tokens else {}))
+                wanted = source_units.units(document, **({"max_tokens": args.max_tokens}
+                                                         if args.max_tokens else {}))
                 if args.sample:
                     wanted = wanted[:args.sample]
                 slug = document.slug
-                progress.source(slug, title=document.title, path=str(where),
+                progress.source(slug, title=document.title, path=document.path,
                                 sections=len(wanted))
-                banks = pdf.question_banks(document, **({"max_tokens": args.max_tokens}
-                                                        if args.max_tokens else {}))
+                banks = source_units.question_banks(document, **({"max_tokens": args.max_tokens}
+                                                                 if args.max_tokens else {}))
                 say(f"{document.title}: {len(document.chapters)} chapter(s), "
                     f"{len(wanted)} unit(s) over {document.page_count} pages, headings from "
                     f"the {document.how}" + (", OpenStax" if document.openstax else "")

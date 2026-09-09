@@ -112,7 +112,9 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
     source, and kept for the rest of the pass. Adam: "allow it to go back over the source
     material if needed".
     """
-    from ml_stack.sources import pdf
+    from ml_stack.home import expand
+    from ml_stack.ingest.run import _read_local
+    from ml_stack.sources import units as source_units
 
     view = Sources(out)
     known: dict[str, str] = dict(texts or {})
@@ -126,10 +128,10 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
             return ""
         read.add(slug)
         held = view.source(slug)
-        if held is None or not held.path or not Path(held.path).expanduser().is_file():
+        if held is None or not held.path or not expand(held.path).is_file():
             return ""
-        document = pdf.read(held.path)
-        for unit in pdf.units(document, keep_questions=True):
+        document = _read_local(held.path, images=False, chapter=None)
+        for unit in source_units.units(document, keep_questions=True):
             known.setdefault(unit.id, unit.text)
         return known.get(unit_id, "")
 
