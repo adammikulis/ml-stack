@@ -93,7 +93,8 @@ def _edge(a, rel, b, weight=1):
 def test_supersedes_folds_from_its_stated_inverse_and_survives_a_store_round_trip(tmp_path):
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import canonical_direction, tidy
+    from ml_stack.graph.relations import canonical_direction
+    from ml_stack.graph.tidy import tidy
 
     assert canonical_direction("superseded_by") == ("supersedes", True)
 

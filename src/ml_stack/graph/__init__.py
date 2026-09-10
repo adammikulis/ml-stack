@@ -17,7 +17,7 @@ from ml_stack.graph.propose import Change, apply, proposing, tools_for
 from ml_stack.graph.search import hybrid, lexical, rrf
 from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, snapshots, take
 from ml_stack.graph.tensors import tensors
-from ml_stack.graph.tidy import HIERARCHY, cycles
+from ml_stack.graph.relations import HIERARCHY, cycles
 from ml_stack.graph.vectors import DOCUMENT, QUERY, TASK, embedded, remember, smooth
 from ml_stack.graph.rebuild import count_store, replace, roll_back, snapshot
 from ml_stack.graph.store import (GraphStore, GraphStoreUnavailable, StoreNeedsUpgrade,

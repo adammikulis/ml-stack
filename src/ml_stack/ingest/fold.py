@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.entities.fold import merged_spans
+from ml_stack.graph.names import plurals
 from ml_stack.ingest.extract import CORE_KINDS, VERBS
 from ml_stack.ingest.judge import sources_for
 from ml_stack.ingest.progress import Progress
@@ -16,8 +17,8 @@ from ml_stack.ingest.reads import _slug, unit_of, units_of
 from ml_stack.ingest.spans import locate, sentence_span, spans_for
 from ml_stack.log import say
 
-__all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "marked", "plurals",
-           "unsourced", "write"]
+__all__ = ["CORE", "build", "fold", "fold_into", "fold_source", "marked", "unsourced",
+           "write"]
 
 
 CORE = frozenset(VERBS) | {"illustrates", "read_from"}
@@ -241,27 +242,6 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
             "folds": {"relations": relation_folds, "concepts": name_folds}}
 
 
-def plurals(names: Iterable[str]) -> dict[str, str]:
-    """``{plural (casefolded): singular}`` for every name whose singular is also a name.
-
-    Chapter 2 of a biology book came back with `acid` and `acids`, `hydrogen ion` and
-    `hydrogen ions`, each with its own edges, because `entities.close` -- rightly -- does
-    not call a plural one letter off. A book does not distinguish a thing from two of it,
-    so the plural folds into the singular however often each was said: handed to
-    `fold_names` as the map somebody decided, which is what it is.
-    """
-    by_lower = {str(name).casefold(): str(name) for name in names}
-    out: dict[str, str] = {}
-    for low, name in by_lower.items():
-        for ending, singular in (("ies", "y"), ("es", ""), ("s", "")):
-            if low.endswith(ending) and len(low) > len(ending) + 2:
-                stem = low[: -len(ending)] + singular
-                if stem in by_lower and stem != low:
-                    out[low] = by_lower[stem]
-                    break
-    return out
-
-
 def _apply(nodes: Mapping[str, dict[str, Any]],
            edges: Mapping[tuple[str, str, str], dict[str, Any]],
            moved: Mapping[str, str]) -> tuple[dict[str, dict[str, Any]],
@@ -460,7 +440,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
               log: Callable[[str], None] | None = None) -> dict[str, Any]:
     """Fold one source's reads so far, reconcile it against the store, and upsert it.
 
-    Before the upsert the fold goes through `graph.tidy.absorb`: a name the store already
+    Before the upsert the fold goes through `graph.absorbing.absorb`: a name the store already
     holds under case, spacing or plural lands on that node, and a close spelling goes to
     ``judge`` when there is one (the run's own model, with the unit text in hand). Adam:
     "the same dedupe mechanism should be used whenever the model is reading a new thing
@@ -499,7 +479,7 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
     shares = {str(n["id"]): int(n.get("mentions") or 0) for n in graph["nodes"]}
     if not rebuild and Path(out).expanduser().exists():
         from ml_stack.graph.store import GraphStore
-        from ml_stack.graph.tidy import absorb
+        from ml_stack.graph.absorbing import absorb
 
         with GraphStore(out) as store:
             taken = absorb(store, graph, judge=judge, sources=texts, log=log)

@@ -142,7 +142,7 @@ class Sources:
         into another's. An edge the same sources hold both ends of is inside a vocabulary
         they share, not between them. ``merged`` is `between_sources`, and ``logged``
         whether the store holds the merges document those come from at all. ``decisions``
-        counts the pairs a judge has settled in the store's `graph.tidy` document.
+        counts the pairs a judge has settled in the store's `graph.verdicts` document.
 
         A source's node is one a ``read_from`` edge joins to ``source:<slug>``; a source's
         edge is one whose provenance names a unit of that source. Without a ``store`` one
@@ -211,7 +211,7 @@ class Sources:
     def between_sources(self, store: Any = None) -> list[dict[str, Any]]:
         """Every name the hygiene pass joined across two sources, heaviest first.
 
-        One entry per merge in the store's `graph.tidy` merges document whose two names
+        One entry per merge in the store's `graph.verdicts` merges document whose two names
         were read from different sources: ``a_label`` and ``a_source`` for the name kept,
         ``b_label`` and ``b_source`` for the name folded into it, ``kind``, and ``weight``
         -- the joined node's mentions (the units both were read from, when the store holds
@@ -220,7 +220,7 @@ class Sources:
         if store is None:
             with self.store() as held:
                 return self.between_sources(held)
-        from ml_stack.graph.tidy import MERGES
+        from ml_stack.graph.verdicts import MERGES
 
         held = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
         held = held.get("merges") if isinstance(held, Mapping) else held
@@ -265,14 +265,14 @@ def run_attrs(out: str | Path, run_ids: Iterable[str] = ()) -> dict[str, dict[st
 
 def _logged(store: Any) -> bool:
     """Whether the store holds a merges document, however many merges are in it."""
-    from ml_stack.graph.tidy import MERGES
+    from ml_stack.graph.verdicts import MERGES
 
     return (store.get_doc(MERGES) if hasattr(store, "get_doc") else None) is not None
 
 
 def _decisions_in(store: Any) -> dict[str, int]:
     """How many name pairs a judge has settled in the store, and how each went."""
-    from ml_stack.graph.tidy import DECISIONS
+    from ml_stack.graph.verdicts import DECISIONS
 
     held = store.get_doc(DECISIONS) if hasattr(store, "get_doc") else None
     pairs = (held or {}).get("pairs") if isinstance(held, Mapping) else None

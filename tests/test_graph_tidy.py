@@ -2,7 +2,10 @@
 flagged, the rest reported -- dry by default, idempotent, never a hidden node."""
 
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.tidy import Report, canonical_direction, suspect, tidy
+from ml_stack.graph.hygiene import Report
+from ml_stack.graph.names import suspect
+from ml_stack.graph.relations import canonical_direction
+from ml_stack.graph.tidy import tidy
 
 
 def _node(id_, label, kind="concept", mentions=1, **attrs):

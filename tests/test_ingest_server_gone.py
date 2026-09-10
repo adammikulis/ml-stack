@@ -216,7 +216,7 @@ def test_a_sigterm_mid_run_releases_the_lease_on_every_path(tmp_path, monkeypatc
         monkeypatch.setattr(ingest, "ask", _terminated)
     else:
         argv = _tidy(tmp_path, monkeypatch)
-        monkeypatch.setattr("ml_stack.graph.tidy.tidy", _terminated)
+        monkeypatch.setattr("ml_stack.ingest.cli.hygiene", _terminated)
     assert ingest.main(argv) == 1
     assert released == [True], "the lease was not released"
     assert "stopped" in capsys.readouterr().out

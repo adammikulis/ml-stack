@@ -13,6 +13,8 @@ from typing import Any
 
 from ml_stack import hub, jobs
 from ml_stack.asking import Asking
+from ml_stack.graph.hygiene import written_from
+from ml_stack.graph.tidy import tidy as hygiene
 from ml_stack.home import state
 from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
 from ml_stack.ingest.extract import PER_SECTION, schema
@@ -432,9 +434,6 @@ def _dispatch(args: Any, rest: list[str]) -> int:
         if word == "tidy":
             # the hygiene pass is graph.tidy's -- a book, a Slack community, any store --
             # and lives beside the fold here only so the ingest commands are in one place
-            from ml_stack.graph.tidy import tidy as hygiene
-            from ml_stack.graph.tidy import written_from
-
             if args.model or args.base_url != parser().get_default("base_url"):
                 # automated: the model judges the names a spelling apart, re-reading the
                 # sources where it must, and the pass applies what it decides -- after the

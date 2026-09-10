@@ -751,8 +751,10 @@ def test_a_unit_that_failed_is_not_done_so_resume_reads_it_again(tmp_path):
 
 
 def test_plurals_fold_into_their_singular_and_nothing_else_does():
-    got = ingest.plurals(["acid", "Acids", "hydrogen ion", "hydrogen ions", "species",
-                          "base", "bases", "bus", "vertebrae", "Currents"])
+    from ml_stack.graph.names import plurals
+
+    got = plurals(["acid", "Acids", "hydrogen ion", "hydrogen ions", "species",
+                  "base", "bases", "bus", "vertebrae", "Currents"])
     assert got == {"acids": "acid", "hydrogen ions": "hydrogen ion", "bases": "base"}
 
 

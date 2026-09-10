@@ -1117,7 +1117,7 @@ def _absorbed(store: Any, graph: Mapping[str, Any], *, judge: Any = None) -> dic
     (an earlier world's, still there under its own namespace); the two are merged into what
     is written back, so a later reconciliation can still read both.
     """
-    from ml_stack.graph.tidy import absorb
+    from ml_stack.graph.absorbing import absorb
 
     incoming = _reconcilable(graph)
     held = store.get_doc("messages") if hasattr(store, "get_doc") else None
@@ -1144,7 +1144,7 @@ def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
     Before that memory is written, `_absorbed` reconciles this world's graph against
     whatever it already holds -- a second run, or a different invented world sharing the
     same store -- so the same person or organisation under a plural or a case variant lands
-    on the node already there rather than doubling it. ``judge`` is a `ml_stack.graph.tidy
+    on the node already there rather than doubling it. ``judge`` is a `ml_stack.graph.judging
     .ModelJudge` for the close spellings a plain match cannot settle; without one those are
     left as new nodes and reported, the way `absorb` always leaves them.
     Returns the counts: threads, messages, the model/template split, outcomes, and what a

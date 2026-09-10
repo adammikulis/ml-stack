@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph.tidy import cycles
+from ml_stack.graph.relations import cycles
 from ml_stack.messages import Message
 from ml_stack.redact.hook import FLOOR, from_database, permitted, recogniser, shapes
 from ml_stack.world.story import ORG_KINDS, OUTCOMES, kind_of

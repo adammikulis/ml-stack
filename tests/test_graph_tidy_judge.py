@@ -6,8 +6,10 @@ import json
 
 from ml_stack import ingest
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.tidy import (DECISIONS, ModelJudge, absorb, excerpts, judge_gold,
-                                 load_gold, tidy)
+from ml_stack.graph.absorbing import absorb
+from ml_stack.graph.judging import ModelJudge, excerpts, judge_gold, load_gold
+from ml_stack.graph.tidy import tidy
+from ml_stack.graph.verdicts import DECISIONS
 from tests.test_graph_tidy import _edge, _ids, _node, _store
 
 

@@ -772,7 +772,7 @@ def _run_nodes(view: Any) -> dict[str, Mapping[str, Any]]:
 def _decisions_count(view: Any) -> int | None:
     """How many name pairs the store's hygiene pass has judged, or None for no such
     document -- a store never tidied says so rather than showing a 0 it never measured."""
-    from ml_stack.graph.tidy import DECISIONS
+    from ml_stack.graph.verdicts import DECISIONS
 
     if not view.out.exists():
         return None

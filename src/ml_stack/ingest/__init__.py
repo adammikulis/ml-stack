@@ -122,7 +122,6 @@ from ml_stack.ingest.fold import (
     fold_source as fold_source,
     fold_into as fold_into,
     marked as marked,
-    plurals as plurals,
     unsourced as unsourced,
     write as write,
     _apply as _apply,

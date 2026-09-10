@@ -109,7 +109,7 @@ def test_a_path_with_no_store_exits_2(tmp_path, capsys):
 
 def test_tidy_rejudge_asks_a_served_judge_again_about_the_remembered_verdicts(tmp_path, capsys,
                                                                        monkeypatch):
-    from ml_stack.graph.tidy import DECISIONS
+    from ml_stack.graph.verdicts import DECISIONS
     from tests.test_graph_tidy import _node, _store
     from tests.test_graph_tidy_judge import Scripted
 

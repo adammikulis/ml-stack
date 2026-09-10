@@ -174,6 +174,6 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
 def _judge(client: Any, out: str | Path, *, model: str = "",
            texts: Mapping[str, str] | None = None) -> Any:
     """The pass's judge over this store: the run's model, and the sources to re-read."""
-    from ml_stack.graph.tidy import ModelJudge
+    from ml_stack.graph.judging import ModelJudge
 
     return ModelJudge(client, sources=sources_for(out, texts=texts), model=model)

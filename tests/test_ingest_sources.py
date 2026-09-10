@@ -127,7 +127,7 @@ def test_an_edge_both_sources_hold_each_end_of_is_not_between_them(tmp_path):
 
 def test_the_pairs_the_hygiene_pass_judged_are_counted(tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import DECISIONS
+    from ml_stack.graph.verdicts import DECISIONS
 
     store = two_sources(tmp_path)
     with GraphStore(store) as held:
@@ -167,7 +167,7 @@ def two_sources_folded_in_turn(tmp_path):
 def test_the_fold_writes_each_name_it_lands_on_an_existing_node_with_the_units_of_both(
         tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     assert ingest.main(["fold", "--out", str(store)]) == 0
@@ -188,7 +188,7 @@ def test_the_fold_writes_each_name_it_lands_on_an_existing_node_with_the_units_o
 
 def test_a_fold_repeated_writes_the_landing_once(tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     ingest.main(["fold", "--out", str(store)])
@@ -251,7 +251,8 @@ def test_a_source_read_further_grows_its_own_share_of_a_shared_node(tmp_path):
 
 def test_a_fold_in_memory_a_dry_fold_and_a_read_only_absorb_write_no_landing(tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES, absorb
+    from ml_stack.graph.absorbing import absorb
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_folded_in_turn(tmp_path)
     sources = ingest.Sources(store)
@@ -277,7 +278,8 @@ WRITTEN = {"seam wal": "seam wall"}
 def test_tidy_writes_each_merge_it_makes_to_the_store_with_the_units_both_names_came_from(
         tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES, tidy
+    from ml_stack.graph.tidy import tidy
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     assert tidy(store, dry_run=False, written=WRITTEN).merged_nodes == 1
@@ -298,7 +300,8 @@ def test_tidy_writes_each_merge_it_makes_to_the_store_with_the_units_both_names_
 
 def test_a_dry_tidy_writes_no_merge(tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES, tidy
+    from ml_stack.graph.tidy import tidy
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     assert tidy(store, written=WRITTEN).merged_nodes == 1
@@ -309,7 +312,8 @@ def test_a_dry_tidy_writes_no_merge(tmp_path):
 
 def test_a_merge_is_written_once_however_often_tidy_runs(tmp_path):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES, tidy
+    from ml_stack.graph.tidy import tidy
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_spelled_apart(tmp_path)
     tidy(store, dry_run=False, written=WRITTEN)
@@ -377,7 +381,7 @@ def two_sources_a_plural_apart(tmp_path):
 
 def test_a_fold_logs_the_name_it_lands_on_another_source_s_node(tmp_path, capsys):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES
+    from ml_stack.graph.verdicts import MERGES
 
     store = two_sources_a_plural_apart(tmp_path)
     assert not store.exists(), "nothing has written the log, or anything else, yet"
@@ -429,7 +433,8 @@ def test_the_sources_command_prints_the_sources_the_shared_concepts_and_the_judg
 def test_the_sources_command_asks_for_a_tidy_once_a_merge_is_logged_within_one_source(
         tmp_path, capsys):
     from ml_stack.graph.store import GraphStore
-    from ml_stack.graph.tidy import MERGES, tidy
+    from ml_stack.graph.tidy import tidy
+    from ml_stack.graph.verdicts import MERGES
 
     store = a_part_read_source(tmp_path)
     ingest.fold(store, say=lambda _: None)

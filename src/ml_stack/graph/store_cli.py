@@ -22,7 +22,10 @@ import sys
 from pathlib import Path
 
 from ml_stack import home
+from ml_stack.graph.hygiene import written_from
+from ml_stack.graph.judging import ModelJudge
 from ml_stack.graph.store import GraphStore, StoreMismatch, StoreNeedsUpgrade
+from ml_stack.graph.tidy import tidy
 from ml_stack.log import say, warn
 
 
@@ -95,7 +98,7 @@ def _embed(path: Path, hops: int, model: str) -> int:
 
 
 def _gold(gold: str, base_url: str, fail_under: float) -> int:
-    from ml_stack.graph.tidy import judge_gold, load_gold
+    from ml_stack.graph.judging import judge_gold, load_gold
 
     if not base_url:
         warn("--gold needs --base-url: a model already serving to answer the pairs")
@@ -175,8 +178,6 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "embed":
             return _embed(path, args.smooth, args.model)
         if args.command == "tidy":
-            from ml_stack.graph.tidy import ModelJudge, tidy, written_from
-
             judge = None
             if args.base_url:
                 from ml_stack.client import Client
