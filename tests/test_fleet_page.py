@@ -97,7 +97,7 @@ def with_peers(joined):
                    "cpus": 16, "ram_gb": 64.0, "ram_used_gb": 20.0, "cpu_pct": 41.0,
                    "vram_total_gb": 24.0, "vram_free_gb": 6.0, "gpu_util_pct": 88.0,
                    "temp_c": 79.0, "clock_mhz": 2400, "power_w": 310.5,
-                   "throttled": True, "labels": ["train"],
+                   "throttled": True, "labels": ["train"], "speech": ["asr", "vad"],
                    "models": [{"name": "thornfield-8B-Q4_K_M.gguf"}]},
     }]
     return joined
@@ -222,6 +222,7 @@ class TestTheClusterView:
         assert "6.0 GB free of 24.0 GB" in card
         assert "79°C" in card and "2400 MHz" in card and "310.5 W" in card
         assert "throttled" in card
+        assert "speech: asr, vad" in card
         assert "3/4" in page.locator("#cluster-stat").inner_text()
         assert not errors
 

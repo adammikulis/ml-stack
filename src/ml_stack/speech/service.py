@@ -8,6 +8,7 @@ cached in one place.
 from __future__ import annotations
 
 import dataclasses
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -19,7 +20,7 @@ from ml_stack.speech.protocols import (
     as_bytes,
 )
 
-__all__ = ["as_json", "providers", "regions", "say", "spoken_pcm", "transcribe"]
+__all__ = ["as_json", "providers", "regions", "say", "spoken_pcm", "transcribe", "working"]
 
 
 def _registries() -> dict[str, Any]:
@@ -40,6 +41,16 @@ def providers() -> dict[str, dict[str, Any]]:
         chosen = next((one["name"] for one in found if one["available"]), None)
         out[kind] = {"auto": chosen, "providers": found}
     return out
+
+
+@lru_cache(maxsize=1)
+def _working() -> tuple[str, ...]:
+    return tuple(kind for kind, table in providers().items() if table["auto"])
+
+
+def working() -> list[str]:
+    """The protocols this machine has a working provider for, probed once a process."""
+    return list(_working())
 
 
 def transcribe(audio: Path | str | bytes, *, provider: str | None = None,

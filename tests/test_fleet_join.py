@@ -309,6 +309,16 @@ class TestStatus:
         assert "measuring" in first and "abc1234" in first and "quince-2b.gguf:8099" in first
         assert "idle" in second and "8 GB ram" in second
 
+    def test_a_peer_that_can_hear_says_which_protocols_answer(self):
+        """Which machine to send a recording to: `speech.working()` on its beacon."""
+        heard = describe(Beacon(name="larch", port=8770, host="10.0.0.2",
+                                device={**DEVICE, "speech": ["asr", "vad"]}))
+        deaf = describe(Beacon(name="pi", port=8770, host="10.0.0.3", device={"ram_gb": 8}))
+        assert heard["speech"] == ["asr", "vad"] and deaf["speech"] == []
+        head, first, second = table([heard, deaf]).splitlines()
+        assert "SPEECH" in head
+        assert "asr,vad" in first and "asr,vad" not in second
+
     def test_no_peers_says_what_to_run(self):
         assert "ml-stack-fleet join" in table([])
 

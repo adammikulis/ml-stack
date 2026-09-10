@@ -114,7 +114,8 @@
       el("div", { class: "row", style: "margin-top:10px;gap:6px;flex-wrap:wrap" },
         el("span", { class: `badge ${v.key}` }, el("span", { class: "chip" }), v.text),
         d.gpu ? el("span", { class: "label" }, d.gpu) : null,
-        d.ram_gb ? el("span", { class: "label" }, `${Math.round(d.ram_gb)} GB RAM`) : null),
+        d.ram_gb ? el("span", { class: "label" }, `${Math.round(d.ram_gb)} GB RAM`) : null,
+        (d.speech || []).length ? el("span", { class: "label" }, `speech: ${d.speech.join(", ")}`) : null),
       (p.clusters || []).length > 1
         ? el("div", { class: "labels" },
             p.clusters.map((c) => el("span", { class: "label" }, c)))

@@ -30,6 +30,7 @@ from .conversations import Conversations
 from .environment import Environment
 from ml_stack.hub import default_roots, free_memory, total_memory
 from ml_stack.log import say, warn
+from ml_stack.speech import service as speech
 
 from .models import Downloads, Models, ModelError
 from .pausing import ADOPT_S, adopt_pause, peer_pause
@@ -835,9 +836,7 @@ def make_handler(runner: JobRunner, files_root: Path,
                 self._send(200, {"jobs": runner.snapshot()})
                 return
             if path == "/speech/providers":
-                from ml_stack.speech.service import providers
-
-                self._send(200, providers()); return
+                self._send(200, speech.providers()); return
             if path == "/bench":
                 if bench is None:
                     self._send(501, {"error": "this daemon takes no bench jobs"}); return
@@ -1257,6 +1256,15 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     base_report = device_report or _DEFAULT_REPORT
     labels = sorted({s.strip() for s in labels if s and s.strip()})
 
+    heard: list[str] = []
+
+    def probe_speech() -> None:
+        heard[:] = speech.working()
+
+    # Off the startup path: a probe imports whisper's dependencies where they are
+    # installed, and the beacon carries what has been found by the time it goes out.
+    threading.Thread(target=probe_speech, name="speech-probe", daemon=True).start()
+
     def report() -> dict[str, Any]:
         # `updates.state` puts the version, the commit and how this machine keeps current
         # on the beacon, so `ml-stack-fleet status` can show a fleet that is half-updated
@@ -1264,7 +1272,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
         from . import updates as updating
 
         return {**base_report(), "labels": labels, **bench_host[0].report(),
-                **updating.state()}
+                **updating.state(), "speech": list(heard)}
     def every_token() -> set[str]:
         """Every token this machine answers to, one per cluster it is in."""
         return {derive_token(m.key) for m in memberships(cluster_key_path)}

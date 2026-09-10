@@ -299,6 +299,7 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
         "slots": beacon.slots, "queued": beacon.queued,
         "room": room, "serving": served,
         "models": [str(m.get("name")) for m in (d.get("models") or []) if m.get("name")],
+        "speech": [str(one) for one in (d.get("speech") or [])],
         "lock": str(lock) if lock else "",
         "paused": bool(said.get("paused")),
         "paused_because": (str(said.get("unavailable_because") or "paused")
@@ -386,7 +387,7 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
                 "  - is the daemon running there?  ml-stack-fleet join\n"
                 "  - same LAN, and the same passphrase?")
     lines = [f"{'NAME':<16} {'URL':<28} {'ROOM':<16} {'STATE':<12} {'COMMIT':<12} "
-             f"{'UPDATES':<12} SERVING"]
+             f"{'UPDATES':<12} {'SPEECH':<12} SERVING"]
     for r in rows:
         state = "busy" if r["busy"] or r["free"] == 0 else "idle"
         if r.get("queued"):
@@ -396,8 +397,9 @@ def table(rows: Sequence[dict[str, Any]]) -> str:
         if r.get("paused"):
             state = "paused"
         serving = ", ".join(r["serving"]) or "-"
+        heard = ",".join(r.get("speech") or []) or "-"
         lines.append(f"{r['name']:<16} {r['base_url']:<28} {r['room']:<16} {state:<12} "
-                     f"{running_code(r):<12} {updating(r):<12} {serving}")
+                     f"{running_code(r):<12} {updating(r):<12} {heard:<12} {serving}")
     held = [r for r in rows if r.get("paused")]
     if held:
         lines.append("")

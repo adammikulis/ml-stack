@@ -410,6 +410,50 @@ class TestTheLibraryFunctions:
             say("hello")
 
 
+class TestWhatThisMachineHears:
+    """`working` is what the fleet beacon carries, so a peer with a microphone can be
+    picked out of a listing."""
+
+    @pytest.fixture(autouse=True)
+    def _unprobed(self):
+        from ml_stack.speech.service import _working
+
+        _working.cache_clear()
+        yield
+        _working.cache_clear()
+
+    def test_it_names_every_protocol_with_a_provider_that_probes(self, registered):
+        from ml_stack.speech.service import working
+
+        assert working() == ["asr", "tts", "vad"]
+
+    def test_a_protocol_nothing_answers_for_is_left_out(self, monkeypatch, registered):
+        from ml_stack import speech as package
+        from ml_stack.speech import Registry
+        from ml_stack.speech.service import working
+
+        broken: Registry = Registry(kind="asr")
+        broken.register("broken", lambda: FakeASR("broken", fail_on="probe"))
+        monkeypatch.setattr(package, "ASR", broken)
+        assert working() == ["tts", "vad"]
+
+    def test_the_probe_runs_once_a_process(self, monkeypatch, registered):
+        """A probe imports faster-whisper and transformers where they are installed --
+        2.0s and ~230 MB measured here -- and the beacon refreshes every ten seconds."""
+        from ml_stack.speech import service
+
+        asked = []
+        real = service.providers
+
+        def counted() -> dict:
+            asked.append(1)
+            return real()
+
+        monkeypatch.setattr(service, "providers", counted)
+        assert service.working() == service.working() == ["asr", "tts", "vad"]
+        assert asked == [1]
+
+
 class TestTheDefaultRegistrations:
     def test_every_engine_that_needs_no_arguments_is_a_candidate(self, monkeypatch):
         from ml_stack import speech as package

@@ -433,12 +433,14 @@ worth taking, in this order:
 
 ## Speech
 
-- [ ] **The beacon does not say which machines can hear.** `refresh(b)` inside
-  `fleet/daemon.py::serve_forever` fills `b.device` with `serving` and `models`;
-  `"speech": [names that probe ok]` beside them would let `ml-stack-fleet status` and the
-  cluster view show which peer to send a recording to, and would make
-  `Peer.find_one(require="speech")` work. `ml_stack.speech.service.providers()` already
-  returns exactly that list. Left out because another branch was editing `serve_forever`.
+- [ ] **A daemon probes for speech providers once, when it starts.** `serve_forever`
+  runs `speech.service.working()` in a thread of its own and the beacon carries what it
+  found, so a provider installed afterwards -- ffmpeg, a whisper model, torch -- is not
+  advertised until that daemon restarts. The probe costs what importing faster-whisper
+  and transformers costs: 2.0s and ~230 MB resident, measured 2026-09-10, paid by every
+  daemon on a machine that has them. A frozen daemon has neither, so it probes in
+  milliseconds and advertises `tts` and `vad`. Both go away if the probe runs somewhere
+  that is not the daemon's own process.
 - [ ] **Nothing streams.** `StreamingASR` in `speech/protocols.py` is a protocol no
   provider implements, and `POST /speech/transcribe` takes one whole file. A push-to-talk
   button wants partial text while the person is still speaking: a provider that yields

@@ -352,6 +352,28 @@ def test_find_one_says_why_when_no_peer_matches(traind):
                                timeout_s=3.0, port=disco_port)
 
 
+def test_a_daemon_that_can_hear_is_found_by_asking_for_speech(traind):
+    """The energy VAD needs no model and no dependency, so every machine answers for at
+    least one protocol; the beacon says which, and `require=` picks on it. The registries
+    this process holds are the suite's empty ones; the daemon is a real process with its
+    own, probed in a thread of its own once it is up."""
+    keyfile, disco_port, http_port, log = traind
+    deadline = time.time() + 30
+    while True:
+        try:
+            peer = Peer.find_one(require="speech", cluster_key_path=keyfile,
+                                 timeout_s=3.0, port=disco_port)
+            break
+        except DiscoveryError as exc:
+            if time.time() > deadline:
+                pytest.fail(f"{exc}\n--- traind said ---\n"
+                            f"{log.read_text(errors='replace')}")
+            time.sleep(0.5)
+    assert peer.beacon.port == http_port
+    assert "vad" in peer.beacon.device["speech"]
+    assert "vad" in peer.health()["speech"]
+
+
 def test_discovery_without_a_key_is_an_error_not_an_empty_list(tmp_path):
     """Silence and 'you have no key' are different facts and must read that way."""
     with pytest.raises(DiscoveryError, match="no cluster key"):
