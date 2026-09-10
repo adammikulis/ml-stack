@@ -323,11 +323,14 @@ def parser() -> argparse.ArgumentParser:
                     help="context of the one slot a --model is served with -- extraction "
                          "reads one unit at a time and never splits the GPU (default: "
                          "%(default)s)")
+    ap.add_argument("--embed", action=argparse.BooleanOptionalAction, default=True,
+                    help="embed the store when a read run finishes, so it answers by "
+                         "meaning as well as by words; --no-embed leaves it to `embed`")
     ap.add_argument("--embed-url", default="", metavar="URL",
-                    help="with embed: a server that embeds, so the store gets a vector "
+                    help="a server that embeds, so the store gets a vector "
                          "index a search can vote with")
     ap.add_argument("--embed-model", default="", metavar="M",
-                    help="with embed: the model that embeds (default: %(default)s)")
+                    help="the model that embeds (default: %(default)s)")
     ap.add_argument("--smooth", type=int, default=0, metavar="N",
                     help="with embed: spread each vector over N hops of neighbours "
                          "afterwards, so a node with no text of its own is still findable "

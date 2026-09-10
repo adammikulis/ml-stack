@@ -1059,3 +1059,19 @@ def test_up_draft_kv_reaches_the_spec_as_the_heads_own_cache(tmp_path, monkeypat
         cli.main(["up", str(model), "--draft", str(head), "--port", "1"])
     assert seen["spec"].spec_draft_type_k == ""
     assert seen["spec"].spec_draft_type_v == ""
+
+
+class TestTheMeasuredShapeIsTheDefault:
+    """`up` serves a model in the shape that measured best unless told not to."""
+
+    def test_profile_is_on_without_being_asked_for(self):
+        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf"])
+        assert args.profile is True
+
+    def test_no_profile_serves_it_bare(self):
+        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--no-profile"])
+        assert args.profile is False
+
+    def test_naming_a_workload_is_enough_to_get_that_workloads_shape(self):
+        args = cli.COMMANDS.parser().parse_args(["up", "a-model.gguf", "--for", "ingest"])
+        assert (args.profile, args.workload) == (True, "ingest")

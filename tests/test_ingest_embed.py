@@ -122,3 +122,68 @@ def test_embed_raises_on_a_dimension_mismatch(server):
         {"data": [{"embedding": [1.0, 2.0, 3.0]}]}))
     with pytest.raises(EmbeddingError):
         embed(["hello"], base_url=instance.base_url, expect_dim=2)
+
+
+class TestAReadRunEmbedsWhatItRead:
+    """A store nobody embedded searches by words alone, silently -- so a read run embeds."""
+
+    def args(self, out, **over):
+        import argparse
+
+        said = {"out": str(out), "embed": True, "embed_url": "", "embed_model": "",
+                "smooth": 0, **over}
+        return argparse.Namespace(**said)
+
+    def test_it_embeds_when_the_read_finishes(self, tmp_path, monkeypatch):
+        from ml_stack.ingest import run
+
+        asked = {}
+
+        def note(out, *, base_url, model, smooth_hops, log):
+            asked.update(out=str(out), base_url=base_url, model=model)
+            return 7
+
+        monkeypatch.setattr("ml_stack.ingest.run.embed_store", note)
+        run._embedded(self.args(tmp_path / "s.ladybug"))
+        assert asked["base_url"] == run.EMBED_URL
+        assert asked["model"] == "embed"
+
+    def test_no_embed_leaves_it_to_the_embed_command(self, tmp_path, monkeypatch):
+        from ml_stack.ingest import run
+
+        def never(*a, **k):
+            raise AssertionError("--no-embed still embedded")
+
+        monkeypatch.setattr("ml_stack.ingest.run.embed_store", never)
+        run._embedded(self.args(tmp_path / "s.ladybug", embed=False))
+
+    def test_an_embedder_that_cannot_be_reached_says_how_to_finish_later(
+            self, tmp_path, monkeypatch, capsys):
+        from ml_stack.ingest import run
+
+        def refuse(*a, **k):
+            raise ConnectionError("nothing is serving on 8081")
+
+        monkeypatch.setattr("ml_stack.ingest.run.embed_store", refuse)
+        run._embedded(self.args(tmp_path / "s.ladybug"))
+        said = capsys.readouterr().err
+        assert "read, not embedded" in said
+        assert "ml-stack-ingest embed --out" in said
+
+    def test_the_url_and_the_model_asked_for_win(self, tmp_path, monkeypatch):
+        from ml_stack.ingest import run
+
+        asked = {}
+        monkeypatch.setattr("ml_stack.ingest.run.embed_store",
+                            lambda out, **kw: asked.update(kw) or 1)
+        run._embedded(self.args(tmp_path / "s.ladybug", embed_url="http://127.0.0.1:9",
+                                embed_model="a-embedder"))
+        assert asked["base_url"] == "http://127.0.0.1:9"
+        assert asked["model"] == "a-embedder"
+
+
+def test_embedding_is_on_unless_the_command_line_says_otherwise():
+    from ml_stack.ingest.cli import parser
+
+    assert parser().parse_args(["doc.pdf"]).embed is True
+    assert parser().parse_args(["doc.pdf", "--no-embed"]).embed is False

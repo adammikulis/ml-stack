@@ -355,9 +355,17 @@ def test_a_context_that_was_given_wins_over_the_whole_measured_cache(leases, tmp
     assert leases[0].context == 16384 and leases[0].parallel == 1
 
 
-def test_up_without_the_flag_reads_no_profile_at_all(leases, tmp_path):
+def test_up_reads_the_profile_without_being_asked_to(leases, tmp_path):
     add(measured(mmproj=""))
     assert serve_cli.main(upped(root=tmp_path)) == 0
+
+    spec = leases[0]
+    assert spec.draft is not None and spec.extra_args != ()
+
+
+def test_no_profile_serves_the_model_bare(leases, tmp_path):
+    add(measured(mmproj=""))
+    assert serve_cli.main(upped("--no-profile", root=tmp_path)) == 0
 
     spec = leases[0]
     assert spec.cache_type_k == "q8_0" and spec.draft is None and spec.extra_args == ()

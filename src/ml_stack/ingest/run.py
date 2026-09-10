@@ -20,6 +20,7 @@ from ml_stack.client.counters import (
     survival_lines,
 )
 from ml_stack.home import expand
+from ml_stack.ingest.embed import embed_store
 from ml_stack.ingest.extract import schema
 from ml_stack.ingest.fold import fold_into
 from ml_stack.ingest.judge import run_record, write_run
@@ -30,7 +31,10 @@ from ml_stack.log import say, warn
 from ml_stack.serve.profile import INGEST
 from ml_stack.sources.html import Marks
 
-__all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit", "reader_for"]
+__all__ = ["EMBED_URL", "FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit", "reader_for"]
+
+EMBED_URL = "http://127.0.0.1:8081"
+"""Where an embedding server is looked for when --embed-url does not say."""
 
 
 FOLD_EVERY = 25
@@ -330,7 +334,32 @@ def _read_run(args: Any) -> int:
     if stopped:
         say("stopped: what was read is folded into the store; "
             f"the same command with --resume reads on ({args.out})")
+    else:
+        _embedded(args)
     return code
+
+
+def _embedded(args: Any) -> None:
+    """Embed what was just read, so the store answers by meaning and not only by words.
+
+    A store nobody embedded has no vector index, and `graph.search.hybrid` then votes on
+    words alone while `store.similar` answers every question with silence. Skipped by
+    ``--no-embed``; an embedder that cannot be reached is said, with the command that
+    finishes the job later.
+    """
+    if not getattr(args, "embed", True) or not args.out:
+        return
+    base = str(getattr(args, "embed_url", "") or EMBED_URL)
+    model = str(getattr(args, "embed_model", "") or "embed")
+    try:
+        written = embed_store(args.out, base_url=base, model=model,
+                              smooth_hops=int(getattr(args, "smooth", 0) or 0), log=None)
+    except (OSError, ValueError, RuntimeError) as why:
+        warn(f"read, not embedded: {type(why).__name__}: {why}")
+        warn(f"  the store answers by words alone until: ml-stack-ingest embed --out "
+             f"{args.out} --embed-url {base} --embed-model {model}")
+        return
+    say(f"  embedded {written} node(s) through {base}")
 
 
 @contextmanager

@@ -390,11 +390,12 @@ def _asked_spec(args: argparse.Namespace, model: str, extra: tuple[str, ...]) ->
              help="how many tokens a turn may think for before it is made to answer; 0 "
                   "turns the thinking off. A ceiling on n_predict cuts the answer instead, "
                   "which is the wrong end"),
-        flag("--profile", action="store_true",
+        flag("--profile", action=argparse.BooleanOptionalAction, default=True,
              help="fill every flag not given from this model's measured profile -- the "
                   "build, head, cache, thinking and llama-server flags that answered best "
                   "(`ml-stack-serve profile MODEL` prints it). A flag given wins over the "
-                  "record"),
+                  "record. --no-profile serves the model bare, at this command's own "
+                  "defaults rather than the ones that measured best"),
         flag("--for", dest="workload", default=ASK, choices=sorted(WORKLOADS),
              metavar="WORKLOAD",
              help=f"which workload the profile is for: "
