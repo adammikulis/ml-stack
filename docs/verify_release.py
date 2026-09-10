@@ -320,8 +320,8 @@ def _():
 
 @check("Training", "the two array backends compute the same thing")
 def _():
-    from ml_stack.train.backend import available, get_backend
-    from ml_stack.train.backend.parity import CASES, check_all
+    from ml_stack.backend import available, get_backend
+    from ml_stack.train.parity import CASES, check_all
     if sorted(available()) != ["mlx", "torch"]:
         return f"only {available()} here, so there is nothing to compare"
     results = check_all(get_backend("torch"), get_backend("mlx"))

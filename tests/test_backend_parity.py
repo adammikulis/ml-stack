@@ -15,9 +15,9 @@ from ml_stack.testing import (
     run_pair,
     torch_grad_norms,
 )
-from ml_stack.train.backend import get_backend
-from ml_stack.train.backend.parity import ATOL, CASES, check_all, check_op, table
-from ml_stack.train.backend.ops import ArrayOps
+from ml_stack.backend import get_backend
+from ml_stack.train.parity import ATOL, CASES, check_all, check_op, table
+from ml_stack.backend.ops import ArrayOps
 from ml_stack.train.step import step_for
 
 STEP_ATOL = 1e-5
@@ -83,7 +83,7 @@ class Stub:
 
 def test_a_disagreeing_operation_is_reported_not_raised(monkeypatch):
     """The command prints a table rather than stopping at the first failure."""
-    from ml_stack.train.backend import parity
+    from ml_stack.train import parity
 
     monkeypatch.setitem(parity.CASES, "invented", lambda b, o: b.value)
     result = parity.check_op("invented", Stub("torch", np.zeros(2)), Stub("mlx", np.ones(2)))
@@ -95,7 +95,7 @@ def test_a_disagreeing_operation_is_reported_not_raised(monkeypatch):
 
 
 def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
-    from ml_stack.train.backend import parity
+    from ml_stack.train import parity
 
     monkeypatch.setitem(parity.CASES, "explodes", lambda b, o: 1 / 0)
     result = parity.check_op("explodes", Stub("torch", None), Stub("mlx", None))
@@ -105,7 +105,7 @@ def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
 
 
 def test_a_serving_mismatch_is_a_failure(monkeypatch):
-    from ml_stack.train.backend import parity
+    from ml_stack.train import parity
 
     monkeypatch.setitem(parity.CASES, "reshaped", lambda b, o: b.value)
     result = parity.check_op("reshaped", Stub("torch", np.zeros((2, 3))),
@@ -279,7 +279,7 @@ def test_the_command_prints_a_row_per_operation_and_exits_zero():
 
 @needs_both
 def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
-    from ml_stack.train.backend import parity as checks
+    from ml_stack.train import parity as checks
     from ml_stack.train.run import parity
 
     monkeypatch.setitem(checks.CASES, "invented",

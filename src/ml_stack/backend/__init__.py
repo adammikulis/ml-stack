@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from ml_stack.train.backend.determinism import SeedReport, set_seeds
-from ml_stack.train.backend.device import (
+from ml_stack.backend.determinism import SeedReport, set_seeds
+from ml_stack.backend.device import (
     DeviceProfile,
     Vendor,
     detect_device,
     resolve_torch_device,
 )
-from ml_stack.train.backend.ops import ArrayBackend, ArrayOps, bind_device
-from ml_stack.train.backend.registry import (
+from ml_stack.backend.ops import ArrayBackend, ArrayOps, bind_device
+from ml_stack.backend.registry import (
     BACKENDS,
     REGISTRY_GROUP,
-    backends,
-    register,
     BackendUnavailable,
     available,
+    backends,
     detect_backend,
     get_backend,
     mlx_backend,
+    register,
     torch_backend,
 )
 

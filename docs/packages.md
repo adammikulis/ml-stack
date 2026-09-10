@@ -21,7 +21,7 @@
 | `ml_stack.web` | Search, read and screenshot the web as tools, refused against private addresses |
 | `ml_stack.redact` | Reading a file for a real person's details — the hook's reader and `ml-stack-audit` |
 | `ml_stack.train` | Atomic checkpoints, schedules, guards, metrics, leak-safe splits, tokenizer fertility |
-| `ml_stack.train.backend` | One array API over MLX and PyTorch, so math is written once |
+| `ml_stack.backend` | One array API over MLX and PyTorch, so math is written once |
 | `ml_stack.testing` | Cross-backend numerical parity harness, behind `ml-stack-train-run parity`, and the fakes the suite shares |
 
 Everything above ships in one package. The extras carry what a module needs beyond the

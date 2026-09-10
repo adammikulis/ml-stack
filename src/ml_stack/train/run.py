@@ -90,7 +90,7 @@ def parity(*, say: Callable[[str], None] = say, first: str = "torch",
     Prints one row per operation with the largest absolute difference between the two,
     and returns 1 if any of them disagree by more than the tolerance.
     """
-    from ml_stack.train.backend.parity import report
+    from ml_stack.train.parity import report
 
     return report(say=say, first=first, second=second)
 

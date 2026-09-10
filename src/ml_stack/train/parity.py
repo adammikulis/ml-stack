@@ -8,9 +8,9 @@ from typing import Any
 
 import numpy as np
 
+from ml_stack.backend.registry import BackendUnavailable, get_backend
 from ml_stack.log import say
 from ml_stack.testing.parity import assert_forward_parity, inputs
-from ml_stack.train.backend.registry import BackendUnavailable, get_backend
 
 Tensor = Any
 

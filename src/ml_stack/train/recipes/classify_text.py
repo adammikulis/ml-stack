@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ml_stack.train.backend import detect_backend
+from ml_stack.backend import detect_backend
 from ml_stack.train.holdout import stratified
 from ml_stack.train.recipes import Built
 from ml_stack.train.recipes.data import class_batches, read_labelled

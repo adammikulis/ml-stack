@@ -22,7 +22,7 @@ from ml_stack import home
 from ml_stack.bench.keep import _commit
 from ml_stack.bench.record import Measured, Spread
 from ml_stack.log import say, warn
-from ml_stack.train.backend import detect_backend, set_seeds
+from ml_stack.backend import detect_backend, set_seeds
 
 __all__ = ["KIND", "Suite", "busy_pct", "file_name", "known", "lock_path",
            "peak_memory_bytes", "register", "registered", "run", "said", "suite_lock"]
@@ -188,7 +188,7 @@ def run(name: str, *, backend: str = "", seeds: Sequence[int] = (0, 1, 2),
         wait: bool = True, lock: Path | str | None = None, **arguments: Any) -> Measured:
     """Run one suite on one backend over ``seeds``, and write the result after each one.
 
-    ``backend`` is a name `ml_stack.train.backend` knows; left out, the detected default.
+    ``backend`` is a name `ml_stack.backend` knows; left out, the detected default.
     ``arguments`` reach the suite's own function. ``lock`` is the file runs take turns on,
     `lock_path` unless said. Returns the record; a seed that raised is recorded in
     ``failures`` and left out of every mean rather than averaged away.
