@@ -416,16 +416,13 @@ below is `bench/run.py` (2,019) under the commands; the rest, largest first:
   `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still
   sits in one file, so a reader looking for what covers `looking.py` has to search for it.
   Split it the way the module was, one file per module, moving whole test classes.
-- [ ] **`local-imports` went 630 -> 636 when `graph/ask.py` became five modules.** Four call
-  sites defer their import of it -- `bench/measure.py:asking`, `ingest/ask.py:ask`,
-  `graph/serve.py:asker` and `world/simulate.py:ModelWriter.__call__` -- and each now needs
-  two or four lines where it needed one. Whether any of them can import at module scope is
-  the question: `world.simulate` cannot while `graph.page` reaches into `world`, and the
-  other three are worth trying one at a time, since the gate counts a deferred import as a
-  hidden cycle.
-- [ ] **`scripts/hooks/pre-push` tells an agent to do what `CLAUDE.md` forbids.** It says to
-  land a branch into local `main` and stop there; `main` is the release branch and work
-  lands on the development branch. One line.
+- [ ] **Four callers defer the modules `graph/ask.py` became, and it is not clear any of
+  them has to.** `bench/measure.py:asking` defers `graph.conversation`, `graph.looking`
+  and `graph.search`; `ingest/ask.py:ask`, `graph/serve.py:asker` and
+  `world/simulate.py:ModelWriter.__call__` defer their own. Only `world.simulate` has a
+  cycle to avoid, while `graph.page` reaches into `world`. The other three are paying for
+  import time -- `graph` pulls numpy -- so measure what module scope costs `ml-stack-bench
+  --help` before deciding, and hoist the ones that cost nothing.
 - [ ] **A daemon probes for speech providers once, when it starts.** `serve_forever`
   runs `speech.service.working()` in a thread of its own and the beacon carries what it
   found, so a provider installed afterwards -- ffmpeg, a whisper model, torch -- is not

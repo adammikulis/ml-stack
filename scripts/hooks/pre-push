@@ -10,7 +10,9 @@ A push is the repository owner's to make. release-please reads the commit subjec
 `main`, so pushing moves the release pull request, and a local `main` that is ahead
 publishes every commit on it at once.
 
-Land your branch into local `main` and stop there. Say in your report that it is unpushed.
+Land your branch into the development branch the primary checkout is on -- `git branch
+--show-current` there says which -- and stop. Never into `main`. Say in your report that
+it is unpushed.
 
 To push on purpose:  ML_STACK_PUSH=yes git push
 WHY

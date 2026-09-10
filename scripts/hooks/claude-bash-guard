@@ -68,9 +68,9 @@ REFUSE = [
      "killing the process leaves the lease behind and the next `up` refuses."),
     (r"(^|[;&|(]\s*)git\s+push\b",
      "A push is Adam's to make, not an agent's. release-please reads the subjects on "
-     "`main`, so a push moves the release PR, and a repository that is 179 commits behind "
-     "goes public in one command. Land your branch into local `main` and stop there; say in "
-     "your report that it is unpushed."),
+     "`main`, so a push moves the release PR and publishes every commit on the branch at "
+     "once. Land your branch into the development branch the primary checkout is on, never "
+     "into `main`; say in your report that it is unpushed."),
     (r"(^|[;&|]\s*|\benv\s+)SKIP_NAME_CHECK=1",
      "SKIP_NAME_CHECK is a person's to set, not an agent's. The hook is the last thing "
      "between a real community and a public repository. If it flagged an invented name, add "
