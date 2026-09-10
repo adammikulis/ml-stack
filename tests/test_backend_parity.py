@@ -11,6 +11,7 @@ from ml_stack.testing import (
     inputs,
     mlx_grad_norms,
     needs_both,
+    needs_torch,
     run_pair,
     torch_grad_norms,
 )
@@ -292,6 +293,7 @@ def test_the_command_exits_one_when_an_operation_disagrees(monkeypatch):
     assert "disagreeing: invented" in printed
 
 
+@needs_torch
 def test_the_command_says_so_when_a_backend_is_missing():
     """Naming a backend that cannot be built here exits 2 and says which."""
     from ml_stack.train.run import parity

@@ -22,7 +22,7 @@ from ml_stack.graph import (
     resolvent_sweep,
     topological_order,
 )
-from ml_stack.testing import assert_forward_parity, needs_both
+from ml_stack.testing import assert_forward_parity, needs_a_backend, needs_both
 
 BACKENDS = available()
 each_backend = pytest.mark.parametrize("name", BACKENDS)
@@ -41,6 +41,7 @@ def _identity(backend, n: int):
 
 
 class TestGraph:
+    @needs_a_backend
     def test_edge_arrays_must_agree_in_length(self):
         backend = get_backend()
         ops = backend.ops
@@ -51,6 +52,7 @@ class TestGraph:
                 dst=ops.array([1], dtype=ops.int32),
             )
 
+    @needs_a_backend
     def test_weights_must_match_the_edge_count(self):
         backend = get_backend()
         ops = backend.ops
@@ -62,6 +64,7 @@ class TestGraph:
                 w=ops.array([1.0], dtype=ops.float32),
             )
 
+    @needs_a_backend
     def test_negative_node_count_is_rejected(self):
         backend = get_backend()
         ops = backend.ops
@@ -69,6 +72,7 @@ class TestGraph:
             Graph(num_nodes=-1, src=ops.array([], dtype=ops.int32),
                   dst=ops.array([], dtype=ops.int32))
 
+    @needs_a_backend
     def test_num_edges(self):
         assert Graph.from_edges(4, PATH).num_edges == 3
 
@@ -80,6 +84,7 @@ class TestGraph:
         # The point of the escape hatch: real algorithms, not reimplemented ones.
         assert nx.shortest_path_length(graph, 0, 3) == 3
 
+    @needs_a_backend
     def test_isolated_nodes_survive_the_networkx_conversion(self):
         """A node with no edges is still a node. Building the graph from the edge list
         alone would silently drop it and renumber everything after it."""
@@ -88,6 +93,7 @@ class TestGraph:
 
 
 class TestBatching:
+    @needs_a_backend
     def test_edge_indices_are_offset_per_graph(self):
         batched = batch_graphs([Graph.from_edges(3, [(0, 1)]), Graph.from_edges(2, [(0, 1)])])
         assert batched.num_nodes == 5
@@ -95,6 +101,7 @@ class TestBatching:
         assert np.asarray(batched.src).tolist() == [0, 3]
         assert np.asarray(batched.dst).tolist() == [1, 4]
 
+    @needs_a_backend
     def test_graph_ids_label_every_node(self):
         batched = batch_graphs([Graph.from_edges(3, [(0, 1)]), Graph.from_edges(2, [(0, 1)])])
         assert np.asarray(batched.graph_ids).tolist() == [0, 0, 0, 1, 1]
@@ -161,6 +168,7 @@ class TestMessagePassing:
         out = np.asarray(normalize_by_degree(backend, graph, _identity(backend, 5)))
         assert np.isfinite(out).all()
 
+    @needs_a_backend
     def test_unknown_reduction_is_rejected(self):
         backend = get_backend()
         graph = Graph.from_edges(4, PATH, backend=backend)
@@ -169,21 +177,25 @@ class TestMessagePassing:
 
 
 class TestDAG:
+    @needs_a_backend
     def test_topological_order_of_a_path(self):
         graph = Graph.from_edges(4, PATH)
         assert topological_order(4, graph.src, graph.dst) == [0, 1, 2, 3]
 
+    @needs_a_backend
     def test_a_cycle_returns_none_rather_than_raising(self):
         """Callers routinely want to *ask* whether a graph is a DAG. That is a question,
         not an error."""
         graph = Graph.from_edges(3, [(0, 1), (1, 2), (2, 0)])
         assert topological_order(3, graph.src, graph.dst) is None
 
+    @needs_a_backend
     def test_require_raises_on_a_cycle(self):
         graph = Graph.from_edges(3, [(0, 1), (1, 2), (2, 0)])
         with pytest.raises(NotADAG):
             require_topological_order(graph)
 
+    @needs_a_backend
     def test_the_order_is_a_valid_one(self):
         graph = Graph.from_edges(4, DIAMOND)
         order = require_topological_order(graph)
@@ -191,6 +203,7 @@ class TestDAG:
         for u, v in DIAMOND:
             assert position[u] < position[v], f"edge {u}->{v} violates the order"
 
+    @needs_a_backend
     def test_the_cache_returns_a_copy_not_the_stored_list(self):
         """A caller mutating the returned list would corrupt every later lookup."""
         graph = Graph.from_edges(4, PATH)
@@ -233,6 +246,7 @@ class TestDAG:
         out = np.asarray(resolvent_sweep(backend, graph, _identity(backend, 4)))
         assert np.allclose(out, expected, atol=1e-5)
 
+    @needs_a_backend
     def test_decompose_produces_dags_in_both_directions(self):
         graph = Graph.from_edges(4, PATH)
         dags = decompose_to_dags(4, graph.src, graph.dst)
@@ -240,6 +254,7 @@ class TestDAG:
         forward, backward = dags
         assert forward[0] == backward[1] and forward[1] == backward[0]
 
+    @needs_a_backend
     def test_decompose_is_stable_across_calls(self):
         """Two backends must produce the same decomposition, or a parity test fails for a
         reason that has nothing to do with the arithmetic."""
@@ -247,10 +262,12 @@ class TestDAG:
         first = decompose_to_dags(6, graph.src, graph.dst)
         assert decompose_to_dags(6, graph.src, graph.dst) == first
 
+    @needs_a_backend
     def test_four_directions_adds_a_second_tree(self):
         graph = Graph.from_edges(5, [(0, 1), (1, 2), (2, 3), (3, 4)])
         assert len(decompose_to_dags(5, graph.src, graph.dst, directions=4)) == 4
 
+    @needs_a_backend
     def test_every_decomposed_direction_is_actually_a_dag(self):
         graph = Graph.from_edges(6, [(0, 1), (1, 2), (2, 0), (2, 3), (3, 4), (4, 5)])
         for src, dst in decompose_to_dags(6, graph.src, graph.dst):

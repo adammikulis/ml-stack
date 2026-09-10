@@ -29,6 +29,7 @@ from ml_stack.testing.fakes import (
 from ml_stack.testing.markers import (
     HAVE_MLX,
     HAVE_TORCH,
+    needs_a_backend,
     needs_both,
     needs_mlx,
     needs_torch,
@@ -82,6 +83,7 @@ __all__ = [
     "metrics_text",
     "mirrors",
     "mlx_grad_norms",
+    "needs_a_backend",
     "needs_both",
     "needs_mlx",
     "needs_torch",

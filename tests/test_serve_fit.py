@@ -594,6 +594,7 @@ class TestDrawingIt:
     @pytest.mark.parametrize("suffix", [".png", ".svg"])
     def test_the_file_is_written_in_the_format_its_name_asks_for(self, tmp_path, suffix):
         """Mutation: hard-code png, and `--plot fit.svg` writes a png with an svg name."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         where = tmp_path / f"fit{suffix}"
         assert fit_mod.plot(self.rows(), where) == str(where)
         assert where.stat().st_size > 0
@@ -603,10 +604,12 @@ class TestDrawingIt:
     def test_a_format_nobody_can_draw_is_refused_by_name(self, tmp_path):
         """Before the figure is built, not inside savefig, so the message names the flag's
         own value rather than a matplotlib backend."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         with pytest.raises(ValueError, match="csv"):
             fit_mod.plot(self.rows(), tmp_path / "fit.csv")
 
     def test_nothing_measured_is_refused_rather_than_drawn_empty(self, tmp_path):
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         with pytest.raises(ValueError, match="no model has been measured"):
             fit_mod.plot([], tmp_path / "fit.png")
 
@@ -615,6 +618,7 @@ class TestDrawingIt:
         was served, so the label carries both. Mutation: label by model alone, and two
         measurements of one model become two indistinguishable lines.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         fit_mod.plot(self.rows(), tmp_path / "fit.png")
@@ -626,6 +630,7 @@ class TestDrawingIt:
                                                               monkeypatch):
         """Read off the figure itself rather than off the file: a record silently dropped
         from a panel is invisible in a png and obvious here."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -652,6 +657,7 @@ class TestDrawingIt:
         is read as what it is. Mutation: skip the record, and the reader cannot tell a model
         that was never measured from one this machine cannot hold.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -674,6 +680,7 @@ class TestDrawingIt:
         """110G solid, 24G dashed: the same models, two machines, one picture. Mutation:
         draw only the first room, and --room's repeatability means nothing.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -695,6 +702,7 @@ class TestDrawingIt:
     def test_the_title_names_the_machine_the_room_and_the_build(self, tmp_path,
                                                                 monkeypatch):
         """A chart with no machine on it is a chart nobody can check a year later."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         drawn: list = []
@@ -712,6 +720,7 @@ class TestDrawingIt:
         """`--at` is the whole reason the second panel is comparable: at 4k the small model
         holds more, at 128k the one with the cheap cache does. Mutation: hard-code 32768.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         seen: list = []
@@ -796,6 +805,7 @@ class TestTheCardsBehindIt:
         lines are what turn it into "and what would I need". Mutation: drop them, and a
         reader with a 24 GB card has to do the arithmetic themselves.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[24 * GIB])
@@ -810,6 +820,7 @@ class TestTheCardsBehindIt:
                                                                     monkeypatch):
         """Mutation: fit the axis to the lines alone, and the room line -- the thing the
         reader is looking for -- falls off the top."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (_left, right) = self.panels(tmp_path, monkeypatch, rooms=[96 * GIB])
@@ -821,6 +832,7 @@ class TestTheCardsBehindIt:
                                                                   monkeypatch):
         """"6.0G + 1.00G/user at 32k" -- the whole model in one line, which is what makes
         two models comparable at a glance. Mutation: label by model name alone."""
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
         _figure, (left, right) = self.panels(tmp_path, monkeypatch, at=32768)
@@ -847,6 +859,7 @@ class TestTheCommandDraws:
 
     def test_plot_writes_the_picture_and_says_where(self, tmp_path, monkeypatch, capsys,
                                                     _fit_files_in_tmp):
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         self.some_records(_fit_files_in_tmp)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
         where = tmp_path / "fit.png"
@@ -857,6 +870,7 @@ class TestTheCommandDraws:
 
     def test_open_shows_the_picture_with_the_desktops_opener(self, tmp_path, monkeypatch,
                                                             capsys, _fit_files_in_tmp):
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         self.some_records(_fit_files_in_tmp)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
         opened = []
@@ -909,6 +923,7 @@ class TestTheCommandDraws:
         moving both to a docs directory keeps the link. Mutation: write an absolute path,
         and the image is broken everywhere but this machine.
         """
+        pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         self.some_records(_fit_files_in_tmp)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
         page, picture = tmp_path / "fit.md", tmp_path / "fit.png"

@@ -675,6 +675,7 @@ class TestTorchStepTiedWeights:
         return TorchStep(model, torch.optim.SGD(model.parameters(), lr=0.1), loss)
 
     def test_a_tied_weight_is_named_once_and_safetensors_writes_it(self, tmp_path):
+        pytest.importorskip("safetensors", reason="ml-stack[train]")
         from safetensors.torch import load_file, save_file
 
         step = self.step_for(self.tied_module())
@@ -686,7 +687,8 @@ class TestTorchStepTiedWeights:
         assert set(load_file(str(tmp_path / "model.safetensors"))) == set(tensors)
 
     def test_a_resume_reties_the_name_the_checkpoint_left_out(self, tmp_path):
-        import torch
+        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
+        pytest.importorskip("safetensors", reason="ml-stack[train]")
         from safetensors.torch import load_file, save_file
 
         trained = self.tied_module()
@@ -714,7 +716,7 @@ class TestTorchStepTiedWeights:
             step.restore(tensors, None)
 
     def test_a_checkpoint_with_a_tensor_the_model_lacks_is_refused(self):
-        import torch
+        torch = pytest.importorskip("torch", reason="ml-stack[torch]")
 
         step = self.step_for(self.tied_module())
         tensors = {**step.parameters(), "extra": torch.zeros(1)}

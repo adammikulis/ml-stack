@@ -12,6 +12,7 @@ import pytest
 from conftest import json_reply
 from ml_stack.graph.store import GraphStore
 from ml_stack.graph.vectors import DOCUMENT, QUERY, embedded, remember
+from ml_stack.testing import needs_a_backend
 
 pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
 
@@ -196,6 +197,7 @@ def _cosine(one, other):
 
 
 class TestSmoothing:
+    @needs_a_backend
     def test_a_node_with_no_vector_ends_where_its_neighbours_mean(self):
         """Cyd wrote nothing; one hop leaves them pointing at the mean of Ada and Bea."""
         from ml_stack.graph.vectors import smooth
@@ -203,6 +205,7 @@ class TestSmoothing:
         spread = smooth(SMOOTHED, {"person:ada": [1.0, 0.0], "person:bea": [0.0, 1.0]}, hops=1)
         assert _cosine(spread["person:cyd"], [0.5, 0.5]) == pytest.approx(1.0, abs=1e-6)
 
+    @needs_a_backend
     def test_a_node_nothing_reaches_and_nothing_wrote_is_left_out(self):
         from ml_stack.graph.vectors import smooth
 
@@ -210,6 +213,7 @@ class TestSmoothing:
         assert "topic:robotics" not in spread
         assert set(spread) == {"person:ada", "person:bea", "person:cyd"}
 
+    @needs_a_backend
     def test_every_vector_comes_back_the_width_it_went_in_and_unit_long(self):
         from ml_stack.graph.vectors import smooth
 
@@ -226,6 +230,7 @@ class TestSmoothing:
 
 
 class TestSmoothingAStore:
+    @needs_a_backend
     def test_the_smoothed_vectors_round_trip_and_find_the_one_that_wrote_nothing(
             self, server, tmp_path):
         """Cyd is embedded by nobody and is still found by "who fixes machines"."""
@@ -246,6 +251,7 @@ class TestSmoothingAStore:
             near = [r["id"] for r in reader.similar([1.0, 0.0], model="gemma", limit=4)]
             assert "person:cyd" in near, near
 
+    @needs_a_backend
     def test_remember_can_spread_what_it_wrote_as_it_writes_it(self, server, tmp_path):
         instance = server(embeddings())
         path = tmp_path / "g.ladybug"

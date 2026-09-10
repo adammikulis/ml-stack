@@ -23,6 +23,10 @@ needs_mlx = pytest.mark.skipif(
     not HAVE_MLX,
     reason=_MLX_WHY or "mlx missing (it ships only for Apple silicon)",
 )
+needs_a_backend = pytest.mark.skipif(
+    not (HAVE_TORCH or HAVE_MLX),
+    reason="neither torch nor mlx is importable; install ml-stack[torch] or ml-stack[mlx]",
+)
 
 
 def needs_both(fn):

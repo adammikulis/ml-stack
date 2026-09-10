@@ -18,7 +18,13 @@ from ml_stack.train.backend import (
     set_seeds,
 )
 from ml_stack.train.backend.registry import reset
-from ml_stack.testing import assert_forward_parity, needs_both, needs_mlx, needs_torch
+from ml_stack.testing import (
+    assert_forward_parity,
+    needs_a_backend,
+    needs_both,
+    needs_mlx,
+    needs_torch,
+)
 
 BACKENDS = available()
 each_backend = pytest.mark.parametrize("name", BACKENDS)
@@ -33,6 +39,7 @@ def test_at_least_one_backend_is_available():
     assert BACKENDS
 
 
+@needs_a_backend
 def test_detect_returns_something_importable():
     assert detect_backend() in BACKENDS
 
