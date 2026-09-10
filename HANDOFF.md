@@ -469,12 +469,13 @@ worth taking, in this order:
     and (on Linux) webkit2gtk and runs the same build; the NSIS setup and the AppImage the
     bundler makes there are what `install.ps1` and `install.sh` now expect, and neither has
     run. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
-  - **`hub.room` pulls the whole graph library in.** `room()` imports `serve.limits`, which
-    runs `ml_stack/serve/__init__.py`, which imports `serve/serving.py`, which imports
-    `graph.asking` and so `graph/__init__.py` and `graph/topology.py`, which needs numpy.
-    The beacon calls `room()` every ten seconds. numpy is bundled into the frozen daemon to
-    get past it (11.7 MB to 15.5 MB); the fix is that a memory number should not reach the
-    tools layer.
+  - **The frozen daemon bundles numpy because `ml_stack.serve` reaches the graph.**
+    `packaging/ml-stack.spec` names `ml_stack.serve` as a hidden import, for the reclaim
+    watcher and the hosting routes; `ml_stack/serve/__init__.py` imports `serve/serving.py`,
+    which imports `graph.asking` and so `graph/__init__.py` and `graph/topology.py`, which
+    needs numpy. It costs 11.7 MB to 15.5 MB of bundle. It goes when `graph.asking` leaves
+    `serve/__init__.py`'s import chain, or when the spec names the `serve` modules the
+    daemon reaches instead of the package.
   - **Adam's call: what a person downloading it gets on macOS.** There is no Apple
     developer certificate and there is not going to be one, so `packaging/build.py`
     ad-hoc signs the app, which is enough to open it on the machine that built it. A file
@@ -559,23 +560,19 @@ worth taking, in this order:
 
 ## Layers
 
-- [ ] **Seventeen imports still cross the layers `tests/test_layers.py` sets out.** The
+- [ ] **Fourteen imports still cross the layers `tests/test_layers.py` sets out.** The
   layers are core, model, graph, machine, tools; a package may import downwards, and
   sideways only when the other package does not import it back. `KNOWN` in that file lists
   every edge that breaks it, and the test fails both on a new violation and on a `KNOWN`
-  entry that is no longer one, so the set only shrinks. Four are two-way cycles inside one
-  layer: `serve` <-> `fleet` (4 files one way, 7 the other), `serve` <-> `setup` (2 and 1),
-  `fleet` <-> `setup` (1 and 1), and `sources` <-> `world` (5 and 1, going when
-  `world.Message` moves down). Nine reach up a layer: `setup`, `fleet`, `ingest` and
-  `serve` into `bench` (1, 3, 2 and 4 files); `gguf`, `hub`, `graph` and `ingest` into
-  `serve` (1, 1, 3 and 2); and `graph.data`, `graph.tensors` and `graph.vectors` into
-  `train.backend.get_backend` for a device handle, where the ops that sit under both belong
-  below `graph` rather than in the tools layer. The
-  `graph` -> `serve` three are function-local reaches: `profile_for` in
-  `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`, `slot` and `held`
-  in `graph/serve.py`. The first goes when the profile store moves below `graph`; the other
-  two are a page and a request handler leasing a server, which is what the machine layer is
-  for.
+  entry that is no longer one, so the set only shrinks. Three are two-way cycles inside one
+  layer: `serve` <-> `fleet` (4 files one way, 7 the other), `serve` <-> `setup` (2 and 1)
+  and `fleet` <-> `setup` (1 and 1). Eight reach up a layer: `setup`, `fleet`, `ingest` and
+  `serve` into `bench` (1, 3, 2 and 4 files); and `gguf`, `hub`, `graph` and `ingest` into
+  `serve` (1, 1, 3 and 2). The `graph` -> `serve` three are function-local reaches:
+  `profile_for` in `graph/asking.py`, `serve` in `graph/requests.py`, and `Run`, `Shape`,
+  `slot` and `held` in `graph/serve.py`. The first goes when the profile store moves below
+  `graph`; the other two are a page and a request handler leasing a server, which is what
+  the machine layer is for.
 
 ## Finding a model
 
