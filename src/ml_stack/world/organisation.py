@@ -38,7 +38,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack.world import World
+from ml_stack.world import World, about
 from ml_stack.world.names import company_name, person_name, product_name, slug
 
 __all__ = ["KINDS", "SIZES", "UNIT_KIND", "load", "make", "role_catalogue", "summary"]
@@ -1224,11 +1224,10 @@ def load(where: str | Path) -> World:
     calendar_file = where / "calendar.json"
     calendar = json.loads(calendar_file.read_text(encoding="utf-8")) if calendar_file.exists() else []
     meta = (graph.get("meta") or {}).get("world") or {}
-    about_file = where / "world.json"
-    about = json.loads(about_file.read_text(encoding="utf-8")) if about_file.exists() else {}
-    people = [str(p) for p in about.get("people") or ()] or \
+    said = about.read(where)
+    people = [str(p) for p in said.get("people") or ()] or \
         [str(n["id"]) for n in graph.get("nodes") or () if n.get("kind") == "person"]
     return World(graph=graph, people=people, personas=personas, calendar=calendar,
-                 seed=int(about.get("seed", meta.get("seed", 0))),
-                 size=str(about.get("size") or meta.get("size") or "small"),
-                 kind=str(about.get("kind") or meta.get("kind") or "company"))
+                 seed=int(said.get("seed", meta.get("seed", 0))),
+                 size=str(said.get("size") or meta.get("size") or "small"),
+                 kind=str(said.get("kind") or meta.get("kind") or "company"))

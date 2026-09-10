@@ -66,6 +66,7 @@ from ml_stack.bench import (
     wants_smoke,
 )
 from ml_stack.log import say, warn
+from ml_stack.world import about
 
 __all__ = ["BUCKETS", "GUESS_SECONDS", "INSTRUCTIONS", "KIND", "MessageRow", "SAMPLE",
            "SMOKE_MESSAGES", "add_arguments", "as_extraction", "estimate", "extract_one",
@@ -157,7 +158,7 @@ def load_world(where: str | Path, *, days: int = DAYS) -> tuple[dict[str, Any], 
     if not talk.is_file():
         from ml_stack.world.simulate import run
 
-        seed = int((read_json(where / "world.json", {}) or {}).get("seed", 0) or 0)
+        seed = int(about.read(where).get("seed", 0) or 0)
         out = Path(tempfile.mkdtemp(prefix="ml-stack-extract-"))
         counts = run(where, out, days=days, mix=0.0, seed=seed)
         note = (f"{where} has no messages.jsonl; simulated {days} working days with the "

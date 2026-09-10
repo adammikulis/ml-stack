@@ -26,12 +26,16 @@ from typing import Any
 
 from ml_stack import jobs
 from ml_stack.contracts import recipe as _recipe
+from ml_stack.files import versioned, write_json
 from ml_stack.home import state
 from ml_stack.log import say, warn
 from ml_stack.train.recipes import build, known, validate
 from ml_stack.train.recipes.models import parameter_count
 from ml_stack.train.schedule import warmup_cosine
 from ml_stack.train.trainer import Trainer
+
+#: 1 -- the recipe, the base, the config, the data fingerprint and the run's numbers.
+MANIFEST_VERSION = 1
 
 ADAPTER_DIR = "adapter"
 MERGED_DIR = "merged"
@@ -193,10 +197,11 @@ def run(recipe_id: str, config: dict[str, Any], data: Path, out: Path,
     if dry:
         return result
     if not lora:
-        (out / "manifest.json").write_text(json.dumps(
+        write_json(out / "manifest.json", versioned(
             {"recipe": recipe_id, "base": built.config.get("base", ""), "config": config,
              "data": fingerprint(data),
-             **{k: v for k, v in result.items() if k != "recipe"}}, indent=2, default=str))
+             **{k: v for k, v in result.items() if k != "recipe"}}, MANIFEST_VERSION),
+            default=str)
     result["manifest"] = str(out / "manifest.json")
     return result
 
@@ -257,7 +262,7 @@ def _finish_lora(built: Any, config: dict[str, Any], data: Path, out: Path, *, r
                 "data": lora_mod.fingerprint(data), "lora": got,
                 "steps": report.steps, "final_loss": report.final_loss,
                 "best_metric": report.best_metric, "seconds": round(report.seconds, 1)}
-    (out / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str))
+    write_json(out / "manifest.json", versioned(manifest, MANIFEST_VERSION), default=str)
     talk(f"manifest: {out / 'manifest.json'}")
     return got
 

@@ -48,7 +48,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ml_stack.messages import Message
-from ml_stack.world import World
+from ml_stack.world import World, about
 from ml_stack.world.story import (DOWNWARD, ORG_KINDS, OUTCOMES, PEER, PLACE_KINDS,
                                   TOPIC_KINDS, UPWARD, calendar, facts_for, groups,
                                   people_of, place_of, slug)
@@ -1157,12 +1157,12 @@ def run(world_dir: str | Path, out_dir: str | Path, *, days: int, mix: float,
     if not isinstance(graph, Mapping):
         raise FileNotFoundError(f"no graph.json in {world_dir}")
     personas = read_json(world_dir / "personas.json", {}) or {}
-    about = read_json(world_dir / "world.json", {}) or {}
-    kind = str(about.get("kind") or (graph.get("meta") or {}).get("kind") or "company")
-    people = [str(p) for p in (about.get("people") or list(personas) or people_of(graph))]
+    said = about.read(world_dir)
+    kind = str(said.get("kind") or (graph.get("meta") or {}).get("kind") or "company")
+    people = [str(p) for p in (said.get("people") or list(personas) or people_of(graph))]
     world = World(graph=dict(graph), people=people, personas=dict(personas),
                   calendar=list(read_json(world_dir / "calendar.json", []) or []),
-                  seed=seed, size=str(about.get("size") or "small"), kind=kind)
+                  seed=seed, size=str(said.get("size") or "small"), kind=kind)
     rng = random.Random(seed)
     if not world.calendar:
         world.calendar = calendar(world, days, rng)

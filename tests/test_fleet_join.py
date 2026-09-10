@@ -903,3 +903,34 @@ class TestStatusSaysWhoIsPaused:
         finally:
             proc.terminate()
             proc.wait(timeout=30)
+
+
+class TestTheStartedRecord:
+    """`leave` stops the daemon by the pid this record holds, so a reader has to be able to
+    tell which shape it is reading."""
+
+    def test_what_start_daemon_writes_says_which_shape_it_is(self, tmp_path, monkeypatch):
+        from ml_stack.files import version_of
+
+        class Ran:
+            pid, command, log, started = 4242, ["a", "b"], tmp_path / "traind.log", "now"
+
+        monkeypatch.setattr(joining, "detach", lambda *a, **k: Ran())
+        assert joining.start_daemon(9999, tmp_path) == 4242
+        record = json.loads(joining.started_file(tmp_path).read_text(encoding="utf-8"))
+        assert version_of(record) == joining.STARTED_VERSION
+        assert joining._started_pid(tmp_path) == 4242
+
+    def test_a_record_written_before_the_key_existed_is_still_read(self, tmp_path):
+        joining.started_file(tmp_path).write_text(json.dumps({"pid": 4242, "argv": []}))
+        assert joining._started_pid(tmp_path) == 4242
+
+    def test_a_record_from_a_newer_ml_stack_is_left_alone(self, tmp_path):
+        joining.started_file(tmp_path).write_text(
+            json.dumps({"version": joining.STARTED_VERSION + 1, "pid": 4242}))
+        assert joining._started_pid(tmp_path) is None
+
+    def test_no_record_and_an_unreadable_one_are_both_no_pid(self, tmp_path):
+        assert joining._started_pid(tmp_path) is None
+        joining.started_file(tmp_path).write_text("{not json")
+        assert joining._started_pid(tmp_path) is None

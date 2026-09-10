@@ -930,3 +930,33 @@ class TestCaches:
         monkeypatch.delenv("HF_HOME")
         assert Path.home() / ".cache" / "huggingface" / "hub" in default_roots(tmp_path)
 
+
+
+class TestTheResumeStamp:
+    """A resume sends ``If-Range`` from what this record holds, so reading one whose shape
+    is unknown would resume a download against the wrong validator."""
+
+    def test_a_stamp_round_trips_with_its_version(self, tmp_path):
+        from ml_stack.files import version_of
+        from ml_stack.fleet.models import STAMP_VERSION, _read_stamp, _write_stamp
+
+        stamp = tmp_path / "m.gguf.part.from"
+        _write_stamp(stamp, "http://x/y.gguf", {"ETag": "abc"})
+        assert version_of(json.loads(stamp.read_text())) == STAMP_VERSION
+        assert _read_stamp(stamp) == {"version": STAMP_VERSION, "url": "http://x/y.gguf",
+                                 "validator": "abc"}
+
+    def test_a_stamp_written_before_the_key_existed_is_still_read(self, tmp_path):
+        from ml_stack.fleet.models import _read_stamp
+
+        stamp = tmp_path / "m.gguf.part.from"
+        stamp.write_text(json.dumps({"url": "http://x/y.gguf", "validator": "abc"}))
+        assert _read_stamp(stamp)["url"] == "http://x/y.gguf"
+
+    def test_a_stamp_from_a_newer_ml_stack_is_not_resumed_against(self, tmp_path):
+        from ml_stack.fleet.models import STAMP_VERSION, _read_stamp
+
+        stamp = tmp_path / "m.gguf.part.from"
+        stamp.write_text(json.dumps({"version": STAMP_VERSION + 1, "url": "http://x/y.gguf",
+                                     "validator": "abc"}))
+        assert _read_stamp(stamp) == {}

@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from ml_stack.files import versioned, write_json
 from ml_stack.gguf.tools import require_converter, require_quantize
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_OUTTYPE = "f16"
 DEFAULT_QUANT = "Q8_0"
+
+#: 1 -- the file name, its outtype, its sha256 and its size.
+SIDECAR_VERSION = 1
 
 
 class ConversionError(RuntimeError):
@@ -57,14 +60,9 @@ def _describe(path: Path, outtype: str, *, write_sidecar: bool) -> ConversionRes
         path.with_suffix(path.suffix + ".sha256").write_text(
             f"{digest}  {path.name}\n", encoding="utf-8"
         )
-        path.with_suffix(path.suffix + ".json").write_text(
-            json.dumps(
-                {"file": path.name, "outtype": outtype,
-                 "sha256": digest, "size_bytes": result.size_bytes},
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
+        write_json(path.with_suffix(path.suffix + ".json"), versioned(
+            {"file": path.name, "outtype": outtype,
+             "sha256": digest, "size_bytes": result.size_bytes}, SIDECAR_VERSION))
     return result
 
 

@@ -341,6 +341,12 @@ class TestEndToEnd:
         assert manifest["lora"]["settings"]["targets"] == ["q_proj", "v_proj"]
         assert manifest["lora"]["gguf"] == str(gguf)
         assert manifest["steps"] == 20 and manifest["base"] == str(base)
+        # A later run is compared against this record; a reader has to be able to tell
+        # which shape it is reading.
+        from ml_stack.files import version_of
+        from ml_stack.train.run import MANIFEST_VERSION
+
+        assert version_of(manifest) == MANIFEST_VERSION
 
     def test_the_manifest_changes_when_the_data_does(self, dataset, tmp_path):
         data, _ = dataset

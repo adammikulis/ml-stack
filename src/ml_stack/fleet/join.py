@@ -20,11 +20,12 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import UNVERSIONED, read_json, version_of, versioned, write_json
 from ml_stack.http import ServerError, ServerUnreachable, json_body, request_bytes
 from ml_stack.jobs import detach
 from ml_stack.log import say, warn
@@ -88,6 +89,9 @@ __all__ = [
 
 DEFAULT_ROOT = "~/.ml-stack/traind"
 STARTED_FILE = "fleet-daemon.json"
+
+#: 1 -- pid, argv, log, started.
+STARTED_VERSION = 1
 """Under the root: the pid, log and argv of the daemon ``join`` started, so ``leave`` can
 stop it by pid rather than by name."""
 
@@ -200,9 +204,9 @@ def start_daemon(port: int, root: Path | str, name: str = "") -> int:
     root.mkdir(parents=True, exist_ok=True)
     argv = ["--port", str(port), "--root", str(root)] + (["--name", name] if name else [])
     ran = detach("ml_stack.fleet.daemon", argv, log=root / "traind.log")
-    started_file(root).write_text(json.dumps({
-        "pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
-        "started": ran.started}, indent=1), encoding="utf-8")
+    write_json(started_file(root), versioned(
+        {"pid": ran.pid, "argv": list(ran.command), "log": str(ran.log),
+         "started": ran.started}, STARTED_VERSION), indent=1)
     return ran.pid
 
 
@@ -226,10 +230,19 @@ def remember_track(root: Path | str, branch: str) -> str:
 
 
 def _started_pid(root: Path | str) -> int | None:
+    """The pid `start_daemon` recorded, or ``None`` when there is no usable record.
+
+    A record with no version key was written before the key existed and carries the same
+    ``pid``; one from a version this code does not know is left alone.
+    """
+    held = read_json(started_file(root), None)
+    if not isinstance(held, Mapping):
+        return None
+    if version_of(held) not in (UNVERSIONED, STARTED_VERSION):
+        return None
     try:
-        held = json.loads(started_file(root).read_text(encoding="utf-8"))
         return int(held["pid"])
-    except (OSError, ValueError, KeyError, TypeError):
+    except (KeyError, TypeError, ValueError):
         return None
 
 

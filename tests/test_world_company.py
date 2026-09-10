@@ -574,3 +574,45 @@ def test_a_large_world_is_made_in_under_ten_seconds(kind):
     assert took < 10, f"{kind} large took {took:.1f}s"
     assert len(world.people) == SIZES["large"]
     assert len(world.graph["edges"]) > 5 * SIZES["large"]
+
+
+class TestTheWorldRecord:
+    """`world.json` carries the seed a simulation is re-run from and the people list every
+    reader trusts, so which shape it is has to be readable off the file."""
+
+    def test_what_make_writes_says_which_shape_it_is(self, tmp_path):
+        from ml_stack.files import version_of
+        from ml_stack.world import about
+        from ml_stack.world.cli import main
+
+        out = tmp_path / "w"
+        assert main(["make", "--kind", "university", "--seed", "2", "--out", str(out)]) == 0
+        record = json.loads((out / "world.json").read_text())
+        assert version_of(record) == about.VERSION
+        assert about.read(out)["seed"] == 2
+
+    def test_a_world_written_before_the_key_existed_is_still_read(self, tmp_path):
+        from ml_stack.files import UNVERSIONED, version_of
+        from ml_stack.world import about
+        from ml_stack.world.cli import main
+
+        out = tmp_path / "w"
+        assert main(["make", "--kind", "university", "--seed", "2", "--out", str(out)]) == 0
+        record = json.loads((out / "world.json").read_text())
+        (out / "world.json").write_text(json.dumps(
+            {k: v for k, v in record.items() if k != "version"}))
+
+        assert version_of(about.read(out)) == UNVERSIONED
+        back = load(out)
+        assert back.kind == "university" and back.seed == 2
+        assert back.people == make("university", "small", 2).people
+
+    def test_a_world_from_a_newer_ml_stack_says_so_rather_than_reading_as_empty(self, tmp_path):
+        from ml_stack.world import about
+
+        out = tmp_path / "w"
+        out.mkdir()
+        (out / "world.json").write_text(json.dumps({"version": about.VERSION + 1,
+                                                    "kind": "university", "seed": 2}))
+        with pytest.raises(about.UnknownVersion, match="version 2"):
+            about.read(out)

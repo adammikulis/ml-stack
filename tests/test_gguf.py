@@ -7,6 +7,7 @@ bug this module exists to prevent is precisely a key that is silently absent.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -287,3 +288,16 @@ class TestExportVerification:
         r = verify_tokenizer_fidelity(bad, lambda t: [], ["x"], serve_fn=_serve,
                                       client_cls=object)
         assert not r.ok and not started
+
+
+def test_the_sidecar_beside_a_converted_file_says_which_shape_it_is(tmp_path):
+    from ml_stack.files import version_of
+    from ml_stack.gguf.convert import SIDECAR_VERSION, _describe
+
+    made = tmp_path / "model-f16.gguf"
+    made.write_bytes(b"GGUF" + b"\0" * 64)
+    result = _describe(made, "f16", write_sidecar=True)
+
+    record = json.loads(made.with_suffix(".gguf.json").read_text(encoding="utf-8"))
+    assert version_of(record) == SIDECAR_VERSION
+    assert record["sha256"] == result.sha256 and record["outtype"] == "f16"

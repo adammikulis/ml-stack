@@ -15,7 +15,7 @@ from typing import Any
 from ml_stack import home
 from ml_stack.files import write_json
 from ml_stack.messages import Message
-from ml_stack.world import emit
+from ml_stack.world import about, emit
 from ml_stack.world.organisation import load, make, summary
 from ml_stack.world.questions import questions
 
@@ -47,10 +47,9 @@ def invent(*, kind: str, size: str, seed: int, out: str) -> dict[str, Any]:
     write_json(where / "graph.json", world.graph)
     write_json(where / "personas.json", world.personas)
     write_json(where / "calendar.json", world.calendar)
-    write_json(where / "world.json",
-               {"kind": world.kind, "size": world.size, "seed": world.seed,
-                "people": world.people,
-                "organisation": world.graph["meta"]["world"]["organisation"]})
+    about.write(where, {"kind": world.kind, "size": world.size, "seed": world.seed,
+                        "people": world.people,
+                        "organisation": world.graph["meta"]["world"]["organisation"]})
     made = summary(world)
     made["out"] = str(where)
     return made

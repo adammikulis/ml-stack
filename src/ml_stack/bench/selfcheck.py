@@ -52,6 +52,7 @@ from unittest import mock
 from ml_stack.client.chat import Client as _RealClient
 from ml_stack.client.families import GENERIC
 from ml_stack.serve.preflight import Preflight as _RealPreflight
+from ml_stack.world import about
 
 __all__ = ["ScriptedModel", "ScriptedReader", "SelfCheckFailed", "selfcheck"]
 
@@ -165,9 +166,8 @@ def _scratch_world(where: Path) -> Path:
     where.mkdir(parents=True, exist_ok=True)
     (where / "graph.json").write_text(json.dumps(world.graph), encoding="utf-8")
     (where / "personas.json").write_text(json.dumps(world.personas), encoding="utf-8")
-    (where / "world.json").write_text(json.dumps(
-        {"kind": "company", "size": "small", "seed": 1, "people": world.people}),
-        encoding="utf-8")
+    about.write(where, {"kind": "company", "size": "small", "seed": 1,
+                        "people": world.people})
     return where
 
 
