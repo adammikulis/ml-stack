@@ -16,9 +16,11 @@ import pytest
 from test_fleet_join import WORDS, FakeDaemon, _free_tcp, _free_udp
 
 from ml_stack.fleet import join as joining
-from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import Advertiser, Beacon, load_cluster_key
 from ml_stack.fleet.discovery import join as join_cluster
+from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.join import main
 from ml_stack.fleet.models import Models
 from ml_stack.fleet.plan import Room, fit_for, place, ranked, room_of, table

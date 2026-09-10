@@ -10,6 +10,7 @@ import threading
 from pathlib import Path
 
 import pytest
+
 from ml_stack.fleet.models import ModelError, Models, _resolve
 
 
@@ -432,7 +433,9 @@ class TestDraftModels:
         """The internet is only for what nobody nearby holds."""
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.daemon import load_or_create_token
+        from ml_stack.fleet.jobs import JobRunner
 
         theirs = tmp_path / "theirs"
         payload = a_model(theirs, name="pair.draft.gguf", mb=2).read_bytes()
@@ -852,7 +855,9 @@ class TestOverHTTP:
     def served(self, tmp_path):
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.daemon import load_or_create_token
+        from ml_stack.fleet.jobs import JobRunner
         from ml_stack.fleet.remote import Peer
 
         root = tmp_path / "traind"

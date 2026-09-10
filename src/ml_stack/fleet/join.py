@@ -291,7 +291,7 @@ def describe(beacon: Beacon, *, clusters: Iterable[str] = (), self_name: str = "
     for one in d.get("serving") or []:
         for model in one.get("models") or []:
             served.append(f"{model}:{one.get('port', '?')}")
-    # `fleet.bench.BenchHost.report` puts the memory a model may use, the commit this
+    # `fleet.measuring.BenchHost.report` puts the memory a model may use, the commit this
     # machine runs and whether it is measuring on the beacon; an older daemon has only
     # the device probe, and its card's memory is the next best answer.
     vram_total, vram_free = d.get("vram_total_gb"), d.get("vram_free_gb")

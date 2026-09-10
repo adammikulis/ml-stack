@@ -20,18 +20,13 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from ml_stack.fleet.daemon import (
-    DIGEST_HEADER,
-    DaemonError,
-    JobRunner,
-    device_report,
-    load_or_create_token,
-    make_handler,
-    resolve_report,
-    safe_relpath,
-    stdlib_device_report,
-)
-from ml_stack.fleet.remote import PeerError, Peer, sha256_file
+
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
+from ml_stack.fleet.device import device_report, resolve_report, stdlib_device_report
+from ml_stack.fleet.files import DIGEST_HEADER, safe_relpath
+from ml_stack.fleet.jobs import DaemonError, JobRunner
+from ml_stack.fleet.remote import Peer, PeerError, sha256_file
 
 
 def _free_port() -> int:
@@ -617,13 +612,13 @@ def test_a_probe_that_raises_costs_detail_not_the_daemon():
 
 
 def test_a_report_spec_resolves_to_its_callable():
-    fn = resolve_report("ml_stack.fleet.daemon:stdlib_device_report")
+    fn = resolve_report("ml_stack.fleet.device:stdlib_device_report")
     assert fn is stdlib_device_report
 
 
 @pytest.mark.parametrize("spec, why", [
     ("no_colon_here", "expected"),
-    ("ml_stack.fleet.daemon:nope", "cannot load"),
+    ("ml_stack.fleet.device:nope", "cannot load"),
     ("ml_stack.nonexistent:report", "cannot load"),
 ])
 def test_a_bad_report_spec_says_what_is_wrong(spec, why):
@@ -750,7 +745,7 @@ class TestWhatAMachineIsDoing:
     """The card showed what a machine is, never what it was doing."""
 
     def test_the_report_carries_memory_in_use_and_how_busy_it_is(self):
-        from ml_stack.fleet.daemon import stdlib_device_report
+        from ml_stack.fleet.device import stdlib_device_report
 
         got = stdlib_device_report()
         assert got["ram_gb"] > 0
@@ -764,7 +759,7 @@ class TestWhatAMachineIsDoing:
         0.0, which would report a working machine as asleep."""
         import sys
 
-        import ml_stack.fleet.daemon as mod
+        import ml_stack.fleet.device as mod
 
         psutil = sys.modules.get("psutil")
         if psutil is None:
@@ -787,7 +782,7 @@ class TestWhatAMachineIsDoing:
         """ml-stack-fleet declares no dependencies; psutil is a bonus."""
         import builtins
 
-        import ml_stack.fleet.daemon as mod
+        import ml_stack.fleet.device as mod
 
         real = builtins.__import__
 
@@ -805,7 +800,7 @@ class TestWhatAMachineIsDoing:
     def test_windows_gets_its_memory_from_the_system_call(self, monkeypatch):
         """os.sysconf does not exist there, so a Windows machine reported no memory
         at all -- not just no usage, no total either."""
-        import ml_stack.fleet.daemon as mod
+        import ml_stack.fleet.device as mod
         import ml_stack.hub as hub
 
         def no_sysconf(*a, **k):
@@ -837,7 +832,7 @@ class TestWhatAMachineIsDoing:
             assert hub._windows_memory() is None
 
     def test_memory_in_use_is_never_more_than_there_is(self):
-        from ml_stack.fleet.daemon import stdlib_device_report
+        from ml_stack.fleet.device import stdlib_device_report
 
         got = stdlib_device_report()
         assert got["ram_used_gb"] <= got["ram_gb"]

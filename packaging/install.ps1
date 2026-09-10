@@ -275,7 +275,7 @@ function Fetch-Models {
     if ($want -eq "none") { Write-Host "none asked for"; return }
     if ($offMod) { Write-Host "offline: using the models in $offMod; nothing is downloaded"; return }
     $py = Join-Path $script:bin "python.exe"
-    $room = & $py -c "from ml_stack.fleet.bench import machine_room; print(machine_room())" 2>$null
+    $room = & $py -c "from ml_stack.hub import machine_room; print(machine_room())" 2>$null
     if (-not $room) { $room = 0 }
     $pick = & $py -m ml_stack.fleet.autostart choose --room $room --want $want 2>$null
     if (-not $pick) { Write-Host "no measured model fits this machine; none fetched"; return }

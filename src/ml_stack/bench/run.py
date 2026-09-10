@@ -1376,7 +1376,7 @@ def _planned(plan: Any) -> list[dict[str, Any]]:
 def _fleet_sweep(args: Any) -> int:
     """`sweep --fleet`: the jobs, the plan, dispatch, wait, gather, show.
 
-    The fleet side is `ml_stack.fleet.bench` -- `plan(models, peers)`, `dispatch(jobs)`,
+    The fleet side is `ml_stack.fleet.sweeps` -- `plan(models, peers)`, `dispatch(jobs)`,
     `wait(handles)`, `gather(handles, into=store)` -- imported by name here so this
     machine's sweep needs none of it. The plan is printed before anything is dispatched,
     and a peer the plan says is on another commit ends the sweep before it starts: the
@@ -1391,10 +1391,10 @@ def _fleet_sweep(args: Any) -> int:
     if not mine:
         warn("error: --fleet needs to know this checkout's commit, and git would not say")
         return 2
-    fleet = importlib.import_module("ml_stack.fleet.bench")
+    fleet = importlib.import_module("ml_stack.fleet.sweeps")
     missing = [name for name in ("plan", "dispatch", "wait", "gather") if not hasattr(fleet, name)]
     if missing:
-        warn(f"error: ml_stack.fleet.bench has no {', '.join(missing)}; the fleet side of "
+        warn(f"error: ml_stack.fleet.sweeps has no {', '.join(missing)}; the fleet side of "
              f"the bench is not in this build")
         return 2
     jobs = fleet_jobs(list(getattr(args, "_argv", None) or []), models, commit=mine)

@@ -8,7 +8,9 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .bench import BENCH_KIND
+from ml_stack.log import emitting
+
+from .calibration import BENCH_KIND
 from .pool import Requires, Score, candidates, eligible
 from .rates import Rates
 from .remote import Peer
@@ -81,12 +83,7 @@ def run(units: Sequence[Unit], peers: Sequence[Peer], *, kind: str = "",
     stop = threading.Event()
     live: dict[str, tuple[Peer, str]] = {}
 
-    def emit(event: str, **fields: Any) -> None:
-        if on_event is not None:
-            try:
-                on_event(event, fields)
-            except Exception:                         # noqa: BLE001
-                pass
+    emit = emitting(on_event)
 
     def take(name: str) -> str | None:
         """The next unit this peer may run, or None."""

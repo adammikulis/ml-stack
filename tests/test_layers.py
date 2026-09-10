@@ -139,8 +139,8 @@ def test_a_client_does_not_load_the_fleet() -> None:
 
 def test_the_beacon_s_memory_number_does_not_load_the_graph(tmp_path: Path) -> None:
     pulled = _loaded(
-        "ml_stack.fleet.bench",
-        "ml_stack.fleet.bench.BenchHost(None, home="
+        "ml_stack.fleet.measuring",
+        "ml_stack.fleet.measuring.BenchHost(None, home="
         f"{str(tmp_path)!r}, commit='none').report()")
     graph = sorted(m for m in pulled if m.startswith("ml_stack.graph"))
     assert not graph, f"the beacon's room number loads {graph}"

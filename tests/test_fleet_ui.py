@@ -20,8 +20,10 @@ from pathlib import Path
 
 import pytest
 
-from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import in_cluster, primary_ip
+from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.session import Sessions, Throttle, parse_cookie
 from ml_stack.fleet.ui import UI, asset_bytes
 

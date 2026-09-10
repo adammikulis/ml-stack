@@ -9,16 +9,31 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import NoReturn, TextIO
 
-__all__ = ["Listener", "die", "listen", "say", "to", "to_file", "warn"]
+__all__ = ["Events", "Listener", "die", "emitting", "listen", "say", "to", "to_file",
+           "warn"]
 
 Listener = Callable[[str, str], None]
 """``on(stream, text)`` -- ``"out"`` or ``"err"``, and the text as it would have printed."""
 
+Events = Callable[[str, dict[str, object]], None]
+"""``on(event, fields)`` -- what happened, and what came with it."""
+
 _LISTENER: Listener | None = None
+
+
+def emitting(on_event: Events | None) -> Callable[..., None]:
+    """A call that hands ``on_event`` an event name and its keyword fields, swallowing
+    whatever it raises. With no listener, a call that does nothing."""
+    def emit(event: str, **fields: object) -> None:
+        if on_event is not None:
+            with suppress(Exception):
+                on_event(event, fields)
+
+    return emit
 
 
 def _write(stream: str, parts: tuple[object, ...], sep: str, end: str,

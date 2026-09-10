@@ -165,7 +165,7 @@ def cmd_ls(args: argparse.Namespace) -> int:
         if vram is not None:
             gpu += f"  {vram}/{p.device.get('vram_total_gb', '?')} GB free"
         # what a model may use there -- `hub.room()`, not free memory -- which is what
-        # `fleet.bench.plan` fits each model against
+        # `fleet.sweeps.plan` fits each model against
         room = p.device.get("room_bytes")
         shown = f"{int(room) / 2**30:.0f}G" if room else "?"
         say(f"{p.name:<16} {p.base_url:<28} {slots:<7} {state:<10} {shown:<7} {gpu}")

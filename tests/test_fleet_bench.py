@@ -19,28 +19,33 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from ml_stack.fleet.bench import (
+
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
+from ml_stack.fleet.gathering import import_runs
+from ml_stack.fleet.jobs import JobRunner
+from ml_stack.fleet.measuring import (
     BenchHost,
-    Handle,
     Job,
     Local,
     Refused,
-    bench_export,
-    dispatch,
     ended_badly,
-    estimate,
-    gather,
     here,
-    import_runs,
     installed_commit,
     jobs_from,
-    plan,
     same_commit,
+)
+from ml_stack.fleet.remote import Peer, PeerError
+from ml_stack.fleet.sizing import estimate
+from ml_stack.fleet.sweeps import (
+    Handle,
+    bench_export,
+    dispatch,
+    gather,
+    plan,
     submit_bench,
     wait,
 )
-from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
-from ml_stack.fleet.remote import Peer, PeerError
 
 G = 2**30
 COMMIT = "ab12cd3"
@@ -384,7 +389,7 @@ def test_stopping_a_bench_job_terminates_the_detached_pid(tmp_path):
         pid = box.peer.job(handle.id)["pid"]
         box.peer.stop(handle.id)
         assert box.peer.job(handle.id)["state"] == "stopped"
-        from ml_stack.fleet.bench import _alive
+        from ml_stack.fleet.measuring import _alive
 
         assert _await(lambda: not _alive(pid), timeout=10), "the pid should be gone"
         time.sleep(0.3)
@@ -396,7 +401,7 @@ def test_stopping_a_bench_job_terminates_the_detached_pid(tmp_path):
 
 
 def test_the_log_tail_names_what_failed():
-    from ml_stack.fleet.bench import FAILED_MARKS
+    from ml_stack.fleet.measuring import FAILED_MARKS
 
     assert ended_badly(Path("/nonexistent/log")) == "no log was written"
     assert all(isinstance(m, str) for m in FAILED_MARKS)
@@ -559,7 +564,7 @@ def test_a_handle_with_no_job_has_nothing_to_gather(tmp_path):
 def test_a_detached_bench_is_told_the_home_whose_lock_the_daemon_watches(tmp_path, monkeypatch):
     """A daemon rooted away from ``~/.ml-stack`` watches ``<root.parent>/bench``; the bench it
     launches must record there too, or the daemon holds a lock nobody takes."""
-    from ml_stack.fleet import bench as fb
+    from ml_stack.fleet import measuring as fb
 
     seen = {}
 

@@ -18,7 +18,11 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import pytest
-from ml_stack.fleet.daemon import JobRunner, device_report, load_or_create_token, make_handler
+
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
+from ml_stack.fleet.device import device_report
+from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.pool import Candidate, Requires, choose, eligible, soonest
 from ml_stack.fleet.rates import Rates
 from ml_stack.fleet.remote import Peer

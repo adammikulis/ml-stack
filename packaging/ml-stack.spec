@@ -17,7 +17,9 @@ if _wheels.is_dir():
     datas += [(str(w), "wheels") for w in _wheels.glob("*.whl")]
 
 hidden = [
-    "ml_stack.fleet.daemon", "ml_stack.fleet.peers", "ml_stack.fleet.launch",
+    "ml_stack.fleet.daemon", "ml_stack.fleet.api", "ml_stack.fleet.jobs",
+    "ml_stack.fleet.files", "ml_stack.fleet.device", "ml_stack.fleet.measuring",
+    "ml_stack.fleet.peers", "ml_stack.fleet.launch",
     "ml_stack.fleet.ui", "ml_stack.fleet.autostart",
     "ml_stack.fleet.telemetry", "ml_stack.fleet.settings",
     "ml_stack.fleet.chat", "ml_stack.fleet.conversations", "ml_stack.fleet.llama",

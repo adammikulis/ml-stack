@@ -33,6 +33,8 @@ from typing import Any
 from ml_stack.files import promote
 from ml_stack.http import ServerError, ServerUnreachable, open_stream, request_json
 
+from .measuring import installed_commit
+
 __all__ = ["Pulled", "Release", "UpdateError", "apply_if_newer", "asset_for", "check",
            "checkout_here", "current_version", "in_the_way", "quiet", "state", "track",
            "track_once", "restart_after_update", "watch",
@@ -385,11 +387,10 @@ def commit_age_s(commit: str = "", checkout: "Path | None" = None) -> float:
 
 
 def _installed_commit() -> str:
-    """`bench.installed_commit`, asked once: it shells out to git, and the beacon rebuilds
-    its report every ten seconds. It cannot change without the process restarting."""
+    """`measuring.installed_commit`, asked once: it shells out to git, and the beacon
+    rebuilds its report every ten seconds. It cannot change without the process
+    restarting."""
     if not _COMMIT:
-        from .bench import installed_commit
-
         _COMMIT.append(installed_commit())
     return _COMMIT[0]
 

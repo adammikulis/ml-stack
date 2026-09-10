@@ -317,7 +317,7 @@ def _await(predicate, timeout: float = 10.0) -> bool:
 class TestTheDaemonRunsAJobTheWindowsWay:
     def test_a_job_is_started_in_its_own_group_and_stopped_with_ctrl_break(
             self, windows, monkeypatch, tmp_path):
-        from ml_stack.fleet import daemon as daemon_module
+        from ml_stack.fleet import jobs as jobs_module
         from ml_stack.platform import CREATE_NEW_PROCESS_GROUP, CTRL_BREAK_EVENT
 
         started: list[dict] = []
@@ -328,8 +328,8 @@ class TestTheDaemonRunsAJobTheWindowsWay:
             procs.append(_FakeProc())
             return procs[-1]
 
-        monkeypatch.setattr(daemon_module.subprocess, "Popen", fake_popen)
-        runner = daemon_module.JobRunner(tmp_path / "traind")
+        monkeypatch.setattr(jobs_module.subprocess, "Popen", fake_popen)
+        runner = jobs_module.JobRunner(tmp_path / "traind")
         try:
             job = runner.submit("checkpointing-loop", ["a-job"], str(tmp_path))
             assert _await(lambda: runner.jobs[job.id].state == "running")
@@ -508,11 +508,11 @@ class TestTraindPersist:
                             lambda *a, **k: pytest.fail("--persist must not serve"))
 
         code = daemon_module.main(["--persist", "--slots", "2", "--label", "prep",
-                                   "--report", "ml_stack.fleet.daemon:stdlib_device_report"])
+                                   "--report", "ml_stack.fleet.device:stdlib_device_report"])
 
         assert code == 0
         assert asked == [{"mode": "login", "slots": 2, "labels": ("prep",),
-                          "report": "ml_stack.fleet.daemon:stdlib_device_report"}]
+                          "report": "ml_stack.fleet.device:stdlib_device_report"}]
         out = capsys.readouterr().out
         assert "installed to start at login" in out and "t.cmd" in out
 

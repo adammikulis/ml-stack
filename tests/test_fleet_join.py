@@ -290,7 +290,7 @@ class TestStatus:
         assert row["commit"] == "?" and row["lock"] == "" and row["models"] == []
 
     def test_describe_reads_what_the_bench_host_puts_on_the_beacon(self):
-        """`fleet.bench.BenchHost.report`: room in bytes, the commit it runs, measuring."""
+        """`fleet.measuring.BenchHost.report`: room in bytes, the commit it runs, measuring."""
         row = describe(Beacon(name="studio", port=8770, device={
             "room_bytes": 96 * 2 ** 30, "bench_commit": "0ce5bc5", "measuring": True,
             "vram_total_gb": 128.0}))

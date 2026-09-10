@@ -18,9 +18,11 @@ import pytest
 from test_fleet_ui import WORDS
 from test_fleet_ui import Serving as UIServing
 
+from ml_stack.fleet.api import make_handler
 from ml_stack.fleet.chat import find, targets
-from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+from ml_stack.fleet.daemon import load_or_create_token
 from ml_stack.fleet.discovery import join_cluster
+from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Serving
 from ml_stack.testing.fakes import FakeLlamaServer, Served
 
@@ -350,8 +352,10 @@ class TestAnsweringToSeveralClusters:
     def daemon(self, tmp_path, anchor):
         from http.server import ThreadingHTTPServer
 
-        from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+        from ml_stack.fleet.api import make_handler
+        from ml_stack.fleet.daemon import load_or_create_token
         from ml_stack.fleet.discovery import derive_token, memberships
+        from ml_stack.fleet.jobs import JobRunner
 
         root = tmp_path / "traind"
         files = root / "files"

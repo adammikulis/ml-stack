@@ -302,7 +302,7 @@ fetch_models() {
     return 0
   fi
   ROOM=$("$BIN/python" -c \
-    'from ml_stack.fleet.bench import machine_room; print(machine_room())' 2>/dev/null || echo 0)
+    'from ml_stack.hub import machine_room; print(machine_room())' 2>/dev/null || echo 0)
   PICK=$("$BIN/python" -m ml_stack.fleet.autostart choose --room "$ROOM" --want "$WANT" 2>/dev/null || true)
   if [ -z "$PICK" ]; then
     say "no measured model fits this machine's $ROOM bytes; none fetched"

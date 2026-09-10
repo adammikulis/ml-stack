@@ -3385,13 +3385,13 @@ def test_fleet_jobs_are_the_same_line_with_one_serve_each():
 
 
 def _fake_fleet(monkeypatch, *, plan):
-    """`ml_stack.fleet.bench` with the four functions faked, recording every call; `gather`
+    """`ml_stack.fleet.sweeps` with the four functions faked, recording every call; `gather`
     keeps one invented run in the store it is told to."""
     import sys
     import types
 
     calls = {}
-    fake = types.ModuleType("ml_stack.fleet.bench")
+    fake = types.ModuleType("ml_stack.fleet.sweeps")
 
     def planning(models, peers):
         calls["plan"] = (list(models), peers)
@@ -3410,7 +3410,7 @@ def _fake_fleet(monkeypatch, *, plan):
                   host="quill")
 
     fake.plan, fake.dispatch, fake.wait, fake.gather = planning, dispatching, waiting, gathering
-    monkeypatch.setitem(sys.modules, "ml_stack.fleet.bench", fake)
+    monkeypatch.setitem(sys.modules, "ml_stack.fleet.sweeps", fake)
     return calls
 
 

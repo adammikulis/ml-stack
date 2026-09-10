@@ -44,7 +44,7 @@ rtx.pull("out/lm/step_000010000/model.safetensors", "local/model.safetensors")
 
 Uploads and downloads resume and are verified by digest.
 
-A model sweep goes over the fleet the same way. `ml_stack.fleet.bench` is the fleet side
+A model sweep goes over the fleet the same way. `ml_stack.fleet.sweeps` is the fleet side
 of `ml-stack-bench sweep --fleet`: `plan(models, peers)` sends each model, largest first,
 to the idle peer with the most room for it -- `room_bytes` is what the daemon announces,
 `hub.room()` rather than free memory -- spreading models over machines rather than

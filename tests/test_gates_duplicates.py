@@ -141,9 +141,7 @@ def test_the_checker_carries_the_gate_interface():
 
 
 @pytest.mark.parametrize("name, one, two", [
-    ("_send", "src/ml_stack/fleet/daemon.py", "src/ml_stack/fleet/ui.py"),
     ("span", "src/ml_stack/bench/estimate.py", "src/ml_stack/train/lora.py"),
-    ("emit", "src/ml_stack/fleet/bench.py", "src/ml_stack/fleet/work.py"),
 ])
 def test_the_copies_this_gate_was_written_for_are_reported(name, one, two):
     """The known pairs, so a normalisation that quietly tightens is caught."""

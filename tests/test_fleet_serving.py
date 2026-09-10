@@ -12,7 +12,9 @@ from http.server import ThreadingHTTPServer
 
 import pytest
 
-from ml_stack.fleet.daemon import JobRunner, load_or_create_token, make_handler
+from ml_stack.fleet.api import make_handler
+from ml_stack.fleet.daemon import load_or_create_token
+from ml_stack.fleet.jobs import JobRunner
 from ml_stack.fleet.serving import Endpoint, Serving, answers
 from ml_stack.testing.fakes import FakeLlamaServer, Served, fake_llama_binary
 

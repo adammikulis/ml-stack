@@ -442,7 +442,7 @@ def _():
 
 @check("Telemetry", "a machine says how much memory is in use and how busy it is")
 def _():
-    from ml_stack.fleet.daemon import stdlib_device_report
+    from ml_stack.fleet.device import stdlib_device_report
 
     got = stdlib_device_report()
     assert got.get("ram_gb"), "no memory total"
@@ -456,7 +456,7 @@ def _():
 
 @check("Telemetry", "a machine with no framework still reports what it is")
 def _():
-    from ml_stack.fleet.daemon import stdlib_device_report
+    from ml_stack.fleet.device import stdlib_device_report
     got = stdlib_device_report()
     assert got["cpus"] >= 1 and got["arch"]
     assert "cuda" not in got and "gpu" not in got
