@@ -203,3 +203,16 @@ def test_an_empty_heading_draws_no_heading():
 
     page = render({"nodes": [], "edges": []}, copy={"heading": ""})
     assert "COPY.heading ? `<h3>" in page
+
+
+def test_the_detail_pane_can_be_an_inspector_with_no_back_link():
+    """A back link is a navigation stack, and a stack is two panes."""
+    import json
+
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []}, copy={"backTo": ""})
+    said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
+    assert said["copy"]["backTo"] == ""
+    assert "if (!to || !M.COPY.backTo) return '';" in page
+    assert "backTo: '← back to'" in page

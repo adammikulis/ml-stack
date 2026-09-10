@@ -235,9 +235,11 @@
       if (seen.length > 40) seen.shift();
     }
     function backHtml() {
+      // an inspector reflects the selection and keeps no history; a caller that says so by
+      // leaving `backTo` empty gets no back link, and the pane is one pane
       const to = seen[seen.length - 2];
-      if (!to) return '';
-      return `<button class="back" id="panel-back">← back to ${esc(to.name)}</button>`;
+      if (!to || !M.COPY.backTo) return '';
+      return `<button class="back" id="panel-back">${esc(M.COPY.backTo)} ${esc(to.name)}</button>`;
     }
     function wireBack(el) {
       const b = el.querySelector('#panel-back');
