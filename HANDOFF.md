@@ -585,21 +585,8 @@ ml-stack-serve profile                                     # every model's measu
 ## The library work `~/Documents/repos/ecms-graph` waits on
 
 That repo's `PLAN.md` holds the whole picture: a graph-RAG demo over nuclear regulation
-where every claim carries a clause citation. Three branches below are its prerequisites and
-are worth having on their own. Worktrees exist off `main`; nothing is pushed.
-
-- [ ] **Ingest reads PDFs only.** `ingest/run.py:146` hard-wires `pdf.read(where, ...)`, so
-  a structured XML source is unreachable — and the best regulatory corpora are XML
-  (laws-lois.justice.gc.ca publishes every Canadian act and regulation; eCFR publishes
-  10 CFR). Branch `sources-html`, worktree `../ml-stack-sources-html`. Hoist unit-splitting
-  out of `sources/pdf.py` into `sources/units.py` so both readers share it (`pdf.units`
-  becomes a delegate, and the `duplicates` gate catches the copy otherwise). Add
-  `sources/html.py` with `read(source, *, url="", sections=None)` and
-  `read_xml(source, *, url="", section_tag="", id_attr="")`, mirroring `pdf.py`'s shape.
-  `pdf._SECTION` is a hard-wired `^(\d+)\.(\d+)\s+`; take the recogniser as a parameter so
-  spellings like `§ 50.55a` stay in the app. `read_xml` walks the element tree, so section
-  ids come from the markup. Then choose the reader in `ingest/run.py` by suffix or URL
-  scheme, which lets `ml-stack-ingest` accept a URL. Test with its own fixture markup.
+where every claim carries a clause citation. What is below is its last prerequisite, and is
+worth having on its own. Its worktree is `../ml-stack-provenance-spans`; nothing is pushed.
 
 - [ ] **Provenance bottoms out at the unit, and the model never sees it.** `look_at` reads
   label, kind, `attrs.definition` and messages — never `provenance`, never source or page —
@@ -615,13 +602,3 @@ are worth having on their own. Worktrees exist off `main`; nothing is pushed.
   every `look_at`/`look_around` result and adding a `quote(ids)` tool. Then `graph/ground.py`
   with `grounded(answer, store)`, naming every id in `answer.show` that carries no
   provenance or was never read.
-
-- [ ] **An ingest store has no vectors, and no verb for an edition.** Nothing in
-  `ml_stack.ingest` calls `vectors.remember`, so `hybrid` votes on words alone; the only
-  worked recipe is buried at `bench/run.py:1100`. Branch `embed-and-drift`, worktree
-  `../ml-stack-embed-and-drift`. Lift that recipe into `ingest/embed.py` and add
-  `ml-stack-ingest embed --out STORE --embed-url URL --embed-model M` — on a writable
-  handle only, because `GraphStore.index()` is a silent no-op read-only and an unbuilt index
-  answers every question with silence, which reads exactly like an empty graph. Add
-  `supersedes` to `extract.VERBS`, and `graph/drift.py` with `superseded(graph)` and
-  `resting_on(graph, node_ids)`.
