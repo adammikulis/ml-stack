@@ -73,6 +73,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+from ml_stack.graph.asking import ASKING
+from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.thread import EVERY, WINDOW
 from ml_stack.log import say, warn
 
@@ -986,9 +988,6 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
               emit: Any) -> Any:
         if self.graph is None:
             raise RuntimeError("no graph on this server: serve with --graph FILE")
-        from ml_stack.graph.asking import ASKING
-        from ml_stack.graph.conversation import converse, converse_stream
-
         client = self.client_on_slot(index=0)
         asked = {"asking": self.config.asking if self.config is not None else ASKING,
                 "turns": turns, "highlighted": highlighted, "finder": self.finder(),
@@ -1134,7 +1133,8 @@ def parser() -> argparse.ArgumentParser:
 
 def geocode(args: argparse.Namespace) -> int:
     """`graph.places.geocode` over a graph file, written back as JSON."""
-    from ml_stack.graph.places import geocode as place, points
+    from ml_stack.graph.places import geocode as place
+    from ml_stack.graph.places import points
 
     graph = json.loads(Path(args.graph).read_text(encoding="utf-8"))
     placed = place(graph, args.cache, near=int(args.near))

@@ -17,16 +17,33 @@ def describe() -> str:
     return "An ml_stack import inside a function; a deferred import hides an import cycle."
 
 
-def _imports(body: list[ast.stmt]) -> list[ast.stmt]:
-    found = []
+def _modules(node: ast.stmt) -> list[str]:
+    """The ml_stack modules one import statement defers, empty for any other statement."""
+    if isinstance(node, ast.Import):
+        return [a.name for a in node.names if a.name.split(".")[0] == "ml_stack"]
+    if isinstance(node, ast.ImportFrom):
+        if node.level:
+            return ["." * node.level + (node.module or "")]
+        if (node.module or "").split(".")[0] == "ml_stack":
+            return [node.module or ""]
+    return []
+
+
+def _imports(body: list[ast.stmt]) -> list[tuple[str, ast.stmt]]:
+    """Each ml_stack module this body defers, once, with the statement that named it.
+
+    A module named twice in one function is one deferred dependency however many statements
+    say so, so splitting ``from x import a, b as c`` in two does not change the count.
+    """
+    found: list[tuple[str, ast.stmt]] = []
+    seen: set[str] = set()
     for statement in body:
         for node in ast.walk(statement):
-            if isinstance(node, ast.Import):
-                if any(a.name.split(".")[0] == "ml_stack" for a in node.names):
-                    found.append(node)
-            elif isinstance(node, ast.ImportFrom):
-                if node.level or (node.module or "").split(".")[0] == "ml_stack":
-                    found.append(node)
+            for module in _modules(node):
+                if module in seen:
+                    continue
+                seen.add(module)
+                found.append((module, node))
     return found
 
 
@@ -37,13 +54,13 @@ def find(root: Path) -> list[Finding]:
         tree = parse(path)
         if tree is None:
             continue
-        seen: set[int] = set()
+        seen: set[tuple[str, str]] = set()
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
-            for found in _imports(node.body):
-                if id(found) in seen:
+            for module, found in _imports(node.body):
+                if (node.name, module) in seen:
                     continue
-                seen.add(id(found))
-                out.append(Finding(where, found.lineno, f"in {node.name}()"))
+                seen.add((node.name, module))
+                out.append(Finding(where, found.lineno, f"{module} in {node.name}()"))
     return out

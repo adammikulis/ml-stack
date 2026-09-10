@@ -9,6 +9,8 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.graph.asking import ASKING
+from ml_stack.graph.conversation import converse
 from ml_stack.ingest.judge import sources_for
 from ml_stack.log import say
 
@@ -70,9 +72,6 @@ def ask(graph: Mapping[str, Any], question: str, client: Any, *,
     ``asking`` is the :class:`~ml_stack.graph.Asking` to ask with. ``finder`` replaces what
     ``look_up`` calls -- `graph.search.hybrid`, say. Returns the `Answer`.
     """
-    from ml_stack.graph.asking import ASKING
-    from ml_stack.graph.conversation import converse
-
     answer = converse(question, graph, client, asking=asking or ASKING, finder=finder)
     say(answer.content or "(no answer)")
     say("  tools: " + (answer.why or "none called"))
