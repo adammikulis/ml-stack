@@ -1810,6 +1810,17 @@ def _remembered(turns: Sequence[Mapping[str, str]], summary: Any, recalled: Sequ
     return [*ahead, *said]
 
 
+def _voters(rows: Any) -> str:
+    """`` by label, words, meaning`` -- the ways those hits were found, in the order they
+    first appear; "" when the hits do not say. See `search.hybrid`'s ``matched``."""
+    seen: list[str] = []
+    for row in rows if isinstance(rows, list) else ():
+        for way in (row.get("matched") or ()) if isinstance(row, Mapping) else ():
+            if str(way) not in seen:
+                seen.append(str(way))
+    return " by " + ", ".join(seen) if seen else ""
+
+
 def _recorded(out: Answer, name: str, args: Mapping[str, Any], result: Any,
               known: set[str]) -> Any:
     """``result`` as the model is told it, with what the call found, read and traced
@@ -1817,7 +1828,7 @@ def _recorded(out: Answer, name: str, args: Mapping[str, Any], result: Any,
     if name == "look_up":
         _note(out.found, [r["id"] for r in result] if isinstance(result, list) else [], known)
         asked = [str(x) for x in (args.get("texts") or ())] or [str(args.get("text") or "")]
-        out.steps.append("looked up " + ", ".join(repr(x) for x in asked))
+        out.steps.append("looked up " + ", ".join(repr(x) for x in asked) + _voters(result))
     elif name == "look_at":
         # one guard, in `_note`: an id the model made up is neither read nor lit up
         ids, real = _read_ids(args, known)

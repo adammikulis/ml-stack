@@ -612,6 +612,30 @@ def test_a_finder_is_batched_the_same_way():
     assert out.found == ["person:ada"]
 
 
+def test_the_step_names_what_found_the_hits_when_they_say():
+    """`search.hybrid` says on each hit which voters found it; the step carries those
+    through to `why`, which is what the page's folded trace reads."""
+    def finder(text):
+        return [{"id": "person:ada", "label": "Ada Lovelace", "kind": "person",
+                 "matched": ["label", "words"]},
+                {"id": "topic:compilers", "label": "compilers", "kind": "topic",
+                 "matched": ["meaning"]}]
+
+    tools = tools_for(GRAPH, finder=finder)
+    model = ScriptedModel([call("look_up", text="who writes compilers?")])
+    out = converse("?", GRAPH, model, tools=tools, finder=finder)
+
+    assert "looked up 'who writes compilers?' by label, words, meaning" in out.why
+
+
+def test_a_finder_that_does_not_say_how_it_matched_leaves_the_step_as_it_was():
+    """The mutation of the test above: `look_up`'s own hits carry no `matched`, and the
+    step reads exactly as it always did."""
+    model = ScriptedModel([call("look_up", text="compilers")])
+
+    assert converse("?", GRAPH, model).why == "looked up 'compilers'"
+
+
 def test_a_tool_call_written_out_as_prose_is_cut_and_believed():
     """A model that wanted `show` on the last turn may write the call out instead of calling it.
 
