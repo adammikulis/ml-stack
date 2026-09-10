@@ -216,3 +216,21 @@ def test_the_detail_pane_can_be_an_inspector_with_no_back_link():
     assert said["copy"]["backTo"] == ""
     assert "if (!to || !M.COPY.backTo) return '';" in page
     assert "backTo: '← back to'" in page
+
+
+def test_the_ask_pane_scrolls_in_one_place():
+    """The turns list scrolled inside a pane that also scrolled; the trace under it grew the
+    pane past its row."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []})
+    assert "overflow: hidden; }  /* the turns list is the one thing that scrolls */" in page
+    assert "howItGotThere(pending, tally, out.why || '')" in page   # the trace rides in the answer, folded
+    assert "<details');\n      how.className = 'how'" in page or "how.className = 'how'" in page
+
+
+def test_escape_puts_the_selection_down():
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []})
+    assert "if (e.key !== 'Escape' || !M.selected) return;" in page

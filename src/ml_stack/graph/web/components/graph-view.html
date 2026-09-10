@@ -263,6 +263,14 @@
     sim.on('end', () => { if (following || needsFit) { needsFit = false; fit(); } });
     setTimeout(() => { if (!fitted) fit(); }, 1500);
     svg.on('click', e => { if (e.target === svg.node()) select(null); });
+    // Escape puts the selection down, as a click on empty space does; a search box that
+    // has focus keeps Escape for itself
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || !M.selected) return;
+      const tag = (document.activeElement || {}).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      select(null);
+    });
     new ResizeObserver(() => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.2).restart(); }).observe(wrap);
     if (!nodes.length) d3.select('.graph-wrap').append('div').attr('class', 'empty').html(`<div><b>No messages yet.</b><br>${esc(COPY.empty)}</div>`);
     function applyPhysics() {

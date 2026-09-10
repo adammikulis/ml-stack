@@ -2,11 +2,15 @@
 <style>
 .qfoot { display: flex; align-items: center; gap: 8px; }
 .qfoot .note { flex: 1; font-size: 11px; color: var(--ink-3); }
+.turns .t .how { margin-top: 6px; font-size: 11px; color: var(--ink-3); }
+.turns .t .how summary { cursor: pointer; }
+.turns .t .how p { margin: 4px 0 0; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 #qclear { padding: 2px 9px; font: inherit; font-size: 11px; border: 1px solid var(--line-strong);
   border-radius: 7px; background: var(--surface-2); color: var(--ink-2); cursor: pointer; }
 #qclear:hover { color: var(--ink); }
 .askpane { display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; gap: 9px;
-  padding: 14px 16px 16px; min-height: 0; border-right: 1px solid var(--line); }
+  padding: 14px 16px 16px; min-height: 0; border-right: 1px solid var(--line);
+  overflow: hidden; }  /* the turns list is the one thing that scrolls */
 .askpane .turns { max-height: none; overflow: auto; align-content: start; }
 .pane-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .session { font: 11px var(--font-body); opacity: .7; margin: 2px 0 6px; }
@@ -307,10 +311,13 @@
         // The answer is about `lit`; joining them up lights the entries in between as well, so
         // a reader counting what is undimmed finds more than the count says. Say both.
         const joining = (M.answer ? M.answer.size : 0) - lit.length;
-        qNote.textContent = (lit.length ? `${lit.length} lit up`
-                               + (joining > 0 ? ` · ${joining} joining them` : '')
-                             : 'nothing to light up')
-          + (out.why ? ` · ${out.why}` : '');
+        // the tally and the steps ride inside the answer, folded, rather than under the
+        // box: a long walk was a paragraph of trace beneath every question
+        const tally = lit.length ? `${lit.length} lit up`
+                        + (joining > 0 ? ` · ${joining} joining them` : '')
+                      : 'nothing to light up';
+        howItGotThere(pending, tally, out.why || '');
+        qNote.textContent = '';
         M.refresh();
       } catch (err) {
         sayInto(pending, 'no answer from the server');
@@ -406,6 +413,15 @@
     }
     // A replayed answer has no live trace, only what the server remembered it doing: the
     // tally goes above, and the remembered steps fold away underneath as the trace did.
+    function howItGotThere(el, tally, why) {
+      const how = document.createElement('details');
+      how.className = 'how';
+      const head = document.createElement('summary');
+      head.textContent = tally;
+      how.appendChild(head);
+      if (why) { const p = document.createElement('p'); p.textContent = why; how.appendChild(p); }
+      el.appendChild(how);
+    }
     function thoughtOver(el, steps) {
       const list = Array.isArray(steps) ? steps.map(String) : String(steps).split(/;\s*/);
       const done = list.filter(Boolean);
