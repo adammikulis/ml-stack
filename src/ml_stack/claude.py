@@ -46,7 +46,7 @@ BARE_CONTEXT = 131072
 """What a model that will not say what it trained for is served with. The system prompt and
 tool definitions Claude Code sends are tens of thousands of tokens before the conversation
 starts, so the build's 4,096 default answers one request with an error."""
-DEFAULT_SEATS = 1      # one conversation, one slot, the whole measured cache
+DEFAULT_SLOTS = 1      # one conversation, one slot, the whole measured cache
 OFFLINE = {
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
     "CLAUDE_CODE_DISABLE_1M_CONTEXT": "1",
@@ -114,7 +114,7 @@ def parser() -> argparse.ArgumentParser:
                          "talks to it as it stands and it is left running afterwards; "
                          "nothing is served and no model is named")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--slots", type=int, default=DEFAULT_SEATS,
+    ap.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
                     help="conversations the server holds at once; one slot gets the whole "
                          "measured cache (default: %(default)s)")
     ap.add_argument("--no-profile", action="store_true", help="serve the model bare")

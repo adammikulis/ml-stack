@@ -48,8 +48,8 @@ def test_a_queue_is_one_bench_line_per_step_with_comments_and_blanks_ignored(tmp
 def test_a_set_line_defines_a_variable_that_later_lines_expand(tmp_path):
     steps = q.read(a_queue(tmp_path, f"""
         set FX={FX}
-        set SHAPE=--serve-kv q8_0 --context 65536 --parallel 2
-        set BEST=--serve ${{FX}} ${{SHAPE}} --plain-only
+        set SERVING=--serve-kv q8_0 --context 65536 --parallel 2
+        set BEST=--serve ${{FX}} ${{SERVING}} --plain-only
 
         sweep ${{BEST}} --sample 10
     """))

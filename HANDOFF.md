@@ -286,10 +286,10 @@ time with the page's server down for the Ollama half.
   fakes; nothing has touched a real server yet, so `--smoke` each line first. Labels carry
   the profile's suffix as `served()` always did; `served_by` is recorded on every run.
   ```
-  # 1. llama.cpp + draft head, against the page's server on 8080 (its profile shape)
+  # 1. llama.cpp + draft head, against the page's server on 8080 (its profile's serving)
   ml-stack-bench sweep --on flash=http://127.0.0.1:8080 --plain-only --short
   ml-stack-bench speed --on flash=http://127.0.0.1:8080
-  # 2. llama.cpp without the head, served by the bench in the measured shape minus -md
+  # 2. llama.cpp without the head, served by the bench with the same serving minus -md
   ml-stack-bench sweep --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash --no-draft --plain-only --short
   ml-stack-bench speed --serve Qwen3.8-Flash-Next-UD-Q4_K_XL --serve-label flash --no-draft
   # 3. Ollama, after `ml-stack-serve down` on 8080 (104 GB does not fit beside 90)
@@ -620,5 +620,5 @@ worth taking, in this order:
 python3 -m pytest tests -q -n 4 > /tmp/out.txt; echo $?   # never pipe into tail; -n 4 while a bench runs
 ml-stack-setup                                             # the machine
 ml-stack-bench status                                      # measuring, serving, what the job kept
-ml-stack-serve profile                                     # every model's measured shape
+ml-stack-serve profile                                     # every model's serving
 ```

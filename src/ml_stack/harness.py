@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ml_stack import hub
-from ml_stack.claude import DEFAULT_PORT, DEFAULT_SEATS, alias_of, environment
+from ml_stack.claude import DEFAULT_PORT, DEFAULT_SLOTS, alias_of, environment
 from ml_stack.log import say
 
 __all__ = ["Answer", "Harness", "Usage", "main", "session"]
@@ -133,7 +133,7 @@ def _usage_of(message: Any) -> Usage:
 
 
 @contextmanager
-def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
+def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SLOTS,
             profile: bool = True, offline: bool = True, draft: str = "auto",
             say: Callable[[str], None] = lambda _line: None, **options: Any) -> Iterator[Harness]:
     """Lease ``model`` in the settings it scored best with and yield a :class:`Harness` on it; the server
@@ -177,7 +177,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("prompt")
     ap.add_argument("--model", required=True)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)
-    ap.add_argument("--slots", type=int, default=DEFAULT_SEATS,
+    ap.add_argument("--slots", type=int, default=DEFAULT_SLOTS,
                     help="conversations the server holds at once; one slot gets "
                          "the whole measured cache (default: %(default)s)")
     ap.add_argument("--cwd", default="")
