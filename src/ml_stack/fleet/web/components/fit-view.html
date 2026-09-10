@@ -1,6 +1,6 @@
 <!-- fit-view: the frame the three fit screens share, and "what fits" itself -->
 <style>
-  fit-model, rates-view, telemetry-view { display: contents; }
+  fit-model, fit-charts, rates-view, telemetry-view { display: contents; }
 
   fit-view header.fit-top {
     display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
@@ -61,41 +61,6 @@
   }
   fit-view .toggle button.on { background: var(--accent-dim); color: var(--text); }
 
-  fit-view .panels { display: grid; gap: 20px; grid-template-columns: 1fr 1fr; margin-top: 20px; }
-  @media (max-width: 1050px) { fit-view .panels { grid-template-columns: 1fr; } }
-  fit-view .panel {
-    background: var(--bg-raised); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 12px 14px 8px; position: relative; box-shadow: var(--shadow);
-  }
-  fit-view .panel h2 { margin: 0 0 2px; font-size: 13px; letter-spacing: -.01em; }
-  fit-view .panel .sub { color: var(--dim); font-size: 11px; margin-bottom: 6px; max-width: 60ch; }
-  fit-view .panel .zoomhint { position: absolute; right: 14px; top: 12px;
-                     color: var(--dim); font-size: 10px; font-family: var(--mono); }
-  fit-view svg { display: block; width: 100%; height: auto; touch-action: none; }
-  fit-view svg text { fill: var(--muted); font-family: var(--mono); font-size: 10px; }
-  fit-view svg .axis { stroke: var(--line-bright); stroke-width: 1; }
-  fit-view svg .grid { stroke: var(--line); stroke-width: 1; }
-  fit-view svg .vram { stroke: var(--line-bright); stroke-width: 1; stroke-dasharray: 2 3; }
-  fit-view svg .vram-label { fill: var(--dim); font-size: 9px; }
-  fit-view svg .room { stroke: var(--bad); stroke-width: 1.6; }
-  fit-view svg .room-label { fill: var(--bad); font-size: 10px; }
-  fit-view svg .ln { fill: none; stroke-width: 1.8; stroke-linejoin: round; }
-  fit-view svg .ln.dim { opacity: .22; }
-  fit-view svg .ln.hot { stroke-width: 3.2; }
-  fit-view svg .cross { stroke: var(--line-bright); stroke-width: 1; stroke-dasharray: 3 3; }
-  fit-view svg .title { fill: var(--muted); font-size: 10px; }
-
-  fit-view .tip {
-    position: absolute; pointer-events: none; z-index: 5; opacity: 0;
-    background: var(--bg-sunken); border: 1px solid var(--line-bright);
-    border-radius: 7px; padding: 6px 8px; font-family: var(--mono); font-size: 11px;
-    box-shadow: var(--shadow); white-space: nowrap; transition: opacity .08s;
-  }
-  fit-view .tip b { color: var(--text); }
-  fit-view .tip span { color: var(--muted); }
-  fit-view .tip .hot { background: color-mix(in srgb, var(--accent) 16%, transparent);
-              border-radius: 3px; }
-
   fit-view table.fit { width: 100%; border-collapse: collapse; margin-top: 22px; font-size: 13px; }
   fit-view table.fit th, fit-view table.fit td { padding: 7px 10px; text-align: right;
                                border-bottom: 1px solid var(--line); }
@@ -129,6 +94,7 @@
 <template>
   <div id="fit" hidden>
     <fit-model></fit-model>
+    <fit-charts></fit-charts>
     <header class="fit-top">
       <h1 id="fit-heading">What fits</h1>
       <nav class="views" id="fit-views"></nav>
@@ -148,8 +114,7 @@
   const M = window.fleetModel;
   const FM = window.fitModel;
   const el = M.el;
-  const { GB, human, kTokens, commas, shortName, COLOURS, svgEl, clip,
-          W, H, IX0, IX1, IY0, IY1 } = FM;
+  const { GB, human, kTokens, commas, shortName, COLOURS } = FM;
 
   class FitView extends HTMLElement {
     connectedCallback() {
@@ -284,241 +249,6 @@
       return [...drafted].some((k) => bare.has(k));
     }
 
-    // ------------------------------------------------- panel A: how many fit, at what context
-    panelFits(rows, tip) {
-      const s = this.state;
-      const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
-      const xs = s.steps;
-      const at = (f, c) => this.slots(f, c);
-      const topUsers = Math.max(1, ...rows.flatMap((f) => xs.map((c) => at(f, c))));
-      const decades = Math.log10(Math.max(10, topUsers * 1.15));
-
-      const lx = (c) => IX0 + (Math.log2(c) - Math.log2(xs[0])) /
-                        (Math.log2(xs[xs.length - 1]) - Math.log2(xs[0])) * (IX1 - IX0);
-      // log y floored at one user: below one the answer is "nobody", not a smaller number.
-      const ly = (n) => IY1 - Math.log10(Math.max(1, n)) / decades * (IY1 - IY0);
-
-      for (const c of xs) {
-        svg.append(svgEl("line", { class: "grid", x1: lx(c), x2: lx(c), y1: IY0, y2: IY1 }));
-        svg.append(svgEl("text", { x: lx(c), y: IY1 + 14, "text-anchor": "middle" }, kTokens(c)));
-      }
-      for (let p = 0; p <= decades; p += 1) {
-        const n = Math.pow(10, p);
-        svg.append(svgEl("line", { class: "grid", x1: IX0, x2: IX1, y1: ly(n), y2: ly(n) }));
-        svg.append(svgEl("text", { x: IX0 - 8, y: ly(n) + 3, "text-anchor": "end" }, commas(n)));
-      }
-      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
-      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
-      svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
-                                 class: "title" }, "context each user gets (tokens)"));
-      svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title",
-                                 "text-anchor": "middle",
-                                 transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
-                       "users that fit"));
-
-      // where the context slider is standing, so the chart and the table agree at a glance
-      svg.append(svgEl("line", { class: "cross", x1: lx(s.ctx), x2: lx(s.ctx),
-                                 y1: IY0, y2: IY1 }));
-
-      for (const f of rows) {
-        const pts = xs.map((c) => [c, at(f, c)]).filter(([, n]) => n > 0);
-        if (!pts.length) continue;
-        const d = pts.map(([c, n], i) =>
-          `${i ? "L" : "M"}${lx(c).toFixed(1)},${ly(n).toFixed(1)}`).join("");
-        const path = svgEl("path", { class: "ln", d, stroke: f.colour });
-        path.dataset.i = f.i;
-        svg.append(path);
-        const here = at(f, s.ctx);
-        if (here > 0) {
-          const dot = svgEl("circle", { cx: lx(s.ctx), cy: ly(here), r: 3, fill: f.colour });
-          dot.dataset.i = f.i;
-          dot.setAttribute("class", "dotmark");
-          svg.append(dot);
-        }
-      }
-
-      this.hovering(svg, tip, (mx) => {
-        // read at the cursor's own context, on the ladder the route answered for
-        const t = (mx - IX0) / (IX1 - IX0);
-        const lo = Math.log2(xs[0]), hi = Math.log2(xs[xs.length - 1]);
-        const c = this.read(Math.max(xs[0], Math.min(xs[xs.length - 1],
-          Math.round(Math.pow(2, lo + t * (hi - lo))))));
-        return {
-          head: `${kTokens(c)} each · ${human(s.room)}`,
-          rows: rows.map((f) => [f, `${commas(at(f, c))} users`]),
-          at: (f) => [lx(c), ly(at(f, c))],
-        };
-      });
-      return svg;
-    }
-
-    // ---------------------------------------------------- panel B: what it costs as they arrive
-    //
-    // `loaded + users * each` -- a straight line from the axis, where the height is the model
-    // with an empty cache and the slope is one user's worth of it. Both numbers are `Fit.line`
-    // out of the route.
-    panelCost(rows, tip) {
-      const s = this.state;
-      const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, role: "img" });
-      const fits = rows.map((f) => this.slots(f, s.ctx));
-      const natural = Math.max(8, Math.min(4096, Math.max(1, ...fits) * 1.15));
-      const [x0, x1] = s.zoom || [0, natural];
-      const px = (n) => IX0 + (n - x0) / Math.max(1e-9, x1 - x0) * (IX1 - IX0);
-
-      const highest = Math.max(s.room / GB,
-        ...rows.map((f) => (f.loaded + x1 * this.each(f, s.ctx)) / GB));
-      const crossed = s.vram.filter((g) => g <= highest);
-      const top = Math.max(s.room / GB, Math.max(0, ...crossed), 1) * 1.08;
-      const py = (g) => IY1 - Math.min(g, top) / top * (IY1 - IY0);
-
-      for (const g of s.vram) {
-        if (g > top) continue;
-        svg.append(svgEl("line", { class: "vram", x1: IX0, x2: IX1, y1: py(g), y2: py(g) }));
-        svg.append(svgEl("text", { class: "vram-label", x: IX1 - 3, y: py(g) - 3,
-                                   "text-anchor": "end" }, `${g}G`));
-      }
-      for (let i = 0; i <= 6; i += 1) {
-        const n = x0 + (x1 - x0) * i / 6;
-        svg.append(svgEl("text", { x: px(n), y: IY1 + 14, "text-anchor": "middle" }, commas(n)));
-      }
-      for (let i = 0; i <= 4; i += 1) {
-        const g = top * i / 4;
-        svg.append(svgEl("text", { x: IX0 - 8, y: py(g) + 3, "text-anchor": "end" },
-                         g.toFixed(0)));
-      }
-      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX1, y1: IY1, y2: IY1 }));
-      svg.append(svgEl("line", { class: "axis", x1: IX0, x2: IX0, y1: IY0, y2: IY1 }));
-      svg.append(svgEl("text", { x: (IX0 + IX1) / 2, y: H - 6, "text-anchor": "middle",
-                                 class: "title" },
-                       `users, each with ${commas(s.ctx)} tokens`));
-      svg.append(svgEl("text", { x: 14, y: (IY0 + IY1) / 2, class: "title",
-                                 "text-anchor": "middle",
-                                 transform: `rotate(-90 14 ${(IY0 + IY1) / 2})` },
-                       "memory needed (GB)"));
-
-      for (const f of rows) {
-        const intercept = f.loaded, each = this.each(f, s.ctx);
-        // clipped to the box by hand: a 120B model at 128k leaves the top at the second
-        // user, and an unclipped line drags every other one into the floor
-        const seg = clip(x0, (intercept + x0 * each) / GB, x1, (intercept + x1 * each) / GB, top);
-        if (!seg) continue;
-        const path = svgEl("path", { class: "ln", stroke: f.colour,
-          d: `M${px(seg[0]).toFixed(1)},${py(seg[1]).toFixed(1)}`
-             + `L${px(seg[2]).toFixed(1)},${py(seg[3]).toFixed(1)}` });
-        path.dataset.i = f.i;
-        svg.append(path);
-      }
-
-      // the room in force, over the lines it cuts: where a line leaves it is the last user
-      const roomY = py(s.room / GB);
-      svg.append(svgEl("line", { class: "room", x1: IX0, x2: IX1, y1: roomY, y2: roomY }));
-      svg.append(svgEl("text", { class: "room-label", x: IX0 + 4, y: roomY - 4 },
-                       `${human(s.room)} of room`));
-
-      if (s.users >= x0 && s.users <= x1) {
-        svg.append(svgEl("line", { class: "cross", x1: px(s.users), x2: px(s.users),
-                                   y1: IY0, y2: IY1 }));
-      }
-
-      this.hovering(svg, tip, (mx) => {
-        const n = Math.max(0, Math.round(x0 + (mx - IX0) / (IX1 - IX0) * (x1 - x0)));
-        return {
-          head: `${commas(n)} user${n === 1 ? "" : "s"} at ${kTokens(s.ctx)}`,
-          rows: rows.map((f) => [f, human(f.loaded + n * this.each(f, s.ctx))]),
-          at: (f) => [px(n), py((f.loaded + n * this.each(f, s.ctx)) / GB)],
-        };
-      });
-      this.zooming(svg, () => [x0, x1], natural);
-      return svg;
-    }
-
-    // ------------------------------------------------------------------ hover and zoom
-
-    /** Cursor tracking for one panel: highlight the nearest line, light its row in the
-        table, and say every model's exact number at that x. */
-    hovering(svg, tip, read) {
-      const s = this.state;
-      const leave = () => { s.hot = null; tip.style.opacity = 0; this.paintHot(); };
-      svg.addEventListener("mouseleave", leave);
-      svg.addEventListener("mousemove", (e) => {
-        const box = svg.getBoundingClientRect();
-        const mx = (e.clientX - box.left) / box.width * W;
-        const my = (e.clientY - box.top) / box.height * H;
-        if (mx < IX0 || mx > IX1) { leave(); return; }
-        const got = read(mx);
-        let best = null, gap = Infinity;
-        for (const [f] of got.rows) {
-          const near = Math.abs(got.at(f)[1] - my);
-          if (near < gap) { gap = near; best = f; }
-        }
-        s.hot = best && gap < 40 ? best.i : null;
-        this.paintHot();
-        tip.replaceChildren(
-          el("div", {}, el("b", {}, got.head)),
-          ...got.rows.map(([f, said]) => el("div", { class: s.hot === f.i ? "hot" : "" },
-            el("i", { class: "sw", style: `background:${f.colour};margin-right:6px` }),
-            el("span", {}, shortName(f) + "  "), el("b", {}, said))));
-        const host = svg.parentElement.getBoundingClientRect();
-        tip.style.left = `${Math.max(4, Math.min(e.clientX - host.left + 14, host.width - 250))}px`;
-        tip.style.top = `${e.clientY - host.top + 14}px`;
-        tip.style.opacity = 1;
-      });
-    }
-
-    /** Drag across to narrow the users axis, wheel to zoom about the cursor, double-click to
-        put it back. Without this one model's 250 users flattens every other line. */
-    zooming(svg, span, natural) {
-      const s = this.state;
-      let from = null;
-      svg.addEventListener("mousedown", (e) => {
-        from = (e.clientX - svg.getBoundingClientRect().left)
-               / svg.getBoundingClientRect().width * W;
-      });
-      svg.addEventListener("mouseup", (e) => {
-        if (from === null) return;
-        const box = svg.getBoundingClientRect();
-        const to = (e.clientX - box.left) / box.width * W;
-        const [x0, x1] = span();
-        const users = (x) => x0 + (Math.max(IX0, Math.min(IX1, x)) - IX0) / (IX1 - IX0) * (x1 - x0);
-        const [a, b] = [users(from), users(to)].sort((p, q) => p - q);
-        from = null;
-        if (b - a < (x1 - x0) * 0.03) return;          // a click is not a drag
-        s.zoom = [Math.max(0, Math.floor(a)), Math.max(1, Math.ceil(b))];
-        this.draw();
-      });
-      svg.addEventListener("dblclick", () => { s.zoom = null; this.draw(); });
-      svg.addEventListener("wheel", (e) => {
-        e.preventDefault();
-        const box = svg.getBoundingClientRect();
-        const mx = (e.clientX - box.left) / box.width * W;
-        const [x0, x1] = span();
-        const here = x0 + (Math.max(IX0, Math.min(IX1, mx)) - IX0) / (IX1 - IX0) * (x1 - x0);
-        const k = e.deltaY > 0 ? 1.25 : 0.8;
-        const a = Math.max(0, here - (here - x0) * k), b = here + (x1 - here) * k;
-        s.zoom = (b - a) >= natural ? null
-          : [Math.floor(a), Math.max(Math.floor(a) + 1, Math.ceil(b))];
-        this.draw();
-      }, { passive: false });
-    }
-
-    /** Re-mark the hot line and its table row without redrawing either panel. */
-    paintHot() {
-      const s = this.state;
-      for (const mark of this.querySelectorAll("svg path.ln, svg .dotmark")) {
-        const mine = Number(mark.dataset.i);
-        const hot = s.hot === mine, dim = s.hot !== null && !hot;
-        mark.classList.toggle("hot", hot);
-        mark.classList.toggle("dim", dim);
-        if (mark.classList.contains("dotmark")) {
-          mark.setAttribute("r", hot ? "4.5" : "3");
-          mark.setAttribute("opacity", dim ? "0.25" : "1");
-        }
-      }
-      for (const tr of this.querySelectorAll("table.fit tbody tr")) {
-        tr.classList.toggle("hot", s.hot === Number(tr.dataset.i));
-      }
-    }
-
     // ------------------------------------------------------------------ the table
     table(rows) {
       const s = this.state;
@@ -527,8 +257,8 @@
         const fits = this.slots(f, s.ctx);
         const long = f.longest;
         const tr = el("tr", { class: fits ? "" : "nofit",
-          onmouseenter: () => { s.hot = f.i; this.paintHot(); },
-          onmouseleave: () => { s.hot = null; this.paintHot(); } },
+          onmouseenter: () => { s.hot = f.i; FM.charts.paintHot(this); },
+          onmouseleave: () => { s.hot = null; FM.charts.paintHot(this); } },
           el("td", { class: "name" },
              el("i", { class: "sw", style: `background:${f.colour}` }), shortName(f)),
           el("td", {}, (f.loaded / GB).toFixed(2)),
@@ -637,8 +367,8 @@
         } });
         cb.checked = true;
         const label = el("label", {
-          onmouseenter: () => { s.hot = f.i; this.paintHot(); },
-          onmouseleave: () => { s.hot = null; this.paintHot(); } },
+          onmouseenter: () => { s.hot = f.i; FM.charts.paintHot(this); },
+          onmouseleave: () => { s.hot = null; FM.charts.paintHot(this); } },
           cb, el("i", { class: "sw", style: `background:${f.colour}` }), shortName(f));
         ref.modelLabels.push([f, label]);
         return label;
@@ -687,7 +417,7 @@
         el("div", { class: "sub" },
            `at ${human(s.room)} of room · both scales logarithmic · `
            + "the dashed line is where the context slider stands"));
-      a.append(this.panelFits(rows, tipA), tipA);
+      a.append(FM.charts.fits(this, rows, tipA), tipA);
 
       const b = el("div", { class: "panel" },
         el("div", { class: "zoomhint" }, "drag or wheel to zoom · double-click to reset"),
@@ -695,7 +425,7 @@
         el("div", { class: "sub" },
            `each user gets ${commas(s.ctx)} tokens · where a line leaves the red room line `
            + "is the last user that machine holds"));
-      b.append(this.panelCost(rows, tipB), tipB);
+      b.append(FM.charts.cost(this, rows, tipB), tipB);
 
       this.body.replaceChildren(
         el("div", { class: "panels" }, a, b),
@@ -708,7 +438,7 @@
           + "user's cache. A heavy model with a cheap cache overtakes a light one with a "
           + "fat cache somewhere, and that crossing is the whole reason the second panel "
           + "is drawn from zero users."));
-      this.paintHot();
+      FM.charts.paintHot(this);
     }
   }
   customElements.define("fit-view", FitView);

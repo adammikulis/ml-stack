@@ -127,7 +127,7 @@ def open_page(browser, vendored):
     contexts = []
 
     def _open(graph=None, *, view="2d", served=False, ask_reply=None, ask_stream=None,
-              stream_from=None, thread=None, review=None, kinds=None,
+              stream_from=None, thread=None, review=None, kinds=None, ask_model=None,
               origin="http://graph.test/"):
         html = document(graph if graph is not None else sample_graph(), served=served,
                         kinds=kinds)
@@ -142,6 +142,8 @@ def open_page(browser, vendored):
                 r.fulfill(path=str(vendored[url]), content_type="application/javascript")
             elif url == origin:
                 r.fulfill(body=html, content_type="text/html")
+            elif url == origin + "ask/model" and ask_model is not None:
+                r.fulfill(body=json.dumps(ask_model), content_type="application/json")
             elif url == origin + "ask" and r.request.method == "POST" \
                     and ask_reply is not None:
                 r.fulfill(body=json.dumps(ask_reply), content_type="application/json")
@@ -1239,4 +1241,141 @@ def test_the_history_chip_is_there_only_when_a_link_carries_a_message(open_page)
     assert page.locator(".tools #history").count() == 1
     assert page.is_hidden(".tools #history")
     assert page.is_hidden("#history-when")
+    assert errors == []
+
+
+# -- the names on the marks and the words on the arrows -----------------------------------
+
+SHOWN_NAMES = """() => [...document.querySelectorAll('#graph g.node:not(.hushed):not(.gone) text')]
+    .map(t => { const r = t.getBoundingClientRect();
+                return { id: t.parentNode.__data__.id, said: t.textContent,
+                         left: r.left, top: r.top, right: r.right, bottom: r.bottom }; })"""
+
+
+#: the leading a glyph box carries above and below the line the pass places
+LEADING = 2
+
+
+def overlapping(boxes):
+    """Every pair of names whose letters share more than the leading."""
+    clashes = []
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1:]:
+            across = min(a["right"], b["right"]) - max(a["left"], b["left"])
+            down = min(a["bottom"], b["bottom"]) - max(a["top"], b["top"])
+            if across > 0 and down > LEADING:
+                clashes.append((a["said"], b["said"], round(across), round(down)))
+    return clashes
+
+
+def test_a_mark_is_named_and_no_name_is_drawn_over_another(open_page):
+    """`graph-labels` places the names in screen pixels: the node that matters most claims
+    its box, and one that would land on a neighbour is left off rather than drawn over it.
+
+    Fails when the labels are never created, and when the collision pass is dropped so that
+    every name is drawn.
+    """
+    page, errors = open_page(a_graph_of(120))
+    settle(page)
+    # the pass runs on the tick, so the names are read against the marks it last placed them by
+    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=60_000)
+    page.wait_for_timeout(600)
+    page.wait_for_function(f"() => ({SHOWN_NAMES})().length > 5")
+    shown = page.evaluate(SHOWN_NAMES)
+    assert 5 < len(shown) < 240, "a pane with every name on it has not placed any of them"
+    assert all(s["said"] for s in shown), "a name was placed with nothing written in it"
+    assert overlapping(shown) == []
+    assert errors == []
+
+
+def test_the_words_on_the_arrows_are_drawn_and_the_panel_takes_them_away(open_page):
+    """The relation is written along its own arrow, and `Labels · Edge names · hide` in the
+    display panel takes every one of them off. Fails when the edge pass never runs, and when
+    it ignores what the panel says."""
+    page, errors = open_page()
+    settle(page)
+    said = "() => [...document.querySelectorAll('#graph text.elabel:not(.hushed)')].map(t => t.textContent)"
+    page.wait_for_function(f"() => ({said})().length > 0")
+    assert "works on" in page.evaluate(said)
+
+    page.click("#display-btn")
+    page.locator("#panel .row", has_text="Edge names").get_by_role(
+        "button", name="hide", exact=True).click()
+    page.wait_for_function(f"() => ({said})().length === 0")
+    assert errors == []
+
+
+def test_the_name_of_what_you_clicked_is_never_left_off(open_page):
+    """A name you asked to see is placed whatever it overlaps. With every mark moved onto one
+    spot, where no label can be placed clear of another, the entry that was clicked and the
+    ones joined to it are named and nothing else is.
+
+    Fails when the selection is not exempt from the collision pass.
+    """
+    page, errors = open_page(a_crowd_of(120))
+    settle(page)
+    hub = page.evaluate("""() => { const M = window.graphModel; let best = null, most = -1;
+        for (const n of M.nodes) { const near = (M.neighbors.get(n.id) || new Set()).size;
+          if (near > most) { most = near; best = n.id; } }
+        return best; }""")
+    box = page.evaluate("""(id) => [...document.querySelectorAll('#graph g.node')]
+        .find(g => g.__data__.id === id).querySelector('path.mark').getBoundingClientRect()""", hub)
+    page.mouse.click((box["left"] + box["right"]) / 2, (box["top"] + box["bottom"]) / 2)
+    page.wait_for_function("(id) => window.graphModel.selected === id", arg=hub)
+    page.wait_for_timeout(700)
+
+    page.evaluate("""() => {
+        const M = window.graphModel;
+        M.view2d.sim.stop();
+        M.nodes.forEach(n => { n.x = 400; n.y = 400; });
+        M.layoutLabels();
+    }""")
+    named = {s["id"] for s in page.evaluate(SHOWN_NAMES)}
+    drawn = set(page.evaluate(
+        "() => [...document.querySelectorAll('#graph g.node:not(.gone)')].map(g => g.__data__.id)"))
+    joined = set(page.evaluate(
+        "(id) => [id, ...(window.graphModel.neighbors.get(id) || [])]", hub)) & drawn
+    assert len(joined) > 1, "an entry joined to nothing does not test this"
+    assert named == joined, (sorted(named), sorted(joined))
+    assert errors == []
+
+
+def test_the_pane_says_which_model_answers_and_what_it_spent(open_page):
+    """`ask-trace` reads `/ask/model` for the name over the box, folds the answer's own
+    `spent` into the line above the trace, and writes the conversation's `session` under the
+    heading.
+
+    Fails when the cost readout is left off the tally, and when the session total never
+    reaches the line under the heading.
+    """
+    spent = {"seconds": 2.5, "calls": 3, "read_tokens": 900, "cached_tokens": 100,
+             "completion_tokens": 40, "context_peak": 12000}
+    session = {"answers": 2, "seconds": 5, "calls": 4, "read_tokens": 1800,
+               "cached_tokens": 200, "completion_tokens": 70}
+    events = [
+        {"event": "tool", "name": "look_up", "detail": "'iron'"},
+        {"event": "answer", "text": "Ada Lovelace works on iron."},
+        {"event": "done", "content": "Ada Lovelace works on iron.",
+         "ids": ["person:ada"], "show": ["person:ada"], "why": "looked up 'iron'",
+         "model": "atlas-4-mini-UD-IQ4_XS.gguf", "spent": spent, "session": session},
+    ]
+    body = "".join(f"data: {json.dumps(e)}\n\n" for e in events)
+    page, errors = open_page(served=True, ask_stream=body,
+                             ask_model={"model": "atlas-4-mini-UD-IQ4_XS.gguf",
+                                        "slot_context": 32000})
+    page.wait_for_selector("#stats b")
+    pw.expect(page.locator("#askpane-title")).to_have_text("Ask atlas-4-mini (IQ4_XS)")
+
+    page.fill("#q", "who works on iron?")
+    page.press("#q", "Enter")
+    now = page.locator("#qturns .t .think summary.now")
+    pw.expect(now).to_contain_text("looked up 1")
+    pw.expect(now).to_contain_text("answered by atlas-4-mini (IQ4_XS)")
+    pw.expect(now).to_contain_text("3 calls")
+    pw.expect(now).to_contain_text("read 900, cached 100")
+    pw.expect(now).to_contain_text("context 12k of 32k")
+
+    said = page.locator("#askpane-session")
+    pw.expect(said).to_contain_text("this session: 2 answers")
+    pw.expect(said).to_contain_text("read 1800, cached 200, wrote 70")
     assert errors == []

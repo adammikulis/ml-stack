@@ -134,7 +134,8 @@ class TestThePage:
         assert not re.search(r'(?:src|href)="https?://', got["raw"]), \
             "the page fetches a library"
 
-    @pytest.mark.parametrize("name", ["fit-model", "fit-view", "rates-view", "telemetry-view"])
+    @pytest.mark.parametrize("name", ["fit-model", "fit-view", "fit-charts", "rates-view",
+                                 "telemetry-view"])
     def test_the_script_parses(self, tmp_path, name):
         """A duplicate declaration anywhere in it stops the whole page loading."""
         from ml_stack.fleet.page import COMPONENTS_DIR
@@ -150,16 +151,18 @@ class TestThePage:
         assert done.returncode == 0, done.stderr[-500:]
 
 
-class TestTheSplitBetweenTheFourComponents:
-    """`fit-view` used to be one 1,150-line file holding three screens; it is now four.
+class TestTheSplitBetweenTheFitComponents:
+    """The fit screen is five files: `fit-model` holds the formatting and the chart geometry,
+    `fit-view` the frame and the table, `fit-charts` the two panels the fit screen draws, and
+    `rates-view` and `telemetry-view` a screen each.
 
     Nothing here drives a browser -- `TestTheFitView` in `test_fleet_page.py` already opens
-    all three screens and reads what they draw. This is the seam itself: the formatting and
-    the chart geometry live once, in `fit-model`, and the other three read it off
-    `window.fitModel` rather than each carrying their own copy.
+    all three screens and reads what they draw. This is the seam itself: the shared pieces
+    live once, in `fit-model`, and the rest read them off `window.fitModel` rather than each
+    carrying their own copy.
     """
 
-    NAMES = ("fit-model", "fit-view", "rates-view", "telemetry-view")
+    NAMES = ("fit-model", "fit-view", "fit-charts", "rates-view", "telemetry-view")
 
     def read(self, name: str) -> str:
         from ml_stack.fleet.page import COMPONENTS_DIR
@@ -183,12 +186,13 @@ class TestTheSplitBetweenTheFourComponents:
             holders = [name for name, text in texts.items() if needle in text]
             assert holders == ["fit-model"], f"{needle!r} is defined in {holders}, not fit-model alone"
 
-    def test_rates_view_and_telemetry_view_read_the_shared_model(self):
-        for name in ("rates-view", "telemetry-view"):
+    def test_the_other_four_read_the_shared_model(self):
+        for name in ("fit-view", "fit-charts", "rates-view", "telemetry-view"):
             assert "window.fitModel" in self.read(name), f"{name} does not read fit-model"
 
-    def test_fit_view_keeps_the_frame_the_other_two_mount_into(self):
+    def test_fit_view_keeps_the_frame_the_others_mount_into(self):
         html = self.read("fit-view")
+        assert "<fit-charts></fit-charts>" in html
         assert "<rates-view></rates-view>" in html
         assert "<telemetry-view></telemetry-view>" in html
         for anchor in ("id=\"fit-heading\"", "id=\"fit-views\"", "id=\"fit-body\""):

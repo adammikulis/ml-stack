@@ -1,0 +1,120 @@
+<!-- <graph-labels>: the names on the marks and the words on the arrows, placed so none covers another -->
+<style>
+.node.dim text { opacity: .1; }
+.node.near text { opacity: .65; font-style: italic; }
+.node text { font: 500 calc(13px * var(--label-scale, 1)) var(--font-body); fill: var(--ink-2); paint-order: stroke; stroke: var(--bg); stroke-width: 3.5px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.node.k-person text { font: 600 calc(15px * var(--label-scale, 1)) var(--font-body); fill: var(--ink); }
+.node.k-topic text { font-size: calc(12px * var(--label-scale, 1)); fill: var(--ink-3); }
+.node.on text, .node.on.k-topic text { fill: var(--ink); font-weight: 700; stroke-width: 5px; }
+.node.on text, .node.on.k-topic text, .node.k-person.on text { paint-order: stroke; stroke: var(--bg); }
+/* a label the layout pass could not place without an overlap */
+.node.hushed text { opacity: 0; }
+.graph-wrap.settling .node text, .graph-wrap.settling .elabel { opacity: 0; }
+.elabel { font: 500 calc(12px * var(--elabel-scale, 1)) var(--font-body); fill: var(--ink-3); paint-order: stroke; stroke: var(--bg);
+          stroke-width: 3px; stroke-linejoin: round; pointer-events: none; transition: opacity .18s; }
+.elabel.hushed { opacity: 0; }
+</style>
+<script>
+(function () {
+  const M = window.graphModel;
+  const { NONE, display, labelText, linkDropped, linkGone, links, matches, minor, neighbors, nodes, paintRank, relText, view } = M;
+  function wire() {
+    const { node, root, svg, sim, zoom, ends, radius } = M.view2d;
+    Object.assign(M, { layoutLabels, measure });
+    const label = node.append('text').attr('text-anchor', 'middle')
+      .attr('dy', d => radius(d) + 13).text(labelText);
+    const elabel = root.append('g').selectAll('text').data(links).join('text')
+      .attr('class', 'elabel').attr('text-anchor', 'middle').text(l => relText(l.rel));
+    function measure() {
+      label.each(function (d) { d.lw = this.getComputedTextLength(); });
+      elabel.each(function (l) { l.lw = this.getComputedTextLength(); });
+    }
+    measure();
+    if (document.fonts) document.fonts.ready.then(() => { measure(); layoutLabels(); });
+
+    // Labels hold a constant size on screen — scale(1/k) undoes the zoom — so placement is done in
+    // screen pixels. The node that matters most claims its box first, below the mark and then above
+    // it; whatever still collides is left unlabelled rather than drawn over a neighbour, and zooming
+    // in spreads the marks apart until those labels fit.
+    const labelDy = (d, k) => radius(d) * k + 13;
+    // density 0 keeps only what fits with room to spare; 100 lets labels sit shoulder to shoulder
+    const gap = () => 14 - (view.density / 100) * 13;
+    let was2d = new Set();
+    // the zoom this pass was placed against; a gesture re-places them once it has moved 8%
+    let lastK = 1;
+    // Past this many candidates, the collision search below (each one checked against every
+    // mark already on screen) costs candidates times marks; the lowest-ranked ones are hushed
+    // before ever being tried, which caps that at LABEL_CAP times marks instead of marks squared.
+    const LABEL_CAP = 800;
+    function layoutLabels() {
+      const k = d3.zoomTransform(svg.node()).k;
+      lastK = k;
+      const focus = M.selected ? new Set([M.selected, ...(neighbors.get(M.selected) || NONE)]) : null;
+      const rank = d => (d.id === M.selected ? 9 : paintRank(d.kind) - (minor(d) ? 1 : 0));
+      const queue = nodes.filter(d => d.x != null && matches(d) && (!focus || focus.has(d.id)))
+        .sort((a, b) => (was2d.has(b.id) - was2d.has(a.id))
+          || rank(b) - rank(a) || (b.mentions || 0) - (a.mentions || 0));
+      // every visible mark is an obstacle too, so a label never lands on another node's shape
+      const boxes = queue.map(d => {
+        const r = radius(d) * k;
+        return { x0: d.x * k - r, x1: d.x * k + r, y0: d.y * k - r, y1: d.y * k + r };
+      });
+      const show = new Set();
+      // A name you asked to see is never dropped for want of room. Collision decides which of the
+      // rest fit; the selected node and the ones joined to it are placed whatever they overlap.
+      const insist = d => d.id === M.selected || (focus && focus.has(d.id));
+      const candidates = queue.length > LABEL_CAP ? queue.slice(0, LABEL_CAP) : queue;
+      for (const d of candidates) {
+        const half = (d.lw || 40) / 2 + gap(), cx = d.x * k, cy = d.y * k;
+        let placed = false;
+        for (const dy of [labelDy(d, k), -(radius(d) * k + 6)]) {
+          const box = { x0: cx - half, x1: cx + half, y0: cy + dy - 12, y1: cy + dy + 4 };
+          if (boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+          boxes.push(box); show.add(d.id); d.dy = dy; placed = true;
+          break;
+        }
+        if (!placed && insist(d)) { show.add(d.id); d.dy = labelDy(d, k); }
+      }
+      was2d = show;
+      node.classed('hushed', d => !show.has(d.id));
+      label.attr('transform', `scale(${1 / k})`).attr('dy', d => d.dy ?? labelDy(d, k));
+
+      // Edge names go in after the node names, so a relation never costs a person their label.
+      // With every kind switched on most of them lose; removing a relation is what frees the room.
+      const showEdge = new Set();
+      if (display.edgeLabels === 'show') {
+        const near = M.selected ? l => (l.source.id === M.selected || l.target.id === M.selected) : () => false;
+        const edges = links.filter(l => !linkGone(l) && !linkDropped(l) && l.source.x != null
+                                        && (!focus || near(l)))
+          .sort((a, b) => (near(b) - near(a)) || (b.weight || 0) - (a.weight || 0));
+        for (const l of edges) {
+          const half = (l.lw || 30) / 2 + gap();
+          const cx = (l.source.x + l.target.x) / 2 * k, cy = (l.source.y + l.target.y) / 2 * k;
+          const box = { x0: cx - half, x1: cx + half, y0: cy - 7, y1: cy + 5 };
+          const mine = M.selected && (l.source.id === M.selected || l.target.id === M.selected);
+          if (!mine && boxes.some(b => b.x0 < box.x1 && box.x0 < b.x1 && b.y0 < box.y1 && box.y0 < b.y1)) continue;
+          boxes.push(box); showEdge.add(l);
+        }
+      }
+      elabel.classed('hushed', l => !showEdge.has(l));
+    }
+
+    sim.on('tick.labels', () => {
+      const k = d3.zoomTransform(svg.node()).k;
+      elabel.attr('transform', l => {
+        const [x1, y1, x2, y2] = ends(l, k);
+        return `translate(${(x1 + x2) / 2},${(y1 + y2) / 2}) scale(${1 / k})`;
+      });
+      if (sim.alpha() < 0.06) layoutLabels();
+    });
+    zoom.on('zoom.labels', e => {
+      label.attr('transform', `scale(${1 / e.transform.k})`);
+      if (Math.abs(e.transform.k - lastK) > lastK * 0.08) layoutLabels();
+    });
+  }
+  class GraphLabels extends HTMLElement {
+    connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
+  }
+  customElements.define('graph-labels', GraphLabels);
+})();
+</script>

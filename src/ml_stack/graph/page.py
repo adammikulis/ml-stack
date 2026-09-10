@@ -28,9 +28,9 @@ WEB = Path(__file__).parent / "web"
 COMPONENTS_DIR = WEB / "components"
 #: the page, in the order the elements wire themselves up
 COMPONENTS = ("page-model", "graph-banner", "graph-stats", "graph-search", "graph-view",
-              "graph-grips", "graph-map", "graph-history", "graph-3d", "graph-detail",
-              "ask-pane", "draft-note", "change-request", "display-panel", "refresh-button",
-              "review-queue")
+              "graph-labels", "graph-grips", "graph-map", "graph-history", "graph-3d",
+              "graph-detail", "ask-pane", "ask-trace", "draft-note", "change-request",
+              "display-panel", "refresh-button", "review-queue")
 SHAPES = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")
 # what a kind is drawn as, when the caller does not say
 FALLBACK = ("circle", "square", "diamond", "triangle", "wye", "star", "cross")

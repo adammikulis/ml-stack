@@ -397,6 +397,57 @@ class TestTheFitView:
         assert page.locator(".panels svg path.ln").count() >= 2
         assert not errors
 
+    def test_the_cursor_over_a_panel_names_every_model_and_lights_the_nearest(
+            self, joined, open_page):
+        """`fit-charts` reads the panel under the cursor: the tip says what every model
+        costs at that point, the line nearest the pointer goes hot, and its row in the table
+        lights with it. Fails when the cursor tracking is dropped from either panel."""
+        page, errors = open_page(joined, cookie=joined.cookie)
+        page.click("nav.tabs a:has-text('Fit')")
+        page.wait_for_selector(".panels svg path.ln")
+        cost = page.locator(".panels .panel").nth(1)
+        line = cost.locator("svg path.ln").first.bounding_box()
+        page.mouse.move(line["x"] + line["width"] / 2, line["y"] + line["height"] / 2)
+
+        tip = cost.locator(".tip")
+        pw.expect(tip).to_be_visible()
+        pw.expect(tip).to_contain_text("users at")
+        rows = page.locator("table.fit tbody tr").count()
+        assert tip.locator("div").count() == rows + 1, "a head and a line for every model"
+        pw.expect(cost.locator("svg path.ln.hot")).to_have_count(1)
+        pw.expect(page.locator("table.fit tbody tr.hot")).to_have_count(1)
+        assert not errors
+
+    def test_dragging_across_the_cost_panel_narrows_the_users_axis(self, joined, open_page):
+        """A drag across the panel is a zoom into that span, and a double-click puts the
+        whole axis back. Fails when the drag no longer narrows it, and when the
+        double-click no longer restores it."""
+        page, errors = open_page(joined, cookie=joined.cookie)
+        page.click("nav.tabs a:has-text('Fit')")
+        page.wait_for_selector(".panels svg path.ln")
+        cost = page.locator(".panels .panel").nth(1).locator("svg")
+        ticks = lambda: cost.locator("text").all_text_contents()
+        whole = ticks()
+
+        box = cost.bounding_box()
+        page.mouse.move(box["x"] + box["width"] * 0.4, box["y"] + box["height"] * 0.5)
+        page.mouse.down()
+        page.mouse.move(box["x"] + box["width"] * 0.7, box["y"] + box["height"] * 0.5,
+                        steps=6)
+        page.mouse.up()
+        page.wait_for_function("([was]) => [...document.querySelectorAll("
+                               "'.panels .panel:nth-of-type(2) svg text')]"
+                               ".map(t => t.textContent).join() !== was",
+                               arg=[",".join(whole)])
+        assert ticks() != whole
+
+        page.mouse.dblclick(box["x"] + box["width"] / 2, box["y"] + box["height"] * 0.5)
+        page.wait_for_function("([was]) => [...document.querySelectorAll("
+                               "'.panels .panel:nth-of-type(2) svg text')]"
+                               ".map(t => t.textContent).join() === was",
+                               arg=[",".join(whole)])
+        assert not errors
+
     def test_the_other_two_views_open(self, joined, open_page):
         page, errors = open_page(joined, cookie=joined.cookie)
         page.click("nav.tabs a:has-text('Fit')")
