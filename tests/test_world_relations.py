@@ -19,7 +19,8 @@ import pytest
 from ml_stack.files import write_json
 from ml_stack.world.organisation import make
 from ml_stack.world.questions import questions
-from ml_stack.world.simulate import _SHAPE, _STATED, run
+from ml_stack.world.sentences import _SHAPE, _STATED
+from ml_stack.world.simulate import run
 from ml_stack.world.story import OUTCOMES
 
 SEED = 7

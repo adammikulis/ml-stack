@@ -76,7 +76,9 @@ question carries its `kind`, which the bench ignores, and `--kinds` draws only s
 
 ```python
 import random
-from ml_stack.world.simulate import model_writer, run, simulate, template_writer
+from ml_stack.world.sentences import template_writer
+from ml_stack.world.simulate import run, simulate
+from ml_stack.world.speaking import model_writer
 from ml_stack.world.story import calendar
 
 world.calendar = calendar(world, days=20, rng=random.Random(world.seed))

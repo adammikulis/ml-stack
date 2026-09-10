@@ -230,7 +230,7 @@ across `src/`.
 ### Files that hold more than one job
 
 `deep-files` refuses a Python file over 900 lines and `deep-components` an HTML, JavaScript
-or CSS file over 500. No component is over any more; twelve Python files are.
+or CSS file over 500. No component is over any more; ten Python files are.
 `claude-edit-guard` refuses a write that lengthens one of them, so each can only get
 shorter from here, but nothing shortens them except somebody splitting them.
 `scripts/budgets --show deep-files` lists them. `bench/run.py` (2,019) has its own entry
@@ -247,12 +247,8 @@ name, not a line count met by moving code sideways.
   question through the client with its bill (`Counting`, `_ask_once`) and its trace, a set
   of them (`measure`, `concurrent`), and what the server costs (`footprint`, `busy`,
   `slot_count`).
-- [ ] **`world/organisation.py` (1,233)** -- an invented organisation as a graph: five
-  kinds of group, the `_Build` that assembles one, the people and their personas.
 - [ ] **`hub.py` (1,215)** -- `Found` and the search, `Head` and the draft head, `Chosen`
   and the pick, plus a `ctypes` memory probe that belongs nowhere near any of them.
-- [ ] **`world/simulate.py` (1,209)** -- `_Relations`, the day clock and its conversation
-  picking, `_Counting`, and `ModelWriter`, which writes the messages through a model.
 - [ ] **`bench/extract.py` (1,095)** -- `MessageRow` and the truth behind a message, the
   resolution of a name to a node, and `_Extracting`, which runs the model.
 - [ ] **`bench/report.py` (1,081)** -- the gathering of kept runs, and `Doc` with the
@@ -267,9 +263,8 @@ name, not a line count met by moving code sideways.
 - [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
   inventing arguments and paraphrases, the synthesiser, turning kept bench traces into
   rows, and the command. Its own section banners name the seams.
-- [ ] **`world/simulate.py`, `world/organisation.py`, `bench/extract.py` and
-  `bench/measure.py` are four of the twelve and all four are read by the extraction
-  bench**, so splitting them is one reader's job rather than four.
+- [ ] **`bench/extract.py` and `bench/measure.py` are both read by the extraction
+  bench**, so splitting them is one reader's job rather than two.
 
 `fleet/models.py` (930) went that way, into `fleet/models.py` (the machine's model files),
 `fleet/catalogue.py` (what the hub offers and what fits here) and `fleet/weights.py` (which

@@ -17,8 +17,9 @@ import pytest
 from ml_stack.graph.prompts import TIGHT_SYSTEM_SENTENCE
 from ml_stack.messages import Message
 from ml_stack.world import World
-from ml_stack.world.simulate import (LONGEST, SHORTEST, WORK_END, WORK_START, model_writer, run,
-                                     simulate, template_writer)
+from ml_stack.world.sentences import template_writer
+from ml_stack.world.simulate import LONGEST, SHORTEST, WORK_END, WORK_START, run, simulate
+from ml_stack.world.speaking import model_writer
 from ml_stack.world.story import ARCS, OUTCOMES, calendar, groups
 
 

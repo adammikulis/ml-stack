@@ -14,10 +14,17 @@ from word lists, and the only real things are cities.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["World", "check"]
+if TYPE_CHECKING:
+    from ml_stack.world import check as check
+
+__all__ = ["World", "Writer", "check"]
+
+Writer = Callable[[Mapping[str, Any], str, Mapping[str, Any]], str]
+"""What writes one message: ``(persona, prompt, context) -> str``."""
 
 
 @dataclass
