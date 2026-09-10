@@ -40,7 +40,7 @@ def device_for() -> Any:
     from ml_stack.train.backend.device import resolve_torch_device
     try:
         return resolve_torch_device(os.environ.get("ML_STACK_DEVICE") or None)
-    except ImportError:
+    except (ImportError, RuntimeError):
         return "torch (not installed)"
 
 
