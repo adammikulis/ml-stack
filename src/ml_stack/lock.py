@@ -30,11 +30,12 @@ import errno
 import os
 import sys
 import time
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any
 
-__all__ = ["Busy", "only_one"]
+__all__ = ["Busy", "held_by", "only_one", "release", "take"]
 
 #: The byte locked on Windows. Past any pid text, so a reader is never refused by the lock.
 _LOCKED_BYTE = 1 << 30
@@ -45,8 +46,17 @@ class Busy(RuntimeError):
 
 
 # -- the two ways of holding a byte -----------------------------------------------------
-def _try_take(handle: int) -> bool:
-    """Take the lock without waiting. True when held now, False when somebody else has it."""
+def _fileno(handle: Any) -> int:
+    return handle if isinstance(handle, int) else handle.fileno()
+
+
+def take(handle: Any) -> bool:
+    """Take the lock on an open file without waiting.
+
+    True when it is held now, False when somebody else has it. ``handle`` is a file
+    descriptor or anything with ``fileno()``.
+    """
+    handle = _fileno(handle)
     if sys.platform == "win32":
         import msvcrt
 
@@ -71,7 +81,9 @@ def _try_take(handle: int) -> bool:
         raise
 
 
-def _drop(handle: int) -> None:
+def release(handle: Any) -> None:
+    """Give back the lock taken on an open file by `take`."""
+    handle = _fileno(handle)
     if sys.platform == "win32":
         import msvcrt
 
@@ -113,7 +125,7 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
     handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
     began, told, taken = time.monotonic(), False, False
     try:
-        while not _try_take(handle):
+        while not take(handle):
             held = _holder(handle)
             if not wait:
                 raise Busy(f"{path} is held by {held}")
@@ -132,6 +144,27 @@ def only_one(what: str | Path, *, wait: bool = True, timeout: float = 0.0,
         try:
             if taken:
                 os.ftruncate(handle, 0)
-                _drop(handle)
+                release(handle)
         finally:
             os.close(handle)
+
+
+def held_by(what: str | Path) -> str:
+    """Who holds the lock on ``what``, as `only_one` records it, or "" when nobody does.
+
+    Asked without waiting and without disturbing the record, so a holder's pid survives
+    being asked about.
+    """
+    path = Path(what).expanduser()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError:
+        return ""
+    try:
+        if not take(handle):
+            return _holder(handle)
+        release(handle)
+        return ""
+    finally:
+        os.close(handle)

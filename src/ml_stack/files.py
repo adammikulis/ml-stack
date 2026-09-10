@@ -8,33 +8,95 @@ renames over it, so a reader sees the old contents or the new, never the middle.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
-from collections.abc import Set
+from collections.abc import Callable, Iterator, Mapping, Set
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-__all__ = ["prune_orphans", "read_json", "write_json"]
+__all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json",
+           "version_of", "versioned", "write_json", "write_text", "writing"]
+
+#: A record with no version key.
+UNVERSIONED = 0
 
 
-def write_json(path: Path, obj: Any, *, indent: int | None = 2) -> None:
-    """Write ``obj`` as JSON so a concurrent reader sees the old file or the new one.
+class CrossDevice(OSError):
+    """The source and the target are on different filesystems."""
 
-    The bytes go to a temporary file in the same directory and are renamed over ``path``;
-    a failure part-way (a value that is not JSON, a full disk) leaves the old file as it was
-    and no temporary behind.
+
+def promote(source: Path | str, target: Path | str) -> Path:
+    """Put a finished ``source`` in ``target``'s place in one step. Returns ``target``.
+
+    ``source`` may be a file, a directory or a symlink, and must be on the same filesystem
+    as ``target``; when it is not, `CrossDevice` says so rather than the bare ``EXDEV``.
+    """
+    source, target = Path(source), Path(target)
+    try:
+        source.replace(target)
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+        raise CrossDevice(
+            errno.EXDEV,
+            f"{source} and {target} are on different filesystems, so moving one onto the "
+            f"other would copy it") from None
+    return target
+
+
+@contextmanager
+def writing(path: Path | str, *, suffix: str = ".tmp") -> Iterator[Path]:
+    """Yield a temporary path beside ``path`` that takes ``path``'s place on a clean exit.
+
+    A reader of ``path`` sees the old contents or the new ones. Leaving the block by an
+    exception takes the temporary away and leaves ``path`` as it was.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    fd, made = tempfile.mkstemp(dir=path.parent, suffix=suffix)
+    os.close(fd)
+    tmp = Path(made)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(obj, fh, indent=indent, ensure_ascii=False)
-        os.replace(tmp, path)
-    except BaseException:
-        Path(tmp).unlink(missing_ok=True)
-        raise
+        yield tmp
+        promote(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def write_text(path: Path | str, text: str, *, encoding: str = "utf-8") -> None:
+    """Write ``text`` to ``path`` so a concurrent reader sees the old file or the new one."""
+    with writing(path) as tmp:
+        tmp.write_text(text, encoding=encoding)
+
+
+def write_json(path: Path, obj: Any, *, indent: int | None = 2,
+               default: Callable[[Any], Any] | None = None) -> None:
+    """Write ``obj`` as JSON so a concurrent reader sees the old file or the new one.
+
+    ``default`` is `json.dump`'s: what to call on a value JSON has no shape for. A failure
+    part-way (a value that is not JSON, a full disk) leaves the old file as it was and no
+    temporary behind.
+    """
+    with writing(path) as tmp, tmp.open("w", encoding="utf-8") as fh:
+        json.dump(obj, fh, indent=indent, ensure_ascii=False, default=default)
+
+
+def versioned(record: Mapping[str, Any], version: int) -> dict[str, Any]:
+    """``record`` carrying the version key that says which shape it has."""
+    return {"version": int(version), **dict(record)}
+
+
+def version_of(record: Any) -> int:
+    """The version ``record`` declares, or ``UNVERSIONED`` when it carries no version key."""
+    if not isinstance(record, Mapping):
+        return UNVERSIONED
+    try:
+        return int(record.get("version", UNVERSIONED) or UNVERSIONED)
+    except (TypeError, ValueError):
+        return UNVERSIONED
 
 
 def read_json(path: Path, default: Any) -> Any:
