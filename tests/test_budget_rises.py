@@ -111,6 +111,22 @@ def git(root: Path, *args: str, **env) -> subprocess.CompletedProcess:
                           check=True, env={**os.environ, **env})
 
 
+WALLS = '''"""A checker that allows nothing, so the hook has a hard gate to read."""
+
+NAME = "walls"
+OWNER = ""
+HARD = True
+
+
+def describe() -> str:
+    return "a wall"
+
+
+def find(root):
+    return []
+'''
+
+
 @pytest.fixture
 def checkout(tmp_path):
     """A repository holding budgets.json, the hook, and the checkers the hook reads."""
@@ -118,12 +134,13 @@ def checkout(tmp_path):
     (root / "scripts" / "hooks").mkdir(parents=True)
     shutil.copytree(REPO / "scripts" / "gates", root / "scripts" / "gates",
                     ignore=shutil.ignore_patterns("__pycache__"))
+    (root / "scripts" / "gates" / "walls.py").write_text(WALLS, encoding="utf-8")
     shutil.copy2(HOOK, root / "scripts" / "hooks" / HOOK.name)
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
     git(root, "config", "user.email", "nobody@example.invalid")
     git(root, "config", "user.name", "A Tester")
     (root / "budgets.json").write_text(
-        json.dumps({"broad-excepts": 2, "deep-files": 19, "print-calls": 0}, indent=2) + "\n",
+        json.dumps({"broad-excepts": 2, "print-calls": 0, "walls": 4}, indent=2) + "\n",
         encoding="utf-8")
     git(root, "add", "-A")
     git(root, "commit", "-qm", "before")
@@ -141,7 +158,7 @@ def commit_with(root: Path, numbers: dict[str, int], **env) -> subprocess.Comple
 
 
 def test_a_hand_edited_rise_is_refused_at_the_commit(checkout):
-    done = commit_with(checkout, {"broad-excepts": 40, "deep-files": 19, "print-calls": 0},
+    done = commit_with(checkout, {"broad-excepts": 40, "print-calls": 0, "walls": 4},
                        CLAUDECODE="1")
     assert done.returncode == 1
     assert "broad-excepts: 2 -> 40, up 38" in done.stderr
@@ -149,7 +166,7 @@ def test_a_hand_edited_rise_is_refused_at_the_commit(checkout):
 
 
 def test_a_metric_deleted_so_it_can_be_re_added_is_refused(checkout):
-    done = commit_with(checkout, {"deep-files": 19, "print-calls": 0}, CLAUDECODE="1")
+    done = commit_with(checkout, {"print-calls": 0, "walls": 4}, CLAUDECODE="1")
     assert done.returncode == 1
     assert "broad-excepts: 2 allowed, now absent" in done.stderr
 
@@ -160,13 +177,13 @@ def test_dropping_the_line_a_hard_gate_should_never_have_had_is_the_fix(checkout
 
 
 def test_a_fall_is_committed_without_a_word(checkout):
-    done = commit_with(checkout, {"broad-excepts": 1, "deep-files": 19, "print-calls": 0},
+    done = commit_with(checkout, {"broad-excepts": 1, "print-calls": 0, "walls": 4},
                        CLAUDECODE="1")
     assert (done.returncode, done.stderr) == (0, "")
 
 
 def test_a_person_raises_it_on_purpose_and_an_agent_still_cannot(checkout):
-    raised = {"broad-excepts": 40, "deep-files": 19, "print-calls": 0}
+    raised = {"broad-excepts": 40, "print-calls": 0, "walls": 4}
     assert commit_with(checkout, raised, ML_STACK_BUDGET_RISE="yes").returncode == 0
     refused = commit_with(checkout, raised, ML_STACK_BUDGET_RISE="yes", CLAUDECODE="1")
     assert refused.returncode == 1
@@ -186,7 +203,7 @@ def test_a_budgets_json_nobody_staged_is_not_this_hook_s_business(checkout):
 def test_the_branch_is_compared_against_a_revision_without_a_commit_hook(checkout):
     """The same refusal, reached the way CI reaches it."""
     (checkout / "budgets.json").write_text(
-        json.dumps({"broad-excepts": 40, "deep-files": 19, "print-calls": 0}, indent=2) + "\n",
+        json.dumps({"broad-excepts": 40, "print-calls": 0, "walls": 4}, indent=2) + "\n",
         encoding="utf-8")
     kept = {k: v for k, v in os.environ.items() if k != "CLAUDECODE"}
     done = subprocess.run(

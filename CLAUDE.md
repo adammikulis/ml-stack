@@ -75,7 +75,7 @@ no shape this repository has decided to live with.
 
 **Nothing is ever grandfathered.** A violation that was here before your branch is your
 work the moment you touch the file it lives in, and everybody's work the rest of the time.
-The nineteen files over the size limit are not a baseline; they are nineteen files to
+The fourteen files over the size limit are not a baseline; they are fourteen files to
 split.
 
 **Banned as a reason to leave something alone:** "pre-existing", "not introduced by this
@@ -84,8 +84,10 @@ budget allows it", "it was already like that". None of those is a statement abou
 the code is right, and none of them has ever been asked for here.
 
 Leave every number you touched lower than you found it, and say by how much. A number may
-never rise on its own: `scripts/budgets --allow-increase` is for a rise Adam has agreed to
-in words, before it is used.
+never rise on its own, and no agent may raise one at all: `--allow-increase` is refused
+whenever `CLAUDECODE` is set -- Claude Code sets it for every command it runs and a terminal
+sets nothing -- so raising a number is Adam's, at his own terminal, like the push it
+resembles.
 
 **And say what you found.** A tolerated violation you noticed and did not fix is something
 Adam hears from you, in the message where you found it -- not something he discovers in a
@@ -99,12 +101,18 @@ Six checks refuse a change rather than describing what it should have been. Run 
 before you ask whether the suite passes.
 
 `budgets.json` holds the highest count each shape in `scripts/gates/` is allowed.
-`scripts/budgets` prints metric, budget, actual and delta, and names every site that is
-over. `tests/test_budgets.py` fails when a number rises, and also when it falls without
-being recorded, so a branch that lowers one runs `scripts/budgets --update` and commits the
-file. `--update` refuses to raise a number; `--allow-increase` puts a rise in the diff.
-`scripts/budgets --show METRIC` lists the sites. `SKIP_BUDGETS=1` skips the pre-commit
-check.
+`scripts/budgets` prints metric, budget, actual and delta, a total under the table -- what
+the budgets add up to, what the tree holds, and the distance between them -- and every site
+that is over. `tests/test_budgets.py` fails when a number rises, and also when it falls
+without being recorded, so a branch that lowers one runs `scripts/budgets --update` and
+commits the file. `--update` refuses to raise a number. `scripts/budgets --show METRIC`
+lists the sites. `SKIP_BUDGETS=1` skips the pre-commit check.
+
+`scripts/hooks/budgets-only-fall` closes the other door: a staged `budgets.json` whose
+numbers rose is refused whatever wrote it, and a metric dropped from the file counts as a
+rise, because the next `--update` puts it back at whatever the tree holds. An agent is
+refused outright; `ML_STACK_BUDGET_RISE=yes` is for Adam's own commit. The pre-commit chain
+is opt-in, so `ci.yml` runs the same check with `--against` the pull request's base.
 
 `tests/test_layers.py` sets out core, model, machine, graph, tools, and reads every import
 including the ones inside functions. A package imports downwards, and sideways only when
@@ -114,7 +122,10 @@ the other does not import it back. `KNOWN` lists what still crosses; it only shr
 script, or be named in `STANDALONE` with a reason. Code nothing calls is a gap to close,
 never a reason to delete.
 
-The size gates cover both halves of the tree: `deep-files` for Python, `deep-components` for the HTML, JavaScript and CSS a page is assembled from.
+The size gates cover both halves of the tree: `deep-files` for Python at 900 lines,
+`deep-components` for the HTML, JavaScript and CSS a page is assembled from at 500. A file
+already over its limit may only get shorter -- `claude-edit-guard` refuses the write that
+lengthens it, at the moment it is written.
 
 `scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
@@ -133,8 +144,9 @@ push anyway runs `ML_STACK_PUSH=yes git push`. The Bash guard refuses the comman
 an agent is told before it runs.
 
 `scripts/hooks/claude-edit-guard` refuses a function whose body already exists elsewhere, a
-raw HTTP call, a docstring over twelve lines and a signature over eight parameters, at the
-moment it is written. `.claude/settings.json` wires it and the Bash guard; `MLSTACK_GUARD=off`
+raw HTTP call, a docstring over twelve lines, a signature over eight parameters, and a write
+that takes a file over its line limit or makes an already-over file longer than it was, at
+the moment it is written. It reads the two limits from the checkers. `.claude/settings.json` wires it and the Bash guard; `MLSTACK_GUARD=off`
 turns both off. `scripts/install-hooks.sh` installs the pre-commit chain.
 
 ## Anything a user reads

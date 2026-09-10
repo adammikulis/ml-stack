@@ -6,12 +6,17 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 GUARD = REPO / "scripts" / "hooks" / "claude-edit-guard"
+sys.path.insert(0, str(REPO / "scripts"))
+
+from gates.deep_components import LIMIT as COMPONENT_LIMIT  # noqa: E402
+from gates.deep_files import LIMIT as FILE_LIMIT  # noqa: E402
 
 BLOCKED, ALLOWED = 2, 0
 
@@ -189,3 +194,67 @@ def test_a_malformed_event_is_not_an_edit_to_refuse(tmp_path):
                           env={**os.environ, "MLSTACK_GUARD_CACHE": str(tmp_path / "cache")},
                           input="not json at all")
     assert done.returncode == ALLOWED
+
+
+def lines(count: int) -> str:
+    """A module of exactly that many lines and no routines."""
+    return "\n".join(f"x{i} = {i}" for i in range(count)) + "\n"
+
+
+def test_a_write_that_crosses_the_line_limit_is_refused(tree, tmp_path):
+    code, said = run(write(tree, "long.py", lines(FILE_LIMIT + 1)), cache=tmp_path / "cache")
+    assert code == BLOCKED
+    assert "src/ml_stack/long.py" in said
+    assert f"{FILE_LIMIT + 1} lines" in said and f"the limit is {FILE_LIMIT}" in said
+    assert "scripts/budgets --show deep-files" in said
+
+
+def test_a_file_at_exactly_the_limit_is_written(tree, tmp_path):
+    assert run(write(tree, "exact.py", lines(FILE_LIMIT)),
+               cache=tmp_path / "cache") == (ALLOWED, "")
+
+
+def test_a_write_that_lengthens_a_file_already_over_the_limit_is_refused(tree, tmp_path):
+    where = tree / "src" / "ml_stack" / "deep.py"
+    where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
+    code, said = run(write(tree, "deep.py", lines(FILE_LIMIT + 501)),
+                     cache=tmp_path / "cache")
+    assert code == BLOCKED
+    assert f"is {FILE_LIMIT + 500} lines and this write leaves it {FILE_LIMIT + 501}" in said
+
+
+def test_a_write_that_shortens_a_file_over_the_limit_is_allowed(tree, tmp_path):
+    where = tree / "src" / "ml_stack" / "deep.py"
+    where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
+    assert run(write(tree, "deep.py", lines(FILE_LIMIT + 100)),
+               cache=tmp_path / "cache") == (ALLOWED, "")
+
+
+def test_deleting_lines_is_always_allowed(tree, tmp_path):
+    where = tree / "src" / "ml_stack" / "deep.py"
+    where.write_text(lines(FILE_LIMIT + 500), encoding="utf-8")
+    for left in (FILE_LIMIT + 499, FILE_LIMIT, 10):
+        assert run(write(tree, "deep.py", lines(left)),
+                   cache=tmp_path / "cache") == (ALLOWED, "")
+
+
+def test_a_component_is_refused_at_its_own_limit(tree, tmp_path):
+    web = tree / "src" / "ml_stack" / "web"
+    web.mkdir()
+    given = {"file_path": str(web / "screen.html"), "content": lines(COMPONENT_LIMIT + 1)}
+    code, said = run(given, cache=tmp_path / "cache")
+    assert code == BLOCKED
+    assert f"the limit is {COMPONENT_LIMIT}" in said
+    assert "scripts/budgets --show deep-components" in said
+    given["content"] = lines(COMPONENT_LIMIT)
+    assert run(given, cache=tmp_path / "cache") == (ALLOWED, "")
+
+
+def test_an_edit_that_grows_an_over_limit_file_is_refused(tree, tmp_path):
+    where = tree / "src" / "ml_stack" / "deep.py"
+    where.write_text("from __future__ import annotations\n" + lines(FILE_LIMIT + 500),
+                     encoding="utf-8")
+    code, said = run(edit(tree, "deep.py", "added = 1\n"), tool="Edit",
+                     cache=tmp_path / "cache")
+    assert code == BLOCKED
+    assert f"the limit is {FILE_LIMIT}" in said

@@ -39,9 +39,9 @@ from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Refused
 from .measuring import Job as BenchJob
 from .models import Models
-from .weights import ModelError
 from .serving import Hosting, NoRoom, Serving
 from .ui import routes as ui_routes
+from .weights import ModelError
 
 INFER_CHUNK = 1 << 13
 INFER_TIMEOUT = 600.0

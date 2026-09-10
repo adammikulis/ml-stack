@@ -32,6 +32,11 @@ def checkers() -> list[ModuleType]:
     return found
 
 
+def hard() -> set[str]:
+    """The metrics with no budget, where one finding fails."""
+    return {c.NAME for c in checkers() if getattr(c, "HARD", False)}
+
+
 def skipped(checker: ModuleType) -> str:
     """Why this checker cannot run here, empty when it can."""
     reason = getattr(checker, "skip", None)

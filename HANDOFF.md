@@ -229,18 +229,52 @@ across `src/`.
 
 ### Files that hold more than one job
 
-`scripts/gates/deep_files.py` refuses a file over 900 lines and `budgets.json` pins the
-count. `scripts/budgets --show deep-files` lists them. The one with its own entry
-below is `bench/run.py` (2,019) under the commands; the rest, largest first:
+`deep-files` refuses a Python file over 900 lines and `deep-components` an HTML, JavaScript
+or CSS file over 500. No component is over any more; twelve Python files are.
+`claude-edit-guard` refuses a write that lengthens one of them, so each can only get
+shorter from here, but nothing shortens them except somebody splitting them.
+`scripts/budgets --show deep-files` lists them. `bench/run.py` (2,019) has its own entry
+below, under the commands.
 
-- [ ] **`serve/fit.py` (1,390), `bench/measure.py` (1,279), `world/organisation.py`
-  (1,233), `hub.py` (1,215), `world/simulate.py` (1,209), `bench/extract.py` (1,094),
-  `bench/report.py` (1,081), `serve/cli.py` (1,062), `bench/show.py` (1,019),
-  `serve/build.py` (999), `train/tools.py` (953), `fleet/models.py` (938).** Each is a file
-  to read before it is a file to split: the question is what jobs it holds, and the answer
-  is a module per job with a name, not a line count met by moving code sideways.
-  `serve/cli.py` is the one a newcomer meets first. Lower the budget as each lands, so the
-  number cannot drift back up.
+Each is a file to read before it is a file to split: the answer is a module per job with a
+name, not a line count met by moving code sideways.
+
+- [ ] **`serve/fit.py` (1,390)** -- parsing the llama.cpp load log (`Segment`, `Measured`,
+  `parse_load_log`), the `Fit` record and its file, the rendering (`render`, `_block`,
+  `_block_md`), the GGUF tensor table (`Tensor`, `tensors_of`, `render_tensors`) and the
+  matplotlib plot.
+- [ ] **`bench/measure.py` (1,279)** -- the questions (`read_questions`, `sample`), one
+  question through the client with its bill (`Counting`, `_ask_once`) and its trace, a set
+  of them (`measure`, `concurrent`), and what the server costs (`footprint`, `busy`,
+  `slot_count`).
+- [ ] **`world/organisation.py` (1,233)** -- an invented organisation as a graph: five
+  kinds of group, the `_Build` that assembles one, the people and their personas.
+- [ ] **`hub.py` (1,215)** -- `Found` and the search, `Head` and the draft head, `Chosen`
+  and the pick, plus a `ctypes` memory probe that belongs nowhere near any of them.
+- [ ] **`world/simulate.py` (1,209)** -- `_Relations`, the day clock and its conversation
+  picking, `_Counting`, and `ModelWriter`, which writes the messages through a model.
+- [ ] **`bench/extract.py` (1,095)** -- `MessageRow` and the truth behind a message, the
+  resolution of a name to a node, and `_Extracting`, which runs the model.
+- [ ] **`bench/report.py` (1,081)** -- the gathering of kept runs, and `Doc` with the
+  sections it renders.
+- [ ] **`serve/cli.py` (1,062)** -- twenty subcommands, each parsing its own arguments; the
+  work is already in `serve/ops.py`, so this is parsers and printing. The one a newcomer
+  meets first, and the file in the commands entry below.
+- [ ] **`bench/show.py` (1,019)** -- the table, the questions behind a score, the rates and
+  the frontier, the plot, and the `drafts` summary: five outputs over one reader.
+- [ ] **`serve/build.py` (999)** -- finding a toolchain, the cmake invocation, the cache of
+  what was built, and choosing the binary to run.
+- [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
+  inventing arguments and paraphrases, the synthesiser, turning kept bench traces into
+  rows, and the command. Its own section banners name the seams.
+- [ ] **`world/simulate.py`, `world/organisation.py`, `bench/extract.py` and
+  `bench/measure.py` are four of the twelve and all four are read by the extraction
+  bench**, so splitting them is one reader's job rather than four.
+
+`fleet/models.py` (930) went that way, into `fleet/models.py` (the machine's model files),
+`fleet/catalogue.py` (what the hub offers and what fits here) and `fleet/weights.py` (which
+file in a repository is the model); the five helpers that crossed a module boundary lost
+their leading underscore and every importer moved rather than being re-exported.
 
 ### The commands
 

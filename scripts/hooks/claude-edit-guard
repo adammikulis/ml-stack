@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Refuse an edit under src/ml_stack that writes a routine the tree already has.
+"""Refuse an edit under src/ml_stack that writes a routine the tree already has, or
+leaves a file over its line limit.
 
 Claude Code runs this before every Write, Edit and MultiEdit. An exit code of 2 blocks
 the edit and hands the message back; a rule that is a suggestion rather than a certainty
@@ -170,6 +171,32 @@ def library_root(path: Path) -> Path | None:
     return None
 
 
+def line_limits() -> dict[str, tuple[int, str]]:
+    """Suffix -> (the line limit for it, the metric that counts what is over)."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from gates import deep_components, deep_files
+    limits = {".py": (deep_files.LIMIT, deep_files.NAME)}
+    for suffix in deep_components.SUFFIXES:
+        limits[suffix] = (deep_components.LIMIT, deep_components.NAME)
+    return limits
+
+
+def too_long(here: str, current: str, proposed: str,
+             limits: dict[str, tuple[int, str]]) -> str:
+    """Why this write leaves the file over its line limit, empty when it does not."""
+    limit, metric = limits[Path(here).suffix]
+    was, now = len(current.splitlines()), len(proposed.splitlines())
+    if now <= limit or now <= was:
+        return ""
+    if was > limit:
+        what = f"{here} is {was} lines and this write leaves it {now}"
+    else:
+        what = f"{here} would be {now} lines"
+    return (f"{what}; the limit is {limit}. Take a job out of it into a module of its own, "
+            f"or put the new code in a module of its own and import it. "
+            f"`scripts/budgets --show {metric}` lists every file over the limit.")
+
+
 def load_duplicates():
     """The duplicate detector from scripts/gates, loaded without importing the package."""
     where = Path(__file__).resolve().parent.parent / "gates" / "duplicates.py"
@@ -182,7 +209,8 @@ def load_duplicates():
 
 def check(tool: str, given: dict) -> int:
     path = Path(given.get("file_path") or "")
-    if path.suffix != ".py" or path.name.startswith("test_"):
+    limits = line_limits()
+    if path.suffix not in limits:
         return ALLOWED
     root = library_root(path)
     if root is None:
@@ -191,6 +219,13 @@ def check(tool: str, given: dict) -> int:
     current = path.read_text(encoding="utf-8") if path.exists() else ""
     proposed = proposed_text(tool, given, current)
     if proposed is None or proposed == current:
+        return ALLOWED
+
+    outgrown = too_long(here, current, proposed, limits)
+    if outgrown:
+        return refuse(outgrown)
+
+    if path.suffix != ".py" or path.name.startswith("test_"):
         return ALLOWED
 
     dup = load_duplicates()

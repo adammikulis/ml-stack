@@ -1,4 +1,6 @@
-"""A budget is a ratchet: over it fails, and under it fails until --update locks the gain in."""
+"""A budget is a ratchet: over it fails, and under it fails until --update locks the gain in.
+
+A hard gate has no budget at all: one finding fails it."""
 
 from __future__ import annotations
 
@@ -16,7 +18,8 @@ from gates import _pins  # noqa: E402
 
 BUDGETS = REPO / "budgets.json"
 FOUND = gates.run(REPO)
-ALLOWED: dict[str, int] = json.loads(BUDGETS.read_text(encoding="utf-8"))
+RECORDED: dict[str, int] = json.loads(BUDGETS.read_text(encoding="utf-8"))
+ALLOWED: dict[str, int] = {**RECORDED, **dict.fromkeys(gates.hard(), 0)}
 
 
 def _sites(name: str) -> str:
@@ -36,8 +39,9 @@ def test_metric_is_within_its_budget(checker) -> None:
     budget = ALLOWED[name]
     actual = len(FOUND[name])
     owner = checker.OWNER or "no owner yet"
+    allowance = "none allowed" if name in gates.hard() else f"{budget} allowed"
     assert actual <= budget, (
-        f"{name}: {actual} sites, {budget} allowed. {checker.describe()}\n"
+        f"{name}: {actual} sites, {allowance}. {checker.describe()}\n"
         f"owned by {owner}\n{_sites(name)}\n"
         f"    scripts/budgets --show {name}"
     )
@@ -60,6 +64,15 @@ def test_every_checker_has_a_budget() -> None:
     missing = sorted(names - set(ALLOWED))
     assert not missing, (
         f"no budget for {', '.join(missing)} -- run scripts/budgets --update"
+    )
+
+
+def test_a_hard_gate_keeps_no_allowance() -> None:
+    """A number in budgets.json is an allowance, and a hard gate grants none."""
+    named = sorted(gates.hard() & set(RECORDED))
+    assert not named, (
+        f"budgets.json allows {', '.join(named)} -- a hard gate has no budget to record. "
+        f"Take the line out and split what is over the limit."
     )
 
 

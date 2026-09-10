@@ -395,8 +395,14 @@ class ModelRoutes:
         if ui.models is None:
             self.send(501, {"error": "no model store on this daemon"})
             return True
-        from .catalogue import (PER_PAGE, families, how_many, popular, searched_count,
-                                searched_families)
+        from .catalogue import (
+            PER_PAGE,
+            families,
+            how_many,
+            popular,
+            searched_count,
+            searched_families,
+        )
         page = max(0, int(self.asked("page", "0")))
         rude = self.asked("rude", "0") in ("1", "true", "yes")
         query = self.asked("q").strip()
