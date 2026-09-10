@@ -51,7 +51,7 @@ def daemon(tmp_path, monkeypatch):
     """A daemon with a model store, a chat store and somewhere to keep things."""
     import urllib.error
 
-    from ml_stack.fleet import models as models_mod
+    from ml_stack.fleet import catalogue as catalogue_mod
     from ml_stack.fleet.conversations import Conversations
     from ml_stack.fleet.models import Models
 
@@ -64,7 +64,7 @@ def daemon(tmp_path, monkeypatch):
     def unreachable(*a, **k):
         raise urllib.error.URLError("no network in tests")
 
-    monkeypatch.setattr(models_mod, "_hub", unreachable)
+    monkeypatch.setattr(catalogue_mod, "_hub", unreachable)
     try:
         yield served
     finally:

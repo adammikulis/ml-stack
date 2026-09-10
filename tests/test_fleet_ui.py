@@ -719,7 +719,7 @@ class TestTheInterfaceAndTheDaemonAgree:
         import urllib.error
 
         serving, cookie = signed_in
-        from ml_stack.fleet import models as models_mod
+        from ml_stack.fleet import catalogue as catalogue_mod
         from ml_stack.fleet.conversations import Conversations
         from ml_stack.fleet.models import Models
         serving.ui.conversations = Conversations(serving.files.parent / "chats")
@@ -732,7 +732,7 @@ class TestTheInterfaceAndTheDaemonAgree:
         def unreachable(*a, **k):
             raise urllib.error.URLError("no network in tests")
 
-        monkeypatch.setattr(models_mod, "_hub", unreachable)
+        monkeypatch.setattr(catalogue_mod, "_hub", unreachable)
 
         called = self.called_paths()
         assert "/ui/chat" in called and "/ui/models" in called, called

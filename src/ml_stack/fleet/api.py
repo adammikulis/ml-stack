@@ -38,7 +38,8 @@ from .files import (
 from .jobs import DaemonError, JobRunner
 from .measuring import BenchHost, Refused
 from .measuring import Job as BenchJob
-from .models import ModelError, Models
+from .models import Models
+from .weights import ModelError
 from .serving import Hosting, NoRoom, Serving
 from .ui import routes as ui_routes
 
