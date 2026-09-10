@@ -16,7 +16,6 @@ there is no test runner and no framework in it.
 
 from __future__ import annotations
 
-import argparse
 import json
 import re
 import shutil
@@ -26,7 +25,9 @@ import urllib.error
 import urllib.request
 
 import pytest
+
 from ml_stack.fleet.ui import asset_bytes, serve_page
+from ml_stack.serve import charts
 from ml_stack.serve import fit as fit_mod
 from ml_stack.serve.fit import Fit
 
@@ -223,8 +224,8 @@ class TestTheDataRoute:
     def test_it_carries_the_rooms_the_chart_draws_faintly(self, page):
         """The familiar card sizes come off fit.py rather than being typed twice."""
         _, got, _ = page.call("/ui/fit.json")
-        assert got["vram_gb"] == list(fit_mod.COMMON_VRAM_GB)
-        assert got["contexts"] == list(fit_mod.PLOT_CONTEXTS)
+        assert got["vram_gb"] == list(charts.COMMON_VRAM_GB)
+        assert got["contexts"] == list(charts.PLOT_CONTEXTS)
 
     def test_each_record_carries_the_numbers_the_page_composes(self, page):
         _, got, _ = page.call("/ui/fit.json")
@@ -298,7 +299,7 @@ class TestTheSlotCountIsWorkedOutOnce:
         the wrong context."""
         _, got, _ = page.call("/ui/fit.json")
         assert set(got["steps"]) <= set(got["ladder"])
-        assert got["steps"] == list(fit_mod.SLIDER_CONTEXTS)
+        assert got["steps"] == list(charts.SLIDER_CONTEXTS)
 
     def test_a_room_that_was_not_asked_for_is_this_machines_own(self, page):
         _, got, _ = page.call("/ui/fit.json")

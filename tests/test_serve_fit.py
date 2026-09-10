@@ -19,10 +19,13 @@ import struct
 from pathlib import Path
 
 import pytest
-from ml_stack.serve import fit as fit_mod
-from ml_stack.serve.fit import Fit, Measured, parse_load_log, parse_room, records, render
-
 from conftest import write_gguf
+
+from ml_stack.serve import charts, loadlog, measuring
+from ml_stack.serve import fit as fit_mod
+from ml_stack.serve import tensors as tensors_mod
+from ml_stack.serve.fit import Fit, parse_room, records, render
+from ml_stack.serve.loadlog import Measured, parse_load_log
 
 MIB = 1024 * 1024
 GIB = 1024 ** 3
@@ -388,7 +391,7 @@ class TestMeasuring:
             seen.append(spec)
             return DENSE_LOG
 
-        got = fit_mod.measure(ServerSpec(model="thornfield-8B-Q4_K_M.gguf", context=32768),
+        got = measuring.measure(ServerSpec(model="thornfield-8B-Q4_K_M.gguf", context=32768),
                               serve=fake)
         assert seen[0].extra_args[-2:] == ("-lv", "4")
         assert got.per_token == 32768
@@ -402,7 +405,7 @@ class TestMeasuring:
             seen.append(spec)
             return DENSE_LOG
 
-        fit_mod.measure(ServerSpec(model="m.gguf", extra_args=("-lv", "5")), serve=fake)
+        measuring.measure(ServerSpec(model="m.gguf", extra_args=("-lv", "5")), serve=fake)
         assert seen[0].extra_args == ("-lv", "5")
 
     def test_a_measurement_becomes_a_record_carrying_what_it_was_measured_with(self):
@@ -476,7 +479,7 @@ class TestTheCommand:
         model = tmp_path / "thornfield-8B-Q4_K_M.gguf"
         model.write_bytes(b"\0" * (4 * MIB))
         monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
-        monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: DENSE_LOG)
+        monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: DENSE_LOG)
 
         assert self.run([str(model), "--measure", "--context", "32768"]) == 0
         out, err = capsys.readouterr()
@@ -503,7 +506,7 @@ class TestTheCommand:
             seen.append(spec.parallel)
             return ISWA_LOG
 
-        monkeypatch.setattr(fit_mod, "_load_log", fake)
+        monkeypatch.setattr(measuring, "_load_log", fake)
         assert self.run([str(model), "--measure"]) == 0
         assert seen == [1]
         assert self.run([str(model), "--measure", "--parallel", "4"]) == 0
@@ -596,7 +599,7 @@ class TestDrawingIt:
         """Mutation: hard-code png, and `--plot fit.svg` writes a png with an svg name."""
         pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         where = tmp_path / f"fit{suffix}"
-        assert fit_mod.plot(self.rows(), where) == str(where)
+        assert charts.plot(self.rows(), where) == str(where)
         assert where.stat().st_size > 0
         start = where.read_bytes()[:2048]
         assert start.startswith(b"\x89PNG") if suffix == ".png" else b"<svg" in start
@@ -606,12 +609,12 @@ class TestDrawingIt:
         own value rather than a matplotlib backend."""
         pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         with pytest.raises(ValueError, match="csv"):
-            fit_mod.plot(self.rows(), tmp_path / "fit.csv")
+            charts.plot(self.rows(), tmp_path / "fit.csv")
 
     def test_nothing_measured_is_refused_rather_than_drawn_empty(self, tmp_path):
         pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         with pytest.raises(ValueError, match="no model has been measured"):
-            fit_mod.plot([], tmp_path / "fit.png")
+            charts.plot([], tmp_path / "fit.png")
 
     def test_the_legend_names_every_record_by_model_cache_and_draft(self, tmp_path):
         """Two records of the same weights differ by their cache type and whether a draft
@@ -621,9 +624,9 @@ class TestDrawingIt:
         pytest.importorskip("matplotlib", reason="ml-stack[plot] draws this")
         import matplotlib.pyplot as plt
 
-        fit_mod.plot(self.rows(), tmp_path / "fit.png")
-        assert fit_mod.label_of(self.rows()[0]) == "thornfield-8B (Q4_K_M)"
-        assert fit_mod.label_of(self.rows()[1]) == "marrowgate-A3B (Q4_K_XL) q8_0 +draft"
+        charts.plot(self.rows(), tmp_path / "fit.png")
+        assert charts.label_of(self.rows()[0]) == "thornfield-8B (Q4_K_M)"
+        assert charts.label_of(self.rows()[1]) == "marrowgate-A3B (Q4_K_XL) q8_0 +draft"
         plt.close("all")
 
     def test_every_record_appears_in_the_legend_of_both_panels(self, tmp_path,
@@ -642,13 +645,13 @@ class TestDrawingIt:
             return made
 
         monkeypatch.setattr(plt, "subplots", spy)
-        fit_mod.plot(self.rows(), tmp_path / "fit.png")
+        charts.plot(self.rows(), tmp_path / "fit.png")
         _, (left, right) = drawn[0]
         for panel in (left, right):
             named = [t.get_text() for t in panel.get_legend().get_texts()]
             for record in self.rows():
-                assert any(fit_mod.label_of(record) in entry for entry in named), \
-                    f"{fit_mod.label_of(record)} is in no legend entry of a panel"
+                assert any(charts.label_of(record) in entry for entry in named), \
+                    f"{charts.label_of(record)} is in no legend entry of a panel"
         plt.close("all")
 
     def test_a_model_that_does_not_fit_says_so_in_the_legend_and_draws_nothing(
@@ -667,7 +670,7 @@ class TestDrawingIt:
 
         huge = Fit(model="cragmoor-400B-Q4_K_M.gguf", weights=200 * GIB, room=24 * GIB,
                    compute=GIB, per_token=16384, cache_type="f16")
-        fit_mod.plot([*self.rows(), huge], tmp_path / "fit.png", rooms=[24 * GIB])
+        charts.plot([*self.rows(), huge], tmp_path / "fit.png", rooms=[24 * GIB])
         _, (left, _right) = drawn[0]
         named = [t.get_text() for t in left.get_legend().get_texts()]
         assert any("cragmoor-400B (Q4_K_M)" in entry and "does not fit" in entry
@@ -688,7 +691,7 @@ class TestDrawingIt:
         monkeypatch.setattr(plt, "subplots",
                             lambda *a, **kw: drawn.append(real(*a, **kw)) or drawn[-1])
 
-        fit_mod.plot(self.rows(), tmp_path / "fit.png", rooms=[110 * GIB, 24 * GIB])
+        charts.plot(self.rows(), tmp_path / "fit.png", rooms=[110 * GIB, 24 * GIB])
         _, (left, right) = drawn[0]
         styles = {line.get_linestyle() for line in left.get_lines()
                   if len(line.get_xdata())}
@@ -710,7 +713,7 @@ class TestDrawingIt:
         monkeypatch.setattr(plt, "subplots",
                             lambda *a, **kw: drawn.append(real(*a, **kw)) or drawn[-1])
 
-        fit_mod.plot(self.rows(), tmp_path / "fit.png", machine="hollowmere")
+        charts.plot(self.rows(), tmp_path / "fit.png", machine="hollowmere")
         title = drawn[0][0].get_suptitle()
         assert "hollowmere" in title and "110.0G" in title and "a1b2c3d" in title
         plt.close("all")
@@ -728,7 +731,7 @@ class TestDrawingIt:
         monkeypatch.setattr(plt, "subplots",
                             lambda *a, **kw: seen.append(real(*a, **kw)) or seen[-1])
 
-        fit_mod.plot(self.rows()[:1], tmp_path / "fit.png", at=4096)
+        charts.plot(self.rows()[:1], tmp_path / "fit.png", at=4096)
         _, (_left, right) = seen[0]
         assert "4,096 tokens" in right.get_xlabel()
         # the line starts at zero users, where the height is the model with an empty cache,
@@ -796,7 +799,7 @@ class TestTheCardsBehindIt:
         real = plt.subplots
         monkeypatch.setattr(plt, "subplots",
                             lambda *a, **k: drawn.append(real(*a, **k)) or drawn[-1])
-        fit_mod.plot(self.rows(), tmp_path / "fit.png", **kw)
+        charts.plot(self.rows(), tmp_path / "fit.png", **kw)
         return drawn[0]
 
     def test_the_familiar_card_sizes_are_drawn_behind_the_lines(self, tmp_path,
@@ -887,7 +890,7 @@ class TestTheCommandDraws:
         self.some_records(_fit_files_in_tmp)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
         seen: list = []
-        monkeypatch.setattr(fit_mod, "plot",
+        monkeypatch.setattr(charts, "plot",
                             lambda rows, where, **kw: seen.append(kw) or str(where))
 
         assert self.run(["--room", "110G", "--room", "24G", "--plot",
@@ -910,7 +913,7 @@ class TestTheCommandDraws:
         self.some_records(_fit_files_in_tmp)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 110 * GIB)
         seen: list = []
-        monkeypatch.setattr(fit_mod, "plot",
+        monkeypatch.setattr(charts, "plot",
                             lambda rows, where, **kw: seen.append(kw) or str(where))
 
         assert self.run(["--at", "8192", "--plot", str(tmp_path / "fit.svg")]) == 0
@@ -954,7 +957,7 @@ class TestTheCommandDraws:
             raise RuntimeError(
                 "drawing the fit chart needs matplotlib: pip install 'ml-stack[plot]'")
 
-        monkeypatch.setattr(fit_mod, "_pyplot", missing)
+        monkeypatch.setattr(charts, "_pyplot", missing)
         assert self.run(["--plot", str(tmp_path / "fit.png")]) == 2
         assert "pip install 'ml-stack[plot]'" in capsys.readouterr().err
 
@@ -1239,7 +1242,7 @@ class TestTheThreeSizesOfAModel:
         by exactly two caches.
         """
         measured = Measured(per_token=32768, per_seq=8 * MIB, compute=GIB,
-                            segments=(fit_mod.Segment(buffers=(("MTL0", 80 * GIB),)),))
+                            segments=(loadlog.Segment(buffers=(("MTL0", 80 * GIB),)),))
         held = 2 * (32768 * 32768 + 8 * MIB)
         record = Fit.of(measured, model="marrowgate-A3B-UD-Q4_K_XL.gguf", context=32768,
                         parallel=2, resident_peak=90 * GIB + GIB + held)
@@ -1250,7 +1253,7 @@ class TestTheThreeSizesOfAModel:
         one was measured wrong. Mutation: trust the subtraction, and a short run reports a
         model as smaller than its own resident weights."""
         measured = Measured(per_token=32768, compute=GIB,
-                            segments=(fit_mod.Segment(buffers=(("MTL0", 80 * GIB),)),))
+                            segments=(loadlog.Segment(buffers=(("MTL0", 80 * GIB),)),))
         record = Fit.of(measured, model="m.gguf", context=32768, parallel=2,
                         resident_peak=4 * GIB)
         assert record.weights_resident == 80 * GIB
@@ -1336,7 +1339,7 @@ class TestWhatTheFileIsMadeOf:
         144. Mutation: use a bytes-per-element float, and a K-quant is off by a scale
         block that the header never mentions.
         """
-        found = {one.name: one for one in fit_mod.tensors_of(self.model(tmp_path))}
+        found = {one.name: one for one in tensors_mod.tensors_of(self.model(tmp_path))}
         assert found["per_layer_token_embd.weight"].bytes == 160 * 4096 // 32 * 18
         assert found["blk.0.ffn_down_exps.weight"].bytes == 256 * 128 * 4 // 32 * 34
         assert found["blk.0.attn_q.weight"].bytes == 256 * 256 // 256 * 144
@@ -1349,7 +1352,7 @@ class TestWhatTheFileIsMadeOf:
         """The listing exists to answer "what is the 15.7G of", and that question is
         answered by the top of the list. Mutation: header order, which is alphabetical-ish
         and says nothing."""
-        found = fit_mod.tensors_of(self.model(tmp_path))
+        found = tensors_mod.tensors_of(self.model(tmp_path))
         assert found[0].name == "per_layer_token_embd.weight"
         assert [one.bytes for one in found] == sorted(
             (one.bytes for one in found), reverse=True)
@@ -1359,7 +1362,7 @@ class TestWhatTheFileIsMadeOf:
         """The one grouping that predicts residency: a table is paged a row at a time and
         an expert is not. Mutation: group by name prefix, and `per_layer_token_embd` is
         just another embedding."""
-        roles = {one.name: one.role for one in fit_mod.tensors_of(self.model(tmp_path))}
+        roles = {one.name: one.role for one in tensors_mod.tensors_of(self.model(tmp_path))}
         assert roles["per_layer_token_embd.weight"] == "table"
         assert roles["blk.0.ffn_down_exps.weight"] == "experts"
         assert roles["blk.0.attn_q.weight"] == "attention"
@@ -1367,8 +1370,8 @@ class TestWhatTheFileIsMadeOf:
         assert roles["output_norm.weight"] == "other"
 
     def test_the_totals_per_type_add_up_to_the_file(self, tmp_path):
-        found = fit_mod.tensors_of(self.model(tmp_path))
-        by_type = dict((name, size) for name, _n, size in fit_mod.totals_by_type(found))
+        found = tensors_mod.tensors_of(self.model(tmp_path))
+        by_type = dict((name, size) for name, _n, size in tensors_mod.totals_by_type(found))
         assert by_type["iq4_nl"] == 160 * 4096 // 32 * 18
         assert sum(by_type.values()) == sum(one.bytes for one in found)
 
@@ -1376,16 +1379,16 @@ class TestWhatTheFileIsMadeOf:
         """`Fit.table_bytes` is an upper bound on how far a resident figure can still
         climb. Mutation: count the ordinary token embedding too, and the bound is wrong in
         the direction that matters."""
-        assert fit_mod.table_bytes(self.model(tmp_path)) == 160 * 4096 // 32 * 18
+        assert tensors_mod.table_bytes(self.model(tmp_path)) == 160 * 4096 // 32 * 18
 
     def test_a_file_that_is_not_a_gguf_costs_a_record_nothing(self, tmp_path):
         """A record is worth writing without this number. Mutation: raise, and `--measure`
         dies on a model whose header this cannot read."""
         broken = tmp_path / "notagguf.gguf"
         broken.write_bytes(b"nope")
-        assert fit_mod.table_bytes(broken) == 0
+        assert tensors_mod.table_bytes(broken) == 0
         with pytest.raises(ValueError, match="not a GGUF file"):
-            fit_mod.tensors_of(broken)
+            tensors_mod.tensors_of(broken)
 
     def test_every_shard_of_a_sharded_model_is_summed(self, tmp_path):
         """Flash-Next is four files and the question is about all four. Mutation: read the
@@ -1396,10 +1399,10 @@ class TestWhatTheFileIsMadeOf:
         with_tensors(tmp_path / "cragmoor-400B-Q4_K_M-00002-of-00002.gguf",
                      {"general.architecture": "llama"},
                      [("blk.1.attn_q.weight", Q4_K, (256, 256))])
-        assert len(fit_mod.tensors_of(first)) == 2
+        assert len(tensors_mod.tensors_of(first)) == 2
 
     def test_the_listing_names_the_table_the_types_and_the_roles(self, tmp_path):
-        text = fit_mod.render_tensors(self.model(tmp_path))
+        text = tensors_mod.render_tensors(self.model(tmp_path))
         assert "per_layer_token_embd.weight" in text
         assert "<- gathered table" in text
         assert "iq4_nl" in text and "q8_0" in text
@@ -1457,7 +1460,7 @@ class TestMeasuringRecordsWhereItWent:
                              {"general.architecture": "llama"},
                              TestWhatTheFileIsMadeOf.TENSORS)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
-        monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: WEIGHTS_LOG)
+        monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: WEIGHTS_LOG)
 
         assert self.run([str(model), "--measure", "--context", "32768"]) == 0
         [row] = records()
@@ -1479,7 +1482,7 @@ class TestMeasuringRecordsWhereItWent:
                              {"general.architecture": "llama"},
                              TestWhatTheFileIsMadeOf.TENSORS)
         monkeypatch.setattr("ml_stack.hub.room", lambda: 24 * GIB)
-        monkeypatch.setattr(fit_mod, "_load_log", lambda spec, **_: WEIGHTS_LOG)
+        monkeypatch.setattr(measuring, "_load_log", lambda spec, **_: WEIGHTS_LOG)
 
         held = 32768 * (1024 * MIB // 32768)
         assert self.run([str(model), "--measure", "--context", "32768",

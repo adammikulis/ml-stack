@@ -386,6 +386,7 @@ class UI:
         """
         try:
             from ml_stack.hub import room as room_here
+            from ml_stack.serve import charts as charts_mod
             from ml_stack.serve import fit as fit_mod
         except ImportError as exc:                        # a device-tier install has no serve
             return {"error": f"this install cannot measure or read fits: {exc}",
@@ -398,18 +399,18 @@ class UI:
             at = one.at_room(asked)
             rows.append({**one.as_dict(), "loaded": at.loaded(), "free": at.free(),
                          "longest": at.longest(people),
-                         "slots": [at.users(c) for c in fit_mod.READ_CONTEXTS],
-                         "costs": [at.cost(c) for c in fit_mod.READ_CONTEXTS]})
+                         "slots": [at.users(c) for c in charts_mod.READ_CONTEXTS],
+                         "costs": [at.cost(c) for c in charts_mod.READ_CONTEXTS]})
         return {
             "records": rows,
             "room": here,
             "at_room": asked,
             "users": people,
             "name": self.name,
-            "vram_gb": list(fit_mod.COMMON_VRAM_GB),
-            "contexts": list(fit_mod.PLOT_CONTEXTS),
-            "steps": list(fit_mod.SLIDER_CONTEXTS),
-            "ladder": list(fit_mod.READ_CONTEXTS),
+            "vram_gb": list(charts_mod.COMMON_VRAM_GB),
+            "contexts": list(charts_mod.PLOT_CONTEXTS),
+            "steps": list(charts_mod.SLIDER_CONTEXTS),
+            "ladder": list(charts_mod.READ_CONTEXTS),
         }
 
     def rates(self) -> dict[str, Any]:

@@ -8,10 +8,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from ml_stack.hub import pretty_name
+from ml_stack.serve.preflight import (
+    _per_layer,
+    _recurrent_layers,
+    _sliding_layers,
+    read_gguf_header,
+)
+from ml_stack.serve.tensors import shard_paths, tensors_of, totals_by_role
 from ml_stack.units import human_bytes
-from ml_stack.serve.fit import _shard_paths, tensors_of, totals_by_role
-from ml_stack.serve.preflight import (_per_layer, _recurrent_layers, _sliding_layers,
-                                      read_gguf_header)
 
 __all__ = ["Layout", "layout", "render"]
 
@@ -155,7 +159,7 @@ def layout(model: str | Path) -> Layout:
         expert_shared_feed_forward_length=_int(key("expert_shared_feed_forward_length")),
         tables=tables,
         by_role=tuple(totals_by_role(tensors)),
-        shards=len(_shard_paths(path)),
+        shards=len(shard_paths(path)),
     )
 
 

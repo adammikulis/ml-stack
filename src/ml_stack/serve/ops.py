@@ -24,9 +24,11 @@ from ml_stack.client.health import serving_params
 from ml_stack.fleet.serving import Serving
 from ml_stack.log import warn
 from ml_stack.serve import fit as fit_mod
+from ml_stack.serve import measuring as measuring_mod
 from ml_stack.serve import preflight as preflight_mod
 from ml_stack.serve import profile as profile_mod
 from ml_stack.serve import reclaim as reclaim_mod
+from ml_stack.serve import tensors as tensors_mod
 from ml_stack.serve.backend import (
     LlamaServerBackend,
     ServerFailed,
@@ -520,7 +522,7 @@ def tensors(models: Iterable[str]) -> list[str]:
     out = []
     for one in models:
         try:
-            out.append(fit_mod.render_tensors(str(hub.located(one) or one)))
+            out.append(tensors_mod.render_tensors(str(hub.located(one) or one)))
         except (OSError, ValueError, struct.error) as exc:
             raise Refused(f"cannot read {one}: {exc}") from exc
     return out
@@ -549,7 +551,7 @@ def measure(names: Sequence[str], *, spec: ServerSpec, backend: LlamaServerBacke
             kind = spec_for(head)
         one = replace(spec, model=model, draft=head or None, spec_type=kind)
         try:
-            measured = fit_mod.measure(one, backend=backend, timeout=timeout)
+            measured = measuring_mod.measure(one, backend=backend, timeout=timeout)
         except Exception as exc:
             raise Refused(f"could not measure {Path(model).name}: {exc}") from exc
         if not measured.measured:
@@ -565,7 +567,7 @@ def measure(names: Sequence[str], *, spec: ServerSpec, backend: LlamaServerBacke
             cache_type=one.cache_type_k or measured.cache_type, spec=kind,
             context=one.context, parallel=one.parallel,
             # from the header, not the log: how much of this file is a gathered table
-            table_bytes=fit_mod.table_bytes(model),
+            table_bytes=tensors_mod.table_bytes(model),
             resident_peak=int(resident[0]), resident_after=int(resident[1]))
         out.append(Recorded(record.model, measured.said(), fit_mod.add(record)))
     return out
