@@ -333,3 +333,24 @@ class TestHierarchyCycles:
         assert len(rings) == 2
         assert {frozenset(ring) for _, ring in rings} == {
             frozenset({"u:a", "u:b"}), frozenset({"u:c", "u:d"})}
+
+
+def test_a_merge_keeps_the_spans_of_both_names_and_of_both_edges(tmp_path):
+    """A node's spans point into the units its provenance names, so a merge that unions one
+    and drops the other leaves a citation with no sentence behind it."""
+    acid = {**_node("concept:acid", "acid", mentions=5, definition="a proton donor"),
+            "spans": {"u:concept:acid": [10, 24]}}
+    acids = {**_node("concept:acids", "acids", mentions=2),
+             "spans": {"u:concept:acids": [3, 19]}}
+    edges = [{**_edge("concept:acid", "contrasts_with", "concept:base", 2),
+              "spans": {"u:concept:acid": [0, 8]}},
+             {**_edge("concept:acids", "contrasts_with", "concept:base", 1),
+              "spans": {"u:concept:acids": [4, 12]}}]
+    path = _store(tmp_path, [acid, acids, _node("concept:base", "base", mentions=3)], edges)
+
+    tidy(path, dry_run=False)
+    nodes, joined = _ids(path)
+    assert nodes["concept:acid"]["spans"] == {"u:concept:acid": [10, 24],
+                                              "u:concept:acids": [3, 19]}
+    kept = joined[("concept:acid", "contrasts_with", "concept:base")]
+    assert kept["spans"] == {"u:concept:acid": [0, 8], "u:concept:acids": [4, 12]}

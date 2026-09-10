@@ -897,6 +897,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         merged = {"source": target, "rel": keep_rel, "target": source,
                   "weight": int(edge.get("weight") or 0) + int((other or {}).get("weight") or 0),
                   "provenance": _union((other or {}).get("provenance"), edge.get("provenance"))}
+        _kept_spans(merged, other, edge)
         report.inverses_folded += 1
         note(f"inverse: {_label(nodes, source)} {rel} {_label(nodes, target)} -> "
              f"{_label(nodes, target)} {keep_rel} {_label(nodes, source)}")
@@ -1167,6 +1168,7 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
         if already is not None:
             merged["weight"] = int(already.get("weight") or 0) + int(edge.get("weight") or 0)
             merged["provenance"] = _union(already.get("provenance"), edge.get("provenance"))
+            _kept_spans(merged, already, edge)
         edged[(source, rel, target)] = merged
     report.graph = {**{k: v for k, v in graph.items() if k not in ("nodes", "edges")},
                     "nodes": list(out.values()), "edges": list(edged.values())}
@@ -1227,6 +1229,7 @@ def _fold_node(kept: Mapping[str, Any], gone: Mapping[str, Any]) -> dict[str, An
     node["attrs"] = attrs
     node["mentions"] = int(node.get("mentions") or 0) + int(gone.get("mentions") or 0)
     node["provenance"] = _union(node.get("provenance"), gone.get("provenance"))
+    _kept_spans(node, node, gone)
     return node
 
 
@@ -1424,6 +1427,7 @@ def _drop_edge(store: Any, edges: list[dict[str, Any]], keep: dict[str, Any],
     """``gone`` out of the store and the working list, its weight and provenance into ``keep``."""
     keep["weight"] = int(keep.get("weight") or 0) + int(gone.get("weight") or 0)
     keep["provenance"] = _union(keep.get("provenance"), gone.get("provenance"))
+    _kept_spans(keep, keep, gone)
     if not dry_run:
         store.remove_edge(gone["source"], gone["rel"], gone["target"])
         store.upsert_edge(keep)
@@ -1598,6 +1602,7 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
         merged = {"source": source, "rel": edge["rel"], "target": target,
                   "weight": int(edge.get("weight") or 0) + int((other or {}).get("weight") or 0),
                   "provenance": _union((other or {}).get("provenance"), edge.get("provenance"))}
+        _kept_spans(merged, other, edge)
         by_triple.pop((edge["source"], edge["rel"], edge["target"]), None)
         by_triple[(source, edge["rel"], target)] = merged
         moved += 1
@@ -1619,6 +1624,7 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
     kept["attrs"] = attrs
     kept["mentions"] = int(kept.get("mentions") or 0) + int(gone.get("mentions") or 0)
     kept["provenance"] = _union(kept.get("provenance"), gone.get("provenance"))
+    _kept_spans(kept, kept, gone)
     if not dry_run:
         store.upsert_node(kept)
         store.drop([remove])
@@ -1627,6 +1633,22 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
     edges[:] = list(by_triple.values())
     nodes.pop(remove, None)
     return moved
+
+
+def _spans(*things: Any) -> dict[str, list[int]]:
+    """The spans of those nodes or edges in one mapping, the first of each unit kept."""
+    out: dict[str, list[int]] = {}
+    for thing in things:
+        for unit_id, span in ((thing or {}).get("spans") or {}).items():
+            out.setdefault(str(unit_id), list(span))
+    return out
+
+
+def _kept_spans(into: dict[str, Any], *things: Any) -> None:
+    """Union those spans onto ``into``, in place, leaving it alone when there are none."""
+    found = _spans(*things)
+    if found:
+        into["spans"] = found
 
 
 def _union(*lists: Any) -> list[str]:
