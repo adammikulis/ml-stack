@@ -329,7 +329,7 @@ def flags_of(one: Mapping[str, Any]) -> dict[str, Any]:
         out[way] = way in words
     out["constrain_ids"] = False
     if "reach" in words:
-        from ml_stack.bench.run import REACH
+        from ml_stack.bench.askings import REACH
 
         # the label says a run reached; it does not say how far, and `--also reach` is the
         # only thing that puts the word there, so its own figure is what was measured
@@ -991,7 +991,7 @@ def fits_named(fits: Iterable[Any], wanted: Sequence[str]) -> list[Any]:
 def main(args: Any) -> int:
     """``ml-stack-bench report``. Reads the store and the fit records; serves nothing."""
     from ml_stack.bench import extract as bench_extract
-    from ml_stack.bench.run import newest
+    from ml_stack.bench.ops import newest
     from ml_stack.serve import fit as fit_mod
 
     store = str(getattr(args, "kept", "") or "")

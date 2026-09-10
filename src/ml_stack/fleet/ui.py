@@ -360,7 +360,8 @@ class UI:
         """What ``ml-stack-bench status`` says, for the page. The bench's home is
         `ml_stack.bench.home_dir`, the one the command reads."""
         try:
-            from ml_stack.bench.run import measuring, status
+            from ml_stack.bench.underway import measuring
+            from ml_stack.bench.progress import status
         except ImportError as exc:
             return {"available": False, "text": f"the bench is not installed here: {exc}",
                     "measuring": None}
@@ -480,7 +481,7 @@ class UI:
         """Start ``ml-stack-bench argv`` detached and hand back its log and pid."""
         import shlex
 
-        from ml_stack.bench.run import detach, measuring_file
+        from ml_stack.bench.underway import detach, measuring_file
 
         log = (self.detach or detach)(argv)
         try:
@@ -492,7 +493,8 @@ class UI:
 
     def stop_sweep(self, pid: int) -> str:
         """Stop the detached measurement, but only the one the page was shown."""
-        from ml_stack.bench.run import measuring, stop
+        from ml_stack.bench.underway import measuring
+        from ml_stack.bench.progress import stop
 
         held = measuring()
         if held is None or int(held.get("pid") or 0) != int(pid):

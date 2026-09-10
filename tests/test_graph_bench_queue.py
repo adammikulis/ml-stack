@@ -234,12 +234,12 @@ def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatc
     where = a_queue(tmp_path, "sweep --serve raincoat-2b.gguf --sample 10\n"
                               "sweep --serve bellwether-12b.gguf --sample 10\n"
                               "show --rank ranking.md\n")
-    from ml_stack.bench import run as running
+    from ml_stack.bench.progress import status
 
     seen = []
 
     def looking(argv):
-        seen.append(running.status())
+        seen.append(status())
         return 0
 
     assert q.run_queue(where, runner=looking) == 0
@@ -250,7 +250,7 @@ def test_status_says_which_step_is_running_and_what_is_left(tmp_path, monkeypatc
     assert "done: 1 ok, 0 failed, 0 skipped" in while_running
     assert "left: 1 -- next show --rank ranking.md" in while_running
 
-    ended = running.status()                                 # and afterwards, one line
+    ended = status()                                 # and afterwards, one line
     assert f"queue: {where} -- ended" in ended and "3 step(s), 3 ok" in ended
 
     held = json.loads(q.state_file().read_text())

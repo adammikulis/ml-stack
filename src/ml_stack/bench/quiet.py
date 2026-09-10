@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.bench.run import beside_on_the_card
+from ml_stack.bench.progress import beside_on_the_card
 from ml_stack.serve.manager import measurement_on_the_card, measurement_said
 from ml_stack.units import human_bytes
 

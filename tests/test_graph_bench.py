@@ -783,7 +783,7 @@ def test_a_run_asks_the_way_the_flags_said_and_writes_it_down(tmp_path, monkeypa
     `converse` there and stand beside the row that was measured under them."""
     pytest.importorskip("ladybug", reason="the store needs ml-stack[store]")
     import ml_stack.bench as bench
-    from ml_stack.bench.run import asking_from
+    from ml_stack.bench.askings import asking_from
     from ml_stack.bench import _parser
 
     assert asking_from(_parser().parse_args(
@@ -2894,7 +2894,7 @@ def test_reach_is_a_way_of_its_own_and_also_a_setting_on_every_way(capsys):
     from argparse import Namespace
 
     from ml_stack.bench import _askings, _parser
-    from ml_stack.bench.run import REACH
+    from ml_stack.bench.askings import REACH
 
     askings = _askings(Namespace(also=["reach"], terse=False, temperature=0.0, reach=0))
     assert "reach" not in askings[0], "the first way is what was asked for, unchanged"
@@ -2916,7 +2916,7 @@ def test_also_reach_reaches_the_serving_seam_as_a_token_budget(tmp_path, monkeyp
     nothing, has none at all. Mutation: default the pop to `REACH` and every run measures
     fat results, including the ones the ranking was written from."""
     import ml_stack.bench as bench
-    from ml_stack.bench.run import REACH
+    from ml_stack.bench.askings import REACH
 
     seen = _serving(monkeypatch, tmp_path)
     asked_reach = []
@@ -3160,11 +3160,11 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
 
     import ml_stack.bench as bench
     from ml_stack.bench import history
-    from ml_stack.bench import run as running
+    from ml_stack.bench import underway as recording
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(bench.platform, "system", lambda: "Darwin")
-    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
+    monkeypatch.setattr(recording, "_commit", lambda root=None: "0f1e2d3 (dirty)")
     monkeypatch.setattr(subprocess, "Popen",
                         lambda command, **kw: type("C", (), {"pid": 4242})())
     argv = ["sweep", "--serve", "models/tiny.gguf", "--detach", "--also", "terse", "--smoke"]
@@ -3184,7 +3184,7 @@ def test_detach_writes_argv_started_and_commit_at_the_top_of_the_log(tmp_path, m
     assert entry.started == held["started"]
 
     # no repository to ask: the header has no commit line and the record an empty one
-    monkeypatch.setattr(running, "_commit", lambda root=None: "")
+    monkeypatch.setattr(recording, "_commit", lambda root=None: "")
     assert bench.main(["run", "tried", "--detach"]) == 0
     capsys.readouterr()
     held = json.loads((tmp_path / "home" / "measuring.json").read_text())
@@ -3248,7 +3248,7 @@ def test_commit_reads_the_short_sha_and_marks_a_dirty_tree(tmp_path):
     uncommitted, and "" where there is no repository at all."""
     import subprocess
 
-    from ml_stack.bench.run import _commit
+    from ml_stack.bench.keep import _commit
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -3366,7 +3366,7 @@ def test_a_cost_run_from_another_host_is_never_taken_and_is_named(tmp_path, caps
 # -- sweep --fleet ----------------------------------------------------------------------------------
 
 def test_fleet_jobs_are_the_same_line_with_one_serve_each():
-    from ml_stack.bench.run import fleet_jobs
+    from ml_stack.bench.ops import fleet_jobs
 
     argv = ["sweep", "--fleet", "--peers", "quill,lantern", "--serve", "a.gguf", "--serve",
             "b.gguf", "--serve-draft", "ha.gguf", "--also", "terse", "--kept", "/k",
@@ -3416,10 +3416,10 @@ def _fake_fleet(monkeypatch, *, plan):
 
 def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeypatch, capsys):
     import ml_stack.bench as bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench import ops
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3")
+    monkeypatch.setattr(ops, "_commit", lambda root=None: "0f1e2d3")
     calls = _fake_fleet(monkeypatch, plan=[{"model": "a.gguf", "peer": "quill", "commit": "0f1e2d3"},
                                            {"model": "b.gguf", "peer": "lantern"}])
     kept = tmp_path / "runs.ladybug"
@@ -3444,10 +3444,10 @@ def test_sweep_fleet_plans_prints_dispatches_waits_and_gathers(tmp_path, monkeyp
 def test_sweep_fleet_refuses_a_peer_on_another_commit_before_dispatching(tmp_path, monkeypatch,
                                                                          capsys):
     import ml_stack.bench as bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench import ops
 
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(running, "_commit", lambda root=None: "0f1e2d3 (dirty)")
+    monkeypatch.setattr(ops, "_commit", lambda root=None: "0f1e2d3 (dirty)")
     calls = _fake_fleet(monkeypatch, plan={"a.gguf": "quill", "b.gguf": "lantern"})
     kept = tmp_path / "runs.ladybug"
     assert bench._main(["sweep", "--fleet", "--serve", "a.gguf", "--serve", "b.gguf",
@@ -3846,7 +3846,7 @@ def test_drafts_measures_every_arm_under_the_same_reasoning_budget(tmp_path, mon
 
 
 def test_newest_narrows_to_since_and_then_to_the_last_n():
-    from ml_stack.bench.run import newest
+    from ml_stack.bench.ops import newest
 
     kept = [{"at": "2026-09-02T10:00:00", "label": "a"}, {"at": "2026-09-02T12:00:00", "label": "b"},
             {"at": "2026-09-02T14:00:00", "label": "c"}]
@@ -3860,7 +3860,7 @@ def test_status_says_what_is_serving_and_what_the_job_kept(tmp_path, monkeypatch
     """One command answers 'is anything benching, what is serving, what did it produce'
     -- Adam: 'you shouldn't have to write so much code to check bench status'."""
     import ml_stack.bench as bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench import progress as running
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
@@ -3941,7 +3941,7 @@ def test_sweep_serve_flags_reach_the_spec_by_field_name(tmp_path, monkeypatch):
     """--serve-arg, --serve-mlock, --serve-no-flash-attn, --serve-mmproj: the serving knobs a
     run varies to find out what each is worth, reaching the ServerSpec as its own fields."""
     import ml_stack.bench as bench
-    from ml_stack.bench.run import serving_fields
+    from ml_stack.bench.ops import serving_fields
 
     seen = _serving(monkeypatch, tmp_path)
     kept = tmp_path / "runs.ladybug"
@@ -4251,7 +4251,7 @@ def test_batch_kinds_and_summary_reach_converse_on_the_asking(monkeypatch):
 
 
 def test_batch_kinds_and_summary_ride_on_every_way_when_asked(tmp_path, monkeypatch):
-    from ml_stack.bench.run import _askings as askings
+    from ml_stack.bench.askings import _askings as askings
 
     args = type("A", (), {"also": ["rich"], "terse": False, "batch": True, "kinds": True,
                           "summary": False, "reach": 0, "temperature": None, "top_p": None,
@@ -4766,7 +4766,7 @@ def test_constrain_ids_rides_on_every_way_and_is_kept_on_the_asking_record(monke
 
     import ml_stack.graph.conversation as conversation
     from ml_stack.bench import _askings, _parser, asked_as, asking
-    from ml_stack.bench.run import _askings as askings
+    from ml_stack.bench.askings import _askings as askings
 
     assert _parser().parse_args(["sweep", "--serve", "x", "--constrain-ids"]).constrain_ids
     assert not _parser().parse_args(["sweep", "--serve", "x"]).constrain_ids
@@ -4802,19 +4802,20 @@ def test_a_held_measuring_lock_with_no_record_still_reads_as_measuring(tmp_path,
     import os
 
     from ml_stack import bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench.underway import measuring
+    from ml_stack.bench.progress import _status_line
 
     monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
-    assert running.measuring() is None, "no lock, nothing measuring"
+    assert measuring() is None, "no lock, nothing measuring"
 
     (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
-    held = running.measuring()
+    held = measuring()
     assert held is not None and held["pid"] == os.getpid() and held["lock_only"]
-    assert "measuring" in running._status_line()
-    assert "nothing is measuring" not in running._status_line()
+    assert "measuring" in _status_line()
+    assert "nothing is measuring" not in _status_line()
 
     (tmp_path / "measuring.lock").write_text("pid 2147483")   # nobody
-    assert running.measuring() is None, "a lock whose holder has gone is not a measurement"
+    assert measuring() is None, "a lock whose holder has gone is not a measurement"
 
 
 def test_a_record_beats_the_lock_it_was_written_beside(tmp_path, monkeypatch):
@@ -4824,14 +4825,14 @@ def test_a_record_beats_the_lock_it_was_written_beside(tmp_path, monkeypatch):
     import os
 
     from ml_stack import bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench.underway import measuring
 
     monkeypatch.setattr(bench, "home_dir", lambda: tmp_path)
     (tmp_path / "measuring.lock").write_text(f"pid {os.getpid()}")
     (tmp_path / "measuring.json").write_text(json.dumps(
         {"pid": os.getpid(), "argv": ["sweep"], "log": "", "started": "", "how": {}}))
-    assert running.measuring()["argv"] == ["sweep"]
+    assert measuring()["argv"] == ["sweep"]
 
     (tmp_path / "measuring.json").write_text(json.dumps(
         {"pid": os.getpid(), "argv": ["sweep"], "ended": True}))
-    assert running.measuring() is None, "its own lock is not another measurement"
+    assert measuring() is None, "its own lock is not another measurement"

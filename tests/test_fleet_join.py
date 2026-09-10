@@ -548,7 +548,7 @@ class TestThePage:
         assert "larch" in [p["name"] for p in body["peers"]]
 
     def test_run_across_fleet_builds_the_line_and_detaches_it(self, page, tmp_path):
-        from ml_stack.bench.run import measuring_file
+        from ml_stack.bench.underway import measuring_file
 
         s, cookie = page
         status, body, _ = s.call("/ui/bench/sweep", method="POST", body={}, cookie=cookie)

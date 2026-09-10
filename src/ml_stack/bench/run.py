@@ -1,11 +1,10 @@
-"""The command line: the parser, the subcommands, the lock, and running in the background.
+"""``ml-stack-bench`` -- the subcommands, the measuring lock, and running in the background.
 
-`_parser` is every flag; `_run` is every subcommand after the parse; `main` is what
-`ml-stack-bench` calls -- the self-check and the prefetch before the lock, the lock itself,
-SIGTERM taken as an exit so a served model comes down, and `--detach` re-running the
-command in its own session with `status`, `tail` and `stop` reading the same file. The
-askings one served model is measured with (`_askings`, `halves`, `_asked`) and the sampler overrides read
-off the command line (`sampling_from`, `with_card`) are here because they read argv.
+Every subcommand parses its arguments and prints; the work is in `ml_stack.bench.ops` and
+the modules beside it, and its flags are in `ml_stack.bench.options`. `main` is what the
+console script calls -- the self-check and the prefetch before the lock, the lock itself,
+SIGTERM taken as an exit so a served model comes down, and ``--detach`` re-running the
+command in its own session with `status`, `tail` and `stop` reading the same file.
 """
 
 from __future__ import annotations
@@ -14,11 +13,10 @@ import argparse
 import importlib
 import json
 import os
-import re
 import signal
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -26,809 +24,31 @@ from typing import Any
 # `bench.home_dir()` -- so anything patchable is looked up there at call
 # time, never bound here at import.
 from ml_stack import bench, hub, jobs
+from ml_stack.bench import ops, options
+from ml_stack.bench.askings import _asked, asking_from, halves, sampling_from, with_card
 from ml_stack.bench.detail import missed, shape
-from ml_stack.bench.estimate import ceiling_default, estimate
+from ml_stack.bench.estimate import estimate
 from ml_stack.bench.frontier import plot, rates
-from ml_stack.bench.history import _epoch, _span
-from ml_stack.bench.keep import (
-    SHORT,
-    SMOKE,
-    _commit,
-    empties,
-    forget,
-    note_beside,
-    read_back,
-    resumable,
-    save,
-)
-from ml_stack.bench.measure import (
-    PER_QUESTION,
-    _how_many,
-    _idle,
-    concurrent,
-    read_questions,
-    sample,
-)
-from ml_stack.bench.score import NOISE, _which, export, ranking
+from ml_stack.bench.keep import SMOKE, empties, forget, read_back, resumable, save
+from ml_stack.bench.measure import _how_many, _idle, concurrent, read_questions, sample
+from ml_stack.bench.ops import Refused
+from ml_stack.bench.progress import note_beside_the_run, status, stop, tail
+from ml_stack.bench.score import _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, table
-from ml_stack.client.chat import Client
-from ml_stack.asking import Asking
-from ml_stack.graph.vectors import MARGIN
+from ml_stack.bench.underway import MEASURING, detach, ended, remember
+from ml_stack.command import Group
 from ml_stack.log import say, warn
-from ml_stack.serve.ops import processes
 from ml_stack.serve.profile import ASK
-from ml_stack.serve.serving import DEFAULT_CACHE, SAMPLERS
-from ml_stack.units import human_bytes
 
-# What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
-# `_askings`: a neighbourhood read whole, which a 256k window does not notice.
-REACH = 8000
+__all__ = ["COMMANDS", "HANDED_OVER", "main"]
 
-
-def _askings(args: Any) -> list[dict[str, Any]]:
-    """The askings to make of one served model: what was asked for, plus each --also.
-
-    Separating these from the serving is where the time goes. A model load is minutes; an
-    asking is minutes too, and repeating the load for a question about the *asking* pays it
-    twice for nothing.
-    """
-    asked = asking_from(args)
-    first: dict[str, Any] = {"terse": asked.terse, **sampling_from(args)}
-    out = [first]
-    for also in getattr(args, "also", []) or []:
-        if also == "terse":
-            out.append({"label": "terse", "terse": True, **sampling_from(args)})
-        elif also == "greedy":
-            out.append({"label": "greedy", "terse": first["terse"], "temperature": 0.0})
-        elif also == "card":
-            # the card's own settings are read from the served model at ask time
-            out.append({"label": "card", "terse": first["terse"], "_card": True})
-        elif also == "rich":
-            # look_up results carry a score and why they matched, and a topic hit brings
-            # the people joined to it -- a question about the asking, so one load
-            out.append({"label": "rich", "terse": first["terse"], "rich": True,
-                        **sampling_from(args)})
-        elif also == "reach":
-            # What Flash-Next is for. Measured 2026-09-02: 256k of context at 48K bytes a
-            # token, a tool result read back at ~390 tok/s against ~35 tok/s written, and
-            # 5-9 calls a question -- so half the wall clock was reading and the way to
-            # spend less of it is fewer, fatter calls. `look_around` is the fat call and
-            # `reach` is what lets a result be worth making; 8000 tokens is a page of
-            # neighbourhood, which is nothing to a 256k window and too much for E2B's.
-            out.append({"label": "reach", "terse": first["terse"],
-                        "reach": asked.reach or REACH, **sampling_from(args)})
-        elif also == "loose":
-            # the control: show told to name what the answer is about with no cap and no
-            # closing rule -- what every run before 2026-09-02 measured. Tight is the
-            # default asking now; Flash-Next went from 43% to 83% precision on it.
-            out.append({"label": "loose", "terse": first["terse"], "tight": False,
-                        **sampling_from(args)})
-        elif also == "batch":
-            # All the lookups in one turn. Measured 2026-09-02, Qwen3.8-Flash-Next spent
-            # about seven tool calls and 25 seconds a question, and those calls were one
-            # question asked one entry at a time -- nothing in the prompt said the ids are
-            # a list. The system text says it, each searching tool is shown a three-entry
-            # call, and a turn that reads one entry while more are still unread is told
-            # once to read the rest in one call. What it should move is the `calls` column.
-            out.append({"label": "batch", "terse": first["terse"], "batch": True,
-                        **sampling_from(args)})
-        elif also == "kinds":
-            # The question word already says what kind the answer is, and the precision
-            # misses were mostly right-adjacent: 65% precision against 85% recall, with a
-            # topic lit beside the people for a "who" question. Drops from `show` what the
-            # question did not ask for, and nothing at all where it named several kinds or
-            # none.
-            out.append({"label": "kinds", "terse": first["terse"], "kinds": True,
-                        **sampling_from(args)})
-        elif also == "summary":
-            # The broad question -- "what is this group about?" -- has no name in it to
-            # look up, so a search answers it with whatever the words happened to hit.
-            # `summarise` is the whole graph at a glance, computed without a model.
-            out.append({"label": "summary", "terse": first["terse"], "summary": True,
-                        **sampling_from(args)})
-        elif also == "single":
-            # `batch` turned around, and here for the opposite model. A fat tool result is
-            # a long thing to hold in mind: a small model handed a dozen entries in one
-            # message answers about the last one or about none of them. One entry to a
-            # read, more turns, each result short enough to still be in view when the
-            # answer is written -- measured against `--also batch` on the same load, since
-            # which trade a model wants is a number and not a taste.
-            out.append({"label": "single", "terse": first["terse"], "single": True,
-                        **sampling_from(args)})
-        elif also == "few":
-            # Three tools -- look_up, look_at, show -- and no other way of looking, for the
-            # model whose tool choice degrades with the number of schemas rather than with
-            # the question. Nothing is faked to cover what went: look_up's description says
-            # the offer has no path tool and no listing tool, and says how to answer those
-            # questions by reading, which is what the loop then does.
-            out.append({"label": "few", "terse": first["terse"], "few": True,
-                        **sampling_from(args)})
-        elif also == "tight":
-            warn("note: tight is the default asking now; --also tight measures nothing new "
-                 "(--also loose is the old asking, as a control)")
-    # `--reach`, `--rounds`, `--batch`, `--kinds`, `--summary` and `--constrain-ids` are
-    # not askings of their own: each rides on every asking, so the hundred-question run of
-    # "everything that held" is one asking and not four.
-    riders: dict[str, Any] = {name: True for name in
-                              ("batch", "kinds", "summary", "constrain_ids")
-                              if getattr(asked, name)}
-    for name in ("reach", "rounds"):
-        if getattr(asked, name):
-            riders[name] = getattr(asked, name)
-    for one in out:
-        for name, value in riders.items():
-            one.setdefault(name, value)
-    return out
-
-
-def halves(args: Any, model: str = "") -> list[tuple[str, int]]:
-    """The ``(suffix, shortlist)`` halves a sweep asks of one model: plain, and shortlisted.
-
-    Every model gets its plain half. The shortlist half goes to every model too, unless
-    ``--shortlist-for`` names substrings of the models that should have it -- `e2b,e4b` --
-    in which case a model matching none of them is measured plain only. ``--plain-only``
-    still means no shortlist half for anything. Matched case aside, against the name the
-    model was asked for by and the file it resolved to, so `e2b` finds `gemma-4-E2B-it`.
-    """
-    if getattr(args, "plain_only", False):
-        return [("plain", 0)]
-    wanted = [w.strip().lower() for w in str(getattr(args, "shortlist_for", "") or "").split(",")
-              if w.strip()]
-    if wanted and not any(w in str(model).lower() for w in wanted):
-        return [("plain", 0)]
-    return [("plain", 0), ("shortlist", int(getattr(args, "shortlist", 0) or 0))]
-
-
-def _asked(args: Any, parts: Sequence[tuple[str, int]]) -> list[dict[str, Any]]:
-    """Every asking one served model is measured with, both halves in one load: each half of
-    ``parts`` crossed with each `_askings` variant, labelled ``plain``, ``plain-terse``...
-
-    Loading the model once per half was how the sweep began, and a load is minutes that
-    say nothing about the asking. Whether a shortlist is handed over is a question about
-    the asking, so it rides on the asking like `terse` does and the server is put up once.
-    """
-    out: list[dict[str, Any]] = []
-    for suffix, shortlist in parts:
-        for one in bench._askings(args):
-            tag = str(one.get("label", "") or "")
-            out.append({**one, "label": f"{suffix}-{tag}" if tag else suffix,
-                        "shortlist": shortlist})
-    return out
-
-
-def asking_from(args: Any) -> Asking:
-    """The asking given on the command line, and nothing else."""
-    return Asking(terse=bool(getattr(args, "terse", False)),
-                  reach=int(getattr(args, "reach", 0) or 0) or None,
-                  rounds=int(getattr(args, "rounds", 0) or 0) or None,
-                  batch=bool(getattr(args, "batch", False)),
-                  kinds=bool(getattr(args, "kinds", False)),
-                  summary=bool(getattr(args, "summary", False)),
-                  constrain_ids=bool(getattr(args, "constrain_ids", False)))
-
-
-def sampling_from(args: Any) -> dict[str, Any]:
-    """The sampler overrides asked for on the command line, and nothing else.
-
-    A setting not given is left out entirely rather than defaulted here, so the client falls
-    through to the model's own card. Sweeping them is the point: "is gemma-4 better at the
-    temperature its publisher asks for than at 0?" is a question about this graph and these
-    questions, and nobody else can answer it for you.
-    """
-    named = {"n_predict": getattr(args, "n_predict", None),
-             "temperature": getattr(args, "temperature", None),
-             "top_p": getattr(args, "top_p", None), "top_k": getattr(args, "top_k", None),
-             "min_p": getattr(args, "min_p", None)}
-    return {k: v for k, v in named.items() if v is not None}
-
-
-def with_card(client: Any, args: Any) -> Any:
-    """The same client, asking with what its model's card recommends, when --card was given.
-
-    This is the only place a card is ever applied. A publisher's advice is a hypothesis about
-    a task they have not seen; making it easy to test and impossible to ship by accident is
-    the whole arrangement.
-    """
-    if not getattr(args, "card", False):
-        return client
-    asked = dict(client.card)
-    asked.update(sampling_from(args))          # an explicit flag still beats the card
-    if not asked:
-        warn(f"note: {client.base_url} serves a model whose card names no sampler settings")
-        return client
-    # the program and the model the client was built for ride along, when it was built
-    # for one: a card is a sampling, not a new server
-    from ml_stack.bench.backends import _accepts
-
-    kept = {name: getattr(client, name) for name in ("api", "model", "context")
-            if getattr(client, name, None) is not None and _accepts(type(client), name)}
-    return type(client)(client.base_url, **kept, **asked)
-
-
-def checking(one: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    """The flags every measuring subcommand has for the checks it makes before it
-    measures: the self-check on no GPU, the estimate against the ceiling, and the smoke on
-    the real one."""
-    one.add_argument("--ceiling", type=float, default=ceiling_default(), metavar="MINUTES",
-                     help="refuse to start when the estimate -- seconds per question from "
-                          "the runs kept of each model, else a guess from its weights, "
-                          "times the questions, the askings and the models, plus a load each "
-                          "-- is over this many minutes, unless --yes (default: "
-                          "%(default)s, or MLSTACK_BENCH_CEILING). A --smoke run is never "
-                          "refused. No more eight-hour tests")
-    one.add_argument("--yes", action="store_true",
-                     help="run it even when the estimate is over --ceiling")
-    one.add_argument("--no-selfcheck", action="store_true",
-                     help="skip the dry run made first, before the lock is taken: this exact "
-                          "command through the whole path with a scripted model, no server "
-                          "and no GPU, into a scratch store read back -- what catches a flag "
-                          "the client does not take before a load is paid for it. For a run "
-                          "you are deliberately repeating, whose path the last one proved. "
-                          "Read before the rest of the line is parsed, like --no-queue")
-    one.add_argument("--no-smoke", action="store_true",
-                     help=f"skip the {SMOKE}-question smoke a real run makes first on the "
-                          f"real server and the real store, read back, before its own "
-                          f"questions. Without this every run that is not itself --smoke "
-                          f"smokes first -- on the same load, where the model is served -- "
-                          f"and a smoke that fails ends the run before anything else starts")
-    return one
-
-
-def _parser() -> argparse.ArgumentParser:
-    """The command line of ``ml-stack-bench``, built once per call and shared with `detach`,
-    which needs a label out of an argv before handing it to the child."""
-    # allow_abbrev=False on every parser here: a flag that is documented but not defined
-    # must be refused by name, not bound by prefix to whichever neighbour shares its
-    # first letters -- `--short` became `--shortlist` that way and the error blamed the
-    # wrong flag. The usage line's list of subcommands is generated, not written, so it
-    # cannot go stale the way "{prepare,run,sweep,show}" did when `drafts` arrived.
-    ap = argparse.ArgumentParser(
-        prog="ml-stack-bench", allow_abbrev=False,
-        description="Time a set of questions through a graph, and compare two runs.")
-    sub = ap.add_subparsers(dest="cmd", required=True)
-
-    run = sub.add_parser("run", allow_abbrev=False,
-                         help="ask every question once and keep what it cost")
-    run.add_argument("label", help="what this run is, e.g. with-shortlist")
-    run.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                     help="where to keep the run (default: %(default)s)")
-    run.add_argument("--base-url", default="http://127.0.0.1:8080",
-                     help="the model answering (default: %(default)s)")
-    run.add_argument("--graph", default="",
-                     help="a graph as JSON (default: the invented community that ships here)")
-    run.add_argument("--questions", default="",
-                     help="one per line: a question, or {\"q\":..., \"expect\":[ids]} "
-                          "(default: the ones that go with the invented community)")
-    run.add_argument("--shortlist", type=int, default=0, metavar="N",
-                     help="hand the model the N likeliest entries before it starts, found by "
-                          "search rather than by asking it to look (default: 0, it looks)")
-    run.add_argument("--store", default=bench.prepared(),
-                     help="a graph store with the word index and vectors: look_up searches it "
-                          "as the application does, and --shortlist reads it first "
-                          "(default: what `prepare` built, when it has been)")
-    run.add_argument("--embed-url", default="",
-                     help="a server that embeds, for --shortlist to search by meaning")
-    run.add_argument("--embed-model", default="", help="the model that embedded the graph")
-    run.add_argument("--margin", type=float, default=MARGIN,
-                     help="how far the best match must stand above the rest before a "
-                          "shortlist is worth handing over (default: %(default)s)")
-    run.add_argument("--ask", default="",
-                     help="module:function taking (question, client) — for asking some other "
-                          "way than the ordinary one")
-    run.add_argument("--client", default="",
-                     help="module:function returning the model client, instead of --base-url")
-
-    heads = sub.add_parser("drafts", allow_abbrev=False,
-                           help="serve one model with each draft head in turn "
-                                "and measure what each is worth")
-    heads.add_argument("model", help="the model to serve: a name, a path, or an hf: "
-                                        "reference. A name is looked up on this machine")
-    heads.add_argument("--draft", action="append", default=[], metavar="PATH",
-                       help="a draft head to measure; repeat for each. Pass '' for the "
-                            "baseline with no draft, which every other row must beat")
-    heads.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
-                       help="tokens the model may spend thinking on each turn, on every arm "
-                            "(llama-server --reasoning-budget; 0 turns thinking off, -1 is "
-                            "unlimited). A head and no thinking is the serving worth "
-                            "measuring together, since drafting pays most where the tokens "
-                            "are. Every label ends -rbN")
-    heads.add_argument("--n-max", action="append", type=int, default=[], metavar="N",
-                       help="how many tokens a head guesses ahead per pass "
-                            "(--spec-draft-n-max); repeat to measure each, labelled "
-                            "draft:<head>@nN. Without it, once at the build's own default")
-    heads.add_argument("--server-per-depth", action="store_true",
-                       help="load the model again for each --n-max, rather than asking one "
-                            "load for each depth. A build carrying the per-request "
-                            "speculative fields is asked per depth unless this says not to")
-    heads.add_argument("--serve-kv", default="", metavar="TYPE",
-                       help="how the served model's KV cache is stored (q8_0 unless said; "
-                            "f16, q4_0); a label ends -kv-TYPE for anything but q8_0 and "
-                            "the table's ctx column shows it")
-    heads.add_argument("--port", type=int, default=8099)
-    heads.add_argument("--context", type=int, default=32768)
-    heads.add_argument("--parallel", type=int, default=1, metavar="N",
-                       help="slots for a --serve'd model (default: %(default)s)")
-    heads.add_argument("--binary", default="", help="a llama-server that reads this model")
-    heads.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"))
-    heads.add_argument("--questions", default="")
-    heads.add_argument("--store", default=bench.prepared(),
-                       help="a graph store with the word index and vectors: look_up searches "
-                            "it as the application does, so a head is measured against the "
-                            "look_up the ranking measures (default: what `prepare` built, "
-                            "when it has been)")
-    heads.add_argument("--embed-url", default="",
-                       help="a server that embeds, for look_up to search by meaning")
-    heads.add_argument("--embed-model", default="", help="the model that embedded the graph")
-    heads.add_argument("--sample", type=int, default=SHORT, metavar="N",
-                       help="how many questions to ask each head (default: %(default)s). "
-                            "A draft cannot change an answer -- the large model verifies "
-                            "every token -- so what is being measured is acceptance and "
-                            "wall clock, and a full run spends most of itself proving a "
-                            "score that must come out the same")
-    heads.add_argument("--smoke", action="store_true",
-                       help=f"ask only {SMOKE} questions of each head, to prove the whole "
-                            f"path -- serve, ask, save, and read the run back -- before "
-                            f"spending the GPU on it")
-
-    conc = sub.add_parser("concurrent", allow_abbrev=False,
-                          help="ask N conversations of T turns each at the same time, and "
-                               "see what the waiting, the memory and the accuracy cost")
-    conc.add_argument("label", help="what this run is, e.g. e2b-4x3")
-    conc.add_argument("--conversations", type=int, default=4, metavar="N",
-                      help="how many conversations are in flight together (default: "
-                           "%(default)s). More than the server has slots, and the turns "
-                           "queue -- which is the thing worth measuring")
-    conc.add_argument("--turns", type=int, default=3, metavar="T",
-                      help="how many questions each conversation asks in turn, the earlier "
-                           "ones carried (default: %(default)s)")
-    conc.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                      help="where to keep the run (default: %(default)s)")
-    conc.add_argument("--base-url", default="http://127.0.0.1:8080",
-                      help="the model answering (default: %(default)s)")
-    conc.add_argument("--graph", default="",
-                      help="a graph as JSON (default: the invented community that ships here)")
-    conc.add_argument("--questions", default="",
-                      help="one per line, as for run (default: the invented community's)")
-    conc.add_argument("--store", default=bench.prepared(),
-                      help="a graph store with the word index and vectors, so look_up "
-                           "searches as the application does (default: what `prepare` "
-                           "built, when it has been)")
-    conc.add_argument("--embed-url", default="", help="a server that embeds, for the store")
-    conc.add_argument("--embed-model", default="", help="the model that embedded the graph")
-    conc.add_argument("--client", default="",
-                      help="module:function returning the model client, instead of --base-url")
-
-    ready = sub.add_parser("prepare", allow_abbrev=False,
-                           help="put a graph in a store and index and embed it")
-    ready.add_argument("--store", default=str(bench.home_dir() / "graph.ladybug"),
-                       help="the store to build (default: %(default)s)")
-    ready.add_argument("--graph", default="",
-                       help="a graph as JSON (default: the invented community)")
-    ready.add_argument("--embed-url", default="",
-                       help="a server that embeds; without one only the word index is built")
-    ready.add_argument("--embed-model", default="", help="what to file the vectors under")
-    ready.add_argument("--mix", action="store_true",
-                       help="print how many questions ask for each kind of answer, and "
-                            "build nothing: what a full run measures, and what a short one "
-                            "draws from")
-    ready.add_argument("--questions", default="",
-                       help="the set --mix reports on (default: the invented community's)")
-
-    sweep = sub.add_parser("sweep", allow_abbrev=False,
-                           help="run every model, with and without a shortlist")
-    sweep.add_argument("--on", action="append", metavar="NAME=URL", default=[],
-                       help="a model to measure, e.g. e4b=http://127.0.0.1:8083; repeatable")
-    sweep.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                       help="where to keep the runs (default: %(default)s)")
-    sweep.add_argument("--graph", default="", help="a graph as JSON (default: the invented one)")
-    sweep.add_argument("--questions", default="", help="(default: the ones that go with it)")
-    sweep.add_argument("--shortlist", type=int, default=8, metavar="N",
-                       help="how many to hand over in the second run (default: %(default)s)")
-    sweep.add_argument("--store", default=bench.prepared(),
-                       help="the indexed and embedded graph, for look_up and the shortlist "
-                            "(default: what `prepare` built, when it has been)")
-    sweep.add_argument("--embed-url", default="", help="a server that embeds, for --shortlist")
-    sweep.add_argument("--embed-model", default="", help="the model that embedded the graph")
-    sweep.add_argument("--margin", type=float, default=MARGIN)
-    sweep.add_argument("--serve", action="append", default=[], metavar="MODEL",
-                       help="a model to put up, measure and take down again, one at a time: "
-                            "a name, a path, or an hf: reference. A name is looked up on "
-                            "this machine. "
-                            "Repeat for each. Without this, --on measures servers somebody "
-                            "else started -- which leaves the starting, stopping and waiting "
-                            "to a shell loop that dies with its terminal")
-    sweep.add_argument("--context", type=int, default=0, metavar="N",
-                       help="total context for a --serve'd model (default: 32768 per slot)")
-    sweep.add_argument("--parallel", type=int, default=1, metavar="N",
-                       help="slots for a --serve'd model (default: %(default)s)")
-    sweep.add_argument("--serve-port", type=int, default=8099,
-                       help="the port each served model gets (default: %(default)s)")
-    sweep.add_argument("--serve-draft", action="append", default=[], metavar="PATH_OR_AUTO",
-                       help="a draft head for the matching --serve, positionally; 'auto' "
-                            "finds the one shipped with it, '' serves without")
-    sweep.add_argument("--binary", default="", metavar="PATH",
-                       help="a llama-server that reads these models")
-    sweep.add_argument("--serve-kv", default="", metavar="TYPE",
-                       help="how each --serve'd model's KV cache is stored (q8_0 unless "
-                            "said; f16, q4_0): a label ends -kv-TYPE for anything but "
-                            "q8_0 and the table's ctx column shows it, since a cache "
-                            "stored differently is another configuration and not "
-                            "another model")
-    sweep.add_argument("--serve-kv-unified", action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help="serve each --serve'd model with one cache pool for every slot "
-                            "(or, --no-serve-kv-unified, a cache per slot); unset leaves "
-                            "the build's default")
-    sweep.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
-                       help="serve each model in the settings that scored best from ml-stack's profiles "
-                            "-- the head at the length that measured best, its build, cache "
-                            "type, thinking budget, raw flags and asking -- for every flag "
-                            "this sweep leaves unset; --no-profile serves it bare")
-    sweep.add_argument("--serve-label", default="", metavar="NAME",
-                       help="what a --serve'd model's runs are labelled, instead of the "
-                            "first 14 characters of its file's name: flash, so its runs "
-                            "read flash-plain beside an --on flash-ollama=... run's")
-    sweep.add_argument("--no-draft", action="store_true",
-                       help="serve each --serve'd model without the draft head its profile "
-                            "measured best with, everything else as measured; every label "
-                            "carries -nodraft, so the head's worth is two labels apart")
-    sweep.add_argument("--label-suffix", default="", metavar="TEXT",
-                       help="appended to every label this sweep keeps, so a run that varies a "
-                            "serving knob (--serve-arg, --serve-mlock, --serve-mmproj) is "
-                            "told apart from the plain one in the table, e.g. -ub2048")
-    sweep.add_argument("--serve-arg", action="append", default=[], metavar="ARG",
-                       help="a raw llama-server argument for each --serve'd model, repeatable "
-                            "(e.g. --serve-arg=--spec-draft-p-min --serve-arg=0.5): the knob "
-                            "the bench has no flag for, measured before it gets one")
-    sweep.add_argument("--serve-mlock", action="store_true",
-                       help="pin the weights in memory rather than page them in on touch")
-    sweep.add_argument("--serve-no-flash-attn", action="store_true",
-                       help="serve without flash attention, to measure what it is worth")
-    sweep.add_argument("--serve-mmproj", default="", metavar="PATH_OR_AUTO",
-                       help="a vision projector to load beside each --serve'd model, as the "
-                            "page does; measures what sight costs a text question")
-    for flag, said in (("batch", "every read in one call, with the nudge when it is not"),
-                       ("kinds", "keep only the kind the question asked for"),
-                       ("summary", "offer the summarise tool for the broad questions"),
-                       ("constrain-ids", "answer every turn that offers look_at, show or "
-                                         "path_between under a grammar in which an id can "
-                                         "only be one the graph holds")):
-        sweep.add_argument(f"--{flag}", action="store_true",
-                           help=f"{said} -- on every way this sweep asks, the way --reach is")
-    sweep.add_argument("--n-max", type=int, default=None, metavar="N",
-                       help="how far the served head guesses ahead (--spec-draft-n-max), the "
-                            "length `drafts` found best -- 4 for Flash-Next")
-    sweep.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
-                       help="tokens each --serve'd model may spend thinking before it must "
-                            "answer (llama-server --reasoning-budget; -1 is unlimited). A "
-                            "ceiling (--n-predict) cuts the answer; this is the budget that "
-                            "stops the thinking. Every label ends -rbN and the table's ctx "
-                            "column shows /rb, since it is another configuration")
-    sweep.add_argument("--plain-only", action="store_true",
-                       help="skip the shortlist half, just measure each model as it is")
-    sweep.add_argument("--shortlist-for", default="", metavar="A,B",
-                       help="substrings of the models that get the shortlist half as well "
-                            "(e2b,e4b); the rest are measured plain only. Both halves of "
-                            "a model are asked of one load")
-    sweep.add_argument("--resume", action="store_true",
-                       help="skip any model and way already kept since --since with this "
-                            "many questions at this context and these slots, so a sweep "
-                            "killed on its third model costs the third model and not all "
-                            "three. Says which it skipped and when each was kept")
-    sweep.add_argument("--since", default="", metavar="WHEN",
-                       help="with --resume, how old a kept run may be and still count: an "
-                            "ISO date or date-time (default: the start of today)")
-    sweep.add_argument("--fleet", action="store_true",
-                       help="spread the --serve models over the fleet instead of this "
-                            "machine: one job per model, this same line with that one "
-                            "--serve, planned over the peers, dispatched, waited for and "
-                            "gathered into --kept, then shown. Every peer must be on this "
-                            "checkout's commit; a peer that is not is refused, here and by "
-                            "its daemon")
-    sweep.add_argument("--peers", default="", metavar="NAME,...",
-                       help="with --fleet, only these peers (default: whichever the fleet "
-                            "plans over)")
-
-    for one in (run, sweep, conc):
-        one.add_argument("--trace", action=argparse.BooleanOptionalAction, default=None,
-                         help="keep each question's transcript -- every call with its arguments, "
-                              "what came back and what it cost -- beside the totals, for "
-                              "`show --trace` and `ml-stack-train-tools from-bench`. Default: on "
-                              f"at {SHORT} questions or fewer, off for a full run, where the "
-                              "transcripts are tens of megabytes in a store nothing backs up")
-        one.add_argument("--sample", type=int, default=0, metavar="N",
-                         help="ask only N of the questions, keeping every kind of answer. "
-                              "For a comparison where accuracy is not the variable -- draft "
-                              "heads, sampling, serving flags -- most of a full run is "
-                              "spent re-establishing a score that cannot move")
-        one.add_argument("--short", dest="short", action="store_true",
-                         help=f"the same as --sample {SHORT}: every kind still asked about "
-                              f"and the same mean number of answers expected, at about half "
-                              f"the time. Each question is worth more, so a small difference "
-                              f"is noise on a short run and signal on a full one")
-        one.add_argument("--smoke", action="store_true",
-                         help=f"ask only {SMOKE} questions, to prove the whole path works "
-                              f"before spending the GPU on it. Serving, asking, scoring, "
-                              f"measuring and saving all happen, so anything that would "
-                              f"raise at the end raises here instead. The score means "
-                              f"nothing at this size -- run it first, then run it properly")
-        one.add_argument("--temperature", type=float, default=None,
-                         help="override the sampling temperature; the default is whatever "
-                              "the model's own card asks for (gemma-4: 1.0)")
-        one.add_argument("--top-p", type=float, default=None, help="override top_p")
-        one.add_argument("--top-k", type=int, default=None, help="override top_k")
-        one.add_argument("--min-p", type=float, default=None, help="override min_p")
-        one.add_argument("--n-predict", type=int, default=16384,
-                         help="tokens each turn may write -- thinking, tool calls and the "
-                              "answer together. A thinking model spends most of a turn "
-                              "reasoning, so a low ceiling truncates the answer rather than "
-                              "the thought (default: %(default)s)")
-        one.add_argument("--anyway", action="store_true",
-                         help="measure even when the server is already busy; the wall clock "
-                              "will then be two runs sharing a GPU, not one run")
-        one.add_argument("--card", action="store_true",
-                         help="ask with what the model's own card recommends, to see whether "
-                              "it suits this task -- it is not what a client sends otherwise")
-    for one in (run, sweep):
-        one.add_argument("--reach", type=int, default=0, metavar="TOKENS",
-                         help="how much one tool result may carry, in tokens, on every way "
-                              "asked. Off by default, which is the flat character cut every "
-                              "run so far measured. With one, look_at, look_around and "
-                              "list_kind pack whole entries with their quotes up to it "
-                              "instead of stopping at a fixed count -- for a model whose "
-                              "context is cheap and whose reading is eleven times faster "
-                              "than its writing, which is what makes fewer, fatter calls "
-                              f"the cheaper question (--also reach uses {REACH})")
-        one.add_argument("--rounds", type=int, default=0, metavar="N",
-                         help="how many tool-calling turns one question may spend before "
-                              "it must answer, on every way asked (converse's `rounds`; "
-                              "unset is the library default). A three-tool offer and a "
-                              "one-entry-at-a-time read both want more of them and a "
-                              "batched read wants fewer, so this is measured beside "
-                              "--also few and --also single rather than fixed for all")
-        one.add_argument("--also", action="append", default=[],
-                         choices=("terse", "card", "greedy", "rich", "tight", "loose",
-                                  "reach", "batch", "kinds", "summary", "single", "few"),
-                         help="ask the same served model another way as well. Whether the "
-                              "tools are described briefly, what sampling is used, "
-                              "whether look_up says why it matched (rich), and whether "
-                              "show is told to name what the answer is about with no cap "
-                              "(loose -- the old asking, kept as a control against the "
-                              "tight one every run uses now), and how much one tool result "
-                              "may carry (reach -- fat results and look_around, for a model "
-                              "that reads faster than it writes), whether every lookup is "
-                              "asked for in one turn (batch -- fewer rounds, which is where "
-                              "the wall clock goes), whether show keeps only the kind the "
-                              "question asked for (kinds -- a who question is answered by "
-                              "people, not by the topic they share) and whether the whole "
-                              "graph can be read at a glance (summary -- for the broad "
-                              "question no search reaches), whether every read takes one "
-                              "entry and more turns (single -- batch turned around, for a "
-                              "model that loses the thread of a long result) and whether "
-                              "only three tools are offered (few -- look_up, look_at and "
-                              "show, for a model whose tool choice degrades with the "
-                              "number of schemas) are questions about the "
-                              "asking, not the serving, so ten of them cost one load "
-                              "rather than ten. There is no one asking every model wants: "
-                              "measure them per model, and `report --profile` writes the "
-                              "winner into that model's record. Repeatable")
-
-    from ml_stack.bench.speed import add_arguments as speeding
-
-    speed = speeding(sub)
-
-    for one in (run, sweep, heads, conc, speed):
-        one.add_argument("--per-question", type=float, default=PER_QUESTION,
-                         metavar="SECONDS",
-                         help="the most one question may take before it is recorded as "
-                              "timed out -- no answer, scored wrong, the cap as its wall "
-                              "clock -- and the next is asked (default: %(default)s). The "
-                              "table counts them under t/o and --detail names them. "
-                              "Measured: a 26B thinking model spent 505 s on one question "
-                              "under a 16k ceiling, and a run that waits for that is not "
-                              "a run")
-        one.add_argument("--no-queue", action="store_true",
-                         help="fail at once if another measurement holds the GPU, rather "
-                              "than queue behind it. Read before the rest of the line is "
-                              "parsed, and listed here so that --help says it exists")
-        one.add_argument("--detach", action="store_true",
-                         help="run this in the background, owned by nobody's terminal: the "
-                              "command re-runs itself in a new session with its output in "
-                              f"a log under {bench.home_dir() / 'logs'}, prints the log's path and "
-                              "returns at once. `status` says what is measuring, `tail -f` "
-                              "follows the log, `stop` ends it and takes its server down. "
-                              "Read before the rest of the line is parsed, like --no-queue")
-        one.add_argument("--no-prefetch", action="store_true",
-                         help="do not download the hf: models and heads named here before "
-                              "the measuring lock is taken. Without this every reference "
-                              "is fetched first, one line each with its size, because a "
-                              "download inside the timed window is a timing of the network")
-        checking(one)
-
-    from ml_stack.bench.extract import add_arguments as extracting
-
-    checking(extracting(sub))
-
-    show = sub.add_parser("show", allow_abbrev=False,
-                          help="compare two runs, or list what is kept")
-    show.add_argument("--trace", nargs="?", const="", default=None, metavar="LABEL",
-                      help="print a traced question as a conversation, one line per call: the "
-                           "newest run, or the run with this label; --question narrows it")
-    show.add_argument("--question", default="", metavar="SUBSTRING",
-                      help="with --trace: only the question containing this")
-    show.add_argument("--by", default="", choices=("serving",), metavar="serving",
-                      help="group the rows by identical serving and asking, one line "
-                           "per group with the mean and the band")
-    show.add_argument("--last", type=int, default=0, metavar="N",
-                      help="only the newest N runs kept")
-    show.add_argument("--since", default="", metavar="ISO",
-                      help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
-    show.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                      help="the store the runs are in (default: %(default)s)")
-    show.add_argument("--compare", nargs=2, metavar=("BEFORE", "AFTER"), default=None)
-    show.add_argument("--extract", action="store_true",
-                      help="only the extraction runs (ml-stack-bench extract), in their own "
-                           "table; without it they print under the answering table")
-    show.add_argument("--speed", action="store_true",
-                      help="the speed runs (ml-stack-bench speed), one table per label: "
-                           "prefill and decode tokens/s and the first token by prompt size "
-                           "and streams")
-    show.add_argument("--detail", nargs="?", const="", default=None, metavar="LABEL",
-                      help="the questions themselves, not the totals: what each one wanted, "
-                           "what it showed, and what it missed. A label narrows it to one run")
-    show.add_argument("--all", action="store_true",
-                      help="with --detail, every question and not only the ones that missed")
-    show.add_argument("--shape", action="store_true",
-                      help="what the question set is made of -- which kinds its answers "
-                           "want, and how many want no person -- so its bias is visible")
-    show.add_argument("--rates", action="store_true",
-                      help="what each run cost to be right -- accuracy over time, tokens and "
-                           "memory -- with the Pareto frontier marked")
-    show.add_argument("--anyway-export", action="store_true", dest="export_anyway",
-                      help="with --export, include runs measured over some other graph. "
-                           "Not into a repository: those may carry a real community's "
-                           "questions")
-    show.add_argument("--export", default="", metavar="FILE.json",
-                      help="write every run as JSON. The store lives under ~/.ml-stack and "
-                           "nothing backs it up: a day of measuring is on one disk, and the "
-                           "results are all of an invented community, so they can be kept "
-                           "beside the code that produced them")
-    show.add_argument("--rank", default="", metavar="FILE.md",
-                      help="write which model answers best, as a conclusion rather than as "
-                           "evidence: one line per model -- accuracy from its largest run, "
-                           "cost per question from its fastest run that held that accuracy, "
-                           "a draft head or a fork included -- and which run that was. This "
-                           "is the part worth keeping in a repository -- the raw runs are "
-                           "not, since they describe one machine and one build")
-    show.add_argument("--noise", type=float, default=NOISE * 100, metavar="PTS",
-                      help="how far a run's F1 may fall under its model's largest run and "
-                           "still supply the cost, in points (default: %(default)s -- one "
-                           "question of a short run). A run outside it is listed as rejected")
-    show.add_argument("--plot", default="", metavar="FILE.html",
-                      help="write the runs as a scatter of accuracy against --cost, with "
-                           "the frontier joined; opens with no network and no packages")
-    show.add_argument("--cost", default="seconds",
-                      choices=("seconds", "paid_tokens", "kv_bytes"),
-                      help="which cost the frontier is drawn against (default: %(default)s)")
-
-    report = sub.add_parser("report", allow_abbrev=False,
-                            help="everything measured so far as one document: how each "
-                                 "model was asked, what a draft head was worth, how much "
-                                 "memory it wants, and what to serve")
-    report.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                        help="the store the runs are in (default: %(default)s)")
-    report.add_argument("--since", default="", metavar="ISO",
-                        help="only runs kept at or after this time (e.g. 2026-09-02T14:29)")
-    report.add_argument("--last", type=int, default=0, metavar="N",
-                        help="only the newest N runs kept")
-    report.add_argument("--model", action="append", default=[], metavar="SUBSTRING",
-                        help="only models whose file or label contains this; repeatable")
-    report.add_argument("--min-n", type=int, default=6, metavar="N", dest="min_n",
-                        help="a run of fewer scored questions than this is counted in a "
-                             "footnote rather than tabled -- it proves the path works "
-                             "rather than how well the model answers (default: %(default)s)")
-    report.add_argument("--full-n", type=int, default=0, metavar="N", dest="full_n",
-                        help="the floor for the across-models table, so every model is "
-                             "read at the same number of questions (default: each model's "
-                             "own largest run)")
-    report.add_argument("--room", action="append", default=[], metavar="SIZE",
-                        help="also answer the memory table for a machine with this much "
-                             "room (24G, 24GiB, 24576M); repeatable")
-    report.add_argument("--at", type=int, default=32768, metavar="TOKENS",
-                        help="the per-user context the memory and serving lines answer at "
-                             "(default: %(default)s)")
-    report.add_argument("--md", default="", metavar="FILE",
-                        help="write the document here instead of to stdout")
-    report.add_argument("--text", action="store_true",
-                        help="plain text with fixed-width columns instead of Markdown")
-    report.add_argument("--open", action="store_true",
-                        help="with --md, open the file with whatever this desktop opens "
-                             "files with")
-    report.add_argument("--profile", action="store_true",
-                        help="write each model's best settings into profiles.json -- the "
-                             "build, head, cache, thinking and asking of its best row -- so "
-                             "`ml-stack-serve up --profile` and `serve.profile.asking_for` "
-                             "serve and ask what was measured. Writes that and nothing else")
-    report.add_argument("--profiles", default="", metavar="FILE",
-                        help="with --profile, write the records here instead of the shipped "
-                             "profiles.json (or this machine's own, when the package cannot "
-                             "be written to)")
-
-    gone = sub.add_parser("forget", allow_abbrev=False,
-                          help="delete kept runs: the empty ones, or every run of one label")
-    gone.add_argument("label", nargs="?", default="",
-                      help="delete every run kept under this label (needs --yes)")
-    gone.add_argument("--empty", action="store_true",
-                      help="delete every run that reads back as nothing")
-    gone.add_argument("--yes", action="store_true",
-                      help="really delete a label's runs; without it they are only listed")
-    gone.add_argument("--kept", default=str(bench.home_dir() / "runs.ladybug"),
-                      help="the store the runs are in (default: %(default)s)")
-
-    sub.add_parser("status", allow_abbrev=False,
-                   help="whether something is measuring, since when, with what, and where "
-                        "its log is. Exits 0 either way")
-    following = sub.add_parser("tail", allow_abbrev=False,
-                               help="the log of the current measurement, or the latest")
-    following.add_argument("-n", type=int, default=20, metavar="N",
-                           help="how many lines from the end (default: %(default)s)")
-    following.add_argument("-f", action="store_true", dest="follow",
-                           help="keep printing as the log grows, until the measurement ends")
-    sub.add_parser("stop", allow_abbrev=False,
-                   help="end the detached measurement: SIGTERM to its pid, so it takes down "
-                        "any server it put up, then wait up to a minute. Never by name")
-    waiting = sub.add_parser("wait", allow_abbrev=False,
-                             help="block until the detached measurement has ended, saying so "
-                                  "every minute -- so the next command can follow it "
-                                  "(ml-stack-bench wait && ml-stack-bench report --profile)")
-    waiting.add_argument("--every", type=float, default=60.0, metavar="SECONDS",
-                         help="how often to say it is still running (default: %(default)s)")
-
-    # The positional is `label` rather than `file` on purpose: `_named_in` reads it, so a
-    # detached queue's log is named after the queue file instead of "bench".
-    queued = sub.add_parser("queue", allow_abbrev=False,
-                            help="run an evening of measurements from a file: one "
-                                 "ml-stack-bench line per step, smoke:/then: pairs, "
-                                 "set VAR= and ${VAR}, one at a time through the "
-                                 "measuring lock")
-    queued.add_argument("label", metavar="FILE",
-                        help="the queue file: one `ml-stack-bench` invocation per line, "
-                             "`#` comments, `set NAME=VALUE` with ${NAME} (the environment "
-                             "when nothing sets it), and a `smoke:` line whose failure "
-                             "skips the `then:` under it. See docs/examples/")
-    queued.add_argument("--dry-run", action="store_true",
-                        help="print the steps as they would be run -- expanded, each one "
-                             "checked against this parser, with the label --resume would "
-                             "match -- and run none of them")
-    queued.add_argument("--resume", action="store_true",
-                        help="skip every step whose label the runs store already holds "
-                             "since this queue's start, so a queue stopped half-way does "
-                             "not measure the first half again")
-    queued.add_argument("--yes", action="store_true",
-                        help="the go-ahead, passed to every step that takes one, so a run "
-                             "over its ceiling is not refused into a log nobody is watching")
-    queued.add_argument("--ceiling", type=float, default=0.0, metavar="MINUTES",
-                        help="pass this ceiling to every step that does not name its own "
-                             "(default: each step's own)")
-    queued.add_argument("--detach", action="store_true",
-                        help="run the whole queue in the background the way a measurement "
-                             f"detaches: a log under {bench.home_dir() / 'logs'}, `status` for "
-                             "the step it is on and what is left, `tail -f` for the log, "
-                             "`stop` to end the queue and the step inside it")
-
-    from ml_stack.bench.comparison import add_arguments as comparing
-    from ml_stack.bench.history import add_arguments as remembering
-
-    comparing(sub)
-    handed_over(sub)
-
-    remembering(sub.add_parser("history", allow_abbrev=False,
-                               help="every measurement the logs remember: when, how long, "
-                                    "how it ended, the estimate beside the actual, and the "
-                                    "runs it kept"))
-    return ap
-
+# allow_abbrev=False on every parser here: a flag that is documented but not defined must
+# be refused by name, not bound by prefix to whichever neighbour shares its first letters
+# -- `--short` became `--shortlist` that way and the error blamed the wrong flag.
+COMMANDS = Group("ml-stack-bench",
+                 "Time a set of questions through a graph, and compare two runs.",
+                 allow_abbrev=False)
 
 # The subcommands whose module has a `main(argv)` of its own: `ml-stack-bench NAME ARGS`
 # hands ARGS to it as they were typed. `standard` takes the measuring lock itself, so
@@ -836,29 +56,10 @@ def _parser() -> argparse.ArgumentParser:
 HANDED_OVER = ("standard", "animate")
 
 
-def handed_over(sub: Any) -> None:
-    """The ``standard`` and ``animate`` subcommands, each with the flags its own parser
-    takes, so `--help` and the README's flags are held to them here too."""
-    from ml_stack.bench import standard
-
-    sub.add_parser("standard", allow_abbrev=False, parents=[standard._parser()],
-                   conflict_handler="resolve",
-                   help="the standard sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through "
-                        "lm-evaluation-harness against a chat endpoint, one JSON per "
-                        "configuration; takes the measuring lock itself")
-    drawn = sub.add_parser("animate", allow_abbrev=False,
-                           help="a comparison document as an animated graphic, with manim")
-    drawn.add_argument("comparison", help="the comparison document (JSON)")
-    drawn.add_argument("--out", required=True, help="the .mp4 to write")
-    drawn.add_argument("--png", help="also write the last frame as a still")
-    drawn.add_argument("--quality", choices=("l", "m", "h"), default="h",
-                       help="l 480p15, m 720p30, h 1080p60 (default h)")
-    drawn.add_argument("--seconds", type=float, default=50,
-                       help="the length of the whole cut (default 50)")
-    drawn.add_argument("--only", help="comma-separated scene keys to render alone")
-    drawn.add_argument("--work", help="where manim keeps its partial renders")
-    drawn.add_argument("--dry-run", action="store_true",
-                       help="print the scene plan and write nothing")
+def _parser() -> argparse.ArgumentParser:
+    """The command line of ``ml-stack-bench``, built once per call and shared with `detach`,
+    which needs a label out of an argv before handing it to the child."""
+    return COMMANDS.parser()
 
 
 def _after(argv: Sequence[str], cmd: str) -> list[str]:
@@ -869,10 +70,16 @@ def _after(argv: Sequence[str], cmd: str) -> list[str]:
 
 def _main(argv: list[str] | None = None) -> int:
     """``ml-stack-bench`` -- what a change to the asking costs, and whether it was worth it."""
-    args = _parser().parse_args(argv)
+    words = list(argv if argv is not None else sys.argv[1:])
+    args = _parser().parse_args(words)
     # the line as given, for `sweep --fleet` to hand each peer the same line with one model
-    args._argv = list(argv if argv is not None else sys.argv[1:])
+    args._argv = words
     return _run(args)
+
+
+def _run(args: Any) -> int:
+    """`_main` after the parse, so a dry run can hand in a namespace it has rewritten."""
+    return int(args.run(args) or 0)
 
 
 def wants_smoke(args: Any) -> bool:
@@ -900,394 +107,28 @@ def smoke_first(args: Any) -> None:
     say("smoke: ok\n")
 
 
-def _run(args: Any) -> int:
-    """`_main` after the parse, so a dry run can hand in a namespace it has rewritten."""
-    if args.cmd == "history":
-        from ml_stack.bench.history import run as remembered
-
-        return remembered(args)
-    if args.cmd in HANDED_OVER:
-        module = importlib.import_module(f"ml_stack.bench.{args.cmd}")
-        return int(module.main(_after(list(getattr(args, "_argv", None) or []), args.cmd)))
-    if args.cmd == "speed":
-        from ml_stack.bench.speed import main as speeding
-
-        return speeding(args)
-    if args.cmd == "compare":
-        from ml_stack.bench.comparison import main as comparing
-
-        return comparing(args)
-    if args.cmd == "status":
-        say(status())
-        return 0
-    if args.cmd == "tail":
-        return tail(lines=args.n, follow=args.follow)
-    if args.cmd == "stop":
-        say(stop())
-        return 0
-    if args.cmd == "wait":
-        from ml_stack import jobs
-
-        return jobs.wait("bench", every=args.every, home=bench.home_dir() / "jobs")
-    if args.cmd == "queue":
-        # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
-        # the measuring lock itself, so a step of a queue and a run started by hand still
-        # wait for each other.
-        from ml_stack.bench.queue import QueueError, run_queue
-
-        if args.detach:
-            log = detach(getattr(args, "_argv", None) or sys.argv[1:])
-            say(f"the queue is running in the background; log: {log}\n"
-                f"  ml-stack-bench status   -- the step it is on, and what is left\n"
-                f"  ml-stack-bench tail -f  -- follow the log\n"
-                f"  ml-stack-bench stop     -- end the queue and the step inside it")
-            return 0
-        try:
-            return run_queue(args.label, dry_run=args.dry_run, resume=args.resume,
-                             yes=args.yes, ceiling=args.ceiling)
-        except QueueError as why:
-            warn(f"error: {why}")
-            return 2
-    if args.cmd == "forget":
-        if not args.empty and not args.label:
-            warn("error: say what to forget: --empty, or a label")
-            return 2
-        if args.empty:
-            went = forget(args.kept, empty=True)
-            say(f"{len(went)} empty run(s) removed" if went else "no empty runs")
-        if args.label:
-            if not args.yes:
-                would = [r["key"] for r in bench.runs(args.kept, args.label)]
-                say("\n".join(would) if would else f"no run labelled {args.label!r}")
-                if would:
-                    say(f"{len(would)} run(s) would go; pass --yes to delete them")
-                return 0
-            went = forget(args.kept, label=args.label)
-            say(f"{len(went)} run(s) labelled {args.label!r} removed")
-        return 0
-    if args.cmd == "sweep":
-        from ml_stack.bench.backends import client_for, http_of, parse_on
-        from ml_stack.graph.community import QUESTIONS
-        from ml_stack.graph.community import graph as invented
-
-        named = []
-        for one in args.on:
-            try:
-                name, url, _ = parse_on(one)
-            except ValueError as why:
-                warn(f"error: {why}")
-                return 2
-            named.append((name, url))
-        if not named and not getattr(args, "serve", []):
-            warn("error: nothing to measure; pass --on NAME=URL for a server that is "
-                 "already up, or --serve MODEL to put one up")
-            return 2
-        if getattr(args, "fleet", False):
-            return _fleet_sweep(args)
-        everything = read_questions(args.questions) if args.questions else QUESTIONS
-        questions = sample(everything, _how_many(args))
-        graph = (json.loads(Path(args.graph).expanduser().read_text())
-                 if args.graph else invented())
-        # the smoke: two questions first, of every model. The servers somebody else
-        # started are smoked as a sweep of their own before anything is served, and each
-        # served model smokes as it comes up, so a load is paid once
-        smoking = wants_smoke(args)
-        if smoking and named:
-            standing = argparse.Namespace(**vars(args))
-            standing.serve = []
-            smoke_first(standing)
-        saved: list[str] = []
-        total_context = args.context or 32768 * max(1, args.parallel)
-        already = (resumable(args.kept, questions=len(questions), context=total_context,
-                             parallel=getattr(args, "parallel", 1), since=args.since)
-                   if args.resume else None)
-        # `wanted`, not `named`: the loop variable was `named` once, which rebound the
-        # (name, url) list built from --on to the last model's name, and the summary below
-        # then unpacked its characters. Every `sweep --serve` answered its questions and
-        # crashed while summarising, and the smoke run is what caught it.
-        for n, wanted in enumerate(getattr(args, "serve", []) or []):
-            model = str(hub.located(wanted, loose=True) or wanted)
-            heads = getattr(args, "serve_draft", []) or []
-            head = heads[n] if n < len(heads) else ""
-            if head.lower() == "auto":
-                # the one resolver (`hub.choose_head`): told which binary will serve, so
-                # a head that borrows its target's embeddings is withheld from mainline
-                # rather than found out at the far end of an 87G load
-                chosen = hub.choose_head(model, binary=args.binary or None)
-                head = chosen.path
-                say(f"    draft head: {head or 'none'} -- {chosen.why}"
-                    + (f"\n      {chosen.note}" if chosen.note else ""))
-            # the label's stem: the model's file, or what --serve-label says it is; then
-            # -nodraft for a model served without its head, and the suffix asked for
-            stem = ((str(getattr(args, "serve_label", "") or "")
-                     or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14])
-                    + ("-nodraft" if getattr(args, "no_draft", False) else "")
-                    + str(getattr(args, "label_suffix", "") or ""))
-            # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
-            # and every `--also` of each, asked of one load. Loading twice per model was
-            # how this began, and the second load measured nothing about the asking.
-            parts = halves(args, f"{wanted} {model}")
-            say(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
-            # A port nothing answers on is exactly what --serve expects, so the
-            # "would not say whether it is busy" note is noise here. Only a port
-            # somebody is actually using should stop us.
-            if bench.busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
-                    f"http://127.0.0.1:{args.serve_port}", args):
-                return 3
-            # `--context` is the total across slots, which is what `-c` takes and what
-            # ServerSpec means by it. Dividing by the slot count served a model at a
-            # quarter of the context every other run had, and the only thing that said
-            # so was the `ctx` column reading 8k where the rest read 32k.
-            before = {r["key"] for r in bench._kept(args.kept)}
-            from ml_stack.serve.backend import ServerFailed
-
-            # The settings that scored best fill every flag this sweep did not set: the head
-            # at the length that measured best, the build that loads it, the cache type,
-            # the thinking budget, the raw flags, and the asking. Adam: "if a model
-            # has a drafting head that speeds it up at some config, always use it at that
-            # config (be sure to report it)". --no-profile serves it bare.
-            chosen = swept(args, model, measured_run(args, model, head, heads, n),
-                           context=total_context, port=args.serve_port,
-                           head=head if n < len(heads) else None)
-            try:
-                bench.served(chosen, questions, graph, label=stem,
-                       askings=_asked(args, parts),
-                       binary=args.binary or "",
-                       kept=args.kept,
-                       store=args.store or None, embed_url=args.embed_url,
-                       embed_model=args.embed_model,
-                       already=already,
-                       trace=getattr(args, "trace", None),
-                       smoke=sample(everything, SMOKE) if smoking else ())
-            except ServerFailed as why:
-                # A model that will not load -- a head the build cannot read, a tensor it
-                # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
-                # such load took gpt-oss-120b's measurement down with it, twice.
-                say(f"    {stem} did not load; moving on:\n"
-                    + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
-                continue
-            saved += [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
-
-        for name, url in named:
-            for suffix, shortlist in halves(args, name):
-                label = f"{name}-{suffix}"
-                if already is not None and already(label):
-                    say(f"skipping {label}: kept at {already(label).get('at', '?')}")
-                    continue
-                ask = bench.asking(graph, how=asking_from(args), shortlist=shortlist,
-                             store=args.store or None, embed_url=args.embed_url,
-                             embed_model=args.embed_model, margin=args.margin)
-                say(f"\n{label} on {url}, look_up by {ask.finder}")
-                if not _idle(http_of(url), args):
-                    return 3
-                # the client for whatever program the URL names -- a llama-server, Ollama,
-                # an OpenAI-style server -- at the sweep's context
-                asking_with = with_card(client_for(url, timeout=args.per_question,
-                                                   context=total_context,
-                                                   **sampling_from(args)), args)
-                # what it will actually send, card and overrides together: a run measured at
-                # one temperature against a run at another is two measurements, and the only
-                # way to know later is to write it down now
-                used = dict(asking_with.sampling)
-                rows = bench.measure(ask, questions, label=label, client=asking_with,
-                                     trace=getattr(args, "trace", None),
-                                     log=print,
-                               graph=graph, per_question=args.per_question)
-                saved.append(save(args.kept, rows,
-                                  server={**bench.footprint(url), "sampling": used,
-                                        "graph": _which(graph), "finder": ask.finder},
-                                  asking=getattr(ask, "asking", None), workload=ASK))
-        say()
-        table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
-        return 0
-    if args.cmd == "prepare":
-        from ml_stack.graph.community import graph as invented
-        from ml_stack.graph.rebuild import replace
-
-        graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
-        if getattr(args, "mix", False):
-            from ml_stack.bench.measure import mix
-            from ml_stack.graph.community import QUESTIONS
-
-            everything = read_questions(args.questions) if args.questions else QUESTIONS
-            counts = mix(everything, graph)
-            scored = sum(1 for q in everything if q.get("expect"))
-            say(f"{len(everything)} asked, {scored} scored")
-            for kind, how_many in counts.items():
-                say(f"  {kind:12} {how_many:4}  {how_many / len(everything):6.1%}")
-            return 0
-        counted = replace(args.store, graph)          # writing builds the word index
-        say(f"{args.store}: {counted['nodes']} nodes, {counted['edges']} edges, word index built")
-        if not args.embed_url:
-            say("  no --embed-url, so no vectors: search will be words only")
-            return 0
-        from ml_stack.ingest.embed import embed_store
-
-        written = embed_store(args.store, base_url=args.embed_url,
-                              model=args.embed_model or "embed", log=print)
-        say(f"  {written} embedded")
-        return 0
-    if args.cmd == "drafts":
-        from ml_stack.graph.community import QUESTIONS
-        from ml_stack.graph.community import graph as invented
-
-        everything = read_questions(args.questions) if args.questions else QUESTIONS
-        asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
-        before = {r["key"] for r in bench._kept(args.kept)}
-        model = str(hub.located(args.model, loose=True) or args.model)
-        rows = drafts(swept(args, model, None, context=args.context, head=None,
-                            port=args.port),
-                      args.draft or [""], asked, invented(),
-                      binary=args.binary,
-                      kept=args.kept, store=args.store or None,
-                      embed_url=args.embed_url, embed_model=args.embed_model,
-                      n_max=list(getattr(args, "n_max", []) or []) or [None],
-                      per_request=False if getattr(args, "server_per_depth", False) else None,
-                      smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
-        say()
-        if getattr(args, "smoke", False):
-            saved = [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
-            table(read_back(args.kept, saved))
-        else:
-            table(bench._kept(args.kept))
-        return 0 if rows else 1
-
-    if args.cmd == "concurrent":
-        from ml_stack.graph.community import QUESTIONS
-        from ml_stack.graph.community import graph as invented
-
-        if wants_smoke(args):
-            smoke_first(args)
-        questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                           _how_many(args))
-        if not questions:
-            warn(f"error: no questions in {args.questions}")
-            return 2
-        graph = (json.loads(Path(args.graph).expanduser().read_text())
-                 if args.graph else invented())
-        if args.client:
-            client = bench.ask_from(args.client)()
-        else:
-            from ml_stack.client import Client
-
-            if not _idle(args.base_url, args):
-                return 3
-            client = with_card(Client(args.base_url, timeout=args.per_question,
-                                      **sampling_from(args)), args)
-        # a smoke run proves the path -- two conversations really overlapping, one turn
-        # each -- and its numbers mean nothing, as with every other --smoke
-        many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
-        ask = bench.asking(graph, how=asking_from(args), store=args.store or None,
-                     embed_url=args.embed_url, embed_model=args.embed_model)
-        where = args.graph or "the invented community"
-        say(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
-            f"look_up by {ask.finder}")
-        rows, measured = concurrent(ask, questions, conversations=many, turns=long,
-                                label=args.label, client=client, graph=graph,
-                                base_url="" if args.client else args.base_url, log=print,
-                                per_question=args.per_question)
-        at = measured["concurrency"]
-        slots = at.get("slots") or 0
-        say(f"  {at['seconds']:.1f}s for all of it"
-            + (f", {at['queued']:.1f}s of that queued"
-                 if slots and many > slots and at.get("queued") is not None else "")
-            + (f", {slots} slot(s)" if slots > 0 else ""))
-        key = save(args.kept, rows,
-                   server={**measured, "sampling": dict(getattr(client, "sampling", {}) or {}),
-                         "graph": _which(graph), "finder": ask.finder},
-                   asking=getattr(ask, "asking", None), workload=ASK)
-        say(f"kept as {key}")
-        if args.smoke:
-            table(read_back(args.kept, [key]))
-        return 0
-
-    if args.cmd == "extract":
-        from ml_stack.bench.extract import main as extracting
-
-        return extracting(args)
-
-    if args.cmd == "report":
-        from ml_stack.bench.report import main as reporting
-
-        return reporting(args)
-
-    if args.cmd == "show":
-        from ml_stack.bench import extract as bench_extract
-
-        # an extraction run is kept in the same store and is not an answering run: it has
-        # no questions to score, and its table is its own
-        from ml_stack.bench import speed as bench_speed
-
-        everything = bench.runs(args.kept) if Path(args.kept).expanduser().exists() else []
-        extracted = bench_extract.only(everything)
-        if getattr(args, "speed", False):
-            bench_speed.speed_table(newest(bench_speed.only(everything),
-                                           last=int(getattr(args, "last", 0) or 0),
-                                           since=str(getattr(args, "since", "") or "")))
-            return 0
-        answering = [r for r in everything
-                     if r.get("kind") not in (bench_extract.KIND, bench_speed.KIND)]
-        answering = newest(answering, last=int(getattr(args, "last", 0) or 0),
-                           since=str(getattr(args, "since", "") or ""))
-        if getattr(args, "trace", None) is not None:
-            bench.transcript(answering, args.trace, getattr(args, "question", "") or "")
-            return 0
-        if getattr(args, "by", "") == "serving":
-            bench.by_serving(answering)
-            return 0
-        if getattr(args, "extract", False):
-            bench_extract.table(extracted)
-            return 0
-        if args.compare:
-            say(compare(args.kept, *args.compare))
-            return 0
-        if args.rank:
-            ranking(answering, args.rank, noise=args.noise / 100)
-            say(args.rank)
-            return 0
-        if args.export:
-            say(export(answering, args.export,
-                         anyway=getattr(args, "export_anyway", False)))
-            return 0
-        if args.shape:
-            from ml_stack.graph.community import QUESTIONS
-            from ml_stack.graph.community import graph as invented
-
-            questions = read_questions(args.questions) if getattr(args, "questions", "") \
-                else QUESTIONS
-            shape(questions, invented())
-            return 0
-        if args.plot:
-            say(plot(answering, args.plot, cost=args.cost, noise=args.noise / 100))
-            return 0
-        if args.rates:
-            rates(answering, cost=args.cost, noise=args.noise / 100)
-            return 0
-        if args.detail is not None:
-            missed([r for r in answering if not args.detail or r.get("label") == args.detail],
-                   everything=args.all, among=answering)
-            return 0
-        table(answering)
-        if extracted:
-            say()
-            bench_extract.table(extracted)
-        hollow = empties(args.kept)
-        if hollow:
-            say(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
-                f"removes them")
-        return 0
-
+def _questions_and_graph(args: Any, *, everything: Any = None) -> tuple[Any, Any, Any]:
+    """The questions a run asks, the sample of them it will ask, and the graph they are
+    about: the invented community unless ``--questions`` and ``--graph`` name others."""
     from ml_stack.graph.community import QUESTIONS
     from ml_stack.graph.community import graph as invented
 
+    asked = everything if everything is not None else (
+        read_questions(args.questions) if args.questions else QUESTIONS)
+    graph = (json.loads(Path(args.graph).expanduser().read_text())
+             if args.graph else invented())
+    return asked, sample(asked, _how_many(args)), graph
+
+
+@COMMANDS.command("run", help="ask every question once and keep what it cost",
+                  options=options.run_options, allow_abbrev=False)
+def cmd_run(args: Any) -> int:
     if wants_smoke(args):
         smoke_first(args)
-    questions = sample(read_questions(args.questions) if args.questions else QUESTIONS,
-                       _how_many(args))
+    _, questions, graph = _questions_and_graph(args)
     if not questions:
         warn(f"error: no questions in {args.questions}")
         return 2
-    graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
     if args.client:
         client = bench.ask_from(args.client)()
     else:
@@ -1307,10 +148,10 @@ def _run(args: Any) -> int:
     rows = bench.measure(ask, questions, label=args.label, client=client, log=print,
                          trace=getattr(args, "trace", None),
                          graph=graph,
-                   per_question=args.per_question)
+                         per_question=args.per_question)
     key = save(args.kept, rows,
                server={**bench.footprint(args.base_url), "sampling": client.sampling,
-                     "graph": _which(graph), "finder": found},
+                       "graph": _which(graph), "finder": found},
                asking=getattr(ask, "asking", None), workload=ASK)
     say(f"kept as {key}")
     if args.smoke:
@@ -1318,599 +159,480 @@ def _run(args: Any) -> int:
     return 0
 
 
-# The flags `sweep --fleet` takes off the line before handing it to a peer: what is about
-# this machine's session, not about the measuring.
-_NOT_FOR_A_PEER = ("--fleet", "--detach", "--no-queue")
-_NOT_FOR_A_PEER_VALUED = ("--peers", "--serve", "--serve-draft")
+@COMMANDS.command("drafts", help="serve one model with each draft head in turn "
+                                 "and measure what each is worth",
+                  options=options.drafts_options, allow_abbrev=False)
+def cmd_drafts(args: Any) -> int:
+    from ml_stack.graph.community import QUESTIONS
+    from ml_stack.graph.community import graph as invented
+
+    everything = read_questions(args.questions) if args.questions else QUESTIONS
+    asked = sample(everything, SMOKE if getattr(args, "smoke", False) else args.sample)
+    before = {r["key"] for r in bench._kept(args.kept)}
+    model = str(hub.located(args.model, loose=True) or args.model)
+    rows = drafts(ops.swept(args, model, None, context=args.context, head=None,
+                            port=args.port),
+                  args.draft or [""], asked, invented(),
+                  binary=args.binary,
+                  kept=args.kept, store=args.store or None,
+                  embed_url=args.embed_url, embed_model=args.embed_model,
+                  n_max=list(getattr(args, "n_max", []) or []) or [None],
+                  per_request=False if getattr(args, "server_per_depth", False) else None,
+                  smoke=sample(everything, SMOKE) if wants_smoke(args) else ())
+    say()
+    if getattr(args, "smoke", False):
+        saved = [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
+        table(read_back(args.kept, saved))
+    else:
+        table(bench._kept(args.kept))
+    return 0 if rows else 1
 
 
-def fleet_jobs(argv: Sequence[str], models: Sequence[str], *, commit: str) -> list[dict[str, Any]]:
-    """One job per model: this same command line with that one ``--serve`` (and its
-    positional ``--serve-draft``, when one was given), on ``commit``.
+@COMMANDS.command("concurrent",
+                  help="ask N conversations of T turns each at the same time, and "
+                       "see what the waiting, the memory and the accuracy cost",
+                  options=options.concurrent_options, allow_abbrev=False)
+def cmd_concurrent(args: Any) -> int:
+    if wants_smoke(args):
+        smoke_first(args)
+    _, questions, graph = _questions_and_graph(args)
+    if not questions:
+        warn(f"error: no questions in {args.questions}")
+        return 2
+    if args.client:
+        client = bench.ask_from(args.client)()
+    else:
+        from ml_stack.client import Client
 
-    Every other flag rides along unchanged -- the questions, the store, the sample, every
-    ``--also`` -- so a peer measures exactly what this machine would have. ``commit`` is
-    the short sha, and ``dirty`` says whether the tree had changes: a peer on another
-    commit is measuring other code, and both ends refuse it.
-    """
-    rest: list[str] = []
-    heads: list[str] = []
-    skip = False
-    for word in argv:
-        if skip:
-            skip = False
-            continue
-        if word in _NOT_FOR_A_PEER:
-            continue
-        flag, sep, value = word.partition("=")
-        if flag in _NOT_FOR_A_PEER_VALUED:
-            if not sep:
-                skip = True
-            continue
-        rest.append(word)
-    heads = list(_values_of(argv, "--serve-draft"))
-    sha, _, dirtiness = commit.partition(" ")
-    out = []
-    for n, model in enumerate(models):
-        line = [*rest, "--serve", model]
-        if n < len(heads):
-            line += ["--serve-draft", heads[n]]
-        out.append({"model": model, "argv": line, "commit": sha, "dirty": bool(dirtiness)})
-    return out
+        if not _idle(args.base_url, args):
+            return 3
+        client = with_card(Client(args.base_url, timeout=args.per_question,
+                                  **sampling_from(args)), args)
+    # a smoke run proves the path -- two conversations really overlapping, one turn
+    # each -- and its numbers mean nothing, as with every other --smoke
+    many, long = (2, 1) if args.smoke else (args.conversations, args.turns)
+    ask = bench.asking(graph, how=asking_from(args), store=args.store or None,
+                       embed_url=args.embed_url, embed_model=args.embed_model)
+    where = args.graph or "the invented community"
+    say(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
+        f"look_up by {ask.finder}")
+    rows, measured = concurrent(ask, questions, conversations=many, turns=long,
+                                label=args.label, client=client, graph=graph,
+                                base_url="" if args.client else args.base_url, log=print,
+                                per_question=args.per_question)
+    at = measured["concurrency"]
+    slots = at.get("slots") or 0
+    say(f"  {at['seconds']:.1f}s for all of it"
+        + (f", {at['queued']:.1f}s of that queued"
+           if slots and many > slots and at.get("queued") is not None else "")
+        + (f", {slots} slot(s)" if slots > 0 else ""))
+    key = save(args.kept, rows,
+               server={**measured, "sampling": dict(getattr(client, "sampling", {}) or {}),
+                       "graph": _which(graph), "finder": ask.finder},
+               asking=getattr(ask, "asking", None), workload=ASK)
+    say(f"kept as {key}")
+    if args.smoke:
+        table(read_back(args.kept, [key]))
+    return 0
 
 
-def _values_of(argv: Sequence[str], flag: str) -> list[str]:
-    """Every value ``flag`` was given on ``argv``, ``--flag V`` and ``--flag=V`` alike."""
-    out: list[str] = []
-    words = list(argv)
-    for n, word in enumerate(words):
-        if word == flag and n + 1 < len(words):
-            out.append(words[n + 1])
-        elif word.startswith(flag + "="):
-            out.append(word.partition("=")[2])
-    return out
+@COMMANDS.command("prepare", help="put a graph in a store and index and embed it",
+                  options=options.prepare_options, allow_abbrev=False)
+def cmd_prepare(args: Any) -> int:
+    from ml_stack.graph.community import graph as invented
 
+    graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
+    if getattr(args, "mix", False):
+        from ml_stack.bench.measure import mix
+        from ml_stack.graph.community import QUESTIONS
 
-def _planned(plan: Any) -> list[dict[str, Any]]:
-    """The fleet's plan as one record per job, whatever shape `plan` gave it: a list of
-    mappings as they are, a mapping of model to peer as ``{"model", "peer"}`` records."""
-    if isinstance(plan, Mapping):
-        return [{"model": str(k), "peer": v} for k, v in plan.items()]
-    return [dict(one) if isinstance(one, Mapping) else {"model": str(one)}
-            for one in (plan or ())]
+        everything = read_questions(args.questions) if args.questions else QUESTIONS
+        counts = mix(everything, graph)
+        scored = sum(1 for q in everything if q.get("expect"))
+        say(f"{len(everything)} asked, {scored} scored")
+        for kind, how_many in counts.items():
+            say(f"  {kind:12} {how_many:4}  {how_many / len(everything):6.1%}")
+        return 0
+    counted = ops.prepare(args.store, graph, embed_url=args.embed_url,
+                          embed_model=args.embed_model)
+    say(f"{args.store}: {counted['nodes']} nodes, {counted['edges']} edges, word index built")
+    if counted["embedded"] is None:
+        say("  no --embed-url, so no vectors: search will be words only")
+        return 0
+    say(f"  {counted['embedded']} embedded")
+    return 0
 
 
 def _fleet_sweep(args: Any) -> int:
-    """`sweep --fleet`: the jobs, the plan, dispatch, wait, gather, show.
-
-    The fleet side is `ml_stack.fleet.sweeps` -- `plan(models, peers)`, `dispatch(jobs)`,
-    `wait(handles)`, `gather(handles, into=store)` -- imported by name here so this
-    machine's sweep needs none of it. The plan is printed before anything is dispatched,
-    and a peer the plan says is on another commit ends the sweep before it starts: the
-    daemon refuses too, but finding out from four peers' logs is later than from one line.
-    """
-    models = [str(m) for m in (getattr(args, "serve", []) or [])]
-    if not models:
-        warn("error: --fleet spreads --serve models over the fleet; pass --serve MODEL for "
-             "each")
-        return 2
-    mine = _commit()
-    if not mine:
-        warn("error: --fleet needs to know this checkout's commit, and git would not say")
-        return 2
-    fleet = importlib.import_module("ml_stack.fleet.sweeps")
-    missing = [name for name in ("plan", "dispatch", "wait", "gather") if not hasattr(fleet, name)]
-    if missing:
-        warn(f"error: ml_stack.fleet.sweeps has no {', '.join(missing)}; the fleet side of "
-             f"the bench is not in this build")
-        return 2
-    jobs = fleet_jobs(list(getattr(args, "_argv", None) or []), models, commit=mine)
+    """``sweep --fleet``: the plan said, the jobs dispatched, waited for and gathered."""
     peers = [p.strip() for p in str(getattr(args, "peers", "") or "").split(",") if p.strip()]
-    planned = _planned(fleet.plan(models, peers or None))
-    sha = mine.partition(" ")[0]
-    say(f"plan: {len(jobs)} job(s) on commit {mine}" + (f" over {', '.join(peers)}" if peers
-                                                          else ""))
-    for one in planned:
-        theirs = str(one.get("commit") or "")
-        say(f"  {one.get('model', '?')} -> {one.get('peer') or one.get('host') or '?'}"
-            + (f" ({theirs})" if theirs else ""))
-        if theirs and theirs.partition(" ")[0] != sha:
-            warn(f"error: {one.get('peer') or one.get('host') or 'a peer'} is on commit "
-                 f"{theirs}, this checkout is on {mine}; a peer measuring other code is "
-                 f"refused, and its daemon would refuse too")
-            return 2
-    where = {str(one.get("model")): one for one in planned if one.get("model")}
-    for job in jobs:
-        peer = (where.get(job["model"]) or {}).get("peer")
-        if peer is not None:
-            job["peer"] = peer
-    handles = fleet.dispatch(jobs)
-    fleet.wait(handles)
-    fleet.gather(handles, into=args.kept)
+    try:
+        planned = ops.fleet_planned(list(getattr(args, "_argv", None) or []),
+                                    [str(m) for m in (getattr(args, "serve", []) or [])],
+                                    peers=peers)
+    except Refused as why:
+        for line in why.said:
+            say(line)
+        warn(why.error)
+        return 2
+    for line in planned.lines:
+        say(line)
+    ops.fleet_measure(planned.jobs, into=args.kept)
     say()
     table(bench._kept(args.kept))
     return 0
 
 
-# Which subcommands put load on the GPU, and so must never overlap with each other.
-MEASURING = ("run", "sweep", "drafts", "concurrent", "extract", "speed")
+def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
+                         smoke: Any) -> list[str]:
+    """Every ``--serve``'d model put up, asked both halves on one load, and taken down;
+    the keys of the runs it kept."""
+    from ml_stack.serve.backend import ServerFailed
 
-
-def measuring_file() -> Path:
-    """Where the run holding the measuring lock writes its pid, argv, log, start time and
-    how it is asking."""
-    return bench.home_dir() / "measuring.json"
-
-
-def measuring_lock_file() -> Path:
-    """Where the run holding the measuring lock is named, whatever else it wrote."""
-    return bench.home_dir() / "measuring.lock"
-
-
-def _locked_by() -> int | None:
-    """The pid written into the measuring lock, or None."""
-    try:
-        said = measuring_lock_file().read_text(encoding="utf-8").split()
-    except OSError:
-        return None
-    return int(said[-1]) if said and said[-1].isdigit() else None
-
-
-def measuring() -> dict[str, Any] | None:
-    """The measurement still running, or None. Read from `measuring_file`; a record marked
-    ended, or one whose pid has gone, is a measurement that finished.
-
-    A live lock with no record of its own is still a measurement, reported with the little
-    the lock knows: a machine whose GPU is busy must never read as idle.
-    """
-    from ml_stack.serve.process import pid_exists
-
-    try:
-        record = json.loads(measuring_file().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        record = None
-    if isinstance(record, dict) and not record.get("ended") and pid_exists(record.get("pid")):
-        return record
-    pid = _locked_by()
-    if pid is None or not pid_exists(pid) \
-            or (isinstance(record, dict) and record.get("pid") == pid):
-        return None
-    return {"pid": pid, "argv": [], "log": "", "how": {},
-            "started": "", "lock_only": True}
-
-
-def asking_said(argv: Sequence[str]) -> dict[str, Any]:
-    """How a run started with ``argv`` will ask: the sampling, the draft head and its
-    depth, the cache type, the thinking budget, the context and the slots."""
-    try:
-        args = _parser().parse_args([a for a in argv if a not in ("--detach", "--no-queue")])
-    except SystemExit:
-        return {}
-    asked = sampling_from(args)
-    sampling = dict(Client(**{k: v for k, v in asked.items() if k in SAMPLERS}).sampling)
-    if asked.get("n_predict") is not None:
-        sampling["n_predict"] = asked["n_predict"]
-    named = [*(getattr(args, "serve_draft", []) or []), *(getattr(args, "draft", []) or [])]
-    heads = ([] if getattr(args, "no_draft", False)
-             else [str(h).rsplit("/", 1)[-1] or "none" for h in named])
-    ahead = getattr(args, "n_max", None)
-    return {"sampling": sampling, "card": bool(getattr(args, "card", False)),
-            "head": ", ".join(heads),
-            "head_ahead": ", ".join(str(n) for n in ahead) if isinstance(ahead, list) else ahead,
-            "cache_type": str(getattr(args, "serve_kv", "") or "") or DEFAULT_CACHE,
-            "reasoning_budget": getattr(args, "reasoning_budget", None),
-            "context": int(getattr(args, "context", 0) or 0),
-            "slots": max(1, int(getattr(args, "parallel", 1) or 1))}
-
-
-def remember(argv: Sequence[str], *, pid: int, log: str = "", started: str = "",
-             commit: str | None = None) -> dict[str, Any]:
-    """Write `measuring_file` for the run named by ``argv``, and return what was written.
-
-    A log already recorded under this pid is kept, so a detached child taking the lock
-    does not lose the log its parent opened for it.
-    """
-    was: dict[str, Any] = {}
-    try:
-        found = json.loads(measuring_file().read_text(encoding="utf-8"))
-        was = found if isinstance(found, dict) and found.get("pid") == pid else {}
-    except (OSError, ValueError):
-        pass
-    record = {"pid": int(pid), "argv": list(argv),
-            "log": str(log or was.get("log") or ""),
-            "started": started or str(was.get("started") or time.strftime("%FT%T")),
-            "commit": _commit() if commit is None else commit,
-            "how": asking_said(argv)}
-    measuring_file().parent.mkdir(parents=True, exist_ok=True)
-    measuring_file().write_text(json.dumps(record, indent=1), encoding="utf-8")
-    return record
-
-
-def ended() -> None:
-    """Mark this process's record finished, so nothing reads it as a live measurement."""
-    try:
-        record = json.loads(measuring_file().read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return
-    if not isinstance(record, dict) or record.get("pid") != os.getpid():
-        return
-    record["ended"] = time.strftime("%FT%T")
-    measuring_file().write_text(json.dumps(record, indent=1), encoding="utf-8")
-
-
-def _named_in(argv: Sequence[str]) -> str:
-    """What to call a detached run's log: its label, or the first model it measures."""
-    try:
-        args = _parser().parse_args(list(argv))
-    except SystemExit:
-        return "bench"
-    named = (getattr(args, "label", "") or next(iter(getattr(args, "serve", []) or []), "")
-             or next(iter(getattr(args, "on", []) or []), "").partition("=")[0]
-             or getattr(args, "model", "") or "bench")
-    return re.sub(r"[^\w.-]+", "-", str(named).rsplit("/", 1)[-1].removesuffix(".gguf"))[:40]
-
-
-def detach(argv: Sequence[str]) -> Path:
-    """Run ``ml-stack-bench argv`` owned by no terminal, and return the log it writes."""
-    rest = [a for a in argv if a != "--detach"]
-    cmd = next((a for a in rest if a in MEASURING), "bench")
-    log = (bench.home_dir() / "logs"
-           / f"{cmd}-{_named_in(rest)}-{time.strftime('%Y%m%dT%H%M%S')}.log")
-    commit = _commit()
-    # `history` reads the log's header back once `measuring.json` has moved on; a second
-    # `--detach` queues behind the measuring lock rather than being refused here
-    ran = jobs.detach("ml_stack.bench", rest, log=log,
-                      lines=[f"commit: {commit}"] if commit else [])
-    remember(rest, pid=ran.pid, log=str(ran.log), started=ran.started, commit=commit)
-    jobs.record("bench", pid=ran.pid, argv=rest, log=str(ran.log), started=ran.started,
-                home=bench.home_dir() / "jobs", refuse_if_alive=False)
-    return ran.log
-
-
-def _last_line(log: Path) -> str:
-    try:
-        lines = log.read_text(encoding="utf-8", errors="replace").splitlines()
-    except OSError:
-        return ""
-    return next((ln for ln in reversed(lines) if ln.strip()), "")
-
-
-def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> Any:
-    """The `Config` the model's profile measured best in, or None with --no-profile or no
-    record. Reports the settings it took.
-
-    The head is left out when ``--serve-draft`` named one for this model, since a flag
-    beats a record; everything else the record says is on the run, and the sweep's own
-    flags are laid over it by `Config.over` afterwards.
-    """
-    if not getattr(args, "profile", True):
-        return None
-    try:
-        from ml_stack.serve.profile import profile_for
-    except ImportError:
-        return None
-    found = profile_for(str(model))
-    if found is None:
-        return None
-    config = found.config(port=int(getattr(args, "serve_port", 8099) or 8099),
-                    slots=int(getattr(args, "parallel", 1) or 1))
-    serving = config.serving
-    said: dict[str, Any] = {}
-    if n >= len(heads) and serving.draft:
-        said["draft"] = str(serving.draft)
-    if serving.build:
-        said["build"] = serving.build
-    if serving.cache_type:
-        said["cache_type"] = serving.cache_type
-    if serving.reasoning_budget is not None:
-        said["reasoning_budget"] = int(serving.reasoning_budget)
-    if serving.draft_n_max:
-        said["draft_n_max"] = int(serving.draft_n_max)
-    rest = {k: v for k, v in (("extra_args", tuple(serving.extra_args)),
-                              ("mmproj", serving.mmproj)) if v}
-    asking = config.asking.said()
-    say("    scored best with: " + ", ".join(f"{k}={v}" for k, v in said.items())
-        + (f"; also {rest}" if rest else "")
-        + (f"; asking {asking}" if asking else ""))
-    return config
-
-
-def swept(args: Any, model: str, measured: Any, *, context: int, head: str | None,
-          port: int) -> Any:
-    """The `Config` one ``--serve``'d model is measured in: what a record measured, with this
-    sweep's own flags laid over it.
-
-    One object rather than twenty keyword arguments, and one place that lays a flag over a
-    record, so the lease `served` takes, the asking it asks with and the client it asks with
-    cannot say different things. ``context`` is the total across the slots, which is what
-    ``-c`` takes; a `Serving` holds it as every slot's share.
-
-    ``head`` is what ``--serve-draft`` named for this model -- ``""`` for the bare model it
-    asked for outright -- and None when it named nothing, which is where a record's own
-    head stands.
-    """
-    from ml_stack.serve.serving import Config, Serving
-
-    slots = max(1, int(getattr(args, "parallel", 1) or 1))
-    config = measured if measured is not None else Config(serving=Serving(model=str(model)))
-    config = config.over(model=str(model), port=int(port), slots=slots,
-                   slot_context=max(1, int(context) // slots),
-                   timeout=float(getattr(args, "per_question", PER_QUESTION)),
-                   terse=bool(getattr(args, "terse", False)),
-                   **sampling_from(args))
-    if head is not None:
-        # a head named on the command line beats the one a record measured, and its method
-        # is read off its own name rather than kept from the record's
-        config = bench.drafted_by(config, head)
-    if getattr(args, "no_draft", False):
-        # the profile's serving minus its head: what the head is worth is this run against
-        # the drafted one, two labels apart
-        config = bench.drafted_by(config, "")
-    if getattr(args, "serve_kv", ""):
-        config = config.over(cache_type=str(args.serve_kv))
-    if getattr(args, "serve_kv_unified", None) is not None:
-        config = config.over(kv_unified=bool(args.serve_kv_unified))
-    if getattr(args, "reasoning_budget", None) is not None:
-        config = config.over(reasoning_budget=int(args.reasoning_budget))
-    length = getattr(args, "n_max", None)
-    if isinstance(length, int) and length:
-        # `drafts` takes a list of them, one served configuration each, put on its own arm
-        # there; a sweep takes one number for the whole run
-        config = config.over(draft_n_max=length)
-    return config.over(**serving_fields(args))
-
-
-def serving_fields(args: Any) -> dict[str, Any]:
-    """The ServerSpec fields a sweep's --serve-* flags name, and nothing when none do."""
-    out: dict[str, Any] = {}
-    raw = list(getattr(args, "serve_arg", []) or [])
-    if raw:
-        out["extra_args"] = tuple(raw)
-    if getattr(args, "serve_mlock", False):
-        out["mlock"] = True
-    if getattr(args, "serve_no_flash_attn", False):
-        out["flash_attn"] = False
-    mmproj = str(getattr(args, "serve_mmproj", "") or "")
-    if mmproj:
-        out["mmproj"] = mmproj
-    return out
-
-
-def newest(kept: list[dict[str, Any]], *, last: int = 0, since: str = "") -> list[dict[str, Any]]:
-    """``kept`` narrowed to what was kept at or after ``since`` and then to the newest
-    ``last`` -- the two ways `show` is asked for what just happened."""
-    rows = [r for r in kept if not since or str(r.get("at", "")) >= since]
-    if last:
-        rows = sorted(rows, key=lambda r: str(r.get("at", "")))[-last:]
-    return rows
-
-
-def beside_on_the_card() -> list[dict[str, Any]]:
-    """Every llama-server already running: its port, pid, model, memory, and whether a
-    lease records it."""
-    got = processes()
-    return [{"port": int(one["port"]), "pid": int(one["pid"]),
-             "model": Path(str(one.get("model") or "")).name,
-             "bytes": int(one.get("rss") or 0),
-             "leased": int(one["port"]) in got.leased}
-            for one in got.found if not one.get("defunct")]
-
-
-def note_beside_the_run() -> str:
-    """Record what else holds the card while this run measures, and say it. The line said,
-    or "" for a card this run has to itself."""
-    found = beside_on_the_card()
-    note_beside(found)
-    if not found:
-        return ""
-    each = ", ".join(f":{one['port']} {one['model'] or '?'} {human_bytes(one['bytes'])}"
-                     + ("" if one["leased"] else ", not leased") for one in found)
-    said = (f"{len(found)} server(s) already hold this card: {each}. Their memory and "
-            f"their work are in these timings, and in the run's record.")
-    warn(said)
-    return said
-
-
-def serving_lines() -> list[str]:
-    """One line per port a server is answering on -- what `ml-stack-serve status` knows,
-    for `status` here, so what is measuring and what it is measuring against are read
-    together and nobody polls ports by hand."""
-    try:
-        from ml_stack.serve.manager import lease_file, recorded_servers
-        from ml_stack.serve.ops import look
-    except Exception:  # noqa: BLE001 - no serving side installed is no servers
-        return []
-    try:
-        records = recorded_servers(lease_file())
-    except Exception:  # noqa: BLE001
-        records = {}
-    out = []
-    for port in sorted(records):
-        got = look(port, records)
-        if got is None:
+    saved: list[str] = []
+    total_context = args.context or 32768 * max(1, args.parallel)
+    # `wanted`, not `named`: the loop variable was `named` once, which rebound the
+    # (name, url) list built from --on to the last model's name, and the summary below
+    # then unpacked its characters. Every `sweep --serve` answered its questions and
+    # crashed while summarising, and the smoke run is what caught it.
+    for n, wanted in enumerate(getattr(args, "serve", []) or []):
+        model = str(hub.located(wanted, loose=True) or wanted)
+        heads = getattr(args, "serve_draft", []) or []
+        head = heads[n] if n < len(heads) else ""
+        if head.lower() == "auto":
+            # the one resolver (`hub.choose_head`): told which binary will serve, so
+            # a head that borrows its target's embeddings is withheld from mainline
+            # rather than found out at the far end of an 87G load
+            chosen = hub.choose_head(model, binary=args.binary or None)
+            head = chosen.path
+            say(f"    draft head: {head or 'none'} -- {chosen.why}"
+                + (f"\n      {chosen.note}" if chosen.note else ""))
+        # the label's stem: the model's file, or what --serve-label says it is; then
+        # -nodraft for a model served without its head, and the suffix asked for
+        stem = ((str(getattr(args, "serve_label", "") or "")
+                 or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")[:14])
+                + ("-nodraft" if getattr(args, "no_draft", False) else "")
+                + str(getattr(args, "label_suffix", "") or ""))
+        # Both halves -- plain, and shortlisted where `--shortlist-for` allows it --
+        # and every `--also` of each, asked of one load. Loading twice per model was
+        # how this began, and the second load measured nothing about the asking.
+        parts = halves(args, f"{wanted} {model}")
+        say(f"\n{stem}: " + ", ".join(suffix for suffix, _ in parts))
+        # A port nothing answers on is exactly what --serve expects, so the
+        # "would not say whether it is busy" note is noise here. Only a port
+        # somebody is actually using should stop us.
+        if bench.busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
+                f"http://127.0.0.1:{args.serve_port}", args):
+            raise Refused("")
+        # `--context` is the total across slots, which is what `-c` takes and what
+        # ServerSpec means by it. Dividing by the slot count served a model at a
+        # quarter of the context every other run had, and the only thing that said
+        # so was the `ctx` column reading 8k where the rest read 32k.
+        before = {r["key"] for r in bench._kept(args.kept)}
+        # The settings that scored best fill every flag this sweep did not set: the head
+        # at the length that measured best, the build that loads it, the cache type,
+        # the thinking budget, the raw flags, and the asking. Adam: "if a model
+        # has a drafting head that speeds it up at some config, always use it at that
+        # config (be sure to report it)". --no-profile serves it bare.
+        chosen = ops.swept(args, model, ops.measured_run(args, model, head, heads, n),
+                           context=total_context, port=args.serve_port,
+                           head=head if n < len(heads) else None)
+        try:
+            bench.served(chosen, questions, graph, label=stem,
+                         askings=_asked(args, parts),
+                         binary=args.binary or "",
+                         kept=args.kept,
+                         store=args.store or None, embed_url=args.embed_url,
+                         embed_model=args.embed_model,
+                         already=already,
+                         trace=getattr(args, "trace", None),
+                         smoke=smoke)
+        except ServerFailed as why:
+            # A model that will not load -- a head the build cannot read, a tensor it
+            # does not know -- ends that model, not the sweep. Measured 2026-09-01: one
+            # such load took gpt-oss-120b's measurement down with it, twice.
+            say(f"    {stem} did not load; moving on:\n"
+                + "\n".join(f"      {line}" for line in str(why).splitlines()[:6]))
             continue
-        served = (f"{got.context // 1024}k" if got.context else "?") + \
-                 (f" x{got.slots}" if got.slots else "")
-        out.append(f"  :{port}  {got.model or '?'}  {served}")
-    return out
+        saved += [r["key"] for r in bench._kept(args.kept) if r["key"] not in before]
+    return saved
 
 
-def results_since(started: str, kept: str | Path | None = None) -> str:
-    """The table of every run kept since ``started`` -- what a job produced, without
-    reading its log. Empty when nothing was kept."""
-    import contextlib
-    import io
+def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, graph: Any,
+                 already: Any) -> list[str]:
+    """Every ``--on`` server measured both halves; the keys of the runs it kept."""
+    from ml_stack.bench.backends import client_for, http_of
 
-    where = Path(kept) if kept else bench.home_dir() / "runs.ladybug"
-    if not started or not where.exists():
-        return ""
+    saved: list[str] = []
+    total_context = args.context or 32768 * max(1, args.parallel)
+    for name, url in named:
+        for suffix, shortlist in halves(args, name):
+            label = f"{name}-{suffix}"
+            if already is not None and already(label):
+                say(f"skipping {label}: kept at {already(label).get('at', '?')}")
+                continue
+            ask = bench.asking(graph, how=asking_from(args), shortlist=shortlist,
+                               store=args.store or None, embed_url=args.embed_url,
+                               embed_model=args.embed_model, margin=args.margin)
+            say(f"\n{label} on {url}, look_up by {ask.finder}")
+            if not _idle(http_of(url), args):
+                raise Refused("")
+            # the client for whatever program the URL names -- a llama-server, Ollama,
+            # an OpenAI-style server -- at the sweep's context
+            asking_with = with_card(client_for(url, timeout=args.per_question,
+                                               context=total_context,
+                                               **sampling_from(args)), args)
+            # what it will actually send, card and overrides together: a run measured at
+            # one temperature against a run at another is two measurements, and the only
+            # way to know later is to write it down now
+            used = dict(asking_with.sampling)
+            rows = bench.measure(ask, questions, label=label, client=asking_with,
+                                 trace=getattr(args, "trace", None),
+                                 log=print,
+                                 graph=graph, per_question=args.per_question)
+            saved.append(save(args.kept, rows,
+                              server={**bench.footprint(url), "sampling": used,
+                                      "graph": _which(graph), "finder": ask.finder},
+                              asking=getattr(ask, "asking", None), workload=ASK))
+    return saved
+
+
+@COMMANDS.command("sweep", help="run every model, with and without a shortlist",
+                  options=options.sweep_options, allow_abbrev=False)
+def cmd_sweep(args: Any) -> int:
+    from ml_stack.bench.backends import parse_on
+
+    named = []
+    for one in args.on:
+        try:
+            name, url, _ = parse_on(one)
+        except ValueError as why:
+            warn(f"error: {why}")
+            return 2
+        named.append((name, url))
+    if not named and not getattr(args, "serve", []):
+        warn("error: nothing to measure; pass --on NAME=URL for a server that is "
+             "already up, or --serve MODEL to put one up")
+        return 2
+    if getattr(args, "fleet", False):
+        return _fleet_sweep(args)
+    everything, questions, graph = _questions_and_graph(args)
+    # the smoke: two questions first, of every model. The servers somebody else
+    # started are smoked as a sweep of their own before anything is served, and each
+    # served model smokes as it comes up, so a load is paid once
+    smoking = wants_smoke(args)
+    if smoking and named:
+        standing = argparse.Namespace(**vars(args))
+        standing.serve = []
+        smoke_first(standing)
+    already = (resumable(args.kept, questions=len(questions),
+                         context=args.context or 32768 * max(1, args.parallel),
+                         parallel=getattr(args, "parallel", 1), since=args.since)
+               if args.resume else None)
     try:
-        rows = newest(bench.runs(where), since=str(started)[:19])
-    except Exception:  # noqa: BLE001 - a store that will not open has nothing to show
-        return ""
-    if not rows:
-        return ""
-    from ml_stack.bench.show import table
-
-    said = io.StringIO()
-    with contextlib.redirect_stdout(said):
-        table(rows)
-    return said.getvalue().rstrip()
-
-
-def status(*, results: bool = True) -> str:
-    """What is measuring, or that nothing is; what is serving; and the rows the current or
-    last job has kept so far. Exit 0 either way: a question, not a check."""
-    text = _status_line()
-    serving = serving_lines()
-    text += "\nserving:\n" + "\n".join(serving) if serving else "\nserving: nothing"
-    from ml_stack.bench.queue import queue_status
-
-    text += ("\n" + queued) if (queued := queue_status()) else ""
-    if results:
-        record = measuring()
-        try:
-            last = record or json.loads(measuring_file().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            last = {}
-        rows = results_since(str(last.get("started") or ""))
-        if rows:
-            text += "\nkept by it so far:\n" + rows if record else "\nkept by it:\n" + rows
-    return text
-
-
-def _sampling_said(sampling: Mapping[str, Any]) -> str:
-    """The sampler settings as one phrase, temperature first; a zero is named greedy."""
-    if not sampling:
-        return "unrecorded"
-    greedy = float(sampling.get("temperature", 1.0)) == 0.0
-    order = [*SAMPLERS, *sorted(k for k in sampling if k not in SAMPLERS)]
-    return ", ".join(f"{name} {sampling[name]}"
-                     + (" (greedy)" if greedy and name == "temperature" else "")
-                     for name in order if name in sampling)
-
-
-def _how_said(how: Mapping[str, Any]) -> list[str]:
-    """The `asking:` and `serving:` lines for a record's ``how``; nothing when it has none."""
-    if not how:
-        return []
-    said = _sampling_said(how.get("sampling") or {})
-    if how.get("card"):
-        said += ", over what the model's card asks for"
-    head, ahead = str(how.get("head") or ""), how.get("head_ahead")
-    context, slots = int(how.get("context") or 0), int(how.get("slots") or 1)
-    served = [f"draft head{'s' if ', ' in head else ''} {head}" if head else "no draft head"]
-    if ahead:
-        served.append(f"{ahead} ahead")
-    served.append(f"{how.get('cache_type') or '?'} cache")
-    if how.get("reasoning_budget") is not None:
-        served.append(f"thinking budget {int(how['reasoning_budget'])}")
-    served.append((f"{context // 1024}k context" if context else "the model's own context")
-                  + f" across {slots} slot" + ("s" if slots != 1 else ""))
-    return [f"  asking: {said}", "  serving: " + "; ".join(served)]
-
-
-def _log_said(log: str) -> list[str]:
-    """The `log:` and `last:` lines for a run's log, or where to read it when it has none."""
-    if not log:
-        return ["  log: none -- it prints to the terminal it was started in"]
-    return [f"  log: {log}", f"  last: {_last_line(Path(log))}"]
-
-
-def _status_line() -> str:
-    record = measuring()
-    if record is None:
-        try:
-            last = json.loads(measuring_file().read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return "nothing is measuring"
-        return "\n".join([f"nothing is measuring; the last one -- ml-stack-bench "
-                          f"{' '.join(last.get('argv') or ())} -- started "
-                          f"{last.get('started', '?')} and has ended.",
-                          *_log_said(str(last.get("log") or ""))])
-    if record.get("lock_only"):
-        return (f"measuring (pid {record['pid']}), which wrote no record of itself: the "
-                f"measuring lock is held and that process is alive. Nothing here says what "
-                f"it is asking or where its log is.")
-    began = _epoch(str(record.get("started") or ""))
-    return "\n".join([f"measuring {f'for {_span(time.time() - began)}, ' if began else ''}"
-                      f"since {record.get('started', '?')} (pid {record.get('pid')}):",
-                      f"  ml-stack-bench {' '.join(record.get('argv') or ())}",
-                      *_how_said(record.get("how") or {}),
-                      *_log_said(str(record.get("log") or ""))])
-
-
-def _latest_log() -> Path | None:
-    record = measuring()
-    if record and record.get("log"):
-        return Path(str(record["log"]))
-    try:
-        last = json.loads(measuring_file().read_text(encoding="utf-8"))
-        if last.get("log") and Path(str(last["log"])).exists():
-            return Path(str(last["log"]))
-    except (OSError, ValueError):
-        pass
-    logs = sorted((bench.home_dir() / "logs").glob("*.log"), key=lambda p: p.stat().st_mtime) \
-        if (bench.home_dir() / "logs").exists() else []
-    return logs[-1] if logs else None
-
-
-def tail(*, lines: int = 20, follow: bool = False, every: float = 0.5) -> int:
-    """Print the end of the current (or latest) log; ``follow`` keeps printing until the
-    measurement's pid has gone and the log has been drained."""
-    from ml_stack.serve.process import pid_exists
-
-    log = _latest_log()
-    if log is None or not log.exists():
-        warn("no log yet: nothing has been detached")
-        return 1
-    with log.open("rb") as fh:
-        text = fh.read().decode("utf-8", "replace")
-        shown = text.splitlines()[-lines:] if lines > 0 else []
-        if shown:
-            say("\n".join(shown))
-        if not follow:
-            return 0
-        record = measuring() or {}
-        pid = record.get("pid")
-        try:
-            while True:
-                more = fh.read().decode("utf-8", "replace")
-                if more:
-                    say(more, end="", flush=True)
-                elif not pid_exists(pid):
-                    break
-                else:
-                    time.sleep(every)
-        except KeyboardInterrupt:
-            pass
+        saved = _served_by_the_sweep(args, questions, graph, already,
+                                     sample(everything, SMOKE) if smoking else ())
+        saved += _measured_on(args, named, questions, graph, already)
+    except Refused:
+        return 3
+    say()
+    table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
     return 0
 
 
-def stop(*, wait: float = 60.0) -> str:
-    """SIGTERM to the detached measurement -- by pid, never by name -- and wait for it.
+COMMANDS.borrow(lambda sub: importlib.import_module("ml_stack.bench.speed").add_arguments(sub),
+                lambda args: importlib.import_module("ml_stack.bench.speed").main(args),
+                options=lambda: (*options.measuring_options(), *options.checking()))
+COMMANDS.borrow(lambda sub: importlib.import_module("ml_stack.bench.extract").add_arguments(sub),
+                lambda args: importlib.import_module("ml_stack.bench.extract").main(args),
+                options=options.checking)
 
-    The child's handler turns the signal into a `SystemExit`, so the `serve` block it is
-    in runs its exit and takes its model down; `pkill llama-server` would not, and would
-    take somebody else's server with it.
-    """
-    from ml_stack.serve.process import pid_exists
 
-    record = measuring()
-    if record is None:
-        return "nothing is measuring"
-    pid = int(record["pid"])
+@COMMANDS.command("show", help="compare two runs, or list what is kept",
+                  options=options.show_options, allow_abbrev=False)
+def cmd_show(args: Any) -> int:
+    # an extraction run is kept in the same store and is not an answering run: it has
+    # no questions to score, and its table is its own
+    from ml_stack.bench import extract as bench_extract
+    from ml_stack.bench import speed as bench_speed
+
+    kept = ops.kept_for(args.kept, last=int(getattr(args, "last", 0) or 0),
+                        since=str(getattr(args, "since", "") or ""))
+    if getattr(args, "speed", False):
+        bench_speed.speed_table(kept.speed)
+        return 0
+    answering = kept.answering
+    if getattr(args, "trace", None) is not None:
+        bench.transcript(answering, args.trace, getattr(args, "question", "") or "")
+        return 0
+    if getattr(args, "by", "") == "serving":
+        bench.by_serving(answering)
+        return 0
+    if getattr(args, "extract", False):
+        bench_extract.table(kept.extracted)
+        return 0
+    if args.compare:
+        say(compare(args.kept, *args.compare))
+        return 0
+    if args.rank:
+        ranking(answering, args.rank, noise=args.noise / 100)
+        say(args.rank)
+        return 0
+    if args.export:
+        say(export(answering, args.export,
+                   anyway=getattr(args, "export_anyway", False)))
+        return 0
+    if args.shape:
+        from ml_stack.graph.community import QUESTIONS
+        from ml_stack.graph.community import graph as invented
+
+        questions = read_questions(args.questions) if getattr(args, "questions", "") \
+            else QUESTIONS
+        shape(questions, invented())
+        return 0
+    if args.plot:
+        say(plot(answering, args.plot, cost=args.cost, noise=args.noise / 100))
+        return 0
+    if args.rates:
+        rates(answering, cost=args.cost, noise=args.noise / 100)
+        return 0
+    if args.detail is not None:
+        missed([r for r in answering if not args.detail or r.get("label") == args.detail],
+               everything=args.all, among=answering)
+        return 0
+    table(answering)
+    if kept.extracted:
+        say()
+        bench_extract.table(kept.extracted)
+    hollow = empties(args.kept)
+    if hollow:
+        say(f"{len(hollow)} empty run(s) skipped -- ml-stack-bench forget --empty "
+            f"removes them")
+    return 0
+
+
+@COMMANDS.command("report",
+                  help="everything measured so far as one document: how each "
+                       "model was asked, what a draft head was worth, how much "
+                       "memory it wants, and what to serve",
+                  options=options.report_options, allow_abbrev=False)
+def cmd_report(args: Any) -> int:
+    from ml_stack.bench.report import main as reporting
+
+    return reporting(args)
+
+
+@COMMANDS.command("forget",
+                  help="delete kept runs: the empty ones, or every run of one label",
+                  options=options.forget_options, allow_abbrev=False)
+def cmd_forget(args: Any) -> int:
+    if not args.empty and not args.label:
+        warn("error: say what to forget: --empty, or a label")
+        return 2
+    if args.empty:
+        went = forget(args.kept, empty=True)
+        say(f"{len(went)} empty run(s) removed" if went else "no empty runs")
+    if args.label:
+        if not args.yes:
+            would = [r["key"] for r in bench.runs(args.kept, args.label)]
+            say("\n".join(would) if would else f"no run labelled {args.label!r}")
+            if would:
+                say(f"{len(would)} run(s) would go; pass --yes to delete them")
+            return 0
+        went = forget(args.kept, label=args.label)
+        say(f"{len(went)} run(s) labelled {args.label!r} removed")
+    return 0
+
+
+@COMMANDS.command("status",
+                  help="whether something is measuring, since when, with what, and where "
+                       "its log is. Exits 0 either way", allow_abbrev=False)
+def cmd_status(args: Any) -> int:
+    say(status())
+    return 0
+
+
+@COMMANDS.command("tail", help="the log of the current measurement, or the latest",
+                  options=options.tail_options, allow_abbrev=False)
+def cmd_tail(args: Any) -> int:
+    return tail(lines=args.n, follow=args.follow)
+
+
+@COMMANDS.command("stop",
+                  help="end the detached measurement: SIGTERM to its pid, so it takes down "
+                       "any server it put up, then wait up to a minute. Never by name",
+                  allow_abbrev=False)
+def cmd_stop(args: Any) -> int:
+    say(stop())
+    return 0
+
+
+@COMMANDS.command("wait",
+                  help="block until the detached measurement has ended, saying so "
+                       "every minute -- so the next command can follow it "
+                       "(ml-stack-bench wait && ml-stack-bench report --profile)",
+                  options=options.wait_options, allow_abbrev=False)
+def cmd_wait(args: Any) -> int:
+    return jobs.wait("bench", every=args.every, home=bench.home_dir() / "jobs")
+
+
+# The positional is `label` rather than `file`: `_named_in` reads it, so a detached
+# queue's log is named after the queue file instead of "bench".
+@COMMANDS.command("queue",
+                  help="run an evening of measurements from a file: one "
+                       "ml-stack-bench line per step, smoke:/then: pairs, "
+                       "set VAR= and ${VAR}, one at a time through the "
+                       "measuring lock",
+                  options=options.queue_options, allow_abbrev=False)
+def cmd_queue(args: Any) -> int:
+    # The queue holds no lock: each of its steps is its own `ml-stack-bench`, and takes
+    # the measuring lock itself, so a step of a queue and a run started by hand still
+    # wait for each other.
+    from ml_stack.bench.queue import QueueError, run_queue
+
+    if args.detach:
+        log = detach(getattr(args, "_argv", None) or sys.argv[1:])
+        say(f"the queue is running in the background; log: {log}\n"
+            f"  ml-stack-bench status   -- the step it is on, and what is left\n"
+            f"  ml-stack-bench tail -f  -- follow the log\n"
+            f"  ml-stack-bench stop     -- end the queue and the step inside it")
+        return 0
     try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return f"pid {pid} had already gone"
-    began = time.monotonic()
-    while pid_exists(pid) and time.monotonic() - began < wait:
-        time.sleep(0.25)
-    if pid_exists(pid):
-        return (f"asked pid {pid} to stop; it is still running after {wait:.0f}s. Its log: "
-                f"{record.get('log', '?')}")
-    return f"stopped pid {pid} after {time.monotonic() - began:.1f}s; its log: {record.get('log', '?')}"
+        return run_queue(args.label, dry_run=args.dry_run, resume=args.resume,
+                         yes=args.yes, ceiling=args.ceiling)
+    except QueueError as why:
+        warn(f"error: {why}")
+        return 2
+
+
+COMMANDS.borrow(
+    lambda sub: importlib.import_module("ml_stack.bench.comparison").add_arguments(sub),
+    lambda args: importlib.import_module("ml_stack.bench.comparison").main(args))
+
+
+def _handed_over(args: Any) -> int:
+    """A subcommand whose module has a ``main(argv)`` of its own, given the words after it."""
+    module = importlib.import_module(f"ml_stack.bench.{args.cmd}")
+    return int(module.main(_after(list(getattr(args, "_argv", None) or []), args.cmd)))
+
+
+COMMANDS.add("standard", _handed_over,
+             help="the standard sets -- GSM8K, MMLU-Pro, IFEval, HumanEval -- through "
+                  "lm-evaluation-harness against a chat endpoint, one JSON per "
+                  "configuration; takes the measuring lock itself",
+             allow_abbrev=False, conflict_handler="resolve",
+             parents=[importlib.import_module("ml_stack.bench.standard")._parser()])
+COMMANDS.add("animate", _handed_over,
+             help="a comparison document as an animated graphic, with manim",
+             options=options.animate_options, allow_abbrev=False)
+
+COMMANDS.borrow(
+    lambda sub: importlib.import_module("ml_stack.bench.history").add_arguments(
+        sub.add_parser("history", allow_abbrev=False,
+                       help="every measurement the logs remember: when, how long, "
+                            "how it ended, the estimate beside the actual, and the "
+                            "runs it kept")),
+    lambda args: importlib.import_module("ml_stack.bench.history").run(args))
 
 
 def _estimated(rest: Sequence[str]) -> int:
@@ -2024,3 +746,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         if previous is not None:
             signal.signal(signal.SIGTERM, previous)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

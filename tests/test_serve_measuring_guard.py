@@ -45,7 +45,7 @@ def stranger():
 
 def _measuring(pid: int, argv: list[str] | None = None) -> None:
     """Write the measuring record and lock for ``pid``."""
-    from ml_stack.bench.run import measuring_file, measuring_lock_file
+    from ml_stack.bench.underway import measuring_file, measuring_lock_file
 
     measuring_file().parent.mkdir(parents=True, exist_ok=True)
     measuring_lock_file().write_text(f"pid {pid}", encoding="utf-8")

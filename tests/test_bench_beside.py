@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ml_stack.bench.keep import beside_the_run, note_beside, stamped
-from ml_stack.bench.run import beside_on_the_card, note_beside_the_run
+from ml_stack.bench.progress import beside_on_the_card, note_beside_the_run
 
 
 class _Processes:
@@ -16,7 +16,7 @@ class _Processes:
 
 def test_every_live_server_is_found_leased_or_not(monkeypatch):
     monkeypatch.setattr(
-        "ml_stack.bench.run.processes",
+        "ml_stack.bench.progress.processes",
         lambda: _Processes(
             [{"port": 8080, "pid": 11, "model": "/w/big.gguf", "rss": 2 ** 30, "defunct": False},
              {"port": 8081, "pid": 12, "model": "/w/small.gguf", "rss": 2 ** 29,
@@ -33,7 +33,7 @@ def test_every_live_server_is_found_leased_or_not(monkeypatch):
 
 def test_the_line_names_each_server_and_what_it_costs(monkeypatch):
     monkeypatch.setattr(
-        "ml_stack.bench.run.beside_on_the_card",
+        "ml_stack.bench.progress.beside_on_the_card",
         lambda: [{"port": 8080, "pid": 11, "model": "big.gguf", "bytes": 2 ** 30,
                   "leased": True},
                  {"port": 8081, "pid": 12, "model": "small.gguf", "bytes": 2 ** 29,

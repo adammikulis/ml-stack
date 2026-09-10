@@ -39,14 +39,14 @@ def test_a_run_in_the_foreground_is_measuring_and_says_how_it_asks(tmp_path, mon
     while `status` said nothing was measuring, so the only way to learn its temperature
     was to read the source."""
     import ml_stack.bench as bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench.progress import status
 
     line = _measurable(tmp_path, monkeypatch)
     seen: list[str] = []
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        seen.append(running.status(results=False))
+        seen.append(status(results=False))
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -58,19 +58,19 @@ def test_a_run_in_the_foreground_is_measuring_and_says_how_it_asks(tmp_path, mon
     assert "ml-stack-bench run in-the-foreground" in said
     assert "asking: temperature 0.0 (greedy), n_predict 16384" in said
     assert "log: none -- it prints to the terminal it was started in" in said
-    assert "nothing is measuring" in running.status(results=False)
+    assert "nothing is measuring" in status(results=False)
 
 
 def test_a_run_asked_for_a_temperature_says_that_one(tmp_path, monkeypatch, capsys):
     import ml_stack.bench as bench
-    from ml_stack.bench import run as running
+    from ml_stack.bench.progress import status
 
     line = _measurable(tmp_path, monkeypatch)
     seen: list[str] = []
     real_asking = bench.asking
 
     def watched(graph, **kw):
-        seen.append(running.status(results=False))
+        seen.append(status(results=False))
         return real_asking(graph, **kw)
 
     monkeypatch.setattr(bench, "asking", watched)
@@ -81,16 +81,17 @@ def test_a_run_asked_for_a_temperature_says_that_one(tmp_path, monkeypatch, caps
 
 def test_a_record_whose_process_has_gone_is_not_measuring(tmp_path, monkeypatch):
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench import run as running
+    from ml_stack.bench.underway import measuring, measuring_file, remember
+    from ml_stack.bench.progress import status
 
-    running.remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
-    assert running.measuring() is not None
+    remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
+    assert measuring() is not None
 
-    held = json.loads(running.measuring_file().read_text(encoding="utf-8"))
+    held = json.loads(measuring_file().read_text(encoding="utf-8"))
     held["pid"] = 2 ** 22 + 7                                          # nobody's
-    running.measuring_file().write_text(json.dumps(held), encoding="utf-8")
-    assert running.measuring() is None
-    assert "nothing is measuring; the last one" in running.status(results=False)
+    measuring_file().write_text(json.dumps(held), encoding="utf-8")
+    assert measuring() is None
+    assert "nothing is measuring; the last one" in status(results=False)
 
 
 def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsys):
@@ -98,9 +99,10 @@ def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsy
     wrote is retired with it."""
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
     from ml_stack.bench import run as running
+    from ml_stack.bench.underway import measuring, measuring_file
 
     def killed(rest):
-        assert running.measuring() is not None
+        assert measuring() is not None
         running._stop_on_sigterm(15, None)
 
     monkeypatch.setattr(running, "_main", killed)
@@ -108,12 +110,13 @@ def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsy
     with pytest.raises(SystemExit):
         running.main(["run", "stopped", "--no-selfcheck", "--no-prefetch"])
     capsys.readouterr()
-    assert running.measuring() is None
-    assert json.loads(running.measuring_file().read_text(encoding="utf-8"))["ended"]
+    assert measuring() is None
+    assert json.loads(measuring_file().read_text(encoding="utf-8"))["ended"]
 
 
 def test_the_record_says_the_serving_a_sweep_will_use():
-    from ml_stack.bench.run import _how_said, asking_said
+    from ml_stack.bench.underway import asking_said
+    from ml_stack.bench.progress import _how_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--n-max", "4", "--serve-kv", "f16", "--reasoning-budget", "2048",
@@ -129,7 +132,8 @@ def test_the_record_says_the_serving_a_sweep_will_use():
 def test_the_record_says_every_arm_a_drafts_run_will_serve():
     """`drafts` names its heads under --draft and a depth per arm, and the baseline arm is
     the empty head."""
-    from ml_stack.bench.run import _how_said, asking_said
+    from ml_stack.bench.underway import asking_said
+    from ml_stack.bench.progress import _how_said
 
     how = asking_said(["drafts", "flash.gguf", "--draft", "", "--draft", "heads/mtp-a.gguf",
                        "--n-max", "2", "--n-max", "8", "--reasoning-budget", "0"])
@@ -139,7 +143,8 @@ def test_the_record_says_every_arm_a_drafts_run_will_serve():
 
 
 def test_a_sweep_told_to_drop_the_head_says_it_has_none():
-    from ml_stack.bench.run import _how_said, asking_said
+    from ml_stack.bench.underway import asking_said
+    from ml_stack.bench.progress import _how_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
                        "--no-draft"])
@@ -151,10 +156,10 @@ def test_a_detached_run_keeps_the_log_its_parent_opened_for_it(tmp_path, monkeyp
     """The child writes its own record when it takes the lock; the log belongs to the
     parent that opened it."""
     monkeypatch.setenv("MLSTACK_BENCH_HOME", str(tmp_path / "home"))
-    from ml_stack.bench import run as running
+    from ml_stack.bench.underway import remember
 
-    running.remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid(),
-                     log=str(tmp_path / "sweep.log"), started="2026-09-05T10:00:00")
-    again = running.remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
+    remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid(),
+             log=str(tmp_path / "sweep.log"), started="2026-09-05T10:00:00")
+    again = remember(["sweep", "--serve", "models/beacon.gguf"], pid=os.getpid())
     assert again["log"] == str(tmp_path / "sweep.log")
     assert again["started"] == "2026-09-05T10:00:00"

@@ -55,7 +55,7 @@ a test that forgets cannot reach any of these:
   `tmp_path`, which moves the runs store, the fit and profile records, the job files and
   every other home at once. The runs store is where an evening of measuring lives; a test
   that read it would pass or fail on what the laptop had been doing.
-- `bench.run.serving_lines` and `bench.run.results_since` — what is serving on this machine
+- `bench.progress.serving_lines` and `bench.progress.results_since` — what is serving on this machine
   right now, and what the last job kept — answer empty.
 - Every variable that moves one corner back out of the state root
   (`MLSTACK_BENCH_HOME`, `MLSTACK_INGEST_HOME`, `MLSTACK_FIT_FILE`, `MLSTACK_PROFILES_FILE`

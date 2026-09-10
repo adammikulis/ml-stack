@@ -175,11 +175,11 @@ def _no_machine_state(monkeypatch, tmp_path):
 
     import importlib
 
-    running = sys.modules.get("ml_stack.bench.run") or importlib.import_module(
-        "ml_stack.bench.run")
-    monkeypatch.setattr(running, "serving_lines", lambda: [])
-    monkeypatch.setattr(running, "beside_on_the_card", lambda: [])
-    monkeypatch.setattr(running, "results_since", lambda started, kept=None: "")
+    progress = sys.modules.get("ml_stack.bench.progress") or importlib.import_module(
+        "ml_stack.bench.progress")
+    monkeypatch.setattr(progress, "serving_lines", lambda: [])
+    monkeypatch.setattr(progress, "beside_on_the_card", lambda: [])
+    monkeypatch.setattr(progress, "results_since", lambda started, kept=None: "")
 
     # An empty speech registry per test: probing the real ones loads whisper and runs the
     # machine's own voice. A test that wants a provider registers its own.

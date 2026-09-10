@@ -70,7 +70,7 @@ def measurement_on_the_card() -> dict[str, Any] | None:
     """The measurement holding the bench's lock, or None when nothing is or this process
     is the holder."""
     try:
-        from ml_stack.bench.run import measuring
+        from ml_stack.bench.underway import measuring
     except ImportError:
         return None
     held = measuring()

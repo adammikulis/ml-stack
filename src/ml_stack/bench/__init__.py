@@ -31,6 +31,15 @@ from __future__ import annotations
 import platform  # noqa: F401 - `bench.platform.system` is what the detach tests patch
 
 from ml_stack.bench import backends  # noqa: F401
+from ml_stack.bench.askings import (  # noqa: F401
+    REACH,
+    _asked,
+    _askings,
+    asking_from,
+    halves,
+    sampling_from,
+    with_card,
+)
 from ml_stack.bench.backends import (  # noqa: F401
     client_for,
     describe,
@@ -111,6 +120,26 @@ from ml_stack.bench.measure import (  # noqa: F401
     watched,
     watching,
 )
+from ml_stack.bench.ops import (  # noqa: F401
+    Refused,
+    fleet_jobs,
+    kept_for,
+    measured_run,
+    newest,
+    serving_fields,
+    swept,
+)
+from ml_stack.bench.options import checking  # noqa: F401
+from ml_stack.bench.progress import (  # noqa: F401
+    _latest_log,
+    beside_on_the_card,
+    note_beside_the_run,
+    results_since,
+    serving_lines,
+    status,
+    stop,
+    tail,
+)
 from ml_stack.bench.record import (  # noqa: F401
     Measured,
     Spread,
@@ -133,32 +162,17 @@ from ml_stack.bench.report import (  # noqa: F401
     thinking_of,
 )
 from ml_stack.bench.run import (  # noqa: F401
-    MEASURING,
-    _asked,
-    _askings,
+    COMMANDS,
+    HANDED_OVER,
     _estimated,
     _fleet_sweep,
-    _last_line,
-    _latest_log,
     _main,
-    _named_in,
     _parser,
     _run,
     _stop_on_sigterm,
-    checking,
-    detach,
-    fleet_jobs,
-    halves,
     main,
-    measuring,
-    measuring_file,
-    sampling_from,
     smoke_first,
-    status,
-    stop,
-    tail,
     wants_smoke,
-    with_card,
 )
 from ml_stack.bench.score import (  # noqa: F401
     BOOTSTRAP,
@@ -230,6 +244,14 @@ from ml_stack.bench.show import (  # noqa: F401
     table,
     timeouts,
     wired_of,
+)
+from ml_stack.bench.underway import (  # noqa: F401
+    MEASURING,
+    _last_line,
+    _named_in,
+    detach,
+    measuring,
+    measuring_file,
 )
 from ml_stack.graph.vectors import MARGIN, stands_out  # noqa: F401 - imported from here too
 from ml_stack.paths import repo_root  # noqa: F401

@@ -332,7 +332,7 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
                smoking_first: bool) -> list[str]:
     """Every ``--on`` server: the grid, kept as one run of kind ``speed`` per label."""
     from ml_stack.bench.measure import _idle
-    from ml_stack.bench.run import sampling_from
+    from ml_stack.bench.askings import sampling_from
 
     keys = []
     prompts, streams = _ints(args.prompts, PROMPTS), _ints(args.streams, STREAMS)
@@ -386,7 +386,7 @@ def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
     """Every ``--serve`` model: put up in the settings it scored best with (minus the head with
     ``--no-draft``), the grid through `up`, taken down."""
-    from ml_stack.bench.run import measured_run, swept
+    from ml_stack.bench.ops import measured_run, swept
     from ml_stack.bench.serve import NotLoaded, up
     from ml_stack.serve.backend import ServerFailed
     from ml_stack.serve.preflight import PreflightFailed

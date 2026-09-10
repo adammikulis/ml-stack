@@ -254,7 +254,7 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
     """``ml-stack-bench sub args``: detached with a log and pid when it measures, else run
     in-process with what it printed."""
     if detach:
-        from ml_stack.bench.run import detach as start
+        from ml_stack.bench.underway import detach as start
 
         log = start([sub, *args])
         from ml_stack import jobs

@@ -3,7 +3,9 @@
 ``SHARED`` holds the options more than one command takes -- ``--port``, ``--model``,
 ``--json``, ``--yes``, ``--out``, ``--context``, ``--timeout``, ``--parallel``,
 ``--dry-run``. `option` takes one by name and changes what this command needs changed;
-`flag` declares one of a command's own. A `Group` collects them and answers as ``main``.
+`flag` declares one of a command's own, and a `Command` whose options are a callable has
+them built each time a parser is. `Borrowed` is a subcommand whose parser a function
+elsewhere adds. A `Group` collects them and answers as ``main``.
 """
 
 from __future__ import annotations
@@ -13,7 +15,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-__all__ = ["SHARED", "Command", "Group", "Option", "flag", "option"]
+__all__ = ["SHARED", "Borrowed", "Command", "Group", "Option", "Options", "flag",
+           "option"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +62,16 @@ def flag(*flags: str, **kwargs: Any) -> Option:
     return Option(tuple(flags), dict(kwargs))
 
 
+Options = Sequence[Option] | Callable[[], Sequence[Option]]
+"""A command's options, or a function that builds them each time a parser is built -- for a
+default read off the machine rather than written down."""
+
+
+def options_of(options: Options) -> tuple[Option, ...]:
+    """``options`` as a tuple, calling it first when it is a function."""
+    return tuple(options() if callable(options) else options)
+
+
 @dataclass(frozen=True, slots=True)
 class Command:
     """One subcommand: what it is called, its one line of help, its options, its handler."""
@@ -66,8 +79,21 @@ class Command:
     name: str
     help: str
     run: Callable[[argparse.Namespace], int | None]
-    options: tuple[Option, ...] = ()
+    options: Options = ()
     kwargs: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class Borrowed:
+    """A subcommand whose parser a function elsewhere adds to the subparsers.
+
+    ``add`` is given the subparsers and returns the parser it added; ``options`` are put on
+    it afterwards, and ``run`` is its handler.
+    """
+
+    add: Callable[[Any], argparse.ArgumentParser]
+    run: Callable[[argparse.Namespace], int | None]
+    options: Options = ()
 
 
 class Group:
@@ -87,9 +113,9 @@ class Group:
         self.options = tuple(options)
         self.handler = run
         self.kwargs = kwargs
-        self.commands: list[Command] = []
+        self.commands: list[Command | Borrowed] = []
 
-    def command(self, name: str, *, help: str, options: Sequence[Option] = (),
+    def command(self, name: str, *, help: str, options: Options = (),
                 **kwargs: Any) -> Callable[[Callable[..., int | None]], Callable[..., int | None]]:
         """Register the decorated function as the subcommand ``name``."""
         def take(fn: Callable[..., int | None]) -> Callable[..., int | None]:
@@ -99,9 +125,14 @@ class Group:
         return take
 
     def add(self, name: str, fn: Callable[..., int | None], *, help: str,
-            options: Sequence[Option] = (), **kwargs: Any) -> None:
+            options: Options = (), **kwargs: Any) -> None:
         """Register a handler written elsewhere as the subcommand ``name``."""
-        self.commands.append(Command(name, help, fn, tuple(options), dict(kwargs)))
+        self.commands.append(Command(name, help, fn, options, dict(kwargs)))
+
+    def borrow(self, add: Callable[[Any], argparse.ArgumentParser],
+               fn: Callable[..., int | None], *, options: Options = ()) -> None:
+        """Register a subcommand whose parser ``add`` puts on the subparsers itself."""
+        self.commands.append(Borrowed(add, fn, options))
 
     def parser(self) -> argparse.ArgumentParser:
         """The parser these commands build."""
@@ -112,8 +143,10 @@ class Group:
         if self.commands:
             sub = ap.add_subparsers(dest="cmd", required=True)
             for command in self.commands:
-                child = sub.add_parser(command.name, help=command.help, **command.kwargs)
-                for one in command.options:
+                child = (command.add(sub) if isinstance(command, Borrowed)
+                         else sub.add_parser(command.name, help=command.help,
+                                             **command.kwargs))
+                for one in options_of(command.options):
                     one.add_to(child)
                 child.set_defaults(run=command.run)
         return ap

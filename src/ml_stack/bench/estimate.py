@@ -191,7 +191,8 @@ def estimate(args: Any, kept: Sequence[Mapping[str, Any]], *,
     """What ``args`` will cost, model by model, from ``kept`` (the runs already in the
     store) -- see the module. ``ceiling_min`` defaults to ``args.ceiling``, then the
     environment's, then `CEILING_MIN`."""
-    from ml_stack.bench.run import _asked, halves, wants_smoke
+    from ml_stack.bench.askings import _asked, halves
+    from ml_stack.bench.run import wants_smoke
 
     cmd = str(getattr(args, "cmd", "") or "")
     smoke = bool(getattr(args, "smoke", False))
