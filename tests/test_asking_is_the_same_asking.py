@@ -13,7 +13,7 @@ import json
 
 import pytest
 
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 from ml_stack.graph.conversation import converse
 from ml_stack.graph.looking import tools_for
 

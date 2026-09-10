@@ -13,7 +13,7 @@ import json
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.looking import LISTED, list_kind, look_at, look_up, path_between, tools_for
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 from ml_stack.testing import ScriptedModel
 
 GRAPH = {

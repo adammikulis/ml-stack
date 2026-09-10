@@ -914,7 +914,7 @@ class ModelWriter:
         return out
 
     def __call__(self, persona: Mapping[str, Any], prompt: str, context: Mapping[str, Any]) -> str:
-        from ml_stack.graph.asking import Asking
+        from ml_stack.asking import Asking
         from ml_stack.graph.conversation import converse
         from ml_stack.graph.looking import tools_for
         from ml_stack.graph.prompts import SYSTEM

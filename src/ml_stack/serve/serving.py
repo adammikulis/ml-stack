@@ -48,8 +48,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack.asking import Asking
 from ml_stack.client.health import serving_params
-from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
 __all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "projector_for",

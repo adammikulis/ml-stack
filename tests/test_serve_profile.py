@@ -15,16 +15,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from conftest import write_gguf
 
+from ml_stack.asking import Asking
 from ml_stack.client import Reply
 from ml_stack.graph.conversation import converse
-from ml_stack.graph.asking import Asking
-from ml_stack.serve import cli as serve_cli, ops as serve_ops
+from ml_stack.serve import cli as serve_cli
+from ml_stack.serve import ops as serve_ops
 from ml_stack.serve import profile as prof
 from ml_stack.serve.fit import Fit
-from ml_stack.serve.profile import Profile, add, profile_for, profiles, record, said
-
-from conftest import write_gguf
+from ml_stack.serve.profile import Profile, add, asking_for, profile_for, profiles, record, said
 
 MODEL = "thornfield-8B-UD-Q4_K_XL.gguf"
 OTHER = "alderpost-2B-Q4_K_M.gguf"
@@ -378,7 +378,7 @@ def test_up_says_so_and_serves_as_asked_when_nothing_measured_this_model(leases,
     assert leases[0].cache_type_k == "q8_0"
 
 
-# -- Asking.for_model -------------------------------------------------------------------
+# -- asking_for -------------------------------------------------------------------
 
 GRAPH = {"nodes": [{"id": "person:ada", "kind": "person", "label": "Ada Lovelace",
                     "mentions": 2, "attrs": {}, "messages": []}],
@@ -399,7 +399,7 @@ class Watcher:
 def test_a_profile_asks_the_way_that_model_measured_best():
     add(measured())
     watching = Watcher()
-    converse("who is here?", GRAPH, watching, asking=Asking.for_model(MODEL))
+    converse("who is here?", GRAPH, watching, asking=asking_for(MODEL))
 
     assert "summarise" in watching.offered[0], \
         "the record measured the summary tool, so the model is offered it"
@@ -415,13 +415,13 @@ def test_no_profile_leaves_the_asking_exactly_as_it_was():
 
 def test_the_way_a_model_measured_is_every_way_that_record_holds():
     add(measured())
-    how = Asking.for_model(MODEL)
+    how = asking_for(MODEL)
     assert (how.batch, how.kinds, how.summary) == (True, True, True)
     assert how == measured().asked()
 
 
 def test_a_model_nothing_measured_is_asked_the_default_way():
-    assert Asking.for_model("nothing-measured-this-Q4_K_M.gguf") == Asking()
+    assert asking_for("nothing-measured-this-Q4_K_M.gguf") == Asking()
 
 
 # -- ml-stack-bench report --profile ------------------------------------------------------
@@ -581,7 +581,7 @@ def test_the_asking_a_profile_writes_is_the_whole_asking_and_reaches_converse():
 
     add(made)
     watching = Watcher()
-    converse("who is here?", GRAPH, watching, asking=Asking.for_model(MODEL))
+    converse("who is here?", GRAPH, watching, asking=asking_for(MODEL))
     assert watching.offered[0] == ["look_up", "look_at", "show"], \
         "the record measured three tools, so three are what the model is offered"
 

@@ -34,6 +34,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from ml_stack.asking import Asking
 from ml_stack.records import Records
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "WORKLOADS",
     "Profile",
     "add",
+    "asking_for",
     "local_file",
     "package_file",
     "profile_for",
@@ -208,10 +210,8 @@ class Profile:
                      extra_args=tuple(self.extra_args), note=note)
 
     def asked(self) -> Any:
-        """The asking this record measured, as an :class:`~ml_stack.graph.Asking`: every
+        """The asking this record measured, as an :class:`~ml_stack.asking.Asking`: every
         one of `FLAGS`, ``terse`` included, plus ``reach`` and ``rounds``."""
-        from ml_stack.graph.asking import Asking
-
         return Asking(**{flag: bool(getattr(self, flag)) for flag in FLAGS},
                       reach=self.reach, rounds=self.rounds)
 
@@ -686,3 +686,10 @@ def said(profile: Profile) -> str:
     if profile.note:
         lines.append(f"  note        {profile.note}")
     return "\n".join(lines)
+
+
+def asking_for(model: str, *, workload: str = "") -> Asking:
+    """The asking a named model scored best with at ``workload`` -- the graph asking when
+    none is named -- or the default when nothing measured it."""
+    found = profile_for(str(model), workload=workload)
+    return found.asked() if found is not None else Asking()

@@ -18,8 +18,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from ml_stack.asking import ASKING, Asking
 from ml_stack.graph.answers import Answer, noted, recorded, result_count, selected, without_images
-from ml_stack.graph.asking import ASKING, Asking
 from ml_stack.graph.grammar import CAP, call_from, call_schema, response_format
 from ml_stack.graph.looking import FOUND, cut, enriched, look_at, tools_for
 from ml_stack.graph.prompts import (
@@ -76,7 +76,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     """One question, answered with the graph in hand.
 
     ``asking`` is the :class:`~ml_stack.graph.Asking` -- every asking flag, in one
-    record; `Asking.for_model` reads a model's measured one.
+    record; `serve.profile.asking_for` reads a model's measured one.
 
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
     ``content`` and ``tool_calls``. ``tools`` is ``[(schema, callable), ...]``, each

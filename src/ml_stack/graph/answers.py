@@ -8,8 +8,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from ml_stack.asking import Asking
 from ml_stack.client.spent import Spent
-from ml_stack.graph.asking import Asking
 from ml_stack.graph.looking import ids_in, kind_of
 from ml_stack.vision.payloads import build_message
 

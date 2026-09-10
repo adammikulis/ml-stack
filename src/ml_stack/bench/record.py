@@ -20,7 +20,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 
 __all__ = ["Measured", "Spread", "prompt_digest"]
 

@@ -29,15 +29,6 @@ class Asking:
     rounds: int | None = None            # tool-calling turns one question may spend
     constrain_ids: bool = False          # id arguments held to the graph's ids by grammar
 
-    @classmethod
-    def for_model(cls, model: str, *, workload: str = "") -> Asking:
-        """The asking a named model scored best with at ``workload`` -- the graph asking
-        when none is named -- or the default when nothing measured it."""
-        from ml_stack.serve.profile import profile_for
-
-        found = profile_for(str(model), workload=workload)
-        return found.asked() if found is not None else cls()
-
     def tools(self) -> dict[str, Any]:
         """The keyword arguments :func:`~ml_stack.graph.ask.tools_for` takes about the
         asking -- the terse set is chosen outside `converse` and handed in."""

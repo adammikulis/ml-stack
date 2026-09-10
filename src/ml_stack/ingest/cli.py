@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack import hub, jobs
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 from ml_stack.home import state
 from ml_stack.ingest.ask import asked_f1, asked_lines, graph_of, read_asked, score_asked
 from ml_stack.ingest.extract import PER_SECTION, schema
@@ -499,8 +499,10 @@ def _ask_run(args: Any) -> int:
     say(f"{args.out}: {len(graph['nodes'])} node(s), {len(graph['edges'])} edge(s)")
     # the asking comes from the same profile the serving does, so a model measured with
     # one way of asking is not served in its shape and asked in somebody else's
+    from ml_stack.serve.profile import asking_for
+
     measured = str(hub.located(args.model, loose=True) or args.model) if args.model else None
-    how = Asking.for_model(measured) if measured else None
+    how = asking_for(measured) if measured else None
     if args.cite:
         how = dataclasses.replace(how or Asking(), cite=True)
     try:

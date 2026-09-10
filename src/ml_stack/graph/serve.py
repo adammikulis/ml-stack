@@ -73,7 +73,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from ml_stack.graph.asking import ASKING
+from ml_stack.asking import ASKING
 from ml_stack.graph.conversation import converse, converse_stream
 from ml_stack.graph.thread import EVERY, WINDOW
 from ml_stack.log import say, warn

@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from ml_stack.graph.asking import ASKING
+from ml_stack.asking import ASKING
 from ml_stack.graph.conversation import converse
 from ml_stack.ingest.judge import sources_for
 from ml_stack.log import say

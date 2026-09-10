@@ -5,8 +5,8 @@ the passage behind one; `grounded` says, afterwards, which of the entries the an
 about had a source and which the model never read.
 """
 
+from ml_stack.asking import Asking
 from ml_stack.graph.answers import Answer
-from ml_stack.graph.asking import Asking
 from ml_stack.graph.ground import grounded, ungrounded
 from ml_stack.graph.looking import look_around, look_at, quotes, tools_for
 

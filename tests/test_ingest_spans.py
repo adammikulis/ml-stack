@@ -245,8 +245,8 @@ def test_a_book_read_folded_and_asked_carries_its_own_words_all_the_way(tmp_path
 
 
 def test_a_model_answering_with_citing_on_is_told_to_cite_and_can_quote():
+    from ml_stack.asking import Asking
     from ml_stack.client import Reply
-    from ml_stack.graph.asking import Asking
     from ml_stack.graph.conversation import converse
     from ml_stack.graph.prompts import CITE_SYSTEM_SENTENCE
 

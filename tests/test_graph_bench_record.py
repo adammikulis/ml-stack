@@ -141,7 +141,7 @@ class TestARunKeptBeforeTheRecord:
         assert (got.label, got.model, got.questions, got.made) == ("", "", 0, "-")
 
     def test_the_asking_comes_back_as_the_record_it_was_written_from(self):
-        from ml_stack.graph.asking import Asking
+        from ml_stack.asking import Asking
 
         one = _run(asking={"tight": True, "terse": False, "batch": True, "rounds": 8,
                            "shortlist": 12, "sampling": {"temperature": 0.0}})

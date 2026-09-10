@@ -51,7 +51,7 @@ from ml_stack.bench.score import NOISE, _which, export, ranking
 from ml_stack.bench.serve import SmokeFailed, drafts, references_in, smoked
 from ml_stack.bench.show import compare, missed, plot, rates, shape, table
 from ml_stack.client.chat import Client
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 from ml_stack.graph.vectors import MARGIN
 from ml_stack.log import say, warn
 from ml_stack.serve.ops import processes
@@ -746,7 +746,7 @@ def _parser() -> argparse.ArgumentParser:
     report.add_argument("--profile", action="store_true",
                         help="write each model's best settings into profiles.json -- the "
                              "build, head, cache, thinking and asking of its best row -- so "
-                             "`ml-stack-serve up --profile` and `Asking.for_model` "
+                             "`ml-stack-serve up --profile` and `serve.profile.asking_for` "
                              "serve and ask what was measured. Writes that and nothing else")
     report.add_argument("--profiles", default="", metavar="FILE",
                         help="with --profile, write the records here instead of the shipped "

@@ -7,7 +7,7 @@ import copy
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 
 SYSTEM = (
     "You are answering a question about a graph. You cannot see it; you read it with the tools "

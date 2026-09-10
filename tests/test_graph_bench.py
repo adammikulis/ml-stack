@@ -14,7 +14,7 @@ import pytest
 from ml_stack import hub
 from ml_stack.bench import Row, _hit, missed, runs, save, table
 from ml_stack.bench.selfcheck import ScriptedModel
-from ml_stack.graph.asking import Asking
+from ml_stack.asking import Asking
 
 from conftest import a_row, json_reply, scored_rows
 
