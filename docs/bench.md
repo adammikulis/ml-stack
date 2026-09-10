@@ -283,7 +283,7 @@ ml-stack-bench stop            # the queue, and the step inside it
 
 One `ml-stack-bench` invocation per line, `#` comments, `${VAR}` from a `set` line or from
 the environment, and a `smoke:` whose failure skips the `then:` under it and says so — the
-`&&` kept, so a shape that will not load is never measured on a hundred questions while the
+`&&` kept, so a serving that will not load is never measured on a hundred questions while the
 rest of the evening still happens. Every line is checked against this parser as the file is
 read, so `--sampel` on the last line is refused before the first model loads rather than
 after the eighth measurement, and an unset `${FX}` is refused rather than expanded to
@@ -298,7 +298,7 @@ runs store already holds since the queue started, `--detach` puts the whole even
 background the way one run does — one log, named after the queue file — and `status` grows a
 `queue` block naming the step in flight, the tally so far and what is left. A step that
 fails on its own does not end the queue, and the exit code is 1 if any step failed. Every
-summary line is one shape, so the log can be read by eye or by `grep`:
+summary line is one form, so the log can be read by eye or by `grep`:
 
 ```
 === 21:41:07 step 3/9: sweep --serve hf:unsloth/Some-Model-GGUF -- ok (612s)

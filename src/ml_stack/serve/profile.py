@@ -1,13 +1,13 @@
 """One model measured for one workload: how to serve it, how to ask it, and what said so.
 
 `fit` answers "how many people fit"; this answers the question that came before it -- *what
-shape*. A model does not have one good configuration and a list of flags, and it does not
-have one per model either: the best shape depends on what the model is doing, because the
+settings*. A model does not have one good configuration and a list of flags, and it does not
+have one per model either: the best settings depend on what the model is doing, because the
 share of the output that is predictable differs. A tool call is mostly JSON skeleton and
 repeated key names; a document extraction is a thin skeleton around free strings; prose has
 no skeleton at all. So a record is keyed on the model *and the workload*, `WORKLOADS` names
 the three this repository drives a model with, and both ends read it: the serve path takes
-:meth:`Profile.shape`, the asking path takes :meth:`Profile.asked`, and the per-call path
+:meth:`Profile.serving`, the asking path takes :meth:`Profile.asked`, and the per-call path
 takes :meth:`Profile.talking`.
 
 A record has a startup half and a request half. `--context`, the draft head file, the cache
@@ -103,10 +103,10 @@ UNSEEN = ("extra_args", "mmproj", "draft_cache_type")
 
 @dataclass(frozen=True)
 class Profile:
-    """One model file doing one workload, in the shape that measured best.
+    """One model file doing one workload, in the settings that scored best.
 
     Four groups, and they stay apart because they are read by different code: ``serve`` is
-    :meth:`shape`'s and is what a server is told once, ``request`` is :meth:`talking`'s and
+    :meth:`serving`'s and is what a server is told once, ``request`` is :meth:`talking`'s and
     rides on each call, ``ask`` is :meth:`asked`'s, and ``measured`` is the provenance.
     """
 
@@ -117,7 +117,7 @@ class Profile:
     build: str = ""                      # a named llama.cpp build, "" for the managed one
     draft: str = ""                      # the head's file name, path, or hf: reference
     spec_type: str = ""                  # draft-mtp, draft-eagle3; "" reads it off the name
-    cache_type: str = ""                 # "" leaves the shape's own, q8_0
+    cache_type: str = ""                 # "" leaves the serving's own, q8_0
     draft_cache_type: str = ""           # the draft's own cache; "" leaves the build's f16
     reasoning_budget: int | None = None  # 0 turns the thinking off; None leaves it alone
     mmproj: str = ""                     # a path, or "auto" to find it beside the weights
@@ -154,7 +154,7 @@ class Profile:
     host: str = ""
     note: str = ""
 
-    # Not part of the record: the reference this profile was asked about, so a shape is
+    # Not part of the record: the reference this profile was asked about, so a serving is
     # built with the `hf:` reference or path the caller has rather than the basename the
     # record is keyed on. `profile_for` fills it in.
     served: str = ""
@@ -172,15 +172,15 @@ class Profile:
         """The quantisation the record was measured at -- ``Q4_K_XL``, "" when unnamed."""
         return quant_of(self.model)
 
-    def shape(self, *, port: int = 8080, slots: int | None = None,
-              model: str = "", resolve: bool = True) -> Any:
-        """The :class:`~ml_stack.serve.Shape` this model measured best in.
+    def serving(self, *, port: int = 8080, slots: int | None = None,
+                model: str = "", resolve: bool = True) -> Any:
+        """The :class:`~ml_stack.serve.Serving` this model scored best in.
 
         One slot alone (no ``slots``, or ``slots=1``) gets the model's own trained context
         length when this machine's room holds it, the longest context that room does hold
-        when it does not, and the measured shape's whole cache -- ``slot_context *
+        when it does not, and the record's whole cache -- ``slot_context *
         parallel``, the record's own -- only when neither can be computed.
-        :attr:`~ml_stack.serve.Shape.note` says which. ``slots`` above one each get what
+        :attr:`~ml_stack.serve.Serving.note` says which. ``slots`` above one each get what
         one measured slot got, from the record's own ``parallel``. ``model`` overrides the
         reference served, which otherwise is what :func:`profile_for` was asked about, and
         the record's own file name failing that.
@@ -190,7 +190,7 @@ class Profile:
         machine's question. Off, the strings are handed on as they are, which is what a
         test wants and what a caller resolving them itself wants.
         """
-        from ml_stack.serve.shape import Shape
+        from ml_stack.serve.serving import Serving
 
         served = str(model or self.served or self.model)
         draft, seeing = self.draft, self.mmproj
@@ -199,7 +199,7 @@ class Profile:
         taken = max(1, int(slots or 1))
         each, note = (_alone_context(self, served) if taken == 1
                      else (self.slot_context, ""))
-        return Shape(model=served, port=port, slots=taken,
+        return Serving(model=served, port=port, slots=taken,
                      slot_context=each, cache_type=self.cache_type,
                      draft=draft, draft_n_max=self.spec_draft_max,
                      draft_cache_type=self.draft_cache_type,
@@ -222,7 +222,7 @@ class Profile:
         call. The ceiling and the timeout are the caller's: how long a machine will wait
         for one call is not what a measurement decided.
         """
-        from ml_stack.serve.shape import Talking
+        from ml_stack.serve.serving import Talking
 
         return Talking(n_predict=n_predict, timeout=timeout, sampling=dict(self.sampling),
                        spec_draft_max=self.spec_draft_max, spec_p_min=self.spec_p_min)
@@ -237,17 +237,17 @@ class Profile:
 
     def run(self, *, port: int = 8080, slots: int | None = None, model: str = "",
             resolve: bool = True, n_predict: int = 16384, timeout: float = 300.0) -> Any:
-        """This record whole, as a :class:`~ml_stack.serve.Run`: the shape to serve it in,
+        """This record whole, as a :class:`~ml_stack.serve.Run`: how to serve it,
         the ways to ask it, and the client to ask it with.
 
         One object built once and handed on, so a bench row, a page answer and a client on a
         slot of this model are the same lease and the same asking. ``port``, ``slots``,
-        ``model`` and ``resolve`` are :meth:`shape`'s: no ``slots`` is one slot holding the
+        ``model`` and ``resolve`` are :meth:`serving`'s: no ``slots`` is one slot holding the
         whole measured cache.
         """
-        from ml_stack.serve.shape import Run
+        from ml_stack.serve.serving import Run
 
-        return Run(shape=self.shape(port=port, slots=slots, model=model, resolve=resolve),
+        return Run(serving=self.serving(port=port, slots=slots, model=model, resolve=resolve),
                    asking=self.asked(),
                    talking=self.talking(n_predict=n_predict, timeout=timeout))
 
@@ -375,12 +375,12 @@ def _and(note: str, said: str) -> str:
 
 def profile_for(model: str, *, workload: str = ASK,
                 records: Sequence[Profile] | None = None) -> Profile | None:
-    """The measured shape for this model doing this workload, or None when nothing
+    """The settings this model scored best with at this workload, or None when nothing
     measured it.
 
     A model with no record for the workload asked falls back to its graph-asking record,
     returned with ``note`` saying which workload measured it and which one it was asked
-    for, so no caller serves a shape measured for something else without being told.
+    for, so no caller serves settings measured for something else without being told.
     """
     named = workload_named(workload)
     every = list(records if records is not None else profiles())
@@ -407,7 +407,7 @@ def resolved(model: str, draft: str, mmproj: str, *, build: str = "") -> tuple[s
     reference is left exactly as it is, and anything that cannot be found is served without
     rather than handed on as a file name llama-server would try to open.
     """
-    from ml_stack.serve.shape import draft_for, projector_for
+    from ml_stack.serve.serving import draft_for, projector_for
 
     head = str(draft or "")
     if head.lower() == "auto":
@@ -453,7 +453,7 @@ def records_in(path: Path) -> list[Profile]:
 
 
 def profiles(*, package: Path | None = None, local: Path | None = None) -> list[Profile]:
-    """Every measured shape: what ships, with this machine's own layered over it.
+    """Every record of what scored best: what ships, with this machine's own layered over it.
 
     A local record for the same model file replaces the shipped one rather than sitting
     beside it.
@@ -545,9 +545,9 @@ def _fit_for(profile: Profile, *, room: int) -> Any | None:
 def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
     """What one slot gets when it is alone, and which of three ways decided it.
 
-    The model's trained context length when a measured :class:`Fit` for this shape says
+    The model's trained context length when a measured :class:`Fit` for these settings says
     this machine's room holds it; the longest context that room does hold when it does
-    not; the record's own measured shape -- :func:`whole_context` -- when the trained
+    not; the record's own cache -- :func:`whole_context` -- when the trained
     context or a fit record cannot be had at all.
     """
     from ml_stack import hub
@@ -555,12 +555,12 @@ def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
     fallback = whole_context(profile)
     trained = _trained_context(served)
     if not trained:
-        return fallback, (f"no trained context read off the model's header; served the "
-                          f"measured shape, {fallback:,} tokens")
+        return fallback, (f"no trained context read off the model's header; served "
+                          f"the record's own, {fallback:,} tokens")
     room = hub.room()
     fit = _fit_for(profile, room=room) if room else None
     if fit is None:
-        return fallback, (f"no fit record for this shape; served the measured shape, "
+        return fallback, (f"no fit record for these settings; served the record's own, "
                           f"{fallback:,} tokens")
     if fit.cost(trained) <= fit.free():
         return trained, (f"the model's trained context, {trained:,} tokens, fits this "
@@ -570,7 +570,7 @@ def _alone_context(profile: Profile, served: str) -> tuple[int, str]:
         return longest, (f"the model's trained context, {trained:,} tokens, does not fit "
                          f"this machine's room; served the longest that does, "
                          f"{longest:,} tokens")
-    return fallback, (f"nothing fits this machine's room beyond the measured shape; "
+    return fallback, (f"nothing fits this machine's room beyond the record's own; "
                       f"served it, {fallback:,} tokens")
 
 

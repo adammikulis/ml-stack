@@ -104,7 +104,7 @@ def test_an_operation_that_raises_is_a_failure_not_a_crash(monkeypatch):
     assert "ZeroDivisionError" in result.detail
 
 
-def test_a_shape_mismatch_is_a_failure(monkeypatch):
+def test_a_serving_mismatch_is_a_failure(monkeypatch):
     from ml_stack.train.backend import parity
 
     monkeypatch.setitem(parity.CASES, "reshaped", lambda b, o: b.value)

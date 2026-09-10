@@ -21,7 +21,7 @@ from ml_stack.serve.binary import BinaryNotFound
 from ml_stack.serve.manager import DEFAULT_TIMEOUT_S
 from ml_stack.serve.ops import DEFAULT_ROOT, Refused, base_url_for
 from ml_stack.serve.profile import ASK, WORKLOADS
-from ml_stack.serve.shape import said_cache, split_cache_type
+from ml_stack.serve.serving import said_cache, split_cache_type
 from ml_stack.units import human_bytes
 
 __all__ = ["COMMANDS", "DEFAULT_ROOT", "main"]
@@ -206,7 +206,7 @@ def from_profile(args: argparse.Namespace, model: str,
     # One slot holds the whole measured cache unless --parallel was given, in which case
     # each of those slots gets what one measured slot got.
     slots = int(getattr(args, "parallel", DEFAULT_PARALLEL) or DEFAULT_PARALLEL)
-    shape = found.shape(slots=slots, resolve=False)
+    serving = found.serving(slots=slots, resolve=False)
     # The head is recorded by file name and llama-server needs a path. 'auto' is left
     # alone: `resolve_spec` answers it, and it has to know which binary will serve.
     head = found.draft
@@ -214,7 +214,7 @@ def from_profile(args: argparse.Namespace, model: str,
         head = resolved(model, head, "", build=found.build)[0]
     # dest -> the value the profile would have, for the flags whose default `up` defines
     wanted = {
-        "context": shape.context,
+        "context": serving.context,
         "parallel": max(1, slots),
         "build": found.build,
         "draft": head,
@@ -236,8 +236,8 @@ def from_profile(args: argparse.Namespace, model: str,
         took.append(f"{dest} {value}")
     if found.extra_args:
         took.append(" ".join(found.extra_args))
-    if shape.note:
-        took.append(shape.note)
+    if serving.note:
+        took.append(serving.note)
     return found, took
 
 
@@ -487,7 +487,7 @@ def cmd_up(args: argparse.Namespace) -> int:
 
 
 @COMMANDS.command(
-    "profile", help="the shape a model measured best in for each workload: what to serve "
+    "profile", help="the settings a model scored best with for each workload: what to serve "
                     "it with, and how to ask it",
     options=[
         flag("model", nargs="?", default="",
@@ -499,7 +499,7 @@ def cmd_up(args: argparse.Namespace) -> int:
         option("json", help="the records as JSON, exactly as they are kept"),
     ])
 def cmd_profile(args: argparse.Namespace) -> int:
-    """``ml-stack-serve profile [MODEL] [--for WORKLOAD]`` -- the shape a model measured
+    """``ml-stack-serve profile [MODEL] [--for WORKLOAD]`` -- the settings a model scored
     best in, one block per workload.
 
     Exit 1 when a model was named and nothing has measured it for any workload.
@@ -509,7 +509,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
     model = str(getattr(args, "model", "") or "")
     wanted = str(getattr(args, "workload", "") or "")
     try:
-        chosen = ops.shapes(model, workload=wanted)
+        chosen = ops.servings(model, workload=wanted)
     except Refused as no:
         warn(no.lines[0])
         return 1
@@ -517,7 +517,7 @@ def cmd_profile(args: argparse.Namespace) -> int:
         say(json.dumps([one.as_dict() for one in chosen], indent=2))
         return 0
     if not chosen:
-        say("no model has a measured shape yet. `ml-stack-bench sweep` measures one and "
+        say("nothing has been measured yet. `ml-stack-bench sweep` measures one and "
             "`ml-stack-bench report --profile` writes the record.")
         return 0
     say("\n\n".join(said(one) for one in chosen))

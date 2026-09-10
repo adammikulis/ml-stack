@@ -328,7 +328,7 @@ def separated(first: Mapping[str, Any], second: Mapping[str, Any],
     little and still be apart by more than the questions can account for, because the
     difference's spread is the two spreads added in quadrature, not summed. Measured, the
     day this changed: a hundred questions read 80% ±6 against 70% ±6, the intervals touched
-    at 74 and 76, and "overlapping" let a shape ten points worse be written into the
+    at 74 and 76, and "overlapping" let a serving ten points worse be written into the
     model's profile as one that held. Ten points over a hundred questions is a measurement.
 
     Not separated is not evidence that two runs are the same -- only that this many

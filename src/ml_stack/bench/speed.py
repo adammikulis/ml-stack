@@ -275,7 +275,7 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
                      help="a server somebody else started, e.g. flash=http://127.0.0.1:8080 "
                           "or flash-ollama=ollama://127.0.0.1:11434/model; repeatable")
     one.add_argument("--serve", action="append", default=[], metavar="MODEL",
-                     help="a model to put up in its measured shape, measure and take down; "
+                     help="a model to put up in the settings it scored best with, measure and take down; "
                           "repeatable")
     one.add_argument("--serve-label", default="", metavar="NAME",
                      help="what the --serve'd model's runs are labelled, instead of the "
@@ -286,7 +286,7 @@ def add_arguments(sub: Any) -> argparse.ArgumentParser:
                      help="serve without the head the profile measured best with; the "
                           "label ends -nodraft")
     one.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
-                     help="serve each model in its measured shape from ml-stack's profiles")
+                     help="serve each model in the settings it scored best with from ml-stack's profiles")
     one.add_argument("--label-suffix", default="", metavar="TEXT",
                      help="appended to every label this measures")
     one.add_argument("--prompts", default=",".join(str(p) for p in PROMPTS), metavar="N,N",
@@ -384,9 +384,9 @@ def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
 
 
 def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
-    """Every ``--serve`` model: put up in its measured shape (minus the head with
+    """Every ``--serve`` model: put up in the settings it scored best with (minus the head with
     ``--no-draft``), the grid through `up`, taken down."""
-    from ml_stack.bench.run import measured_shape, swept
+    from ml_stack.bench.run import measured_run, swept
     from ml_stack.bench.serve import NotLoaded, up
     from ml_stack.serve.backend import ServerFailed
     from ml_stack.serve.preflight import PreflightFailed
@@ -411,7 +411,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                  + str(getattr(args, "label_suffix", "") or "") + "-speed")
         say(f"\n{label}: {len(prompts)} prompt size(s) x {len(streams)} stream count(s)")
         args.parallel = slots
-        run = swept(args, model, measured_shape(args, model, head, heads, n),
+        run = swept(args, model, measured_run(args, model, head, heads, n),
                     context=per_slot * slots, port=args.serve_port,
                     head=head if n < len(heads) else None)
         run = run.over(**{k: v for k, v in _client_settings(

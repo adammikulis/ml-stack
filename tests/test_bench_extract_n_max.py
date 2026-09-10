@@ -23,11 +23,11 @@ def _args(tmp_path, **over):
 
 
 def _serving_seam(monkeypatch, seen, *, draft):
-    from ml_stack.serve import Shape
+    from ml_stack.serve import Serving
 
     class Found:
-        def shape(self, port, slots):
-            return Shape(model="x.gguf", port=port, slots=slots, slot_context=4096,
+        def serving(self, port, slots):
+            return Serving(model="x.gguf", port=port, slots=slots, slot_context=4096,
                          cache_type="q8_0", draft=draft, draft_n_max=4 if draft else None)
 
         def said(self):

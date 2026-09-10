@@ -1,6 +1,6 @@
 """What ``ml-stack-serve`` does, as functions that take values and return them.
 
-One per subcommand -- `status`, `processes`, `up`, `preflight`, `shapes`, `fit_markdown`,
+One per subcommand -- `status`, `processes`, `up`, `preflight`, `servings`, `fit_markdown`,
 `tensors`, `measure`, `memory`, `limits`, `reclaim`, `down`, `orphans`, `escalate` --
 with the helpers they share. `ml_stack.serve.cli` parses and prints; nothing here does
 either. `Refused` carries the lines a command says when it will not act.
@@ -51,7 +51,7 @@ __all__ = ["DEFAULT_ROOT", "FIT_HEAD", "PLIST", "PROBE_TIMEOUT", "Drafting", "Li
            "Status", "Stopped", "alongside", "announce", "base_url_for", "beacon",
            "cache_of", "down", "drafted", "escalate", "fit_markdown", "fit_page", "judge",
            "limits", "look", "manager_for", "measure", "memory", "orphans", "preflight",
-           "processes", "reclaim", "reclaim_once", "resolve_spec", "shapes",
+           "processes", "reclaim", "reclaim_once", "resolve_spec", "servings",
            "status", "tensors", "up", "withdraw", "write_plist"]
 
 PROBE_TIMEOUT = 2.0
@@ -133,7 +133,7 @@ class Resolved:
 
 @dataclass(frozen=True, slots=True)
 class Started:
-    """A server leased, the shape it is serving, and what the fleet was told."""
+    """A server leased, the settings it is serving, and what the fleet was told."""
 
     info: ServerInfo
     spec: ServerSpec
@@ -481,8 +481,8 @@ def up(spec: ServerSpec, *, manager: ServerManager, timeout: float | None = None
     return Started(info, spec, announce(root, spec))
 
 
-def shapes(model: str = "", *, workload: str = "") -> list[Any]:
-    """The measured shapes: every record, one workload's, or one model's -- with no
+def servings(model: str = "", *, workload: str = "") -> list[Any]:
+    """Every record of what scored best: every record, one workload's, or one model's -- with no
     workload named, every record that model has of its own, in workload order.
 
     Raises `Refused` when a model is named and nothing has measured it.
@@ -759,7 +759,7 @@ def escalate(port: int, *, add: int = 1, room: str = "", timeout: float | None =
         raise Refused(f"nothing is answering on port {port} to escalate")
     params = serving_params(base_url)
     if params is None or not params.model or params.n_ctx is None or params.total_slots is None:
-        raise Refused(f"port {port} does not say enough about its own shape to escalate "
+        raise Refused(f"port {port} does not say enough about its own settings to escalate "
                       "-- is /props answering, with --slots enabled?")
     current = ServerSpec(model=params.model, port=port,
                          context=int(params.n_ctx) * int(params.total_slots),

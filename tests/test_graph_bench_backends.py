@@ -579,7 +579,7 @@ def test_a_sweep_serves_without_the_head_and_labels_the_runs_so(tmp_path, monkey
                         "--plain-only", "--smoke", *seen["common"]]) == 0
     kw = seen["kwargs"][0]
     assert not kw.get("draft") and not kw.get("spec_type"), "the head is left out"
-    assert kw.get("cache_type_k") == "q8_0", "the rest of the measured shape is kept"
+    assert kw.get("cache_type_k") == "q8_0", "the rest of the settings are kept"
     assert [r["label"] for r in runs(seen["kept"])] == ["flash-nodraft-plain"], \
         "the stem, -nodraft, the way, and the cache type the profile measured with"
     assert "draft_model" not in runs(seen["kept"])[0]["server"]

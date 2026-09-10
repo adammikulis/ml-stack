@@ -216,7 +216,7 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--base-url", default="http://127.0.0.1:8080",
                     help="the model reading, when nothing is served (default: %(default)s)")
     ap.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
-                    help="serve --model in its measured shape from ml-stack's profiles "
+                    help="serve --model in the settings it scored best with from ml-stack's profiles "
                          "(build, head, cache type, thinking budget, raw flags); "
                          "--no-profile serves it bare")
     ap.add_argument("--images", action="store_true",

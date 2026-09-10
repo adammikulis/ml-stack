@@ -930,7 +930,7 @@ def add_arguments(sub: Any) -> Any:
                          f"serve, read, fold, score, save and read the run back -- before "
                          f"spending the GPU on it")
     ap.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
-                    help="serve the model in its measured shape from ml-stack's profiles "
+                    help="serve the model in the settings it scored best with from ml-stack's profiles "
                          "(build, head, cache type, thinking budget, raw flags); "
                          "--no-profile serves it bare")
     ap.add_argument("--twice", action="store_true",
@@ -1041,7 +1041,7 @@ def main(args: Any) -> int:
 
         found = str(hub.located(args.serve[0], loose=True) or args.serve[0])
         began = time.time()
-        # the model's measured shape -- its build, head, cache type, thinking budget, raw
+        # the settings the model scored best with -- its build, head, cache type, thinking budget, raw
         # flags -- unless told to serve it bare: an extraction measured on mainline without
         # the head (2026-09-02) measured a different program from the one that answers
         lease: dict[str, Any] = {"port": args.serve_port, "context": args.context,
@@ -1053,12 +1053,12 @@ def main(args: Any) -> int:
 
             measured = profile_for(str(found), workload="ingest")
             if measured is not None:
-                shape = measured.shape(port=args.serve_port, slots=args.parallel)
-                lease = {**lease, **{k: v for k, v in shape.lease().items()
+                serving = measured.serving(port=args.serve_port, slots=args.parallel)
+                lease = {**lease, **{k: v for k, v in serving.lease().items()
                                      if k not in ("port", "context", "parallel")}}
-                manager = shape.manager()
-                say(f"    serving in its measured shape: {measured.said()}"
-                    if hasattr(measured, "said") else "    serving in its measured shape")
+                manager = serving.manager()
+                say(f"    serving in the settings it scored best with: {measured.said()}"
+                    if hasattr(measured, "said") else "    serving in the settings it scored best with")
         if getattr(args, "n_max", None) is not None:
             if not lease.get("draft"):
                 warn("    --n-max: no draft head is being served, so there is no draft "

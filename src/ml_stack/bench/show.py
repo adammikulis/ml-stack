@@ -71,8 +71,8 @@ def _flag(args: Sequence[Any], *names: str) -> str:
 
 
 def _num(value: Any) -> str:
-    """A number as a shape says it: ``2048``, ``.5``, ``1.2`` -- no trailing zeros, and no
-    leading one either, since a shape is read at a glance and ``0.5`` costs a character."""
+    """A number as a serving says it: ``2048``, ``.5``, ``1.2`` -- no trailing zeros, and no
+    leading one either, since a serving is read at a glance and ``0.5`` costs a character."""
     try:
         got = float(value)
     except (TypeError, ValueError):
@@ -82,7 +82,7 @@ def _num(value: Any) -> str:
 
 
 def head_short(name: Any) -> str:
-    """A draft head as a shape names it: ``mtp``, ``eagle3``, ``ngram``, else its own stem.
+    """A draft head as a serving names it: ``mtp``, ``eagle3``, ``ngram``, else its own stem.
 
     The file is `mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf` and what tells one run from another is
     the *kind* of head; which model it drafts for is the run's model, already on the line.
@@ -95,7 +95,7 @@ def head_short(name: Any) -> str:
     return plain[:10]
 
 
-def shape_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
+def serving_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
     """How a run was *served*, as one field: ``q8/rb0/ub2048/pmin.5/mtp@4``.
 
     Every one of these decided the measurement and none of them had a column. They lived in
@@ -148,7 +148,7 @@ def shape_of(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
 # model was allowed to do with them. `tight` is the default asking now, so it says nothing
 # and its absence -- `loose` -- says everything.
 # (`report` has a `WAYS` of its own, the words a *label* can carry; this is the record's
-# flags in the order a shape names them, and the two must not share a name in `bench`.)
+# flags in the order a serving names them, and the two must not share a name in `bench`.)
 SHOWN_WAYS = (("terse", "terse"), ("rich", "rich"), ("batch", "batch"),
               ("single", "single"), ("few", "few"),
               ("kinds", "kinds"), ("summary", "summary"), ("constrain_ids", "ids"))
@@ -187,19 +187,19 @@ def asked_as(one: Mapping[str, Any]) -> str:
     return "".join(bits) or "tight"
 
 
-def shaped(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
+def served_as(one: Mapping[str, Any], *, ctx_shown: bool = False) -> str:
     """The whole configuration as one field: what was served, then how it was asked --
-    ``q8/rb0/mtp@4+batch+kinds``. What `by_shape` groups on, sampling beside it.
+    ``q8/rb0/mtp@4+batch+kinds``. What `by_serving` groups on, sampling beside it.
 
     One word, with no space in it, because every column of the table is read by eye and by
     ``split()`` -- the tests count words along a line, and a field that is sometimes one
     word and sometimes two makes every column after it move. The asking's parts already
     begin with ``+``, so the join needs no separator; a run that kept no record of its
-    asking carries the served shape alone, and one that recorded the plain asking says
+    asking carries the serving alone, and one that recorded the plain asking says
     ``+tight`` rather than nothing, since "asked plainly" and "did not say" are not the
-    same fact. ``ctx_shown`` is `shape_of`'s: leave out what the ``ctx`` column says.
+    same fact. ``ctx_shown`` is `serving_of`'s: leave out what the ``ctx`` column says.
     """
-    form, way = shape_of(one, ctx_shown=ctx_shown), asked_as(one)
+    form, way = serving_of(one, ctx_shown=ctx_shown), asked_as(one)
     if way == "-":
         return form
     return f"{'' if form == '-' else form}{'+tight' if way == 'tight' else way}" or "-"
@@ -360,11 +360,11 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # A run against a `--base-url` this machine does not own samples nothing and prints
     # `-`: not sampled is not zero. `kv+run` is computed from the peak where there is one.
     #
-    # `shape` is everything else that decided the run and had nowhere to live: the cache
+    # `serving` is everything else that decided the run and had nowhere to live: the cache
     # type, the reasoning budget, the micro-batch, the draft's p-min and head, the
     # projector and the lock -- then the asking, `+batch+kinds`. All of it used to be
     # readable only as a guess at the end of a label, and half of it was not in the label
-    # either. `-` where a run kept no record of it: see `shape_of` and `asked_as`.
+    # either. `-` where a run kept no record of it: see `serving_of` and `asked_as`.
     #
     # `beside` is what else held the card while the run was measured -- `2/61G`, servers
     # and their resident total -- and `-` for a run that had it to itself.
@@ -381,7 +381,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
     # of one model on two programs read apart: `llama.cpp·gguf·Q4_K_XL` beside
     # `ollama·mlx·nvfp4`. `-` for a run kept before it was recorded.
     head = (f"{'run':28} " + (f"{'host':>10} " if several else "")
-            + f"{'ctx':>10} {'n':>3} {'shape':32} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
+            + f"{'ctx':>10} {'n':>3} {'serving':32} {'wall':>7} {'load':>5} {'calls':>6} {'read':>8} "
             f"{'written':>8} {'cached':>8} {'peak':>6} {'pfx':>4} {'draft':>6} {'speed':>6} {'find':>7} {'conc':>5} "
             f"{'real':>9} {'mem':>9} {'wired':>8} {'beside':>7} {'kv+run':>8} "
             f"{'per 1k':>8} {'F1':>8} "
@@ -413,7 +413,7 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
             + (f"{_shown(host_of(one) or '-', 10):>10} " if several else "")
             + f"{(f'{ctx // 1024}k x{slots or chr(63)}' + (f'/{kv}' if kv else '') + budgeted if ctx else '-'):>10} "
             f"{len(scored):>3} "
-            f"{_shown(shaped(one, ctx_shown=True), 32):32} "
+            f"{_shown(served_as(one, ctx_shown=True), 32):32} "
             f"{wall_of(one):>6.0f}s "
             f"{(f'{float(load):.0f}s' if load is not None else ''):>5} "
             f"{_total(rows, 'calls'):>6.0f} "
@@ -434,17 +434,17 @@ def table(kept: Sequence[dict[str, Any]]) -> None:
             f"{sampled(server):14} {short(server.get('served_by'))}")
 
 
-def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
+def by_serving(kept: Sequence[Mapping[str, Any]]) -> None:
     """One line per configuration rather than per run: the runs that were the same thing
     measured twice, gathered, with the mean and the spread of what they measured.
 
-    A sweep leaves a table of forty lines in which the same shape appears four times, and
+    A sweep leaves a table of forty lines in which the same serving appears four times, and
     reading the difference between two of them is reading noise -- ten questions moved 15%
     in wall clock and five points of F1 between identical runs (2026-09-02). Gathered, the
-    question becomes the one worth asking: this shape against that one, with each side's
+    question becomes the one worth asking: this serving against that one, with each side's
     band beside it, and ``n`` runs saying how much of the difference is the draw.
 
-    A group is a model, a shape (`shape_of`), an asking (`asked_as`) and a sampling: change
+    A group is a model, a serving (`serving_of`), an asking (`asked_as`) and a sampling: change
     any of them and it is another measurement, which is what every column of `table` is
     there to say. The band is the questions' own -- pooled over the group's rows, so two
     runs of twenty are read as forty -- and the runs' spread is printed beside it as the
@@ -458,12 +458,12 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
         if not derived(one):
             continue
         model = str((one.get("server") or {}).get("model") or "?")
-        grouped.setdefault((model, shaped(one), sampled(one.get("server") or {})),
+        grouped.setdefault((model, served_as(one), sampled(one.get("server") or {})),
                            []).append(one)
     if not grouped:
         say("nothing scored yet")
         return
-    head = (f"{'model':22} {'shape':40} {'sampling':14} {'runs':>4} {'n':>4} {'F1':>10} "
+    head = (f"{'model':22} {'serving':40} {'sampling':14} {'runs':>4} {'n':>4} {'F1':>10} "
             f"{'spread':>8} {'rec':>5} {'prec':>5} {'s/q':>10}")
     say(head)
     say("-" * len(head))
@@ -473,7 +473,7 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
         got = derived(pooled)
         means = sorted(derived(one)["right"] for one in group)
         # what the runs themselves did, which a band over pooled questions cannot show: two
-        # runs of the same shape 8 points apart is the answer to "is this worth re-running"
+        # runs of the same serving 8 points apart is the answer to "is this worth re-running"
         drift = f"{(means[-1] - means[0]) * 100:.0f}" if len(means) > 1 else "-"
         right = f"{100 * got['right']:.0f}% {band_of(pooled)}".strip()
         each = f"{got['seconds_per_question']:.1f} " \
@@ -482,7 +482,7 @@ def by_shape(kept: Sequence[Mapping[str, Any]]) -> None:
             f"{len(group):>4} {len(rows):>4} {right:>10} {drift:>8} "
             f"{100 * got['recall']:>4.0f}% {100 * got['precision']:>4.0f}% "
             f"{each.strip():>10}")
-    say("\nOne line per shape: runs of the same model, server shape, asking and sampling, "
+    say("\nOne line per serving: runs of the same model, serving, asking and sampling, "
         "read together.")
     say("F1's ± is the 95% interval over the group's questions; spread is how far the "
         "runs' own means lie apart, in points.")

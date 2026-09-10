@@ -51,7 +51,7 @@ see `Sources.shared` -- and ``stop`` ends a detached run after folding what it h
 
 *A store is asked questions the way any graph is.* ``ml-stack-ingest ask --out STORE
 "question"`` puts the store's graph through `ml_stack.graph.ask.converse` with the model
-served in its measured shape, and ``ask --gold FILE`` scores a set of questions against the
+served in the settings it scored best with, and ``ask --gold FILE`` scores a set of questions against the
 entries each answer should have selected, using the bench's own scorer.
 
 Nothing here is about any one source: it reads a document, it asks a model, it writes a

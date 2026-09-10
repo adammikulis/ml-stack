@@ -1,35 +1,37 @@
-"""The shape a model is served in, written down once, and one server per port to sit at.
+"""How a model is served, written down once, and one server per port to take a slot on.
 
-llama.cpp serves **one shape per port**. Two parts of a program that lease the same model
-with different context, different slots, or a draft head on one and not the other are not
-two clients of one server: whichever leases second finds a mismatch, stops the first server
-and loads the weights again. On a large model that is a minute of nothing working, and it
-happens the moment a lease is spelled out in two places and one of them is edited.
+llama.cpp serves **one set of server settings per port**. Two parts of a program that lease
+the same model with different context, different slots, or a draft head on one and not the
+other are not two clients of one server: whichever leases second finds a mismatch, stops the
+first server and loads the weights again. On a large model that is a minute of nothing
+working, and it happens the moment a lease is spelled out in two places and one of them is
+edited.
 
-So a :class:`Shape` is the whole shape in one object -- the model, its port, how many
+So a :class:`Serving` is every server setting in one object -- the model, its port, how many
 conversations it holds and how much context each gets, the KV cache's precision, the draft
 head and how far ahead it guesses, the vision projector, the thinking budget, and which
-llama.cpp build serves it -- and :meth:`Shape.lease` is the only place those become the
+llama.cpp build serves it -- and :meth:`Serving.lease` is the only place those become the
 keyword arguments :func:`ml_stack.serve.serve` takes. Everything that wants the model asks
 :func:`slot` for a slot on it: the server is started once per port and held for the process,
 and each caller gets a :class:`~ml_stack.client.Client` pinned to a slot of its own, so two
 conversations at once do not reprocess each other's context.
 
-A shape holds one slot unless it is asked for more, and that slot gets the whole context::
+A serving holds one slot unless it is asked for more, and that slot gets the whole context::
 
-    shape = Shape(model="hf:owner/repo/weights.gguf", port=8080,
-                  slot_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
-    client = slot(shape, index=request_number, n_predict=16384)
+    serving = Serving(model="hf:owner/repo/weights.gguf", port=8080,
+                      slot_context=131072, cache_type="q8_0", draft=head, draft_n_max=4)
+    client = slot(serving, index=request_number, n_predict=16384)
 
-    crowded = dataclasses.replace(shape, slots=4, slot_context=32768)   # four at once
+    crowded = dataclasses.replace(serving, slots=4, slot_context=32768)   # four at once
 
-A shape is one third of what a model needs. :class:`Run` is all three -- the :class:`Shape`
-to serve it in, the :class:`Asking` to ask it with, and the :class:`Talking` the client is
-built from -- so a bench row, a page answer and a client on a slot for one model are the same
-lease and the same asking by construction rather than by three places agreeing::
+A serving is one third of what a model needs. :class:`Run` is all three -- the
+:class:`Serving` to serve it in, the :class:`Asking` to ask it with, and the
+:class:`Talking` the client is built from -- so a bench row, a page answer and a client on a
+slot for one model are the same lease and the same asking by construction rather than by
+three places agreeing::
 
     run = profile_for(model).run(port=8080)
-    serve(run.shape.model, **run.lease())                  # the server
+    serve(run.serving.model, **run.lease())                # the server
     converse(question, graph, client, asking=run.asking)   # the asking
     client = slot(run, index=request_number)                # the client
 
@@ -50,15 +52,15 @@ from ml_stack.client.health import serving_params
 from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
-__all__ = ["Run", "Shape", "Talking", "draft_for", "drafted", "held", "projector_for",
-           "release_all", "said_cache", "served", "shape_said", "slot",
+__all__ = ["Run", "Serving", "Talking", "draft_for", "drafted", "held", "projector_for",
+           "release_all", "said_cache", "served", "serving_said", "slot",
            "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
 SAMPLERS = ("temperature", "top_p", "top_k", "min_p")
 
 
-#: how the KV cache is stored unless a shape says otherwise
+#: how the KV cache is stored unless a serving says otherwise
 DEFAULT_CACHE = "q8_0"
 
 
@@ -75,7 +77,7 @@ def said_cache(type_k: str, type_v: str) -> str:
 
 
 @dataclass(frozen=True)
-class Shape:
+class Serving:
     """One model, served one way. :meth:`lease` is what :func:`ml_stack.serve.serve` takes."""
 
     model: str
@@ -85,7 +87,7 @@ class Shape:
     # any one conversation actually gets.
     slots: int = 1
     slot_context: int = 4096
-    # How the KV cache is stored: q8_0 unless a shape says otherwise (measured 2026-09-02
+    # How the KV cache is stored: q8_0 unless a serving says otherwise (measured 2026-09-02
     # on Flash-Next: F1 unchanged, faster, half the cache); "f16" asks for the full one.
     cache_type: str = DEFAULT_CACHE
     # Whether every slot's cache is one pool the server masks per sequence, or a cache per
@@ -118,7 +120,7 @@ class Shape:
     # has nowhere else to put it.
     extra_args: tuple[str, ...] = ()
     # What decided `slot_context` for a lone slot -- the model's trained context, the
-    # longest this machine's room holds, or the measured shape -- said outright rather
+    # longest this machine's room holds, or what scored best -- said outright rather
     # than left for a caller to work out from the number alone. "" when slots > 1.
     note: str = ""
 
@@ -130,7 +132,7 @@ class Shape:
     def lease(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.serve.serve` takes, model aside.
 
-        Only what was actually asked for appears, so a shape that says nothing about a
+        Only what was actually asked for appears, so a serving that says nothing about a
         draft, a projector or thinking serves exactly as the build's own defaults do.
         """
         out: dict[str, Any] = {"port": self.port, "context": self.context,
@@ -221,22 +223,22 @@ class Run:
     it.
     """
 
-    shape: Shape
+    serving: Serving
     asking: Asking = field(default_factory=Asking)
     talking: Talking = field(default_factory=Talking)
 
     @property
     def model(self) -> str:
         """The model reference served."""
-        return self.shape.model
+        return self.serving.model
 
     @property
     def port(self) -> int:
-        return self.shape.port
+        return self.serving.port
 
     def lease(self) -> dict[str, Any]:
         """The keyword arguments :func:`ml_stack.serve.serve` takes, model aside."""
-        return self.shape.lease()
+        return self.serving.lease()
 
     def client(self, base_url: str, *, index: int | None = None, **over: Any) -> Any:
         """A :class:`~ml_stack.client.Client` on this run's server.
@@ -249,7 +251,7 @@ class Run:
 
         asked = {**self.talking.client(), **over}
         if index is not None:
-            asked["slot"] = index % max(1, self.shape.slots)
+            asked["slot"] = index % max(1, self.serving.slots)
         return Client(base_url, **asked)
 
     def over(self, **fields: Any) -> Run:
@@ -263,11 +265,11 @@ class Run:
         a request asks for are one measurement, and a run whose two disagree measures the
         request's. Taking the head away takes the request's depth with it.
         """
-        parts: dict[str, dict[str, Any]] = {"shape": {}, "asking": {}, "talking": {}}
+        parts: dict[str, dict[str, Any]] = {"serving": {}, "asking": {}, "talking": {}}
         sampling = dict(self.talking.sampling)
         for name, value in fields.items():
-            if name in Shape.__dataclass_fields__:
-                parts["shape"][name] = value
+            if name in Serving.__dataclass_fields__:
+                parts["serving"][name] = value
             elif name in Asking.__dataclass_fields__:
                 parts["asking"][name] = value
             elif name in Talking.__dataclass_fields__:
@@ -294,11 +296,11 @@ _STACKS: dict[int, contextlib.ExitStack] = {}
 _URLS: dict[int, str] = {}
 
 
-def slot(shape: Shape | Run, *, index: int, n_predict: int | None = None,
+def slot(serving: Serving | Run, *, index: int, n_predict: int | None = None,
          timeout: float | None = None, **client_kwargs: Any) -> Any:
-    """A client on one slot of ``shape``'s server, started on first ask and held after.
+    """A client on one slot of ``serving``'s server, started on first ask and held after.
 
-    ``shape`` is a :class:`Shape` or the whole :class:`Run`; given a run, the ceiling, the
+    ``serving`` is a :class:`Serving` or the whole :class:`Run`; given a run, the ceiling, the
     timeout and the sampling are its ``talking``'s and need not be said again.
 
     ``index`` is whose slot it is -- a request number, a worker id -- taken modulo the
@@ -307,7 +309,7 @@ def slot(shape: Shape | Run, *, index: int, n_predict: int | None = None,
     task that calls tools with exact ids is one where sampling noise becomes a wrong
     argument rather than a livelier sentence.
     """
-    run = shape if isinstance(shape, Run) else Run(shape=shape)
+    run = serving if isinstance(serving, Run) else Run(serving=serving)
     if n_predict is not None:
         client_kwargs["n_predict"] = n_predict
     if timeout is not None:
@@ -318,7 +320,7 @@ def slot(shape: Shape | Run, *, index: int, n_predict: int | None = None,
 
             stack = contextlib.ExitStack()
             server = stack.enter_context(
-                serve(run.model, manager=run.shape.manager(), **run.lease()))
+                serve(run.model, manager=run.serving.manager(), **run.lease()))
             _STACKS[run.port], _URLS[run.port] = stack, server.base_url
         where = _URLS[run.port]
     return run.client(where, index=index, **client_kwargs)
@@ -351,20 +353,20 @@ def drafted(run: Run, asked: str = "auto", *,
     """
     from ml_stack.hub import drafting, head_choice
 
-    if run.shape.draft:
-        say(drafting(run.shape.draft, run.shape.spec_type, run.talking.spec_draft_max,
-                     run.shape.build))
+    if run.serving.draft:
+        say(drafting(run.serving.draft, run.serving.spec_type, run.talking.spec_draft_max,
+                     run.serving.build))
         return run
     head = head_choice(run.model, asked)
     say(head.serving() if head is not None else drafting())
     return run.over(**head.over()) if head is not None else run
 
 
-def shape_said(base_url: str) -> str:
-    """``2 slots x 32k`` as the server on ``base_url`` reports it, or ``shape unknown``."""
+def serving_said(base_url: str) -> str:
+    """``2 slots x 32k`` as the server on ``base_url`` reports it, or ``settings unknown``."""
     params = serving_params(base_url, timeout=5.0)
     if params is None or not params.total_slots or not params.n_ctx:
-        return "shape unknown"
+        return "settings unknown"
     slots = int(params.total_slots)
     return f"{slots} slot{'s' if slots != 1 else ''} x {int(params.n_ctx) // 1024}k"
 
@@ -384,11 +386,11 @@ def served(run: Run, *, say: Callable[[str], None] | None = None,
     up = already_up(run.model, run.port)
     if up is not None:
         base_url = str(up["base_url"])
-        told(f"using the server already up on {run.port} ({shape_said(base_url)}); "
+        told(f"using the server already up on {run.port} ({serving_said(base_url)}); "
              f"it is left running")
         yield base_url
         return
-    with serve(run.model, manager=run.shape.manager(), **run.lease(), **over) as server:
+    with serve(run.model, manager=run.serving.manager(), **run.lease(), **over) as server:
         yield server.base_url
 
 

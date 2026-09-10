@@ -411,13 +411,13 @@ Serving and asking a model well is a measurement per model, not a habit.
 - **One load, asked several ways.** A sweep puts a model up once and answers the same
   questions under each asking worth trying, so the comparison is of askings rather than of
   cold loads.
-- **A profile is the shape a model measured best in for one kind of work** — the cache, the
+- **A profile is the settings a model scored best with for one kind of work** — the cache, the
   draft head, the thinking budget, the draft depth, the asking, the sampling — kept with the
-  run that set it. There is a record per model and workload, because the shape that answers
-  questions fastest is not the shape that reads documents fastest: a tool call is mostly
+  run that set it. There is a record per model and workload, because the settings that answer
+  questions fastest are not the settings that read documents fastest: a tool call is mostly
   skeleton a draft head guesses right, prose is not. Serving, benching and answering read
   the same record, so what was measured is what is used, and asking for a workload nothing
-  has measured says so rather than serving somebody else's shape.
+  has measured says so rather than serving somebody else's settings.
 - **A night of measurement is a file**, checked line by line before the first model loads:
   a smoke guards the run under it, resuming skips what the store already holds, and one
   background log says what is running and what is left.
@@ -447,7 +447,7 @@ The commands are also tools an agent can call.
   asks what the task leaves open, confirms the models it found on this disk, prints a plan,
   asks go, runs the tools, waits for what detached, and reports what was measured and
   where.
-- **Claude Code itself** runs on a model this machine serves, in its measured shape, on a
+- **Claude Code itself** runs on a model this machine serves, in the settings it scored best with, on a
   lease taken for it and dropped on the way out.
 
 ## Searching the web

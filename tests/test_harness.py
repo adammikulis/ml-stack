@@ -71,7 +71,7 @@ def test_ask_runs_one_task_and_says_what_it_spent(fake_sdk):
     assert fake_sdk["prompt"] == "what is this?"
 
 
-def test_session_leases_the_measured_shape_and_the_command_prints_the_answer(fake_sdk, monkeypatch, capsys):
+def test_session_leases_the_best_settings_and_the_command_prints_the_answer(fake_sdk, monkeypatch, capsys):
     from ml_stack.serve.profile import record
 
     seen = {}

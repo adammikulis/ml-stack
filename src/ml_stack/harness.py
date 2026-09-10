@@ -3,7 +3,7 @@
 Adam: "do we just include the harness library itself? ... in ml-stack I mean, integrate
 it." The SDK (`claude-agent-sdk`, the ``claude`` extra) drives the same Claude Code binary
 `ml_stack.claude` launches, and reads the same environment, so this is the same lease and
-the same wiring with a Python face: :func:`session` leases the model in its measured shape
+the same wiring with a Python face: :func:`session` leases the model in the settings it scored best with
 and yields a :class:`Harness` whose :meth:`Harness.ask` runs one agentic task and returns
 what it said and what it spent, and whose :meth:`Harness.stream` hands the SDK's messages
 through as they come. Every result's usage lands in a `Spent`-shaped record so the page,
@@ -136,7 +136,7 @@ def _usage_of(message: Any) -> Usage:
 def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
             profile: bool = True, offline: bool = True, draft: str = "auto",
             say: Callable[[str], None] = lambda _line: None, **options: Any) -> Iterator[Harness]:
-    """Lease ``model`` in its measured shape and yield a :class:`Harness` on it; the server
+    """Lease ``model`` in the settings it scored best with and yield a :class:`Harness` on it; the server
     goes when the block ends. ``draft`` is the head to guess tokens ahead with -- 'auto'
     takes the smallest one on this machine, 'none' takes none -- and a measured record's
     own head stands whatever it says. ``options`` are `ClaudeAgentOptions` fields (cwd,
@@ -144,7 +144,7 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
     from ml_stack.serve import chat_template, manager
     from ml_stack.serve import profile as records
     from ml_stack.serve.recent import note
-    from ml_stack.serve.shape import Run, Shape, drafted, served
+    from ml_stack.serve.serving import Run, Serving, drafted, served
 
     found = str(hub.located(model, loose=True) or model)
     note(found, by="agent")
@@ -153,10 +153,10 @@ def session(model: str, *, port: int = DEFAULT_PORT, slots: int = DEFAULT_SEATS,
     measured = records.profile_for(found) if profile else None
     if measured is not None:
         run = measured.run(port=port, slots=slots, model=found)
-        leasing(f"serving in its measured shape: {records.said(measured)}")
+        leasing(f"serving in the settings it scored best with: {records.said(measured)}")
         run = drafted(run, "none", say=leasing)
     else:
-        run = Run(shape=Shape(model=found, port=port, slots=slots))
+        run = Run(serving=Serving(model=found, port=port, slots=slots))
         run = drafted(run, draft, say=leasing)
     patched = chat_template.written_beside(found)
     if patched is not None:
@@ -173,7 +173,7 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="ml-stack-agent",
         description="One agentic task through the Claude Agent SDK on a model this machine "
-                    "serves, in its measured shape; prints what it said and what it spent.")
+                    "serves, in the settings it scored best with; prints what it said and what it spent.")
     ap.add_argument("prompt")
     ap.add_argument("--model", required=True)
     ap.add_argument("--port", type=int, default=DEFAULT_PORT)

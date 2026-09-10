@@ -52,7 +52,7 @@ def _speed_runs(kept: Sequence[Mapping[str, Any]], label: str,
     ``label``.
 
     A speed grid over one server and a graph run over the same one carry the same model,
-    build, head and serve shape (`record.Measured.serving`); a run kept before those were
+    build, head and serving (`record.Measured.serving`); a run kept before those were
     recorded carries only its label.
     """
     mine = [one for one in kept if str(one.get("kind") or "") == SPEED]

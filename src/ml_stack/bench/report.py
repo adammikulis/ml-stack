@@ -354,7 +354,7 @@ def measured_best(mine: Sequence[Mapping[str, Any]], *, full_n: int = 0
     same seconds -- go to the higher F1, then to the later run.
 
     Never from fewer than `SHORT` questions: the ranking refuses to rank a smoke, and a
-    record set from one would send every later serve of that model the shape a coin toss
+    record set from one would send every later serve of that model the settings a coin toss
     chose (a two-question row once wrote a 27B's profile). Such a model gets no record,
     and `main` says so.
     """
@@ -380,9 +380,9 @@ def workload_of(one: Mapping[str, Any]) -> str:
 
 
 def profile_of(model: str, one: Mapping[str, Any]) -> Any:
-    """The measured shape a run records, as a `ml_stack.serve.profile.Profile`.
+    """The settings a run records, as a `ml_stack.serve.profile.Profile`.
 
-    One row sets one record, and the record says which row: a shape composed from the
+    One row sets one record, and the record says which row: settings composed from the
     accuracy of one run and the speed of another is a configuration nobody ever served.
     Nothing is guessed -- a field the run does not carry is left at its default, and `add`
     keeps whatever the older record knew about the two fields a kept run cannot see (the
@@ -438,7 +438,7 @@ def write_profiles(kept: Sequence[Mapping[str, Any]], *, full_n: int = 0,
     same question: the ranking asks which model answers best, and a record asks how this
     model should be asked, where two askings the questions cannot tell apart should be
     settled by the seconds rather than by a hundredth of an F1. Both read only a model's
-    longest runs, so a profile is never a shape chosen by a coin toss over two questions.
+    longest runs, so a profile is never settings chosen by a coin toss over two questions.
     """
     grouped = by_model(kept)
     out = []

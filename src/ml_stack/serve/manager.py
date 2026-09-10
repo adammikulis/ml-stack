@@ -170,7 +170,7 @@ def model_matches(reported: str, wanted: str | Path) -> bool:
     return wanted_name in reported_name or reported_name in wanted_name
 
 
-def shape_mismatch(
+def serving_mismatch(
     spec: ServerSpec,
     models: list[str],
     params: ServingParams | None,
@@ -196,7 +196,7 @@ def shape_mismatch(
         out.append(f"context: asked for {per_slot} per slot, serving {params.n_ctx}")
 
     # a spec that brings its own template wants one that renders a late system message;
-    # a server still on the model's own, which refuses one, is not the shape asked for
+    # a server still on the model's own, which refuses one, is not what was asked for
     if spec.chat_template_file and params.chat_template:
         from ml_stack.serve.chat_template import needs_forgiving
 
@@ -209,9 +209,9 @@ def shape_mismatch(
 
 def already_up(model: str, port: int, *, state_file: Path | None = None) -> dict | None:
     """The recorded server on ``port`` if it serves ``model`` (by file name) and its
-    process is alive -- whatever its shape. A conversation that would lease one slot on a
-    port already holding the same weights in another shape uses what is up rather than
-    reloading them: the reload is the cost, the shape is not (Adam, 2026-09-03)."""
+    process is alive -- whatever its settings. A conversation that would lease one slot on a
+    port already holding the same weights with other settings uses what is up rather than
+    reloading them: the reload is the cost, the settings are not (Adam, 2026-09-03)."""
     entry = recorded_servers(state_file).get(int(port))
     if not entry:
         return None
@@ -268,8 +268,8 @@ class ServerManager:
         """A healthy server for ``spec``. Starts one only if there is not one already.
 
         A server on the port whose record names a leasing process that has gone is an
-        orphan: one serving the shape asked for is adopted and its record made this
-        process's; one serving another shape is stopped before a server is started.
+        orphan: one serving what was asked for is adopted and its record made this
+        process's; one serving something else is stopped before a server is started.
         Either way ``say`` (else ``self.say``, else the log) is told.
 
         When the port is busy with something else and this machine has the memory to hold
@@ -391,7 +391,7 @@ class ServerManager:
         return info
 
     def _slots_shortfall(self, spec: ServerSpec) -> ServerSpec | None:
-        """The shape actually running on ``spec.port``, if the only way it disagrees with
+        """The settings actually running on ``spec.port``, if the only way they disagree with
         ``spec`` is holding fewer slots than asked. ``None`` for any other disagreement,
         or for nothing answering at all -- an escalation is a repair for one specific
         mismatch, not a second way to adopt."""
@@ -460,10 +460,10 @@ class ServerManager:
         if not is_healthy(base_url, timeout=1.0):
             return None
 
-        mismatch = shape_mismatch(spec, reported_models(base_url), serving_params(base_url))
+        mismatch = serving_mismatch(spec, reported_models(base_url), serving_params(base_url))
         if mismatch:
             raise ServerFailed(
-                f"port {spec.port} is already serving a different shape -- "
+                f"port {spec.port} is already serving different settings -- "
                 + "; ".join(mismatch)
                 + ". Stop it, or lease on a different port."
             )
@@ -484,7 +484,7 @@ class ServerManager:
         """Grow the server on ``spec.port`` by ``add_slots`` more concurrent conversations,
         keeping every one already live.
 
-        ``spec`` is the shape actually running -- its ``context`` and ``parallel`` are
+        ``spec`` is the settings actually running -- its ``context`` and ``parallel`` are
         what the port is serving now, not what a caller wishes it were (:meth:`lease`'s
         ``escalate=True`` works this out with :meth:`_slots_shortfall` before calling
         here). Every slot with a live conversation is saved through

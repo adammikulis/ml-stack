@@ -24,13 +24,8 @@ Words this library coined that a reader has to learn before the code means anyth
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
 
-- [ ] **`Shape` -> what it is (65), and `measured shape` deleted (49).** `Shape` is the
-  settings a server is started with. `Profile` already holds "the settings that scored
-  best", so the concept carries two names and neither says settings. Pick one plain name,
-  and say "the settings that scored best" wherever the prose says "measured shape" --
-  including `ml-stack-serve profile`'s output and `serve/profile.py`'s module docstring.
 - [ ] **`ways`, `the way` as a noun for configuration (276).** "every way of asking, in one
-  record" names nothing. Mostly `graph/ask.py`, `graph/asking.py`, `serve/shape.py`.
+  record" names nothing. Mostly `graph/ask.py`, `graph/asking.py`, `serve/serving.py`.
 - [ ] **`Run` (208).** Not an execution -- a model plus how to serve, ask and talk to it.
   The name points at the wrong thing.
 - [ ] **`held` as a variable name (989).** Says only that something was assigned. Rename to
@@ -473,7 +468,7 @@ worth taking, in this order:
     bundler makes there are what `install.ps1` and `install.sh` now expect, and neither has
     run. The Linux AppImage is installed as `~/.local/bin/ml-stack`.
   - **`hub.room` pulls the whole graph library in.** `room()` imports `serve.limits`, which
-    runs `ml_stack/serve/__init__.py`, which imports `serve/shape.py`, which imports
+    runs `ml_stack/serve/__init__.py`, which imports `serve/serving.py`, which imports
     `graph.asking` and so `graph/__init__.py` and `graph/topology.py`, which needs numpy.
     The beacon calls `room()` every ten seconds. numpy is bundled into the frozen daemon to
     get past it (11.7 MB to 15.5 MB); the fix is that a memory number should not reach the

@@ -694,7 +694,7 @@ def _refusal(message: str) -> tuple[int, dict[str, Any]]:
 
 
 def _measurements() -> tuple[list[Any], list[Any]]:
-    """Every measured shape and every memory record this machine knows."""
+    """Every record of what scored best and every memory record this machine knows."""
     from ml_stack.serve.fit import records
     from ml_stack.serve.profile import profiles
 
@@ -711,8 +711,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
     me = already_running(args.port)
     rows = peers(cluster_key_path=args.cluster_key, timeout_s=args.timeout,
                  self_name=str((me or {}).get("name") or ""))
-    shapes, fits = _measurements()
-    placement = place(args.users, args.context, rows, shapes, fits,
+    servings, fits = _measurements()
+    placement = place(args.users, args.context, rows, servings, fits,
                       prefer=args.prefer)
     applied: list[dict[str, Any]] = []
     if args.apply and placement.rows:

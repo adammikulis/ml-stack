@@ -2,7 +2,7 @@
 
 The record is written when the measuring lock is taken and retired when it is released,
 so a run started in the foreground is as visible as a detached one, and it says how it is
-asking -- the sampling, the draft head, the cache, the thinking budget, the shape.
+asking -- the sampling, the draft head, the cache, the thinking budget, the serving.
 """
 
 from __future__ import annotations
@@ -112,7 +112,7 @@ def test_a_run_that_is_killed_leaves_no_live_record(tmp_path, monkeypatch, capsy
     assert json.loads(running.measuring_file().read_text(encoding="utf-8"))["ended"]
 
 
-def test_the_record_says_the_shape_a_sweep_will_serve_in():
+def test_the_record_says_the_serving_a_sweep_will_use():
     from ml_stack.bench.run import _how_said, asking_said
 
     how = asking_said(["sweep", "--serve", "models/flash.gguf", "--serve-draft", "auto",
@@ -122,7 +122,7 @@ def test_the_record_says_the_shape_a_sweep_will_serve_in():
     assert how["head"] == "auto" and how["head_ahead"] == 4
     assert how["cache_type"] == "f16" and how["reasoning_budget"] == 2048
     assert how["context"] == 131072 and how["slots"] == 4
-    assert _how_said(how)[1] == ("  shape: draft head auto; 4 ahead; f16 cache; "
+    assert _how_said(how)[1] == ("  serving: draft head auto; 4 ahead; f16 cache; "
                                 "thinking budget 2048; 128k context across 4 slots")
 
 
@@ -134,7 +134,7 @@ def test_the_record_says_every_arm_a_drafts_run_will_serve():
     how = asking_said(["drafts", "flash.gguf", "--draft", "", "--draft", "heads/mtp-a.gguf",
                        "--n-max", "2", "--n-max", "8", "--reasoning-budget", "0"])
     assert how["head"] == "none, mtp-a.gguf" and how["head_ahead"] == "2, 8"
-    assert _how_said(how)[1] == ("  shape: draft heads none, mtp-a.gguf; 2, 8 ahead; "
+    assert _how_said(how)[1] == ("  serving: draft heads none, mtp-a.gguf; 2, 8 ahead; "
                                 "q8_0 cache; thinking budget 0; 32k context across 1 slot")
 
 

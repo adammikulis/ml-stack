@@ -318,7 +318,7 @@ def test_the_speed_subcommand_serves_a_model_without_its_head_and_labels_it_so(t
                         "--kept", str(kept), "--serve-port", "1", "--smoke"]) == 0
     kw = seen["kwargs"][0]
     assert not kw.get("draft") and not kw.get("spec_type"), "served without the head"
-    assert kw.get("cache_type_k") == "q8_0", "the rest of the measured shape stays"
+    assert kw.get("cache_type_k") == "q8_0", "the rest of the settings stay"
     assert kw.get("parallel") == 2, "a slot per stream"
     got = runs(kept)
     assert [r["label"] for r in got] == ["flash-nodraft-speed"]

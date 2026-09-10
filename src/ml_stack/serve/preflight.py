@@ -544,7 +544,7 @@ def _fit_check(weights_bytes: int, draft_bytes: int, mmproj_bytes: int, kv_bytes
 
 def _measured_fit_check(spec, limit_bytes: int,
                         fits: Callable[[], list] | None = None) -> Check | None:
-    """Whether a real measurement of this model says the shape asked for fits, in place of
+    """Whether a real measurement of this model says the settings asked for fit, in place of
     the analytic estimate above.
 
     A record prices the load from what landed on the GPU, not the file: a gathered lookup

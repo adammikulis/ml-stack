@@ -31,7 +31,7 @@ from ml_stack.serve import (
     pid_exists,
     port_is_free,
     recorded_servers,
-    shape_mismatch,
+    serving_mismatch,
     tail,
 )
 from ml_stack.serve.manager import orphaned
@@ -476,12 +476,12 @@ class TestShapeMismatch:
     def test_a_matching_shape_has_no_mismatch(self):
         params = ServingParams(n_ctx=4096, total_slots=2)
         spec = ServerSpec(model="a-model.gguf", context=8192, parallel=2)
-        assert shape_mismatch(spec, ["a-model.gguf"], params) == []
+        assert serving_mismatch(spec, ["a-model.gguf"], params) == []
 
     def test_every_differing_field_is_named(self):
         params = ServingParams(n_ctx=2048, total_slots=1)
         spec = ServerSpec(model="a-model.gguf", context=32768, parallel=4)
-        assert shape_mismatch(spec, ["some-other.gguf"], params) == [
+        assert serving_mismatch(spec, ["some-other.gguf"], params) == [
             "model: asked for 'a-model.gguf', serving 'some-other.gguf'",
             "slots: asked for 4, serving 1",
             "context: asked for 8192 per slot, serving 2048",
@@ -491,11 +491,11 @@ class TestShapeMismatch:
         """More context and more slots than asked for is still what was asked for."""
         params = ServingParams(n_ctx=32768, total_slots=8)
         spec = ServerSpec(model="a-model.gguf", context=4096, parallel=1)
-        assert shape_mismatch(spec, ["a-model.gguf"], params) == []
+        assert serving_mismatch(spec, ["a-model.gguf"], params) == []
 
     def test_a_server_that_reports_nothing_has_no_mismatch(self):
         spec = ServerSpec(model="a-model.gguf", context=32768, parallel=4)
-        assert shape_mismatch(spec, [], None) == []
+        assert serving_mismatch(spec, [], None) == []
 
     def test_a_server_on_a_refusing_template_is_not_the_shape_a_patched_one_asks_for(self):
         """Driven 2026-09-05: ml-stack-claude adopted a server up on the model's own
@@ -506,13 +506,13 @@ class TestShapeMismatch:
         plain = ServerSpec(model="a-model.gguf", context=4096, parallel=1)
         patched = ServerSpec(model="a-model.gguf", context=4096, parallel=1,
                              chat_template_file="a-model.jinja")
-        assert shape_mismatch(plain, ["a-model.gguf"], params) == []
-        assert shape_mismatch(patched, ["a-model.gguf"], params) == [
+        assert serving_mismatch(plain, ["a-model.gguf"], params) == []
+        assert serving_mismatch(patched, ["a-model.gguf"], params) == [
             "chat template: asked for one that renders a late system message, "
             "serving one that refuses it"]
         rendering = ServingParams(n_ctx=4096, total_slots=1,
                                   chat_template="{{ '<|im_start|>system' + content }}")
-        assert shape_mismatch(patched, ["a-model.gguf"], rendering) == []
+        assert serving_mismatch(patched, ["a-model.gguf"], rendering) == []
 
 
 class TestAdoptingTheWrongShape:
@@ -656,7 +656,7 @@ class TestServingBeside:
     def test_a_caller_that_needs_that_port_still_gets_the_refusal(self, serving, tmp_path):
         instance = serving("somethingelse.gguf")
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different shape"):
+        with pytest.raises(ServerFailed, match="different settings"):
             held.lease(ServerSpec(model=tmp_path / "mine.gguf", port=instance.port), roam=False)
 
     def test_it_refuses_when_the_machine_has_no_room(self, serving, tmp_path, monkeypatch):
@@ -666,7 +666,7 @@ class TestServingBeside:
         instance = serving("somethingelse.gguf")
         monkeypatch.setattr("ml_stack.serve.manager.free_memory", lambda: 1024)
         held = self.manager(tmp_path, [])
-        with pytest.raises(ServerFailed, match="different shape"):
+        with pytest.raises(ServerFailed, match="different settings"):
             held.lease(ServerSpec(model=big, port=instance.port))
 
 

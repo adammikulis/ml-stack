@@ -94,7 +94,7 @@ def drafted_by(run: Any, head: str) -> Any:
     """``run`` serving ``head``: a path or ``hf:`` reference, "" for no head at all, or
     `EMBEDDED` for the head inside the weights -- the speculative type, no ``-md``.
 
-    The method is left to `Shape.lease`, which reads it off the head's own name, so an
+    The method is left to `Serving.lease`, which reads it off the head's own name, so an
     EAGLE3 head is never served as draft-simple.
     """
     if head == EMBEDDED:
@@ -108,7 +108,7 @@ class NotLoaded(RuntimeError):
 
 @contextlib.contextmanager
 def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900.0) -> Any:
-    """One model put up in ``run``'s shape for the block: the load preflighted -- shards
+    """One model put up in ``run``'s serving for the block: the load preflighted -- shards
     present, architecture read by this build, weights plus an estimated KV cache under
     what this machine may use, every flag one the build accepts -- then served, and taken
     down on the way out. Yields ``(server, held)``: the lease's `ServerInfo` and the record
@@ -126,7 +126,7 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
     from ml_stack.serve.binary import find_binary
 
     model = run.model
-    if str(run.shape.mmproj or "").lower() == "auto":
+    if str(run.serving.mmproj or "").lower() == "auto":
         # resolved here the way `ml-stack-serve up --mmproj auto` resolves it: the library
         # lease hands `mmproj` to the spec untouched, and 'auto' reached llama-server as a
         # file to load -- it picked the MTP head and died (2026-09-02)
@@ -152,15 +152,15 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         from ml_stack.serve.manager import ServerManager
 
         manager = ServerManager(LlamaServerBackend(binary=binary))
-    elif run.shape.build:
+    elif run.serving.build:
         # a named build, because an architecture or a head newer than any release loads
         # only on the build that has it; not found here, the default build serves and says so
         try:
-            manager = run.shape.manager()
+            manager = run.serving.manager()
             build = str(manager.backend.binary)
         except Exception as exc:  # noqa: BLE001 - said, then the default build serves
             manager = None
-            say(f"    the profile names build {run.shape.build!r}, not found here: {exc}")
+            say(f"    the profile names build {run.serving.build!r}, not found here: {exc}")
     build = build or str(find_binary() or "llama-server")
     report = checks.Preflight(spec, binary=build, limit_bytes=hub.room())
     if not report.ok:
@@ -189,17 +189,17 @@ def up(run: Any, *, binary: str = "", name: str = "", serve_timeout: float = 900
         # mainline when the ranking takes its cost; `build` is its name, for `served_by`
         held: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
                                 "warmup_s": warmup_s, "binary": build,
-                                "build": str(run.shape.build or ""),
+                                "build": str(run.serving.build or ""),
                                 "baseline": before_load, "loaded": loaded}
-        if run.shape.draft or run.shape.spec_type:
-            held["draft_model"] = (str(run.shape.draft).rsplit("/", 1)[-1] if run.shape.draft
+        if run.serving.draft or run.serving.spec_type:
+            held["draft_model"] = (str(run.serving.draft).rsplit("/", 1)[-1] if run.serving.draft
                                    else EMBEDDED)
-            if run.shape.draft_n_max is not None:
-                held["spec_draft_max"] = int(run.shape.draft_n_max)
-        if run.shape.cache_type:
-            held["cache_type"] = run.shape.cache_type
-        if run.shape.reasoning_budget is not None:
-            held["reasoning_budget"] = int(run.shape.reasoning_budget)
+            if run.serving.draft_n_max is not None:
+                held["spec_draft_max"] = int(run.serving.draft_n_max)
+        if run.serving.cache_type:
+            held["cache_type"] = run.serving.cache_type
+        if run.serving.reasoning_budget is not None:
+            held["reasoning_budget"] = int(run.serving.reasoning_budget)
         yield server, held
 
 
@@ -218,7 +218,7 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
            needs_draft_depth: bool = False) -> list[Row]:
     """Put one model up, ask it the questions, take it down again.
 
-    ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the shape the
+    ``run`` is the whole configuration -- a :class:`~ml_stack.serve.Run`: the serving the
     server is leased in, the ways it is asked, and the client it is asked with. It used to
     be twenty keyword arguments unpacked here into three destinations, and `tight` went to
     the client once and took an 87G load down with it.
@@ -269,12 +269,12 @@ def served(run: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[str,
     model = run.model
     per_question = float(run.talking.timeout)
     name = label or str(model).rsplit("/", 1)[-1].removesuffix(".gguf")
-    from ml_stack.serve.shape import DEFAULT_CACHE
+    from ml_stack.serve.serving import DEFAULT_CACHE
 
-    kv = run.shape.cache_type
+    kv = run.serving.cache_type
     suffix = ((f"-kv-{kv}" if kv and kv != DEFAULT_CACHE else "")
-              + (f"-rb{run.shape.reasoning_budget}"
-                 if run.shape.reasoning_budget is not None else ""))
+              + (f"-rb{run.serving.reasoning_budget}"
+                 if run.serving.reasoning_budget is not None else ""))
 
     def labelled(way: Mapping[str, Any]) -> str:
         tag = str(way.get("label", "") or "")

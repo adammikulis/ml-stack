@@ -1,4 +1,4 @@
-"""One model's measured shape, kept in a file that both ends read.
+"""The settings one model scored best with, kept in a file that both ends read.
 
 Everything here is invented: two made-up model files (`thornfield-8B`, `alderpost-2B`)
 with made-up heads, written into ``tmp_path``. Both halves of the source of truth are
@@ -87,7 +87,7 @@ def test_this_machine_replaces_the_shipped_record_rather_than_sitting_beside_it(
             measured(cache_type="f16", label="thornfield--plain", right=0.5))
 
     every = profiles()
-    assert len(every) == 1, "two shapes for one model is a choice nobody can make outside"
+    assert len(every) == 1, "two records for one model is a choice nobody can make outside"
     assert every[0].cache_type == "f16" and every[0].right == 0.5
 
 
@@ -112,7 +112,7 @@ def test_the_file_name_is_found_through_a_path_or_an_hf_reference():
                   MODEL.upper()):
         found = profile_for(asked)
         assert found is not None and found.model == MODEL, asked
-        assert found.served == asked, "a shape is served by the reference it was asked for"
+        assert found.served == asked, "a serving is built from the reference it was asked for"
 
 
 def test_a_shard_of_the_same_quantisation_finds_the_record_by_family_and_quant():
@@ -139,36 +139,36 @@ def test_a_model_nothing_measured_has_no_profile():
 
 # -- what the two ends read -------------------------------------------------------------
 
-def test_the_shape_is_the_whole_serving_and_the_lease_it_becomes():
-    shape = measured().shape(port=8099, resolve=False)
+def test_the_record_is_the_whole_serving_and_the_lease_it_becomes():
+    serving = measured().serving(port=8099, resolve=False)
 
-    assert (shape.model, shape.port, shape.slots, shape.slot_context) == (MODEL, 8099, 1, 65536), \
+    assert (serving.model, serving.port, serving.slots, serving.slot_context) == (MODEL, 8099, 1, 65536), \
         "one slot holding the whole cache the record measured across two"
-    assert (shape.build, shape.draft, shape.spec_type) == ("thornfell", HEAD, "draft-mtp")
-    assert shape.lease() == {"port": 8099, "context": 65536, "parallel": 1,
+    assert (serving.build, serving.draft, serving.spec_type) == ("thornfell", HEAD, "draft-mtp")
+    assert serving.lease() == {"port": 8099, "context": 65536, "parallel": 1,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0",
                              "draft": HEAD, "spec_type": "draft-mtp", "spec_draft_max": 4,
                              "mmproj": "auto", "reasoning_budget": 0,
                              "extra_args": ("-ub", "2048", "--spec-draft-p-min", "0.5")}
 
 
-def test_the_shape_is_served_by_the_reference_asked_for_and_the_slots_asked_for():
+def test_the_serving_uses_the_reference_asked_for_and_the_slots_asked_for():
     add(measured())
     found = profile_for(f"hf:thornfell/thornfield-GGUF/{MODEL}")
-    shape = found.shape(port=8080, slots=8, resolve=False)
+    serving = found.serving(port=8080, slots=8, resolve=False)
 
-    assert shape.model == f"hf:thornfell/thornfield-GGUF/{MODEL}"
-    assert shape.slots == 8, "how many conversations a machine wants is that machine's"
-    assert shape.slot_context == 32768, "and the rest of the shape is not"
+    assert serving.model == f"hf:thornfell/thornfield-GGUF/{MODEL}"
+    assert serving.slots == 8, "how many conversations a machine wants is that machine's"
+    assert serving.slot_context == 32768, "and the rest of the serving is not"
 
 
 def test_a_head_recorded_by_file_name_is_looked_for_where_this_machine_keeps_models(
         monkeypatch):
     monkeypatch.setattr("ml_stack.hub.located", lambda name: Path(f"/models/{name}"))
-    assert measured().shape(resolve=True).draft == f"/models/{HEAD}"
+    assert measured().serving(resolve=True).draft == f"/models/{HEAD}"
 
     monkeypatch.setattr("ml_stack.hub.located", lambda name: None)
-    assert measured().shape(resolve=True).draft == "", "a head not on this machine is not served"
+    assert measured().serving(resolve=True).draft == "", "a head not on this machine is not served"
 
 
 # -- one slot, alone: the model's own trained context, capped by what fits ---------------
@@ -190,10 +190,10 @@ def test_one_slot_alone_gets_the_trained_context_when_it_fits(tmp_path, fit_file
                    per_seq=1000)], room=30_000_000)
     solo = record(path.name, slot_context=32768, parallel=2)
 
-    shape = solo.alone(model=str(path), resolve=False).shape
+    serving = solo.alone(model=str(path), resolve=False).serving
 
-    assert shape.slot_context == TRAINED
-    assert "trained context" in shape.note and f"{TRAINED:,}" in shape.note
+    assert serving.slot_context == TRAINED
+    assert "trained context" in serving.note and f"{TRAINED:,}" in serving.note
 
 
 def test_one_slot_alone_gets_the_longest_that_fits_when_trained_does_not(tmp_path, fit_files):
@@ -202,24 +202,24 @@ def test_one_slot_alone_gets_the_longest_that_fits_when_trained_does_not(tmp_pat
                    per_seq=1000)], room=5_000_000)
     solo = record(path.name, slot_context=32768, parallel=2)
 
-    shape = solo.alone(model=str(path), resolve=False).shape
+    serving = solo.alone(model=str(path), resolve=False).serving
 
-    assert shape.slot_context == 49_990, "(free 5,000,000 - per_seq 1,000) // per_token 100"
-    assert shape.slot_context < TRAINED
-    assert "does not fit" in shape.note and "49,990" in shape.note
+    assert serving.slot_context == 49_990, "(free 5,000,000 - per_seq 1,000) // per_token 100"
+    assert serving.slot_context < TRAINED
+    assert "does not fit" in serving.note and "49,990" in serving.note
 
 
-def test_one_slot_alone_falls_back_to_the_measured_shape_with_no_fit_record(tmp_path):
+def test_one_slot_alone_falls_back_to_the_records_own_cache_with_no_fit_record(tmp_path):
     path = _model_file(tmp_path, "duskfield-12B-Q4_K_M.gguf")
     solo = record(path.name, slot_context=32768, parallel=2)
 
-    shape = solo.alone(model=str(path), resolve=False).shape
+    serving = solo.alone(model=str(path), resolve=False).serving
 
-    assert shape.slot_context == 65536, "slot_context 32768 * parallel 2: today's fallback"
-    assert "no fit record" in shape.note
+    assert serving.slot_context == 65536, "slot_context 32768 * parallel 2: today's fallback"
+    assert "no fit record" in serving.note
 
 
-def test_one_slot_alone_falls_back_to_the_measured_shape_with_no_layout_data(
+def test_one_slot_alone_falls_back_to_the_records_own_cache_with_no_layout_data(
         tmp_path, fit_files):
     # a model file this test never wrote: nothing to read a trained context off
     missing = tmp_path / "duskfield-12B-Q4_K_M.gguf"
@@ -227,10 +227,10 @@ def test_one_slot_alone_falls_back_to_the_measured_shape_with_no_layout_data(
                    per_seq=1000)], room=30_000_000)
     solo = record(missing.name, slot_context=32768, parallel=2)
 
-    shape = solo.alone(model=str(missing), resolve=False).shape
+    serving = solo.alone(model=str(missing), resolve=False).serving
 
-    assert shape.slot_context == 65536
-    assert "no trained context" in shape.note
+    assert serving.slot_context == 65536
+    assert "no trained context" in serving.note
 
 
 def test_more_than_one_slot_still_gets_the_profiles_own_slot_context(tmp_path, fit_files):
@@ -239,11 +239,11 @@ def test_more_than_one_slot_still_gets_the_profiles_own_slot_context(tmp_path, f
                    per_seq=1000)], room=30_000_000)
     solo = record(path.name, slot_context=32768, parallel=2)
 
-    shape = solo.shape(model=str(path), slots=4, resolve=False)
+    serving = solo.serving(model=str(path), slots=4, resolve=False)
 
-    assert (shape.slots, shape.slot_context) == (4, 32768), \
+    assert (serving.slots, serving.slot_context) == (4, 32768), \
         "trained-context sizing is the lone slot's; a crowd keeps the profile's own"
-    assert shape.note == ""
+    assert serving.note == ""
 
 
 def test_the_asking_is_every_way_the_record_measured_and_nothing_it_did_not():
@@ -586,7 +586,7 @@ def test_the_asking_a_profile_writes_is_the_whole_asking_and_reaches_converse():
         "the record measured three tools, so three are what the model is offered"
 
 
-def test_the_shape_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
+def test_what_a_person_reads_says_the_sampling_it_was_measured_at(capsys):
     """A model card asking for temperature 1.0 and a measurement agreeing with it is the
     thing a person about to serve it needs to see, not infer. Greedy is one word, because
     at temperature 0 nothing else can change an argument."""
@@ -644,7 +644,7 @@ def test_the_named_build_is_read_off_the_binary_a_run_started(tmp_path):
     assert build({}) == ""
 
 
-def test_the_shape_a_person_reads_names_the_flags_and_the_ways(capsys):
+def test_what_a_person_reads_names_the_flags_and_the_ways(capsys):
     text = said(measured())
     assert text.splitlines()[0] == MODEL
     assert "serve with" in text and "ask with" in text and "measured" in text
@@ -656,10 +656,10 @@ def test_alone_is_one_slot_holding_the_whole_measured_cache():
 
     record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
     run = record.alone(port=8123, model="quince-2b.gguf", resolve=False)
-    assert run.shape.slots == 1 and run.shape.slot_context == 65536 and run.shape.port == 8123
+    assert run.serving.slots == 1 and run.serving.slot_context == 65536 and run.serving.port == 8123
 
     bare = record.run(port=8123, model="quince-2b.gguf", resolve=False)
-    assert (bare.shape.slots, bare.shape.slot_context) == (1, 65536), \
+    assert (bare.serving.slots, bare.serving.slot_context) == (1, 65536), \
         "the record's parallel is provenance, not how many slots to serve"
 
 
@@ -668,7 +668,7 @@ def test_slots_asked_for_get_what_one_measured_slot_got():
     from ml_stack.serve.profile import Profile
 
     record = Profile(model="quince-2b.gguf", slot_context=32768, parallel=2)
-    crowded = record.shape(slots=4, model="quince-2b.gguf", resolve=False)
+    crowded = record.serving(slots=4, model="quince-2b.gguf", resolve=False)
     assert (crowded.slots, crowded.slot_context, crowded.context) == (4, 32768, 131072)
     assert crowded.lease()["parallel"] == 4
 
@@ -748,7 +748,7 @@ def test_the_request_half_travels_with_each_call():
 
 def test_the_startup_half_still_names_the_draft_depth_it_was_served_with():
     one = measured(spec_draft_max=3)
-    assert one.shape(resolve=False).draft_n_max == 3, \
+    assert one.serving(resolve=False).draft_n_max == 3, \
         "a build with no per-request override serves the depth it was started with"
 
 
@@ -862,7 +862,7 @@ def test_a_record_keeps_the_drafts_own_cache_type():
     one = Profile(model="m.gguf", draft="h.gguf", cache_type="q8_0",
                   draft_cache_type="q4_0")
     assert Profile.from_dict(one.as_dict()).draft_cache_type == "q4_0"
-    assert one.shape(resolve=False).draft_cache_type == "q4_0"
+    assert one.serving(resolve=False).draft_cache_type == "q4_0"
     assert "--draft-kv q4_0" in _flags(one)
 
 

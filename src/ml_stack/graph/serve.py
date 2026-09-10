@@ -298,8 +298,8 @@ class AskRoutes:
     Two things are the subclass's to say, and the rest has a default:
 
     ``run``
-        The :class:`~ml_stack.serve.Run` this page answers with: the shape its model is
-        served in, the ways it is asked, and the client. Given one, ``client_on_slot()``
+        The :class:`~ml_stack.serve.Run` this page answers with: the settings its model
+        is served with, the ways it is asked, and the client. Given one, ``client_on_slot()``
         leases the server and hands out a slot of it, and ``model_name`` and ``serving_url`` answer
         from it.
     ``asker(question, *, turns, held, stream, emit)``
@@ -359,8 +359,8 @@ class AskRoutes:
 
         ``run`` is a :class:`~ml_stack.serve.Run`: the same object a bench row is measured
         from and `slot` elsewhere is given, so a page answer and a measurement of the
-        page's model are one lease and one way of asking. llama.cpp serves one shape per
-        port, and a page that spelled its lease out beside the bench's stopped the server
+        page's model are one lease and one way of asking. llama.cpp serves one set of
+        settings per port, and a page that spelled its lease out beside the bench's stopped the server
         and loaded the weights again the first time either was edited.
 
         ``over`` is `Run.over`'s: a knob for this slot, routed to the section that owns it.
@@ -368,7 +368,7 @@ class AskRoutes:
         if self.run is None:
             raise RuntimeError("no run on this handler: set `run`, or override "
                                "`client_on_slot`")
-        from ml_stack.serve.shape import slot
+        from ml_stack.serve.serving import slot
 
         return slot(self.run.over(**over) if over else self.run, index=index)
 
@@ -396,7 +396,7 @@ class AskRoutes:
         once a question has been asked and not before."""
         if self.run is None:
             return ""
-        from ml_stack.serve.shape import held
+        from ml_stack.serve.serving import held
 
         return held().get(self.run.port, "")
 
@@ -1137,9 +1137,9 @@ def bind(argv: Sequence[str] | None = None) -> ThreadingHTTPServer:
     args = parser().parse_args(argv)
     run = None
     if args.model:
-        from ml_stack.serve.shape import Run, Shape, drafted
+        from ml_stack.serve.serving import Run, Serving, drafted
 
-        run = drafted(Run(shape=Shape(model=str(args.model), port=int(args.model_port))),
+        run = drafted(Run(serving=Serving(model=str(args.model), port=int(args.model_port))),
                       str(getattr(args, "draft", "auto") or "auto"))
     graph = None
     if args.graph:

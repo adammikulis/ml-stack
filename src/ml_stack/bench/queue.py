@@ -8,10 +8,10 @@ was running or what was left. That is a queue file, and this is the thing that r
 
     # what this evening is for
     set FX=hf:unsloth/Some-Model-GGUF/UD-Q4_K_XL/Some-Model-UD-Q4_K_XL.gguf
-    set SHAPE=--serve-kv q8_0 --context 65536
+    set SERVING=--serve-kv q8_0 --context 65536
 
-    smoke: sweep --serve ${FX} ${SHAPE} --label-suffix=-v2 --smoke
-    then:  sweep --serve ${FX} ${SHAPE} --label-suffix=-v2 --sample 10
+    smoke: sweep --serve ${FX} ${SERVING} --label-suffix=-v2 --smoke
+    then:  sweep --serve ${FX} ${SERVING} --label-suffix=-v2 --sample 10
 
     show --rank docs/model-ranking.md
 

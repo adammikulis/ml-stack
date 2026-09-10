@@ -2192,7 +2192,7 @@ def test_drafts_hands_the_store_and_the_embedder_through(tmp_path, monkeypatch):
     seen = {}
 
     def fake_drafts(run, heads, questions, graph, **kw):
-        seen.update(kw, heads=list(heads), model=run.shape.model)
+        seen.update(kw, heads=list(heads), model=run.serving.model)
         return []
 
     monkeypatch.setattr(run_mod, "drafts", fake_drafts)
@@ -2849,7 +2849,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     import ml_stack.client
     import ml_stack.serve
     from ml_stack import bench
-    from ml_stack.serve import Run, Shape
+    from ml_stack.serve import Run, Serving
 
     built = []
 
@@ -2880,7 +2880,7 @@ def test_what_is_about_the_asking_never_reaches_the_client(monkeypatch):
     _preflight_ok(monkeypatch)
     ways = [{}, {"label": "rich", "rich": True}, {"label": "tight", "tight": True},
             {"label": "reach", "reach": 8000}]
-    bench.served(Run(shape=Shape(model="tiny.gguf")), [{"q": "who?", "expect": []}],
+    bench.served(Run(serving=Serving(model="tiny.gguf")), [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, ways=ways, kept="")
     assert len(built) == 4, "one strict client per way, none refused"
 
@@ -3770,7 +3770,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     import ml_stack.client
     import ml_stack.serve
     from ml_stack import bench
-    from ml_stack.serve import Run, Shape
+    from ml_stack.serve import Run, Serving
     from ml_stack.testing import FakeClient, FakeServe
 
     fake = FakeServe()
@@ -3781,7 +3781,7 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     monkeypatch.setattr(hub, "located", lambda *a, **k: None)
     monkeypatch.setattr(bench, "footprint", lambda url: {"base_url": url})
     _preflight_ok(monkeypatch)
-    bare = Run(shape=Shape(model="tiny.gguf"))
+    bare = Run(serving=Serving(model="tiny.gguf"))
     bench.served(bench.drafted_by(bare, bench.EMBEDDED).over(draft_n_max=2),
                  [{"q": "who?", "expect": []}], {"nodes": [], "edges": []},
                  kept="", smoke=())
@@ -3791,8 +3791,8 @@ def test_an_embedded_head_serves_with_the_speculative_type_and_no_file(monkeypat
     seen = []
     monkeypatch.setattr(bench, "served",
                         lambda run, *a, **k: seen.append(
-                            (k.get("label"), run.shape.draft, run.shape.spec_type,
-                             run.shape.draft_n_max, k.get("ways"))) or [])
+                            (k.get("label"), run.serving.draft, run.serving.spec_type,
+                             run.serving.draft_n_max, k.get("ways"))) or [])
     bench.drafts(bare, ["", bench.EMBEDDED], [{"q": "who?", "expect": []}],
                  {"nodes": [], "edges": []}, n_max=[2, 8], kept="", per_request=True)
     assert [row[:4] for row in seen] == [("draft:none", "", "", None),
@@ -4382,30 +4382,30 @@ def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=No
 
 def test_the_shape_says_what_the_label_only_hinted_at(tmp_path):
     """Everything that decided a run and had nowhere to live, on one field."""
-    from ml_stack.bench import asked_as, shape_of, shaped
+    from ml_stack.bench import asked_as, served_as, serving_of
 
     one = {"server": {"cache_type": "q8_0", "reasoning_budget": 0,
                       "extra_args": ["-ub", "2048", "--draft-p-min", "0.5"],
                       "draft_model": "mtp-flash.gguf", "spec_draft_max": 4},
            "asking": {"tight": True, "batch": True, "kinds": True}}
-    assert shape_of(one) == "q8/rb0/ub2048/pmin.5/mtp@4"
+    assert serving_of(one) == "q8/rb0/ub2048/pmin.5/mtp@4"
     assert asked_as(one) == "+batch+kinds"
-    assert shaped(one) == "q8/rb0/ub2048/pmin.5/mtp@4+batch+kinds", "one word, so columns hold"
+    assert served_as(one) == "q8/rb0/ub2048/pmin.5/mtp@4+batch+kinds", "one word, so columns hold"
 
     # the flag may be written either way, and a field of its own beats extra_args
-    assert "ub512" in shape_of({"server": {"extra_args": ["--ubatch=512"]}})
-    assert "ub4096" in shape_of({"server": {"n_ubatch": 4096, "extra_args": ["-ub", "512"]}})
-    assert shape_of({"server": {"mmproj": "mmproj-flash.gguf", "mlock": True}}) == "mmproj/mlock"
+    assert "ub512" in serving_of({"server": {"extra_args": ["--ubatch=512"]}})
+    assert "ub4096" in serving_of({"server": {"n_ubatch": 4096, "extra_args": ["-ub", "512"]}})
+    assert serving_of({"server": {"mmproj": "mmproj-flash.gguf", "mlock": True}}) == "mmproj/mlock"
 
 
 def test_a_run_that_recorded_none_of_it_still_reads(tmp_path):
     """Missing records show `-`, and `-` is not the same as "asked plainly"."""
-    from ml_stack.bench import asked_as, shape_of, shaped
+    from ml_stack.bench import asked_as, served_as, serving_of
 
-    assert shape_of({}) == "-" and asked_as({}) == "-" and shaped({}) == "-"
-    assert shaped({"server": {"cache_type": "q8_0"}}) == "q8", "served shape, asking unknown"
+    assert serving_of({}) == "-" and asked_as({}) == "-" and served_as({}) == "-"
+    assert served_as({"server": {"cache_type": "q8_0"}}) == "q8", "the serving, asking unknown"
     plain = {"server": {"cache_type": "q8_0"}, "asking": {"tight": True, "terse": False}}
-    assert asked_as(plain) == "tight" and shaped(plain) == "q8+tight", \
+    assert asked_as(plain) == "tight" and served_as(plain) == "q8+tight", \
         "a plain asking that was recorded is not a missing record"
     assert asked_as({"asking": {"tight": False, "reach": 8000}}) == "+loose+reach8k"
 
@@ -4440,7 +4440,7 @@ def test_asking_records_what_it_handed_converse(tmp_path):
 
 def test_the_table_carries_the_shape_and_the_old_runs_still_read(tmp_path, capsys):
     """The table leaves out what `ctx` already says, so the field prints whole."""
-    from ml_stack.bench import shape_of
+    from ml_stack.bench import serving_of
 
     store = tmp_path / "runs.ladybug"
     _shaped_run(store, "flash-batch", cache_type="q8_0", reasoning_budget=0,
@@ -4448,18 +4448,18 @@ def test_the_table_carries_the_shape_and_the_old_runs_still_read(tmp_path, capsy
     _shaped_run(store, "flash-old")
     table(runs(store))
     said = capsys.readouterr().out
-    assert "shape" in said.splitlines()[0]
+    assert "serving" in said.splitlines()[0]
     new = next(ln for ln in said.splitlines() if ln.startswith("flash-batch"))
     old = next(ln for ln in said.splitlines() if ln.startswith("flash-old"))
     assert new.split()[4] == "ub2048+batch", "the shape is the fifth word, after n"
     assert "q8/rb" in new.split()[2], "the cache and the budget stay in ctx, said once"
-    assert shape_of(runs(store)[0]) == "q8/rb0/ub2048", "and the shape itself carries them"
+    assert serving_of(runs(store)[0]) == "q8/rb0/ub2048", "and the serving itself carries them"
     assert old.split()[4] == "-", "a run that recorded none of it is a dash, not a guess"
 
 
 def test_runs_of_the_same_shape_are_one_line(tmp_path, capsys):
     """Four lines that are the same thing measured four times is a table of noise."""
-    from ml_stack.bench import by_shape
+    from ml_stack.bench import by_serving
 
     store = tmp_path / "runs.ladybug"
     shape = {"cache_type": "q8_0", "reasoning_budget": 0}
@@ -4468,7 +4468,7 @@ def test_runs_of_the_same_shape_are_one_line(tmp_path, capsys):
                     **shape)
     _shaped_run(store, "flash-plain", hits=13, seconds=300.0, asking={"tight": True}, **shape)
     _shaped_run(store, "flash-before")         # no record at all: its own group
-    by_shape(runs(store))
+    by_serving(runs(store))
     lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("flash.gguf")]
     assert len(lines) == 3, "two runs of one shape are one line; the other two are their own"
     together = next(ln for ln in lines if "+batch" in ln)
@@ -4728,7 +4728,7 @@ def test_the_kernel_read_is_behind_a_seam_and_never_raises(monkeypatch):
         "no footprint anywhere: on Linux and Windows it is the resident set, said twice"
 
 
-def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, monkeypatch, capsys):
+def test_sweep_serves_a_model_with_the_settings_that_scored_best_and_reports_them(tmp_path, monkeypatch, capsys):
     """Adam: 'if a model has a drafting head that speeds it up at some config, always use it
     at that config (be sure to report it).' The profile fills every flag the sweep left
     unset; an explicit flag wins; --no-profile serves bare."""
@@ -4750,7 +4750,7 @@ def test_sweep_serves_a_model_in_its_measured_shape_and_reports_it(tmp_path, mon
     assert kw.get("draft") == "/models/mtp-tiny.gguf" and kw.get("spec_draft_max") == 4
     assert kw.get("cache_type_k") == "q8_0" and kw.get("reasoning_budget") == 0
     assert kw.get("extra_args") == ("-ub", "2048")
-    assert "measured shape" in capsys.readouterr().out
+    assert "scored best with" in capsys.readouterr().out
     # explicit flags win, and --no-profile serves bare
     assert bench._main(["sweep", "--serve", "tiny.gguf", "--plain-only", "--smoke", "--n-max", "2",
                         "--serve-kv", "f16", "--kept", str(kept), "--questions", str(asked),

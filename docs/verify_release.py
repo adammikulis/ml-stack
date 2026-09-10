@@ -1093,7 +1093,7 @@ def _():
 
 
 # -- measuring models ------------------------------------------------------
-@check("Measuring", "a model's measured shape is on file per workload, not remembered")
+@check("Measuring", "the settings a model scored best with is on file per workload, not remembered")
 def _():
     from ml_stack.serve import profile_for
     named = "Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf"

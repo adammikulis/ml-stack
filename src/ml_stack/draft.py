@@ -27,7 +27,7 @@ from ml_stack.log import say, warn
 from ml_stack.serve.backend import LlamaServerBackend
 from ml_stack.serve.binary import find_binary
 from ml_stack.serve.profile import profile_for, profiles
-from ml_stack.serve.shape import Run, Shape, Talking
+from ml_stack.serve.serving import Run, Serving, Talking
 from ml_stack.sources import pdf
 
 __all__ = [
@@ -230,7 +230,7 @@ def recommendation(measured: Sequence[Measured], *, model: str, head: str,
 # ---------------------------------------------------------------- running one arm
 
 def _run_for(model: str, args: argparse.Namespace, *, workload: str) -> Any:
-    """The run every arm is measured against: this model's measured shape, one slot."""
+    """The run every arm is measured against: the settings this model scored best with, one slot."""
     port, context = int(args.port), int(args.context or 0)
     build, kv = str(args.build or ""), str(args.kv or "")
     found = profile_for(model, workload=workload)
@@ -238,7 +238,7 @@ def _run_for(model: str, args: argparse.Namespace, *, workload: str) -> Any:
         run = found.run(port=port, slots=1)
         run = run.over(slot_context=context) if context else run
     else:
-        run = Run(shape=Shape(model=model, port=port, slots=1,
+        run = Run(serving=Serving(model=model, port=port, slots=1,
                               slot_context=context or 32768),
                   talking=Talking(n_predict=4096, timeout=300.0))
     if build:
@@ -448,7 +448,7 @@ def cmd_draft(args: argparse.Namespace) -> int:
     model = str(located(args.model) or args.model)
     args.build = build_for(model, str(args.build or ""))
     if args.build:
-        say(f"build: {args.build} -- the shape this model measured in")
+        say(f"build: {args.build} -- the build this model measured in")
     head, why = _head_for(model, str(args.draft or ""), str(args.build or ""))
     if not head:
         warn(f"no draft head for {Path(model).name}: {why}.")
@@ -491,9 +491,9 @@ OPTIONS = (
          help="measure even when something else holds this machine. Every row is marked, "
               "because its seconds are not this model's"),
     flag("--kv", default="", metavar="TYPE",
-         help="the model's own KV cache type for every arm (default: its measured shape's)"),
+         help="the model's own KV cache type for every arm (default: the settings it scored best with)"),
     flag("--build", default="", metavar="NAME",
-         help="serve with a named build (default: the model's measured shape's)"),
+         help="serve with a named build (default: the settings the model scored best with)"),
     flag("--binary", default="", metavar="PATH",
          help="the llama-server to serve with, when the one on PATH cannot read this model"),
     flag("--store", default="", metavar="PATH",
@@ -503,7 +503,7 @@ OPTIONS = (
          help="where each arm is kept (default: the bench's own runs store)"),
     option("port", default=8099, help="the port to serve each arm on (default: 8099)"),
     option("context", default=0,
-           help="context for the one slot (default: the model's measured shape's)"),
+           help="context for the one slot (default: the settings the model scored best with)"),
 )
 
 COMMANDS = Group(

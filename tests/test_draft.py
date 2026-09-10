@@ -92,15 +92,15 @@ class TestTheArms:
         assert every[0].over["draft_n_max"] == 4
 
     def test_an_arm_lays_over_a_run_without_touching_the_rest_of_it(self):
-        from ml_stack.serve.shape import Run, Shape
+        from ml_stack.serve.serving import Run, Serving
 
-        run = Run(shape=Shape(model="m.gguf", slot_context=32768, cache_type="q8_0"))
+        run = Run(serving=Serving(model="m.gguf", slot_context=32768, cache_type="q8_0"))
         arm = Arm("head@n8", {"draft": "h.gguf", "spec_type": "draft-mtp",
                               "draft_n_max": 8})
         over = run.over(**dict(arm.over))
-        assert over.shape.draft == "h.gguf"
-        assert over.shape.slot_context == 32768
-        assert over.shape.cache_type == "q8_0"
+        assert over.serving.draft == "h.gguf"
+        assert over.serving.slot_context == 32768
+        assert over.serving.cache_type == "q8_0"
 
 
 class TestTheTable:

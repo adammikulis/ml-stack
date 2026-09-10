@@ -1,4 +1,4 @@
-"""One shape per port, written down once, and one held server to take a slot on."""
+"""One serving per port, written down once, and one held server to take a slot on."""
 
 from dataclasses import replace
 from pathlib import Path
@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 
 import ml_stack.serve
-from ml_stack.serve import shape as shape_mod
-from ml_stack.serve.shape import Shape, draft_for, held, projector_for, release_all, slot
+from ml_stack.serve import serving as serving_mod
+from ml_stack.serve.serving import Serving, draft_for, held, projector_for, release_all, slot
 
 
 class Held:
@@ -37,30 +37,30 @@ def leases(monkeypatch):
         return servers[-1]
 
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
-    monkeypatch.setattr(shape_mod, "_STACKS", {})
-    monkeypatch.setattr(shape_mod, "_URLS", {})
+    monkeypatch.setattr(serving_mod, "_STACKS", {})
+    monkeypatch.setattr(serving_mod, "_URLS", {})
     yield asked, servers
 
 
-def test_a_unified_cache_is_asked_for_only_when_the_shape_says():
-    from ml_stack.serve.shape import Shape
+def test_a_unified_cache_is_asked_for_only_when_the_serving_says():
+    from ml_stack.serve.serving import Serving
 
-    assert "kv_unified" not in Shape(model="m").lease()
-    assert Shape(model="m", kv_unified=True).lease()["kv_unified"] is True
-    assert Shape(model="m", kv_unified=False).lease()["kv_unified"] is False
+    assert "kv_unified" not in Serving(model="m").lease()
+    assert Serving(model="m", kv_unified=True).lease()["kv_unified"] is True
+    assert Serving(model="m", kv_unified=False).lease()["kv_unified"] is False
 
 
 def test_a_lease_says_only_what_was_asked_for_and_the_cache_is_q8_0_unless_said():
-    plain = Shape(model="weights.gguf", port=8080, slots=2, slot_context=32768)
+    plain = Serving(model="weights.gguf", port=8080, slots=2, slot_context=32768)
     assert plain.lease() == {"port": 8080, "context": 65536, "parallel": 2,
                              "cache_type_k": "q8_0", "cache_type_v": "q8_0"}
-    full = Shape(model="weights.gguf", port=8080, slots=2, slot_context=32768, cache_type="f16")
+    full = Serving(model="weights.gguf", port=8080, slots=2, slot_context=32768, cache_type="f16")
     assert full.lease()["cache_type_k"] == "f16"
     assert plain.context == 65536, "what the server is asked for is every slot added up"
 
 
-def test_the_whole_shape_becomes_the_arguments_serve_takes():
-    full = Shape(model="weights.gguf", port=8082, slots=4, slot_context=32768,
+def test_the_whole_serving_becomes_the_arguments_serve_takes():
+    full = Serving(model="weights.gguf", port=8082, slots=4, slot_context=32768,
                  cache_type="q8_0", draft="hf:owner/repo/mtp-Q8_0.gguf", draft_n_max=4,
                  mmproj="/models/mmproj-F16.gguf", reasoning_budget=0)
     assert full.lease() == {
@@ -73,24 +73,24 @@ def test_the_whole_shape_becomes_the_arguments_serve_takes():
 
 def test_a_head_is_served_as_the_method_it_implements():
     """An EAGLE3 head served as draft-simple is not slower, it is wrong."""
-    assert Shape(model="m", draft="eagle3-head.gguf").lease()["spec_type"] == "draft-eagle3"
-    assert Shape(model="m", draft="mtp-head.gguf").lease()["spec_type"] == "draft-mtp"
+    assert Serving(model="m", draft="eagle3-head.gguf").lease()["spec_type"] == "draft-eagle3"
+    assert Serving(model="m", draft="mtp-head.gguf").lease()["spec_type"] == "draft-mtp"
     # thinking off is a decision and 0 is not "nothing was said"
-    assert Shape(model="m", reasoning_budget=0).lease()["reasoning_budget"] == 0
-    assert "reasoning_budget" not in Shape(model="m").lease()
+    assert Serving(model="m", reasoning_budget=0).lease()["reasoning_budget"] == 0
+    assert "reasoning_budget" not in Serving(model="m").lease()
 
 
 def test_a_named_build_gets_its_own_manager_and_the_default_gets_none():
-    assert Shape(model="m").manager() is None
-    manager = Shape(model="m", build="unsloth").manager()
+    assert Serving(model="m").manager() is None
+    manager = Serving(model="m", build="unsloth").manager()
     assert manager.backend._build == "unsloth"
 
 
 def test_two_models_on_two_ports_are_two_servers_and_neither_is_leased_twice(leases):
     """A single held server used to serve whichever job asked first, at four times the cost."""
     asked, _servers = leases
-    large = Shape(model="/models/large.gguf", port=8080, slots=2, slot_context=32768)
-    small = Shape(model="/models/small.gguf", port=8082, slots=4, slot_context=32768)
+    large = Serving(model="/models/large.gguf", port=8080, slots=2, slot_context=32768)
+    small = Serving(model="/models/small.gguf", port=8082, slots=4, slot_context=32768)
 
     reading = slot(large, index=0, n_predict=100)
     answering = slot(small, index=0, n_predict=100)
@@ -106,21 +106,21 @@ def test_two_models_on_two_ports_are_two_servers_and_neither_is_leased_twice(lea
 
 
 def test_every_slot_is_its_own_slot_and_a_busy_port_cycles_through_them(leases):
-    small = Shape(model="/models/small.gguf", port=8082, slots=4)
+    small = Serving(model="/models/small.gguf", port=8082, slots=4)
     assert [slot(small, index=i, n_predict=100).slot for i in range(6)] == [0, 1, 2, 3, 0, 1]
-    # a shape with no slots named still asks for a slot that exists
-    assert slot(Shape(model="/m.gguf", port=8083, slots=0), index=3, n_predict=100).slot == 0
+    # a serving with no slots named still asks for a slot that exists
+    assert slot(Serving(model="/m.gguf", port=8083, slots=0), index=3, n_predict=100).slot == 0
 
 
 def test_the_client_gets_the_ceiling_and_the_timeout_it_was_asked_for(leases):
-    client = slot(Shape(model="/m.gguf", port=8080), index=0, n_predict=16384, timeout=42.0)
+    client = slot(Serving(model="/m.gguf", port=8080), index=0, n_predict=16384, timeout=42.0)
     assert (client.n_predict, client.timeout) == (16384, 42.0)
 
 
 def test_letting_go_releases_every_held_server(leases):
     _asked, servers = leases
-    slot(Shape(model="/a.gguf", port=8080), index=0, n_predict=100)
-    slot(Shape(model="/b.gguf", port=8082), index=0, n_predict=100)
+    slot(Serving(model="/a.gguf", port=8080), index=0, n_predict=100)
+    slot(Serving(model="/b.gguf", port=8082), index=0, n_predict=100)
     release_all()
     assert [s.closed for s in servers] == [True, True]
     assert held() == {}
@@ -201,8 +201,8 @@ def shipped(monkeypatch):
     found = profile_for(FLASH, records=records_in(package_file()))
     assert found is not None, "the shipped profiles must still hold the Flash-Next record"
     run = found.run(port=8099, slots=2)
-    if run.shape.build:
-        where = managed_named() / run.shape.build
+    if run.serving.build:
+        where = managed_named() / run.serving.build
         where.mkdir(parents=True, exist_ok=True)
         fake_binary(where)
     return run
@@ -229,13 +229,13 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
     `over` knows which section owns each name, so nothing about the asking can reach the
     client at all. Mutation: send unknown names on to one of the three."""
     from ml_stack.graph.asking import Asking
-    from ml_stack.serve import Run, Shape
+    from ml_stack.serve import Run, Serving
 
-    run = Run(shape=Shape(model="weights.gguf"))
+    run = Run(serving=Serving(model="weights.gguf"))
     laid = run.over(cache_type="q8_0", few=True, reach=8000, n_predict=4096,
                     temperature=0.7, top_k=20)
-    assert laid.shape.cache_type == "q8_0" and laid.shape == replace(
-        run.shape, cache_type="q8_0")
+    assert laid.serving.cache_type == "q8_0" and laid.serving == replace(
+        run.serving, cache_type="q8_0")
     assert laid.asking == Asking(few=True, reach=8000)
     assert laid.talking.n_predict == 4096
     assert laid.talking.sampling == {"temperature": 0.7, "top_k": 20}
@@ -247,12 +247,12 @@ def test_a_knob_goes_to_the_section_that_owns_it_and_an_unknown_one_is_refused()
         run.over(tightt=True)
 
 
-def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_slot(shipped, leases,
+def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, leases,
                                                                     monkeypatch):
     """A bench row, a page answer and a client on a slot for one model are the same lease by
     construction. Three places each built their own from the profile, and llama.cpp serves
-    one shape per port: whichever leased second stopped the server and loaded the weights
-    again. Mutation: give any one of them its own Shape."""
+    one serving per port: whichever leased second stopped the server and loaded the weights
+    again. Mutation: give any one of them its own Serving."""
     from ml_stack.graph.serve import AskRoutes
 
     asked, _servers = leases
@@ -268,7 +268,7 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_slot(shipped, lea
 
     assert [model for model, _ in asked] == [FLASH, FLASH]
     def lease_of(kwargs):
-        """One lease, without what is not the shape: the bench's prefix cache and skipped
+        """One lease, without what is not the serving: the bench's prefix cache and skipped
         warm-up, and the manager, which is the named build asserted below."""
         return {k: v for k, v in kwargs.items()
                 if k not in ("cache_reuse", "warmup", "timeout", "manager")}
@@ -278,7 +278,7 @@ def test_one_run_leases_one_shape_for_the_bench_the_page_and_a_slot(shipped, lea
     assert [k["manager"].backend._build for _m, k in asked] == ["unsloth", "unsloth"], \
         "the build the record names loads it in both places, or the head does not load"
     # and `slot` asked for nothing more: the page's server is the one it took a slot on,
-    # which is what one shape per port means
+    # which is what one serving per port means
     assert len(asked) == 2 and answering.base_url == elsewhere.base_url
     assert held() == {8099: answering.base_url}
     # and the asking is one asking: what the bench asks with is what the page asks with
@@ -315,21 +315,21 @@ def test_a_knob_set_on_the_run_reaches_all_three(shipped, leases, monkeypatch):
 
 
 def test_a_new_draft_depth_reaches_the_server_and_the_request():
-    from ml_stack.serve.shape import Run, Shape, Talking
+    from ml_stack.serve.serving import Run, Serving, Talking
 
-    run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_n_max=4),
+    run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
     deeper = run.over(draft_n_max=8)
 
-    assert deeper.shape.draft_n_max == 8
+    assert deeper.serving.draft_n_max == 8
     assert deeper.talking.spec_draft_max == 8, \
         "a request that still asked for 4 would measure 4, whatever the server started at"
 
 
 def test_taking_the_head_away_takes_the_requests_depth_with_it():
-    from ml_stack.serve.shape import Run, Shape, Talking
+    from ml_stack.serve.serving import Run, Serving, Talking
 
-    run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_n_max=4),
+    run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_n_max=4),
               talking=Talking(spec_draft_max=4))
     bare = run.over(draft="", spec_type="")
 
@@ -338,41 +338,41 @@ def test_taking_the_head_away_takes_the_requests_depth_with_it():
 
 class TestDraftCacheType:
     """The draft's own KV cache: a second cache llama.cpp stores at f16 whatever the
-    target's is stored as, so a shape that wants it smaller has to say so."""
+    target's is stored as, so a serving that wants it smaller has to say so."""
 
     def test_it_reaches_the_lease_as_both_halves(self):
-        lease = Shape(model="m.gguf", draft="h.gguf", draft_cache_type="q4_0").lease()
+        lease = Serving(model="m.gguf", draft="h.gguf", draft_cache_type="q4_0").lease()
         assert lease["spec_draft_type_k"] == "q4_0"
         assert lease["spec_draft_type_v"] == "q4_0"
 
     def test_the_two_halves_can_differ(self):
-        lease = Shape(model="m.gguf", draft="h.gguf", draft_cache_type="q8_0/q4_0").lease()
+        lease = Serving(model="m.gguf", draft="h.gguf", draft_cache_type="q8_0/q4_0").lease()
         assert (lease["spec_draft_type_k"], lease["spec_draft_type_v"]) == ("q8_0", "q4_0")
 
     def test_it_is_left_out_where_nothing_guesses_ahead(self):
-        lease = Shape(model="m.gguf", draft_cache_type="q4_0").lease()
+        lease = Serving(model="m.gguf", draft_cache_type="q4_0").lease()
         assert "spec_draft_type_k" not in lease
 
     def test_a_head_inside_the_weights_still_gets_it(self):
-        lease = Shape(model="m.gguf", spec_type="draft-mtp",
+        lease = Serving(model="m.gguf", spec_type="draft-mtp",
                       draft_cache_type="q4_0").lease()
         assert lease["spec_draft_type_k"] == "q4_0"
 
     def test_the_targets_cache_is_a_different_setting(self):
-        lease = Shape(model="m.gguf", draft="h.gguf", cache_type="q8_0",
+        lease = Serving(model="m.gguf", draft="h.gguf", cache_type="q8_0",
                       draft_cache_type="q4_0").lease()
         assert lease["cache_type_k"] == "q8_0"
         assert lease["spec_draft_type_k"] == "q4_0"
 
-    def test_a_run_lays_it_over_the_shape(self):
-        from ml_stack.serve.shape import Run
+    def test_a_run_lays_it_over_the_serving(self):
+        from ml_stack.serve.serving import Run
 
-        run = Run(shape=Shape(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
-        assert run.over(draft_cache_type="q4_0").shape.draft_cache_type == "q4_0"
+        run = Run(serving=Serving(model="m.gguf", draft="h.gguf", draft_cache_type="f16"))
+        assert run.over(draft_cache_type="q4_0").serving.draft_cache_type == "q4_0"
 
 
 def test_one_cache_type_reads_both_ways():
-    from ml_stack.serve.shape import said_cache, split_cache_type
+    from ml_stack.serve.serving import said_cache, split_cache_type
 
     assert split_cache_type("q8_0") == ("q8_0", "q8_0")
     assert split_cache_type("q8_0/q4_0") == ("q8_0", "q4_0")

@@ -1,4 +1,4 @@
-"""The model a run reads with: one lease in its measured shape, held throughout."""
+"""The model a run reads with: one lease in the settings it scored best with, held throughout."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ __all__ = ["SERVE_EXTRA", "EXTRACT_SAMPLING", "_alive", "_run", "_sampling",
 
 SERVE_EXTRA: dict[str, Any] = {"timeout": 900.0, "cache_reuse": 256, "warmup": False,
                                "roam": False}
-"""What `serve` takes that no `Shape` field names: how long the server is given to come up,
+"""What `serve` takes that no `Serving` field names: how long the server is given to come up,
 how much of a prompt it may reuse from the last one, that it is not warmed, and that it is
 served on the port asked for and no other. The ingest's, not the profile's -- a measurement
 of how a model answers says nothing about them."""
@@ -62,7 +62,7 @@ def _run(args: Any, *, resolve: bool = True,
     """The whole :class:`~ml_stack.serve.Run` this ingest reads with, and the profile that
     measured it (None when nothing did).
 
-    One object -- the shape to serve the model in, the ways it measured best, the client to
+    One object -- how to serve the model, the ways it measured best, the client to
     ask it with -- built here and nowhere else, so the lease that is taken and the serving
     the run record names are the same thing rather than two derivations that drift.
 
@@ -71,7 +71,7 @@ def _run(args: Any, *, resolve: bool = True,
     the draft's length, ``--per-section`` the cap on one call, ``--n-predict`` the ceiling,
     and the samplers the client's.
     """
-    from ml_stack.serve.shape import Run, Shape, drafted
+    from ml_stack.serve.serving import Run, Serving, drafted
 
     model = str(getattr(args, "model", "") or "")
     found = str(hub.located(model, loose=True) or model) if model else ""
@@ -92,10 +92,10 @@ def _run(args: Any, *, resolve: bool = True,
     if measured is not None:
         run = measured.run(port=port, slots=slots, resolve=resolve,
                            n_predict=n_predict, timeout=timeout)
-        say(f"    serving in its measured shape: {_said(measured)}")
+        say(f"    serving in the settings it scored best with: {_said(measured)}")
         run = drafted(run, "none", say=lambda line: say(f"    {line}"))
     else:
-        run = Run(shape=Shape(model=found, port=port, slots=slots)).over(
+        run = Run(serving=Serving(model=found, port=port, slots=slots)).over(
             n_predict=n_predict, timeout=timeout)
         if found:
             asked = str(getattr(args, "draft", "auto") or "auto")
@@ -105,15 +105,15 @@ def _run(args: Any, *, resolve: bool = True,
     # the projector and a reply of several thousand tokens overran a 16k slot on the first
     # night. A profile that measured a wider slot keeps it.
     run = run.over(slot_context=max(int(getattr(args, "context", 0) or 0),
-                                    int(run.shape.slot_context or 0)))
+                                    int(run.serving.slot_context or 0)))
     sampling = _sampling(args)
     if sampling:
         run = run.over(**sampling)
-    if not getattr(args, "images", False) and run.shape.mmproj:
+    if not getattr(args, "images", False) and run.serving.mmproj:
         run = run.over(mmproj="")
     if getattr(args, "n_max", None) is not None:
         # the draft length for this run, over the one the profile measured
-        if not (run.shape.draft or run.shape.spec_type):
+        if not (run.serving.draft or run.serving.spec_type):
             say("--n-max: no draft head is being served, so there is no draft to lengthen")
         else:
             run = run.over(draft_n_max=int(args.n_max))
@@ -123,7 +123,7 @@ def _run(args: Any, *, resolve: bool = True,
 
 @contextmanager
 def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
-    """A client for the run: one lease, held throughout, in the model's measured shape,
+    """A client for the run: one lease, held throughout, in the settings the model scored best with,
     under the bench's measuring lock so the two never share the GPU.
 
     The same branch the extract bench takes, and for the same reason: a model served bare
@@ -144,7 +144,7 @@ def _serving(args: Any, say: Callable[[str], None] = say) -> Any:
         from ml_stack.serve.manager import serve
 
         began = time.time()
-        with serve(run.model, manager=run.shape.manager(), **run.lease(),
+        with serve(run.model, manager=run.serving.manager(), **run.lease(),
                    **SERVE_EXTRA) as server:
             say(f"    up in {time.time() - began:.0f}s")
             yield run.client(server.base_url, index=0)
@@ -159,7 +159,7 @@ def _alive(client: Any) -> bool:
 
 
 def _serving_said(args: Any) -> str:
-    """The measured shape a --model is served in, for the run record.
+    """The settings a --model is served in, for the run record.
 
     Read off the same `Run` `_serving` leases, so a record says what was actually asked for
     -- the slot's context, the draft's length -- and not a second derivation of it that can

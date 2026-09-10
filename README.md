@@ -155,7 +155,7 @@ on whichever machine is free rather than the one you are typing at.
 | [Installing](docs/install.md) | the four modes, the one model cache per machine, Windows, and an install a script drives |
 | [The commands](docs/commands.md) | every `ml-stack-<command>`, what it takes and what it prints |
 | [The fleet](docs/fleet.md) | joining, placing people across machines, following a branch, and running work on peers from Python |
-| [Finding and serving a model](docs/serving.md) | one manager per machine, the shape each model measured best in, how many people fit in a card, llama.cpp builds and draft heads |
+| [Finding and serving a model](docs/serving.md) | one manager per machine, the settings each model scored best with, how many people fit in a card, llama.cpp builds and draft heads |
 | [Working with a graph](docs/graph.md) | the six things a model is given instead of the graph, how a question is asked, and a conversation of any length |
 | [Documents into a graph](docs/ingest.md) | a book read section by section, with the page and the model behind every claim |
 | [Training](docs/training.md) | the loop, the recipes, and a fine-tune that ends in a model calling your own tools |

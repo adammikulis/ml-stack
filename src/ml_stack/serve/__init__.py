@@ -26,7 +26,7 @@ from ml_stack.serve.manager import (
     model_matches,
     recorded_servers,
     serve,
-    shape_mismatch,
+    serving_mismatch,
     stop_all_servers,
 )
 from ml_stack.serve.ports import (
@@ -38,9 +38,9 @@ from ml_stack.serve.ports import (
 )
 from ml_stack.serve.process import kill_pid, kill_process_tree, pid_exists
 from ml_stack.serve.profile import Profile, profile_for, profiles
-from ml_stack.serve.shape import (
+from ml_stack.serve.serving import (
     Run,
-    Shape,
+    Serving,
     Talking,
     draft_for,
     projector_for,
@@ -60,7 +60,7 @@ __all__ = [
     "Profile",
     "Run",
     "ServerSpec",
-    "Shape",
+    "Serving",
     "Talking",
     "child_env",
     "draft_for",
@@ -82,7 +82,7 @@ __all__ = [
     "slot",
     "serve",
     "server_pids_on_port",
-    "shape_mismatch",
+    "serving_mismatch",
     "stop_all_servers",
     "tail",
     "trained_context",

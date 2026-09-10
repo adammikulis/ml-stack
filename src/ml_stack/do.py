@@ -636,8 +636,8 @@ def best_on_disk() -> tuple[Any, str] | None:
 
 
 def client_for(args: argparse.Namespace) -> Any:
-    """A client on the served model: ``--url`` for one already up, ``--model`` leased in
-    its measured shape on one slot."""
+    """A client on the served model: ``--url`` for one already up, ``--model`` leased on
+    one slot in the settings it scored best with."""
     if args.url:
         from ml_stack.client import Client
 
@@ -648,13 +648,13 @@ def client_for(args: argparse.Namespace) -> Any:
     from ml_stack.serve.manager import already_up
     from ml_stack.serve.profile import profile_for, said
     from ml_stack.serve.recent import note
-    from ml_stack.serve.shape import Run, Shape, drafted, slot
+    from ml_stack.serve.serving import Run, Serving, drafted, slot
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="do")
     up = already_up(found, args.port)
     if up is not None:
-        # the weights are up already, in whatever shape: use them rather than reload them
+        # the weights are up already, whatever the settings: use them rather than reload them
         say(f"using the server already up on {args.port}: {Path(found).name}, "
             f"{up.get('slots') or '?'} slot(s)")
         return Client(str(up["base_url"]), n_predict=args.n_predict, timeout=args.timeout)
@@ -662,11 +662,11 @@ def client_for(args: argparse.Namespace) -> Any:
     if measured is not None:
         run = measured.alone(port=args.port, model=found, n_predict=args.n_predict,
                              timeout=args.timeout)
-        say(f"serving alone, one slot of {run.shape.slot_context} tokens "
-            f"({run.shape.note}): {said(measured)}")
+        say(f"serving alone, one slot of {run.serving.slot_context} tokens "
+            f"({run.serving.note}): {said(measured)}")
         run = drafted(run, "none", say=say)
     else:
-        run = Run(shape=Shape(model=found, port=args.port, slots=1, slot_context=32768,
+        run = Run(serving=Serving(model=found, port=args.port, slots=1, slot_context=32768,
                               reasoning_budget=0))
         run = drafted(run, args.draft, say=say)
     return slot(run, index=0)
@@ -681,7 +681,7 @@ def parser() -> argparse.ArgumentParser:
                     "With no TASK, tasks are read from stdin until EOF.")
     ap.add_argument("task", nargs="?", default="", metavar="TASK")
     which = ap.add_mutually_exclusive_group()
-    which.add_argument("--model", default="", help="a model to lease in its measured shape")
+    which.add_argument("--model", default="", help="a model to lease in the settings it scored best with")
     which.add_argument("--url", default="", help="a server already up, e.g. "
                                                  "http://127.0.0.1:8080")
     ap.add_argument("--port", type=int, default=8080, help="where --model is served")

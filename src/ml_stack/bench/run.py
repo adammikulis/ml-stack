@@ -56,7 +56,7 @@ from ml_stack.graph.vectors import MARGIN
 from ml_stack.log import say, warn
 from ml_stack.serve.ops import processes
 from ml_stack.serve.profile import ASK
-from ml_stack.serve.shape import DEFAULT_CACHE, SAMPLERS
+from ml_stack.serve.serving import DEFAULT_CACHE, SAMPLERS
 from ml_stack.units import human_bytes
 
 # What `--also reach` gives one tool result, in tokens, when `--reach` did not say. See
@@ -328,7 +328,7 @@ def _parser() -> argparse.ArgumentParser:
     heads.add_argument("--reasoning-budget", type=int, default=None, metavar="N",
                        help="tokens the model may spend thinking on each turn, on every arm "
                             "(llama-server --reasoning-budget; 0 turns thinking off, -1 is "
-                            "unlimited). A head and no thinking is the serving shape worth "
+                            "unlimited). A head and no thinking is the serving worth "
                             "measuring together, since drafting pays most where the tokens "
                             "are. Every label ends -rbN")
     heads.add_argument("--n-max", action="append", type=int, default=[], metavar="N",
@@ -459,7 +459,7 @@ def _parser() -> argparse.ArgumentParser:
                             "(or, --no-serve-kv-unified, a cache per slot); unset leaves "
                             "the build's default")
     sweep.add_argument("--profile", action=argparse.BooleanOptionalAction, default=True,
-                       help="serve each model in its measured shape from ml-stack's profiles "
+                       help="serve each model in the settings that scored best from ml-stack's profiles "
                             "-- the head at the length that measured best, its build, cache "
                             "type, thinking budget, raw flags and asking -- for every flag "
                             "this sweep leaves unset; --no-profile serves it bare")
@@ -655,8 +655,8 @@ def _parser() -> argparse.ArgumentParser:
                            "newest run, or the run with this label; --question narrows it")
     show.add_argument("--question", default="", metavar="SUBSTRING",
                       help="with --trace: only the question containing this")
-    show.add_argument("--by", default="", choices=("shape",), metavar="shape",
-                      help="group the rows by identical serving shape and asking, one line "
+    show.add_argument("--by", default="", choices=("serving",), metavar="serving",
+                      help="group the rows by identical serving and asking, one line "
                            "per group with the mean and the band")
     show.add_argument("--last", type=int, default=0, metavar="N",
                       help="only the newest N runs kept")
@@ -744,7 +744,7 @@ def _parser() -> argparse.ArgumentParser:
                         help="with --md, open the file with whatever this desktop opens "
                              "files with")
     report.add_argument("--profile", action="store_true",
-                        help="write each model's measured shape into profiles.json -- the "
+                        help="write each model's best settings into profiles.json -- the "
                              "build, head, cache, thinking and asking of its best row -- so "
                              "`ml-stack-serve up --profile` and `Asking.for_model` "
                              "serve and ask what was measured. Writes that and nothing else")
@@ -1038,16 +1038,16 @@ def _run(args: Any) -> int:
             before = {r["key"] for r in bench._kept(args.kept)}
             from ml_stack.serve.backend import ServerFailed
 
-            # The model's measured shape fills every flag this sweep did not set: the head
+            # The settings that scored best fill every flag this sweep did not set: the head
             # at the length that measured best, the build that loads it, the cache type,
             # the thinking budget, the raw flags, and the asking ways. Adam: "if a model
             # has a drafting head that speeds it up at some config, always use it at that
             # config (be sure to report it)". --no-profile serves it bare.
-            shaped = swept(args, model, measured_shape(args, model, head, heads, n),
+            chosen = swept(args, model, measured_run(args, model, head, heads, n),
                            context=total_context, port=args.serve_port,
                            head=head if n < len(heads) else None)
             try:
-                bench.served(shaped, questions, graph, label=stem,
+                bench.served(chosen, questions, graph, label=stem,
                        ways=_asked(args, parts),
                        binary=args.binary or "",
                        kept=args.kept,
@@ -1227,8 +1227,8 @@ def _run(args: Any) -> int:
         if getattr(args, "trace", None) is not None:
             bench.transcript(answering, args.trace, getattr(args, "question", "") or "")
             return 0
-        if getattr(args, "by", "") == "shape":
-            bench.by_shape(answering)
+        if getattr(args, "by", "") == "serving":
+            bench.by_serving(answering)
             return 0
         if getattr(args, "extract", False):
             bench_extract.table(extracted)
@@ -1568,9 +1568,9 @@ def _last_line(log: Path) -> str:
     return next((ln for ln in reversed(lines) if ln.strip()), "")
 
 
-def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> Any:
+def measured_run(args: Any, model: str, head: str, heads: Sequence[str], n: int) -> Any:
     """The `Run` the model's profile measured best in, or None with --no-profile or no
-    record. Reports the shape it took.
+    record. Reports the settings it took.
 
     The head is left out when ``--serve-draft`` named one for this model, since a flag
     beats a record; everything else the record says is on the run, and the sweep's own
@@ -1587,23 +1587,23 @@ def measured_shape(args: Any, model: str, head: str, heads: Sequence[str], n: in
         return None
     run = found.run(port=int(getattr(args, "serve_port", 8099) or 8099),
                     slots=int(getattr(args, "parallel", 1) or 1))
-    shape = run.shape
+    serving = run.serving
     said: dict[str, Any] = {}
-    if n >= len(heads) and shape.draft:
-        said["draft"] = str(shape.draft)
-    if shape.build:
-        said["build"] = shape.build
-    if shape.cache_type:
-        said["cache_type"] = shape.cache_type
-    if shape.reasoning_budget is not None:
-        said["reasoning_budget"] = int(shape.reasoning_budget)
-    if shape.draft_n_max:
-        said["draft_n_max"] = int(shape.draft_n_max)
-    serving = {k: v for k, v in (("extra_args", tuple(shape.extra_args)),
-                                 ("mmproj", shape.mmproj)) if v}
+    if n >= len(heads) and serving.draft:
+        said["draft"] = str(serving.draft)
+    if serving.build:
+        said["build"] = serving.build
+    if serving.cache_type:
+        said["cache_type"] = serving.cache_type
+    if serving.reasoning_budget is not None:
+        said["reasoning_budget"] = int(serving.reasoning_budget)
+    if serving.draft_n_max:
+        said["draft_n_max"] = int(serving.draft_n_max)
+    rest = {k: v for k, v in (("extra_args", tuple(serving.extra_args)),
+                              ("mmproj", serving.mmproj)) if v}
     asking = run.asking.said()
-    say("    measured shape: " + ", ".join(f"{k}={v}" for k, v in said.items())
-        + (f"; serving {serving}" if serving else "")
+    say("    scored best with: " + ", ".join(f"{k}={v}" for k, v in said.items())
+        + (f"; also {rest}" if rest else "")
         + (f"; asking {asking}" if asking else ""))
     return run
 
@@ -1616,16 +1616,16 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
     One object rather than twenty keyword arguments, and one place that lays a flag over a
     record, so the lease `served` takes, the ways it asks with and the client it asks with
     cannot say different things. ``context`` is the total across the slots, which is what
-    ``-c`` takes; a `Shape` holds it as every slot's share.
+    ``-c`` takes; a `Serving` holds it as every slot's share.
 
     ``head`` is what ``--serve-draft`` named for this model -- ``""`` for the bare model it
     asked for outright -- and None when it named nothing, which is where a record's own
     head stands.
     """
-    from ml_stack.serve.shape import Run, Shape
+    from ml_stack.serve.serving import Run, Serving
 
     slots = max(1, int(getattr(args, "parallel", 1) or 1))
-    run = measured if measured is not None else Run(shape=Shape(model=str(model)))
+    run = measured if measured is not None else Run(serving=Serving(model=str(model)))
     run = run.over(model=str(model), port=int(port), slots=slots,
                    slot_context=max(1, int(context) // slots),
                    timeout=float(getattr(args, "per_question", PER_QUESTION)),
@@ -1636,7 +1636,7 @@ def swept(args: Any, model: str, measured: Any, *, context: int, head: str | Non
         # is read off its own name rather than kept from the record's
         run = bench.drafted_by(run, head)
     if getattr(args, "no_draft", False):
-        # the profile's shape minus its head: what the head is worth is this run against
+        # the profile's serving minus its head: what the head is worth is this run against
         # the drafted one, two labels apart
         run = bench.drafted_by(run, "")
     if getattr(args, "serve_kv", ""):
@@ -1722,9 +1722,9 @@ def serving_lines() -> list[str]:
         got = look(port, records)
         if got is None:
             continue
-        shape = (f"{got.context // 1024}k" if got.context else "?") + \
-                (f" x{got.slots}" if got.slots else "")
-        out.append(f"  :{port}  {got.model or '?'}  {shape}")
+        served = (f"{got.context // 1024}k" if got.context else "?") + \
+                 (f" x{got.slots}" if got.slots else "")
+        out.append(f"  :{port}  {got.model or '?'}  {served}")
     return out
 
 
@@ -1784,7 +1784,7 @@ def _sampling_said(sampling: Mapping[str, Any]) -> str:
 
 
 def _how_said(how: Mapping[str, Any]) -> list[str]:
-    """The `asking:` and `shape:` lines for a record's ``how``; nothing when it has none."""
+    """The `asking:` and `serving:` lines for a record's ``how``; nothing when it has none."""
     if not how:
         return []
     said = _sampling_said(how.get("sampling") or {})
@@ -1792,15 +1792,15 @@ def _how_said(how: Mapping[str, Any]) -> list[str]:
         said += ", over what the model's card asks for"
     head, ahead = str(how.get("head") or ""), how.get("head_ahead")
     context, slots = int(how.get("context") or 0), int(how.get("slots") or 1)
-    shape = [f"draft head{'s' if ', ' in head else ''} {head}" if head else "no draft head"]
+    served = [f"draft head{'s' if ', ' in head else ''} {head}" if head else "no draft head"]
     if ahead:
-        shape.append(f"{ahead} ahead")
-    shape.append(f"{how.get('cache_type') or '?'} cache")
+        served.append(f"{ahead} ahead")
+    served.append(f"{how.get('cache_type') or '?'} cache")
     if how.get("reasoning_budget") is not None:
-        shape.append(f"thinking budget {int(how['reasoning_budget'])}")
-    shape.append((f"{context // 1024}k context" if context else "the model's own context")
-                 + f" across {slots} slot" + ("s" if slots != 1 else ""))
-    return [f"  asking: {said}", "  shape: " + "; ".join(shape)]
+        served.append(f"thinking budget {int(how['reasoning_budget'])}")
+    served.append((f"{context // 1024}k context" if context else "the model's own context")
+                  + f" across {slots} slot" + ("s" if slots != 1 else ""))
+    return [f"  asking: {said}", "  serving: " + "; ".join(served)]
 
 
 def _log_said(log: str) -> list[str]:

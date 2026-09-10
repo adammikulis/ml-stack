@@ -24,12 +24,12 @@ caches it on first use, so there is no separate fetching step.
 What makes this part worth having is the lifecycle, not the launcher. Every model server on
 a machine goes through one manager: it is written down *before* the process exists (the
 record carries the port, the model and the owner; the pid is filled in when the server
-answers, and a start that fails is forgotten), one shape is served per port and a lease
-that asks for another shape is refused with the field that differs named, a server already
+answers, and a start that fails is forgotten), one set of settings is served per port and a
+lease that asks for others is refused with the field that differs named, a server already
 serving what was asked for is adopted rather than started again, a server the record does
 not know is reported as somebody else's and never killed, and the backend launches nothing
 without the manager's lease in hand -- so an untracked server cannot come out of the
-library at all. The measured shape of each model (`ml-stack-serve profile`) is what a
+library at all. What each model scored best with (`ml-stack-serve profile`) is what a
 lease is built from, so serving and asking use the numbers that were measured rather than
 remembered. The commands below are the surface of that.
 
@@ -44,7 +44,7 @@ ml-stack-serve down
 
 `status` prints the port, the model, the context each slot gets, how many slots there are
 and which process holds the lease. `--json` gives a script the same, and it exits non-zero
-when nothing is serving. `up` adopts a server already serving that model in that shape
+when nothing is serving. `up` adopts a server already serving that model with those settings
 instead of starting a second one, and prints the base URL. `down` stops only a server
 started on this machine.
 
@@ -63,10 +63,10 @@ with serve("model.gguf", port=8899) as server:
 `serve` adopts a healthy server that is already running rather than starting a second one,
 and leaves an adopted server alone on exit. It only stops what it started.
 
-**One shape per port, written down once.** llama.cpp serves a model one way at a time, so
+**One serving per port, written down once.** llama.cpp serves a model one way at a time, so
 two parts of a program that lease it differently are not two clients of one server:
 whichever leases second finds a mismatch, stops the first and loads the weights again. A
-`Shape` is the whole shape in one object and `Shape.lease()` is the only place it becomes
+`Serving` is every server setting in one object and `Serving.lease()` is the only place it becomes
 `serve`'s arguments, so the two cannot drift apart. `slot` starts the server on the first
 ask, holds it per port for the process, and hands each caller a `Client` pinned to a slot of
 its own -- so several conversations at once do not reprocess each other's context.
@@ -74,21 +74,21 @@ its own -- so several conversations at once do not reprocess each other's contex
 ```python
 from dataclasses import replace
 
-from ml_stack.serve import Shape, slot, draft_for, projector_for
+from ml_stack.serve import Serving, slot, draft_for, projector_for
 
 model = "hf:unsloth/gemma-4-E4B-it-qat-GGUF/gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf"
-shape = Shape(model=model, port=8080, slot_context=131072, cache_type="q8_0",
-              draft=draft_for(model, "auto"),         # the head shipped beside the weights
-              draft_n_max=4, reasoning_budget=0,      # measured, not remembered
-              mmproj=projector_for(model, "auto"),    # so the model can see
-              build="unsloth")                        # a head mainline will not load
+serving = Serving(model=model, port=8080, slot_context=131072, cache_type="q8_0",
+                  draft=draft_for(model, "auto"),      # the head shipped beside the weights
+                  draft_n_max=4, reasoning_budget=0,   # measured, not remembered
+                  mmproj=projector_for(model, "auto"), # so the model can see
+                  build="unsloth")                     # a head mainline will not load
 
-client = slot(shape, index=request_number, n_predict=16384)
+client = slot(serving, index=request_number, n_predict=16384)
 
-crowded = replace(shape, slots=4, slot_context=32768)   # four conversations at once
+crowded = replace(serving, slots=4, slot_context=32768)   # four conversations at once
 ```
 
-A shape holds one slot unless it is asked for more, and that slot gets the whole context.
+A serving holds one slot unless it is asked for more, and that slot gets the whole context.
 `slots=N` divides the same memory between N conversations, each with its own KV cache. A
 lone slot is given the model's own trained window when the room allows it, read off the
 GGUF header; a context asked for past the trained window turns on YaRN position scaling by
@@ -103,18 +103,18 @@ it found nothing rather than serving undrafted or blind in silence. `release_all
 of every held server; `held()` says which ports are up.
 
 A port already serving something else is refused, with the field that differs named —
-the model, the number of slots, or the context each slot gets. Adopting a server of the
-wrong shape hands back a lease that cannot do what was asked of it.
+the model, the number of slots, or the context each slot gets. Adopting a server started with
+the wrong settings hands back a lease that cannot do what was asked of it.
 
-### The shape a model measured best in, for one kind of work
+### The settings a model scored best with, for one kind of work
 
-The `Shape` above was typed out by hand, and every value in it came from a bench run
-somebody remembered. A **profile** is that shape written down instead: one record per model
+The `Serving` above was typed out by hand, and every value in it came from a bench run
+somebody remembered. A **profile** is those settings written down instead: one record per model
 file **and workload** of the serving and the asking that measured best, and the row of the
 store that set it. `ml_stack/data/profiles.json` ships them and `~/.ml-stack/profiles.json`
 (`$MLSTACK_PROFILES_FILE`) layers this machine's own over them, exactly as `fit.json` does.
 
-There are three workloads, because the best shape depends on what the model is doing:
+There are three workloads, because the best settings depend on what the model is doing:
 `ask` (tool-calling over a graph), `ingest` (documents into JSON under a schema) and `chat`
 (prose, under no schema). A tool call is mostly JSON skeleton and repeated key names, so a
 draft head guesses it right most of the time; free prose it guesses wrong, and every wrong
@@ -160,7 +160,7 @@ line reads:
   ask with    tight + few + rounds 20 at temperature 1.0 / top-p 0.95 / top-k 20
 ```
 
-Because no two models want the same shape. Flash-Next answers well only on a fork build,
+Because no two models want the same settings. Flash-Next answers well only on a fork build,
 with the shared MTP head at four, a q8_0 cache, its thinking off, `-ub 2048`,
 `--spec-draft-p-min 0.5` and three ways of asking at once; gemma-4 wants its thinking left
 on, a different head at two, and none of those flags. Written as defaults each would be
@@ -182,7 +182,7 @@ answer = converse(question, graph, client, asking=run.asking)
 ```
 
 `Profile.run()` is a **`Run`**: the whole configuration in one object, in three sections
-that different code reads. `run.shape` is the `Shape` the server is leased in, `run.asking`
+that different code reads. `run.serving` is the `Serving` the server is leased with, `run.asking`
 is an `Asking` — the ways `converse` is called with — and `run.talking` is a `Talking`, what
 the `Client` is built from. `run.lease()`, `run.asking` and `run.client()` are the only
 places each becomes arguments, and `run.over(cache_type="f16", few=True, temperature=0.7)`
@@ -190,7 +190,7 @@ lays a knob over it, routed to the section that owns it rather than to whichever
 `**kwargs` next.
 
 Hand the same run to the bench (`bench.served(run, ...)`), to a page (`AskRoutes.run`, and
-`client_on_slot()` hands out a slot of it) and to `slot` and they lease one shape and ask one way by
+`client_on_slot()` hands out a slot of it) and to `slot` and they lease one serving and ask one way by
 construction. Three places each building their own from the record is how a knob about the
 asking reached `Client.__init__` and took an 87G load down with it, and how two of them
 could lease one port two ways — which llama.cpp answers by stopping the server and loading
@@ -198,7 +198,7 @@ the weights again.
 
 `Asking.for_model(name, workload=...)` is the way that model measured best at that work, and
 `Profile.asked()` is the same record's. A model matched only by family (the same weights at
-another quantisation) comes back with `note` saying so: a shape measured on Q4_K_XL is the
+another quantisation) comes back with `note` saying so: settings measured on Q4_K_XL are the
 right place to start for IQ4_XS and is not a measurement of it.
 
 Nothing writes a record by hand. `ml-stack-bench report --profile` takes, per model **and

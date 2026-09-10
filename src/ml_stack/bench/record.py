@@ -1,13 +1,13 @@
 """One measurement run as one record: what identifies it, what it describes, and its spread.
 
 `Measured` is what `keep.save` writes and every reader reads: the model and what served
-it, the workload it measured, the serve shape, the `Asking`, the sampling, a digest of the
+it, the workload it measured, the serving, the `Asking`, the sampling, a digest of the
 system prompt and the tool schemas (`prompt_digest`), the commit and the host, the timing,
 the per-question rows, and -- for a run measured over several seeds -- a `Spread` per
 metric. Its accessors
 are the one answer each question has: `build`, `head`, `made`, `identity`.
 
-`ml_stack.serve.shape.Run` is the other kind of run: a model to serve, asked one way. That
+`ml_stack.serve.serving.Run` is the other kind of run: a model to serve, asked one way. That
 one is a plan; this one is what a measurement left behind.
 """
 
@@ -290,7 +290,7 @@ class Measured:
 
     @property
     def serving(self) -> tuple[Any, ...]:
-        """What served this run: the model, the build, the head, and the serve shape."""
+        """What served this run: the model, the build, the head, and the serving."""
         return (self.model, self.build, self.head, self.head_ahead, self.context,
                 self.slots, self.cache_type, self.reasoning_budget)
 

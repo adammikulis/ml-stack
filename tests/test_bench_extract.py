@@ -444,18 +444,18 @@ def test_the_instructions_say_what_a_topic_is_and_name_the_relation_vocabulary()
     assert "invent nothing" in INSTRUCTIONS
 
 
-def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeypatch, tmp_path):
+def test_extract_serves_the_model_with_the_best_settings_unless_told_bare(monkeypatch, tmp_path):
     """The first extraction run of Flash-Next (2026-09-02) went up on mainline without its
     head: a different program from the one that answers. --profile (the default) takes the
-    model's measured shape; --no-profile serves it bare."""
+    settings the model scored best with; --no-profile serves it bare."""
     from ml_stack.bench import extract as ex
-    from ml_stack.serve import Shape
+    from ml_stack.serve import Serving
 
     seen = {}
 
     class Found:
-        def shape(self, port, slots):
-            return Shape(model="x.gguf", port=port, slots=slots, slot_context=4096,
+        def serving(self, port, slots):
+            return Serving(model="x.gguf", port=port, slots=slots, slot_context=4096,
                          cache_type="q8_0", build="unsloth", draft="mtp.gguf", draft_n_max=4,
                          reasoning_budget=0, extra_args=("-ub", "2048"))
 
@@ -496,7 +496,7 @@ def test_extract_serves_the_model_in_its_measured_shape_unless_told_bare(monkeyp
     assert lease["cache_type_k"] == "q8_0" and lease["extra_args"] == ("-ub", "2048")
     assert lease["context"] == 8192 and lease["parallel"] == 2, "the run's own shape wins"
 
-    # ... and told bare, the measured shape is not asked for at all
+    # ... and told bare, the record is not asked for at all
     seen.clear()
     args.profile = False
     with contextlib.suppress(SystemExit):

@@ -1,11 +1,11 @@
-"""Claude Code on a model this machine serves: one command, the measured shape, nothing else.
+"""Claude Code on a model this machine serves: one command, the settings it scored best with, nothing else.
 
 Adam: "make a very clean/easy way for me to launch claude code with llama-server."
 llama-server speaks the Messages API at ``/v1/messages`` -- streaming, tool use (with
 ``--jinja``, which every lease here carries), thinking, ``count_tokens`` -- so Claude Code
 needs no bridge, only an environment that points every request at the served model and
 keeps every other call off the network. ``ml-stack-claude MODEL [-- claude args]`` leases
-the model in its measured shape (a `Run` from its profile, the way the bench, the page and
+the model in the settings it scored best with (a `Run` from its profile, the way the bench, the page and
 the ingest lease), builds that environment, runs ``claude`` inside the lease, and lets the
 server go when Claude Code exits.
 
@@ -103,7 +103,7 @@ def alias_of(base_url: str, model: str) -> str:
 def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="ml-stack-claude", allow_abbrev=False,
-        description="Claude Code on a model this machine serves, in its measured shape. "
+        description="Claude Code on a model this machine serves, in the settings it scored best with. "
                     "Everything after `--` goes to claude.",
         usage="ml-stack-claude {MODEL | --on URL} [--port N] [--slots N] [--no-profile] [--online] "
               "[--claude PATH] [-- claude arguments]")
@@ -176,7 +176,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
 
     from ml_stack.serve import chat_template, manager, profile
     from ml_stack.serve.recent import note
-    from ml_stack.serve.shape import Run, Shape, drafted, served
+    from ml_stack.serve.serving import Run, Serving, drafted, served
 
     found = str(hub.located(args.model, loose=True) or args.model)
     note(found, by="claude")
@@ -188,17 +188,17 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
         if whole := chat_template.trained_context(found):
             from dataclasses import replace
 
-            run = replace(run, shape=replace(run.shape, slot_context=whole // max(1, args.slots)))
-        leasing(f"serving in its measured shape: {profile.said(measured)}")
+            run = replace(run, serving=replace(run.serving, slot_context=whole // max(1, args.slots)))
+        leasing(f"serving in the settings it scored best with: {profile.said(measured)}")
         if whole:
             leasing(f"  with the model's whole {whole:,}-token window, not the "
                     f"measured cache")
         run = drafted(run, "none", say=leasing)
     else:
         slot = chat_template.trained_context(found) or BARE_CONTEXT
-        run = Run(shape=Shape(model=found, port=args.port, slots=args.slots,
+        run = Run(serving=Serving(model=found, port=args.port, slots=args.slots,
                               slot_context=slot))
-        leasing(f"serving bare: no measured shape for this model, {slot:,} tokens a slot")
+        leasing(f"serving bare: nothing measured for this model, {slot:,} tokens a slot")
         try:
             run = drafted(run, args.draft, say=leasing)
         except ValueError as why:
@@ -216,7 +216,7 @@ def launch(argv: Sequence[str] | None = None, *, say: Callable[[str], None] = sa
                                                            if k != "event"))) as base_url:
         alias = alias_of(base_url, found)
         env = environment(base_url, alias, offline=not args.online,
-                          context=run.shape.context)
+                          context=run.serving.context)
         say(f"claude on {base_url} as {alias!r}, up in {time.time() - began:.0f}s")
         command = [binary, "--settings", settings(), *extra]
         runner = run_claude or (lambda cmd, env: subprocess.call(cmd, env=env))

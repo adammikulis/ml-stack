@@ -1,4 +1,4 @@
-"""ml-stack-claude: Claude Code on a served model, in its measured shape, off the network."""
+"""ml-stack-claude: Claude Code on a served model, in the settings it scored best with, off the network."""
 
 import contextlib
 import functools
@@ -22,7 +22,7 @@ def test_the_environment_points_every_model_call_at_the_server_and_nothing_elsew
                                              "alwaysThinkingEnabled": False}
 
 
-def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch, tmp_path):
+def test_launch_leases_the_best_settings_and_runs_claude_inside_it(monkeypatch, tmp_path):
     from ml_stack.serve.profile import record
 
     seen = {}
@@ -56,7 +56,7 @@ def test_launch_leases_the_measured_shape_and_runs_claude_inside_it(monkeypatch,
                           "--print", "hello"], say=lambda _: None, run_claude=run_claude)
     assert code == 7
     assert seen["lease"]["port"] == 8899 and seen["lease"]["parallel"] == 1, "one conversation, one slot"
-    assert seen["lease"]["cache_type_k"] == "q8_0", "the measured shape"
+    assert seen["lease"]["cache_type_k"] == "q8_0", "what it scored best with"
     assert seen["command"][0] == str(binary) and seen["command"][1] == "--settings"
     assert seen["command"][-2:] == ["--print", "hello"]
     assert seen["env"]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:8899"
@@ -195,7 +195,7 @@ class TestJoiningAServerAlreadyUp:
         monkeypatch.setattr(manager, "already_up",
                             lambda model, port, **_: {"base_url": f"http://127.0.0.1:{port}",
                                                       "pid": 1, "model": model})
-        monkeypatch.setattr("ml_stack.serve.shape.shape_said", lambda url: "1 slot x 32k")
+        monkeypatch.setattr("ml_stack.serve.serving.serving_said", lambda url: "1 slot x 32k")
         monkeypatch.setattr("ml_stack.serve.profile.profile_for", lambda m, **_: None)
         monkeypatch.setattr("ml_stack.hub.located",
                             lambda name, **kw: Path("/models/quince-2b-Q4_K_M.gguf"))

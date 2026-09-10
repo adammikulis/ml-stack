@@ -316,7 +316,7 @@ class ServerSpec:
     n_cpu_moe: int | None = None
     # How the *main* model's KV cache is stored -- not the draft's, which
     # `spec_draft_type_k/v` already covers. "" leaves the server's own default, which is
-    # f16; every shape ml-stack leases through (`Shape.cache_type`) asks for q8_0. A
+    # f16; every serving ml-stack leases through (`Serving.cache_type`) asks for q8_0. A
     # preflight's fit estimate reads these back to size the KV cache it predicts.
     cache_type_k: str = ""
     cache_type_v: str = ""
