@@ -230,18 +230,17 @@ across `src/`.
 ### Files that hold more than one job
 
 `scripts/gates/deep_files.py` refuses a file over 900 lines and `budgets.json` pins the
-count at 18. `scripts/budgets --show deep-files` lists them. The one with its own entry
+count. `scripts/budgets --show deep-files` lists them. The one with its own entry
 below is `bench/run.py` (2,019) under the commands; the rest, largest first:
 
-- [ ] **`fleet/daemon.py` (1,575), `serve/fit.py` (1,390), `bench/measure.py` (1,279),
-  `world/organisation.py` (1,234), `hub.py` (1,215), `world/simulate.py` (1,209),
-  `bench/extract.py` (1,094), `bench/report.py` (1,081), `serve/cli.py` (1,062),
-  `fleet/bench.py` (1,057), `bench/show.py` (1,019), `serve/build.py` (999),
-  `train/tools.py` (953), `fleet/models.py` (930).** Each is a file to read before it is a
-  file to split: the question is what jobs it holds, and the answer is a module per job with
-  a name, not a line count met by moving code sideways. `fleet/daemon.py` and `serve/cli.py`
-  are the two a newcomer meets first. Lower the budget as each lands, so the number cannot
-  drift back up.
+- [ ] **`serve/fit.py` (1,390), `bench/measure.py` (1,279), `world/organisation.py`
+  (1,233), `hub.py` (1,215), `world/simulate.py` (1,209), `bench/extract.py` (1,094),
+  `bench/report.py` (1,081), `serve/cli.py` (1,062), `bench/show.py` (1,019),
+  `serve/build.py` (999), `train/tools.py` (953), `fleet/models.py` (938).** Each is a file
+  to read before it is a file to split: the question is what jobs it holds, and the answer
+  is a module per job with a name, not a line count met by moving code sideways.
+  `serve/cli.py` is the one a newcomer meets first. Lower the budget as each lands, so the
+  number cannot drift back up.
 
 ### The commands
 
@@ -289,7 +288,7 @@ below is `bench/run.py` (2,019) under the commands; the rest, largest first:
 - [ ] **Two callers still decide for themselves what an `hf:` reference means.**
   `hub.located` is the one finder now, and it answers `None` for an `hf:` reference
   because the bench and `ml-stack-serve up` hand that string to llama.cpp for it to
-  download. `fleet/bench.py:_local_path` wants the opposite -- the file an already-fetched
+  download. `fleet/sizing.py:_at_hand` wants the opposite -- the file an already-fetched
   reference points at -- so it strips the reference to a filename and asks `located` for
   that; `serve/profile.py:_heads` skips `located` for anything starting `hf:`. Folding
   either into `located` means deciding whether a fetched reference resolves to its local
@@ -330,7 +329,7 @@ below is `bench/run.py` (2,019) under the commands; the rest, largest first:
   are keyed on that, so two machines both called `Mac` are two peers and both get work.
   Nothing else uses that token. `fleet/rates.py` keys measured speed on `(peer name, kind)`,
   so two machines of one name average into a single number and placement scores them
-  identically; `fleet/bench.py` stamps gathered runs with `_name_of(peer)`, so their
+  identically; `fleet/sweeps.py` stamps gathered runs with `_name_of(peer)`, so their
   measurements land in the store indistinguishable. Nothing checks for the collision at
   join. The default name is the hostname, and this machine already records `"host": "Mac"`.
   Fixing it means a stable per-machine identity (the current token is per process, so a
