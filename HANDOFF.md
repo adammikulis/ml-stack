@@ -581,24 +581,3 @@ ml-stack-setup                                             # the machine
 ml-stack-bench status                                      # measuring, serving, what the job kept
 ml-stack-serve profile                                     # every model's measured shape
 ```
-
-## The library work `~/Documents/repos/ecms-graph` waits on
-
-That repo's `PLAN.md` holds the whole picture: a graph-RAG demo over nuclear regulation
-where every claim carries a clause citation. What is below is its last prerequisite, and is
-worth having on its own. Its worktree is `../ml-stack-provenance-spans`; nothing is pushed.
-
-- [ ] **Provenance bottoms out at the unit, and the model never sees it.** `look_at` reads
-  label, kind, `attrs.definition` and messages — never `provenance`, never source or page —
-  so a model cannot cite what it cannot see, and there are no character spans anywhere.
-  Branch `provenance-spans`, worktree `../ml-stack-provenance-spans`; spans first, then the
-  tools, then the check. `ingest/spans.py` with `locate(text, quote, *, least=0.9)` and
-  `spans_for(extraction, unit)`: the extraction schema already requires `definition` to be
-  the source's own words, so locating it back in the unit text gives offsets — and a
-  definition that cannot be found in its own source is a fabricated one, which the span
-  search then reports rather than swallows. Thread spans through `fold.build` onto node and
-  edge provenance; `judge.located()` gains `"span"`; add `judge.quote(store, thing)`. Then
-  `graph/ask.py` gains `tools_for(..., cite=True)`, rendering source, section and page into
-  every `look_at`/`look_around` result and adding a `quote(ids)` tool. Then `graph/ground.py`
-  with `grounded(answer, store)`, naming every id in `answer.show` that carries no
-  provenance or was never read.
