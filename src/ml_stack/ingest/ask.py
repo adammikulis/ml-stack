@@ -63,14 +63,16 @@ def spent_line(spent: Any) -> str:
 
 
 def ask(graph: Mapping[str, Any], question: str, client: Any, *,
-        say: Callable[[str], None] = say, asking: Any = None) -> Any:
+        say: Callable[[str], None] = say, asking: Any = None,
+        finder: Callable[[str], list[dict[str, Any]]] | None = None) -> Any:
     """One question of a store's graph, through `graph.ask.converse`; the answer, printed.
 
-    ``asking`` is the :class:`~ml_stack.graph.Asking` to ask with. Returns the `Answer`.
+    ``asking`` is the :class:`~ml_stack.graph.Asking` to ask with. ``finder`` replaces what
+    ``look_up`` calls -- `graph.search.hybrid`, say. Returns the `Answer`.
     """
     from ml_stack.graph.ask import ASKING, converse
 
-    answer = converse(question, graph, client, asking=asking or ASKING)
+    answer = converse(question, graph, client, asking=asking or ASKING, finder=finder)
     say(answer.content or "(no answer)")
     say("  tools: " + (answer.why or "none called"))
     if answer.show or answer.ids:
@@ -110,12 +112,13 @@ def _ids_for(graph: Mapping[str, Any], wanted: Iterable[Any]) -> list[str]:
 
 
 def score_asked(graph: Mapping[str, Any], client: Any, asked: Sequence[Mapping[str, Any]], *,
-                log: Callable[[str], None] | None = None, asking: Any = None) -> list[Any]:
+                log: Callable[[str], None] | None = None, asking: Any = None,
+                finder: Callable[[str], list[dict[str, Any]]] | None = None) -> list[Any]:
     """Every question through `converse`, scored as the bench scores one: a `Row` each.
 
     Recall and precision are over the ids the answer selected against the ids the set
     expected, by `bench.score` and not by a second scorer of this command's own -- a
-    number measured two ways is two numbers.
+    number measured two ways is two numbers. ``finder`` is `ask`'s: what ``look_up`` calls.
     """
     from ml_stack.bench.score import Row
 
@@ -123,7 +126,8 @@ def score_asked(graph: Mapping[str, Any], client: Any, asked: Sequence[Mapping[s
     for index, one in enumerate(asked, start=1):
         question = str(one.get("question") or "")
         began = time.time()
-        answer = ask(graph, question, client, say=lambda _: None, asking=asking)
+        answer = ask(graph, question, client, say=lambda _: None, asking=asking,
+                     finder=finder)
         row = Row(label=str(one.get("label") or f"q{index}"), question=question,
                   seconds=round(time.time() - began, 2), calls=answer.spent.calls,
                   prompt_tokens=answer.spent.prompt_tokens,

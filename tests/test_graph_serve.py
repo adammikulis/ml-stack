@@ -834,3 +834,58 @@ def test_main_prints_where_it_is_serving_then_serves(site, monkeypatch, capsys):
     assert main(["serve", "--site", str(page), "--port", "0"]) == 0
     assert served and served[0][0] == "127.0.0.1"
     assert f"http://127.0.0.1:{served[0][1]}" in capsys.readouterr().out
+
+
+# -- the finder seam: what look_up calls, under the concrete handler ----------------------
+
+FINDER_HIT = {"id": "org:pellard", "label": "Pellard Foundry", "kind": "org"}
+
+FINDER_GRAPH = {
+    "nodes": [*GRAPH["nodes"],
+              {"id": "org:pellard", "label": "Pellard Foundry", "kind": "org",
+               "attrs": {}, "messages": []}],
+    "edges": list(GRAPH["edges"]),
+    "messages": {},
+}
+
+
+def finding_handler(*, finder):
+    """A `Handler` over `FINDER_GRAPH` whose model calls look_up once, with that finder."""
+    from ml_stack.testing import ScriptedModel
+
+    class Finding(Handler):
+        graph = FINDER_GRAPH
+
+        def finder(self):
+            return finder
+
+        def client_on_slot(self, *, index=0, **over):
+            return ScriptedModel([("look_up", {"text": "surveying"})],
+                                 answer="Pellard Foundry surveys land.")
+
+    return Finding
+
+
+def test_the_handlers_finder_is_what_look_up_calls():
+    """`finder()` replaces the built-in search under the ask route: the hit it returns is
+    what the model was given and what the answer reports as found."""
+    handler = finding_handler(finder=lambda text: [dict(FINDER_HIT)])
+    with threaded_server(handler) as url:
+        status, _, body = call(url + "/ask", "POST", {"question": "who surveys?"})
+
+    assert status == 200
+    assert body["found"] == ["org:pellard"]
+    assert "org:pellard" in body["ids"]
+    assert body["steps"] == ["looked up 'surveying'"]
+
+
+def test_without_a_finder_the_same_question_is_answered_by_the_built_in_search():
+    """The mutation of the test above: `finder()` at its default finds the graph's own
+    match for the word and never the canned hit."""
+    handler = finding_handler(finder=None)
+    with threaded_server(handler) as url:
+        status, _, body = call(url + "/ask", "POST", {"question": "who surveys?"})
+
+    assert status == 200
+    assert body["found"] == ["topic:surveying"]
+    assert "org:pellard" not in body["ids"]

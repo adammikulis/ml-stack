@@ -267,3 +267,21 @@ def test_ask_on_a_store_that_is_not_there_says_so(tmp_path, capsys):
 def test_ask_needs_a_store(capsys):
     assert ingest.main(["ask"]) == 2
     assert "ask needs --out STORE" in capsys.readouterr().err
+
+
+def test_a_finder_replaces_what_look_up_calls_when_a_set_is_scored(tmp_path):
+    """`score_asked(finder=)` reaches `converse`, so a set can be scored through
+    `graph.search.hybrid` rather than the built-in match."""
+    graph = ingest.graph_of(a_store(tmp_path))
+    asked = [{"question": "what runs in the vault?", "expected": ["seam wall"]}]
+    asked_for: list[str] = []
+
+    def finder(text):
+        asked_for.append(text)
+        return [{"id": "concept:seam-wall", "label": "seam wall", "kind": "concept"}]
+
+    rows = ingest.score_asked(graph, found_then_shown("concept:seam-wall"), asked,
+                              finder=finder)
+
+    assert asked_for == ["vault"]
+    assert rows[0].hit == 1.0

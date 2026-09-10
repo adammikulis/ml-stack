@@ -337,6 +337,11 @@ class AskRoutes:
         ``texts -> vectors``, or None. Given, every turn is embedded as it is remembered
         and recalled by meaning as well as by its words -- one embedding call per turn
         written and one per question asked.
+    ``finder()``
+        ``text -> hits``, or None. Given, it replaces what ``look_up`` calls: the model's
+        searches go through it instead of `ask.look_up`, so a subclass holding a store and
+        an embedder can hand the question to `search.hybrid` and have meaning vote beside
+        the words. Each hit is a mapping with ``id``, ``label`` and ``kind``.
     ``summariser()``
         ``turns -> str``, or None. Given, the summary is rolled forward every
         ``summary_every`` turns, after the answer has gone out: one more short model
@@ -418,6 +423,9 @@ class AskRoutes:
         return payload
 
     def embedder(self) -> Callable[[Sequence[str]], Sequence[Sequence[float]]] | None:
+        return None
+
+    def finder(self) -> Callable[[str], list[dict[str, Any]]] | None:
         return None
 
     def summariser(self) -> Callable[[Sequence[Any]], str] | None:
@@ -982,7 +990,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
 
         client = self.client_on_slot(index=0)
         asked = {"asking": self.config.asking if self.config is not None else ASKING,
-                "turns": turns, "highlighted": highlighted,
+                "turns": turns, "highlighted": highlighted, "finder": self.finder(),
                 "summary": getattr(turns, "summary", None),
                 "recalled": list(getattr(turns, "recalled", ()) or ())}
         if stream:

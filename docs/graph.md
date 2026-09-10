@@ -178,8 +178,10 @@ form, the refresh button and the note drafter each have a route behind them, and
 `ReviewRoutes` lists and acts on a `graph.review.Queue`; `RequestRoutes` keeps a request
 on disk before saying so; `RefreshRoutes` streams the stages a subclass's `stages()`
 yields; `DraftRoutes` hands ids to a `drafter`. A subclass says how a question is answered
-(`asker`), where conversations are kept (`threads`) and what each other route is given,
-and hangs its own journal off `answered`; each route is a 404 until it is given its thing,
+(`asker`), where conversations are kept (`threads`), what `look_up` calls (`finder`, which
+is where `search.hybrid` goes so meaning votes beside the words) and what each other route
+is given, and hangs its own journal off `answered`; each route is a 404 until it is given
+its thing,
 and the ones that change the machine refuse a request that came through a proxy.
 `Handler` composes them all; who may ask is still the project's policy.
 
