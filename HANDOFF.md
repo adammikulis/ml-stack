@@ -53,7 +53,7 @@ capability; every line is something that already exists not being what it says.
   reader following the README hits this in the first minute.
 - [ ] **A zero-extras install dies on `import numpy`, which contradicts the no-dependencies
   claim.** `pyproject.toml` says `dependencies = []`, but numpy is a module-level import in
-  `graph/topology.py` and `vision/geometry.py`, and `graph/ask.py` reaches the second. On a
+  `graph/topology.py` and `vision/geometry.py`, and `graph/answers.py` reaches the second. On a
   bare interpreter `ml-stack-setup`, `ml-stack-doctor`, `ml-stack-serve`, `ml-stack-ingest`
   and `fleet join` all end in `ModuleNotFoundError: numpy`. `install.sh` only survives it
   because its `EXTRAS` pull numpy in through matplotlib. Either numpy is a dependency or
@@ -211,7 +211,8 @@ across `src/`.
   `serve.serving.servers()`, `hub.on_disk()`, `jobs.recorded()`, `converse(highlighted=)`,
   `AskRoutes.asker(highlighted=)`, `Ask.highlighted`, the `highlighted` field the page
   posts, and `bench.save(server=)` -- and so are `ingest/fold.py`, `graph/tidy.py`,
-  `graph/serve.py`, `graph/ask.py`, `bench/keep.py`, `bench/extract.py`, `bench/run.py`,
+  `graph/serve.py`, the five modules `graph/ask.py` became, `bench/keep.py`,
+  `bench/extract.py`, `bench/run.py`,
   `bench/serve.py`, `bench/speed.py` and `jobs.py`. What is left is per-file:
   `ingest/sources.py` (36), `bench/measure.py` (32), `serve/manager.py` (25),
   `bench/show.py` (23), `world/simulate.py` (21), `ingest/imports.py` (20),
@@ -240,14 +241,12 @@ across `src/`.
 ### Files that hold more than one job
 
 `scripts/gates/deep_files.py` refuses a file over 900 lines and `budgets.json` pins the
-count at 19, which is where it has sat: the gate stops a twentieth appearing, it does not
-shrink the nineteen. `scripts/budgets --show deep-files` lists them. The two with their own
-entries below are `graph/ask.py` (2,404) under the tool loop and `bench/run.py` (2,019)
-under the commands; the rest, largest first:
+count at 18. `scripts/budgets --show deep-files` lists them. The one with its own entry
+below is `bench/run.py` (2,019) under the commands; the rest, largest first:
 
 - [ ] **`graph/tidy.py` (1,660), `fleet/daemon.py` (1,575), `serve/fit.py` (1,390),
-  `bench/measure.py` (1,278), `world/organisation.py` (1,234), `hub.py` (1,215),
-  `world/simulate.py` (1,205), `graph/serve.py` (1,182), `bench/extract.py` (1,094),
+  `bench/measure.py` (1,279), `world/organisation.py` (1,234), `hub.py` (1,215),
+  `world/simulate.py` (1,209), `graph/serve.py` (1,183), `bench/extract.py` (1,094),
   `bench/report.py` (1,081), `serve/cli.py` (1,062), `fleet/bench.py` (1,057),
   `bench/show.py` (1,019), `serve/build.py` (999), `train/tools.py` (953),
   `graph/store.py` (938), `fleet/models.py` (930).** Each is a file to read before it is a
@@ -264,20 +263,6 @@ under the commands; the rest, largest first:
   and nothing else -- so a `graph-labels` component beside `graph-3d`, which already places
   its own, takes the file under the limit and gives the pass a name. Take
   `deep-components` to 2 with it.
-
-### The tool loop
-
-- [ ] **`graph/ask.py` is 2,393 lines, and `deep-files` counts it as one site.** It holds
-  three jobs: the prompt text and the tool schemas (`SYSTEM`, `TOOLS`, `TERSE`, every
-  sentence a way of asking adds, `_asked`, `tools_for`), the tools themselves over a graph
-  (`look_up`, `look_at`, `look_around`, `path_between`, `list_kind`, `summarise`), and the
-  conversation (`Answer`, `_Loop`, `_converse`, `draft`). Splitting it into three modules
-  would take `deep-files` from 19 to 18 and give each half a name, but every one of the
-  seventeen test files that imports from `ml_stack.graph.ask` names the symbols directly, so
-  the move is a rename across the suite rather than a re-export. Whatever moves, the
-  prompt bytes may not: `tests/test_asking_is_the_same_asking.py` hashes the system prompt
-  and the tool schemas for every way the bench measures, and `graph/cache.py:fingerprint`
-  puts those bytes in the answer-cache key that 290 kept runs were measured against.
 
 ### The commands
 
@@ -448,6 +433,18 @@ under the commands; the rest, largest first:
 
 ### The code itself
 
+- [ ] **`tests/test_graph_ask.py` (2,383 lines) tests five modules under the name of one
+  that is gone.** `graph/ask.py` is now `graph/prompts.py`, `graph/looking.py`,
+  `graph/replies.py`, `graph/answers.py` and `graph/conversation.py`, and every test still
+  sits in one file, so a reader looking for what covers `looking.py` has to search for it.
+  Split it the way the module was, one file per module, moving whole test classes.
+- [ ] **`local-imports` went 630 -> 636 when `graph/ask.py` became five modules.** Four call
+  sites defer their import of it -- `bench/measure.py:asking`, `ingest/ask.py:ask`,
+  `graph/serve.py:asker` and `world/simulate.py:ModelWriter.__call__` -- and each now needs
+  two or four lines where it needed one. Whether any of them can import at module scope is
+  the question: `world.simulate` cannot while `graph.page` reaches into `world`, and the
+  other three are worth trying one at a time, since the gate counts a deferred import as a
+  hidden cycle.
 - [ ] **`scripts/hooks/pre-push` tells an agent to do what `CLAUDE.md` forbids.** It says to
   land a branch into local `main` and stop there; `main` is the release branch and work
   lands on the development branch. One line.
