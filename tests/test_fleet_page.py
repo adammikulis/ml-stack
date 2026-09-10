@@ -426,7 +426,10 @@ class TestTheFitView:
         page.click("nav.tabs a:has-text('Fit')")
         page.wait_for_selector(".panels svg path.ln")
         cost = page.locator(".panels .panel").nth(1).locator("svg")
-        ticks = lambda: cost.locator("text").all_text_contents()
+
+        def ticks():
+            return cost.locator("text").all_text_contents()
+
         whole = ticks()
 
         box = cost.bounding_box()
