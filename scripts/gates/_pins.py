@@ -27,7 +27,18 @@ def pins() -> dict[str, str]:
 
 @cache
 def tool(name: str) -> tuple[str, ...] | None:
-    """How to run ``name`` here, or None when it is not installed."""
+    """How to run ``name`` here, or None when it is not installed.
+
+    ``pyenv which`` names the binary a shim for ``name`` would resolve to, good from any
+    working directory rather than only this one.
+    """
+    pyenv = shutil.which("pyenv")
+    if pyenv:
+        resolved = subprocess.run([pyenv, "which", name],
+                                  capture_output=True, text=True, check=False)
+        real = resolved.stdout.strip()
+        if resolved.returncode == 0 and real:
+            return (real,)
     found = shutil.which(name)
     if found:
         return (found,)
