@@ -158,7 +158,9 @@
   const relCount = new Map();
   links.forEach(l => relCount.set(l.rel, (relCount.get(l.rel) || 0) + 1));
   const RELS = [...relCount.keys()].sort((a, b) => relCount.get(b) - relCount.get(a) || a.localeCompare(b));
-  const relText = r => r.replace(/_/g, ' ');
+  // A verb in the caller's words where it has one: `incorporates_by_reference` is the
+  // edge a reader most needs and the one they are least likely to know.
+  const relText = r => (DATA.relWords || {})[r] || String(r).replace(/_/g, ' ');
   const degree = id => (neighbors.get(id) || NONE).size;
   // a topic only one person named once is background texture: no label until you look closer
   const minor = n => n.kind === 'topic' && degree(n.id) < 2 && (n.mentions || 1) < 2;

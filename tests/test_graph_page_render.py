@@ -124,3 +124,16 @@ def test_a_graph_that_records_nothing_about_its_making_says_nothing():
     page = render({"nodes": [], "edges": []})
     assert "'built —'" not in page
     assert "filter(Boolean)" in page
+
+
+def test_a_verb_can_be_given_the_caller_s_words():
+    """`incorporates_by_reference` is the edge a reader most needs and least knows."""
+    import json
+
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []},
+                  extra={"relWords": {"incorporates_by_reference": "makes binding"}})
+    said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
+    assert said["relWords"]["incorporates_by_reference"] == "makes binding"
+    assert "(DATA.relWords || {})[r]" in page
