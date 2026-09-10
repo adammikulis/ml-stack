@@ -120,6 +120,7 @@
     const labelLayer = document.getElementById('labels3d');
     const els = new Map();
     const rad3d = n => Math.cbrt(val3d(n)) * 5;
+    const LABEL_CAP = 800;
     function build3dLabels() {
       const add = (key, cls, text) => {
         const el = document.createElement('span');
@@ -171,7 +172,11 @@
         || rank(b.ref) - rank(a.ref) || (b.ref.mentions || 0) - (a.ref.mentions || 0));
       for (const el of els.values()) el.hidden = true;
       const nowShown = new Set();
-      for (const q of queue) {
+      // this runs every frame; past LABEL_CAP candidates the lowest-ranked ones are hushed
+      // before ever being tried, so the per-frame cost stays LABEL_CAP times marks, not
+      // marks squared
+      const candidates = queue.length > LABEL_CAP ? queue.slice(0, LABEL_CAP) : queue;
+      for (const q of candidates) {
         const half = (q.ref.lw || 40) / 2 + 3;
         if (q.px < half || q.px > w - half) continue;
         const insist = q.id === M.selected || (focus && focus.has(q.id));
