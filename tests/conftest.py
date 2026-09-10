@@ -15,6 +15,7 @@ import json
 import os
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import types
@@ -26,6 +27,37 @@ import pytest
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
+
+
+def _install_git_hooks() -> None:
+    """Put this repository's hooks in place when they are not, at the start of any run.
+
+    The hooks refuse a real person's name, a budget that rose and a push from an agent, and
+    an installer someone has to remember is an installer that is not run.
+    """
+    if not (REPO / "scripts" / "install-hooks.sh").is_file():
+        return
+    try:
+        common = subprocess.run(["git", "rev-parse", "--git-common-dir"], cwd=REPO,
+                                capture_output=True, text=True, timeout=10)
+        if common.returncode != 0:
+            return
+        hooks = (REPO / common.stdout.strip()).resolve() / "hooks"
+        want = ("pre-commit", "commit-msg", "pre-push")
+        if all((hooks / h).is_symlink() and "scripts/hooks/" in str((hooks / h).readlink())
+               for h in want):
+            return
+        done = subprocess.run(["sh", str(REPO / "scripts" / "install-hooks.sh")], cwd=REPO,
+                              capture_output=True, text=True, timeout=30)
+        if done.returncode == 0:
+            print("conftest: git hooks installed")
+        else:
+            print(f"conftest: git hooks not installed: {done.stderr.strip()}")
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+_install_git_hooks()
 
 # ``src`` goes on the path above, so these cannot be imported with the rest.
 from ml_stack.testing.fakes import LLAMA_SERVER_HELP as LLAMA_SERVER_HELP  # noqa: E402

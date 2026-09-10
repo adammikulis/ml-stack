@@ -58,7 +58,7 @@ def make_repo(where: Path, *, hooks_dir: str = "scripts/hooks", commits: int = 1
     """An invented repository shipping its hooks the way the real ones do."""
     where.mkdir(parents=True)
     git(where, "init", "-q", "-b", "main")
-    for name in ("no-real-names", "commit-msg", "pre-commit"):
+    for name in ("no-real-names", "commit-msg", "pre-commit", "pre-push"):
         _script(where / hooks_dir / name, "exit 0\n")
     if hooks_dir == "scripts/hooks":
         shutil.copy(REPO / "scripts" / "install-hooks.sh", where / "scripts" / "install-hooks.sh")
@@ -82,7 +82,7 @@ def test_hooks_not_installed_is_named_with_the_installer_as_the_fix(tmp_path):
     repo = make_repo(tmp_path / "quenlow")
     found = hooks_of(repo)
     assert not found.good
-    assert found.said == "not installed: pre-commit, commit-msg"
+    assert found.said == "not installed: pre-commit, commit-msg, pre-push"
     assert found.fix == f"cd {repo} && sh scripts/install-hooks.sh"
 
 
@@ -99,7 +99,8 @@ def test_an_untracked_wrapper_that_execs_the_shipped_script_counts_as_installed(
     """A machine points the tracked hook at its own database with a wrapper; that is the
     documented shape, and it must not read as 'not installed'."""
     repo = make_repo(tmp_path / "quenlow")
-    for hook, script in (("pre-commit", "no-real-names"), ("commit-msg", "commit-msg")):
+    for hook, script in (("pre-commit", "no-real-names"), ("commit-msg", "commit-msg"),
+                         ("pre-push", "pre-push")):
         _script(repo / ".git" / "hooks" / hook,
                 'export NAMES_GRAPH=/nowhere\nexec "$(git rev-parse --show-toplevel)/'
                 f'scripts/hooks/{script}" "$@"\n')
@@ -111,7 +112,8 @@ def test_a_repository_shipping_hooks_under_services_gets_a_link_fix(tmp_path):
     found = hooks_of(repo)
     assert not found.good
     assert found.fix == (f"cd {repo} && ln -sf ../../services/hooks/pre-commit .git/hooks/pre-commit"
-                         " && ln -sf ../../services/hooks/commit-msg .git/hooks/commit-msg")
+                         " && ln -sf ../../services/hooks/commit-msg .git/hooks/commit-msg"
+                         " && ln -sf ../../services/hooks/pre-push .git/hooks/pre-push")
     subprocess.run(found.fix, shell=True, check=True)
     assert hooks_of(repo).said == "installed, from services/hooks"
 
@@ -122,7 +124,7 @@ def test_a_hook_pointing_somewhere_else_is_not_installed(tmp_path):
     hooks.mkdir(exist_ok=True)
     os.symlink("/somewhere/else/pre-commit", hooks / "pre-commit")
     _script(hooks / "commit-msg", "exit 0\n")
-    assert hooks_of(repo).said == "not installed: pre-commit, commit-msg"
+    assert hooks_of(repo).said == "not installed: pre-commit, commit-msg, pre-push"
 
 
 def test_a_repository_shipping_no_hooks_has_nothing_to_say(tmp_path):
@@ -411,7 +413,7 @@ def test_look_names_everything_and_main_exits_one_until_it_is_fixed(everything, 
     assert main(["--repo", str(repo), "--bench-home", str(home)]) == 1
     out = capsys.readouterr().out
     assert out.startswith("ml-stack: the repositories and the working state\n")
-    assert "  ! quenlow: hooks: not installed: pre-commit, commit-msg" in out
+    assert "  ! quenlow: hooks: not installed: pre-commit, commit-msg, pre-push" in out
     assert f"      fix: rm -f {home / 'measuring.json'}" in out
     assert "ok  quenlow: working tree: clean" in out
 

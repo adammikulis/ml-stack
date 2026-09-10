@@ -34,7 +34,7 @@ CHECKOUT = Path("~/Documents/repos/ml-stack").expanduser()
 STALE_BUILD_DAYS = 14
 """A managed llama.cpp older than this is noted."""
 
-HOOKS = ("pre-commit", "commit-msg")
+HOOKS = ("pre-commit", "commit-msg", "pre-push")
 """The git hooks every repository here installs, from the directory it ships them in."""
 
 _SHIPPED = ("scripts/hooks", "services/hooks")
