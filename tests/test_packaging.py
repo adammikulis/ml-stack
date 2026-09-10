@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 import zipfile
@@ -68,6 +69,22 @@ def test_serving_a_model_has_a_command_of_its_own():
     assert console_scripts().get("ml-stack-serve") == "ml_stack.serve.cli:main"
 
 
+def _binds(path: Path, attr: str) -> bool:
+    """Whether the module at ``path`` binds ``attr`` at its top level, however it does it:
+    a def, a class, an assignment, or an import from somewhere else."""
+    named = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, named) and node.name == attr:
+            return True
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                (one.asname or one.name.split(".")[0]) == attr for one in node.names):
+            return True
+        if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == attr for t in node.targets):
+            return True
+    return False
+
+
 def test_every_console_script_points_at_something_that_exists():
     scripts = console_scripts()
     assert scripts, "the package installs no commands"
@@ -76,10 +93,7 @@ def test_every_console_script_points_at_something_that_exists():
         where = REPO / "src" / Path(*module.split("."))
         path = where / "__init__.py" if where.is_dir() else where.with_suffix(".py")
         assert path.exists(), f"{name} points at {module}, which is neither module nor package"
-        text = path.read_text()
-        held = (f"def {attr}(" in text or f" {attr} as {attr}," in text
-                or f"\n{attr} = " in text)
-        assert held, f"{module} has no {attr}()"
+        assert _binds(path, attr), f"{module} has no {attr}()"
 
 
 # -- the release page ----------------------------------------------------
