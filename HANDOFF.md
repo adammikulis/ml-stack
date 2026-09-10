@@ -590,14 +590,6 @@ worth taking, in this order:
 
 ## The shared fakes
 
-- [ ] **`tests/test_serve_preflight.py` still writes its own model server as a shell
-  script.** `fake_server_process` there builds an executable out of a string of Python
-  source, answering `--help` and then `/health`, `/props`, `/v1/models` and `/completion`.
-  `ml_stack.testing.fakes.fake_llama_binary` is the same executable with every route the
-  clients read, a `--help` covering every flag `ServerSpec` emits, and a process name
-  `serve.process.every_server` matches; the swap is one call and a deletion of the
-  fixture.
-
 - [ ] **Eighteen tests monkeypatch `serve()` with a `fake_serve` of their own.** Each takes
   `**lease` and records the dict, which is the shape that lets a keyword `ServerSpec` does
   not have through unnoticed; `ml_stack.testing.fakes.FakeServe` builds a real `ServerSpec`

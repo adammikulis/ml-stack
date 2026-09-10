@@ -12,7 +12,6 @@ socket, the same way the rest of this suite prefers a real server to a mocked tr
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 import pytest
 from ml_stack.serve import backend as backend_module
@@ -20,6 +19,7 @@ from ml_stack.serve import preflight
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
 import ml_stack.serve.preflight as preflight
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
+from ml_stack.testing.fakes import fake_llama_binary
 
 from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
 from tests.conftest import leased
@@ -488,55 +488,6 @@ class TestStartRunsPreflight:
         assert reached == [True]
 
 
-def fake_server_process(tmp_path: Path) -> Path:
-    """A real, tiny executable standing in for llama-server: answers ``--help`` with
-    ``LLAMA_SERVER_HELP``, otherwise serves ``/health``, ``/props``, ``/v1/models`` and
-    ``/completion`` over a real loopback socket. Spawned for real by ``Popen``, so this
-    exercises the whole path -- health polling, ``load_s``, the warm-up completion -- with
-    nothing mocked below the socket."""
-    script = tmp_path / "llama-server"
-    script.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys, json, http.server, socketserver\n"
-        "argv = sys.argv[1:]\n"
-        f"HELP = {LLAMA_SERVER_HELP!r}\n"
-        "if '--help' in argv:\n"
-        "    sys.stdout.write(HELP)\n"
-        "    sys.exit(0)\n"
-        "def opt(flag, default=None):\n"
-        "    return argv[argv.index(flag) + 1] if flag in argv else default\n"
-        "host = opt('--host', '127.0.0.1')\n"
-        "port = int(opt('--port', '8080'))\n"
-        "class H(http.server.BaseHTTPRequestHandler):\n"
-        "    def _send(self, obj):\n"
-        "        body = json.dumps(obj).encode()\n"
-        "        self.send_response(200)\n"
-        "        self.send_header('Content-Length', str(len(body)))\n"
-        "        self.end_headers()\n"
-        "        self.wfile.write(body)\n"
-        "    def do_GET(self):\n"
-        "        if self.path.startswith('/health'):\n"
-        "            self._send({'status': 'ok'})\n"
-        "        elif self.path.startswith('/v1/models'):\n"
-        "            self._send({'data': [{'id': 'model.gguf'}]})\n"
-        "        elif self.path.startswith('/props'):\n"
-        "            self._send({'model_path': 'model.gguf', 'total_slots': 1})\n"
-        "        else:\n"
-        "            self._send({})\n"
-        "    def do_POST(self):\n"
-        "        length = int(self.headers.get('content-length') or 0)\n"
-        "        self.rfile.read(length)\n"
-        "        self._send({'content': 'warm', 'stopped_limit': False})\n"
-        "    def log_message(self, *a):\n"
-        "        pass\n"
-        "socketserver.TCPServer.allow_reuse_address = True\n"
-        "with socketserver.TCPServer((host, port), H) as httpd:\n"
-        "    httpd.serve_forever()\n"
-    )
-    script.chmod(0o755)
-    return script
-
-
 class TestLoadTimingAndWarmUp:
     """``load_s`` is wall time to the health check; ``warmup_s`` is one short completion
     sent through the real client afterward, so the first measured question is not the one
@@ -554,7 +505,7 @@ class TestLoadTimingAndWarmUp:
         from ml_stack.serve.process import kill_process_tree
 
         spec = self._spec(tmp_path, monkeypatch)
-        binary = fake_server_process(tmp_path)
+        binary = fake_llama_binary(tmp_path)
         info = leased(LlamaServerBackend(binary=binary), spec, timeout=10.0)
         try:
             assert info.load_s is not None and info.load_s >= 0.0
@@ -566,7 +517,7 @@ class TestLoadTimingAndWarmUp:
         from ml_stack.serve.process import kill_process_tree
 
         spec = self._spec(tmp_path, monkeypatch)
-        binary = fake_server_process(tmp_path)
+        binary = fake_llama_binary(tmp_path)
         info = leased(LlamaServerBackend(binary=binary), 
             spec, timeout=10.0, warmup_request=False)
         try:
