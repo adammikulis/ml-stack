@@ -149,6 +149,7 @@
         this.setAttribute('x2', x2); this.setAttribute('y2', y2);
       });
       node.attr('transform', d => `translate(${d.x},${d.y})`);
+      M.trackLabels(k);
       // A layout takes tens of seconds to settle on a graph of any size, and it spreads the
       // whole way: a frame taken early holds a knot, and everything then walks out of it.
       // So the view follows the graph until the reader moves it themselves.
@@ -156,6 +157,7 @@
     });
     const zoom = d3.zoom().scaleExtent([0.2, 4]).on('zoom', e => {
       root.attr('transform', e.transform);
+      M.scaleLabels(e.transform.k);
       // a gesture is the reader's; a programmatic transform carries no source event
       if (e.sourceEvent) following = false;
     });
@@ -429,7 +431,7 @@
         d3.zoomIdentity.translate(W / 2 - t.k * d.x, H / 2 - t.k * d.y).scale(t.k));
     }
     const resized = () => { W = wrap.clientWidth; H = wrap.clientHeight; sim.force('center', d3.forceCenter(W / 2, H / 2)).alpha(0.15).restart(); M.layoutLabels(); };
-    const view2d = { node, link, hitline, root, svg, sim, zoom, ends, radius };
+    const view2d = { node, link, hitline, root, svg, sim, ends, radius };
     Object.assign(M, { resized, view2d });
   }
   class GraphView extends HTMLElement {

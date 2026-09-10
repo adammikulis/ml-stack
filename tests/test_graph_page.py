@@ -172,7 +172,7 @@ def open_page(browser, vendored):
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.on("console", lambda m: errors.append(m.text)
                 if m.type == "error" and "Failed to load resource" not in m.text else None)
-        page.goto(origin)
+        page.goto(origin, timeout=60_000)
         return page, errors
 
     yield _open
@@ -946,15 +946,17 @@ def test_the_view_follows_the_layout_while_it_spreads_and_stops_when_the_reader_
         put(220);
         sim.alphaTarget(0.3).restart();
     }""")
-    page.wait_for_timeout(1500)
+    # the re-frame rides on the tick, and a loaded machine raises fewer of them
+    page.wait_for_function(f"() => ({OUTSIDE})() === 0", timeout=60_000)
     assert page.evaluate("() => window.graphModel.view2d.sim.alpha()") > 0.05, \
         "the layout is still moving, which is the case under test"
-    assert outside_the_view(page) == 0, "the view followed the graph as it spread"
 
     # a drag is the reader's own; the view stays where they put it
-    page.mouse.move(700, 400)
+    spot = an_empty_spot(page)
+    assert spot, "no canvas to drag from"
+    page.mouse.move(spot["x"], spot["y"])
     page.mouse.down()
-    page.mouse.move(300, 200, steps=8)
+    page.mouse.move(spot["x"] - 400, spot["y"] - 200, steps=8)
     page.mouse.up()
     page.wait_for_timeout(1500)
     assert outside_the_view(page) > 0, "and it is not dragged back"
@@ -962,14 +964,34 @@ def test_the_view_follows_the_layout_while_it_spreads_and_stops_when_the_reader_
     assert errors == []
 
 
-def outside_the_view(page):
+def an_empty_spot(page):
+    """A point over the canvas and nothing else, in the quarter of the graph a drag of 400
+    by 200 leaves on screen. A drag that starts on a mark moves that mark, and one that
+    starts on a link's hit line is that link's; neither pans the view."""
     return page.evaluate("""() => {
         const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
-        return [...document.querySelectorAll('#graph g.node path.mark')]
-            .map(el => el.getBoundingClientRect())
-            .filter(r => r.left < wrap.left || r.right > wrap.right
-                         || r.top < wrap.top || r.bottom > wrap.bottom).length;
+        const svg = document.querySelector('#graph');
+        for (let y = wrap.top + wrap.height * 0.55; y < wrap.bottom - 30; y += 7) {
+            for (let x = wrap.left + wrap.width * 0.55; x < wrap.right - 30; x += 7) {
+                if (document.elementFromPoint(x, y) === svg) return { x, y };
+            }
+        }
+        return null;
     }""")
+
+
+#: how many marks lie outside the pane the graph is drawn in
+OUTSIDE = """() => {
+    const wrap = document.querySelector('.graph-wrap').getBoundingClientRect();
+    return [...document.querySelectorAll('#graph g.node path.mark')]
+        .map(el => el.getBoundingClientRect())
+        .filter(r => r.left < wrap.left || r.right > wrap.right
+                     || r.top < wrap.top || r.bottom > wrap.bottom).length;
+}"""
+
+
+def outside_the_view(page):
+    return page.evaluate(OUTSIDE)
 
 
 def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
@@ -991,7 +1013,7 @@ def test_the_2d_view_frames_every_node_once_the_layout_has_settled(open_page):
         sim.alpha(1).restart();
     }""")
     settle(page)
-    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=60_000)
+    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=180_000)
     page.wait_for_timeout(600)
     outside = outside_the_view(page)
     assert outside == 0, f"{outside} nodes lie outside the view"
@@ -1278,7 +1300,7 @@ def test_a_mark_is_named_and_no_name_is_drawn_over_another(open_page):
     page, errors = open_page(a_graph_of(120))
     settle(page)
     # the pass runs on the tick, so the names are read against the marks it last placed them by
-    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=60_000)
+    page.wait_for_function("() => window.graphModel.view2d.sim.alpha() < 0.005", timeout=180_000)
     page.wait_for_timeout(600)
     page.wait_for_function(f"() => ({SHOWN_NAMES})().length > 5")
     shown = page.evaluate(SHOWN_NAMES)

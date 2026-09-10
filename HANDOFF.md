@@ -243,15 +243,6 @@ below is `bench/run.py` (2,019) under the commands; the rest, largest first:
   a name, not a line count met by moving code sideways. `fleet/daemon.py` and `serve/cli.py`
   are the two a newcomer meets first. Lower the budget as each lands, so the number cannot
   drift back up.
-- [ ] **Three components hold more than one screen: `fleet/web/components/fit-view.html`
-  (716), `graph/web/components/ask-pane.html` (556) and `graph/web/components/graph-view.html`
-  (531), against the 500-line limit `scripts/gates/deep_components.py` sets.** `graph-view`
-  holds the force layout, the label placement, selection and raising, the path run and the
-  travelling signal; the labels are the piece with the clearest edge -- `layoutLabels`, `gap`,
-  `labelDy`, `LABEL_CAP` and the two `was2d`/`show` sets, about 70 lines that read `M.view2d`
-  and nothing else -- so a `graph-labels` component beside `graph-3d`, which already places
-  its own, takes the file under the limit and gives the pass a name. Take
-  `deep-components` to 2 with it.
 
 ### The commands
 

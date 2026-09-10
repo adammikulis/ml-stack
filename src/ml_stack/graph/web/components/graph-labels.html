@@ -19,8 +19,8 @@
   const M = window.graphModel;
   const { NONE, display, labelText, linkDropped, linkGone, links, matches, minor, neighbors, nodes, paintRank, relText, view } = M;
   function wire() {
-    const { node, root, svg, sim, zoom, ends, radius } = M.view2d;
-    Object.assign(M, { layoutLabels, measure });
+    const { node, root, svg, sim, ends, radius } = M.view2d;
+    Object.assign(M, { layoutLabels, measure, trackLabels, scaleLabels });
     const label = node.append('text').attr('text-anchor', 'middle')
       .attr('dy', d => radius(d) + 13).text(labelText);
     const elabel = root.append('g').selectAll('text').data(links).join('text')
@@ -99,18 +99,18 @@
       elabel.classed('hushed', l => !showEdge.has(l));
     }
 
-    sim.on('tick.labels', () => {
-      const k = d3.zoomTransform(svg.node()).k;
+    // where the edge names sit, once the layout has moved the arrows under them
+    function trackLabels(k) {
       elabel.attr('transform', l => {
         const [x1, y1, x2, y2] = ends(l, k);
         return `translate(${(x1 + x2) / 2},${(y1 + y2) / 2}) scale(${1 / k})`;
       });
       if (sim.alpha() < 0.06) layoutLabels();
-    });
-    zoom.on('zoom.labels', e => {
-      label.attr('transform', `scale(${1 / e.transform.k})`);
-      if (Math.abs(e.transform.k - lastK) > lastK * 0.08) layoutLabels();
-    });
+    }
+    function scaleLabels(k) {
+      label.attr('transform', `scale(${1 / k})`);
+      if (Math.abs(k - lastK) > lastK * 0.08) layoutLabels();
+    }
   }
   class GraphLabels extends HTMLElement {
     connectedCallback() { if (!this.wired) { this.wired = true; wire(); } }
