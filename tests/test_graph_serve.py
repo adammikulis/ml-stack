@@ -18,7 +18,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 from ml_stack.graph.answers import Answer
-from ml_stack.graph.serve import Ask, AskRoutes, History, answer_payload, sse, thread_request
+from ml_stack.graph.payloads import answer_payload, sse, thread_request
+from ml_stack.graph.questions import Ask, History
+from ml_stack.graph.serve import AskRoutes
 from ml_stack.graph.store import GraphStore
 
 from conftest import threaded_server
@@ -707,7 +709,7 @@ def test_metrics_prom_is_the_same_numbers_a_scraper_can_read(served):
         assert float(said["seconds_total"]) == 1.6
         assert 'model_info{model="tiny-Q4.gguf"} 1' in body
         # every metric a scraper reads is declared, once, before its value
-        for name, _, kind_, _said in __import__("ml_stack.graph.serve", fromlist=["PROM"]).PROM:
+        for name, _, kind_, _said in __import__("ml_stack.graph.metrics", fromlist=["PROM"]).PROM:
             assert f"# TYPE {name} {kind_}" in body and f"# HELP {name} " in body
     finally:
         handler.answer = kept
@@ -716,7 +718,7 @@ def test_metrics_prom_is_the_same_numbers_a_scraper_can_read(served):
 
 def test_a_model_name_with_a_quote_in_it_does_not_break_the_exposition(served):
     """A label value is escaped, or one odd model name makes the whole scrape unparsable."""
-    from ml_stack.graph.serve import prometheus
+    from ml_stack.graph.metrics import prometheus
 
     body = prometheus({"answers": 1}, model='tiny "Q4"\\x.gguf', uptime=3.0)
     line = [ln for ln in body.splitlines() if ln.startswith("model_info")][0]

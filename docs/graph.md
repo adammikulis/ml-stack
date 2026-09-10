@@ -173,11 +173,12 @@ apiece, each holding its own style, markup and script, sharing one model -- so a
 leave a component out (`parts=`) or add one of its own file; `ml_stack.ui.assemble` is the
 assembler, for any page built this way. The ask pane, the review queue, the change-request
 form, the refresh button and the note drafter each have a route behind them, and
-`ml_stack.graph.serve` has one mixin per route: `AskRoutes` streams answers from
+there is one mixin per route: `graph.serve.AskRoutes` streams answers from
 `/ask/stream`, falls back to `/ask`, and reopens a conversation from `/thread/<name>`;
-`ReviewRoutes` lists and acts on a `graph.review.Queue`; `RequestRoutes` keeps a request
-on disk before saying so; `RefreshRoutes` streams the stages a subclass's `stages()`
-yields; `DraftRoutes` hands ids to a `drafter`. A subclass says how a question is answered
+`graph.metrics.MetricsRoutes` answers `/metrics` and `/metrics.prom`; and in
+`graph.routes`, `ReviewRoutes` lists and acts on a `graph.review.Queue`, `RequestRoutes`
+keeps a request on disk before saying so, `RefreshRoutes` streams the stages a subclass's
+`stages()` yields, and `DraftRoutes` hands ids to a `drafter`. A subclass says how a question is answered
 (`asker`), where conversations are kept (`threads`), what `look_up` calls (`finder`, which
 is where `search.hybrid` goes so meaning votes beside the words) and what each other route
 is given, and hangs its own journal off `answered`; each route is a 404 until it is given

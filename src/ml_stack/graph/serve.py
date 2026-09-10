@@ -6,14 +6,11 @@ whole answer. A server without that route gets the same question at ``/ask`` and
 one JSON body. And ``GET /thread/<name>`` reopens a conversation the graph is holding, so
 closing the tab does not end it and another machine can pick it up.
 
-``GET /metrics`` and ``GET /metrics.prom`` are the same server saying what it has spent:
-every answer's `Spent` is kept in a ring on the handler class as it goes out, and the two
-routes are that ring as JSON and as Prometheus text. Nothing has to be running for them to
-answer -- a server that has answered nothing reports zeros and its uptime, which is how a
-scraper tells a quiet server from a missing one.
+``GET /metrics`` and ``GET /metrics.prom`` are `ml_stack.graph.metrics`, mixed in here; the
+routes beside the ask ones -- refresh, review, request, draft -- are
+`ml_stack.graph.routes`.
 
-Those routes were the same in every project that rendered the page, and lived in none
-of them here. ``AskRoutes`` is that server-side half, with no opinion about where the graph
+``AskRoutes`` is the server-side half, with no opinion about where the graph
 comes from or which model answers: a subclass says how a question is answered (``asker``)
 and where conversations are kept (``threads``), and hangs whatever it wants -- a journal, a
 review queue, a slot number -- off ``answered`` and ``failed``.
@@ -63,9 +60,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 import time
-from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -75,24 +70,20 @@ from urllib.parse import unquote, urlsplit
 
 from ml_stack.asking import ASKING
 from ml_stack.graph.conversation import converse, converse_stream
+from ml_stack.graph.metrics import MetricsRoutes
+from ml_stack.graph.payloads import answer_payload, drained, sse, thread_request
+from ml_stack.graph.questions import Ask, History
+from ml_stack.graph.routes import (DraftRoutes, RefreshRoutes, RequestRoutes, ReviewRoutes)
+from ml_stack.graph.store import GraphStore
 from ml_stack.graph.thread import EVERY, WINDOW
 from ml_stack.log import say, warn
 
-__all__ = ["Ask", "AskRoutes", "DraftRoutes", "Handler", "History", "KEEP_ANSWERS",
-           "PROXY_HEADERS", "RefreshRoutes", "RequestRoutes", "ReviewRoutes", "STARTED",
-           "answer_payload", "bind", "main", "prometheus", "sse", "thread_request"]
+__all__ = ["AskRoutes", "EXPORT_TYPES", "Handler", "LIVE", "PORT", "bind", "exported", "main"]
 
 LIVE = b"<script>window.GRAPH_LIVE=1</script>"
 """What goes ahead of a served page and not a published one: the page asks a server it
 finds this on for answers, and asks nothing otherwise."""
 
-PROXY_HEADERS = ("X-Forwarded-For", "Forwarded", "Cf-Ray", "CF-Connecting-IP",
-                 "Cf-Access-Jwt-Assertion")
-"""A request wearing any of these came through a proxy or a tunnel, not from this machine.
-The routes that change what is on this machine -- review, refresh -- refuse it."""
-
-# the most a change request may carry, by field
-REQUEST_MOST = {"kind": 60, "claimed": 120, "claimedLabel": 120, "text": 2000}
 
 PORT = 8794
 """Where ``ml-stack-graph serve`` listens unless told otherwise."""
@@ -100,201 +91,8 @@ PORT = 8794
 # what an export is sent as, by suffix; anything else is bytes
 EXPORT_TYPES = {".json": "application/json", ".html": "text/html; charset=utf-8"}
 
-STARTED = time.time()
-"""When this process began, near enough: the moment this module was imported. ``/metrics``
-reports uptime against it, which is what tells a scraper that a server was restarted
-between two scrapes rather than having answered nothing."""
 
-KEEP_ANSWERS = 200
-"""How many answers the metrics ring holds. A ring and not a log: a server that answers for
-a week must not grow for a week, and what a scraper wants is the recent shape, not the
-history -- the history is in the conversation store, which is on disk and is not this."""
-
-# What `/metrics.prom` exposes, in order: the name a scraper sees, the key on
-# `Spent.totals`, whether it only ever goes up, and the line that says what it is.
-PROM = (
-    ("answers_total", "answers", "counter", "Answers given since this process started."),
-    ("calls_total", "calls", "counter", "Calls made to the model server."),
-    ("tokens_read_total", "read_tokens", "counter",
-     "Prompt tokens the server actually read (timings.prompt_n)."),
-    ("tokens_cached_total", "cached_tokens", "counter",
-     "Prompt tokens it kept from the call before (timings.cache_n)."),
-    ("tokens_written_total", "completion_tokens", "counter", "Tokens generated."),
-    ("draft_tokens_total", "draft_tokens", "counter", "Tokens guessed ahead by a draft head."),
-    ("draft_accepted_total", "draft_taken", "counter", "And accepted by the large model."),
-    ("seconds_total", "seconds", "counter", "Wall clock spent answering, on this side."),
-    ("context_peak", "context_peak", "gauge",
-     "The most one slot held: prompt plus answer, the largest of any single call."),
-)
-
-
-def prometheus(totals: Mapping[str, Any], *, model: str = "", uptime: float | None = None,
-               ) -> str:
-    """`Spent.totals` in the Prometheus text exposition format, ready to be scraped.
-
-    One HELP and one TYPE line per metric, then the value: counters for everything that
-    only goes up, gauges for the peak and the uptime, and ``model_info`` carrying the
-    served model's name as a label, which is how a name is exposed to a system that only
-    stores numbers. A missing total is 0 and not a missing line -- a scraper that loses a
-    series cannot tell a quiet server from a broken one.
-    """
-    lines: list[str] = []
-    for name, key, kind, said in PROM:
-        value = totals.get(key) or 0
-        lines += [f"# HELP {name} {said}", f"# TYPE {name} {kind}",
-                  f"{name} {_number(value)}"]
-    if uptime is not None:
-        lines += ["# HELP uptime_seconds How long this process has been up.",
-                  "# TYPE uptime_seconds gauge", f"uptime_seconds {_number(uptime)}"]
-    lines += ["# HELP model_info The served model, as a label; the value is always 1.",
-              "# TYPE model_info gauge",
-              f'model_info{{model="{_label(model)}"}} 1']
-    return "\n".join(lines) + "\n"
-
-
-def _number(value: Any) -> str:
-    """A metric value: an int stays an int, everything else is a float a scraper parses."""
-    if isinstance(value, bool) or value is None:
-        return "0"
-    if isinstance(value, int):
-        return str(value)
-    try:
-        return repr(round(float(value), 3))
-    except (TypeError, ValueError):
-        return "0"
-
-
-def _label(text: Any) -> str:
-    """A label value, escaped the way the exposition format asks: backslash, quote, newline."""
-    return (str(text or "").replace("\\", "\\\\").replace('"', '\\"')
-            .replace("\n", "\\n"))
-
-# what an answer carries to the page, in the order the page reads them: `content` is the
-# words, `ids` everything the tools touched, then the four ways they touched it, then the
-# working as one line (`why`) and one step at a time (`steps`)
-PAYLOAD = ("content", "ids", "found", "read", "path", "show", "why", "steps")
-
-
-def sse(wfile: Any, event: Mapping[str, Any]) -> None:
-    """Write one server-sent event frame -- ``data: {json}\\n\\n`` -- and flush it.
-
-    One frame per event, JSON in the data line and nothing else, because that is the whole
-    of what the page's reader parses. Flushing is the point: a frame held in a buffer until
-    the answer is complete is an answer that did not stream.
-    """
-    wfile.write(f"data: {json.dumps(dict(event), ensure_ascii=False)}\n\n".encode())
-    wfile.flush()
-
-
-def answer_payload(out: Any, **extra: Any) -> dict[str, Any]:
-    """The shape both ask routes return: an ``Answer``, or a mapping already in that shape.
-
-    ``content`` is what to say; ``ids`` what to light; ``found``, ``read``, ``path`` and
-    ``show`` how each entry was touched, kept apart because lighting what was merely found
-    as though it were the answer floods the graph; ``steps`` the working one step at a
-    time, and ``why`` the same steps joined, for anything that reads a single line.
-
-    A mapping keeps every key it came with -- a project that adds ``raised`` or
-    ``remembered`` to its answers gets them through untouched -- and only ``why`` and
-    ``steps`` are filled in from each other when one is missing. ``extra`` rides along on
-    top, for what the route knows and the answer does not.
-    """
-    if isinstance(out, Mapping):
-        payload = dict(out)
-    else:
-        payload = {k: getattr(out, k) for k in PAYLOAD if hasattr(out, k)}
-        spent = getattr(out, "spent", None)
-        if spent is not None and hasattr(spent, "public") and getattr(spent, "calls", 0):
-            # which model answered and what it cost: calls, seconds, tokens read, written,
-            # cached and drafted -- for the page's footer and for anyone testing an answer.
-            # An answer no model was asked for (a greeting, a cached one) carries neither.
-            payload["model"] = spent.model
-            payload["spent"] = spent.public()
-    payload.setdefault("content", "")
-    steps = payload.get("steps")
-    if steps is not None:
-        payload["steps"] = [str(s) for s in steps]
-    if payload.get("why") is None and steps is not None:
-        payload["why"] = "; ".join(payload["steps"])
-    if steps is None and payload.get("why"):
-        payload["steps"] = [s for s in str(payload["why"]).split("; ") if s]
-    payload.setdefault("steps", [])
-    payload.setdefault("why", "")
-    for key in ("ids", "found", "read", "path", "show"):
-        if key in payload and payload[key] is not None:
-            payload[key] = [str(i) for i in payload[key]]
-    payload.update(extra)
-    return payload
-
-
-def thread_request(path: str) -> tuple[str, bool] | None:
-    """``/thread/<name>[?working=1]`` read out of a request path; None for any other path.
-
-    The name is capped at 64 characters, which is a page's conversation id and not a
-    query. ``working`` asks for what each turn drew on, which is what lets an old answer
-    light the graph again.
-    """
-    if not path.startswith("/thread/"):
-        return None
-    rest = path[len("/thread/"):]
-    name, _, query = rest.partition("?")
-    return name[:64], "working=1" in query
-
-
-class History(list):
-    """What goes back with a question: the window as messages, and what goes ahead of it.
-
-    A list of ``{"role", "content"}`` -- the last ``WINDOW`` turns, chosen by recency alone,
-    exactly what ``history`` always returned -- so every asker that passes ``turns`` on
-    keeps working. On it, for ``converse(..., summary=, recalled=)``: ``summary`` is the
-    latest summary ``Turn`` or None, ``recalled`` the earlier turns found for this
-    question, oldest first. ``as_dict`` is the same three things by name.
-    """
-
-    __slots__ = ("summary", "recalled")
-
-    def __init__(self, turns: Sequence[Mapping[str, str]] = (), *, summary: Any = None,
-                 recalled: Sequence[Any] = ()) -> None:
-        super().__init__(turns)
-        self.summary = summary
-        self.recalled = list(recalled)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"summary": self.summary, "recalled": list(self.recalled), "turns": list(self)}
-
-
-class Ask:
-    """One question as the page sent it, after the body was checked and history resolved."""
-
-    __slots__ = ("question", "sent", "turns", "thread", "highlighted", "body", "began")
-
-    def __init__(self, body: Mapping[str, Any]) -> None:
-        self.body = dict(body)
-        self.question = str(body.get("question") or "").strip()
-        self.sent = body.get("turns") if isinstance(body.get("turns"), list) else []
-        self.turns: list = list(self.sent)
-        self.thread = str(body.get("thread") or "")[:64]
-        lit = body.get("highlighted")
-        self.highlighted = (list(lit) if isinstance(lit, list)
-                            and all(isinstance(h, str) for h in lit) else [])
-        self.began = time.time()
-
-    @property
-    def took_s(self) -> float:
-        return round(time.time() - self.began, 1)
-
-    @property
-    def summary(self) -> Any:
-        """The latest summary of the thread, when ``history`` found one."""
-        return getattr(self.turns, "summary", None)
-
-    @property
-    def recalled(self) -> list:
-        """The earlier turns recalled for this question, oldest first."""
-        return list(getattr(self.turns, "recalled", ()) or ())
-
-
-class AskRoutes:
+class AskRoutes(MetricsRoutes):
     """``/ask``, ``/ask/stream`` and ``/thread/<name>`` for a ``BaseHTTPRequestHandler``.
 
     Mix it in ahead of the handler class and call the three ``handle_*`` methods from
@@ -462,88 +260,6 @@ class AskRoutes:
 
     def failed(self, ask: Ask, exc: BaseException) -> None:
         warn(f"{time.strftime('%FT%T')} ask failed: {exc}")
-
-    # ------------------------------------------------------------ what it has spent
-
-    keep_answers: int = KEEP_ANSWERS
-
-    @classmethod
-    def _kept(cls) -> dict[str, Any]:
-        """This handler class's telemetry: when it started, how many answers, and a ring.
-
-        On the class, because ``http.server`` builds a handler per request and an instance
-        remembers nothing. On the *concrete* class and not on `AskRoutes`, so two servers
-        in one process -- a test's, and the one it is testing -- do not add up together.
-        """
-        counters = cls.__dict__.get("_telemetry")
-        if counters is None:
-            counters = {"started": time.time(), "answers": 0,
-                    "ring": deque(maxlen=max(1, int(cls.keep_answers)))}
-            cls._telemetry = counters           # on this class, not on a base of it
-        return counters
-
-    def record(self, ask: Ask | None, payload: Mapping[str, Any]) -> None:
-        """Note one answered question in the ring. Never raises: telemetry is not the answer.
-
-        What is kept is the answer's `Spent.public()` with the thread and the clock on it,
-        which is exactly what `Spent.totals` reads -- so the totals over a ring, over a
-        thread's slice of it, and over a conversation in the store are all the same
-        function over the same records. An answer no model was asked for -- a greeting, one
-        that came back from the cache -- has nothing to add and is counted, not kept.
-        """
-        try:
-            kept = self._kept()
-            kept["answers"] += 1
-            spent = payload.get("spent")
-            if isinstance(spent, Mapping) and spent.get("calls"):
-                kept["ring"].append({**spent, "at": round(time.time(), 3),
-                                     "thread": (ask.thread if ask else "")})
-        except Exception:  # noqa: BLE001 - a metric is never worth an answer
-            pass
-
-    def metrics(self) -> dict[str, Any]:
-        """The whole of this process's telemetry, as `/metrics` sends it.
-
-        ``answers`` counts every answer since the process started; ``recent`` is the last
-        `keep_answers` of them as `Spent.public()` records, newest last; ``totals`` is
-        `Spent.totals` over that ring and ``threads`` the same totals per conversation, so
-        a reader can see which thread is spending the tokens without opening the store.
-        """
-        from ml_stack.client.spent import Spent
-
-        kept = self._kept()
-        recent = list(kept["ring"])
-        threads: dict[str, Any] = {}
-        for name in dict.fromkeys(str(one.get("thread") or "") for one in recent):
-            if name:
-                threads[name] = Spent.totals([one for one in recent
-                                              if str(one.get("thread") or "") == name])
-        return {"answers": int(kept["answers"]),
-                "kept": len(recent),
-                "uptime": round(time.time() - STARTED, 1),
-                "started": round(kept["started"], 3),
-                "model": self.model_name() or (recent[-1].get("model") if recent else "") or "",
-                "url": self.serving_url(),
-                "ready": self.ready(),
-                "totals": Spent.totals(recent),
-                "threads": threads,
-                "recent": recent}
-
-    def handle_metrics(self) -> dict[str, Any]:
-        """``GET /metrics``: this process's telemetry as one JSON body."""
-        return self.send_json(200, self.metrics())
-
-    def handle_metrics_prom(self) -> str:
-        """``GET /metrics.prom``: the same numbers in the Prometheus text exposition format.
-
-        The point of the second route is that nothing has to know anything about this
-        server to watch it: a scraper already installed picks up answers, calls, tokens
-        read against tokens cached, draft acceptance and the context peak, and the peak is
-        the number that says how many more users this machine holds.
-        """
-        got = self.metrics()
-        body = prometheus(got["totals"], model=got["model"], uptime=got["uptime"])
-        return self.send_text(200, body, "text/plain; version=0.0.4; charset=utf-8")
 
     # ---------------------------------------------------------------- the routes
 
@@ -753,201 +469,10 @@ class AskRoutes:
                              stream=stream,
                              emit=emit)
             if isinstance(got, Iterator):
-                got = _drained(got, emit)
+                got = drained(got, emit)
             return got
         finally:
             self.asking = None
-
-
-def _drained(events: Iterator[Any], emit: Any) -> Any:
-    """Relay what an iterator of events yields; the answer is what it returns.
-
-    A generator that ``yield``s events and ``return``s the answer is the other natural
-    shape for a streaming asker. One that returns nothing is taken at its last ``done``
-    event, minus the ``event`` key.
-    """
-    last: Any = None
-    while True:
-        try:
-            event = next(events)
-        except StopIteration as stop:
-            if stop.value is not None:
-                return stop.value
-            break
-        if isinstance(event, Mapping) and event.get("event") == "done":
-            last = {k: v for k, v in event.items() if k != "event"}
-        elif emit is not None:
-            emit(event)
-    return last or {}
-
-
-class LocalOnly:
-    """`proxied`, for a route that answers only a request made from this machine."""
-
-    def proxied(self) -> bool:
-        """Whether the request wears a proxy or tunnel header (`PROXY_HEADERS`)."""
-        headers = getattr(self, "headers", None)
-        return headers is not None and any(headers.get(h) is not None for h in PROXY_HEADERS)
-
-    def refused(self) -> bool:
-        """A 403 for a proxied request; True when one was sent."""
-        if not self.proxied():
-            return False
-        self.send_error(403)
-        return True
-
-
-class RefreshRoutes(LocalOnly):
-    """``GET /refresh``: a re-read of the sources, streamed stage by stage.
-
-    A subclass gives ``stages()``, a generator of ``(stage, detail)`` pairs that ends with
-    ``done`` or ``error``; the page shows each as it arrives and reloads on ``done``. One
-    runs at a time: a second request while one runs is a 409. Without ``stages`` the route
-    is a 404, and a proxied request is refused.
-    """
-
-    def stages(self) -> Iterator[tuple[str, str]] | None:
-        return None
-
-    @classmethod
-    def _refresh_lock(cls) -> threading.Lock:
-        lock = cls.__dict__.get("_refreshing")
-        if lock is None:
-            lock = threading.Lock()
-            setattr(cls, "_refreshing", lock)
-        return lock
-
-    def handle_refresh(self) -> None:
-        if self.refused():
-            return
-        stages = self.stages()
-        if stages is None:
-            self.send_error(404)
-            return
-        lock = type(self)._refresh_lock()
-        if not lock.acquire(blocking=False):
-            self.send_error(409)
-            return
-        try:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            for stage, detail in stages:
-                sse(self.wfile, {"stage": str(stage), "detail": str(detail), "t": time.time()})
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-        finally:
-            lock.release()
-
-
-class ReviewRoutes(LocalOnly):
-    """``GET /review`` and ``POST /review``: the proposals waiting for a person.
-
-    ``queue`` is a `ml_stack.graph.review.Queue`; the list is ``queue.listed()`` and a POST
-    of ``{"id", "action"}`` is ``queue.act``: 404 for an id it does not hold, 400 for an
-    action it does not offer, else ``{"ok": true, "problems": [...]}``. Without a queue both
-    are 404, and a proxied request is refused.
-    """
-
-    queue: Any = None
-
-    def handle_review_list(self) -> None:
-        if self.refused():
-            return
-        if self.queue is None:
-            self.send_error(404)
-            return
-        self.send_json(200, self.queue.listed())
-
-    def handle_review_act(self, body: Mapping[str, Any]) -> None:
-        if self.refused():
-            return
-        if self.queue is None:
-            self.send_error(404)
-            return
-        from ml_stack.graph.review import ACTIONS
-
-        action = str(body.get("action") or "")
-        if action not in ACTIONS:
-            self.send_json(400, {"error": "action must be " + ", ".join(ACTIONS)})
-            return
-        try:
-            problems = self.queue.act(str(body.get("id") or ""), action)
-        except KeyError:
-            self.send_json(404, {"error": "no such proposal"})
-            return
-        self.send_json(200, {"ok": True, "problems": problems})
-
-
-class RequestRoutes:
-    """``POST /request``: a change request from the page's form, kept before it is read.
-
-    ``requests`` is the JSONL file rows are appended to; the row is checked and cut to
-    `REQUEST_MOST` first, a request with no words is a 400, and 204 goes back as soon as
-    the row is on disk. Then ``proposed(row)`` runs, after the response, for a subclass
-    that asks a model what the request means (`ml_stack.graph.requests.propose`).
-    Without ``requests`` the route is a 404.
-    """
-
-    requests: Path | None = None
-
-    def proposed(self, row: Mapping[str, Any]) -> None:
-        return None
-
-    def handle_request(self, body: Mapping[str, Any] | None) -> None:
-        if self.requests is None:
-            self.send_error(404)
-            return
-        if body is None or not str(body.get("text") or "").strip():
-            self.send_error(400)
-            return
-        row = {"at": str(body.get("at") or ""),
-               "kind": str(body.get("kind") or "")[:REQUEST_MOST["kind"]],
-               "claimed": str(body.get("claimed") or "")[:REQUEST_MOST["claimed"]],
-               "claimedLabel": str(body.get("claimedLabel") or "")[:REQUEST_MOST["claimedLabel"]],
-               "attested": bool(body.get("attested")),
-               "text": str(body["text"])[:REQUEST_MOST["text"]],
-               "targets": list(body.get("targets") or [])}
-        self.requests.parent.mkdir(parents=True, exist_ok=True)
-        with self.requests.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-        self.send_response(204)
-        self.end_headers()
-        try:
-            self.wfile.flush()
-        except OSError:
-            pass
-        self.proposed(row)
-
-
-class DraftRoutes:
-    """``POST /draft``: a note introducing the entries an answer named, for a person to send.
-
-    ``drafter(ids, question, answer)`` is the subclass's: `ml_stack.graph.conversation.draft` on the
-    graph and a slot of the model, returning its dict. 400 without ids, 404 without a
-    drafter, 500 with the exception's text when it raised.
-    """
-
-    def drafter(self, ids: list[str], question: str, answer: str) -> Mapping[str, Any] | None:
-        return None
-
-    def handle_draft(self, body: Mapping[str, Any]) -> None:
-        ids = body.get("ids")
-        if not (isinstance(ids, list) and all(isinstance(i, str) for i in ids)):
-            self.send_json(400, {"error": "no ids"})
-            return
-        try:
-            out = self.drafter(list(ids), str(body.get("question") or ""),
-                               str(body.get("answer") or ""))
-        except Exception as exc:  # noqa: BLE001 - the page shows the reason
-            warn(f"{time.strftime('%FT%T')} draft failed: {exc}")
-            self.send_json(500, {"error": str(exc)[:200]})
-            return
-        if out is None:
-            self.send_error(404)
-            return
-        self.send_json(200, dict(out))
 
 
 class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes,
@@ -1000,8 +525,6 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
     def threads(self, *, write: bool = False) -> AbstractContextManager[Any] | None:
         if self.store is None:
             return None
-        from ml_stack.graph.store import GraphStore
-
         return GraphStore(self.store, read_only=not write)
 
     # ------------------------------------------------------------------- the routes
