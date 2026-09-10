@@ -1079,3 +1079,67 @@ def test_the_two_d_view_opens_in_the_states_the_kinds_asked_for(open_page):
     page.fill("#gq", "")
     page.wait_for_function(f"() => {drawn} === 2")
     assert errors == []
+
+
+WORDS = ["clause", "annex", "schedule", "limit", "channel", "vessel", "feeder", "record",
+         "review", "report", "inspection", "tolerance", "margin", "boundary", "interface"]
+
+
+def a_crowd_of(n, per_node=2.7):
+    """``n`` nodes at the edge density and label length a read corpus reaches.
+
+    The ends of each edge are two coprime strides over the ids, which mixes them across the
+    whole graph without a generator.
+    """
+    nodes = [{"id": f"n{i}", "kind": ["person", "org", "topic"][i % 3], "mentions": 1 + i % 4,
+              "label": " ".join(WORDS[(i * 5 + w * 7) % len(WORDS)] for w in range(4))[:56]
+                       + f" {i}",
+              "attrs": {}, "messages": []} for i in range(n)]
+    edges = []
+    for i in range(int(n * per_node)):
+        a, b = (i * 7 + 3) % n, (i * 13 + 11) % n
+        if a != b:
+            edges.append({"source": f"n{a}", "target": f"n{b}", "weight": 1 + i % 3,
+                          "rel": ["works_on", "interested_in", "works_at"][i % 3],
+                          "messages": []})
+    return {"nodes": nodes, "edges": edges, "messages": {}, "stats": {"messages": 0},
+            "meta": {}}
+
+
+#: frames raised over ``ms``, and how many of them replaced the 3D labels
+FRAMES = """(ms) => new Promise(done => {
+    const first = window.graphModel.label3dRuns;
+    let frames = 0;
+    const t0 = performance.now();
+    const tick = () => { frames++;
+        if (performance.now() - t0 < ms) requestAnimationFrame(tick);
+        else done({ frames, passes: window.graphModel.label3dRuns - first }); };
+    requestAnimationFrame(tick);
+})"""
+
+
+def test_the_3d_labels_are_left_alone_on_a_frame_that_changed_nothing(open_page):
+    """Measured 2026-09-10 on 3,000 nodes: a still 3D view spent 435 ms of every three
+    seconds reprojecting labels that had not moved, 62 ms on each of the seven frames it
+    raised. Fails when the pass runs on frames that changed nothing."""
+    page, errors = open_page(a_crowd_of(3000), view="3d")
+    page.wait_for_function("() => window.graphModel.g3", timeout=180_000)
+    page.wait_for_function("() => window.graphModel.label3dRuns > 0", timeout=180_000)
+    # the reader's still view: the layout finished and the camera is not turning
+    page.evaluate("() => { window.graphModel.setSpin(false);"
+                  " window.graphModel.g3.cooldownTicks(0); }")
+    for _ in range(30):
+        settling = page.evaluate(FRAMES, 1500)
+        if settling["frames"] >= 3 and settling["passes"] == 0:
+            break
+    still = page.evaluate(FRAMES, 2000)
+    assert still["frames"] >= 3, still
+    assert still["passes"] == 0, still
+
+    was = page.evaluate("() => window.graphModel.label3dRuns")
+    page.evaluate("() => window.graphModel.g3.cameraPosition({ x: 300, y: 200, z: 1400 })")
+    page.wait_for_timeout(2000)
+    assert page.evaluate("() => window.graphModel.label3dRuns") > was
+    assert errors == []
+
+

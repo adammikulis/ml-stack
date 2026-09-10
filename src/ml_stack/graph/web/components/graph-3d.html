@@ -34,7 +34,7 @@
   function wire() {
     Object.assign(M, { setView, setSpin, flyTo, push3d, mark3dPicked, init3d });
     const wrap = document.querySelector('.graph-wrap');
-    M.g3 = null; M.is3d = false; let fitted3d = false;
+    M.g3 = null; M.is3d = false; M.label3dRuns = 0; let fitted3d = false;
     const cssVar = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
     function init3d() {
@@ -64,6 +64,7 @@
         .onNodeClick(n => { M.clearPicks(); M.select(n.id); })
         .onBackgroundClick(() => M.select(null))
         .showNavInfo(false)
+        .onEngineTick(() => { moved = true; })
         .onEngineStop(() => { if (!fitted3d) { fitted3d = true; M.g3.zoomToFit(0, 70); setTimeout(() => M.g3.zoomToFit(500, 70), 300); } });
       M.applyPhysics();
       // without this the disconnected components drift apart and zoomToFit has to frame the gaps,
@@ -110,7 +111,7 @@
       }
       return { nodes: live, links: joined };
     }
-    function push3d() { if (M.g3) { M.g3.graphData(live3d()); fitted3d = false; } }
+    function push3d() { if (M.g3) { M.g3.graphData(live3d()); fitted3d = false; moved = true; } }
     const VAL3D = { person: [6, 4], org: [2, 1], place: [2, 1], opportunity: [2, 1], topic: [0.6, 0.4] };
     function val3d(n) { const [base, per] = VAL3D[n.kind] || VAL3D.org; return base + (n.mentions || 1) * per; }
 
@@ -133,11 +134,13 @@
       nodes.forEach(n => add(n.id, 'l3 k-' + n.kind, labelText(n)));
       mark3dPicked();
       links.forEach(l => add('rel:' + l.source.id + '|' + l.rel + '|' + l.target.id, 'l3 edge', relText(l.rel)));
+      moved = true;
     }
     let was3d = new Set();
     const slot3d = new Map();
     function place3dLabels() {
       if (!M.is3d || !M.g3) return;
+      M.label3dRuns++;
       const cam = M.g3.cameraPosition(), tgt = M.g3.controls().target;
       let ax = tgt.x - cam.x, ay = tgt.y - cam.y, az = tgt.z - cam.z;
       const len = Math.hypot(ax, ay, az) || 1; ax /= len; ay /= len; az /= len;
@@ -266,6 +269,15 @@
     }
 
     let raf = 0;
+    // What the label placement reads and a frame can change: `where` is the camera, the view
+    // and the selection; `moved` is set by the layout and by the repaints others ask for.
+    let moved = true, where = '';
+    function look() {
+      const cam = M.g3.cameraPosition(), tgt = M.g3.controls().target;
+      return [cam.x, cam.y, cam.z, tgt.x, tgt.y, tgt.z, wrap.clientWidth, wrap.clientHeight,
+              M.g3.graphData().nodes.length, M.selected, display.edgeLabels,
+              view.labelScale, view.elabelScale].join(',');
+    }
     // after a node drag ends — and a plain press on a node is a zero-length drag — the
     // library resets the camera controls by synthesizing a "touch" pointerup on the
     // document; the controls then read a touch position they never stored and throw.
@@ -273,7 +285,11 @@
     document.addEventListener('pointerup', e => {
       if (!e.isTrusted && e.pointerType === 'touch') e.stopImmediatePropagation();
     }, true);
-    function frame3d() { place3dLabels(); raf = requestAnimationFrame(frame3d); }
+    function frame3d() {
+      const now = look();
+      if (moved || now !== where) { moved = false; where = now; place3dLabels(); }
+      raf = requestAnimationFrame(frame3d);
+    }
     function flyTo(id) {
       if (!M.g3) return;
       const all = M.g3.graphData().nodes;
@@ -329,6 +345,7 @@
         init3d();
         if (M.g3) {
           if (!els.size) build3dLabels();
+          moved = true;
           if (!raf) frame3d();
           M.g3.width(wrap.clientWidth).height(wrap.clientHeight).backgroundColor(cssVar('--bg'));
           M.g3.nodeColor(M.g3.nodeColor());
@@ -351,7 +368,8 @@
     document.getElementById('v2d').addEventListener('click', () => setView(false));
     document.getElementById('v3d').addEventListener('click', () => setView(true));
     document.getElementById('spin').addEventListener('click', () => setSpin(!M.g3.controls().autoRotate));
-    new ResizeObserver(() => { if (M.g3) M.g3.width(wrap.clientWidth).height(wrap.clientHeight); }).observe(wrap);
+    new ResizeObserver(() => { if (M.g3) { M.g3.width(wrap.clientWidth).height(wrap.clientHeight); moved = true; } }).observe(wrap);
+    on('refresh', () => { moved = true; });
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (M.g3) { M.g3.backgroundColor(cssVar('--bg')); M.g3.nodeColor(M.g3.nodeColor()); M.g3.linkColor(M.g3.linkColor()); } });
     let want3d = true;
     try { want3d = (localStorage.getItem('graph-view') || '3d') === '3d'; } catch (e) {}
