@@ -166,3 +166,14 @@ def test_a_node_can_say_what_state_it_opens_in():
     ], "edges": []}, kinds=[{"k": "clause", "label": "Clauses", "shape": "square"}])
     assert "startsAt[n.id] = said" in page
     assert "const stateOf = d => startsAt[d.id] || display.node[d.kind]" in page
+
+
+def test_the_panes_do_not_depend_on_the_map_being_drawn():
+    """`aside` gives its rows out in order; a page without the map has one child fewer, and
+    the panes landed in the six-pixel grip row."""
+    from ml_stack.graph.page import COMPONENTS, render
+
+    without = [n for n in COMPONENTS if n != "graph-map"]
+    page = render({"nodes": [], "edges": []}, parts=without)
+    assert "aside > .two { grid-row: -1; }" in page
+    assert "<graph-map>" not in page
