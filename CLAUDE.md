@@ -40,6 +40,31 @@ The body is for detail a reader would want later: what was wrong, what the fix i
 it costs. Plain sentences. No war stories, no rhetorical questions, no lines that argue
 with a future reader.
 
+## Nothing is cemented until 1.0
+
+This library is a work in progress. No prompt, schema, serving default, pin, name,
+signature or file layout is frozen, and none of them is worth keeping in a shape that is
+wrong.
+
+Never keep bad code to keep something green -- not a test, not a hash, not a budget, not a
+kept benchmark, not a caller that would otherwise have to change. If the right shape breaks
+one of those, change the shape and then fix what broke: update the fixture in the same
+commit as the change so cause and effect are one diff, say which kept runs stop being
+comparable, and write what needs re-measuring where the next person will read it.
+
+**Banned:** a duplicate kept so an old path still works, a wrapper preserving an old name, a
+branch for a caller nobody has, a module boundary drawn around a hash, a number left in a
+document because re-measuring is inconvenient, "we can't change that, it would invalidate
+the benchmarks".
+
+What is refused is the *accidental* version. `tests/test_asking_is_the_same_asking.py` and
+`graph/cache.py:fingerprint` exist to catch bytes moving when nobody meant them to: they are
+detectors, not vetoes. A red you can explain is a change. A red you cannot explain is a bug.
+
+(Adam, 2026-09-10: "if you have to change something, even if it invalidates old benchmarks,
+do what is best for the library"; "never hold onto old/bad code that needs changing to keep
+xyz green (including benchmarks). this lib is a WIP and nothing is cemented until 1.0".)
+
 ## The gates
 
 Six checks refuse a change rather than describing what it should have been. Run them

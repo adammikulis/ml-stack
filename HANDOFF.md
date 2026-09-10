@@ -20,13 +20,9 @@ ten questions, unconfirmed.
 Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
-A kept measurement is not a veto. Adam, 2026-09-10: "if you have to change something, even
-if it invalidates old benchmarks, do what is best for the library." So a prompt, a schema,
-a default or a pin changes when the design calls for it, and the cost is paid in the open:
-say which kept runs stop being comparable, update the fixtures in the same commit as the
-change, and write what needs re-measuring as an entry under measurements. What is still
-refused is an *accidental* change -- `tests/test_asking_is_the_same_asking.py` and
-`graph/cache.py:fingerprint` exist to catch bytes moving when nobody meant them to.
+Nothing here is blocked by a kept measurement, a hash or a pin: `CLAUDE.md` says what that
+means and what it costs. An entry that reads "we cannot change that, it would invalidate
+the benchmarks" is an entry someone should rewrite as the change plus the re-measurement.
 
 ## Fixes
 
