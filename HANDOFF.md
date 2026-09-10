@@ -20,6 +20,14 @@ ten questions, unconfirmed.
 Fixes first, then measurements that need the card, then what does not exist yet.
 Inside the fixes, most blocking first.
 
+A kept measurement is not a veto. Adam, 2026-09-10: "if you have to change something, even
+if it invalidates old benchmarks, do what is best for the library." So a prompt, a schema,
+a default or a pin changes when the design calls for it, and the cost is paid in the open:
+say which kept runs stop being comparable, update the fixtures in the same commit as the
+change, and write what needs re-measuring as an entry under measurements. What is still
+refused is an *accidental* change -- `tests/test_asking_is_the_same_asking.py` and
+`graph/cache.py:fingerprint` exist to catch bytes moving when nobody meant them to.
+
 ## Fixes
 
 What is broken, unproven, or claims more than it does. Nothing here is a new
@@ -321,9 +329,10 @@ under the commands; the rest, largest first:
   reference points at -- so it strips the reference to a filename and asks `located` for
   that; `serve/profile.py:_heads` skips `located` for anything starting `hf:`. Folding
   either into `located` means deciding whether a fetched reference resolves to its local
-  path, which changes what a sweep serves, so it is a measurement question, not a
-  refactor. Whoever takes it should check `bench.serve.served` and
-  `serve/preflight.py` first.
+  path, which changes what a sweep serves. That is a decision to make and then re-measure,
+  not a reason to leave three answers in the tree: pick one meaning, make `located` the
+  only place that holds it, and record which kept runs stop being comparable. Whoever takes
+  it should check `bench.serve.served` and `serve/preflight.py` first.
 
 ### The shared fakes
 
