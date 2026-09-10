@@ -198,7 +198,8 @@ def test_a_nonprofit_has_a_board_that_advises_the_director_and_volunteers_who_re
 
 def test_the_graph_goes_through_a_store_and_comes_back_whole(tmp_path):
     pytest.importorskip("ladybug")
-    from ml_stack.graph.store import GraphStore, replace
+    from ml_stack.graph.rebuild import replace
+    from ml_stack.graph.store import GraphStore
 
     world = make("company", "small", 2)
     written = replace(tmp_path / "world.ladybug", world.graph)

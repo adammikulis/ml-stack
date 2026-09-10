@@ -142,7 +142,7 @@ def test_read_counts_the_nodes_and_edges_it_hands_back(tmp_path):
 
 def test_a_store_can_be_snapshotted_and_rolled_back(tmp_path):
     """The real thing this exists for: a rebuild that goes wrong is not the end of the graph."""
-    from ml_stack.graph.store import count_store, roll_back, snapshot
+    from ml_stack.graph.rebuild import count_store, roll_back, snapshot
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -229,7 +229,8 @@ def a_store_of(tmp_path, n):
 
 def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
     """A pipeline that read nothing produces an empty graph, which looks exactly like this."""
-    from ml_stack.graph.store import WouldLoseTooMuch, count_store, replace
+    from ml_stack.graph.rebuild import count_store, replace
+    from ml_stack.graph.store import WouldLoseTooMuch
 
     path = a_store_of(tmp_path, 10)
     with pytest.raises(WouldLoseTooMuch, match="10 of 10"):
@@ -242,7 +243,7 @@ def test_a_write_that_would_take_most_of_the_store_is_refused(tmp_path):
 
 
 def test_an_ordinary_rebuild_still_goes_through(tmp_path):
-    from ml_stack.graph.store import count_store, replace
+    from ml_stack.graph.rebuild import count_store, replace
 
     path = a_store_of(tmp_path, 10)
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 2, "attrs": {}}
@@ -253,7 +254,7 @@ def test_an_ordinary_rebuild_still_goes_through(tmp_path):
 
 def test_a_write_that_takes_a_tenth_leaves_a_copy_behind(tmp_path):
     from ml_stack.graph.snapshots import snapshots
-    from ml_stack.graph.store import replace
+    from ml_stack.graph.rebuild import replace
 
     path = a_store_of(tmp_path, 10)
     keep = [{"id": f"n{i}", "kind": "topic", "label": f"t{i}", "mentions": 1, "attrs": {}}
@@ -276,7 +277,7 @@ def test_dropping_most_of_a_store_by_hand_is_refused_too(tmp_path):
 
 
 def test_a_store_that_does_not_exist_yet_is_simply_written(tmp_path):
-    from ml_stack.graph.store import count_store, replace
+    from ml_stack.graph.rebuild import count_store, replace
 
     fresh = tmp_path / "new" / "g"
     assert replace(fresh, GRAPH) == {"nodes": 5, "edges": 3}
@@ -298,7 +299,7 @@ def test_a_write_that_fails_partway_leaves_nothing(tmp_path):
 
 
 def test_a_rebuild_that_fails_leaves_the_old_graph(tmp_path):
-    from ml_stack.graph.store import count_store, replace
+    from ml_stack.graph.rebuild import count_store, replace
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -435,7 +436,7 @@ def test_the_word_index_is_built_while_writing_so_a_reader_can_use_it(tmp_path):
     graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"},
                        {"id": "person:ada", "label": "Ada Lovelace", "kind": "person"}],
              "edges": [], "messages": {}}
-    from ml_stack.graph.store import replace
+    from ml_stack.graph.rebuild import replace
 
     replace(path, graph)
 
@@ -459,7 +460,7 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
     A rebuild is the moment to give them one — otherwise retrieval stays silent on exactly
     the graphs people already have.
     """
-    from ml_stack.graph.store import replace
+    from ml_stack.graph.rebuild import replace
 
     path = tmp_path / "old.ladybug"
     graph = {"nodes": [{"id": "topic:robotics", "label": "robotics", "kind": "topic"}],
@@ -482,18 +483,18 @@ def test_a_store_written_before_there_was_an_index_gets_one_on_the_next_rebuild(
 def test_a_value_that_will_not_encode_is_refused_by_path_rather_than_kept_as_nothing(tmp_path):
     """`_json` used to return "{}" when json.dumps raised. A run with one unencodable
     field anywhere in it was then kept as an empty document, and nothing said so."""
-    from ml_stack.graph.store import _json
+    from ml_stack.graph.columns import as_json
 
     record = {"label": "tried", "server": {"concurrency": {"per_turn": {(0, 1): 2.0}}}}
     with pytest.raises(ValueError) as why:
-        _json(record)
+        as_json(record)
     assert "server.concurrency.per_turn[(0, 1)]" in str(why.value)
     assert "keys must be str" in str(why.value)
 
     loop: dict = {"rows": []}
     loop["rows"].append(loop)
     with pytest.raises(ValueError, match=r"rows\[0\] \(refers to itself\)"):
-        _json(loop)
+        as_json(loop)
 
     with GraphStore(tmp_path / "g") as store:
         with pytest.raises(ValueError, match="per_turn"):
@@ -586,7 +587,8 @@ def test_a_node_or_edge_that_does_not_read_back_is_refused_at_the_write(tmp_path
 
 
 def test_a_rebuild_whose_count_does_not_match_is_rolled_back(tmp_path, monkeypatch):
-    from ml_stack.graph.store import StoreMismatch, count_store, replace
+    from ml_stack.graph.rebuild import count_store, replace
+    from ml_stack.graph.store import StoreMismatch
 
     path = tmp_path / "g"
     with GraphStore(path) as store:
@@ -752,25 +754,25 @@ def test_each_vector_search_on_a_handle_answers_its_own_question(tmp_path):
 # -- a column that does not hold an object is refused, never read as an empty one ----------
 
 def test_a_json_value_that_is_not_an_object_is_refused_by_name():
-    from ml_stack.graph.store import _unjson
+    from ml_stack.graph.columns import from_json
 
-    assert _unjson(None) == {}
-    assert _unjson("") == {}
-    assert _unjson("null") == {}
-    assert _unjson('{"a": 1}') == {"a": 1}
-    assert _unjson({"a": 1}) == {"a": 1}
+    assert from_json(None) == {}
+    assert from_json("") == {}
+    assert from_json("null") == {}
+    assert from_json('{"a": 1}') == {"a": 1}
+    assert from_json({"a": 1}) == {"a": 1}
     with pytest.raises(ValueError, match="a list, not an object"):
-        _unjson("[1, 2]")
+        from_json("[1, 2]")
     with pytest.raises(ValueError, match="a str, not an object"):
-        _unjson('"role"')
+        from_json('"role"')
     with pytest.raises(ValueError, match="an int, not an object"):
-        _unjson("7")
+        from_json("7")
     with pytest.raises(ValueError, match="not JSON: '\\{\"a\": '"):
-        _unjson('{"a": ')
+        from_json('{"a": ')
     with pytest.raises(ValueError, match="not JSON: 'analyst'"):
-        _unjson("analyst")
+        from_json("analyst")
     with pytest.raises(ValueError, match="an int, not an object"):
-        _unjson(7)
+        from_json(7)
 
 
 def test_a_node_whose_attrs_hold_a_list_is_refused_when_read(tmp_path):

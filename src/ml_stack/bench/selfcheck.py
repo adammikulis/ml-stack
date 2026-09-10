@@ -151,7 +151,7 @@ def _scratch_store(where: Path) -> Path:
     """The invented community in a store of its own, word index built, as `prepare` builds
     the real one; what look_up searches and a shortlist reads when the run names one."""
     from ml_stack.graph.community import graph as invented
-    from ml_stack.graph.store import replace
+    from ml_stack.graph.rebuild import replace
 
     replace(where, invented())
     return where

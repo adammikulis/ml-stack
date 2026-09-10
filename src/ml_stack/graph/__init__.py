@@ -19,8 +19,9 @@ from ml_stack.graph.snapshots import Snapshot, SnapshotError, prune, restore, sn
 from ml_stack.graph.tensors import tensors
 from ml_stack.graph.tidy import HIERARCHY, cycles
 from ml_stack.graph.vectors import DOCUMENT, QUERY, TASK, embedded, remember, smooth
+from ml_stack.graph.rebuild import count_store, replace, roll_back, snapshot
 from ml_stack.graph.store import (GraphStore, GraphStoreUnavailable, StoreNeedsUpgrade,
-                                  WouldLoseTooMuch, count_store, replace, roll_back, snapshot)
+                                  WouldLoseTooMuch)
 from ml_stack.graph.dag import (
     NotADAG,
     clear_cache,

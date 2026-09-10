@@ -25,6 +25,8 @@ from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
+from ml_stack.graph.columns import as_json, column, differences, from_json, refused
+
 NODE_TABLE = """CREATE NODE TABLE IF NOT EXISTS Node(
     id STRING, kind STRING, label STRING, mentions INT64, attrs STRING, data STRING,
     PRIMARY KEY (id))"""
@@ -70,94 +72,6 @@ class StoreMismatch(RuntimeError):
 # read nothing produces an empty graph, and an empty graph looks exactly like "delete
 # everything" to anything that trusts it.
 MOST = 0.5
-# and how much before a verified copy is taken on the way past
-COPY_OVER = 0.1
-
-
-def _json(value: Any) -> str:
-    """A value as the JSON the store keeps, or a ValueError naming what will not encode.
-
-    It used to return ``"{}"`` when ``json.dumps`` raised, which is the one thing a store
-    must never do: a value it cannot keep became a value that was kept as nothing, and
-    nothing said so. Objects go through ``str`` -- a Path, a dataclass, a numpy scalar --
-    because losing their type is better than losing the record; what remains unencodable
-    is a key that is not a string, or a value that refers to itself, and either is a bug at
-    the caller that this names by path rather than hides.
-    """
-    try:
-        return json.dumps(value or {}, ensure_ascii=False, default=str)
-    except (TypeError, ValueError) as why:
-        raise ValueError(f"{_blame(value)}: {why}") from why
-
-
-def _blame(value: Any, path: str = "value", seen: frozenset[int] = frozenset()) -> str:
-    """The path to the first thing in ``value`` that ``json.dumps`` refuses: a key that is
-    not a string, a container that holds itself, or a leaf ``str`` cannot render."""
-    if isinstance(value, (Mapping, list, tuple)):
-        if id(value) in seen:
-            return f"{path} (refers to itself)"
-        seen = seen | {id(value)}
-    if isinstance(value, Mapping):
-        for key, inner in value.items():
-            if not isinstance(key, (str, int, float, bool)) and key is not None:
-                return f"{path}[{key!r}]"
-            found = _blame(inner, f"{path}.{key}" if isinstance(key, str) else f"{path}[{key!r}]",
-                           seen)
-            if found:
-                return found
-        return ""
-    if isinstance(value, (list, tuple)):
-        for n, inner in enumerate(value):
-            found = _blame(inner, f"{path}[{n}]", seen)
-            if found:
-                return found
-        return ""
-    try:
-        json.dumps(value, default=str)
-    except (TypeError, ValueError):
-        return path
-    return ""
-
-
-def _unjson(raw: Any) -> dict[str, Any]:
-    """A JSON column as a dict. None, "" and null read as {}; anything else that is not an
-    object, or is not JSON at all, raises ValueError."""
-    if isinstance(raw, dict):
-        return raw
-    if raw is None or raw == "":
-        return {}
-    if isinstance(raw, (bytes, bytearray)):
-        raw = raw.decode("utf-8", "replace")
-    if isinstance(raw, str):
-        try:
-            out = json.loads(raw)
-        except ValueError:
-            raise ValueError(f"not JSON: {raw[:40]!r}") from None
-    else:
-        out = raw
-    if out is None:
-        return {}
-    if not isinstance(out, dict):
-        kind = type(out).__name__
-        raise ValueError(f"{'an' if kind[0] in 'aeiou' else 'a'} {kind}, not an object")
-    return out
-
-
-def _column(raw: Any, what: str) -> dict[str, Any]:
-    """_unjson, with the record and column named when it refuses."""
-    try:
-        return _unjson(raw)
-    except ValueError as exc:
-        raise ValueError(f"{what}: {exc}") from None
-
-
-def _refused(raw: Any, what: str) -> list[str]:
-    """One line naming the record and column when it does not hold a JSON object; else none."""
-    try:
-        _column(raw, what)
-    except ValueError as exc:
-        return [str(exc)]
-    return []
 
 
 _MISSING = object()
@@ -166,89 +80,6 @@ _MISSING = object()
 NODE_BY_ID = ("MATCH (n:Node {id:$id}) RETURN n.id AS id, n.kind AS kind, n.label AS label, "
               "n.mentions AS mentions, n.attrs AS attrs, n.data AS data")
 
-
-def _shown(value: Any) -> str:
-    """A value short enough for one line: long strings by their length."""
-    if isinstance(value, str) and len(value) > 40:
-        return f"{len(value)} chars"
-    return repr(value)
-
-
-def _differences(a: Mapping[str, Any], b: Mapping[str, Any], a_name: str = "written",
-                 b_name: str = "read") -> str:
-    """The columns two rows disagree on, as ``col (written X, read Y)``, on one line."""
-    parts = [f"{col} ({a_name} {_shown(a.get(col))}, {b_name} {_shown(b.get(col))})"
-             for col in sorted(set(a) | set(b)) if a.get(col) != b.get(col)]
-    return ", ".join(parts) or "nothing, yet the rows differ"
-
-
-def replace(path: str | Path, graph: Mapping[str, Any], *, force: bool = False,
-            keep_copy: bool = True) -> dict[str, int]:
-    """Make the store hold this graph and nothing else, safely.
-
-    The safe part is the point. Anything no longer in the graph goes, but a write that would
-    take most of the store is refused rather than performed, and one that would take a tenth
-    leaves a verified copy behind first. A rebuild is a normal thing to do; losing a graph to
-    one is not.
-    """
-    from ml_stack.graph.snapshots import take
-
-    live = {str(n["id"]) for n in (graph.get("nodes") or ())}
-    if not Path(path).expanduser().exists():
-        # nothing to lose yet
-        with GraphStore(path) as store:
-            return store.write(graph)
-    with GraphStore(path, read_only=True) as reader:
-        held = [n["id"] for n in reader.nodes()]
-    gone = [i for i in held if i not in live]
-    if not force and held and len(gone) > len(held) * MOST:
-        raise WouldLoseTooMuch(
-            f"{len(gone)} of {len(held)} nodes would go in one write. If that is really meant, "
-            "pass force=True; if it is not, something upstream read nothing.")
-    if keep_copy and held and len(gone) > len(held) * COPY_OVER:
-        take(path, reason=f"before dropping {len(gone)} of {len(held)} nodes",
-             count=count_store, fold=fold_log)
-    with GraphStore(path) as store:
-        with store.transaction():
-            store.drop(gone, force=True)  # already judged, above, against the whole store
-            written = store.write(graph)
-            # counted before the commit, so a store that did not take the write keeps none of it
-            held = store.counts()["nodes"]
-            if held != len(live):
-                raise StoreMismatch(
-                    f"{path}: wrote {len(live)} nodes and counts {held} afterwards")
-        store.index()                     # outside the transaction: see GraphStore.index
-        return written
-
-
-def count_store(path: str | Path) -> dict[str, int]:
-    """Open a store read-only on a fresh handle and count it.
-
-    The fresh handle is the point, not an implementation detail: a bulk write can report every
-    row written while reading back on the same connection, and be short when reopened. Only a
-    fresh open sees what reached the disk.
-    """
-    with GraphStore(path, read_only=True) as store:
-        return store.counts()
-
-
-def fold_log(path: str | Path) -> None:
-    """Open a store writable once and close it, which checkpoints its log away."""
-    GraphStore(path).close()
-
-
-def snapshot(path: str | Path, *, reason: str, keep: int = 10):
-    """A verified copy of a store, taken before something that cannot be undone."""
-    from ml_stack.graph.snapshots import take
-
-    return take(path, reason=reason, count=count_store, fold=fold_log, keep=keep)
-
-
-def roll_back(snapshot_path: str | Path):
-    """Put a snapshot back, saving what is there now first."""
-    from ml_stack.graph.snapshots import restore
-
-    return restore(snapshot_path, count=count_store, fold=fold_log)
 
 
 def store_memory() -> int:
@@ -432,8 +263,8 @@ class GraphStore:
         """
         sent = {"id": str(node["id"]), "kind": str(node.get("kind") or ""),
                 "label": str(node.get("label") or ""), "mentions": int(node.get("mentions") or 0),
-                "attrs": _json(node.get("attrs")),
-                "data": _json({k: v for k, v in node.items() if k not in NODE_COLUMNS})}
+                "attrs": as_json(node.get("attrs")),
+                "data": as_json({k: v for k, v in node.items() if k not in NODE_COLUMNS})}
         self._conn.execute(self._written(
             "MERGE (n:Node {id: $id}) SET n.kind=$kind, n.label=$label, "
             "n.mentions=$mentions, n.attrs=$attrs, n.data=$data"), sent)
@@ -441,13 +272,13 @@ class GraphStore:
         if not back or back[0] != sent:
             raise StoreMismatch(
                 f"node {sent['id']}: written, then read back by id as "
-                f"{_differences(sent, back[0]) if back else 'nothing'}")
+                f"{differences(sent, back[0]) if back else 'nothing'}")
 
     def upsert_edge(self, edge: Mapping[str, Any]) -> bool:
         """Put one edge in. False when either end is not in the store."""
         sent = {"s": str(edge["source"]), "t": str(edge["target"]),
                 "rel": str(edge.get("rel") or ""), "weight": int(edge.get("weight") or 1),
-                "data": _json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})}
+                "data": as_json({k: v for k, v in edge.items() if k not in EDGE_COLUMNS})}
         rows = self.query(self._written(
             "MATCH (a:Node {id:$s}), (b:Node {id:$t}) "
             "MERGE (a)-[e:Edge {rel:$rel}]->(b) SET e.weight=$weight, e.data=$data "
@@ -459,7 +290,7 @@ class GraphStore:
         if rows[0] != expected:
             raise StoreMismatch(
                 f"edge {sent['s']} -{sent['rel']}-> {sent['t']}: written, then read back as "
-                f"{_differences(expected, rows[0])}")
+                f"{differences(expected, rows[0])}")
         return True
 
     def write(self, graph: Mapping[str, Any]) -> dict[str, int]:
@@ -479,7 +310,6 @@ class GraphStore:
         if not self._in_tx:
             self.index()
         return {"nodes": len(nodes), "edges": kept}
-
 
     def index(self) -> None:
         """Build what a reader will search through, while there is write access to do it.
@@ -513,11 +343,11 @@ class GraphStore:
     def _attrs(self, node_id: str) -> dict[str, Any] | None:
         """A node's attributes, or None when it is not in the store."""
         rows = self.query("MATCH (n:Node {id:$id}) RETURN n.attrs AS attrs", {"id": str(node_id)})
-        return _column(rows[0]["attrs"], f"node {node_id}: attrs") if rows else None
+        return column(rows[0]["attrs"], f"node {node_id}: attrs") if rows else None
 
     def _set_attrs(self, node_id: str, attrs: Mapping[str, Any]) -> None:
         self._conn.execute(self._written("MATCH (n:Node {id:$id}) SET n.attrs = $attrs"),
-                           {"id": str(node_id), "attrs": _json(attrs)})
+                           {"id": str(node_id), "attrs": as_json(attrs)})
 
     def set_attribute(self, node_id: str, name: str, value: Any) -> bool:
         """Set one attribute of a node, keeping the others. False when it is not in the store."""
@@ -558,8 +388,8 @@ class GraphStore:
               "n.mentions AS mentions, n.attrs AS attrs, n.data AS data ORDER BY n.id",
             {"kind": kind} if kind else None)
         return [{**{k: v for k, v in r.items() if k != "data"},
-                 "attrs": _column(r["attrs"], f"node {r['id']}: attrs"),
-                 **_column(r["data"], f"node {r['id']}: data")} for r in rows]
+                 "attrs": column(r["attrs"], f"node {r['id']}: attrs"),
+                 **column(r["data"], f"node {r['id']}: data")} for r in rows]
 
     def edges(self, rel: str | None = None) -> list[dict[str, Any]]:
         rows = self.query(
@@ -568,7 +398,7 @@ class GraphStore:
               "e.weight AS weight, e.data AS data ORDER BY a.id, e.rel, b.id",
             {"rel": rel} if rel else None)
         return [{**{k: v for k, v in r.items() if k != "data"},
-                 **_column(r["data"], f"edge {r['source']} -{r['rel']}-> {r['target']}: data")}
+                 **column(r["data"], f"edge {r['source']} -{r['rel']}-> {r['target']}: data")}
                 for r in rows]
 
     def put_doc(self, key: str, value: Any) -> None:
@@ -578,18 +408,18 @@ class GraphStore:
         when what comes back is not what went in. One lookup per write is what a store of
         documents can afford, and a store of measurements cannot afford to be without.
         """
-        raw = _json(value)
+        raw = as_json(value)
         self._conn.execute(self._written("MERGE (d:Doc {key: $key}) SET d.value = $value"),
                            {"key": str(key), "value": raw})
         back = self.get_doc(str(key), _MISSING)
-        if back is _MISSING or back != _unjson(raw):
+        if back is _MISSING or back != from_json(raw):
             raise StoreMismatch(
                 f"doc {key}: written ({len(raw)} chars), then read back by key as "
-                + ("nothing" if back is _MISSING else f"{len(_json(back))} chars"))
+                + ("nothing" if back is _MISSING else f"{len(as_json(back))} chars"))
 
     def get_doc(self, key: str, default: Any = None) -> Any:
         rows = self.query("MATCH (d:Doc {key:$key}) RETURN d.value AS value", {"key": str(key)})
-        return _column(rows[0]["value"], f"doc {key}") if rows else default
+        return column(rows[0]["value"], f"doc {key}") if rows else default
 
     def delete_doc(self, key: str) -> bool:
         """Take one document out. False when there was none under that key."""
@@ -654,7 +484,7 @@ class GraphStore:
                 found.append(f"doc {row['key']}: empty by key and by scan; "
                              "nothing left to restore it from")
             else:
-                found.extend(_refused(by_key, f"doc {row['key']}"))
+                found.extend(refused(by_key, f"doc {row['key']}"))
         found.extend(self._counted("docs", "MATCH (d:Doc) RETURN count(d) AS c", len(docs)))
 
         nodes = self.query("MATCH (n:Node) RETURN n.id AS id, n.kind AS kind, n.label AS label, "
@@ -665,9 +495,9 @@ class GraphStore:
                 found.append(f"node {row['id']}: found by scan, not by id")
             elif by_id[0] != row:
                 found.append(f"node {row['id']}: scan and id disagree on "
-                             f"{_differences(by_id[0], row, 'id', 'scan')}")
-            for column in ("attrs", "data"):
-                found.extend(_refused(row[column], f"node {row['id']}: {column}"))
+                             f"{differences(by_id[0], row, 'id', 'scan')}")
+            for col in ("attrs", "data"):
+                found.extend(refused(row[col], f"node {row['id']}: {col}"))
         found.extend(self._counted("nodes", "MATCH (n:Node) RETURN count(n) AS c", len(nodes)))
 
         edges = self.query("MATCH (a:Node)-[e:Edge]->(b:Node) RETURN a.id AS source, e.rel AS rel, "
@@ -685,8 +515,8 @@ class GraphStore:
             expected = {"weight": row["weight"], "data": row["data"]}
             if keyed[0] != expected:
                 found.append(f"{name}: scan and lookup disagree on "
-                             f"{_differences(keyed[0], expected, 'lookup', 'scan')}")
-            found.extend(_refused(row["data"], f"{name}: data"))
+                             f"{differences(keyed[0], expected, 'lookup', 'scan')}")
+            found.extend(refused(row["data"], f"{name}: data"))
         found.extend(self._counted("edges", "MATCH (:Node)-[e:Edge]->(:Node) RETURN count(e) AS c",
                                    len(edges)))
         found.extend(self._counted("edges, walked backwards",
@@ -878,7 +708,7 @@ class GraphStore:
         self._conn.execute(self._written(
             "MERGE (a:Asset {id:$id}) SET a.node_id=$n, a.mime=$m, a.bytes=$b, a.meta=$meta"),
             {"id": str(asset_id), "n": str(node_id), "m": str(mime), "b": bytes(blob),
-             "meta": _json(meta)})
+             "meta": as_json(meta)})
 
     def asset(self, asset_id: str) -> dict[str, Any] | None:
         rows = self.query("MATCH (a:Asset {id:$id}) RETURN a.node_id AS node_id, "
@@ -886,7 +716,7 @@ class GraphStore:
         if not rows:
             return None
         row = rows[0]
-        return {**row, "meta": _column(row["meta"], f"asset {asset_id}: meta"),
+        return {**row, "meta": column(row["meta"], f"asset {asset_id}: meta"),
                 "bytes": bytes(row["bytes"] or b"")}
 
     def assets_of(self, node_id: str) -> list[str]:

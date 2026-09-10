@@ -1099,7 +1099,7 @@ def _run(args: Any) -> int:
         return 0
     if args.cmd == "prepare":
         from ml_stack.graph.community import graph as invented
-        from ml_stack.graph.store import replace
+        from ml_stack.graph.rebuild import replace
 
         graph = json.loads(Path(args.graph).expanduser().read_text()) if args.graph else invented()
         if getattr(args, "mix", False):

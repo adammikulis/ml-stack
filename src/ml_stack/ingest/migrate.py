@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from ml_stack.files import promote
+from ml_stack.graph.rebuild import count_store, roll_back, snapshot
+from ml_stack.graph.store import GraphStore
 from ml_stack.ingest.progress import Progress
 from ml_stack.ingest.reads import _read_json, _write_json
 from ml_stack.log import say
@@ -37,8 +39,6 @@ def pending(out: str | Path) -> dict[str, int]:
     where = Path(out).expanduser()
     found = {"nodes": 0, "edges": 0, "docs": 0, "rows": 0, "progress": 0}
     if where.exists():
-        from ml_stack.graph.store import GraphStore
-
         with GraphStore(where, read_only=True) as store:
             old = {str(n["id"]) for n in store.nodes()
                    if str(n["id"]).startswith(OLD_PREFIX) or n.get("kind") == "book"}
@@ -67,8 +67,6 @@ def migrate(out: str | Path, *, say: Callable[[str], None] = say) -> int:
     back if the store does not read back whole afterwards. A store that already speaks of
     sources is left alone.
     """
-    from ml_stack.graph.store import GraphStore, count_store, roll_back, snapshot
-
     where = Path(out).expanduser()
     if not where.exists():
         say(f"no store at {out}")
