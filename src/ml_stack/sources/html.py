@@ -170,10 +170,17 @@ def _attribute(element: ET.Element, name: str) -> str:
 
 
 def _xml_title(root: ET.Element) -> str:
+    """The document's title: a ``title`` element, else the first tag whose name ends in
+    one -- a statute calls it ``ShortTitle`` and a bill ``BillTitle``."""
+    found = ""
     for element in root.iter():
-        if _local(element.tag) == "title" and (element.text or "").strip():
-            return " ".join(element.text.split())
-    return ""
+        name, said = _local(element.tag), " ".join((element.text or "").split())
+        if not said or not name.endswith("title"):
+            continue
+        if name == "title":
+            return said
+        found = found or said
+    return found
 
 
 def _xml_heading(element: ET.Element) -> tuple[str, str]:

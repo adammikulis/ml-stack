@@ -102,6 +102,7 @@ class Document:
     openstax: bool = False
     how: str = "toc"
     url: str = ""                  # where a web source was read from
+    named: str = ""                # a slug the caller gave, in place of one off the title
     chapters: list[Chapter] = field(default_factory=list)
 
     @property
@@ -110,7 +111,7 @@ class Document:
 
     @property
     def slug(self) -> str:
-        return _slug(self.title)
+        return _slug(self.named) if self.named else _slug(self.title)
 
 
 @dataclass

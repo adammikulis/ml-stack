@@ -260,6 +260,9 @@ def parser() -> argparse.ArgumentParser:
     ap.add_argument("--section-pattern", default="", metavar="REGEX",
                     help="in HTML, the pattern a heading must match to start a section; "
                          "its first group is the section's number and its second the title")
+    ap.add_argument("--title", default="", metavar="TITLE",
+                    help="what to call the document, when its markup does not say or says "
+                         "it somewhere this cannot find; one document only")
     ap.add_argument("--slug", default="", metavar="SLUG",
                     help="with import: name the source this; by default the file it was read "
                          "out of names it")

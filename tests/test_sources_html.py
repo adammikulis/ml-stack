@@ -289,3 +289,67 @@ def test_a_source_recorded_without_marks_is_still_re_read(tmp_path):
     record.save()
 
     assert sources_for(out)(wanted[0].id) == wanted[0].text
+
+
+def test_a_statute_is_titled_by_the_tag_its_schema_uses():
+    """`title` wins; a source that has none is titled by the first tag whose name ends in
+    one, which is where a statute keeps it."""
+    said = """<?xml version="1.0"?>
+<Statute><Identification><LongTitle>An Act respecting invented things</LongTitle>
+<ShortTitle>Invented Things Act</ShortTitle></Identification>
+<Section><Label>1</Label><Text>Words.</Text></Section></Statute>"""
+    document = html.read_xml(said, marks=html.Marks(section_tag="Section",
+                                                    number_tag="Label"))
+    assert document.title == "An Act respecting invented things"
+    assert document.slug != "untitled"
+
+
+def test_a_source_with_no_title_anywhere_is_still_untitled():
+    said = "<Doc><Part id='1'><p>Words.</p></Part></Doc>"
+    assert html.read_xml(said, marks=html.Marks(section_tag="Part")).title == "untitled"
+
+
+class TestNamingADocument:
+    """Two sources whose markup names neither would both read as `untitled`, and the second
+    would overwrite the first in the store."""
+
+    def document(self):
+        return html.read_xml("<Doc><Part id='1'><p>Words.</p></Part></Doc>",
+                             marks=html.Marks(section_tag="Part"))
+
+    def test_a_slug_and_a_title_given_are_what_the_document_is_read_under(self):
+        import argparse
+
+        from ml_stack.ingest.run import _named
+
+        document = self.document()
+        _named(argparse.Namespace(slug="cfr-10-50", title="10 CFR Part 50"), document, 1)
+        assert (document.slug, document.title) == ("cfr-10-50", "10 CFR Part 50")
+
+    def test_the_markup_still_wins_when_neither_is_given(self):
+        import argparse
+
+        from ml_stack.ingest.run import _named
+
+        document = self.document()
+        _named(argparse.Namespace(slug="", title=""), document, 1)
+        assert document.slug == "untitled"
+
+    def test_naming_one_document_in_a_run_over_several_is_refused(self, capsys):
+        import argparse
+
+        from ml_stack.ingest.run import _named
+
+        document = self.document()
+        _named(argparse.Namespace(slug="a-slug", title=""), document, 3)
+        assert document.slug == "untitled"
+        assert "name one document" in capsys.readouterr().err
+
+
+def test_the_page_declares_its_encoding():
+    """Opened from disk there is no server to say; the page carries arrows and dashes."""
+    from ml_stack.graph.page import template
+
+    shell = template()
+    assert 'charset="utf-8"' in shell.lower()
+    assert shell.lower().index("charset") < shell.lower().index("<title>")

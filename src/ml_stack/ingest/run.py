@@ -230,6 +230,7 @@ def _read_run(args: Any) -> int:
                     warn(f"error: {why}")
                     code = 2
                     continue
+                _named(args, document, len(args.docs))
                 wanted = source_units.units(document, **({"max_tokens": args.max_tokens}
                                                          if args.max_tokens else {}))
                 if args.sample:
@@ -337,6 +338,26 @@ def _read_run(args: Any) -> int:
     else:
         _embedded(args)
     return code
+
+
+def _named(args: Any, document: Any, docs: int) -> None:
+    """Put ``--slug`` and ``--title`` on the document, when one document was named.
+
+    A source's own markup is where a title comes from by default, and every corpus spells
+    that differently: a statute calls it ShortTitle, eCFR names it nowhere a reader would
+    guess, and a document with none is read under the slug ``untitled`` -- which two of
+    them share, and the second then overwrites the first in the store.
+    """
+    slug, title = str(getattr(args, "slug", "") or ""), str(getattr(args, "title", "") or "")
+    if not (slug or title):
+        return
+    if docs > 1:
+        warn("--slug and --title name one document; ignored for a run over several")
+        return
+    if title:
+        document.title = title
+    if slug:
+        document.named = slug
 
 
 def _embedded(args: Any) -> None:
