@@ -929,10 +929,10 @@ def room() -> int:
     """How much memory a model may use here, in bytes, or 0 when unknown.
 
     `machine_room` is what the machine allows; this is that, capped by what this machine
-    was told ml-stack may take (`ml_stack.serve.limits`). Every preflight, fit and lease
+    was told ml-stack may take (`ml_stack.limits`). Every preflight, fit and lease
     reads it, so a limit set once is honoured everywhere without anybody passing it on.
     """
-    from ml_stack.serve.limits import read
+    from ml_stack.limits import read
 
     return read().room(machine_room())
 

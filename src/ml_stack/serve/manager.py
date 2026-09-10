@@ -801,7 +801,7 @@ class ServerManager:
     def _over_limit(self, spec: ServerSpec) -> str:
         """Why this machine's limits refuse this lease, or "". A server already up on this
         port is adopted rather than added, so it is not counted against the server limit."""
-        from ml_stack.serve.limits import read
+        from ml_stack.limits import read
 
         limits = read()
         if not (limits.servers or limits.slots):

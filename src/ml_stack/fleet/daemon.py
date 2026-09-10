@@ -1429,7 +1429,7 @@ def serve_forever(root: Path | str = "~/.ml-stack/traind",
     # limits --idle`). Without one, nothing is watched and nothing is stopped.
     from contextlib import ExitStack
 
-    from ml_stack.serve.limits import read as limits_read
+    from ml_stack.limits import read as limits_read
     from ml_stack.serve.reclaim import watching
 
     idle_s = limits_read().idle_s

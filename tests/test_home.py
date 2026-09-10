@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ml_stack import bench, home, hub, ingest, jobs
-from ml_stack.serve import binary, build, limits, manager, reclaim
+from ml_stack import bench, home, hub, ingest, jobs, limits
+from ml_stack.serve import binary, build, manager, reclaim
 
 
 class TestTheStateRoot:

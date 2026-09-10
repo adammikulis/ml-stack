@@ -11,7 +11,7 @@ from http.server import BaseHTTPRequestHandler
 
 import pytest
 
-from ml_stack.serve import limits as caps
+from ml_stack import limits as caps
 from ml_stack.serve import reclaim as reclaimer
 
 from conftest import threaded_server

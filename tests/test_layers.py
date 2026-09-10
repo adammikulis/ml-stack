@@ -18,8 +18,8 @@ ROOT = REPO / "src" / "ml_stack"
 
 LAYERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("core", ("backend", "command", "contracts", "data", "entities", "files", "geo",
-              "home", "http", "jobs", "jsonl", "lock", "log", "markup", "media",
-              "messages", "paths", "platform", "redact", "scrape", "records",
+              "home", "http", "jobs", "jsonl", "limits", "lock", "log", "markup",
+              "media", "messages", "paths", "platform", "redact", "scrape", "records",
               "telemetry", "ui", "units")),
     ("model", ("client", "gguf", "hub", "speech", "vision")),
     ("graph", ("graph", "ingest", "sources", "world")),
@@ -115,12 +115,13 @@ def test_known_holds_nothing_already_fixed() -> None:
     assert not stale, f"no longer violations, delete from KNOWN: {stale}"
 
 
-def _loaded(module: str) -> set[str]:
-    """The ``ml_stack`` modules a fresh interpreter loads when it imports ``module``."""
+def _loaded(module: str, then: str = "pass") -> set[str]:
+    """The ``ml_stack`` modules a fresh interpreter loads importing ``module`` and running
+    ``then``."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(REPO / "src")] + ([env["PYTHONPATH"]] if env.get("PYTHONPATH") else []))
-    code = (f"import sys, {module}; "
+    code = (f"import sys, {module}; {then}; "
             "print('\\n'.join(m for m in sys.modules if m.startswith('ml_stack')))")
     done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                           env=env, timeout=120)
@@ -133,3 +134,12 @@ def test_a_client_does_not_load_the_fleet() -> None:
     for module in ("ml_stack.client", "ml_stack.hub", "ml_stack.serve.cli"):
         pulled = _loaded(module) & unwanted
         assert not pulled, f"{module} loads {sorted(pulled)}"
+
+
+def test_the_beacon_s_memory_number_does_not_load_the_graph(tmp_path: Path) -> None:
+    pulled = _loaded(
+        "ml_stack.fleet.bench",
+        "ml_stack.fleet.bench.BenchHost(None, home="
+        f"{str(tmp_path)!r}, commit='none').report()")
+    graph = sorted(m for m in pulled if m.startswith("ml_stack.graph"))
+    assert not graph, f"the beacon's room number loads {graph}"
