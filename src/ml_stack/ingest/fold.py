@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from ml_stack.entities.fold import merged_spans
 from ml_stack.ingest.extract import CORE_KINDS, VERBS
 from ml_stack.ingest.judge import sources_for
 from ml_stack.ingest.progress import Progress
@@ -52,15 +53,6 @@ def _at(thing: dict[str, Any], unit_id: str, span: tuple[int, int] | None) -> No
     if span is None:
         return
     thing.setdefault("spans", {})[unit_id] = [int(span[0]), int(span[1])]
-
-
-def _spans(*things: Mapping[str, Any] | None) -> dict[str, list[int]]:
-    """The spans of those nodes or edges in one mapping, the first of each unit kept."""
-    out: dict[str, list[int]] = {}
-    for thing in things:
-        for unit_id, span in ((thing or {}).get("spans") or {}).items():
-            out.setdefault(str(unit_id), list(span))
-    return out
 
 
 def unsourced(nodes: Iterable[Mapping[str, Any]]) -> list[str]:
@@ -212,7 +204,7 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
             held["mentions"] += node["mentions"]
             held["provenance"] = list(dict.fromkeys(held["provenance"] + node["provenance"]))
             if held.get("spans") or node.get("spans"):
-                held["spans"] = _spans(held, node)
+                held["spans"] = merged_spans(held, node)
             for key, value in node["attrs"].items():
                 if key == "aliases":
                     held["attrs"]["aliases"] = list(dict.fromkeys(
@@ -227,7 +219,7 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
             held["weight"] += edge["weight"]
             held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
             if held.get("spans") or edge.get("spans"):
-                held["spans"] = _spans(held, edge)
+                held["spans"] = merged_spans(held, edge)
 
     edges, relation_folds = fold_edges(
         edges, log=log, label="relations", provenance="provenance",
@@ -286,7 +278,7 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
         kept["provenance"] = list(dict.fromkeys(list(kept.get("provenance") or [])
                                                 + node["provenance"]))
         if kept.get("spans") or node.get("spans"):
-            kept["spans"] = _spans(kept, node)
+            kept["spans"] = merged_spans(kept, node)
         aliases = kept.setdefault("attrs", {}).setdefault("aliases", [])
         for alias in [node["label"], *node["attrs"].get("aliases", [])]:
             if alias and alias != kept.get("label") and alias not in aliases:
@@ -311,7 +303,7 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
         held["weight"] += edge["weight"]
         held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
         if held.get("spans") or edge.get("spans"):
-            held["spans"] = _spans(held, edge)
+            held["spans"] = merged_spans(held, edge)
     return out_nodes, out_edges
 
 

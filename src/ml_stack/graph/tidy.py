@@ -79,7 +79,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ml_stack.entities.fold import ESTABLISHED, fold_edges
+from ml_stack.entities.fold import ESTABLISHED, fold_edges, merged_spans
 
 __all__ = ["HIERARCHY", "INVERSES", "ModelJudge", "Report", "Scored", "VERDICTS", "absorb",
            "canonical_direction", "cycles", "excerpts", "gold_file", "judge_gold", "load_gold",
@@ -1635,18 +1635,9 @@ def _merge(store: Any, nodes: dict[str, dict[str, Any]], edges: list[dict[str, A
     return moved
 
 
-def _spans(*things: Any) -> dict[str, list[int]]:
-    """The spans of those nodes or edges in one mapping, the first of each unit kept."""
-    out: dict[str, list[int]] = {}
-    for thing in things:
-        for unit_id, span in ((thing or {}).get("spans") or {}).items():
-            out.setdefault(str(unit_id), list(span))
-    return out
-
-
 def _kept_spans(into: dict[str, Any], *things: Any) -> None:
     """Union those spans onto ``into``, in place, leaving it alone when there are none."""
-    found = _spans(*things)
+    found = merged_spans(*things)
     if found:
         into["spans"] = found
 

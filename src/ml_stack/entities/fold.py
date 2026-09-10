@@ -22,7 +22,16 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Set
 from typing import Any
 
-__all__ = ["ESTABLISHED", "dead_keys", "fold_edges", "fold_names"]
+__all__ = ["ESTABLISHED", "dead_keys", "fold_edges", "fold_names", "merged_spans"]
+
+def merged_spans(*things: Any) -> dict[str, list[int]]:
+    """The ``spans`` of those nodes or edges in one mapping, the first of each unit kept."""
+    out: dict[str, list[int]] = {}
+    for thing in things:
+        for unit_id, span in ((thing or {}).get("spans") or {}).items():
+            out.setdefault(str(unit_id), list(span))
+    return out
+
 
 # How much use makes a name established. An automatic fold is a guess that two names are one
 # word spelled twice; once both carry this much weight they are two names people keep
