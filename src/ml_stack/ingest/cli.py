@@ -245,6 +245,21 @@ def parser() -> argparse.ArgumentParser:
                          "store, for after a fix that changed what a read means")
     ap.add_argument("--dry-run", action="store_true",
                     help="with fold or import: say what would be written, and write nothing")
+    ap.add_argument("--section-tag", default="", metavar="TAG",
+                    help="in XML, the element one section is (laws-lois `Section`, eCFR "
+                         "`DIV8`); matched without its namespace or its case")
+    ap.add_argument("--id-attr", default="", metavar="ATTR",
+                    help="in XML, the attribute a section's number is in (default: id)")
+    ap.add_argument("--number-tag", default="", metavar="TAG",
+                    help="in XML, the child element a section's number is in, which is "
+                         "where a statute puts it (laws-lois `Label`); tried before "
+                         "--id-attr")
+    ap.add_argument("--title-tag", default="", metavar="TAG",
+                    help="in XML, the child element a section's heading is in "
+                         "(laws-lois `MarginalNote`)")
+    ap.add_argument("--section-pattern", default="", metavar="REGEX",
+                    help="in HTML, the pattern a heading must match to start a section; "
+                         "its first group is the section's number and its second the title")
     ap.add_argument("--slug", default="", metavar="SLUG",
                     help="with import: name the source this; by default the file it was read "
                          "out of names it")

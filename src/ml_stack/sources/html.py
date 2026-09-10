@@ -17,11 +17,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from html import unescape
 from pathlib import Path
+from typing import Any
 
 from ml_stack.home import expand
 from ml_stack.sources.units import Chapter, Document, Section
 
-__all__ = ["DEFAULT_RULE", "SectionRule", "read", "read_xml"]
+__all__ = ["DEFAULT_RULE", "Marks", "SectionRule", "read", "read_xml", "rule_for"]
 
 _HEADING = re.compile(r"<h[1-3][^>]*>(.*?)</h[1-3]\s*>", re.IGNORECASE | re.DOTALL)
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
@@ -42,6 +43,53 @@ def _plain(match: re.Match[str]) -> tuple[str, str]:
 
 DEFAULT_RULE = SectionRule(pattern=re.compile(r"^\s*(\S.*)$"), parse=_plain)
 """Every non-blank heading is its own unnumbered section, titled by its text."""
+
+
+def _grouped(match: re.Match[str]) -> tuple[str, str]:
+    """``(number, title)`` from a pattern's first two groups; one group is the title."""
+    found = match.groups()
+    if len(found) >= 2:
+        return (found[0] or "").strip(), (found[1] or "").strip()
+    return "", ((found[0] if found else match.group(0)) or "").strip()
+
+
+def rule_for(pattern: str) -> SectionRule | None:
+    """A `SectionRule` from a pattern whose first group is a section's number and whose
+    second is its title; None for an empty pattern."""
+    return SectionRule(pattern=re.compile(pattern), parse=_grouped) if pattern else None
+
+
+@dataclass(frozen=True)
+class Marks:
+    """How one source marks a section, for whichever reader takes it.
+
+    In XML: ``section_tag`` is the element, and a section's number comes from the
+    ``number_tag`` child -- where a statute puts it -- else the ``id_attr`` attribute; its
+    title comes from the ``title_tag`` child. In HTML: ``pattern`` is what a heading must
+    match, its first group the number and its second the title. Every tag and attribute
+    name is matched without its namespace and without regard to case.
+    """
+
+    section_tag: str = "section"
+    id_attr: str = "id"
+    number_tag: str = ""
+    title_tag: str = ""
+    pattern: str = ""
+
+    def rule(self) -> SectionRule | None:
+        """`pattern` as a `SectionRule`, or None when there is none."""
+        return rule_for(self.pattern)
+
+    @classmethod
+    def from_args(cls, args: Any) -> Marks:
+        """The marks a command line asked for: ``--section-tag``, ``--id-attr``,
+        ``--number-tag``, ``--title-tag`` and ``--section-pattern``."""
+        def said(name: str, fallback: str = "") -> str:
+            return str(getattr(args, name, "") or "") or fallback
+
+        return cls(section_tag=said("section_tag", "section"),
+                   id_attr=said("id_attr", "id"), number_tag=said("number_tag"),
+                   title_tag=said("title_tag"), pattern=said("section_pattern"))
 
 
 def _text(fragment: str) -> str:
@@ -112,6 +160,15 @@ def _local(tag: str) -> str:
     return tag.rpartition("}")[2].casefold()
 
 
+def _attribute(element: ET.Element, name: str) -> str:
+    """That attribute of the element, matched without its namespace or its case."""
+    wanted = _local(name)
+    for key, value in element.attrib.items():
+        if _local(key) == wanted:
+            return value
+    return ""
+
+
 def _xml_title(root: ET.Element) -> str:
     for element in root.iter():
         if _local(element.tag) == "title" and (element.text or "").strip():
@@ -142,23 +199,52 @@ def _xml_text(element: ET.Element, *, skip: str) -> str:
     return " ".join(" ".join(element.itertext()).split())
 
 
-def read_xml(source: str | Path, *, url: str = "", section_tag: str = "section",
-            id_attr: str = "id") -> Document:
-    """An XML document's ``section_tag`` elements as a `Document` of one `Chapter`.
+def _child_text(element: ET.Element, name: str) -> str:
+    """That direct child's text, matched without its namespace or its case."""
+    wanted = _local(name)
+    for child in element:
+        if _local(child.tag) == wanted:
+            return " ".join(" ".join(child.itertext()).split())
+    return ""
 
-    Each element numbers its section from ``id_attr`` and titles it from a ``title`` or
-    ``heading`` child, falling back to the id. ``source`` is a path to a file or a string of
-    markup.
+
+def _without(element: ET.Element, *, skip: tuple[str, ...]) -> str:
+    """One paragraph per direct child whose tag is not in ``skip``."""
+    unwanted = {_local(name) for name in skip if name}
+    paragraphs = [" ".join(" ".join(child.itertext()).split()) for child in element
+                  if _local(child.tag) not in unwanted]
+    return "\n\n".join(p for p in paragraphs if p)
+
+
+def read_xml(source: str | Path, *, url: str = "", marks: Marks | None = None) -> Document:
+    """An XML document's sections as a `Document` of one `Chapter`.
+
+    ``marks`` says which element a section is and where its number and title are -- see
+    `Marks`; without one, every ``section`` element numbered by its ``id``. A tag named for
+    the number or the title is kept out of the section's text, and a section with no title
+    of its own falls back to a ``title`` or ``heading`` child and then to its number.
+    ``source`` is a path to a file or a string of markup.
     """
+    marks = marks or Marks()
+    section_tag, id_attr = marks.section_tag, marks.id_attr
+    number_tag, title_tag = marks.number_tag, marks.title_tag
     raw, path = _xml_bytes(source)
     root = ET.fromstring(raw)
     title = _xml_title(root)
     doc = Document(path=path or url, title=title or url or "untitled", how="markup", url=url)
     chapter = Chapter(number="", title=doc.title)
-    for element in root.iter(section_tag):
-        number = element.get(id_attr, "")
-        heading_tag, heading_text = _xml_heading(element)
-        text = _xml_text(element, skip=heading_tag)
+    wanted = _local(section_tag)
+    for element in root.iter():
+        if _local(element.tag) != wanted:
+            continue
+        number = (_child_text(element, number_tag) if number_tag else "") \
+            or _attribute(element, id_attr)
+        if title_tag:
+            heading_tag, heading_text = title_tag, _child_text(element, title_tag)
+        else:
+            heading_tag, heading_text = _xml_heading(element)
+        text = (_without(element, skip=(heading_tag, number_tag))
+                if number_tag or title_tag else _xml_text(element, skip=heading_tag))
         chapter.sections.append(Section(number=number, title=heading_text or number or
                                         "untitled", chapter_title=doc.title, text=text))
     if chapter.sections:

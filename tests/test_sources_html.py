@@ -48,7 +48,7 @@ NUMBERED = html.SectionRule(
 
 
 def test_read_xml_sections_keep_their_markup_ids():
-    document = html.read_xml(XML, section_tag="section", id_attr="id")
+    document = html.read_xml(XML)
     assert [s.number for s in document.sections] == ["s-4", "s-5"]
     assert document.sections[0].title == "Definitions"
     assert "glimmer node means" in document.sections[0].text
@@ -139,3 +139,111 @@ def test_reader_for_fetches_a_url_and_dispatches_on_what_came_down(tmp_path, mon
 def test_reader_for_refuses_a_url_this_machine_should_not_fetch():
     with pytest.raises(Refused):
         ingest.reader_for("http://127.0.0.1/secret")()
+
+
+NAMESPACED = """<?xml version="1.0" encoding="UTF-8"?>
+<Statute xmlns="urn:example:law">
+  <Title>An Invented Act</Title>
+  <Section Id="4.1">
+    <Title>What a licensee shall do</Title>
+    <Text>A licensee shall keep the records this section names.</Text>
+  </Section>
+  <Section Id="4.2">
+    <Title>What a licensee shall report</Title>
+    <Text>A licensee shall report a change to the regulator before making it.</Text>
+  </Section>
+</Statute>
+"""
+
+
+def test_read_xml_matches_a_tag_whatever_its_case_or_namespace():
+    document = html.read_xml(NAMESPACED, marks=html.Marks(id_attr="ID"))
+    assert [s.number for s in document.sections] == ["4.1", "4.2"]
+    assert document.sections[0].title == "What a licensee shall do"
+
+
+def test_reader_for_takes_the_spelling_a_source_uses(tmp_path):
+    xml = tmp_path / "act.xml"
+    xml.write_text(NAMESPACED)
+    plain = ingest.reader_for(str(xml))()
+    assert [s.number for s in plain.sections] == ["4.1", "4.2"]
+
+    named = ingest.reader_for(str(xml), marks=html.Marks(section_tag="Title"))()
+    assert len(named.sections) == 3
+
+
+def test_marks_read_the_spelling_off_a_command_line():
+    import argparse
+
+    args = argparse.Namespace(section_tag="Section", id_attr="", number_tag="Label",
+                              title_tag="MarginalNote",
+                              section_pattern=r"^(\d+\.\d+)\s+(.*)$")
+    marks = html.Marks.from_args(args)
+    assert (marks.section_tag, marks.number_tag, marks.title_tag) \
+        == ("Section", "Label", "MarginalNote")
+    assert marks.id_attr == "id"
+    assert marks.rule() is not None
+
+
+def test_marks_leave_each_reader_its_own_default():
+    import argparse
+
+    marks = html.Marks.from_args(argparse.Namespace())
+    assert (marks.section_tag, marks.id_attr) == ("section", "id")
+    assert marks.rule() is None
+
+
+def test_rule_for_reads_a_number_and_a_title_out_of_a_heading():
+    rule = html.rule_for(r"^REGDOC\s+(\S+)\s+(.*)$")
+    assert rule.parse(rule.pattern.match("REGDOC 7.3 Fitness for service")) \
+        == ("7.3", "Fitness for service")
+    assert html.rule_for("") is None
+
+
+def test_an_html_section_rule_reaches_the_reader(tmp_path):
+    page = tmp_path / "reg.html"
+    page.write_text("<html><body><h2>REGDOC 7.3 Fitness for service</h2><p>Words.</p>"
+                    "<h2>Not a clause</h2><p>More words.</p></body></html>")
+    marks = html.Marks(pattern=r"^REGDOC\s+(\S+)\s+(.*)$")
+    document = ingest.reader_for(str(page), marks=marks)()
+    assert [(s.number, s.title) for s in document.sections] == [("7.3", "Fitness for service")]
+
+
+STATUTE = """<?xml version="1.0" encoding="UTF-8"?>
+<Statute>
+  <Title>An Invented Act</Title>
+  <Section lims:id="99001" xmlns:lims="urn:example:lims">
+    <MarginalNote>Short title</MarginalNote>
+    <Label>1</Label>
+    <Text>This Act may be cited as the Invented Act.</Text>
+  </Section>
+  <Section lims:id="99002" xmlns:lims="urn:example:lims">
+    <MarginalNote>Records to be kept</MarginalNote>
+    <Label>2</Label>
+    <Text>A licensee shall keep the records this section names.</Text>
+  </Section>
+</Statute>
+"""
+
+
+def test_read_xml_numbers_a_section_from_a_child_element():
+    document = html.read_xml(STATUTE, marks=html.Marks(
+        section_tag="Section", number_tag="Label", title_tag="MarginalNote"))
+    assert [(s.number, s.title) for s in document.sections] == [
+        ("1", "Short title"), ("2", "Records to be kept")]
+
+
+def test_the_number_and_the_title_are_not_repeated_in_the_section_text():
+    document = html.read_xml(STATUTE, marks=html.Marks(
+        section_tag="Section", number_tag="Label", title_tag="MarginalNote"))
+    text = document.sections[1].text
+    assert text == "A licensee shall keep the records this section names."
+
+
+def test_a_number_child_wins_over_the_id_attribute():
+    document = html.read_xml(STATUTE, marks=html.Marks(
+        section_tag="Section", number_tag="Label"))
+    assert [s.number for s in document.sections] == ["1", "2"]
+
+    without = html.read_xml(STATUTE, marks=html.Marks(section_tag="Section"))
+    assert [s.number for s in without.sections] == ["99001", "99002"]

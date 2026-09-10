@@ -28,6 +28,7 @@ from ml_stack.ingest.reads import Read, _keep_reads, _read_json, reads_path
 from ml_stack.ingest.serving import _sampling
 from ml_stack.log import say, warn
 from ml_stack.serve.profile import INGEST
+from ml_stack.sources.html import Marks
 
 __all__ = ["FOLD_EVERY", "FOLD_SECONDS", "Stopped", "read_unit", "reader_for"]
 
@@ -78,34 +79,41 @@ def read_unit(client: Any, unit: Any, shape: Mapping[str, Any], **asking: Any) -
 
 
 def reader_for(where: str, *, images: bool = False, chapter: str | int | None = None,
-              cache_dir: str | Path | None = None) -> Callable[[], Any]:
+              cache_dir: str | Path | None = None, marks: Any = None
+              ) -> Callable[[], Any]:
     """The reader for ``where``: a PDF, an HTML or XML file, or a URL fetched first.
 
     ``.pdf`` reads through `ml_stack.sources.pdf`; ``.html``, ``.htm`` and ``.xml`` through
     `ml_stack.sources.html`. http(s) is checked by `ml_stack.http.check`, fetched by
     `ml_stack.media.download.fetch` into ``cache_dir`` (the state root by default), and
     dispatched the same way once it is down.
+
+    ``marks`` says how this source marks a section -- a
+    :class:`~ml_stack.sources.html.Marks`. Left out, each reader takes its own default,
+    which no corpus with a spelling of its own will fit.
     """
     text = str(where)
+    how = marks if marks is not None else Marks()
     if urllib.parse.urlsplit(text).scheme in ("http", "https"):
-        return lambda: _read_url(text, images=images, chapter=chapter, cache_dir=cache_dir)
-    return lambda: _read_local(text, images=images, chapter=chapter)
+        return lambda: _read_url(text, images=images, chapter=chapter, cache_dir=cache_dir,
+                                 marks=how)
+    return lambda: _read_local(text, images=images, chapter=chapter, marks=how)
 
 
-def _read_local(where: str, *, images: bool, chapter: str | int | None) -> Any:
+def _read_local(where: str, *, images: bool, chapter: str | int | None, marks: Any) -> Any:
     """A PDF, HTML or XML file, read by its suffix."""
     from ml_stack.sources import html, pdf
 
     suffix = Path(where).suffix.casefold()
     if suffix in (".html", ".htm"):
-        return html.read(where)
+        return html.read(where, sections=marks.rule())
     if suffix == ".xml":
-        return html.read_xml(where)
+        return html.read_xml(where, marks=marks)
     return pdf.read(where, images=images, chapter=chapter)
 
 
 def _read_url(url: str, *, images: bool, chapter: str | int | None,
-             cache_dir: str | Path | None) -> Any:
+             cache_dir: str | Path | None, marks: Any) -> Any:
     """A document fetched from the web, then dispatched by what came down."""
     from ml_stack.home import state
     from ml_stack.http import check
@@ -117,9 +125,9 @@ def _read_url(url: str, *, images: bool, chapter: str | int | None,
     local = fetch(safe, root / _cache_name(safe))
     suffix = local.suffix.casefold()
     if suffix in (".html", ".htm"):
-        return html.read(local, url=safe)
+        return html.read(local, url=safe, sections=marks.rule())
     if suffix == ".xml":
-        return html.read_xml(local, url=safe)
+        return html.read_xml(local, url=safe, marks=marks)
     return pdf.read(local, images=images, chapter=chapter)
 
 
@@ -131,12 +139,13 @@ def _cache_name(url: str) -> str:
     return f"{stem}-{hashlib.sha256(url.encode()).hexdigest()[:16]}{suffix}"
 
 
-def _opened(text: str, *, images: bool, chapter: str | int | None) -> Any:
+def _opened(text: str, *, images: bool, chapter: str | int | None,
+           marks: Any = None) -> Any:
     """One of `args.docs`, read into a `Document`; `FileNotFoundError` for a local path
     that is not one."""
     if urllib.parse.urlsplit(text).scheme not in ("http", "https") and not expand(text).is_file():
         raise FileNotFoundError(f"no such document: {expand(text)}")
-    return reader_for(text, images=images, chapter=chapter)()
+    return reader_for(text, images=images, chapter=chapter, marks=marks)()
 
 
 @contextmanager
@@ -207,7 +216,9 @@ def _read_run(args: Any) -> int:
                 text = str(path)
                 began = time.time()
                 try:
-                    document = _opened(text, images=args.images, chapter=args.chapter or None)
+                    document = _opened(text, images=args.images,
+                                      chapter=args.chapter or None,
+                                      marks=Marks.from_args(args))
                 except (FileNotFoundError, Refused, DownloadError, ValueError) as why:
                     warn(f"error: {why}")
                     code = 2
