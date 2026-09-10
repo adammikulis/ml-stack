@@ -81,13 +81,21 @@
       .force('collide', d3.forceCollide(n => radius(n) + (n.kind === 'person' ? 34 : 20)))
       .force('center', d3.forceCenter(W / 2, H / 2))
       .force('x', d3.forceX(W / 2).strength(0.03)).force('y', d3.forceY(H / 2).strength(0.03));
+    const liveNodes = () => nodes.filter(d => !dropped(d));
+    const liveLinks = () => links.filter(l => !linkDropped(l));
+    // the layout runs on what is not removed; every node keeps the position forceSimulation
+    // gave it and every link the ends forceLink resolved
+    sim.nodes(liveNodes());
+    sim.force('link').links(liveLinks());
     // "mentions" is the relation the model reaches for when no better one fits, and it is a third
     // of the edges. Off to start with, the graph reads as who is interested in what, who works
     // where, and who answered whom; the Links section switches it back on.
     RELS.forEach(r => { if (!display.link[r]) display.link[r] = r === 'mentions' ? 'hide' : 'show'; });
-    const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link').attr('stroke-width', thickness);
+    const link = root.append('g').selectAll('line').data(links).join('line').attr('class', 'link')
+      .attr('stroke-width', thickness).classed('gone', linkGone);
     // a one-pixel line is not something anyone can hit; the events live on a wide clear one
     const hitline = root.append('g').selectAll('line').data(links).join('line').attr('class', 'hitline')
+      .classed('gone', linkGone)
       .on('click', (e, l) => {
         e.stopPropagation();
         if (e.shiftKey || e.ctrlKey || e.metaKey) M.pick('link:' + links.indexOf(l)); else M.selectEdge(l);
@@ -95,7 +103,8 @@
       .on('contextmenu', (e, l) => { if (e.ctrlKey) { e.preventDefault(); e.stopPropagation(); M.pick('link:' + links.indexOf(l)); } })
       .on('mousemove', (e, l) => tip(e, `${shown(l.source)} → ${shown(l.target)}`, `${l.rel.replace(/_/g, ' ')} · seen in ${l.messages.length} message${l.messages.length === 1 ? '' : 's'}`))
       .on('mouseleave', hideTip);
-    const node = root.append('g').selectAll('g').data(nodes).join('g').attr('class', d => 'node k-' + d.kind).attr('tabindex', 0)
+    const node = root.append('g').selectAll('g').data(nodes).join('g')
+      .attr('class', d => 'node k-' + d.kind).classed('gone', gone).attr('tabindex', 0)
       .call(d3.drag()
         .filter(e => e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey)
         .on('start', (e, d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
@@ -236,9 +245,10 @@
     const FOLLOW_MS = 400;
     let following = true, followed = 0;
     function frame(dur) {
-      if (!nodes.length) return;
+      const live = sim.nodes();
+      if (!live.length) return;
       followed = performance.now();
-      const xs = nodes.map(n => n.x), ys = nodes.map(n => n.y);
+      const xs = live.map(n => n.x), ys = live.map(n => n.y);
       const x0 = Math.min(...xs) - 60, x1 = Math.max(...xs) + 60, y0 = Math.min(...ys) - 40, y1 = Math.max(...ys) + 50;
       const k = Math.min(2.2, 0.92 / Math.max((x1 - x0) / W, (y1 - y0) / H));
       const t = d3.zoomIdentity.translate(W / 2 - k * (x0 + x1) / 2, H / 2 - k * (y0 + y1) / 2).scale(k);
@@ -308,10 +318,8 @@
     }
     let needsFit = false;
     function applyRemoval() {
-      const liveNodes = nodes.filter(d => !dropped(d));
-      const liveLinks = links.filter(l => !linkDropped(l));
-      sim.nodes(liveNodes);
-      sim.force('link').links(liveLinks);
+      sim.nodes(liveNodes());
+      sim.force('link').links(liveLinks());
       needsFit = true;
       sim.alpha(0.7).restart();
       if (M.g3) M.push3d();
@@ -321,10 +329,10 @@
     // find the shape of what is left, ForceAtlas2-style: repulsion scaled by how well joined a
     // node is, so hubs push out and leaves settle around them.
     function arrange() {
-      const live = nodes.filter(d => !dropped(d));
-      const liveLinks = links.filter(l => !linkDropped(l));
+      const live = liveNodes();
+      const joined = liveLinks();
       const degree = new Map(live.map(d => [d.id, 0]));
-      for (const l of liveLinks) {
+      for (const l of joined) {
         const a = l.source.id ?? l.source, b = l.target.id ?? l.target;
         degree.set(a, (degree.get(a) || 0) + 1);
         degree.set(b, (degree.get(b) || 0) + 1);
@@ -336,7 +344,7 @@
         d.vx = d.vy = 0; d.fx = d.fy = null;
       });
       sim.nodes(live);
-      sim.force('link').links(liveLinks);
+      sim.force('link').links(joined);
       sim.force('charge', d3.forceManyBody()
         .strength(d => -160 * (1 + Math.sqrt(degree.get(d.id) || 0)) * view.repel)
         .distanceMax(700));

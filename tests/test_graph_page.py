@@ -81,9 +81,9 @@ def sample_graph():
     }
 
 
-def document(graph, *, served=False):
+def document(graph, *, served=False, kinds=None):
     """The rendered page as a browser-complete document."""
-    body = graph_page.render(graph, title="A graph", world=EMPTY_WORLD)
+    body = graph_page.render(graph, title="A graph", world=EMPTY_WORLD, kinds=kinds)
     live = "<script>window.GRAPH_LIVE = true</script>" if served else ""
     return f'<!doctype html>\n<meta charset="utf-8">\n{live}{body}'
 
@@ -127,8 +127,10 @@ def open_page(browser, vendored):
     contexts = []
 
     def _open(graph=None, *, view="2d", served=False, ask_reply=None, ask_stream=None,
-              stream_from=None, thread=None, review=None, origin="http://graph.test/"):
-        html = document(graph if graph is not None else sample_graph(), served=served)
+              stream_from=None, thread=None, review=None, kinds=None,
+              origin="http://graph.test/"):
+        html = document(graph if graph is not None else sample_graph(), served=served,
+                        kinds=kinds)
         ctx = browser.new_context(viewport={"width": 1400, "height": 900})
         contexts.append(ctx)
         ctx.add_init_script(
@@ -1035,3 +1037,45 @@ def test_the_panes_fill_the_column_without_the_map(open_page):
     assert len(sizes) == 3, rows          # a fourth row means the panes fell out of the grid
     assert abs(sizes[-1] - two) < 2, (sizes, two)   # and the tall row is the one they fill
     assert two > 0 and aside > 0
+
+
+def test_the_two_d_view_opens_in_the_states_the_kinds_asked_for(open_page):
+    """A kind that opens `hide` is carried but not drawn, one that opens `remove` is not in
+    the layout at all, and searching a hidden node's name draws it.
+
+    Fails when graph-view builds the simulation from every node the page carries, or when the
+    marks are created without the state page-model resolved for them.
+    """
+    graph = {
+        "nodes": [
+            {"id": "person:ada", "label": "Ada Lovelace", "kind": "person", "mentions": 2,
+             "attrs": {}, "messages": []},
+            {"id": "person:grace", "label": "Grace Hopper", "kind": "person", "mentions": 1,
+             "attrs": {}, "messages": []},
+            {"id": "topic:iron", "label": "iron", "kind": "topic", "mentions": 1,
+             "attrs": {}, "messages": []},
+            {"id": "org:quenlow", "label": "Quenlow Robotics", "kind": "org", "mentions": 1,
+             "attrs": {}, "messages": []},
+        ],
+        "edges": [{"source": "person:ada", "target": "topic:iron", "rel": "works_on",
+                   "weight": 1, "messages": []}],
+        "messages": {}, "stats": {}, "meta": {},
+    }
+    kinds = [{"k": "person", "label": "People", "shape": "circle"},
+             {"k": "topic", "label": "Topics", "shape": "triangle", "start": "hide"},
+             {"k": "org", "label": "Orgs", "shape": "square", "start": "remove"}]
+    page, errors = open_page(graph, kinds=kinds)
+    settle(page)
+
+    drawn = "document.querySelectorAll('#graph g.node:not(.gone)').length"
+    simulated = "window.graphModel.view2d.sim.nodes().map(n => n.id)"
+    assert page.evaluate(drawn) == 2
+    assert sorted(page.evaluate(simulated)) == ["person:ada", "person:grace", "topic:iron"]
+
+    page.fill("#gq", "iron")
+    page.wait_for_function(f"() => {drawn} === 3")
+    assert sorted(page.evaluate(simulated)) == ["person:ada", "person:grace", "topic:iron"]
+
+    page.fill("#gq", "")
+    page.wait_for_function(f"() => {drawn} === 2")
+    assert errors == []

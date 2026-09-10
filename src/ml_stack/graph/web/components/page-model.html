@@ -90,8 +90,14 @@
   const srcGone = d => d.session && display.source.session !== 'show';
   const srcDropped = d => d.session && display.source.session === 'remove';
   const stateOf = d => startsAt[d.id] || display.node[d.kind];
-  const gone = d => stateOf(d) !== 'show' || srcGone(d);
+  const masked = d => stateOf(d) !== 'show' || srcGone(d);
   const dropped = d => stateOf(d) === 'remove' || srcDropped(d);
+  // what a masked node is drawn for: selected, gathered, named by an answer, or matched by
+  // the search. A removed node is out of the layout and never qualifies.
+  const asked = d => !dropped(d) && (M.selected === d.id || picked.has('node:' + d.id)
+    || !!(M.answer && M.answer.has(d.id))
+    || !!(M.found && (M.found.direct.has(d.id) || M.found.near.has(d.id))));
+  const gone = d => masked(d) && !asked(d);
   const linkGone = l => display.link[l.rel] !== 'show' || srcGone(l) || linkP2PGone(l)
     || gone(l.source) || gone(l.target);
   const linkDropped = l => display.link[l.rel] === 'remove' || srcDropped(l) || linkP2PDropped(l)
@@ -188,7 +194,7 @@
     if (!M.query) { M.found = null; return; }
     const direct = new Set();
     for (const n of nodes) {
-      if (gone(n)) continue;
+      if (dropped(n)) continue;
       // "Canada" should find the member who wrote "Ontario": what the gazetteer called the
       // place is searched alongside what they typed
       const where = (DATA.geo || {})[n.kind === 'place' ? n.label : (n.attrs.location || '')] || '';
@@ -212,7 +218,7 @@
     const votes = new Map();
     direct.forEach(id => ((DATA.near || {})[id] || []).forEach(other => {
       const n = byId.get(other);
-      if (n && !gone(n) && !direct.has(other)) votes.set(other, (votes.get(other) || 0) + 1);
+      if (n && !dropped(n) && !direct.has(other)) votes.set(other, (votes.get(other) || 0) + 1);
     }));
     const near = new Set([...votes.entries()]
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
