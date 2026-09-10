@@ -292,9 +292,9 @@ def known_architectures(binary: str | Path) -> set[str]:
 
     found: set[str] = set()
     try:
-        from ml_stack.serve.build import _arches_from_source
+        from ml_stack.serve.build_platform import arches_from_source
 
-        found |= _arches_from_source(Path(source_dir()))
+        found |= arches_from_source(Path(source_dir()))
     except Exception:  # noqa: BLE001 - no source checkout, or a table that moved
         pass
     found |= _arches(binary)
@@ -303,7 +303,7 @@ def known_architectures(binary: str | Path) -> set[str]:
 
 def source_dir() -> Path:
     """Where the managed build's source checkout lives; a seam so tests can point elsewhere."""
-    from ml_stack.serve.build import src_dir
+    from ml_stack.serve.build_paths import src_dir
 
     return Path(src_dir())
 

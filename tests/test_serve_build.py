@@ -22,7 +22,16 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from ml_stack.serve import build
+
+from ml_stack.serve import (
+    build,
+    build_persist,
+    build_platform,
+    build_release,
+    build_report,
+    build_source,
+    build_verify,
+)
 
 _REAL_RUN = subprocess.run   # captured before any test patches subprocess.run
 
@@ -86,7 +95,7 @@ class FakeToolchain:
         if args and args[0] == "-B":
             return _ok()
         # --build: drop the binary and a library carrying the architecture words in place.
-        _fake_server_script(bin_dir / build._server_name())
+        _fake_server_script(bin_dir / build_platform.server_name())
         _fake_libllama(bin_dir / "libllama.0.3.0.dylib", self.arches)
         return _ok()
 
@@ -95,10 +104,11 @@ class FakeToolchain:
 def _isolated(tmp_path, monkeypatch):
     """Every managed path lives under tmp_path, never a real ~/.ml-stack."""
     monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
-    monkeypatch.setattr(build, "PERSIST_PLIST",
-                        tmp_path / "Library" / "LaunchAgents" / f"{build.PERSIST_LABEL}.plist")
+    monkeypatch.setattr(build_persist, "PERSIST_PLIST",
+                        tmp_path / "Library" / "LaunchAgents" / f"{build_persist.PERSIST_LABEL}.plist")
     # No earlier build to compare against, unless a test says otherwise.
-    monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+    monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
+    monkeypatch.setattr(build_report, "find_binary", lambda *a, **k: None)
     # No patches, unless a test points this at a directory holding some.
     monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(tmp_path / "no-patches"))
     yield
@@ -129,7 +139,7 @@ class TestSourceBuild:
             next(c for c in chain.calls if Path(c[0]).name == "git" and c[1] == "clone"))
 
         dest = build.builds_dir() / "abc1234"
-        assert (dest / build._server_name()).is_file()
+        assert (dest / build_platform.server_name()).is_file()
         assert (dest / "libllama.0.3.0.dylib").is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "abc1234"
@@ -195,10 +205,10 @@ class TestVerificationGatesTheSwitch:
         """The whole point: a new build must not cost an architecture the old one read."""
         baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp", "phi9"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})   # missing phi9
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -218,7 +228,7 @@ class TestVerificationGatesTheSwitch:
             bin_dir.mkdir(parents=True, exist_ok=True)
             if args and args[0] == "-B":
                 return _ok()
-            path = bin_dir / build._server_name()
+            path = bin_dir / build_platform.server_name()
             path.write_text("#!/bin/sh\nexit 0\n")
             path.chmod(0o755)
             return _ok()
@@ -234,10 +244,10 @@ class TestVerificationGatesTheSwitch:
     def test_a_build_that_reads_a_superset_becomes_current(self, monkeypatch, capsys):
         baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -262,11 +272,11 @@ class TestVerificationGatesTheSwitch:
 
         baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         # The baseline has the false-positive string too -- exactly the real machine.
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "phi4"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         chain = FakeToolchain(arches={"gemma4", "qwen4exp"})   # no "phi4" -- correctly so
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -385,7 +395,7 @@ class TestFindBinaryPrefersTheManagedBuild:
 
 class TestCheck:
     def test_nothing_built_and_nothing_on_path_says_so(self, monkeypatch):
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_report, "find_binary", lambda *a, **k: None)
         assert build.cmd_build(_args(check=True)) == 1
 
     def test_a_managed_build_reports_its_commit_and_age(self, monkeypatch, capsys):
@@ -412,7 +422,7 @@ class TestAdopt:
                                                   "commit 62acc89)", arches=None):
         source = tmp_path / "hand-built"
         source.mkdir()
-        _fake_server_script(source / build._server_name(), version=version)
+        _fake_server_script(source / build_platform.server_name(), version=version)
         _fake_libllama(source / "libllama.dylib", arches or {"gemma4", "qwen4exp"})
         return source
 
@@ -420,10 +430,10 @@ class TestAdopt:
             self, tmp_path, monkeypatch):
         baseline_dir = tmp_path / "baseline"
         baseline_dir.mkdir()
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         source = self._existing_dir(tmp_path, arches={"gemma4", "qwen4exp"})
         code = build.cmd_build(_args(adopt=str(source)))
@@ -434,7 +444,7 @@ class TestAdopt:
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "62acc89"
         assert manifest["source"] == f"adopted from {source.resolve()}"
-        assert (dest / build._server_name()).is_file()
+        assert (dest / build_platform.server_name()).is_file()
         assert (dest / "libllama.dylib").is_file()
 
     def test_a_directory_missing_an_architecture_the_current_build_has_is_refused(
@@ -443,10 +453,10 @@ class TestAdopt:
         architecture, older in another -- not a strict superset, so it must not switch."""
         baseline_dir = tmp_path / "baseline"
         baseline_dir.mkdir()
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "phi4"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         source = self._existing_dir(tmp_path, arches={"gemma4", "qwen4exp"})   # no phi4
         code = build.cmd_build(_args(adopt=str(source)))
@@ -457,7 +467,7 @@ class TestAdopt:
         assert (build.builds_dir() / "62acc89" / "BUILD.json").is_file()
 
     def test_the_commit_is_read_from_version_when_it_names_one(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(
             tmp_path, version="version: 0.3.0 (build 10621, commit c1d0e7a00)")
         assert build.cmd_build(_args(adopt=str(source))) == 0
@@ -465,7 +475,7 @@ class TestAdopt:
 
     def test_a_version_with_no_commit_falls_back_to_a_slug_rather_than_failing(
             self, tmp_path, monkeypatch):
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         source = self._existing_dir(tmp_path, version="llama-server v9.9.9")
         assert build.cmd_build(_args(adopt=str(source))) == 0
         made = list(build.builds_dir().iterdir())
@@ -473,7 +483,7 @@ class TestAdopt:
 
     def test_a_directory_with_no_server_binary_fails_rather_than_adopting_nothing(
             self, tmp_path, monkeypatch, capsys):
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
         empty = tmp_path / "empty"
         empty.mkdir()
         code = build.cmd_build(_args(adopt=str(empty)))
@@ -497,13 +507,13 @@ class TestPersist:
                             if name == "ml-stack-serve" else None)
 
         assert build.cmd_build(_args(persist=True)) == 0
-        assert build.PERSIST_PLIST.is_file()
+        assert build_persist.PERSIST_PLIST.is_file()
 
         import plistlib
-        plist = plistlib.loads(build.PERSIST_PLIST.read_bytes())
+        plist = plistlib.loads(build_persist.PERSIST_PLIST.read_bytes())
         assert plist["ProgramArguments"] == ["/usr/local/bin/ml-stack-serve", "build"]
-        assert plist["StartInterval"] == build.WEEK_SECONDS
-        assert plist["Label"] == build.PERSIST_LABEL
+        assert plist["StartInterval"] == build_persist.WEEK_SECONDS
+        assert plist["Label"] == build_persist.PERSIST_LABEL
 
         launchctl_calls = [c[0][0] for c in calls if Path(c[0][0][0]).name == "launchctl"]
         assert any("load" in c for c in launchctl_calls)
@@ -529,7 +539,7 @@ class TestPersist:
         assert argv[0] == "schtasks"
         assert "/Create" in argv and "/SC" in argv
         assert argv[argv.index("/SC") + 1] == "WEEKLY"
-        assert argv[argv.index("/TN") + 1] == build.PERSIST_TASK
+        assert argv[argv.index("/TN") + 1] == build_persist.PERSIST_TASK
         tr = argv[argv.index("/TR") + 1]
         assert "ml-stack-serve" in tr and "build" in tr
 
@@ -548,13 +558,13 @@ class TestPlatformSelection:
 
     def test_defaults_to_release_with_no_compiler(self, monkeypatch):
         monkeypatch.setattr(shutil, "which", lambda name: None)
-        assert build._can_build_from_source() is False
+        assert build_platform.can_build_from_source() is False
 
     def test_defaults_to_source_when_cmake_and_a_compiler_are_present(self, monkeypatch):
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
         monkeypatch.setattr(shutil, "which",
                             lambda name: f"/usr/bin/{name}" if name in ("cmake", "cc") else None)
-        assert build._can_build_from_source() is True
+        assert build_platform.can_build_from_source() is True
 
     def test_windows_asset_glob_prefers_cuda_then_vulkan_then_cpu(self, monkeypatch):
         monkeypatch.setattr(platform, "system", lambda: "Windows")
@@ -562,22 +572,22 @@ class TestPlatformSelection:
 
         monkeypatch.setattr(shutil, "which", lambda name: None)
         monkeypatch.delenv("VULKAN_SDK", raising=False)
-        assert build._platform_asset_globs() == ["llama-*-bin-win-cpu-x64.zip"]
+        assert build_release._release_asset_globs() == ["llama-*-bin-win-cpu-x64.zip"]
 
         monkeypatch.setenv("VULKAN_SDK", "C:\\VulkanSDK")
-        assert build._platform_asset_globs() == [
+        assert build_release._release_asset_globs() == [
             "llama-*-bin-win-vulkan-x64.zip", "llama-*-bin-win-cpu-x64.zip"]
 
         monkeypatch.setattr(shutil, "which", lambda name: "nvcc.exe" if name == "nvcc" else None)
-        assert build._platform_asset_globs()[0] == "llama-*-bin-win-cuda-12.4-x64.zip"
+        assert build_release._release_asset_globs()[0] == "llama-*-bin-win-cuda-12.4-x64.zip"
 
     def test_macos_and_linux_asset_globs_are_tar_gz_not_zip(self, monkeypatch):
         monkeypatch.setattr(platform, "machine", lambda: "arm64")
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
-        assert build._platform_asset_globs() == ["llama-*-bin-macos-arm64.tar.gz"]
+        assert build_release._release_asset_globs() == ["llama-*-bin-macos-arm64.tar.gz"]
 
         monkeypatch.setattr(platform, "system", lambda: "Linux")
-        assert build._platform_asset_globs() == ["llama-*-bin-ubuntu-arm64.tar.gz"]
+        assert build_release._release_asset_globs() == ["llama-*-bin-ubuntu-arm64.tar.gz"]
 
     def test_cudart_companion_is_matched_by_the_same_cuda_version(self):
         assets = {
@@ -587,9 +597,9 @@ class TestPlatformSelection:
             "cudart-llama-bin-win-cuda-13.3-x64.zip":
                 {"name": "cudart-llama-bin-win-cuda-13.3-x64.zip"},
         }
-        found = build._cudart_companion("llama-b1-bin-win-cuda-12.4-x64.zip", assets)
+        found = build_release._cudart_companion("llama-b1-bin-win-cuda-12.4-x64.zip", assets)
         assert found is not None and found["name"] == "cudart-llama-bin-win-cuda-12.4-x64.zip"
-        assert build._cudart_companion("llama-b1-bin-win-vulkan-x64.zip", assets) is None
+        assert build_release._cudart_companion("llama-b1-bin-win-vulkan-x64.zip", assets) is None
 
 
 class TestNamedBuild:
@@ -606,7 +616,7 @@ class TestNamedBuild:
         assert code == 0
 
         dest = build.builds_dir() / "unsloth-86bd2d3"
-        assert (dest / build._server_name()).is_file()
+        assert (dest / build_platform.server_name()).is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["repo"] == "unslothai/llama.cpp"
         assert manifest["ref"] == "b10715-mix-86bd2d3"
@@ -622,10 +632,10 @@ class TestNamedBuild:
         own build, unlike the default build a bare 'ml-stack-serve build' would replace."""
         baseline_dir = build.root().parent / "baseline"
         baseline_dir.mkdir(parents=True)
-        _fake_server_script(baseline_dir / build._server_name())
+        _fake_server_script(baseline_dir / build_platform.server_name())
         _fake_libllama(baseline_dir / "libllama-old.dylib", {"gemma4", "qwen4exp"})
-        monkeypatch.setattr(build, "find_binary",
-                            lambda *a, **k: baseline_dir / build._server_name())
+        monkeypatch.setattr(build_verify, "find_binary",
+                            lambda *a, **k: baseline_dir / build_platform.server_name())
 
         chain = FakeToolchain(arches={"gemma4"})   # missing qwen4exp -- fine for --name
         monkeypatch.setattr(subprocess, "run", chain.run)
@@ -651,13 +661,13 @@ class TestNamedBuild:
             {"name": "app-b10715-mix-86bd2d3-windows-x64-cpu.zip"},   # not this machine
             {"name": "llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz", "size": 0},
         ]}]
-        monkeypatch.setattr(build, "_releases_for", lambda repo, **kw: releases)
+        monkeypatch.setattr(build_release, "_releases_for", lambda repo, **kw: releases)
 
         archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
         payload = archive_dir / "payload"
         payload.mkdir()
-        _fake_server_script(payload / build._server_name())
+        _fake_server_script(payload / build_platform.server_name())
         _fake_libllama(payload / "libllama.dylib", {"gemma4"})
         archive = archive_dir / "llama-b10715-mix-86bd2d3-bin-macos-arm64.tar.gz"
         with tarfile.open(archive, "w:gz") as tf:
@@ -671,7 +681,7 @@ class TestNamedBuild:
 
         import ml_stack.fleet.updates as gh_updates
         monkeypatch.setattr(gh_updates, "download", fake_download)
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
 
         code = build.cmd_build(_args(repo="unslothai/llama.cpp", name="unsloth",
                                      source_kind="release"))
@@ -714,14 +724,14 @@ class TestNamedReleaseAssetGlobs:
     def test_macos_matches_the_same_shape_mainline_uses(self, monkeypatch):
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
         monkeypatch.setattr(platform, "machine", lambda: "arm64")
-        assert build._named_release_asset_globs() == ["llama-*-bin-macos-arm64.tar.gz"]
+        assert build_release._release_asset_globs(fork=True) == ["llama-*-bin-macos-arm64.tar.gz"]
 
     def test_windows_uses_the_forks_app_bundle_naming_not_llama_bin(self, monkeypatch):
         monkeypatch.setattr(platform, "system", lambda: "Windows")
         monkeypatch.setattr(platform, "machine", lambda: "AMD64")
         monkeypatch.setattr(shutil, "which", lambda name: None)
         monkeypatch.delenv("VULKAN_SDK", raising=False)
-        assert build._named_release_asset_globs() == ["app-*-windows-x64-cpu.zip"]
+        assert build_release._release_asset_globs(fork=True) == ["app-*-windows-x64-cpu.zip"]
 
 
 class TestReleaseInstall:
@@ -735,13 +745,13 @@ class TestReleaseInstall:
             {"tag_name": "b998", "assets": [
                 {"name": "llama-b998-bin-macos-arm64.tar.gz", "size": 0}]},
         ]
-        monkeypatch.setattr(build, "_llama_releases", lambda *a, **k: releases)
+        monkeypatch.setattr(build_release, "_llama_releases", lambda *a, **k: releases)
 
         archive_dir = tmp_path / "archive"
         archive_dir.mkdir()
         payload = archive_dir / "llama-b998-bin-macos-arm64"
         payload.mkdir()
-        _fake_server_script(payload / build._server_name())
+        _fake_server_script(payload / build_platform.server_name())
         _fake_libllama(payload / "libllama.dylib", {"gemma4"})
         archive = archive_dir / "llama-b998-bin-macos-arm64.tar.gz"
         with tarfile.open(archive, "w:gz") as tf:
@@ -755,13 +765,13 @@ class TestReleaseInstall:
 
         import ml_stack.fleet.updates as gh_updates
         monkeypatch.setattr(gh_updates, "download", fake_download)
-        monkeypatch.setattr(build, "find_binary", lambda *a, **k: None)
+        monkeypatch.setattr(build_verify, "find_binary", lambda *a, **k: None)
 
         code = build.cmd_build(_args(source_kind="release"))
         assert code == 0
         assert downloaded == ["llama-b998-bin-macos-arm64.tar.gz"]
         dest = build.builds_dir() / "b998"
-        assert (dest / build._server_name()).is_file()
+        assert (dest / build_platform.server_name()).is_file()
         manifest = json.loads((dest / "BUILD.json").read_text())
         assert manifest["commit"] == "b998"
         assert manifest["source"] == "release"
@@ -770,7 +780,7 @@ class TestReleaseInstall:
             self, monkeypatch):
         monkeypatch.setattr(platform, "system", lambda: "Darwin")
         monkeypatch.setattr(platform, "machine", lambda: "arm64")
-        monkeypatch.setattr(build, "_llama_releases",
+        monkeypatch.setattr(build_release, "_llama_releases",
                             lambda *a, **k: [{"tag_name": "b1", "assets": []}])
         code = build.cmd_build(_args(source_kind="release"))
         assert code == 2
@@ -813,14 +823,14 @@ class TestPatches:
     def test_a_patch_is_applied_to_the_checkout(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
-        assert build._apply_patches(source) == ["0001-x.patch"]
+        assert build_source._apply_patches(source) == ["0001-x.patch"]
         assert "TWO" in (source / "a.txt").read_text()
 
     def test_applying_twice_is_not_an_error(self, tmp_path, monkeypatch):
         source = self._repo(tmp_path)
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
-        build._apply_patches(source)
-        assert build._apply_patches(source) == ["0001-x.patch"]
+        build_source._apply_patches(source)
+        assert build_source._apply_patches(source) == ["0001-x.patch"]
         assert (source / "a.txt").read_text().count("TWO") == 1
 
     def test_a_changed_patch_set_does_not_land_on_the_last_one(self, tmp_path, monkeypatch):
@@ -828,12 +838,12 @@ class TestPatches:
         patch sets stacking is what makes a rebuild produce something neither describes."""
         source = self._repo(tmp_path)
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
-        build._apply_patches(source)
+        build_source._apply_patches(source)
         assert "TWO" in (source / "a.txt").read_text()
 
         other = self.BODY.replace("+TWO", "+DEUX")
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, other)))
-        build._apply_patches(source)
+        build_source._apply_patches(source)
         text = (source / "a.txt").read_text()
         assert "DEUX" in text and "TWO" not in text
 
@@ -842,14 +852,14 @@ class TestPatches:
         body = self.BODY.replace(" one\n-two", " ONE\n-two")
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, body)))
         with pytest.raises(build.BuildFailed, match="does not apply"):
-            build._apply_patches(source)
+            build_source._apply_patches(source)
 
     def test_the_stamp_names_the_build_directory(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MLSTACK_LLAMA_PATCHES", str(self._patch(tmp_path, self.BODY)))
         chain = FakeToolchain()
         monkeypatch.setattr(subprocess, "run", chain.run)
-        monkeypatch.setattr(build, "_apply_patches", lambda source: ["0001-x.patch"])
-        dest, tag = build._build_from_source(_args())
+        monkeypatch.setattr(build_source, "_apply_patches", lambda source: ["0001-x.patch"])
+        dest, tag = build_source.build_from_source(_args())
         assert tag.endswith("-" + build.patch_stamp())
         assert dest.name == tag
         assert json.loads((dest / "BUILD.json").read_text())["patches"] == ["0001-x.patch"]

@@ -14,14 +14,14 @@ from __future__ import annotations
 import subprocess
 
 import pytest
+from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
+
+import ml_stack.serve.preflight as preflight
 from ml_stack.serve import backend as backend_module
 from ml_stack.serve import preflight
 from ml_stack.serve.backend import LlamaServerBackend, ServerSpec
-import ml_stack.serve.preflight as preflight
 from ml_stack.serve.preflight import Preflight, PreflightFailed, read_gguf_header, shard_names
 from ml_stack.testing.fakes import fake_llama_binary
-
-from conftest import LLAMA_SERVER_HELP, fake_binary, write_gguf
 from tests.conftest import leased
 
 
@@ -258,7 +258,6 @@ class TestMeasuredFitCheck:
         GPU; the file size refused a shape that runs (driven 2026-09-05, Flash-Next at
         its whole window). Mutation: let the estimate keep the verdict."""
         import ml_stack.setup as setup_module
-
         from ml_stack.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
@@ -285,7 +284,6 @@ class TestMeasuredFitCheck:
 
     def test_slots_are_charged_each(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module
-
         from ml_stack.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
@@ -313,7 +311,6 @@ class TestMeasuredFitCheck:
 
     def test_a_measured_record_that_fits(self, tmp_path, monkeypatch):
         import ml_stack.setup as setup_module
-
         from ml_stack.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
@@ -333,7 +330,6 @@ class TestMeasuredFitCheck:
     def test_a_measured_record_that_does_not_fit_refuses_with_the_numbers(self, tmp_path,
                                                                           monkeypatch):
         import ml_stack.setup as setup_module
-
         from ml_stack.serve.fit import Fit
 
         monkeypatch.setattr(setup_module, "_arches", lambda binary: {"llama"})
@@ -563,7 +559,7 @@ def test_an_architecture_with_a_hyphen_is_known_when_the_source_says_so(monkeypa
     drop the source table."""
     from ml_stack.serve import preflight
 
-    monkeypatch.setattr("ml_stack.serve.build._arches_from_source", lambda source: {"gpt-oss", "llama"})
+    monkeypatch.setattr("ml_stack.serve.build_platform.arches_from_source", lambda source: {"gpt-oss", "llama"})
     monkeypatch.setattr("ml_stack.setup._arches", lambda binary, **k: {"llama", "gemma3"})
     known = preflight.known_architectures(tmp_path / "llama-server")
     assert "gpt-oss" in known

@@ -19,8 +19,10 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+
 from ml_stack import home
 from ml_stack.log import say
+from ml_stack.serve.build_platform import server_name
 from ml_stack.units import human_bytes
 
 __all__ = ["BEHAVIOURS", "CHECKOUT", "HOOKS", "SPEECH_PROTOCOLS", "STALE_BUILD_DAYS",
@@ -333,8 +335,7 @@ def _firewall_finding() -> Finding:
 def _lacking_flags(binary: str) -> list[tuple[str, str]]:
     """Every flag ``ServerSpec`` can emit that this build's ``--help`` does not list, with
     the nearest it has; empty when the build answers everything or printed no help at all."""
-    from ml_stack.serve.backend import (LlamaServerBackend, emitted_flags, flags_of,
-                                        unknown_flags)
+    from ml_stack.serve.backend import LlamaServerBackend, emitted_flags, flags_of, unknown_flags
 
     try:
         return unknown_flags(emitted_flags(LlamaServerBackend(binary=binary)),
@@ -689,9 +690,9 @@ def _answers_help(binary: Path) -> bool:
 
 
 def _days_old(build_dir: Path) -> int | None:
-    from ml_stack.serve.build import _manifest_of
+    from ml_stack.serve.build_report import manifest_of
 
-    built = str(_manifest_of(build_dir).get("built_at", ""))
+    built = str(manifest_of(build_dir).get("built_at", ""))
     try:
         then = datetime.fromisoformat(built)
     except ValueError:
@@ -703,10 +704,10 @@ def _days_old(build_dir: Path) -> int | None:
 
 def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS) -> list[Finding]:
     """``current`` answers ``--help`` and is not stale; the named builds beside it."""
-    from ml_stack.serve.build import _manifest_of, _server_name
+    from ml_stack.serve.build_report import manifest_of
 
     out: list[Finding] = []
-    server = current / _server_name()
+    server = current / server_name()
     if not (current.is_symlink() or current.exists()):
         out.append(Finding(name="llama.cpp: current", good=False,
                            said="not built yet", fix="ml-stack-serve build",
@@ -719,7 +720,7 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
                            note="the link is there and the binary behind it is not, or "
                                 "cannot load: it will fail the same way at serve time"))
     else:
-        commit = _manifest_of(current).get("commit", "?")
+        commit = manifest_of(current).get("commit", "?")
         age = _days_old(current)
         stale = age is not None and age >= stale_days
         out.append(Finding(
@@ -733,11 +734,11 @@ def builds_of(current: Path, named: Path, *, stale_days: int = STALE_BUILD_DAYS)
                  "architecture'"))
     if named.is_dir():
         kept = [(p.name, p) for p in sorted(named.iterdir())
-                if (p.is_symlink() or p.is_dir()) and (p / _server_name()).exists()]
+                if (p.is_symlink() or p.is_dir()) and (p / server_name()).exists()]
         if kept:
             out.append(Finding(
                 name="llama.cpp: named builds", good=True,
-                said=", ".join(f"{n} ({_manifest_of(p).get('commit', '?')})" for n, p in kept),
+                said=", ".join(f"{n} ({manifest_of(p).get('commit', '?')})" for n, p in kept),
                 note="beside current, not replacing it -- ml-stack-serve up --build NAME "
                      "selects one"))
     return out
