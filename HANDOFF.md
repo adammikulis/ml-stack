@@ -505,10 +505,25 @@ worth taking, in this order:
 
 ## The interface
 
-- [ ] **Nobody has drawn 3,000 nodes in the page.** The page ships the whole graph as one
-  JSON blob and lays it out in the browser; the biggest graph it has held is a few hundred
-  nodes. `ml-stack-world make --size large` gives one 5,000 people to try, and
-  `most_messages` already trims the quotes; nothing trims the drawing.
+- [ ] **The 2D force layout reads as one grey mass past a couple thousand nodes.**
+  Measured with synthetic clause/standard graphs at 500-5000 nodes, 2.7 edges/node,
+  30-60 character labels: page size, search latency and memory all scale linearly and
+  stay small (5,000 nodes is under 3 MB of HTML and under 100 MB of heap), but the charge
+  and collide forces in `graph-view.html` are fixed constants tuned for a few hundred
+  nodes, so the interior of a bigger graph collapses into an undifferentiated ball no
+  panning or zooming escapes. A real corpus with actual cluster structure (citations,
+  hierarchy) likely fares better than the uniformly-random synthetic edges used to
+  measure this; unverified against one.
+- [ ] **`place3dLabels()` (`graph-3d.html`) reprojects every visible node every animation
+  frame, forever, while the 3D view is open, even when the camera has not moved and
+  nothing has changed.** `layoutLabels()` (`graph-view.html`) and `place3dLabels()` now
+  both cap the candidates they try to fit at 800 (`LABEL_CAP`), which bounds the
+  collision search to candidates times marks instead of marks squared, but the 3D
+  function still does that capped pass unconditionally every frame rather than only
+  when the camera or selection changed.
+- [ ] **Nothing in the test suite catches a regression in either of the above.**
+  `tests/test_graph_page.py` drives the page at a handful of nodes; no test renders it at
+  the thousands-of-nodes scale a real graph reaches.
 
 ## The tool loop
 
