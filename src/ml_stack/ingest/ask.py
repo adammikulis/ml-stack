@@ -3,13 +3,13 @@ questions scored the way the bench scores one."""
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from ml_stack.asking import ASKING
+from ml_stack.files import records_in
 from ml_stack.graph.conversation import converse
 from ml_stack.ingest.judge import sources_for
 from ml_stack.log import say
@@ -89,11 +89,7 @@ def read_asked(path: str | Path) -> list[dict[str, Any]]:
     writing a gold set for a textbook knows "vault current" and not
     ``concept:vault-current``; `score_asked` resolves a label against the graph.
     """
-    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    asked = held.get("questions") if isinstance(held, Mapping) else held
-    if not isinstance(asked, list) or not asked:
-        raise ValueError(f"{path}: no questions")
-    return [dict(one) for one in asked if isinstance(one, Mapping)]
+    return records_in(path, "questions")
 
 
 def _ids_for(graph: Mapping[str, Any], wanted: Iterable[Any]) -> list[str]:

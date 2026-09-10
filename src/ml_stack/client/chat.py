@@ -82,6 +82,18 @@ def forget_families() -> None:
     _FAMILY_BY_URL.clear()
 
 
+def sampling_asked(temperature: float | None, top_p: float | None, top_k: int | None,
+                   min_p: float | None) -> dict[str, Any]:
+    """The sampler fields a request carries: those that were chosen, greedy when none was."""
+    out: dict[str, Any] = {}
+    for name, value in (("temperature", temperature), ("top_p", top_p),
+                        ("top_k", top_k), ("min_p", min_p)):
+        if value is not None:
+            out[name] = value
+    out.setdefault("temperature", 0.0)
+    return out
+
+
 class GrammarBudgetError(ServerError):
     """A grammar-constrained generation ran out of tokens mid-structure."""
 
@@ -205,14 +217,8 @@ class Client:
 
         Greedy by default, because a caller who has not chosen wants the repeatable answer.
         """
-        out: dict[str, Any] = {}
-        for name, value in (("temperature", self.asked_temperature),
-                            ("top_p", self.asked_top_p), ("top_k", self.asked_top_k),
-                            ("min_p", self.asked_min_p)):
-            if value is not None:
-                out[name] = value
-        out.setdefault("temperature", 0.0)
-        return out
+        return sampling_asked(self.asked_temperature, self.asked_top_p,
+                              self.asked_top_k, self.asked_min_p)
 
     @property
     def speculative(self) -> dict[str, Any]:

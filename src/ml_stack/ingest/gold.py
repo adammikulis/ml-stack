@@ -3,7 +3,6 @@ same path, scored."""
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from collections.abc import Callable, Collection, Mapping, Sequence
@@ -11,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import records_in
 from ml_stack.ingest.extract import PER_SECTION, VERBS
 from ml_stack.ingest.reads import _slug
 
@@ -88,11 +88,7 @@ def read_gold(path: str | Path) -> list[dict[str, Any]]:
     extractor that says "mitochondrion" where the gold says "mitochondria" is right, and a
     scorer with no aliases would call it wrong and send somebody tuning a prompt for a week.
     """
-    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    passages = held.get("passages") if isinstance(held, Mapping) else held
-    if not isinstance(passages, list) or not passages:
-        raise ValueError(f"{path}: no passages")
-    return [dict(p) for p in passages if isinstance(p, Mapping)]
+    return records_in(path, "passages")
 
 
 def _names(value: Any) -> list[str]:

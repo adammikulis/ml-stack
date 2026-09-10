@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__all__ = ["human_bytes"]
+__all__ = ["human_bytes", "span"]
 
 
 def human_bytes(size: float) -> str:
@@ -13,3 +13,14 @@ def human_bytes(size: float) -> str:
             return f"{value:.0f}{unit}" if unit == "B" else f"{value:.1f}{unit}"
         value /= 1024.0
     return f"{value:.1f}T"
+
+
+def span(seconds: float) -> str:
+    """``45 s``, ``26 min``, ``2 h 10 min`` -- the shapes `history.parse_duration` reads."""
+    whole = int(round(seconds))
+    if whole < 60:
+        return f"{whole} s"
+    minutes = int(round(whole / 60))
+    if minutes < 60:
+        return f"{minutes} min"
+    return f"{minutes // 60} h {minutes % 60:02d} min"

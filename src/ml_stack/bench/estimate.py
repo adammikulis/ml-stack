@@ -24,6 +24,7 @@ from typing import Any
 # anything patchable is looked up there at call time, never bound here at import.
 from ml_stack import hub
 from ml_stack.bench.keep import SMOKE
+from ml_stack.units import span
 
 # A model nothing is known about: no run kept and no weights on disk to size it by.
 GUESS_S = 15.0
@@ -43,17 +44,6 @@ def ceiling_default() -> float:
         return float(os.environ.get(CEILING_ENV, "") or CEILING_MIN)
     except ValueError:
         return CEILING_MIN
-
-
-def span(seconds: float) -> str:
-    """``45 s``, ``26 min``, ``2 h 10 min`` -- the shapes `history.parse_duration` reads."""
-    whole = int(round(seconds))
-    if whole < 60:
-        return f"{whole} s"
-    minutes = int(round(whole / 60))
-    if minutes < 60:
-        return f"{minutes} min"
-    return f"{minutes // 60} h {minutes % 60:02d} min"
 
 
 @dataclass

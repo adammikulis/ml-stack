@@ -36,6 +36,7 @@ from typing import Any
 
 from ml_stack import home
 from ml_stack.train.step import TorchStep
+from ml_stack.units import span
 
 __all__ = ["CEILING_ENV", "CEILING_MIN", "DEFAULT_TARGETS", "Fit", "Lora", "LoraStep",
            "OverCeiling", "PEFT_MISSING", "attach", "adapter_tensors", "converter",
@@ -63,6 +64,15 @@ PEFT_MISSING = (
 # hours where a bench run is minutes, which is exactly why it must be a decision.
 CEILING_MIN = 30.0
 CEILING_ENV = "MLSTACK_TRAIN_CEILING"
+
+
+def ceiling_default() -> float:
+    """The ceiling in minutes: the environment's, else `CEILING_MIN`."""
+    try:
+        return float(os.environ.get(CEILING_ENV, "") or CEILING_MIN)
+    except ValueError:
+        return CEILING_MIN
+
 
 # Tokens a second, per billion *active* parameters, for a LoRA fine-tune through
 # transformers. Derived rather than measured: forward and backward through a LoRA'd layer
@@ -252,25 +262,6 @@ def managed_source() -> Path:
         return Path(src_dir())
     except Exception:                                       # noqa: BLE001 - a bare install
         return home.state("llama.cpp", "src")
-
-
-def ceiling_default() -> float:
-    """The ceiling in minutes: the environment's, else `CEILING_MIN`."""
-    try:
-        return float(os.environ.get(CEILING_ENV, "") or CEILING_MIN)
-    except ValueError:
-        return CEILING_MIN
-
-
-def span(seconds: float) -> str:
-    """``45 s``, ``26 min``, ``2 h 10 min`` -- the shapes the bench's estimates print."""
-    whole = int(round(seconds))
-    if whole < 60:
-        return f"{whole} s"
-    minutes = int(round(whole / 60))
-    if minutes < 60:
-        return f"{minutes} min"
-    return f"{minutes // 60} h {minutes % 60:02d} min"
 
 
 def parameters_b(base: str, size_spec: Mapping[str, Any] | None = None) -> tuple[float, float]:

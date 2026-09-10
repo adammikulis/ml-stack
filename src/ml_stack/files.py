@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-__all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json",
+__all__ = ["UNVERSIONED", "CrossDevice", "promote", "prune_orphans", "read_json", "records_in",
            "version_of", "versioned", "write_json", "write_text", "writing"]
 
 #: A record with no version key.
@@ -123,3 +123,13 @@ def prune_orphans(directory: Path, live: Set[str], suffix: str = ".json") -> lis
             f.unlink()
             gone.append(f.stem)
     return gone
+
+
+def records_in(path: str | Path, key: str) -> list[dict[str, Any]]:
+    """The list of mappings a JSON file holds under ``key``, or the file itself when it is
+    a list. Raises ``ValueError`` naming the file when there are none."""
+    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    found = held.get(key) if isinstance(held, Mapping) else held
+    if not isinstance(found, list) or not found:
+        raise ValueError(f"{path}: no {key}")
+    return [dict(one) for one in found if isinstance(one, Mapping)]

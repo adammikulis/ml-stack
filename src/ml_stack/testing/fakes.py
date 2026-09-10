@@ -37,7 +37,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from ml_stack.client import families
-from ml_stack.client.chat import Client, Reply
+from ml_stack.client.chat import Client, Reply, sampling_asked
 from ml_stack.client.counters import Speculative
 from ml_stack.client.families import Family
 from ml_stack.http import json_body
@@ -217,14 +217,8 @@ class FakeClient:
 
     @property
     def sampling(self) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for name, value in (("temperature", self.asked_temperature),
-                            ("top_p", self.asked_top_p), ("top_k", self.asked_top_k),
-                            ("min_p", self.asked_min_p)):
-            if value is not None:
-                out[name] = value
-        out.setdefault("temperature", 0.0)
-        return out
+        return sampling_asked(self.asked_temperature, self.asked_top_p,
+                              self.asked_top_k, self.asked_min_p)
 
     @property
     def card(self) -> dict[str, Any]:
@@ -783,6 +777,7 @@ if not os.environ.get("MLSTACK_FAKE_LLAMA"):
 from pathlib import Path
 
 from ml_stack.testing.fakes import serve_from_argv
+from ml_stack.client.chat import sampling_asked
 
 raise SystemExit(serve_from_argv(sys.argv[1:], where=Path(__file__).parent))
 """
