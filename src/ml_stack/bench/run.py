@@ -56,6 +56,15 @@ COMMANDS = Group("ml-stack-bench",
 HANDED_OVER = ("standard", "animate")
 
 
+class _NotIdle(Exception):
+    """A server a sweep would measure is busy; `_idle` has already said which."""
+
+
+def _module(name: str) -> Any:
+    """The ``ml_stack.bench`` module ``name``, for a subcommand that owns its own flags."""
+    return importlib.import_module(f"ml_stack.bench.{name}")
+
+
 def _parser() -> argparse.ArgumentParser:
     """The command line of ``ml-stack-bench``, built once per call and shared with `detach`,
     which needs a label out of an argv before handing it to the child."""
@@ -323,7 +332,7 @@ def _served_by_the_sweep(args: Any, questions: Any, graph: Any, already: Any,
         # somebody is actually using should stop us.
         if bench.busy(f"http://127.0.0.1:{args.serve_port}") > 0 and not _idle(
                 f"http://127.0.0.1:{args.serve_port}", args):
-            raise Refused("")
+            raise _NotIdle
         # `--context` is the total across slots, which is what `-c` takes and what
         # ServerSpec means by it. Dividing by the slot count served a model at a
         # quarter of the context every other run had, and the only thing that said
@@ -376,7 +385,7 @@ def _measured_on(args: Any, named: Sequence[tuple[str, str]], questions: Any, gr
                                embed_model=args.embed_model, margin=args.margin)
             say(f"\n{label} on {url}, look_up by {ask.finder}")
             if not _idle(http_of(url), args):
-                raise Refused("")
+                raise _NotIdle
             # the client for whatever program the URL names -- a llama-server, Ollama,
             # an OpenAI-style server -- at the sweep's context
             asking_with = with_card(client_for(url, timeout=args.per_question,
@@ -433,18 +442,18 @@ def cmd_sweep(args: Any) -> int:
         saved = _served_by_the_sweep(args, questions, graph, already,
                                      sample(everything, SMOKE) if smoking else ())
         saved += _measured_on(args, named, questions, graph, already)
-    except Refused:
+    except _NotIdle:
         return 3
     say()
     table(read_back(args.kept, saved) if args.smoke else bench._kept(args.kept))
     return 0
 
 
-COMMANDS.borrow(lambda sub: importlib.import_module("ml_stack.bench.speed").add_arguments(sub),
-                lambda args: importlib.import_module("ml_stack.bench.speed").main(args),
+COMMANDS.borrow(lambda sub: _module("speed").add_arguments(sub),
+                lambda args: _module("speed").main(args),
                 options=lambda: (*options.measuring_options(), *options.checking()))
-COMMANDS.borrow(lambda sub: importlib.import_module("ml_stack.bench.extract").add_arguments(sub),
-                lambda args: importlib.import_module("ml_stack.bench.extract").main(args),
+COMMANDS.borrow(lambda sub: _module("extract").add_arguments(sub),
+                lambda args: _module("extract").main(args),
                 options=options.checking)
 
 
@@ -605,15 +614,14 @@ def cmd_queue(args: Any) -> int:
         return 2
 
 
-COMMANDS.borrow(
-    lambda sub: importlib.import_module("ml_stack.bench.comparison").add_arguments(sub),
-    lambda args: importlib.import_module("ml_stack.bench.comparison").main(args))
+COMMANDS.borrow(lambda sub: _module("comparison").add_arguments(sub),
+                lambda args: _module("comparison").main(args))
 
 
 def _handed_over(args: Any) -> int:
     """A subcommand whose module has a ``main(argv)`` of its own, given the words after it."""
-    module = importlib.import_module(f"ml_stack.bench.{args.cmd}")
-    return int(module.main(_after(list(getattr(args, "_argv", None) or []), args.cmd)))
+    return int(_module(args.cmd).main(
+        _after(list(getattr(args, "_argv", None) or []), args.cmd)))
 
 
 COMMANDS.add("standard", _handed_over,
@@ -621,18 +629,18 @@ COMMANDS.add("standard", _handed_over,
                   "lm-evaluation-harness against a chat endpoint, one JSON per "
                   "configuration; takes the measuring lock itself",
              allow_abbrev=False, conflict_handler="resolve",
-             parents=[importlib.import_module("ml_stack.bench.standard")._parser()])
+             parents=[_module("standard")._parser()])
 COMMANDS.add("animate", _handed_over,
              help="a comparison document as an animated graphic, with manim",
              options=options.animate_options, allow_abbrev=False)
 
 COMMANDS.borrow(
-    lambda sub: importlib.import_module("ml_stack.bench.history").add_arguments(
+    lambda sub: _module("history").add_arguments(
         sub.add_parser("history", allow_abbrev=False,
                        help="every measurement the logs remember: when, how long, "
                             "how it ended, the estimate beside the actual, and the "
                             "runs it kept")),
-    lambda args: importlib.import_module("ml_stack.bench.history").run(args))
+    lambda args: _module("history").run(args))
 
 
 def _estimated(rest: Sequence[str]) -> int:
