@@ -358,7 +358,9 @@ def test_a_daemon_that_can_hear_is_found_by_asking_for_speech(traind):
     this process holds are the suite's empty ones; the daemon is a real process with its
     own, probed in a thread of its own once it is up."""
     keyfile, disco_port, http_port, log = traind
-    deadline = time.time() + 30
+    # the probe runs in the daemon's own thread; on a busy machine the beacon carries an
+    # empty `speech` for a while, and this waits for the thread rather than for the clock
+    deadline = time.time() + 120
     while True:
         try:
             peer = Peer.find_one(require="speech", cluster_key_path=keyfile,
