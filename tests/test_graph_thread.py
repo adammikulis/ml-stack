@@ -9,8 +9,17 @@ import pytest
 
 from ml_stack.graph.answers import Answer
 from ml_stack.graph.store import GraphStore
-from ml_stack.graph.thread import (drew_on, follow, forget_thread, of_node, recent,
-                                   remember_turn, threads, turn_of)
+from ml_stack.graph.thread import (
+    _rows,
+    drew_on,
+    follow,
+    forget_thread,
+    of_node,
+    recent,
+    remember_turn,
+    threads,
+    turn_of,
+)
 
 GRAPH = {
     "nodes": [{"id": "person:iris", "label": "Iris Bellweather", "kind": "person",
@@ -185,8 +194,15 @@ def test_a_graph_that_was_never_talked_to_has_no_conversation(tmp_path):
 
 from ml_stack.graph.conversation import converse  # noqa: E402
 from ml_stack.graph.prompts import EARLIER, RECALLED  # noqa: E402
-from ml_stack.graph.thread import (EVERY, SUMMARY, WINDOW, latest_summary,  # noqa: E402
-                                   recall, summarise, write_summary)
+from ml_stack.graph.thread import (  # noqa: E402
+    EVERY,
+    SUMMARY,
+    WINDOW,
+    latest_summary,
+    recall,
+    summarise,
+    write_summary,
+)
 from ml_stack.testing import ScriptedModel  # noqa: E402
 
 LONG_GRAPH = {
@@ -441,3 +457,21 @@ def test_a_graph_never_talked_to_has_nothing_to_recall_or_summarise(tmp_path):
     with GraphStore(tmp_path / "graph.ladybug", read_only=True) as reopened:
         assert recall(reopened, "never", "who?", embedder=bag) == []
         assert latest_summary(reopened, "never") is None
+
+
+class TestAStoreFaultIsNotAnEmptyConversation:
+    """`_rows` returned [] for every exception, so a corrupt store, a schema mismatch and an
+    engine error all reached the reader as "this graph has no history"."""
+
+    def test_a_query_the_engine_refuses_for_any_other_reason_raises(self, store):
+        remember_turn(store, thread="t1", role="user", text="Who surveys land?")
+        with pytest.raises(RuntimeError, match=r"[Bb]inder"):
+            _rows(store, "MATCH (t:Turn) RETURN t.no_such_column AS x")
+
+    def test_a_store_that_cannot_answer_at_all_raises(self, store):
+        class Broken:
+            def query(self, _cypher, _params):
+                raise RuntimeError("IO exception: Could not read from file")
+
+        with pytest.raises(RuntimeError, match="IO exception"):
+            _rows(Broken(), "MATCH (t:Turn) RETURN t")

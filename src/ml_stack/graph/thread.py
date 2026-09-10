@@ -41,6 +41,7 @@ makes the tools find it.
 from __future__ import annotations
 
 import json
+import re
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -132,17 +133,22 @@ def _tag(thread: str) -> str:
     return "thread:" + str(thread)
 
 
+#: The engine has no typed exception for a missing table; it is in the message.
+_NO_SUCH_TABLE = re.compile(r"table \S+ does not exist", re.IGNORECASE)
+
+
 def _rows(store: Any, cypher: str, params: Mapping[str, Any] | None = None) -> list[dict]:
     """Query, treating "no such table" as no rows.
 
     A graph that has never been talked to has no Turn table, and a reader cannot make one.
-    Asking it for a conversation should come back empty rather than raise: history is an
-    addition to a graph, not a part of every graph.
+    Every other fault -- a schema mismatch, an unreadable store, an engine error -- raises.
     """
     try:
         return store.query(cypher, params or {})
-    except Exception:  # noqa: BLE001 - a graph with no conversation in it has no conversation
-        return []
+    except RuntimeError as exc:
+        if _NO_SUCH_TABLE.search(str(exc)):
+            return []
+        raise
 
 
 def drew_on(answer: Any) -> dict[str, list[str]]:
