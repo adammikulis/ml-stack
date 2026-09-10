@@ -222,25 +222,20 @@ across `src/`.
 
 ### The interface
 
-- [ ] **The 2D force layout reads as one grey mass past a couple thousand nodes.**
-  Measured with synthetic clause/standard graphs at 500-5000 nodes, 2.7 edges/node,
-  30-60 character labels: page size, search latency and memory all scale linearly and
-  stay small (5,000 nodes is under 3 MB of HTML and under 100 MB of heap), but the charge
-  and collide forces in `graph-view.html` are fixed constants tuned for a few hundred
-  nodes, so the interior of a bigger graph collapses into an undifferentiated ball no
-  panning or zooming escapes. A real corpus with actual cluster structure (citations,
-  hierarchy) likely fares better than the uniformly-random synthetic edges used to
-  measure this; unverified against one.
-- [ ] **`place3dLabels()` (`graph-3d.html`) reprojects every visible node every animation
-  frame, forever, while the 3D view is open, even when the camera has not moved and
-  nothing has changed.** `layoutLabels()` (`graph-view.html`) and `place3dLabels()` now
-  both cap the candidates they try to fit at 800 (`LABEL_CAP`), which bounds the
-  collision search to candidates times marks instead of marks squared, but the 3D
-  function still does that capped pass unconditionally every frame rather than only
-  when the camera or selection changed.
-- [ ] **Nothing in the test suite catches a regression in either of the above.**
-  `tests/test_graph_page.py` drives the page at a handful of nodes; no test renders it at
-  the thousands-of-nodes scale a real graph reaches.
+- [ ] **A graph of a few thousand nodes is drawn whole, and the pane holds about that
+  many.** Measured 2026-09-10 headless at 1400x900 on synthetic graphs at 2.7 edges a node:
+  at 3,000 nodes the marks settle 10 px apart -- two mark diameters -- over 61% of the pane,
+  and at 5,000, 7 px apart over 63%. Scaling the charge, the repulsion cutoff, the pull to
+  the centre and the collide radius with the live node count was tried across exponents 0.5
+  to 3, with degree-scaled repulsion and with stronger and weaker centring, and left every
+  one of those numbers the same or worse, because the layout grows in world units and the
+  fit zooms back out (the measurements are in the body of "the link layer's ink falls with
+  the number of links drawn in it", 2026-09-10). What would give a bigger graph room is
+  drawing fewer of it -- a cap on marks with the rest reached by search or by opening a
+  neighbourhood, the way `LABEL_CAP` caps names -- rather than another constant. Still
+  unverified against a real corpus with cluster structure: 3,000 nodes in thirty planted
+  communities, 85% of each node's edges inside its own, settled into one blob under every
+  setting tried, and a citation or hierarchy graph may not.
 
 ### Files that hold more than one job
 
@@ -441,12 +436,6 @@ under the commands; the rest, largest first:
   `/ask/stream`, and a review queue with something in it. `ml-stack-serve up <model>`
   first, then `ml-stack-walk fleet chat models` and `ml-stack-walk graph ask review --ask
   "..."`.
-- [ ] **The graph page's ▶ history chip does nothing on a graph whose links carry no
-  messages, and says so nowhere.** `playHistory` in `graph-history.html` returns early when
-  `histOrder` is empty, leaving the chip pressable and inert; a reader presses it and gets
-  silence. `ml-stack-walk graph history` reports "this graph's links carry no messages to
-  play through" because it can read `aria-pressed`, which is more than the page tells
-  anyone. Either hide the chip when nothing would play, or have it say why.
 
 ### The code itself
 
