@@ -94,10 +94,10 @@
     // private window or a preview, so every touch of it is guarded.
     const threadName = (() => {
       try {
-        let held = localStorage.getItem('thread');
-        if (!held) { held = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-                     localStorage.setItem('thread', held); }
-        return held;
+        let name = localStorage.getItem('thread');
+        if (!name) { name = 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+                     localStorage.setItem('thread', name); }
+        return name;
       } catch (e) { return ''; }
     })();
     let asking = false;
@@ -118,9 +118,9 @@
       try {
         const r = await fetch('/thread/' + encodeURIComponent(threadName));
         if (!r.ok) return;
-        const held = await r.json();
-        if (held.session) sessionLine(held.session);
-        for (const t of (held.turns || [])) {
+        const kept = await r.json();
+        if (kept.session) sessionLine(kept.session);
+        for (const t of (kept.turns || [])) {
           if (!t.text) continue;
           turns.push({ role: t.role, content: t.text });
           const el = say(t.role, t.text);
@@ -129,7 +129,7 @@
           const steps = t.steps || (t.meta && t.meta.steps);
           if (t.role === 'assistant' && steps) thoughtOver(el, steps);
         }
-        if ((held.turns || []).length) openAnswers('');
+        if ((kept.turns || []).length) openAnswers('');
       } catch (e) { /* no history is not a broken page */ }
     }
     reopen();
@@ -211,8 +211,8 @@
       // what is lit right now rides along, so the model can keep it or leave it
       // only what the reader deliberately kept travels to the next question: gathered nodes
       // and the selected one. Carrying a whole previous answer drags its strangers along
-      const held = [...picked].filter(k => k.startsWith('node:')).map(k => k.slice(5));
-      if (M.selected && !held.includes(M.selected)) held.push(M.selected);
+      const highlighted = [...picked].filter(k => k.startsWith('node:')).map(k => k.slice(5));
+      if (M.selected && !highlighted.includes(M.selected)) highlighted.push(M.selected);
       // the plain text search runs first, so something is lit up while the model thinks
       M.query = question.toLowerCase();
       M.answer = null;
@@ -240,7 +240,7 @@
       try {
         const payload = JSON.stringify({ question, turns: turns.slice(0, -1),
                                          ...(threadName ? { thread: threadName } : {}),
-                                         ...(held.length ? { held } : {}) });
+                                         ...(highlighted.length ? { highlighted } : {}) });
         // the streaming route shows the work as it happens; a server without it gets one POST
         let out = await askStream(payload, pending);
         if (out === null) {

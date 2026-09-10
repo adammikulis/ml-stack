@@ -316,7 +316,7 @@ def _reading_work(units: Sequence[Any], *, binary: str) -> Any:
 
     def work(config: Any, label: str, kept: str) -> list[Any]:
         rows = []
-        with up(config, binary=binary, name=label) as (server, held):
+        with up(config, binary=binary, name=label) as (server, record):
             client = config.client(server.base_url)
             for unit in units:
                 read = extract_unit(client, unit, shape)
@@ -324,10 +324,10 @@ def _reading_work(units: Sequence[Any], *, binary: str) -> Any:
                 say(f"  {read.section or read.unit:<10} {read.seconds:6.1f}s  "
                     f"{read.concepts:>3}c {read.relations:>3}r"
                     + (f"  {read.error}" if read.error else ""))
-            held.pop("loaded", None)
-            held.pop("baseline", None)
+            record.pop("loaded", None)
+            record.pop("baseline", None)
             if kept:
-                say(f"  kept as {save(kept, rows, held=held, label=label, workload='ingest')}")
+                say(f"  kept as {save(kept, rows, server=record, label=label, workload='ingest')}")
         return rows
 
     return work

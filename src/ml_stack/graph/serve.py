@@ -27,11 +27,12 @@ this question, for ``converse(..., summary=, recalled=)``. A subclass that retur
 ::
 
     class Handler(AskRoutes, BaseHTTPRequestHandler):
-        def asker(self, question, *, turns, held, stream, emit):
+        def asker(self, question, *, turns, highlighted, stream, emit):
             if stream:
-                return converse_stream(question, graph, client, turns=turns, held=held,
+                return converse_stream(question, graph, client, turns=turns,
+                                       highlighted=highlighted,
                                        on_event=emit)
-            return converse(question, graph, client, turns=turns, held=held)
+            return converse(question, graph, client, turns=turns, highlighted=highlighted)
 
         def threads(self, *, write=False):
             return GraphStore(path, read_only=not write)
@@ -263,7 +264,7 @@ class History(list):
 class Ask:
     """One question as the page sent it, after the body was checked and history resolved."""
 
-    __slots__ = ("question", "sent", "turns", "thread", "held", "body", "began")
+    __slots__ = ("question", "sent", "turns", "thread", "highlighted", "body", "began")
 
     def __init__(self, body: Mapping[str, Any]) -> None:
         self.body = dict(body)
@@ -271,8 +272,9 @@ class Ask:
         self.sent = body.get("turns") if isinstance(body.get("turns"), list) else []
         self.turns: list = list(self.sent)
         self.thread = str(body.get("thread") or "")[:64]
-        held = body.get("held")
-        self.held = list(held) if isinstance(held, list) and all(isinstance(h, str) for h in held) else []
+        lit = body.get("highlighted")
+        self.highlighted = (list(lit) if isinstance(lit, list)
+                            and all(isinstance(h, str) for h in lit) else [])
         self.began = time.time()
 
     @property
@@ -302,7 +304,7 @@ class AskRoutes:
         is served with, the asking, and the client. Given one, ``client_on_slot()``
         leases the server and hands out a slot of it, and ``model_name`` and
         ``serving_url`` answer from it.
-    ``asker(question, *, turns, held, stream, emit)``
+    ``asker(question, *, turns, highlighted, stream, emit)``
         Answers. Returns an ``Answer`` (or a mapping in ``answer_payload``'s shape).
         When ``stream`` is true the model's events are reported through ``emit`` as they
         happen -- ``converse_stream``'s ``on_event`` -- or the asker may instead return an
@@ -350,7 +352,7 @@ class AskRoutes:
 
     # ------------------------------------------------------------- what a subclass says
 
-    def asker(self, question: str, *, turns: list, held: list, stream: bool,
+    def asker(self, question: str, *, turns: list, highlighted: list, stream: bool,
               emit: Any) -> Any:
         raise NotImplementedError("a subclass says how a question is answered")
 
@@ -396,9 +398,9 @@ class AskRoutes:
         once a question has been asked and not before."""
         if self.config is None:
             return ""
-        from ml_stack.serve.serving import held
+        from ml_stack.serve.serving import servers
 
-        return held().get(self.config.port, "")
+        return servers().get(self.config.port, "")
 
     def handle_model(self) -> dict[str, Any]:
         """``GET /ask/model``: ``{"model": name, "slot_context": n, "slots": n}`` -- the
@@ -438,10 +440,10 @@ class AskRoutes:
         from ml_stack.graph.thread import follow
 
         try:
-            with self._opened() as held:
-                if held is None:
+            with self._opened() as store:
+                if store is None:
                     return None
-                records = [(t.meta or {}).get("spent") for t in follow(held, str(thread)[:64],
+                records = [(t.meta or {}).get("spent") for t in follow(store, str(thread)[:64],
                                                                      working=False)
                            if t.role == "assistant"]
         except Exception:  # noqa: BLE001 - a session that cannot be read is no session
@@ -463,12 +465,12 @@ class AskRoutes:
         remembers nothing. On the *concrete* class and not on `AskRoutes`, so two servers
         in one process -- a test's, and the one it is testing -- do not add up together.
         """
-        held = cls.__dict__.get("_telemetry")
-        if held is None:
-            held = {"started": time.time(), "answers": 0,
+        counters = cls.__dict__.get("_telemetry")
+        if counters is None:
+            counters = {"started": time.time(), "answers": 0,
                     "ring": deque(maxlen=max(1, int(cls.keep_answers)))}
-            cls._telemetry = held               # on this class, not on a base of it
-        return held
+            cls._telemetry = counters           # on this class, not on a base of it
+        return counters
 
     def record(self, ask: Ask | None, payload: Mapping[str, Any]) -> None:
         """Note one answered question in the ring. Never raises: telemetry is not the answer.
@@ -605,8 +607,9 @@ class AskRoutes:
 
         name = str(name)[:64]
         try:
-            with self._opened() as held:
-                turns = [] if held is None else [t.as_dict() for t in follow(held, name, working=working)]
+            with self._opened() as store:
+                turns = ([] if store is None
+                         else [t.as_dict() for t in follow(store, name, working=working)])
             from ml_stack.client.spent import Spent
 
             session = Spent.totals([(t.get("meta") or {}).get("spent") for t in turns
@@ -639,14 +642,14 @@ class AskRoutes:
         try:
             from ml_stack.graph.thread import latest_summary, recall, recent
 
-            with self._opened() as held:
-                if held is None:
+            with self._opened() as store:
+                if store is None:
                     return History(sent)
-                kept = recent(held, thread, turns=keep)
-                summary = latest_summary(held, thread)
+                kept = recent(store, thread, turns=keep)
+                summary = latest_summary(store, thread)
                 recalled = []
                 if question and int(self.recalled_turns) > 0:
-                    recalled = recall(held, thread, question, embedder=self.embedder(),
+                    recalled = recall(store, thread, question, embedder=self.embedder(),
                                       limit=int(self.recalled_turns), window=keep)
             return History(kept or sent, summary=summary, recalled=recalled)
         except Exception:  # noqa: BLE001 - a conversation is not worth failing an answer for
@@ -672,12 +675,12 @@ class AskRoutes:
 
             payload = answer_payload(out)
             embed = self.embedder()
-            with self._opened(write=True) as held:
-                if held is None:
+            with self._opened(write=True) as store:
+                if store is None:
                     return
-                remember_turn(held, thread=ask.thread, role="user", text=ask.question,
+                remember_turn(store, thread=ask.thread, role="user", text=ask.question,
                               embedder=embed)
-                remember_turn(held, thread=ask.thread, role="assistant",
+                remember_turn(store, thread=ask.thread, role="assistant",
                               text=str(payload.get("content") or ""), drew=drew_on(payload),
                               meta={"why": payload.get("why", ""), "steps": payload.get("steps", []),
                                     "model": payload.get("model", ""),
@@ -685,7 +688,7 @@ class AskRoutes:
                               embedder=embed)
                 writer = self.summariser()
                 if writer is not None:
-                    summarise(held, ask.thread, writer, every=int(self.summary_every))
+                    summarise(store, ask.thread, writer, every=int(self.summary_every))
         except Exception as exc:  # noqa: BLE001
             warn(f"{time.strftime('%FT%T')} turn not remembered: {exc}")
 
@@ -723,8 +726,8 @@ class AskRoutes:
 
     def _opened(self, *, write: bool = False) -> AbstractContextManager[Any]:
         """The conversation store as a context manager, or one that yields None."""
-        held = self.threads(write=write)
-        return nullcontext(None) if held is None else held
+        store = self.threads(write=write)
+        return nullcontext(None) if store is None else store
 
     def _checked(self, body: Mapping[str, Any]) -> Ask | None:
         ask = Ask(body)
@@ -736,7 +739,8 @@ class AskRoutes:
     def _answer(self, ask: Ask, *, stream: bool, emit: Any) -> Any:
         self.asking = ask
         try:
-            got = self.asker(ask.question, turns=ask.turns, held=ask.held, stream=stream,
+            got = self.asker(ask.question, turns=ask.turns, highlighted=ask.highlighted,
+                             stream=stream,
                              emit=emit)
             if isinstance(got, Iterator):
                 got = _drained(got, emit)
@@ -797,11 +801,11 @@ class RefreshRoutes(LocalOnly):
 
     @classmethod
     def _refresh_lock(cls) -> threading.Lock:
-        held = cls.__dict__.get("_refreshing")
-        if held is None:
-            held = threading.Lock()
-            setattr(cls, "_refreshing", held)
-        return held
+        lock = cls.__dict__.get("_refreshing")
+        if lock is None:
+            lock = threading.Lock()
+            setattr(cls, "_refreshing", lock)
+        return lock
 
     def handle_refresh(self) -> None:
         if self.refused():
@@ -970,7 +974,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
 
     # ------------------------------------------------------------- what AskRoutes asks
 
-    def asker(self, question: str, *, turns: list, held: list, stream: bool,
+    def asker(self, question: str, *, turns: list, highlighted: list, stream: bool,
               emit: Any) -> Any:
         if self.graph is None:
             raise RuntimeError("no graph on this server: serve with --graph FILE")
@@ -978,7 +982,7 @@ class Handler(RefreshRoutes, ReviewRoutes, RequestRoutes, DraftRoutes, AskRoutes
 
         client = self.client_on_slot(index=0)
         asked = {"asking": self.config.asking if self.config is not None else ASKING,
-                "turns": turns, "held": held,
+                "turns": turns, "highlighted": highlighted,
                 "summary": getattr(turns, "summary", None),
                 "recalled": list(getattr(turns, "recalled", ()) or ())}
         if stream:

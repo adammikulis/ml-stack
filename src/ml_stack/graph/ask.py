@@ -1077,8 +1077,8 @@ def quotes(graph: Mapping[str, Any], ids: Sequence[str], *,
         # what the entry records is only quotable when the fold found it in the source
         said = "" if attrs.get("unsourced") else \
             " ".join(str(attrs.get("definition") or "").split())
-        held = list(node.get("provenance") or ())[:QUOTED] or [""]
-        for unit_id in held:
+        cited = list(node.get("provenance") or ())[:QUOTED] or [""]
+        for unit_id in cited:
             span = spans.get(unit_id)
             text = _text_of(texts, unit_id) if span else ""
             words = text[int(span[0]):int(span[1])] if text else ""
@@ -1478,7 +1478,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
              turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
              limit: int = LIT,
              tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
-             finder: Any = None, held: Sequence[str] = (),
+             finder: Any = None, highlighted: Sequence[str] = (),
              opening: Sequence[str] = (), summary: Any = None,
              recalled: Sequence[Any] = ()) -> Answer:
     """One question, answered with the graph in hand.
@@ -1489,7 +1489,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``client`` is anything with ``chat(messages, tools=...)`` returning a reply carrying
     ``content`` and ``tool_calls``. ``tools`` is ``[(schema, callable), ...]``, each
     callable taking the parsed arguments mapping; ``tools_for(graph)`` by default.
-    ``finder`` replaces just look_up's callable. ``held`` names entries already highlighted
+    ``finder`` replaces just look_up's callable. ``highlighted`` names entries already lit
     for the reader: they are told to the model by label and id, and enter ``ids`` only if a
     tool call touches them. ``limit`` caps what ``show`` may light.
 
@@ -1500,7 +1500,7 @@ def converse(question: str, graph: Mapping[str, Any], client: Any, *,
     ``opening`` names entries a cheap search already found, read out before the first turn.
     """
     return _converse(question, graph, client, asking=asking, turns=turns, system=system,
-                     limit=limit, tools=tools, finder=finder, held=held, emit=None,
+                     limit=limit, tools=tools, finder=finder, highlighted=highlighted, emit=None,
                      opening=opening, summary=summary, recalled=recalled)
 
 
@@ -1509,7 +1509,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
                     turns: Sequence[Mapping[str, str]] = (), system: str = SYSTEM,
                     limit: int = LIT,
                     tools: Sequence[tuple[Mapping[str, Any], Any]] | None = None,
-                    finder: Any = None, held: Sequence[str] = (),
+                    finder: Any = None, highlighted: Sequence[str] = (),
                     opening: Sequence[str] = (), summary: Any = None,
                     recalled: Sequence[Any] = ()) -> Answer:
     """converse, reporting what is happening to ``on_event`` as it happens.
@@ -1522,7 +1522,7 @@ def converse_stream(question: str, graph: Mapping[str, Any], client: Any, *,
     any other client's text arrives whole.
     """
     return _converse(question, graph, client, asking=asking, turns=turns, system=system,
-                     limit=limit, tools=tools, finder=finder, held=held, emit=on_event,
+                     limit=limit, tools=tools, finder=finder, highlighted=highlighted, emit=on_event,
                      opening=opening, summary=summary, recalled=recalled)
 
 
@@ -1750,7 +1750,7 @@ def _offer(graph: Mapping[str, Any], tools: Sequence[tuple[Mapping[str, Any], An
 
 
 def _telling(system: str, *, asking: Asking, known: set[str], graph: Mapping[str, Any],
-             held: Sequence[str], out: Answer) -> tuple[str, bool]:
+             highlighted: Sequence[str], out: Answer) -> tuple[str, bool]:
     """The system prompt as this asking says it, and whether ids are held to the graph's.
 
     Constraining is dropped over `CAP` ids, which is written into the answer's steps.
@@ -1774,7 +1774,7 @@ def _telling(system: str, *, asking: Asking, known: set[str], graph: Mapping[str
         constrain_ids = False
     if constrain_ids:
         system = system + "\n\n" + CONSTRAINED_SYSTEM_SENTENCE
-    lit = [str(h) for h in held if str(h) in known]
+    lit = [str(h) for h in highlighted if str(h) in known]
     if lit:
         label = {str(n["id"]): str(n.get("label") or "") for n in (graph.get("nodes") or ())}
         system = (system + "\n\nCurrently highlighted: "
@@ -2309,13 +2309,13 @@ def _selected(out: Answer, graph: Mapping[str, Any], question: str, asking: Aski
 def _converse(question: str, graph: Mapping[str, Any], client: Any, *, asking: Asking,
               turns: Sequence[Mapping[str, str]], system: str, limit: int,
               tools: Sequence[tuple[Mapping[str, Any], Any]] | None,
-              finder: Any, held: Sequence[str], emit: Any, opening: Sequence[str] = (),
+              finder: Any, highlighted: Sequence[str], emit: Any, opening: Sequence[str] = (),
               summary: Any = None, recalled: Sequence[Any] = ()) -> Answer:
     out = Answer()
     offer = _offer(graph, tools, finder=finder, asking=asking)
     known = {str(n["id"]) for n in (graph.get("nodes") or ())}
     system, constrain_ids = _telling(system, asking=asking, known=known, graph=graph,
-                                     held=held, out=out)
+                                     highlighted=highlighted, out=out)
     schemas = [schema for schema, _ in offer]
     loop = _Loop(client=client, graph=graph, emit=emit, schemas=schemas,
                  run={str((schema.get("function") or {}).get("name") or ""): fn

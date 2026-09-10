@@ -241,7 +241,7 @@ class TestWhatAMeasuredRunKeeps:
                   expected=["person:iris"], shown=["person:iris"])
         row.prompts = prompt_digest(SYSTEM, TOOLS)
         store = tmp_path / "runs.ladybug"
-        key = save(store, [row], held={"model": "sundial-8b.bin"})
+        key = save(store, [row], server={"model": "sundial-8b.bin"})
 
         kept = next(r for r in runs(store) if r["key"] == key)
         assert kept["prompts"] == prompt_digest(SYSTEM, TOOLS)
@@ -255,7 +255,7 @@ class TestWhatAMeasuredRunKeeps:
         for system in (SYSTEM, SYSTEM + "."):
             row = Row(label="sundial-plain", question="q", expected=["a"], shown=["a"])
             row.prompts = prompt_digest(system, TOOLS)
-            save(store, [row], held={"model": "sundial-8b.bin"})
+            save(store, [row], server={"model": "sundial-8b.bin"})
 
         kept = [Measured.from_dict(r) for r in runs(store)]
         assert len({one.fingerprint for one in kept}) == 2, \

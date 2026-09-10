@@ -1091,7 +1091,7 @@ def _run(args: Any) -> int:
                                      log=print,
                                graph=graph, per_question=args.per_question)
                 saved.append(save(args.kept, rows,
-                                  held={**bench.footprint(url), "sampling": used,
+                                  server={**bench.footprint(url), "sampling": used,
                                         "graph": _which(graph), "finder": ask.finder},
                                   asking=getattr(ask, "asking", None), workload=ASK))
         say()
@@ -1177,18 +1177,18 @@ def _run(args: Any) -> int:
         where = args.graph or "the invented community"
         say(f"{args.label}: {many} conversations of {long} turn(s) at once over {where}, "
             f"look_up by {ask.finder}")
-        rows, held = concurrent(ask, questions, conversations=many, turns=long,
+        rows, measured = concurrent(ask, questions, conversations=many, turns=long,
                                 label=args.label, client=client, graph=graph,
                                 base_url="" if args.client else args.base_url, log=print,
                                 per_question=args.per_question)
-        at = held["concurrency"]
+        at = measured["concurrency"]
         slots = at.get("slots") or 0
         say(f"  {at['seconds']:.1f}s for all of it"
             + (f", {at['queued']:.1f}s of that queued"
                  if slots and many > slots and at.get("queued") is not None else "")
             + (f", {slots} slot(s)" if slots > 0 else ""))
         key = save(args.kept, rows,
-                   held={**held, "sampling": dict(getattr(client, "sampling", {}) or {}),
+                   server={**measured, "sampling": dict(getattr(client, "sampling", {}) or {}),
                          "graph": _which(graph), "finder": ask.finder},
                    asking=getattr(ask, "asking", None), workload=ASK)
         say(f"kept as {key}")
@@ -1302,7 +1302,7 @@ def _run(args: Any) -> int:
                          graph=graph,
                    per_question=args.per_question)
     key = save(args.kept, rows,
-               held={**bench.footprint(args.base_url), "sampling": client.sampling,
+               server={**bench.footprint(args.base_url), "sampling": client.sampling,
                      "graph": _which(graph), "finder": found},
                asking=getattr(ask, "asking", None), workload=ASK)
     say(f"kept as {key}")
@@ -1459,14 +1459,14 @@ def measuring() -> dict[str, Any] | None:
     from ml_stack.serve.process import pid_exists
 
     try:
-        held = json.loads(measuring_file().read_text(encoding="utf-8"))
+        record = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        held = None
-    if isinstance(held, dict) and not held.get("ended") and pid_exists(held.get("pid")):
-        return held
+        record = None
+    if isinstance(record, dict) and not record.get("ended") and pid_exists(record.get("pid")):
+        return record
     pid = _locked_by()
     if pid is None or not pid_exists(pid) \
-            or (isinstance(held, dict) and held.get("pid") == pid):
+            or (isinstance(record, dict) and record.get("pid") == pid):
         return None
     return {"pid": pid, "argv": [], "log": "", "how": {},
             "started": "", "lock_only": True}
@@ -1509,26 +1509,26 @@ def remember(argv: Sequence[str], *, pid: int, log: str = "", started: str = "",
         was = found if isinstance(found, dict) and found.get("pid") == pid else {}
     except (OSError, ValueError):
         pass
-    held = {"pid": int(pid), "argv": list(argv),
+    record = {"pid": int(pid), "argv": list(argv),
             "log": str(log or was.get("log") or ""),
             "started": started or str(was.get("started") or time.strftime("%FT%T")),
             "commit": _commit() if commit is None else commit,
             "how": asking_said(argv)}
     measuring_file().parent.mkdir(parents=True, exist_ok=True)
-    measuring_file().write_text(json.dumps(held, indent=1), encoding="utf-8")
-    return held
+    measuring_file().write_text(json.dumps(record, indent=1), encoding="utf-8")
+    return record
 
 
 def ended() -> None:
     """Mark this process's record finished, so nothing reads it as a live measurement."""
     try:
-        held = json.loads(measuring_file().read_text(encoding="utf-8"))
+        record = json.loads(measuring_file().read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return
-    if not isinstance(held, dict) or held.get("pid") != os.getpid():
+    if not isinstance(record, dict) or record.get("pid") != os.getpid():
         return
-    held["ended"] = time.strftime("%FT%T")
-    measuring_file().write_text(json.dumps(held, indent=1), encoding="utf-8")
+    record["ended"] = time.strftime("%FT%T")
+    measuring_file().write_text(json.dumps(record, indent=1), encoding="utf-8")
 
 
 def _named_in(argv: Sequence[str]) -> str:
@@ -1761,14 +1761,14 @@ def status(*, results: bool = True) -> str:
 
     text += ("\n" + queued) if (queued := queue_status()) else ""
     if results:
-        held = measuring()
+        record = measuring()
         try:
-            last = held or json.loads(measuring_file().read_text(encoding="utf-8"))
+            last = record or json.loads(measuring_file().read_text(encoding="utf-8"))
         except (OSError, ValueError):
             last = {}
         rows = results_since(str(last.get("started") or ""))
         if rows:
-            text += "\nkept by it so far:\n" + rows if held else "\nkept by it:\n" + rows
+            text += "\nkept by it so far:\n" + rows if record else "\nkept by it:\n" + rows
     return text
 
 
@@ -1811,8 +1811,8 @@ def _log_said(log: str) -> list[str]:
 
 
 def _status_line() -> str:
-    held = measuring()
-    if held is None:
+    record = measuring()
+    if record is None:
         try:
             last = json.loads(measuring_file().read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -1821,22 +1821,22 @@ def _status_line() -> str:
                           f"{' '.join(last.get('argv') or ())} -- started "
                           f"{last.get('started', '?')} and has ended.",
                           *_log_said(str(last.get("log") or ""))])
-    if held.get("lock_only"):
-        return (f"measuring (pid {held['pid']}), which wrote no record of itself: the "
+    if record.get("lock_only"):
+        return (f"measuring (pid {record['pid']}), which wrote no record of itself: the "
                 f"measuring lock is held and that process is alive. Nothing here says what "
                 f"it is asking or where its log is.")
-    began = _epoch(str(held.get("started") or ""))
+    began = _epoch(str(record.get("started") or ""))
     return "\n".join([f"measuring {f'for {_span(time.time() - began)}, ' if began else ''}"
-                      f"since {held.get('started', '?')} (pid {held.get('pid')}):",
-                      f"  ml-stack-bench {' '.join(held.get('argv') or ())}",
-                      *_how_said(held.get("how") or {}),
-                      *_log_said(str(held.get("log") or ""))])
+                      f"since {record.get('started', '?')} (pid {record.get('pid')}):",
+                      f"  ml-stack-bench {' '.join(record.get('argv') or ())}",
+                      *_how_said(record.get("how") or {}),
+                      *_log_said(str(record.get("log") or ""))])
 
 
 def _latest_log() -> Path | None:
-    held = measuring()
-    if held and held.get("log"):
-        return Path(str(held["log"]))
+    record = measuring()
+    if record and record.get("log"):
+        return Path(str(record["log"]))
     try:
         last = json.loads(measuring_file().read_text(encoding="utf-8"))
         if last.get("log") and Path(str(last["log"])).exists():
@@ -1864,8 +1864,8 @@ def tail(*, lines: int = 20, follow: bool = False, every: float = 0.5) -> int:
             say("\n".join(shown))
         if not follow:
             return 0
-        held = measuring() or {}
-        pid = held.get("pid")
+        record = measuring() or {}
+        pid = record.get("pid")
         try:
             while True:
                 more = fh.read().decode("utf-8", "replace")
@@ -1889,10 +1889,10 @@ def stop(*, wait: float = 60.0) -> str:
     """
     from ml_stack.serve.process import pid_exists
 
-    held = measuring()
-    if held is None:
+    record = measuring()
+    if record is None:
         return "nothing is measuring"
-    pid = int(held["pid"])
+    pid = int(record["pid"])
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -1902,8 +1902,8 @@ def stop(*, wait: float = 60.0) -> str:
         time.sleep(0.25)
     if pid_exists(pid):
         return (f"asked pid {pid} to stop; it is still running after {wait:.0f}s. Its log: "
-                f"{held.get('log', '?')}")
-    return f"stopped pid {pid} after {time.monotonic() - began:.1f}s; its log: {held.get('log', '?')}"
+                f"{record.get('log', '?')}")
+    return f"stopped pid {pid} after {time.monotonic() - began:.1f}s; its log: {record.get('log', '?')}"
 
 
 def _estimated(rest: Sequence[str]) -> int:

@@ -42,11 +42,11 @@ def test_detach_records_the_run_as_this_machines_train_job(tmp_path, monkeypatch
         assert train_run.main(argv) == 0
         assert started["command"][1:3] == ["-m", "ml_stack.train.run"], "the module, not a shell"
         assert "--detach" not in started["command"], "the child does not detach again"
-        held = jobs.held("train", home=tmp_path / "jobs")
-        assert held["pid"] == started["child"].pid
-        assert held["argv"] == [a for a in argv if a != "--detach"]
-        assert held["log"].endswith(".log") and Path(held["log"]).is_file()
-        assert "argv:" in Path(held["log"]).read_text(), "the log says what it is"
+        record = jobs.recorded("train", home=tmp_path / "jobs")
+        assert record["pid"] == started["child"].pid
+        assert record["argv"] == [a for a in argv if a != "--detach"]
+        assert record["log"].endswith(".log") and Path(record["log"]).is_file()
+        assert "argv:" in Path(record["log"]).read_text(), "the log says what it is"
         assert jobs.alive("train", home=tmp_path / "jobs") == started["child"].pid
         assert "detached; the log is" in capsys.readouterr().out
     finally:
@@ -66,8 +66,8 @@ def test_a_second_detach_is_refused_while_one_is_still_training(tmp_path, monkey
         said = capsys.readouterr().err
         assert f"a training run (pid {child.pid}) is still going" in said
         assert "wait" in said and "stop" in said
-        held = jobs.held("train", home=tmp_path / "jobs")
-        assert held["pid"] == child.pid, "the refused run never overwrote the record"
+        record = jobs.recorded("train", home=tmp_path / "jobs")
+        assert record["pid"] == child.pid, "the refused run never overwrote the record"
     finally:
         child.kill()
         child.wait(timeout=10)

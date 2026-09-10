@@ -10,7 +10,7 @@ from tests.test_graph_bench import scored_rows
 
 def _run(store, label, *, questions, hits, seconds, model="flash.gguf"):
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
-    return save(store, rows, held={"graph": invented_digest(), "model": model})
+    return save(store, rows, server={"graph": invented_digest(), "model": model})
 
 
 def test_fifteen_points_over_a_hundred_questions_is_a_measurement(tmp_path):
@@ -71,7 +71,7 @@ def test_a_run_without_an_asking_record_keeps_the_asking_the_record_already_says
 
     # a run that does record its asking is taken as it is, even when that means fewer askings
     save(store, scored_rows("flash--bare", questions=100, hits=82, seconds=2600.0),
-         held={"graph": invented_digest(), "model": "flash.gguf"},
+         server={"graph": invented_digest(), "model": "flash.gguf"},
          asking={"tight": True, "batch": False, "kinds": False, "summary": False})
     write_profiles(runs(store), path=where)
     got = profile_for("flash.gguf", records=records_in(where))
@@ -87,10 +87,10 @@ def test_each_workload_gets_its_own_record_from_its_own_runs(tmp_path):
     where = tmp_path / "profiles.json"
     store = tmp_path / "runs.ladybug"
     save(store, scored_rows("flash--asking", questions=100, hits=80, seconds=2700.0),
-         held={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 4},
+         server={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 4},
          asking={"tight": True}, workload="ask")
     save(store, scored_rows("flash--reading", questions=100, hits=90, seconds=1800.0),
-         held={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 2},
+         server={"graph": invented_digest(), "model": "flash.gguf", "spec_draft_max": 2},
          asking={"tight": True}, workload="ingest")
 
     written = write_profiles(runs(store), path=where)

@@ -402,7 +402,7 @@ class TestTheRatesRoute:
                         expected=["person:iris"],
                         shown=["person:iris"] if right or n % 2 else ["topic:welding"])
                     for n in range(questions)]
-            save(where, rows, held={"context": 32768, "slots": 2, "host": "atrium",
+            save(where, rows, server={"context": 32768, "slots": 2, "host": "atrium",
                                     "model": model or f"{label}-Q4_K_M.gguf",
                                     "kv_and_run_bytes": 4 * GIB})
 

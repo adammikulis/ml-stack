@@ -107,7 +107,7 @@ def test_a_path_with_no_store_exits_2(tmp_path, capsys):
     assert "no store there" in capsys.readouterr().err
 
 
-def test_tidy_rejudge_asks_a_served_judge_again_about_the_held_verdicts(tmp_path, capsys,
+def test_tidy_rejudge_asks_a_served_judge_again_about_the_remembered_verdicts(tmp_path, capsys,
                                                                        monkeypatch):
     from ml_stack.graph.tidy import DECISIONS
     from tests.test_graph_tidy import _node, _store
@@ -126,7 +126,7 @@ def test_tidy_rejudge_asks_a_served_judge_again_about_the_held_verdicts(tmp_path
     assert len(scripted.calls) == 1, "held, so not asked"
     assert main(["tidy", str(path), "--base-url", "http://localhost:1", "--rejudge"]) == 0
     out = capsys.readouterr().out
-    assert len(scripted.calls) == 2 and "asked the judge again about 1 held verdict(s)" in out
+    assert len(scripted.calls) == 2 and "asked the judge again about 1 remembered verdict(s)" in out
     with GraphStore(path, read_only=True) as store:
         assert store.get_doc(DECISIONS)["pairs"]["concept:glimer-node|concept:glimmer-node"][
             "verdict"] == "same"

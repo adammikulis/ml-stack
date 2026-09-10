@@ -50,7 +50,7 @@ class TestOrderedByWhatWasUsedLast:
     def _machine(self, monkeypatch, names):
         from ml_stack.serve import profile as profile_module
 
-        monkeypatch.setattr(recent, "held", lambda: dict.fromkeys(names, 100))
+        monkeypatch.setattr(recent, "on_disk", lambda: dict.fromkeys(names, 100))
         monkeypatch.setattr(recent, "weight_paths", lambda: [])
         monkeypatch.setattr(recent, "heads_for", lambda *a, **k: [])
         monkeypatch.setattr(recent, "_running", lambda _every: [])

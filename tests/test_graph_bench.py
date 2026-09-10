@@ -130,7 +130,7 @@ def test_a_run_kept_reads_back_as_it_was_written(tmp_path):
     store = tmp_path / "runs.ladybug"
     rows = [a_row("who welds?", expected=["person:iris"], shown=["person:iris"]),
             a_row("who sells?", expected=["person:otto"], shown=[])]
-    key = save(store, rows, held={"context": 32768, "slots": 2})
+    key = save(store, rows, server={"context": 32768, "slots": 2})
     assert key.startswith("bench:tried:")
 
     back = runs(store)
@@ -147,7 +147,7 @@ def test_a_run_kept_reads_back_as_it_was_written(tmp_path):
 def test_table_reads_a_kept_run(tmp_path, capsys):
     store = tmp_path / "runs.ladybug"
     save(store, [a_row("who welds?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 2, "kv_and_run_bytes": 2 * 2**30,
+         server={"context": 32768, "slots": 2, "kv_and_run_bytes": 2 * 2**30,
                "bytes_per_1k_context": 32 * 2**20})
     table(runs(store))
     said = capsys.readouterr().out
@@ -166,9 +166,9 @@ def test_the_table_says_how_many_questions_a_run_answered(tmp_path, capsys):
     """
     store = tmp_path / "runs.ladybug"
     save(store, [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
-                 for n in range(9)], held={"context": 32768, "slots": 2})
+                 for n in range(9)], server={"context": 32768, "slots": 2})
     save(store, [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
-                 for n in range(10)], held={"context": 32768, "slots": 2})
+                 for n in range(10)], server={"context": 32768, "slots": 2})
 
     table(runs(store))
     lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("tried")]
@@ -213,7 +213,7 @@ def test_the_table_records_the_sampling_and_the_draft_a_run_used(tmp_path, capsy
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
     row.draft_tokens, row.draft_taken = 54, 41
-    save(store, [row], held={"context": 32768, "slots": 4,
+    save(store, [row], server={"context": 32768, "slots": 4,
                              "sampling": {"temperature": 1.0, "top_p": 0.95, "top_k": 64}})
     table(runs(store))
     said = capsys.readouterr().out
@@ -501,9 +501,9 @@ def test_what_a_server_holds_is_reported_even_when_the_derived_number_is_not(tmp
     "not meaningful"."""
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
-    save(store, [row], held={"context": 32768, "slots": 2,
+    save(store, [row], server={"context": 32768, "slots": 2,
                              "resident_bytes": 70 * 2**30, "mmapped": True})
-    save(store, [row], held={"context": 32768, "slots": 2,
+    save(store, [row], server={"context": 32768, "slots": 2,
                              "resident_bytes": 12 * 2**30,
                              "kv_and_run_bytes": 3 * 2**30,
                              "bytes_per_1k_context": 30 * 2**20})
@@ -578,7 +578,7 @@ def test_runs_can_be_written_out_so_they_are_not_on_one_disk(tmp_path):
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris", "person:otto"], shown=["person:iris"])
     row.draft_tokens, row.draft_taken = 54, 41
-    save(store, [row], held={"context": 32768, "slots": 4, "model": "thing.gguf",
+    save(store, [row], server={"context": 32768, "slots": 4, "model": "thing.gguf",
                              "resident_bytes": 12 * 2**30,
                              "graph": invented_digest(),
                              "sampling": {"temperature": 0.0}})
@@ -614,9 +614,9 @@ def test_only_runs_over_the_invented_community_are_exported(tmp_path, capsys):
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
-    save(store, [row], held={"graph": invented_digest(), "model": "thing.gguf"})
-    save(store, [row], held={"graph": "some-other-graph", "model": "thing.gguf"})
-    save(store, [row], held={"model": "thing.gguf"})          # from before the marker
+    save(store, [row], server={"graph": invented_digest(), "model": "thing.gguf"})
+    save(store, [row], server={"graph": "some-other-graph", "model": "thing.gguf"})
+    save(store, [row], server={"model": "thing.gguf"})          # from before the marker
 
     got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
     assert len(got) == 1, "only the one whose graph is known to be the invented one"
@@ -636,7 +636,7 @@ def test_an_export_carries_no_question_and_no_entry(tmp_path):
     store = tmp_path / "runs.ladybug"
     row = a_row("who surveys land in Calderwick?", expected=["person:iris"],
                 shown=["person:iris", "org:brayfield"])
-    save(store, [row], held={"graph": invented_digest()})
+    save(store, [row], server={"graph": invented_digest()})
 
     text = pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text()
     assert "Calderwick" not in text and "surveys" not in text
@@ -882,8 +882,8 @@ def test_the_table_says_which_finder_a_run_used_and_still_prints_an_old_one(tmp_
 
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"])
-    save(store, [row], held={"context": 32768, "slots": 2, "finder": "meaning"})
-    save(store, [row], held={"context": 32768, "slots": 2})        # from before the column
+    save(store, [row], server={"context": 32768, "slots": 2, "finder": "meaning"})
+    save(store, [row], server={"context": 32768, "slots": 2})        # from before the column
     table(runs(store))
     said = capsys.readouterr().out
     head, lines = said.splitlines()[0], [ln for ln in said.splitlines() if ln.startswith("tried")]
@@ -906,7 +906,7 @@ def test_an_export_and_the_ranking_carry_the_finder(tmp_path):
     store = tmp_path / "runs.ladybug"
     rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
             for n in range(SHORT)]
-    save(store, rows, held={"graph": invented_digest(), "model": "thing.gguf",
+    save(store, rows, server={"graph": invented_digest(), "model": "thing.gguf",
                             "finder": "words"})
     got = json.loads(pathlib.Path(export(runs(store), tmp_path / "o.json")).read_text())
     assert got[0]["finder"] == "words"
@@ -990,7 +990,7 @@ def test_the_table_the_detail_and_the_ranking_carry_what_was_made_up(tmp_path, c
     rows[0].unread, rows[0].unread_named = ["Otto Brayfield"], 1
     rows[1].unread, rows[1].unread_named = ["Pellard", "Otto Brayfield"], 2
     rows[2].unread, rows[2].unread_named = ["Tam Quillon"], 1
-    save(store, rows, held={"graph": invented_digest(), "model": "thing.gguf",
+    save(store, rows, server={"graph": invented_digest(), "model": "thing.gguf",
                             "finder": "words"})
     # a run kept before the count existed has rows without the key
     with GraphStore(store) as held:
@@ -1218,9 +1218,9 @@ def test_a_concurrent_run_is_kept_and_shown_with_its_marker(tmp_path, capsys):
                                            for n in range(6)],
                             conversations=2, turns=3, label="together",
                             client=_Overlapping(0.0), graph=TINY)
-    save(store, rows, held={**held, "context": 32768, "slots": 2, "finder": "chars"})
+    save(store, rows, server={**held, "context": 32768, "slots": 2, "finder": "chars"})
     save(store, [a_row("q?", expected=["person:ada"], shown=["person:ada"])],
-         held={"context": 32768, "slots": 2, "finder": "chars"})
+         server={"context": 32768, "slots": 2, "finder": "chars"})
 
     back = {r["label"]: r for r in runs(store)}
     kept = back["together"]["server"]["concurrency"]
@@ -1376,7 +1376,7 @@ def test_a_run_with_a_field_the_store_could_not_take_is_kept_whole(tmp_path):
     plain before the store sees it, and read back before `save` returns."""
     store = tmp_path / "runs.ladybug"
     row = a_row("who welds?", expected=["person:iris"], shown=["person:iris"])
-    key = save(store, [row], held={"context": 32768, "slots": 2,
+    key = save(store, [row], server={"context": 32768, "slots": 2,
                                    "concurrency": {"per_turn": {(0, 1): 2.0}},
                                    "where": pathlib.Path("/models/thing.gguf")})
     back = runs(store)
@@ -1764,14 +1764,14 @@ def test_a_resumed_sweep_measures_only_the_way_it_has_not_kept(tmp_path, monkeyp
     row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"])
     for label in ("tiny-plain", "tiny-plain-terse"):
         row.label = label
-        save(kept, [row], held={"context": 32768, "slots": 1})
+        save(kept, [row], server={"context": 32768, "slots": 1})
     # and a stale one for the third: a different question count, so it does not count
     row.label = "tiny-plain-card"
-    save(kept, [row, a_row("and?", expected=[], shown=[])], held={"context": 32768, "slots": 1})
+    save(kept, [row, a_row("and?", expected=[], shown=[])], server={"context": 32768, "slots": 1})
     # and a whole model kept, every way of it, which is then never loaded
     for label in ("other-plain", "other-plain-terse", "other-plain-card"):
         row.label = label
-        save(kept, [row], held={"context": 32768, "slots": 1})
+        save(kept, [row], server={"context": 32768, "slots": 1})
 
     argv = ["sweep", "--serve", "tiny.gguf", "--serve", "other.gguf", "--plain-only",
             "--also", "terse", "--also", "card", "--kept", str(kept), "--graph", str(graph),
@@ -1995,7 +1995,7 @@ def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_pa
 
     # an older run beside it, kept before the lease said how long it took
     save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 1})
+         server={"context": 32768, "slots": 1})
     table(runs(seen["kept"]))
     said = capsys.readouterr().out
     head = said.splitlines()[0].split()
@@ -2012,7 +2012,7 @@ def test_the_load_is_the_leases_own_clock_and_shows_everywhere_a_run_does(tmp_pa
 
     rows = [a_row(f"q{n}?", expected=["person:iris"], shown=["person:iris"])
             for n in range(SHORT)]
-    save(seen["kept"], rows, held={"graph": invented_digest(), "model": "thing.gguf",
+    save(seen["kept"], rows, server={"graph": invented_digest(), "model": "thing.gguf",
                                    "load_s": 41.6})
     got = json.loads(pathlib.Path(export(runs(seen["kept"]), tmp_path / "o.json")).read_text())
     assert {r["load_s"] for r in got} == {41.6}
@@ -2138,7 +2138,7 @@ def test_a_quantised_cache_is_on_the_spec_the_label_and_the_ctx_column(tmp_path,
     assert all(r["server"]["cache_type"] == "f16" for r in runs(seen["kept"]))
 
     save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 1})
+         server={"context": 32768, "slots": 1})
     table(runs(seen["kept"]))
     said = capsys.readouterr().out
     quantised = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-kv"))
@@ -2222,7 +2222,7 @@ def test_a_resumed_sweep_with_shortlist_for_measures_only_the_half_not_kept(tmp_
     seen = _serving(monkeypatch, tmp_path)
     row = a_row("who works on compilers?", expected=["topic:compiler"], shown=["topic:compiler"],
                 label="gemma-E2B-plain")
-    save(seen["kept"], [row], held={"context": 32768, "slots": 1})
+    save(seen["kept"], [row], server={"context": 32768, "slots": 1})
 
     assert bench._main(["sweep", "--serve", "gemma-E2B.gguf", "--shortlist-for", "e2b",
                         "--shortlist", "5", "--resume", *seen["common"]]) == 0
@@ -2274,7 +2274,7 @@ def _kept_run(store, label, *, model, questions, hits, seconds, binary="", **ser
     from ml_stack.bench import invented_digest
 
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds)
-    return save(store, rows, held={"graph": invented_digest(), "model": model,
+    return save(store, rows, server={"graph": invented_digest(), "model": model,
                                    "binary": binary, **server})
 
 
@@ -2501,7 +2501,7 @@ def test_the_table_counts_timeouts_and_the_detail_names_them(tmp_path, capsys):
     rows = [a_row("who?", expected=["person:iris"], shown=[]),
             a_row("and who else?", expected=["person:iris"], shown=["person:iris"])]
     rows[0].timed_out, rows[0].seconds, rows[0].error = True, 300.0, "timed out after 300s"
-    save(store, rows, held={"context": 32768, "slots": 1})
+    save(store, rows, server={"context": 32768, "slots": 1})
     table(runs(store))
     said = capsys.readouterr().out
     head = said.splitlines()[0].split()
@@ -2546,7 +2546,7 @@ def test_a_reasoning_budget_is_on_the_spec_the_label_and_the_ctx_column(tmp_path
     assert all(r["server"]["reasoning_budget"] == 2048 for r in runs(seen["kept"]))
 
     save(seen["kept"], [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 1})
+         server={"context": 32768, "slots": 1})
     table(runs(seen["kept"]))
     said = capsys.readouterr().out
     budgeted = next(ln for ln in said.splitlines() if ln.startswith("tiny-plain-rb"))
@@ -3292,9 +3292,9 @@ def test_every_run_carries_the_host_and_the_commit(tmp_path, monkeypatch):
     store = tmp_path / "runs.ladybug"
     monkeypatch.setattr(keep, "_commit", lambda root=None: "0f1e2d3 (dirty)")
     save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768})
+         server={"context": 32768})
     save(store, [a_row("who?", expected=["person:iris"], shown=[])],
-         held={"host": "lantern", "commit": "abc1234"})
+         server={"host": "lantern", "commit": "abc1234"})
     mine, theirs = runs(store)
     assert mine["server"]["host"] == socket.gethostname()
     assert mine["server"]["commit"] == "0f1e2d3 (dirty)" and mine["server"]["context"] == 32768
@@ -3535,9 +3535,9 @@ def test_the_run_the_table_the_detail_and_the_export_carry_the_cache_per_turn(tm
     store = tmp_path / "runs.ladybug"
     grew = _cache_row([(0, 900), (900, 120), (1025, 80), (1100, 60)])
     mixed = _cache_row([(0, 900), (900, 120), (0, 1100), (1100, 50)])
-    save(store, [grew, mixed], held={"context": 32768, "slots": 1})
+    save(store, [grew, mixed], server={"context": 32768, "slots": 1})
     save(store, [a_row("q?", expected=["topic:compiler"], shown=["topic:compiler"])],
-         held={"context": 32768, "slots": 1})               # as a run kept before this
+         server={"context": 32768, "slots": 1})               # as a run kept before this
     back = {r["label"]: r for r in runs(store)}
     assert back["cached"]["server"]["prefix_hits"] == pytest.approx(5 / 6)
     assert "prefix_hits" not in back["tried"]["server"], "no turn judged: no key, not 0"
@@ -4112,7 +4112,7 @@ def test_a_traced_run_reads_back_out_of_the_store_with_its_trace_whole(tmp_path)
     row, _ = _one_traced_row()
     kept = tmp_path / "runs.ladybug"
 
-    key = save(kept, [row], held={"model": "invented-e4b.gguf", "context": 32768})
+    key = save(kept, [row], server={"model": "invented-e4b.gguf", "context": 32768})
     back = next(r for r in runs(kept) if r["key"] == key)
     assert back["traced"] == 1, "the run says how many of its rows carry a transcript"
     assert back["rows"][0]["trace"] == json.loads(json.dumps(row.trace))
@@ -4375,7 +4375,7 @@ def _shaped_run(store, label, *, questions=20, hits=14, seconds=200.0, asking=No
     rows = scored_rows(label, questions=questions, hits=hits, seconds=seconds,
                        miss=["person:wren"])
     return save(store, rows,
-                held={"graph": invented_digest(), "model": "flash.gguf", "context": 32768,
+                server={"graph": invented_digest(), "model": "flash.gguf", "context": 32768,
                       "slots": 1, **server},
                 asking=asking)
 
@@ -4681,7 +4681,7 @@ def test_the_footprint_takes_the_peak_and_the_kv_follows_it(monkeypatch, tmp_pat
 
     store = tmp_path / "runs.ladybug"
     save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 1, "resident_bytes": 91 * G,
+         server={"context": 32768, "slots": 1, "resident_bytes": 91 * G,
                "resident_peak": 91 * G, "footprint_peak": 71 * G, "wired_peak": 96 * G,
                "wired_baseline": 41 * G, "wired_baseline_before_load": True,
                "kv_and_run_bytes": 31 * G})
@@ -4697,7 +4697,7 @@ def test_the_footprint_takes_the_peak_and_the_kv_follows_it(monkeypatch, tmp_pat
 def test_the_table_says_nothing_rather_than_zero_for_a_run_that_sampled_none(tmp_path, capsys):
     store = tmp_path / "runs.ladybug"
     save(store, [a_row("who?", expected=["person:iris"], shown=["person:iris"])],
-         held={"context": 32768, "slots": 1})
+         server={"context": 32768, "slots": 1})
     table(runs(store))
     line = next(ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("tried"))
     assert "0.00G" not in line and "0.0G" not in line, "not sampled is not zero"

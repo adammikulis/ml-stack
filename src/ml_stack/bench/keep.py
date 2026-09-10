@@ -102,7 +102,7 @@ def beside_the_run() -> list[Mapping[str, Any]]:
     return list(_BESIDE)
 
 
-def stamped(held: Mapping[str, Any] | None) -> dict[str, Any]:
+def stamped(server: Mapping[str, Any] | None) -> dict[str, Any]:
     """A run's ``server`` record with ``host``, ``commit`` and ``beside`` on it, unless it
     names them.
 
@@ -112,7 +112,7 @@ def stamped(held: Mapping[str, Any] | None) -> dict[str, Any]:
     under ``--host`` -- keeps it; an empty one is filled in. ``beside`` is what else held
     the card while it was measured, written only when something did.
     """
-    out = dict(held or {})
+    out = dict(server or {})
     out.setdefault("host", socket.gethostname())
     out.setdefault("commit", _commit())
     if beside := beside_the_run():
@@ -182,7 +182,7 @@ def _told(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def asked_with(asking: Mapping[str, Any] | None,
-               held: Mapping[str, Any]) -> dict[str, Any]:
+               server: Mapping[str, Any]) -> dict[str, Any]:
     """A run's ``asking`` record: the way it asked, with the sampling it asked at.
 
     `measure.asking` knows the keywords it handed `converse` and nothing about the client,
@@ -193,12 +193,12 @@ def asked_with(asking: Mapping[str, Any] | None,
     if asking is None:
         return {}
     out = dict(asking)
-    if "sampling" not in out and held.get("sampling"):
-        out["sampling"] = dict(held["sampling"])
+    if "sampling" not in out and server.get("sampling"):
+        out["sampling"] = dict(server["sampling"])
     return out
 
 
-def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None = None,
+def save(store: str | Path, rows: Sequence[Any], *, server: dict[str, Any] | None = None,
          asking: Mapping[str, Any] | None = None, kind: str = "", label: str = "",
          workload: str = "") -> str:
     """Keep a run where it can be compared with another one, later, by anybody.
@@ -230,7 +230,7 @@ def save(store: str | Path, rows: Sequence[Any], *, held: dict[str, Any] | None 
 
     rows = [r if is_dataclass(r) else _Cell(**{"label": label or "", **dict(r)})
             if isinstance(r, Mapping) else r for r in rows]
-    server = stamped(held)
+    server = stamped(server)
     # the run's prompt-cache figure beside the per-question ones, so the table can carry
     # it without adding up every row. Only when there is one: a run with no turn to judge
     # carries no key, like a run kept before it was counted -- not counted is not zero
@@ -292,8 +292,8 @@ def runs(store: str | Path, label: str = "") -> list[dict[str, Any]]:
     """
     from ml_stack.graph.store import GraphStore
 
-    with GraphStore(store, read_only=True) as held:
-        kept = held.docs()
+    with GraphStore(store, read_only=True) as store:
+        kept = store.docs()
     found = [{**kept[k], "key": k} for k in sorted(kept)
              if k.startswith("bench:") and isinstance(kept[k], dict) and kept[k]]
     return [r for r in found if not label or r.get("label") == label]
@@ -305,8 +305,8 @@ def empties(store: str | Path) -> list[str]:
 
     if not Path(store).expanduser().exists():
         return []
-    with GraphStore(store, read_only=True) as held:
-        kept = held.docs()
+    with GraphStore(store, read_only=True) as store:
+        kept = store.docs()
     return sorted(k for k, v in kept.items()
                   if k.startswith("bench:") and not (isinstance(v, dict) and v))
 
@@ -319,9 +319,9 @@ def forget(store: str | Path, *, label: str = "", empty: bool = False) -> list[s
              else [r["key"] for r in bench.runs(store, label)] if label else [])
     if not going:
         return []
-    with GraphStore(store) as held:
+    with GraphStore(store) as store:
         for key in going:
-            held.delete_doc(key)
+            store.delete_doc(key)
     return going
 
 

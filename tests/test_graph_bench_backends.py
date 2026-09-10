@@ -203,11 +203,11 @@ def test_the_build_reads_what_served_a_run_before_the_binary_it_started():
 def test_the_table_tells_two_runs_of_one_model_apart_by_what_served_them(tmp_path, capsys):
     store = tmp_path / "runs.ladybug"
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"], label="flash-plain")
-    save(store, [row], held={"context": 32768, "slots": 1, "model": "thornfell",
+    save(store, [row], server={"context": 32768, "slots": 1, "model": "thornfell",
                              "served_by": {"program": "llama.cpp", "format": "gguf",
                                            "quant": "Q4_K_XL"}})
     row = a_row("who?", expected=["person:iris"], shown=["person:iris"], label="flash-ollama")
-    save(store, [row], held={"context": 32768, "slots": 1, "model": "thornfell",
+    save(store, [row], server={"context": 32768, "slots": 1, "model": "thornfell",
                              "served_by": {"program": "ollama", "runtime": "mlx",
                                            "format": "safetensors", "quant": "nvfp4"}})
     table(runs(store))
@@ -363,7 +363,7 @@ def test_a_row_from_a_backend_that_reports_nothing_says_so(tmp_path):
     assert row.calls == 1 and row.prompt_tokens == 100
 
     store = tmp_path / "runs.ladybug"
-    save(store, rows, held={"context": 32768, "slots": 1})
+    save(store, rows, server={"context": 32768, "slots": 1})
     back = runs(store)[0]["rows"][0]
     assert back["cached_tokens"] is None and back["queued"] is None, "kept as None"
     assert "prefix_hits" not in runs(store)[0]["server"], "no turn judged is no figure"
@@ -384,7 +384,7 @@ def test_the_table_prints_a_dash_for_each_figure_nobody_measured(tmp_path, capsy
     row.queued = row.first_token = None
     row.cache_calls = [[None, None]]
     row.prefix_kept = row.prefix_turns = row.prefix_hits = None
-    save(store, [row], held={"context": 32768, "slots": 1})
+    save(store, [row], server={"context": 32768, "slots": 1})
     table(runs(store))
     said = capsys.readouterr().out
     head, line = said.splitlines()[0], next(ln for ln in said.splitlines()
@@ -409,10 +409,10 @@ def test_compare_says_not_measured_rather_than_a_percentage(tmp_path):
     store = tmp_path / "runs.ladybug"
     a = a_row("who?", expected=["person:iris"], shown=["person:iris"], label="llama")
     a.cached_tokens, a.processed_tokens, a.completion_tokens = 40, 60, 20
-    save(store, [a], held={})
+    save(store, [a], server={})
     b = a_row("who?", expected=["person:iris"], shown=["person:iris"], label="ollama")
     b.cached_tokens, b.processed_tokens, b.completion_tokens = None, 70, 25
-    save(store, [b], held={})
+    save(store, [b], server={})
     said = compare(store, "llama", "ollama")
     cached = next(ln for ln in said.splitlines() if "cached" in ln)
     assert "not measured on ollama" in cached and "%" not in cached
@@ -549,7 +549,7 @@ def test_the_footprint_takes_the_weights_and_the_program_from_what_served_it(mon
 def test_a_run_of_speed_or_none_kind_has_no_questions_in_the_answering_table(tmp_path, capsys):
     store = tmp_path / "runs.ladybug"
     save(store, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 900.0,
-                  "decode_tps": 30.0}], held={"context": 32768}, kind="speed",
+                  "decode_tps": 30.0}], server={"context": 32768}, kind="speed",
          label="flash-speed")
     kept = runs(store)
     assert kept[0]["kind"] == "speed" and kept[0]["label"] == "flash-speed"

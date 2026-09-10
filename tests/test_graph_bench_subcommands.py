@@ -61,7 +61,7 @@ def test_compare_takes_positional_labels_and_last(tmp_path, monkeypatch):
     mine = invented_digest()
     for label in ("one-plain", "two-plain", "three-plain", "four-plain"):
         save(kept, scored_rows(label, questions=2, hits=1, seconds=4.0),
-             held={"graph": mine, "context": 4096})
+             server={"graph": mine, "context": 4096})
     labels = newest_labels(bench.runs(kept), 3)
     assert len(set(labels)) == 3
     out = tmp_path / "c.json"

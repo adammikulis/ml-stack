@@ -134,7 +134,7 @@ def shard_names(filename: str) -> list[str]:
 
 def _local_index() -> dict[str, Path]:
     """Every model file this machine already holds, by filename -- the same disk scan
-    ``ml_stack.hub.held()`` does, kept here with its path rather than only its size,
+    ``ml_stack.hub.on_disk()`` does, kept here with its path rather than only its size,
     because a preflight has to *open* the file to read its header."""
     from ml_stack.fleet.models import Models
     from ml_stack.hub import default_roots

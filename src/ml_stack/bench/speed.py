@@ -349,27 +349,27 @@ def measure_on(args: Any, named: Sequence[tuple[str, str]], *, smoke: bool,
             say("  smoke: one cell first")
             proved = grid(client, prompts=prompts, streams=streams, generate=args.generate,
                           log=print, smoke=True)
-            key = save(args.kept, proved, held=_held(url, client), kind=KIND, label=label)
+            key = save(args.kept, proved, server=_server_record(url, client), kind=KIND, label=label)
             _proved(read_back(args.kept, [key]), f"{label} smoke")
             keys.append(key)
             say("  smoke: ok")
         cells = grid(client, prompts=prompts, streams=streams, generate=args.generate,
                      log=print, smoke=smoke, sample=int(getattr(args, "sample", 0) or 0))
-        keys.append(save(args.kept, cells, held=_held(url, client), kind=KIND, label=label))
+        keys.append(save(args.kept, cells, server=_server_record(url, client), kind=KIND, label=label))
     return keys
 
 
-def _held(url: str, client: Any) -> dict[str, Any]:
+def _server_record(url: str, client: Any) -> dict[str, Any]:
     """The run's ``server`` record: what serves on ``url``, and what it holds."""
     from ml_stack.bench.measure import said_by
 
-    held = bench.footprint(url, client)
-    held.setdefault("base_url", url)
-    if "served_by" not in held:
+    server = bench.footprint(url, client)
+    server.setdefault("base_url", url)
+    if "served_by" not in server:
         record = said_by(client)
         if record:
-            held["served_by"] = record
-    return held
+            server["served_by"] = record
+    return server
 
 
 def _proved(kept: Sequence[Mapping[str, Any]], what: str) -> None:
@@ -425,7 +425,7 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                     say("  smoke: one cell first, on this load")
                     proved = grid(client, prompts=prompts, streams=streams,
                                   generate=args.generate, log=print, smoke=True)
-                    key = save(args.kept, proved, held={**_held(server.base_url, client),
+                    key = save(args.kept, proved, server={**_server_record(server.base_url, client),
                                                         **held_up}, kind=KIND, label=label)
                     _proved(read_back(args.kept, [key]), f"{label} smoke")
                     keys.append(key)
@@ -434,7 +434,8 @@ def measure_served(args: Any, *, smoke: bool, smoking_first: bool) -> list[str]:
                              log=print, smoke=smoke,
                              sample=int(getattr(args, "sample", 0) or 0))
                 keys.append(save(args.kept, cells,
-                                 held={**_held(server.base_url, client), **held_up},
+                                 server={**_server_record(server.base_url, client),
+                                         **held_up},
                                  kind=KIND, label=label))
         except (NotLoaded, PreflightFailed) as why:
             say(f"    preflight refused {label}; not loaded:\n"

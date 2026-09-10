@@ -52,8 +52,8 @@ from ml_stack.client.health import serving_params
 from ml_stack.graph.asking import Asking
 from ml_stack.log import say
 
-__all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "held", "projector_for",
-           "release_all", "said_cache", "served", "serving_said", "slot",
+__all__ = ["Config", "Serving", "Talking", "draft_for", "drafted", "projector_for",
+           "release_all", "said_cache", "served", "servers", "serving_said", "slot",
            "split_cache_type"]
 
 # The sampler settings a `Talking` carries. They are the client's, never the server's.
@@ -326,7 +326,7 @@ def slot(serving: Serving | Config, *, index: int, n_predict: int | None = None,
     return config.client(where, index=index, **client_kwargs)
 
 
-def held() -> dict[int, str]:
+def servers() -> dict[int, str]:
     """port -> base url, for every server :func:`slot` is holding."""
     with _LOCK:
         return dict(_URLS)

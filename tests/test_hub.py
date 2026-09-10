@@ -185,7 +185,7 @@ def test_a_listing_says_what_is_already_downloaded(monkeypatch, capsys):
                ("BF16/thing-BF16-00001-of-00001.gguf", 300_000_000_000)]
     monkeypatch.setattr(hub, "files", lambda repo, **kw: shelves)
     monkeypatch.setattr(hub, "room", lambda: 110 * 2**30)
-    monkeypatch.setattr(hub, "held", lambda: {
+    monkeypatch.setattr(hub, "on_disk", lambda: {
         "thing-UD-IQ4_XS-00001-of-00002.gguf": 40_000_000_000,
         "thing-UD-IQ4_XS-00002-of-00002.gguf": 46_000_000_000})
 
@@ -206,14 +206,14 @@ def test_a_partly_downloaded_build_says_so(monkeypatch, capsys):
         ("UD-IQ4_XS/thing-UD-IQ4_XS-00002-of-00003.gguf", 1),
         ("UD-IQ4_XS/thing-UD-IQ4_XS-00003-of-00003.gguf", 1)])
     monkeypatch.setattr(hub, "room", lambda: 110 * 2**30)
-    monkeypatch.setattr(hub, "held", lambda: {"thing-UD-IQ4_XS-00001-of-00003.gguf": 1})
+    monkeypatch.setattr(hub, "on_disk", lambda: {"thing-UD-IQ4_XS-00001-of-00003.gguf": 1})
 
     hub.main(["files", "maker/thing-GGUF"])
     said = capsys.readouterr().out
     assert "1/3 downloaded" in said and "ON THIS MACHINE" not in said
 
 
-def test_held_resolves_symlinks_because_a_cache_is_made_of_them(tmp_path, monkeypatch):
+def test_on_disk_resolves_symlinks_because_a_cache_is_made_of_them(tmp_path, monkeypatch):
     """A Hub cache is symlinks into blobs/, so `ls -l` reports 79 bytes for a 46G
     shard. Reading that as "not downloaded" is the same mistake wearing a different hat."""
     import ml_stack.hub as hub
@@ -230,7 +230,7 @@ def test_held_resolves_symlinks_because_a_cache_is_made_of_them(tmp_path, monkey
     assert link.lstat().st_size < 200, "the link itself is tiny, which is the trap"
 
     monkeypatch.setattr(hub, "default_roots", lambda root: [tmp_path, tmp_path / "absent"])
-    assert hub.held() == {"thing-Q4.gguf": 5000}
+    assert hub.on_disk() == {"thing-Q4.gguf": 5000}
 
 
 def _gguf(tmp_path, pairs):
@@ -769,7 +769,7 @@ class TestChooseHead:
 
         hub = self._hub(monkeypatch, tmp_path, notes={"maker/flash-GGUF": self.FORK_ONLY})
         monkeypatch.setattr(hub, "room", lambda: 0)
-        monkeypatch.setattr(hub, "held", lambda: {})
+        monkeypatch.setattr(hub, "on_disk", lambda: {})
         current = self._binary(tmp_path / "current")
         monkeypatch.setenv("ML_STACK_HOME", str(tmp_path / "ml-stack"))
         self._binary(binary_module.managed_named() / "forkname")
@@ -865,8 +865,8 @@ class TestHeadsOnThisMachine:
         self._machine(tmp_path, monkeypatch, {"thing-Q4_K_M.gguf": 900,
                                               "mtp-thing-Q8_0.gguf": 100,
                                               "mmproj-thing-F32.gguf": 50})
-        assert sorted(hub.held()) == ["thing-Q4_K_M.gguf"]
-        assert len(hub.held(alongside=True)) == 3
+        assert sorted(hub.on_disk()) == ["thing-Q4_K_M.gguf"]
+        assert len(hub.on_disk(alongside=True)) == 3
 
     def test_the_words_that_name_the_model_survive_quantisation_and_shards(self):
         from ml_stack.hub import base_words

@@ -17,7 +17,7 @@ from pathlib import Path, PurePath
 
 from ml_stack import home
 from ml_stack.files import read_json, write_json
-from ml_stack.hub import NO_HEAD, heads_for, held, pretty_name, weight_paths
+from ml_stack.hub import NO_HEAD, heads_for, on_disk, pretty_name, weight_paths
 from ml_stack.log import say
 
 __all__ = ["LIMIT", "SHOWN", "choices", "head_line", "note", "pick", "pick_head",
@@ -97,7 +97,7 @@ def choices(*, path: Path | None = None) -> list[dict]:
         where.setdefault(found.name, found)
     used = {_key(str(row["model"])): float(row["at"]) for row in recent(path)}
     ranked = {one.model: one for one in profile.profiles()}
-    for name in sorted(k for k in held() if k.endswith(".gguf")):
+    for name in sorted(k for k in on_disk() if k.endswith(".gguf")):
         if re.search(r"-0000[2-9]-of-", name):
             continue
         record = ranked.get(name) or profile.profile_for(name)

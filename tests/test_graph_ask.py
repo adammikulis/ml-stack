@@ -265,7 +265,7 @@ def test_the_final_turn_is_told_the_searching_is_over_and_refuses_a_search_once(
 
 def test_held_entries_are_named_to_the_model_by_label_and_id():
     model = ScriptedModel([])
-    converse("and what else?", GRAPH, model, held=["person:ada", "topic:compilers"])
+    converse("and what else?", GRAPH, model, highlighted=["person:ada", "topic:compilers"])
     system = model.seen[0][0]["content"]
     assert "Currently highlighted: Ada Lovelace (person:ada), compilers (topic:compilers)" in system
 
@@ -273,19 +273,19 @@ def test_held_entries_are_named_to_the_model_by_label_and_id():
 def test_a_follow_up_that_re_reads_held_keeps_it_in_the_answer():
     model = ScriptedModel([call("look_at", ids=["person:ada"]),
                            call("look_up", text="Bea Marlow")])
-    out = converse("also show Bea", GRAPH, model, held=["person:ada"])
+    out = converse("also show Bea", GRAPH, model, highlighted=["person:ada"])
     assert out.ids == ["person:ada", "person:bea"]
 
 
 def test_a_subject_change_does_not_drag_held_along():
     model = ScriptedModel([call("look_up", text="Pellard")])
-    out = converse("what is Pellard Foundry?", GRAPH, model, held=["person:ada", "person:bea"])
+    out = converse("what is Pellard Foundry?", GRAPH, model, highlighted=["person:ada", "person:bea"])
     assert out.ids == ["org:pellard"]
 
 
 def test_an_unknown_held_id_is_dropped_silently():
     model = ScriptedModel([])
-    out = converse("hello", GRAPH, model, held=["person:ghost"])
+    out = converse("hello", GRAPH, model, highlighted=["person:ghost"])
     assert out.ids == []
     assert "Currently highlighted" not in model.seen[0][0]["content"]
 
@@ -510,7 +510,7 @@ def test_a_held_entry_the_answer_never_names_is_not_shown():
     """
     model = ScriptedModel([call("look_at", ids=["org:pellard"]),
                            call("show", ids=["person:bea"])])
-    out = converse("what about Bea?", GRAPH, model, held=["org:pellard"])
+    out = converse("what about Bea?", GRAPH, model, highlighted=["org:pellard"])
     assert "org:pellard" in out.read
     assert out.show == ["person:bea"]
 
@@ -1747,8 +1747,8 @@ def test_a_reach_cuts_a_tool_message_by_tokens_and_none_cuts_by_characters():
     long = "the kiln cracked again. " * 2000
     assert _cut(long, None) == long[:CUT]
     assert _cut("short", None) == "short"
-    held = _cut(long, 200)
-    assert estimate_tokens(held) <= 200 and len(held) < len(long)
+    cut = _cut(long, 200)
+    assert estimate_tokens(cut) <= 200 and len(cut) < len(long)
     assert _cut("short", 200) == "short", "under the budget nothing is touched"
 
 

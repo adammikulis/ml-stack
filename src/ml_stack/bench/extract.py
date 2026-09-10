@@ -198,8 +198,8 @@ def sample_messages(messages: Sequence[Mapping[str, Any]], n: int, *,
     grouped: dict[str, list[dict[str, Any]]] = {}
     for m in everything:
         grouped.setdefault(_stratum(m), []).append(m)
-    for held in grouped.values():
-        rng.shuffle(held)
+    for group in grouped.values():
+        rng.shuffle(group)
     order = sorted(grouped, key=lambda k: (len(grouped[k]), k))
     taken: list[dict[str, Any]] = []
     for key in order:
@@ -264,20 +264,20 @@ def gold(graph: Mapping[str, Any], messages: Sequence[Mapping[str, Any]]) -> dic
                                                  for e in (graph.get("edges") or ())} - {""})}
     seen: set[tuple[str, str, str]] = set()
     for m in messages:
-        held = (m.get("attrs") or {}).get("asserts")
-        if not isinstance(held, Mapping):
+        asserts = (m.get("attrs") or {}).get("asserts")
+        if not isinstance(asserts, Mapping):
             raise ValueError(f"message {m.get('id')!r} carries no attrs.asserts; simulate the "
                              f"world again with a build that records what each message states")
         if not (m.get("attrs") or {}).get("asserts_exact", True):
             out["exact"] = False
         for bucket in BUCKETS:
-            for one in held.get(bucket) or ():
+            for one in asserts.get(bucket) or ():
                 if str(one) in nodes:
                     out["nodes"][bucket][str(one)] = nodes[str(one)]
-        for one in held.get("others") or ():
+        for one in asserts.get("others") or ():
             if str(one) in nodes:
                 out["others"][str(one)] = nodes[str(one)]
-        for r in held.get("relations") or ():
+        for r in asserts.get("relations") or ():
             if len(r) == 3 and str(r[0]) in nodes and str(r[2]) in nodes:
                 key = (str(r[0]), str(r[1]), str(r[2]))
                 if key not in seen:
@@ -286,18 +286,18 @@ def gold(graph: Mapping[str, Any], messages: Sequence[Mapping[str, Any]]) -> dic
     return out
 
 
-def as_extraction(held: Mapping[str, Any]) -> dict[str, Any]:
+def as_extraction(truth: Mapping[str, Any]) -> dict[str, Any]:
     """The gold written back in the schema's shape: what a perfect extractor would return,
     and what the scorer must give 100% to."""
-    label = {i: str(n.get("label") or i) for b in BUCKETS for i, n in held["nodes"][b].items()}
-    label.update({i: str(n.get("label") or i) for i, n in held["others"].items()})
+    label = {i: str(n.get("label") or i) for b in BUCKETS for i, n in truth["nodes"][b].items()}
+    label.update({i: str(n.get("label") or i) for i, n in truth["others"].items()})
     return {"people": [{"name": label[i], "role": "", "org": "", "place": ""}
-                       for i in held["nodes"]["people"]],
-            "orgs": [{"name": label[i], "kind": ""} for i in held["nodes"]["orgs"]],
-            "topics": [label[i] for i in held["nodes"]["topics"]],
-            "places": [label[i] for i in held["nodes"]["places"]],
+                       for i in truth["nodes"]["people"]],
+            "orgs": [{"name": label[i], "kind": ""} for i in truth["nodes"]["orgs"]],
+            "topics": [label[i] for i in truth["nodes"]["topics"]],
+            "places": [label[i] for i in truth["nodes"]["places"]],
             "relations": [{"from": label.get(s, s), "rel": r, "to": label.get(t, t)}
-                          for s, r, t in held["relations"]]}
+                          for s, r, t in truth["relations"]]}
 
 
 # -- folding what was extracted into one graph -----------------------------------------------------
@@ -317,19 +317,19 @@ def fold(extractions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         name = str(name or "").strip()
         if not name:
             return ""
-        held = clusters[kind]
-        hit = next((c for c in held if any(same(name, n) for n in c["names"])), None)
+        group = clusters[kind]
+        hit = next((c for c in group if any(same(name, n) for n in c["names"])), None)
         if hit is None and kind == "people" and len(_norm(name).split()) == 1:
-            by_first = [c for c in held if any(_first(n) == _norm(name) for n in c["names"])]
+            by_first = [c for c in group if any(_first(n) == _norm(name) for n in c["names"])]
             hit = by_first[0] if len(by_first) == 1 else None
         if hit is None and kind == "people":
             # a full name arriving after its first name alone
-            alone = [c for c in held if all(len(_norm(n).split()) == 1 for n in c["names"])
+            alone = [c for c in group if all(len(_norm(n).split()) == 1 for n in c["names"])
                      and any(_norm(n) == _first(name) for n in c["names"])]
             hit = alone[0] if len(alone) == 1 else None
         if hit is None:
             hit = {"name": name, "names": [], "attrs": {}}
-            held.append(hit)
+            group.append(hit)
         if name not in hit["names"]:
             hit["names"].append(name)
         if len(_norm(name).split()) > len(_norm(hit["name"]).split()):
@@ -428,7 +428,7 @@ def _components(nodes: Sequence[str], edges: Sequence[tuple[str, str]]) -> dict[
             "largest_share": round(max(sizes.values()) / len(nodes), 4) if nodes else 0.0}
 
 
-def topology(folded: Mapping[str, Any], held: Mapping[str, Any]) -> dict[str, Any]:
+def topology(folded: Mapping[str, Any], truth: Mapping[str, Any]) -> dict[str, Any]:
     """The folded graph's shape against the gold's: nodes, edges, connected components and
     the share of nodes in the largest, so a model that names the right things and joins
     none of them is seen. A person's ``org`` and ``place`` count as edges the extraction
@@ -439,12 +439,12 @@ def topology(folded: Mapping[str, Any], held: Mapping[str, Any]) -> dict[str, An
         for key in ("org", "place"):
             if c.get("attrs", {}).get(key):
                 edges.append((str(c["name"]), _named(folded["nodes"], str(c["attrs"][key]))))
-    ids = [i for b in BUCKETS for i in held["nodes"][b]]
+    ids = [i for b in BUCKETS for i in truth["nodes"][b]]
     return {"extracted": _components(names, edges),
-            "gold": _components(ids, [(s, t) for s, _, t in held["relations"]])}
+            "gold": _components(ids, [(s, t) for s, _, t in truth["relations"]])}
 
 
-def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
+def score(folded: Mapping[str, Any], truth: Mapping[str, Any], *,
           per_message: Sequence[Mapping[str, Any]] = ()) -> dict[str, Any]:
     """The folded extraction against the gold.
 
@@ -473,30 +473,30 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
     by_kind: dict[str, dict[str, Any]] = {}
     where: dict[str, str] = {}                       # cluster name -> gold id
     absorbed: list[int] = []                         # per mapped cluster, gold ids it names
-    truth_all: dict[str, Mapping[str, Any]] = {i: n for b in BUCKETS for i, n in held["nodes"][b].items()}
+    truth_all: dict[str, Mapping[str, Any]] = {i: n for b in BUCKETS for i, n in truth["nodes"][b].items()}
     found_total = of_total = said_total = invented_total = 0
     for bucket in BUCKETS:
-        truth = held["nodes"][bucket]
+        wanted = truth["nodes"][bucket]
         found: set[str] = set()
         said = invented = 0
         for cluster in (folded.get("nodes") or {}).get(bucket) or ():
             hits = [h for n in cluster["names"]
-                    if (h := _resolve(n, truth, people=bucket == "people"))]
+                    if (h := _resolve(n, wanted, people=bucket == "people"))]
             hit = hits[0] if hits else ""
             if hit:
                 found.add(hit)
                 where[cluster["name"]] = hit
                 absorbed.append(len(set(hits)))
                 said += 1
-            elif any(_resolve(n, held["others"]) for n in cluster["names"]):
+            elif any(_resolve(n, truth["others"]) for n in cluster["names"]):
                 continue
             else:
                 said += 1
                 invented += 1
-        by_kind[bucket] = {**_rates(len(found), len(truth), said), "of": len(truth),
+        by_kind[bucket] = {**_rates(len(found), len(wanted), said), "of": len(wanted),
                            "found": len(found), "said": said, "invented": invented}
         found_total += len(found)
-        of_total += len(truth)
+        of_total += len(wanted)
         said_total += said
         invented_total += invented
     nodes = {**_rates(found_total, of_total, said_total), "of": of_total, "found": found_total,
@@ -512,7 +512,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
         hit = _resolve(name, truth_all, people=True)
         if hit:
             return hit
-        return "" if _resolve(name, held["others"]) else None
+        return "" if _resolve(name, truth["others"]) else None
 
     matched: set[int] = set()
     said_rels = right_rels = 0
@@ -520,7 +520,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
     # under ``others`` -- a project, a department -- is dropped from both sides, the way an
     # entry naming one is, since the schema had no bucket to put it in and an extraction
     # naming it is neither right nor wrong
-    scored = [i for i, (s, _rel, t) in enumerate(held["relations"])
+    scored = [i for i, (s, _rel, t) in enumerate(truth["relations"])
               if s in truth_all and t in truth_all]
     for r in folded.get("relations") or ():
         src, dst = end(str(r["from"])), end(str(r["to"]))
@@ -530,7 +530,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
         if src is None or dst is None:
             continue
         for i in scored:
-            s, rel, t = held["relations"][i]
+            s, rel, t = truth["relations"][i]
             if s == src and t == dst and same(r["rel"], rel):
                 matched.add(i)
                 right_rels += 1
@@ -541,9 +541,9 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
 
     labels = {i: str(n.get("label") or "") for i, n in truth_all.items()}
     has: dict[str, dict[str, list[str]]] = {"org": {}, "place": {}}
-    for s, _, t in held["relations"]:
+    for s, _, t in truth["relations"]:
         for key, bucket in (("org", "orgs"), ("place", "places")):
-            if s in held["nodes"]["people"] and t in held["nodes"][bucket]:
+            if s in truth["nodes"]["people"] and t in truth["nodes"][bucket]:
                 has[key].setdefault(s, []).append(labels[t])
     attrs: dict[str, dict[str, int]] = {}
     for key in ("org", "place"):
@@ -558,7 +558,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
         attrs[key] = {"stated": stated, "right": right}
     # conformance: relations named in the world's own vocabulary, entries under a key the
     # schema has -- a grammar makes the second always so, and a path without one may not
-    vocabulary = list(held.get("vocabulary") or ())
+    vocabulary = list(truth.get("vocabulary") or ())
     rels_all = list(folded.get("relations") or ())
     in_vocab = sum(1 for r in rels_all if any(same(r["rel"], v) for v in vocabulary))
     on_schema = sum(len(v) for k, v in (folded.get("nodes") or {}).items() if k in BUCKETS)
@@ -571,7 +571,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
                    "off_schema": (len(rels_all) - in_vocab) + off_schema}
     # fact survival: per message, what of its own assertions the folded graph still holds
     present = set(where.values())
-    kept_rels = {tuple(held["relations"][i]) for i in matched}
+    kept_rels = {tuple(truth["relations"][i]) for i in matched}
     shares: list[float] = []
     for asserted in per_message:
         facts: list[Any] = [str(i) for b in BUCKETS for i in (asserted.get(b) or ())
@@ -592,7 +592,7 @@ def score(folded: Mapping[str, Any], held: Mapping[str, Any], *,
     resolution = {"splits": round(sum(per_gold.values()) / len(per_gold), 4) if per_gold else None,
                   "merges": round(sum(absorbed) / len(absorbed), 4) if absorbed else None}
     return {"nodes": nodes, "by_kind": by_kind, "relations": relations, "invented": invented,
-            "attrs": attrs, "topology": topology(folded, held), "conformance": conformance,
+            "attrs": attrs, "topology": topology(folded, truth), "conformance": conformance,
             "survival": survival, "resolution": resolution}
 
 
@@ -726,7 +726,7 @@ def measure(client: Any, messages: Sequence[Mapping[str, Any]], graph: Mapping[s
 
 def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: str,
          world: Mapping[str, Any], scores: Mapping[str, Any], sample: Mapping[str, Any],
-         held: Mapping[str, Any] | None = None) -> str:
+         server: Mapping[str, Any] | None = None) -> str:
     """Keep an extraction run beside the answering ones, and read it back before returning.
 
     The same discipline as `bench.save`, for the same reason: the store once took twelve
@@ -738,7 +738,7 @@ def save(store: str | Path, rows: Sequence[MessageRow], *, label: str, model: st
     stem = f"bench:{label}:{time.strftime('%Y%m%dT%H%M%S')}"
     record = _plain({"at": time.strftime("%FT%T"), "label": label, "kind": KIND,
                      "workload": WORKLOAD, "model": model,
-                     "world": dict(world), "sample": dict(sample), "server": stamped(held),
+                     "world": dict(world), "sample": dict(sample), "server": stamped(server),
                      "scores": dict(scores), "rows": [asdict(r) for r in rows]})
     record = json.loads(json.dumps(record))
     with GraphStore(store) as writer:
@@ -800,12 +800,12 @@ def _line(label: str, model: str, rows: Sequence[Mapping[str, Any]], scores: Map
     timed = sum(1 for r in rows if r.get("timed_out"))
 
     def pair(bucket: str) -> str:
-        held = by.get(bucket) or {}
-        return f"{_pct(held.get('coverage')):>7} {_pct(held.get('precision')):>8}"
+        row = by.get(bucket) or {}
+        return f"{_pct(row.get('coverage')):>7} {_pct(row.get('precision')):>8}"
 
     def ratio(key: str) -> str:
-        held = attrs.get(key) or {}
-        return f"{held.get('right', 0)}/{held.get('stated', 0)}" if held else "-"
+        row = attrs.get(key) or {}
+        return f"{row.get('right', 0)}/{row.get('stated', 0)}" if row else "-"
 
     invented = (f"{made.get('count', 0)} ({_pct(made.get('rate'))})"
                 if made.get("of") else f"{made.get('count', 0)}")
@@ -993,7 +993,7 @@ def main(args: Any) -> int:
     arcs = sum(1 for m in picked if (m.get("attrs") or {}).get("arc"))
     loose = sum(1 for m in picked if not (m.get("attrs") or {}).get("asserts_exact", True))
     try:
-        held = gold(graph, picked)
+        truth = gold(graph, picked)
     except ValueError as why:
         warn(f"error: {why}")
         return 2
@@ -1003,8 +1003,8 @@ def main(args: Any) -> int:
              "digest": _which(graph), "messages": len(messages), "where": str(args.world)}
     sample = {"n": len(picked), "seed": args.seed, "arcs": arcs, "chatter": len(picked) - arcs,
               "model_written": loose,
-              "gold": {b: len(held["nodes"][b]) for b in BUCKETS} | {
-                  "others": len(held["others"]), "relations": len(held["relations"])}}
+              "gold": {b: len(truth["nodes"][b]) for b in BUCKETS} | {
+                  "others": len(truth["others"]), "relations": len(truth["relations"])}}
 
     model = (str(hub.located(args.serve[0], loose=True) or args.serve[0])
              .rsplit("/", 1)[-1].removesuffix(".gguf")
@@ -1022,16 +1022,16 @@ def main(args: Any) -> int:
 
     sampling = sampling_from(args)
 
-    def read_and_keep(client: Any, reading: Sequence[Mapping[str, Any]], *, held: Mapping[str, Any],
+    def read_and_keep(client: Any, reading: Sequence[Mapping[str, Any]], *, server: Mapping[str, Any],
                       twice_over: bool, n: int) -> str:
         """``reading`` through ``client``, folded, scored, kept and read back: the key."""
         rows, scores = measure(client, reading, graph, per_message=args.per_message, log=print)
-        held = dict(held)
+        server = dict(server)
         if twice_over:
-            scores["consistency"], held["twice"] = twice(client, reading, graph, scores,
+            scores["consistency"], server["twice"] = twice(client, reading, graph, scores,
                                                          per_message=args.per_message)
         key = save(args.kept, rows, label=args.label, model=model, world=world, scores=scores,
-                   sample={**sample, "n": n}, held=held)
+                   sample={**sample, "n": n}, server=server)
         say(f"kept as {key}")
         table(read_back(args.kept, [key]))
         return key
@@ -1069,26 +1069,26 @@ def main(args: Any) -> int:
         with serve(found, manager=manager, **lease) as server:
             say(f"    up in {time.time() - began:.0f}s")
             client = Client(server.base_url, timeout=args.per_message, **sampling)
-            held = {**footprint(server.base_url), "sampling": dict(client.sampling),
+            server = {**footprint(server.base_url), "sampling": dict(client.sampling),
                     "load_s": getattr(server, "load_s", None)}
             if lease.get("spec_draft_max") is not None:
-                held["spec_draft_max"] = int(lease["spec_draft_max"])
+                server["spec_draft_max"] = int(lease["spec_draft_max"])
             if wants_smoke(args):
                 # first, on this load: a few messages through the whole path, kept and
                 # read back, before the sample that costs the GPU
                 few = sample_messages(messages, SMOKE_MESSAGES, seed=args.seed)
                 say(f"\n  smoke: {len(few)} message(s) through the whole path first")
-                key = read_and_keep(client, few, held=held, twice_over=False, n=len(few))
+                key = read_and_keep(client, few, server=server, twice_over=False, n=len(few))
                 smoked(read_back(args.kept, [key]), f"{args.label} smoke")
                 say("  smoke: ok\n")
-            read_and_keep(client, picked, held=held, twice_over=args.twice, n=len(picked))
+            read_and_keep(client, picked, server=server, twice_over=args.twice, n=len(picked))
     else:
         if wants_smoke(args):
             smoke_first(args)
         if not _idle(args.base_url, args):
             return 3
         client = Client(args.base_url, timeout=args.per_message, **sampling)
-        read_and_keep(client, picked, held={**footprint(args.base_url),
+        read_and_keep(client, picked, server={**footprint(args.base_url),
                                             "sampling": dict(client.sampling)},
                       twice_over=args.twice, n=len(picked))
     return 0

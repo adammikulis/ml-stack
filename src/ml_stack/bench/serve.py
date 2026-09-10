@@ -187,20 +187,20 @@ def up(config: Any, *, binary: str = "", name: str = "", serve_timeout: float = 
         say("\n".join(f"      {line}" for line in report.said().splitlines()))
         # `binary` is the llama-server this ran on, so a run on a fork is told from one on
         # mainline when the ranking takes its cost; `build` is its name, for `served_by`
-        held: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
+        record: dict[str, Any] = {"preflight": dict(checked), "load_s": load_s,
                                 "warmup_s": warmup_s, "binary": build,
                                 "build": str(config.serving.build or ""),
                                 "baseline": before_load, "loaded": loaded}
         if config.serving.draft or config.serving.spec_type:
-            held["draft_model"] = (str(config.serving.draft).rsplit("/", 1)[-1] if config.serving.draft
+            record["draft_model"] = (str(config.serving.draft).rsplit("/", 1)[-1] if config.serving.draft
                                    else EMBEDDED)
             if config.serving.draft_n_max is not None:
-                held["spec_draft_max"] = int(config.serving.draft_n_max)
+                record["spec_draft_max"] = int(config.serving.draft_n_max)
         if config.serving.cache_type:
-            held["cache_type"] = config.serving.cache_type
+            record["cache_type"] = config.serving.cache_type
         if config.serving.reasoning_budget is not None:
-            held["reasoning_budget"] = int(config.serving.reasoning_budget)
-        yield server, held
+            record["reasoning_budget"] = int(config.serving.reasoning_budget)
+        yield server, record
 
 
 class DraftDepthIgnored(RuntimeError):
@@ -346,16 +346,16 @@ def served(config: Any, questions: Sequence[Mapping[str, Any]], graph: Mapping[s
                                   graph=graph, per_question=per_question)
                     for row in got:
                         row.steps = f"{row.steps}; server up in {loaded:.0f}s".strip("; ")
-                    held = {**bench.footprint(server.base_url), "graph": _which(graph),
+                    record = {**bench.footprint(server.base_url), "graph": _which(graph),
                             "finder": getattr(ask, "finder", ""), **held_up}
                     if host:
-                        held["host"] = host
+                        record["host"] = host
                     asked_depth = getattr(client, "asked_spec_draft_max", None)
                     if asked_depth is not None:
-                        held["spec_draft_max_asked"] = int(asked_depth)
+                        record["spec_draft_max_asked"] = int(asked_depth)
                     if kept:
                         keys.append(save(kept, got,
-                                         held={**held, "sampling": dict(client.sampling)},
+                                         server={**record, "sampling": dict(client.sampling)},
                                          # the way, beside what was serving: see `save`
                                          asking=getattr(ask, "asking", None),
                                          workload=ASK))

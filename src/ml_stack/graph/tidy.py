@@ -332,14 +332,14 @@ class ModelJudge:
         """One excerpt per unit per label, in order, nothing repeated."""
         if self.sources is None:
             return []
-        held = list(nodes)
+        snapshot = list(nodes)
         out: list[tuple[str, str]] = []
         for unit in units:
             try:
                 text = self.sources(str(unit))
             except Exception:  # noqa: BLE001 - a source that cannot be re-read is skipped
                 continue
-            for node in held:
+            for node in snapshot:
                 for piece in excerpts(text, str(node.get("label") or ""),
                                       chars=self.excerpt_chars, most=1):
                     if (str(unit), piece) not in out:
@@ -436,7 +436,7 @@ class Report:
     suspects_resolved: int = 0
     suspects_dropped: int = 0
     rejudged: int = 0
-    replayed: int = 0      # verdicts the store already held, applied without asking again
+    replayed: int = 0      # verdicts the store remembered, applied without asking again
     stale: int = 0         # verdicts naming a node the store no longer holds
     unjudged: int = 0      # verb pairs met with no verdict and no judge to ask
     conflicts: list[tuple[str, str, str, str]] = field(default_factory=list)
@@ -485,13 +485,13 @@ class Report:
                 f"({self.conflict_edges_dropped} edge(s) dropped) and "
                 f"{self.definitions_judged} definition(s); resolved {self.suspects_resolved} "
                 f"suspect label(s) ({self.suspects_dropped} node(s) dropped)"
-                + (f"; replayed {self.replayed} verdict(s) the store already held"
+                + (f"; replayed {self.replayed} verdict(s) the store remembered"
                    if self.replayed else "")
-                + (f"; {self.stale} held verdict(s) name a node the store no longer has"
+                + (f"; {self.stale} remembered verdict(s) name a node the store no longer has"
                    if self.stale else "")
                 + (f"; {self.unjudged} verb pair(s) no verdict covers"
                    if self.unjudged else "")
-                + (f"; asked the judge again about {self.rejudged} held verdict(s)"
+                + (f"; asked the judge again about {self.rejudged} remembered verdict(s)"
                    if self.rejudged else ""))
 
     def absorbed(self) -> str:
@@ -509,10 +509,10 @@ def written_from(path: str | Path | None) -> dict[str, str]:
 
     if not path:
         return {}
-    held = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
-    if not isinstance(held, dict) or not all(isinstance(v, str) for v in held.values()):
+    data = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not all(isinstance(v, str) for v in data.values()):
         raise ValueError(f"{path}: expected a JSON object of name -> name")
-    return {str(k): v for k, v in held.items()}
+    return {str(k): v for k, v in data.items()}
 
 
 @dataclass
@@ -549,8 +549,8 @@ def load_gold(path: str | Path | None = None) -> list[dict[str, Any]]:
     import json
 
     where = Path(path).expanduser() if path else gold_file()
-    held = json.loads(where.read_text(encoding="utf-8"))
-    pairs = held.get("pairs") if isinstance(held, dict) else held
+    data = json.loads(where.read_text(encoding="utf-8"))
+    pairs = data.get("pairs") if isinstance(data, dict) else data
     if not isinstance(pairs, list) or not pairs:
         raise ValueError(f"{where}: expected a JSON object with a non-empty 'pairs' list")
     return [dict(pair) for pair in pairs]
@@ -569,7 +569,7 @@ def judge_gold(client: Any, gold: str | Path | list[dict[str, Any]] | None = Non
     for pair in pairs:
         one, other = _gold_node(pair.get("a") or {}), _gold_node(pair.get("b") or {})
         passages = dict(pair.get("passages") or {})
-        judge = ModelJudge(client, sources=lambda unit, held=passages: held.get(unit, ""),
+        judge = ModelJudge(client, sources=lambda unit, text_of=passages: text_of.get(unit, ""),
                            model=scored.model)
         answer = judge.decide(one, other)
         got = str(answer.get("verdict") or "unsure")
@@ -604,14 +604,14 @@ def _gold_node(said: Mapping[str, Any]) -> dict[str, Any]:
 
 def plurals(names: Iterable[str]) -> dict[str, str]:
     """``{plural (casefolded): singular}`` for every name whose singular is also a name."""
-    held = {str(name).casefold(): str(name) for name in names}
+    by_lower = {str(name).casefold(): str(name) for name in names}
     out: dict[str, str] = {}
-    for low, _name in held.items():
+    for low, _name in by_lower.items():
         for ending, singular in (("ies", "y"), ("es", ""), ("s", "")):
             if low.endswith(ending) and len(low) > len(ending) + 2:
                 stem = low[: -len(ending)] + singular
-                if stem in held and stem != low:
-                    out[low] = held[stem]
+                if stem in by_lower and stem != low:
+                    out[low] = by_lower[stem]
                     break
     return out
 
@@ -714,7 +714,7 @@ def _rings(n: int, src: list[int], dst: list[int]) -> list[list[int]]:
                 queue.append(p)
 
     rings: list[list[int]] = []
-    held: set[frozenset[int]] = set()
+    already: set[frozenset[int]] = set()
     walked = [False] * n
     for start in range(n):
         if not alive[start] or walked[start]:
@@ -728,8 +728,8 @@ def _rings(n: int, src: list[int], dst: list[int]) -> list[list[int]]:
             walked[u] = True
             u = next(v for v in outgoing[u] if alive[v])
         ring = walk[seen[u]:]
-        if frozenset(ring) not in held:
-            held.add(frozenset(ring))
+        if frozenset(ring) not in already:
+            already.add(frozenset(ring))
             rings.append(ring)
     return rings
 
@@ -774,7 +774,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
     rejudge = bool(rejudge and judge is not None)
     report.stale = _stale(decisions, nodes)
     if report.stale:
-        note(f"{report.stale} held verdict(s) name a node the store no longer has, and are "
+        note(f"{report.stale} remembered verdict(s) name a node the store no longer has, and are "
              "left in the decisions document")
 
     # 1. duplicate nodes, within a kind
@@ -783,13 +783,13 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         by_kind.setdefault(str(node.get("kind") or ""), []).append(node)
     merged_into: dict[str, str] = {}
     decided = {str(k).casefold(): str(v) for k, v in (written or {}).items()}
-    for kind, held in by_kind.items():
+    for kind, group in by_kind.items():
         if kind in _NEVER_FOLDED:
             continue
         # the same name under two ids -- case, spacing, hyphens -- is one node; the
         # heavier survives
         by_same: dict[str, dict[str, Any]] = {}
-        for node in sorted(held, key=lambda n: -int(n.get("mentions") or 0)):
+        for node in sorted(group, key=lambda n: -int(n.get("mentions") or 0)):
             key = same_name(node.get("label"))
             if key in by_same:
                 merged_into[node["id"]] = by_same[key]["id"]
@@ -817,19 +817,19 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
                     continue
                 a, b = by_label[one], by_label[other]
                 key = _pair_key(a["id"], b["id"])
-                held = _held(decisions, "pairs", key, rejudge=rejudge, report=report)
-                if held is None and not rejudge:
-                    held = _pair_remembered(decisions, one, other, kind)
-                report.replayed += int(held is not None)
-                if held is None and judge is not None:
-                    held = judge.decide(a, b)
-                    held = {**held, "a": a["id"], "b": b["id"], "kind": kind,
-                            "a_label": one, "b_label": other,
-                            "model": getattr(judge, "model", ""),
-                            "when": _now()}
-                    if not held.get("failed"):
-                        _keep_decision(store, decisions, "pairs", key, held)
-                verdict = str((held or {}).get("verdict") or "unsure")
+                decision = _remembered(decisions, "pairs", key, rejudge=rejudge, report=report)
+                if decision is None and not rejudge:
+                    decision = _pair_remembered(decisions, one, other, kind)
+                report.replayed += int(decision is not None)
+                if decision is None and judge is not None:
+                    decision = judge.decide(a, b)
+                    decision = {**decision, "a": a["id"], "b": b["id"], "kind": kind,
+                                "a_label": one, "b_label": other,
+                                "model": getattr(judge, "model", ""),
+                                "when": _now()}
+                    if not decision.get("failed"):
+                        _keep_decision(store, decisions, "pairs", key, decision)
+                verdict = str((decision or {}).get("verdict") or "unsure")
                 if verdict == "same":
                     heavier, lighter = ((a, b) if int(a.get("mentions") or 0)
                                         >= int(b.get("mentions") or 0) else (b, a))
@@ -837,16 +837,17 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
                         merged_into[lighter["id"]] = heavier["id"]
                     report.judged_same += 1
                     note(f"judged same ({kind}): {lighter['label']!r} -> {heavier['label']!r}"
-                         f" -- {held.get('why', '')}"
-                         + (f" (read {len(held.get('read') or ())} passage(s))"
-                            if held.get("read") else ""))
+                         f" -- {decision.get('why', '')}"
+                         + (f" (read {len(decision.get('read') or ())} passage(s))"
+                            if decision.get("read") else ""))
                 elif verdict == "different":
                     report.judged_different += 1
-                    note(f"judged different ({kind}): {one!r} | {other!r} -- {held.get('why', '')}")
+                    note(f"judged different ({kind}): {one!r} | {other!r}"
+                         f" -- {decision.get('why', '')}")
                 else:
                     report.possible.append((one, other))
                     note(f"possible ({kind}): {one!r} ~ {other!r} -- a spelling apart"
-                         + ("; the judge could not settle it" if held else "")
+                         + ("; the judge could not settle it" if decision else "")
                          + "; hand it back as written if they are one")
     # follow chains a -> b -> c to their end
     for remove in list(merged_into):
@@ -916,7 +917,7 @@ def tidy(store: Any, *, dry_run: bool = True, established: int = ESTABLISHED,
         remembered = _suspect_verdict(decisions, node, rejudge=rejudge, report=report)
         if judge is not None or remembered is not None:
             _resolve_suspect(store, nodes, edges, node, why, judge=judge, decisions=decisions,
-                             report=report, note=note, merges=merges, held=remembered,
+                             report=report, note=note, merges=merges, decision=remembered,
                              dry_run=dry_run)
         elif not (node.get("attrs") or {}).get("suspect"):
             report.flagged += 1
@@ -998,12 +999,12 @@ def _recount(store: Any) -> None:
     """The ``stats`` document's ``nodes`` and ``edges`` from what the store counts."""
     if not all(hasattr(store, name) for name in ("get_doc", "put_doc", "counts")):
         return
-    held = store.get_doc("stats", None)
-    if not isinstance(held, dict):
+    stats = store.get_doc("stats", None)
+    if not isinstance(stats, dict):
         return
     counted = store.counts()
-    fresh = {**held, "nodes": counted["nodes"], "edges": counted["edges"]}
-    if fresh != held:
+    fresh = {**stats, "nodes": counted["nodes"], "edges": counted["edges"]}
+    if fresh != stats:
         store.put_doc("stats", fresh)
 
 
@@ -1062,9 +1063,9 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
             if unit in carried:
                 return carried[unit]
             if sources is not None:
-                held = sources(unit)
-                if held:
-                    return held
+                text = sources(unit)
+                if text:
+                    return text
             return original(unit) if original is not None else ""
 
         judge.sources = _text
@@ -1072,18 +1073,18 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
     try:
         for node in incoming:
             kind = str(node.get("kind") or "")
-            held = by_key.get(kind)
-            if _hidden(node) or kind in _NEVER_FOLDED or not held:
+            same_kind = by_key.get(kind)
+            if _hidden(node) or kind in _NEVER_FOLDED or not same_kind:
                 continue
             node_id = str(node.get("id") or "")
             key = same_name(node.get("label"))
-            found = held.get(key)
+            found = same_kind.get(key)
             if found is not None and str(found["id"]) == node_id:
                 continue
             how = "the same name"
             if found is None:
                 for kin in _kin(key):
-                    found = held.get(kin)
+                    found = same_kind.get(kin)
                     if found is not None:
                         how = "a plural"
                         break
@@ -1098,7 +1099,7 @@ def absorb(store: Any, graph: Mapping[str, Any], *, judge: Any = None,
                      f"({how})")
                 continue
             for other_key in _near(by_length.get(kind) or {}, key):
-                other = held[other_key]
+                other = same_kind[other_key]
                 if str(other["id"]) == node_id:
                     continue
                 pair = _pair_key(node_id, str(other["id"]))
@@ -1246,17 +1247,17 @@ def _now() -> str:
 def _decisions(store: Any) -> dict[str, dict[str, Any]]:
     """Every verdict the store remembers, by section: ``pairs`` (two names), ``conflicts``
     (two verbs between the same ends), ``definitions``, ``suspects``."""
-    held = store.get_doc(DECISIONS) if hasattr(store, "get_doc") else None
-    held = held if isinstance(held, dict) else {}
-    return {name: (dict(held[name]) if isinstance(held.get(name), dict) else {})
+    doc = store.get_doc(DECISIONS) if hasattr(store, "get_doc") else None
+    doc = doc if isinstance(doc, dict) else {}
+    return {name: (dict(doc[name]) if isinstance(doc.get(name), dict) else {})
             for name in _SECTIONS}
 
 
 def _merges(store: Any) -> list[dict[str, Any]]:
     """Every merge the store remembers, oldest first."""
-    held = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
-    held = held.get("merges") if isinstance(held, dict) else held
-    return [dict(m) for m in held if isinstance(m, Mapping)] if isinstance(held, list) else []
+    doc = store.get_doc(MERGES) if hasattr(store, "get_doc") else None
+    doc = doc.get("merges") if isinstance(doc, dict) else doc
+    return [dict(m) for m in doc if isinstance(m, Mapping)] if isinstance(doc, list) else []
 
 
 def _keep_merge(store: Any, merges: list[dict[str, Any]], entry: Mapping[str, Any]) -> None:
@@ -1268,12 +1269,12 @@ def _keep_merges(store: Any, merges: list[dict[str, Any]],
                  entries: Iterable[Mapping[str, Any]]) -> None:
     """``entries`` into the store's merges document in one write; a (kept, gone) pair
     already there is not written twice, and a read-only store is not written."""
-    held = {(m.get("kept"), m.get("gone")) for m in merges}
+    seen = {(m.get("kept"), m.get("gone")) for m in merges}
     new = []
     for entry in entries:
         pair = (entry["kept"], entry["gone"])
-        if pair not in held:
-            held.add(pair)
+        if pair not in seen:
+            seen.add(pair)
             new.append(dict(entry))
     if not new:
         return
@@ -1283,15 +1284,15 @@ def _keep_merges(store: Any, merges: list[dict[str, Any]],
     store.put_doc(MERGES, {"merges": merges, "hidden": True})
 
 
-def _held(decisions: dict[str, dict[str, Any]], section: str, key: str, *, rejudge: bool,
+def _remembered(decisions: dict[str, dict[str, Any]], section: str, key: str, *, rejudge: bool,
           report: Report) -> dict[str, Any] | None:
     """The verdict the store remembers under ``key``; None when there is none, or when it
     is to be asked again."""
-    held = decisions[section].get(key)
-    if held is not None and rejudge:
+    found = decisions[section].get(key)
+    if found is not None and rejudge:
         report.rejudged += 1
         return None
-    return held
+    return found
 
 
 def _keep_decision(store: Any, decisions: dict[str, dict[str, Any]], section: str, key: str,
@@ -1316,10 +1317,10 @@ def _suspect_verdict(decisions: dict[str, dict[str, Any]], node: Mapping[str, An
     A rebuild from the reads can give a node an id the verdict was not written against,
     so the label and kind the verdict recorded stand in for it.
     """
-    held = _held(decisions, "suspects", str(node.get("id") or ""), rejudge=rejudge,
+    decision = _remembered(decisions, "suspects", str(node.get("id") or ""), rejudge=rejudge,
                  report=report)
-    if held is not None or rejudge:
-        return held
+    if decision is not None or rejudge:
+        return decision
     label, kind = str(node.get("label") or ""), str(node.get("kind") or "")
     for one in (decisions.get("suspects") or {}).values():
         if str((one or {}).get("label") or "") == label \
@@ -1332,11 +1333,11 @@ def _pair_remembered(decisions: dict[str, dict[str, Any]], one: str, other: str,
                      kind: str) -> dict[str, Any] | None:
     """One name-pair verdict found by the two labels it recorded rather than by node id."""
     want = {one, other}
-    for held in (decisions.get("pairs") or {}).values():
-        held = held or {}
-        if {str(held.get("a_label") or ""), str(held.get("b_label") or "")} == want \
-                and str(held.get("kind") or kind) == kind:
-            return dict(held)
+    for one in (decisions.get("pairs") or {}).values():
+        one = one or {}
+        if {str(one.get("a_label") or ""), str(one.get("b_label") or "")} == want \
+                and str(one.get("kind") or kind) == kind:
+            return dict(one)
     return None
 
 
@@ -1387,30 +1388,30 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
     while at < len(left) - 1:
         a_rel, b_rel = left[at], left[at + 1]
         key = _conflict_key(ends, a_rel, b_rel)
-        held = _held(decisions, "conflicts", key, rejudge=rejudge, report=report)
-        if held is None and not rejudge:
-            held = _conflict_remembered(
+        decision = _remembered(decisions, "conflicts", key, rejudge=rejudge, report=report)
+        if decision is None and not rejudge:
+            decision = _conflict_remembered(
                 decisions, {str(one.get("label") or ""), str(other.get("label") or "")},
                 sorted((a_rel, b_rel)))
-        replayed = held is not None
-        if held is None:
+        replayed = decision is not None
+        if decision is None:
             if judge is None:
                 report.unjudged += 1
                 at += 1
                 continue
-            held = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
-            held = {**held, "ends": list(ends), "verbs": sorted((a_rel, b_rel)),
+            decision = judge.decide_conflict(one, other, group[a_rel], group[b_rel])
+            decision = {**decision, "ends": list(ends), "verbs": sorted((a_rel, b_rel)),
                     "labels": [str(one.get("label") or ""), str(other.get("label") or "")],
                     "model": getattr(judge, "model", ""), "when": _now()}
-            if not held.get("failed"):
-                _keep_decision(store, decisions, "conflicts", key, held)
+            if not decision.get("failed"):
+                _keep_decision(store, decisions, "conflicts", key, decision)
         report.conflicts_judged += 1
         report.replayed += int(replayed)
-        verdict = str(held.get("verdict") or "unsure")
+        verdict = str(decision.get("verdict") or "unsure")
         drop = b_rel if verdict == f"keep {a_rel}" else a_rel if verdict == f"keep {b_rel}" else ""
         if not drop:
             note(f"conflict judged ({verdict}): {one['label']!r} and {other['label']!r} joined "
-                 f"by {a_rel} and {b_rel} -- {held.get('why', '')}")
+                 f"by {a_rel} and {b_rel} -- {decision.get('why', '')}")
             at += 1
             continue
         kept_rel = a_rel if drop == b_rel else b_rel
@@ -1418,7 +1419,7 @@ def _resolve_conflict(store: Any, nodes: dict[str, dict[str, Any]], edges: list[
         left.remove(drop)
         report.conflict_edges_dropped += 1
         note(f"conflict judged: {one['label']!r} and {other['label']!r} keep {kept_rel}; "
-             f"{drop} dropped, its weight and provenance folded in -- {held.get('why', '')}")
+             f"{drop} dropped, its weight and provenance folded in -- {decision.get('why', '')}")
     return left
 
 
@@ -1441,24 +1442,24 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
                      node: dict[str, Any], why: str, *, judge: Any,
                      decisions: dict[str, dict[str, Any]], report: Report,
                      note: Callable[[str], None], merges: list[dict[str, Any]] | None = None,
-                     held: Mapping[str, Any] | None = None, dry_run: bool = False) -> None:
+                     decision: Mapping[str, Any] | None = None, dry_run: bool = False) -> None:
     """One doubtful label renamed, dropped, or kept with the flag cleared.
 
-    ``held`` is the verdict the store already carries for this label; without one the
+    ``decision`` is the verdict the store already carries for this label; without one the
     judge is asked and its answer written down.
     """
-    replayed = held is not None
-    if held is None:
-        held = judge.decide_suspect(node, why)
-        held = {**held, "label": node.get("label"), "kind": node.get("kind"), "flagged": why,
+    replayed = decision is not None
+    if decision is None:
+        decision = judge.decide_suspect(node, why)
+        decision = {**decision, "label": node.get("label"), "kind": node.get("kind"), "flagged": why,
                 "model": getattr(judge, "model", ""), "when": _now()}
-        if not held.get("failed"):
-            _keep_decision(store, decisions, "suspects", node["id"], held)
+        if not decision.get("failed"):
+            _keep_decision(store, decisions, "suspects", node["id"], decision)
     report.suspects_resolved += 1
     report.replayed += int(replayed)
-    verdict = str(held.get("verdict") or "keep")
+    verdict = str(decision.get("verdict") or "keep")
     label = str(node.get("label") or "")
-    name = str(held.get("name") or "").strip()
+    name = str(decision.get("name") or "").strip()
     if verdict == "rename" and name and name != label:
         into = next((n for n in nodes.values()
                      if n["id"] != node["id"] and str(n.get("label") or "") == name
@@ -1477,7 +1478,7 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
             store.rename(node["id"], name)
             store.unset_attribute(node["id"], "suspect")
         (node.setdefault("attrs", {})).pop("suspect", None)
-        note(f"suspect: {label!r} renamed to {name!r} -- {held.get('why', '')}")
+        note(f"suspect: {label!r} renamed to {name!r} -- {decision.get('why', '')}")
     elif verdict == "drop":
         gone = [e for e in edges if node["id"] in (e["source"], e["target"])]
         if not dry_run:
@@ -1485,12 +1486,12 @@ def _resolve_suspect(store: Any, nodes: dict[str, dict[str, Any]], edges: list[d
         nodes.pop(node["id"], None)
         edges[:] = [e for e in edges if node["id"] not in (e["source"], e["target"])]
         report.suspects_dropped += 1
-        note(f"suspect: {label!r} dropped with {len(gone)} edge(s) -- {held.get('why', '') or why}")
+        note(f"suspect: {label!r} dropped with {len(gone)} edge(s) -- {decision.get('why', '') or why}")
     else:
         if not dry_run:
             store.unset_attribute(node["id"], "suspect")
         (node.setdefault("attrs", {})).pop("suspect", None)
-        note(f"suspect: {label!r} kept, the flag cleared -- {held.get('why', '') or why}")
+        note(f"suspect: {label!r} kept, the flag cleared -- {decision.get('why', '') or why}")
 
 
 _FRAGMENT = re.compile(r"^(that|which|who|and|or|but|of|in|to|for|with|by)\b", re.I)
@@ -1513,10 +1514,10 @@ def _better_definition(one: str, other: str) -> tuple[str, str]:
 def _definition_remembered(decisions: dict[str, dict[str, Any]] | None, a_said: str,
                            b_said: str) -> dict[str, Any] | None:
     """The verdict the store holds about which of two definitions is the definition."""
-    for held in ((decisions or {}).get("definitions") or {}).values():
-        held = held or {}
-        if {str(held.get("a") or ""), str(held.get("b") or "")} == {a_said, b_said}:
-            return dict(held)
+    for one in ((decisions or {}).get("definitions") or {}).values():
+        one = one or {}
+        if {str(one.get("a") or ""), str(one.get("b") or "")} == {a_said, b_said}:
+            return dict(one)
     return None
 
 
@@ -1534,9 +1535,9 @@ def _merge_definitions(kept: Mapping[str, Any], gone: Mapping[str, Any],
     a_said = str((kept.get("attrs") or {}).get("definition") or "").strip()
     b_said = str((gone.get("attrs") or {}).get("definition") or "").strip()
     also = [d for d in (attrs.get("definitions_also") or []) if d]
-    for held in ((gone.get("attrs") or {}).get("definitions_also") or []):
-        if held and held not in also:
-            also.append(held)
+    for one in ((gone.get("attrs") or {}).get("definitions_also") or []):
+        if one and one not in also:
+            also.append(one)
     if a_said and b_said:
         better, spare = _better_definition(a_said, b_said)
         differ = _substantially(a_said, b_said)
@@ -1644,8 +1645,8 @@ def _kept_spans(into: dict[str, Any], *things: Any) -> None:
 
 def _union(*lists: Any) -> list[str]:
     out: list[str] = []
-    for held in lists:
-        for item in held or ():
+    for one in lists:
+        for item in one or ():
             if item not in out:
                 out.append(item)
     return out

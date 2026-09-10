@@ -106,7 +106,7 @@ def _extraction(store: str, label: str, *, model: str, messages: int, seconds: f
                    sample={"n": messages, "seed": 3},
                    scores=_scored(node_f1=node_f1, rel_cov=rel_cov, rel_prec=rel_prec,
                                   rel_f1=rel_f1, top_prec=top_prec, invented=invented),
-                   held={"model": model, "resident_bytes": resident})
+                   server={"model": model, "resident_bytes": resident})
 
 
 def _answering(store: str, label: str, *, model: str = "kestrel.gguf", questions: int = 20,
@@ -117,7 +117,7 @@ def _answering(store: str, label: str, *, model: str = "kestrel.gguf", questions
                 seconds=seconds / questions, calls=3, answer_chars=200,
                 processed_tokens=500, completion_tokens=100)
             for n in range(questions)]
-    return bench.save(store, rows, held={"model": model, "context": 32768, "slots": 1,
+    return bench.save(store, rows, server={"model": model, "context": 32768, "slots": 1,
                                          "binary": "/builds/current/llama-server",
                                          "graph": "invented"})
 

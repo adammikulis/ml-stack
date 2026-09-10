@@ -189,7 +189,7 @@ class PacedStream:
 
     def __init__(self, events):
         self.gate = queue.Queue()
-        held = [f"data: {json.dumps(e)}\n\n".encode() for e in events]
+        frames = [f"data: {json.dumps(e)}\n\n".encode() for e in events]
         gate = self.gate
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -199,7 +199,7 @@ class PacedStream:
                 self.send_header("Content-Type", "text/event-stream")
                 self.send_header("Cache-Control", "no-cache")
                 self.end_headers()
-                for chunk in held:
+                for chunk in frames:
                     gate.get()
                     self.wfile.write(chunk)
                     self.wfile.flush()
@@ -349,7 +349,7 @@ def test_hidden_beats_any_display_rule(open_page):
 
 
 def test_a_second_ask_carries_only_what_was_gathered(open_page):
-    """Fails when the held array is dropped, or when it is filled from the last answer.
+    """Fails when the highlighted array is dropped, or when it is filled from the last answer.
 
     An answer's own nodes are not a standing selection: carrying them into the next
     question drags its strangers along. Only a deliberate pick or selection travels.
@@ -365,15 +365,15 @@ def test_a_second_ask_carries_only_what_was_gathered(open_page):
     page.fill("#q", "and the org?")
     with page.expect_request("**/ask") as second:
         page.press("#q", "Enter")
-    assert "held" not in json.loads(first.value.post_data)
+    assert "highlighted" not in json.loads(first.value.post_data)
     # the answer lit two nodes, and neither was gathered by hand
-    assert "held" not in json.loads(second.value.post_data)
+    assert "highlighted" not in json.loads(second.value.post_data)
     # gathering one deliberately does travel
     page.locator("#graph g.node", has_text="Ada Lovelace").first.click(modifiers=["Shift"])
     page.fill("#q", "what about them?")
     with page.expect_request("**/ask") as third:
         page.press("#q", "Enter")
-    assert json.loads(third.value.post_data)["held"] == ["person:ada"]
+    assert json.loads(third.value.post_data)["highlighted"] == ["person:ada"]
     assert errors == []
 
 
@@ -595,12 +595,12 @@ def test_the_line_above_the_trace_says_what_is_happening_now(open_page):
 
 def test_a_reopened_answer_gets_its_tally_back(open_page):
     """Fails when reopen() stops handing a remembered turn's steps to thoughtOver()."""
-    held = {"thread": "c1", "turns": [
+    kept = {"thread": "c1", "turns": [
         {"role": "user", "text": "who is at the robotics company?"},
         {"role": "assistant", "text": "Grace Hopper is at Quenlow Robotics.",
          "steps": ["looked up 'robotics'", "read 1 entry"]},
     ]}
-    page, errors = open_page(served=True, thread=held)
+    page, errors = open_page(served=True, thread=kept)
     page.wait_for_selector("#stats b")
     pw.expect(page.locator("#qturns .t .think summary.now")).to_have_text(
         "looked up 'robotics', read 1 entry")

@@ -345,7 +345,7 @@ def test_show_speed_prints_the_speed_runs_and_the_answering_table_leaves_them_ou
                  "wall_s": 9.1, "draft_tokens": 200, "draft_taken": 150, "errors": 0},
                 {"prompt_tokens": 4096, "streams": 2, "prefill_tps": None, "decode_tps": None,
                  "ttft_s": None, "wall_s": 20.0, "draft_tokens": None, "errors": 1}],
-         held={"served_by": {"program": "llama.cpp", "format": "gguf", "quant": "Q4_K_XL"},
+         server={"served_by": {"program": "llama.cpp", "format": "gguf", "quant": "Q4_K_XL"},
                "build": "unsloth", "resident_peak": 70 * 2**30, "load_s": 40.0},
          kind=KIND, label="flash-speed")
     speed_table(runs(kept))

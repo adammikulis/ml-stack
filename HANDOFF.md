@@ -24,14 +24,18 @@ Words this library coined that a reader has to learn before the code means anyth
 if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
 across `src/`.
 
-- [ ] **`held` as a variable name (989).** Says only that something was assigned. Rename to
-  what it holds, file by file; a sweep that renames all 989 to one other word is the same
-  problem again.
-
-Do it as its own branch with the full suite green, not alongside anything else: it touches
-about 1,500 sites and every one is mechanical, so a conflict with real work is expensive
-and hard to read. `tests/test_cli_reference.py` and the docs under `docs/` mention several
-of these by name.
+- [ ] **`held` as a variable name, 665 uses left in `src/`.** The public names are done --
+  `serve.serving.servers()`, `hub.on_disk()`, `jobs.recorded()`, `converse(highlighted=)`,
+  `AskRoutes.asker(highlighted=)`, `Ask.highlighted`, the `highlighted` field the page
+  posts, and `bench.save(server=)` -- and so are `ingest/fold.py`, `graph/tidy.py`,
+  `graph/serve.py`, `graph/ask.py`, `bench/keep.py`, `bench/extract.py`, `bench/run.py`,
+  `bench/serve.py`, `bench/speed.py` and `jobs.py`. What is left is per-file:
+  `ingest/sources.py` (36), `bench/measure.py` (32), `serve/manager.py` (25),
+  `bench/show.py` (23), `world/simulate.py` (21), `ingest/imports.py` (20),
+  `graph/store.py` (16), `serve/cli.py` (15), then a long tail. Rename each to what it
+  holds; renaming them all to one other word is the same problem again. Watch for the
+  name already in that scope: three of these renames collided with an existing local and
+  only the tests caught it.
 
 ## The store (each needs the GPU; Adam's call)
 

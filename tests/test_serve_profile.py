@@ -446,7 +446,7 @@ def keep_run(store, label: str, *, right: float = 0.8, n: int = 20,   # SHORT: a
                         completion_tokens=10))
     server = {"model": MODEL, "binary": "/builds/current/llama-server", "slots": 2,
               "context": 65536, "host": "ladybug", **held}
-    return bench.save(store, rows, held=server, asking=held.pop("asking", None))
+    return bench.save(store, rows, server=server, asking=held.pop("asking", None))
 
 
 def test_the_record_is_written_from_the_best_row_of_the_store(tmp_path, capsys):

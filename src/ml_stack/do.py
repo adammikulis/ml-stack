@@ -260,8 +260,8 @@ def bench_cli(sub: str, args: Sequence[str], detach: bool) -> dict[str, Any]:
         from ml_stack import jobs
         from ml_stack import bench
 
-        held = jobs.held("bench", home=bench.home_dir() / "jobs")
-        return {"log": str(log), "pid": held.get("pid"), "argv": [sub, *args]}
+        record = jobs.recorded("bench", home=bench.home_dir() / "jobs")
+        return {"log": str(log), "pid": record.get("pid"), "argv": [sub, *args]}
     from ml_stack.bench.run import _main
 
     return mcp._captured(lambda: _main([sub, *list(args)]))

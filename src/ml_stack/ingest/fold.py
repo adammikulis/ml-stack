@@ -86,15 +86,15 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = "", tex
         if not clean:
             return ""
         node_id = f"concept:{_slug(clean)}"
-        held = nodes.setdefault(node_id, {
+        node = nodes.setdefault(node_id, {
             "id": node_id, "kind": kind or "concept", "label": clean, "mentions": 0,
             "attrs": {"definition": "", "aliases": [], "key_term": False},
             "provenance": []})
-        held["mentions"] += 1
-        if where["unit"] not in held["provenance"]:
-            held["provenance"].append(where["unit"])
-        _at(held, where["unit"], found.get(clean))
-        attrs = held["attrs"]
+        node["mentions"] += 1
+        if where["unit"] not in node["provenance"]:
+            node["provenance"].append(where["unit"])
+        _at(node, where["unit"], found.get(clean))
+        attrs = node["attrs"]
         if clean in found and found[clean] is None:
             attrs["unsourced"] = True
         if more.get("definition") and not attrs["definition"]:
@@ -129,16 +129,16 @@ def build(extraction: Mapping[str, Any], unit: Any, *, book_title: str = "", tex
         if not (source and target and rel) or source == target:
             continue
         key = (source, rel, target)
-        held = edges.setdefault(key, {"source": source, "rel": rel, "target": target,
+        edge = edges.setdefault(key, {"source": source, "rel": rel, "target": target,
                                       "weight": 0, "provenance": []})
         if rel not in CORE:
-            held["extension"] = True
+            edge["extension"] = True
             if relation.get("vague"):
-                held["vague"] = True
-        held["weight"] += 1
-        if where["unit"] not in held["provenance"]:
-            held["provenance"].append(where["unit"])
-        _at(held, where["unit"], sentence_span(said, relation.get("from", ""),
+                edge["vague"] = True
+        edge["weight"] += 1
+        if where["unit"] not in edge["provenance"]:
+            edge["provenance"].append(where["unit"])
+        _at(edge, where["unit"], sentence_span(said, relation.get("from", ""),
                                                relation.get("to", "")))
 
     for order, figure in enumerate(extraction.get("figures") or (), start=1):
@@ -197,29 +197,31 @@ def fold_source(reads: Iterable[Mapping[str, Any]], units_by_id: Mapping[str, An
         got_nodes, got_edges = build(read["extracted"], unit, book_title=book_title,
                                      text=said)
         for node_id, node in got_nodes.items():
-            held = nodes.get(node_id)
-            if held is None:
+            already = nodes.get(node_id)
+            if already is None:
                 nodes[node_id] = node
                 continue
-            held["mentions"] += node["mentions"]
-            held["provenance"] = list(dict.fromkeys(held["provenance"] + node["provenance"]))
-            if held.get("spans") or node.get("spans"):
-                held["spans"] = merged_spans(held, node)
+            already["mentions"] += node["mentions"]
+            already["provenance"] = list(dict.fromkeys(already["provenance"]
+                                                       + node["provenance"]))
+            if already.get("spans") or node.get("spans"):
+                already["spans"] = merged_spans(already, node)
             for key, value in node["attrs"].items():
                 if key == "aliases":
-                    held["attrs"]["aliases"] = list(dict.fromkeys(
-                        held["attrs"].get("aliases", []) + value))
-                elif value and not held["attrs"].get(key):
-                    held["attrs"][key] = value
+                    already["attrs"]["aliases"] = list(dict.fromkeys(
+                        already["attrs"].get("aliases", []) + value))
+                elif value and not already["attrs"].get(key):
+                    already["attrs"][key] = value
         for key, edge in got_edges.items():
-            held = edges.get(key)
-            if held is None:
+            already = edges.get(key)
+            if already is None:
                 edges[key] = edge
                 continue
-            held["weight"] += edge["weight"]
-            held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
-            if held.get("spans") or edge.get("spans"):
-                held["spans"] = merged_spans(held, edge)
+            already["weight"] += edge["weight"]
+            already["provenance"] = list(dict.fromkeys(already["provenance"]
+                                                       + edge["provenance"]))
+            if already.get("spans") or edge.get("spans"):
+                already["spans"] = merged_spans(already, edge)
 
     edges, relation_folds = fold_edges(
         edges, log=log, label="relations", provenance="provenance",
@@ -248,14 +250,14 @@ def plurals(names: Iterable[str]) -> dict[str, str]:
     so the plural folds into the singular however often each was said: handed to
     `fold_names` as the map somebody decided, which is what it is.
     """
-    held = {str(name).casefold(): str(name) for name in names}
+    by_lower = {str(name).casefold(): str(name) for name in names}
     out: dict[str, str] = {}
-    for low, name in held.items():
+    for low, name in by_lower.items():
         for ending, singular in (("ies", "y"), ("es", ""), ("s", "")):
             if low.endswith(ending) and len(low) > len(ending) + 2:
                 stem = low[: -len(ending)] + singular
-                if stem in held and stem != low:
-                    out[low] = held[stem]
+                if stem in by_lower and stem != low:
+                    out[low] = by_lower[stem]
                     break
     return out
 
@@ -296,14 +298,14 @@ def _apply(nodes: Mapping[str, dict[str, Any]],
         key = (moved.get(source, source), rel, moved.get(target, target))
         if key[0] == key[2]:
             continue
-        held = out_edges.get(key)
-        if held is None:
+        into = out_edges.get(key)
+        if into is None:
             out_edges[key] = dict(edge, source=key[0], target=key[2])
             continue
-        held["weight"] += edge["weight"]
-        held["provenance"] = list(dict.fromkeys(held["provenance"] + edge["provenance"]))
-        if held.get("spans") or edge.get("spans"):
-            held["spans"] = merged_spans(held, edge)
+        into["weight"] += edge["weight"]
+        into["provenance"] = list(dict.fromkeys(into["provenance"] + edge["provenance"]))
+        if into.get("spans") or edge.get("spans"):
+            into["spans"] = merged_spans(into, edge)
     return out_nodes, out_edges
 
 
@@ -350,8 +352,8 @@ def write(out: str | Path, graph: Mapping[str, Any], *, source: str, title: str,
         else:
             # a source folded before the shares were kept, or one never folded at all
             previous = None if store.get_doc(f"ingest:folds:{source}") is not None else {}
-        held = {str(n["id"]): n for n in store.nodes()}
-        nodes = [_joined(node, held.get(str(node["id"])), source, shares, previous)
+        already = {str(n["id"]): n for n in store.nodes()}
+        nodes = [_joined(node, already.get(str(node["id"])), source, shares, previous)
                  for node in nodes]
         marked(nodes, edges)
         counts = store.write({"nodes": nodes, "edges": edges})
@@ -412,9 +414,9 @@ def _drop_source(store: Any, source: str, *, keep_units: Iterable[str] | None = 
     if keep_units is not None:
         # every unit id starts with the source's slug, so the stale documents are a prefix
         # away and no document has to be read to find them
-        held, prefix = {f"ingest:unit:{u}" for u in keep_units}, f"ingest:unit:{source}:"
+        keep, prefix = {f"ingest:unit:{u}" for u in keep_units}, f"ingest:unit:{source}:"
         for key in store.doc_keys():
-            if key.startswith(prefix) and key not in held:
+            if key.startswith(prefix) and key not in keep:
                 store.delete_doc(key)
     read_from = store.edges("read_from")
     mine = {e["source"] for e in read_from if e["target"] == source_id}
@@ -476,15 +478,15 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
 
     view = Sources(out)
     rows = list(reads) if reads is not None else view.reads(slug)
-    held = view.progress.state["sources"].get(slug) or {}
-    name = title or str(held.get("title") or "") or slug
+    state = view.progress.state["sources"].get(slug) or {}
+    name = title or str(state.get("title") or "") or slug
     units = {**units_of(rows), **dict(units_by_id or {})}
     began = time.time()
     texts = None if dry_run else _texts_of(out, units)
     graph = fold_source(rows, units, book_title=name, texts=texts, log=log)
     new_nodes, new_edges = _missing_from(out, graph)
     folds = len(graph["folds"].get("concepts") or ()) + len(graph["folds"].get("relations") or ())
-    wanted = int(held.get("sections") or 0)
+    wanted = int(state.get("sections") or 0)
     got = {"source": slug, "title": name, "units": len(rows),
            "read": sum(1 for r in rows if not r.get("error")),
            "wanted": wanted, "nodes": len(graph["nodes"]), "edges": len(graph["edges"]),
@@ -521,9 +523,9 @@ def fold_into(out: str | Path, slug: str, *, title: str = "",
 
 def _texts_of(out: str | Path, units: Mapping[str, Any]) -> Callable[[str], str]:
     """``unit id -> its text``: the units in hand, and the document read again for the rest."""
-    held = {uid: text for uid, u in units.items()
+    texts = {uid: text for uid, u in units.items()
             if (text := str(getattr(u, "text", "") or ""))}
-    return sources_for(out, texts=held)
+    return sources_for(out, texts=texts)
 
 
 def _missing_from(out: str | Path, graph: Mapping[str, Any]) -> tuple[int, int]:
@@ -575,8 +577,8 @@ def fold(out: str | Path, *, source: str = "", rebuild: bool = False, dry_run: b
             + (f": no reads for {source}" if source
                else f": no {Path(out).name}.*.reads.json"))
         return 1
-    for held in wanted:
-        got = fold_into(out, held.slug, title=held.title, progress=view.progress,
+    for one in wanted:
+        got = fold_into(out, one.slug, title=one.title, progress=view.progress,
                         rebuild=rebuild, dry_run=dry_run)
         what = ("would add" if dry_run else "rebuilt with" if rebuild else "added")
         say(f"{got['title']}: {got['read']} of {got['wanted'] or '?'} units read, "

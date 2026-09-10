@@ -39,10 +39,10 @@ __all__ = [
     "Job",
     "alive",
     "detach",
-    "held",
     "home_dir",
     "main",
     "record",
+    "recorded",
     "status",
     "stop",
     "wait",
@@ -71,10 +71,10 @@ def _path(kind: str, home: Path | None) -> Path:
 
 def _read(path: Path) -> dict[str, Any]:
     try:
-        held = json.loads(path.read_text(encoding="utf-8"))
+        found = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    return held if isinstance(held, dict) else {}
+    return found if isinstance(found, dict) else {}
 
 
 def _ended(pid: int) -> bool:
@@ -102,7 +102,7 @@ def _wait_for(pid: int, seconds: float) -> bool:
     return True
 
 
-def held(kind: str, *, home: Path | None = None) -> dict[str, Any]:
+def recorded(kind: str, *, home: Path | None = None) -> dict[str, Any]:
     """The record ``kind`` last wrote -- pid, argv, log, started -- or ``{}`` when there is
     none. Says nothing about whether the pid is still running; `alive` does that."""
     return _read(_path(kind, home))
@@ -111,8 +111,8 @@ def held(kind: str, *, home: Path | None = None) -> dict[str, Any]:
 def alive(kind: str, *, home: Path | None = None) -> int:
     """The pid recorded for ``kind`` while it is still running; 0 when there is none, or the
     recorded pid has ended."""
-    held = _read(_path(kind, home))
-    pid = int(held.get("pid") or 0)
+    record = _read(_path(kind, home))
+    pid = int(record.get("pid") or 0)
     if not pid:
         return 0
     return 0 if _ended(pid) else pid
@@ -130,9 +130,9 @@ def record(kind: str, *, pid: int, argv: Sequence[str] = (), log: str = "", star
     """
     home = home or home_dir()
     if refuse_if_alive:
-        held = alive(kind, home=home)
-        if held:
-            raise Busy(f"a {kind} job (pid {held}) is already running")
+        running = alive(kind, home=home)
+        if running:
+            raise Busy(f"a {kind} job (pid {running}) is already running")
     home.mkdir(parents=True, exist_ok=True)
     job = Job(kind=kind, pid=int(pid), argv=tuple(str(a) for a in argv), log=str(log),
               started=started or time.strftime("%FT%T"), home=home)
@@ -206,8 +206,8 @@ def stop(kind: str, *, say: Callable[[str], None] = say, wait: float = STOP_WAIT
     once it has, or once the pid was already gone."""
     home = home or home_dir()
     path = _path(kind, home)
-    held = _read(path)
-    pid = int(held.get("pid") or 0)
+    record = _read(path)
+    pid = int(record.get("pid") or 0)
     if not pid:
         say(f"no {kind} job is recorded")
         return 1
@@ -242,16 +242,16 @@ def status(*, say: Callable[[str], None] = say, home: Path | None = None) -> int
         return 0
     for path in records:
         kind = path.stem
-        held = _read(path)
-        pid = int(held.get("pid") or 0)
+        record = _read(path)
+        pid = int(record.get("pid") or 0)
         running = bool(pid) and not _ended(pid)
         said = f"running (pid {pid})" if running else (f"ended (pid {pid})" if pid else "unknown")
-        say(f"{kind}: {said} since {held.get('started', '?')}")
-        argv = " ".join(str(a) for a in (held.get("argv") or ()))
+        say(f"{kind}: {said} since {record.get('started', '?')}")
+        argv = " ".join(str(a) for a in (record.get("argv") or ()))
         if argv:
             say(f"  argv: {argv}")
-        if held.get("log"):
-            say(f"  log: {held['log']}")
+        if record.get("log"):
+            say(f"  log: {record['log']}")
     return 0
 
 

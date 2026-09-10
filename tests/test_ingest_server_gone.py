@@ -68,10 +68,10 @@ def test_detach_records_the_run_as_this_machines_ingest_job(tmp_path, monkeypatc
         assert ingest.main(argv) == 0
         assert started["command"][1:3] == ["-m", "ml_stack.ingest"], "the module, not a shell"
         assert "--detach" not in started["command"]
-        held = jobs.held("ingest", home=tmp_path / "jobs")
-        assert held["pid"] == started["child"].pid
-        assert held["argv"] == [a for a in argv if a != "--detach"]
-        assert held["log"].endswith(".log") and Path(held["log"]).is_file()
+        record = jobs.recorded("ingest", home=tmp_path / "jobs")
+        assert record["pid"] == started["child"].pid
+        assert record["argv"] == [a for a in argv if a != "--detach"]
+        assert record["log"].endswith(".log") and Path(record["log"]).is_file()
         assert jobs.alive("ingest", home=tmp_path / "jobs") == started["child"].pid
     finally:
         started["child"].kill()

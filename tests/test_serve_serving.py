@@ -7,7 +7,7 @@ import pytest
 
 import ml_stack.serve
 from ml_stack.serve import serving as serving_mod
-from ml_stack.serve.serving import Serving, draft_for, held, projector_for, release_all, slot
+from ml_stack.serve.serving import Serving, draft_for, projector_for, release_all, servers, slot
 
 
 class Held:
@@ -29,17 +29,17 @@ class Held:
 def leases(monkeypatch):
     """`serve` replaced by a record of what it was asked for. No server is started."""
     asked: list[tuple[str, dict]] = []
-    servers: list[Held] = []
+    started: list[Held] = []
 
     def fake_serve(model, **kwargs):
         asked.append((str(model), dict(kwargs)))
-        servers.append(Held(f"http://127.0.0.1:{kwargs['port']}"))
-        return servers[-1]
+        started.append(Held(f"http://127.0.0.1:{kwargs['port']}"))
+        return started[-1]
 
     monkeypatch.setattr(ml_stack.serve, "serve", fake_serve)
     monkeypatch.setattr(serving_mod, "_STACKS", {})
     monkeypatch.setattr(serving_mod, "_URLS", {})
-    yield asked, servers
+    yield asked, started
 
 
 def test_a_unified_cache_is_asked_for_only_when_the_serving_says():
@@ -102,7 +102,7 @@ def test_two_models_on_two_ports_are_two_servers_and_neither_is_leased_twice(lea
 
     slot(small, index=1, n_predict=100)
     assert len(asked) == 2, "the server is held per port, not started per ask"
-    assert held() == {8080: reading.base_url, 8082: answering.base_url}
+    assert servers() == {8080: reading.base_url, 8082: answering.base_url}
 
 
 def test_every_slot_is_its_own_slot_and_a_busy_port_cycles_through_them(leases):
@@ -118,12 +118,12 @@ def test_the_client_gets_the_ceiling_and_the_timeout_it_was_asked_for(leases):
 
 
 def test_letting_go_releases_every_held_server(leases):
-    _asked, servers = leases
+    _asked, started = leases
     slot(Serving(model="/a.gguf", port=8080), index=0, n_predict=100)
     slot(Serving(model="/b.gguf", port=8082), index=0, n_predict=100)
     release_all()
-    assert [s.closed for s in servers] == [True, True]
-    assert held() == {}
+    assert [s.closed for s in started] == [True, True]
+    assert servers() == {}
 
 
 def test_a_draft_that_cannot_be_found_is_served_without_it_out_loud(monkeypatch):
@@ -280,7 +280,7 @@ def test_one_run_leases_one_serving_for_the_bench_the_page_and_a_slot(shipped, l
     # and `slot` asked for nothing more: the page's server is the one it took a slot on,
     # which is what one serving per port means
     assert len(asked) == 2 and answering.base_url == elsewhere.base_url
-    assert held() == {8099: answering.base_url}
+    assert servers() == {8099: answering.base_url}
     # and the asking is one asking: what the bench asks with is what the page asks with
     assert leased["asked"]["how"] == shipped.asking
     assert shipped.asking.said() == {"tight": True, "terse": False, "batch": True,

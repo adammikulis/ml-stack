@@ -54,8 +54,9 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def asker(self, question, *, turns, held, stream, emit):
-        type(self).asked.append({"question": question, "turns": list(turns), "held": held,
+    def asker(self, question, *, turns, highlighted, stream, emit):
+        type(self).asked.append({"question": question, "turns": list(turns),
+                                 "highlighted": highlighted,
                                  "stream": stream, "summary": getattr(turns, "summary", None),
                                  "recalled": list(getattr(turns, "recalled", ()))})
         if self.raise_with:
@@ -110,8 +111,8 @@ class Scripted(AskRoutes, BaseHTTPRequestHandler):
 @pytest.fixture
 def served(tmp_path):
     """A live server with a conversation store beside it; yields (url, handler class)."""
-    with GraphStore(tmp_path / "graph.ladybug") as held:
-        held.write(GRAPH)
+    with GraphStore(tmp_path / "graph.ladybug") as store:
+        store.write(GRAPH)
 
     class Handler(Scripted):
         store_path = tmp_path / "graph.ladybug"
@@ -175,18 +176,18 @@ def test_the_stream_relays_each_event_then_a_done_frame_carrying_the_whole_answe
 def test_the_plain_route_returns_the_same_payload_in_one_body(served):
     url, handler = served
     code, kind, out = call(url + "/ask", "POST", {"question": "who surveys land?",
-                                                   "held": ["topic:surveying"]})
+                                                   "highlighted": ["topic:surveying"]})
     assert code == 200 and kind == "application/json"
     assert out == answer_payload(ANSWER)
     assert handler.asked[-1] == {"question": "who surveys land?", "turns": [],
-                                 "held": ["topic:surveying"], "stream": False,
+                                 "highlighted": ["topic:surveying"], "stream": False,
                                  "summary": None, "recalled": []}
 
 
 def test_a_generator_asker_yields_its_events_and_returns_its_answer(served):
     url, handler = served
 
-    def asker(self, question, *, turns, held, stream, emit):
+    def asker(self, question, *, turns, highlighted, stream, emit):
         yield EVENTS[0]
         yield {"event": "done"}
         return {"content": "Iris does.", "ids": ["person:iris"], "steps": ["one step"]}
@@ -256,8 +257,8 @@ def test_a_thread_is_remembered_and_read_back_with_each_answers_steps(served):
     _, _, working = call(url + "/thread/c1?working=1")
     assert working["turns"][1]["drew"] == {"found": ["topic:surveying", "person:iris"],
                                            "read": ["person:iris"], "shown": ["person:iris"]}
-    with GraphStore(handler.store_path, read_only=True) as held:
-        assert [t.role for t in follow(held, "c1")] == ["user", "assistant"]
+    with GraphStore(handler.store_path, read_only=True) as store:
+        assert [t.role for t in follow(store, "c1")] == ["user", "assistant"]
 
 
 def test_the_stores_history_goes_back_to_the_model_rather_than_the_pages(served):
@@ -354,10 +355,10 @@ def test_thread_request_reads_the_name_and_the_working_flag():
 
 
 def test_an_ask_checks_the_body_the_way_the_page_sends_it():
-    ask = Ask({"question": "  who?  ", "thread": "t" * 80, "held": ["a", 3], "turns": "no"})
+    ask = Ask({"question": "  who?  ", "thread": "t" * 80, "highlighted": ["a", 3], "turns": "no"})
     assert ask.question == "who?" and len(ask.thread) == 64
-    assert ask.held == [] and ask.sent == [] and ask.took_s >= 0
-    assert Ask({"held": ["a"]}).held == ["a"]
+    assert ask.highlighted == [] and ask.sent == [] and ask.took_s >= 0
+    assert Ask({"highlighted": ["a"]}).highlighted == ["a"]
 
 
 # ------------------------------------------------------------ of any length
@@ -395,8 +396,8 @@ def test_the_window_is_the_last_ten_turns_in_order_and_nothing_else(served):
 
 def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(tmp_path):
     """The new shape: the window as before, with the summary and what was recalled on it."""
-    with GraphStore(tmp_path / "graph.ladybug") as held:
-        held.write(GRAPH)
+    with GraphStore(tmp_path / "graph.ladybug") as store:
+        store.write(GRAPH)
 
     class Handler(Scripted):
         store_path = tmp_path / "graph.ladybug"
@@ -443,13 +444,13 @@ def test_history_carries_the_summary_and_the_recalled_turns_ahead_of_the_window(
         # the page never sees the summary as a turn
         _, _, replay = call(url + "/thread/c1")
         assert [t["role"] for t in replay["turns"]] == ["user", "assistant"] * 3
-        with GraphStore(Handler.store_path, read_only=True) as held:
-            assert [t.role for t in follow(held, "c1", summaries=True)].count(SUMMARY) == 1
+        with GraphStore(Handler.store_path, read_only=True) as store:
+            assert [t.role for t in follow(store, "c1", summaries=True)].count(SUMMARY) == 1
 
 
 def test_a_summariser_that_raises_loses_the_summary_not_the_answer(tmp_path, capsys):
-    with GraphStore(tmp_path / "graph.ladybug") as held:
-        held.write(GRAPH)
+    with GraphStore(tmp_path / "graph.ladybug") as store:
+        store.write(GRAPH)
 
     class Handler(Scripted):
         store_path = tmp_path / "graph.ladybug"

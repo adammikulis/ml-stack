@@ -24,8 +24,8 @@ from ml_stack.units import human_bytes
 __all__ = ["Chosen", "DRAFT_MARK", "DRAFT_KINDS", "Found", "Head", "PREFER",
            "WEIGHT_SUFFIXES", "advice", "aside", "base_words", "beside", "borrowed_head",
            "builds", "card", "choose_head", "DRAFT_DEPTH", "NO_HEAD", "default_roots", "draft_for", "draft_note", "drafting",
-           "drafts_for", "fetch", "files", "find", "forks", "head_choice", "heads_for", "held", "hub_cache",
-           "in_gguf", "is_head", "located", "main", "mmproj_for", "ref", "repo_of", "room",
+           "drafts_for", "fetch", "files", "find", "forks", "head_choice", "heads_for", "hub_cache",
+           "in_gguf", "is_head", "located", "main", "mmproj_for", "on_disk", "ref", "repo_of", "room",
            "spec_for", "weight_paths"]
 
 # Publishers whose quantisations tend to be there first and be right. Ordered: the first one
@@ -236,10 +236,10 @@ def beside(repo: str, prefix: str, *, best: bool = False,
     nested: list[str] = []
     root: list[str] = []
     try:
-        held = files(repo)
+        listing = files(repo)
     except Exception:  # noqa: BLE001 - a repository that is not there holds nothing
         return ""
-    for name, _size in held:
+    for name, _size in listing:
         plain = name.lower().rsplit("/", 1)[-1]
         if not plain.startswith(prefix):
             continue
@@ -330,11 +330,11 @@ def in_gguf(path: str | Path) -> dict[str, float]:
 
             for _ in range(keys):
                 name = text()
-                held = value(struct.unpack("<I", f.read(4))[0])
+                found = value(struct.unpack("<I", f.read(4))[0])
                 if name.startswith("general.sampling."):
                     tail = name.rsplit(".", 1)[-1]
-                    if tail in want and isinstance(held, (int, float)):
-                        out[want[tail]] = float(held)
+                    if tail in want and isinstance(found, (int, float)):
+                        out[want[tail]] = float(found)
     except Exception:  # noqa: BLE001 - a file that will not parse simply says nothing
         return {}
     return out
@@ -474,7 +474,7 @@ def weight_paths(roots: Sequence[Path] | None = None) -> list[Path]:
     return out
 
 
-def held(*, alongside: bool = False) -> dict[str, int]:
+def on_disk(*, alongside: bool = False) -> dict[str, int]:
     """Every model file already on this machine, by filename, with its real size.
 
     Sizes are resolved through symlinks: a Hub cache is symlinks into `blobs/`, so
@@ -682,7 +682,7 @@ def heads_for(model: str | Path, *, files: Sequence[Path] | None = None,
     return sorted(out, key=lambda h: (h.bytes, h.name))
 
 
-def held_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, int]]:
+def build_files(repo: str, build: str, ending: str = ".gguf") -> list[tuple[str, int]]:
     """The filenames belonging to one build of a repository."""
     return [(name.rsplit("/", 1)[-1], size) for name, size in files(repo, ending=ending)
             if not aside(name) and (name.split("/")[0] == build
@@ -893,7 +893,7 @@ def choose_head(model: str | Path, *, binary: str | Path | None, prefer: tuple[s
 def fetch(reference: str) -> Path:
     """Download an `hf:` reference into the Hub cache, without serving it.
 
-    The same cache llama-server's own `-hf` download fills, and `held()` reads back -- so a
+    The same cache llama-server's own `-hf` download fills, and `on_disk()` reads back -- so a
     prefetch here and a lease afterward see the same file, and a benchmark that preflights
     a model before timing it never pays for the download inside the timed window.
 
@@ -1150,17 +1150,17 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         if not args.every:
             fits = room()
-            mine = held()
+            mine = on_disk()
             grouped = builds(args.repo, ending=args.ending)
             if fits:
                 say(f"this machine can serve about {human_bytes(fits)}\n")
             for name, size, shards in grouped:
-                on_disk = sum(1 for f, _s in held_files(args.repo, name, args.ending)
-                              if f in mine)
+                downloaded = sum(1 for f, _s in build_files(args.repo, name, args.ending)
+                                 if f in mine)
                 mark = "" if not fits else ("  fits" if size < fits * 0.95 else "  TOO BIG")
-                if on_disk:
-                    mark = ("  ON THIS MACHINE" if on_disk >= shards
-                            else f"  {on_disk}/{shards} downloaded") + mark
+                if downloaded:
+                    mark = ("  ON THIS MACHINE" if downloaded >= shards
+                            else f"  {downloaded}/{shards} downloaded") + mark
                 many = f"  {shards} shards" if shards > 1 else ""
                 # IQ builds decode through lookup tables Metal runs slowly: on a Mac the
                 # smaller IQ file was the slower model (README, "What this measured")

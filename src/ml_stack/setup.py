@@ -187,9 +187,9 @@ def look() -> list[Finding]:
 
     try:
         from ml_stack.fleet.models import caches, sized
-        from ml_stack.hub import held
+        from ml_stack.hub import on_disk
 
-        mine = held()
+        mine = on_disk()
         where = ", ".join(f"{_tilde(path)} {sized(total)}"
                           for path, files, total in caches(home.home())
                           if files)

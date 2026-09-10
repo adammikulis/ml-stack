@@ -100,7 +100,7 @@ already talking a cold reload.
 `draft_for` and `projector_for` answer 'auto' the way `ml-stack-serve up` does -- a lease
 built by hand has to resolve what the CLI resolves for itself -- and each says out loud why
 it found nothing rather than serving undrafted or blind in silence. `release_all()` lets go
-of every held server; `held()` says which ports are up.
+of every held server; `on_disk()` says which ports are up.
 
 A port already serving something else is refused, with the field that differs named —
 the model, the number of slots, or the context each slot gets. Adopting a server started with

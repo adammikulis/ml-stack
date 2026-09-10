@@ -58,12 +58,13 @@ def _adopt(home: Path | None = None) -> None:
     """Take over an ``ingesting.json`` -- a run started before the record moved into
     `ml_stack.jobs` -- as this machine's ``ingest`` job, so `stop` and `wait` still find it."""
     old = Path(home) / "ingesting.json" if home is not None else _home() / "ingesting.json"
-    held = _read_json(old)
-    if not isinstance(held, dict) or not int(held.get("pid") or 0):
+    old_record = _read_json(old)
+    if not isinstance(old_record, dict) or not int(old_record.get("pid") or 0):
         return
     if not jobs.alive(KIND, home=_jobs_home(home)):
-        jobs.record(KIND, pid=int(held["pid"]), argv=held.get("argv") or (),
-                    log=str(held.get("log") or ""), started=str(held.get("started") or ""),
+        jobs.record(KIND, pid=int(old_record["pid"]), argv=old_record.get("argv") or (),
+                    log=str(old_record.get("log") or ""),
+                    started=str(old_record.get("started") or ""),
                     home=_jobs_home(home), refuse_if_alive=False)
     old.unlink(missing_ok=True)
 
@@ -106,12 +107,12 @@ def stop(*, say: Callable[[str], None] = say, home: Path | None = None,
     """
     where = _jobs_home(home)
     _adopt(home)
-    held = jobs.held(KIND, home=where)
-    pid = int(held.get("pid") or 0)
+    record = jobs.recorded(KIND, home=where)
+    pid = int(record.get("pid") or 0)
     if not pid:
         say("no detached ingest is recorded on this machine")
         return 1
-    out = _out_of(held.get("argv") or ())
+    out = _out_of(record.get("argv") or ())
     before = _folded_at(out)
 
     def waiting(line: str) -> None:
@@ -120,7 +121,7 @@ def stop(*, say: Callable[[str], None] = say, home: Path | None = None,
             say(line.replace("still ending", "still folding"))
 
     if jobs.stop(KIND, say=waiting, wait=wait, home=where):
-        if jobs.held(KIND, home=where):
+        if jobs.recorded(KIND, home=where):
             say(f"asked the detached ingest (pid {pid}) to stop; it had not ended after "
                 f"{wait:.0f}s, so its last fold is still being written -- its record stays, "
                 f"and no new run starts beside it until it has")

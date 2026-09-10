@@ -287,7 +287,7 @@ def test_a_run_is_kept_read_back_and_shown_in_its_own_table(tmp_path, capsys):
     rows, scores = bx.measure(Reader(), picked, graph)
     kept = tmp_path / "runs.ladybug"
     key = bx.save(kept, rows, label="reader", model="fake-reader", world={"kind": "company"},
-                  scores=scores, sample={"n": 5}, held={"resident_bytes": 3 * 2**30})
+                  scores=scores, sample={"n": 5}, server={"resident_bytes": 3 * 2**30})
     back = runs(kept)
     assert [r["key"] for r in back] == [key] and back[0]["kind"] == "extract"
     assert back[0]["scores"]["by_kind"] == scores["by_kind"]

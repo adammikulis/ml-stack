@@ -211,7 +211,7 @@ def test_ingest_sits_beside_answering_runs_in_the_same_document(tmp_path):
                       expected=["person:marisol-quen"], shown=["person:marisol-quen"],
                       seconds=10.0, calls=1, answer_chars=80, processed_tokens=400,
                       completion_tokens=50) for n in range(8)]
-    bench.save(answering_store, rows, held={"model": "kestrel.gguf", "context": 32768,
+    bench.save(answering_store, rows, server={"model": "kestrel.gguf", "context": 32768,
                                             "slots": 1,
                                             "binary": "/builds/current/llama-server"})
     kept = bench.runs(answering_store)

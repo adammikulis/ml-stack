@@ -50,7 +50,7 @@ def _keep(store, label, *, model="flash.gguf", questions=20, hits=12, seconds=20
                        expected="person:marisol-quen", tokens=(500, 100),
                        question="who runs the kiln, question {n}?",
                        draft=(guessed, taken))
-    return bench.save(store, rows, held=held)
+    return bench.save(store, rows, server=held)
 
 
 @pytest.fixture()

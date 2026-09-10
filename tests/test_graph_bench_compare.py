@@ -25,7 +25,7 @@ def store(tmp_path):
     # the drafted llama.cpp run, its speed grid, and a standard set to go with it
     rows = scored_rows("flash-plain", questions=20, hits=16, seconds=200.0, tokens=(300, 40),
                        draft=(100, 78))
-    save(kept, rows, held={"graph": mine, "context": 32768, "slots": 1,
+    save(kept, rows, server={"graph": mine, "context": 32768, "slots": 1,
                            "binary": "/opt/builds/unsloth/bin/llama-server", "build": "unsloth",
                            "draft_model": "mtp-thornfell.gguf", "load_s": 41.0,
                            "resident_peak": 70 * G, "weights_bytes": 104 * G,
@@ -33,7 +33,7 @@ def store(tmp_path):
                                          "quant": "Q4_K_XL", "model": "thornfell.gguf"}})
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 900.0, "decode_tps": 30.0,
                  "decode_tps_per_stream": 30.0, "ttft_s": 0.6, "ttft_from": "prompt_ms"}],
-         held={"resident_peak": 74 * G, "served_by": {"program": "llama.cpp", "format": "gguf",
+         server={"resident_peak": 74 * G, "served_by": {"program": "llama.cpp", "format": "gguf",
                                                       "quant": "Q4_K_XL"},
                "build": "unsloth", "context": 32768, "slots": 1,
                "binary": "/opt/builds/unsloth/bin/llama-server",
@@ -42,11 +42,11 @@ def store(tmp_path):
     # a speed run from before a server record was kept: only its label says what it is
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 100.0, "decode_tps": 9.0,
                  "decode_tps_per_stream": 9.0, "ttft_s": 2.0, "ttft_from": "prompt_ms"}],
-         held={}, kind=SPEED, label="bare-speed")
+         server={}, kind=SPEED, label="bare-speed")
     # the same without the head: a graph run only
     rows = scored_rows("flash-nodraft-plain", questions=20, hits=16, seconds=260.0,
                        tokens=(300, 40))
-    save(kept, rows, held={"graph": mine, "context": 32768, "slots": 1,
+    save(kept, rows, server={"graph": mine, "context": 32768, "slots": 1,
                            "binary": "/opt/builds/unsloth/bin/llama-server", "build": "unsloth",
                            "load_s": 39.0, "resident_peak": 69 * G,
                            "served_by": {"program": "llama.cpp", "format": "gguf",
@@ -56,20 +56,20 @@ def store(tmp_path):
                        tokens=(300, 40))
     for r in rows:
         r.draft_tokens = r.draft_taken = r.cached_tokens = None
-    save(kept, rows, held={"graph": mine, "context": 32768, "resident_peak": 80 * G,
+    save(kept, rows, server={"graph": mine, "context": 32768, "resident_peak": 80 * G,
                            "weights_bytes": 66 * G,
                            "served_by": {"program": "ollama", "version": "0.33.3",
                                          "format": "safetensors", "runtime": "mlx",
                                          "quant": "nvfp4", "model": "thornfell:125b-mlx"}})
     save(kept, [{"prompt_tokens": 512, "streams": 1, "prefill_tps": 700.0, "decode_tps": 25.0,
                  "decode_tps_per_stream": 25.0, "ttft_s": 0.8, "ttft_from": "prompt_ms"}],
-         held={"context": 32768,
+         server={"context": 32768,
                "served_by": {"program": "ollama", "version": "0.33.3", "format": "safetensors",
                              "runtime": "mlx", "quant": "nvfp4"}},
          kind=SPEED, label="flash-ollama-speed")
     # a graph run over some other community, newer, which must not be taken
     rows = scored_rows("flash-plain", questions=20, hits=20, seconds=10.0)
-    save(kept, rows, held={"graph": "somebody-elses", "context": 32768})
+    save(kept, rows, server={"graph": "somebody-elses", "context": 32768})
     return kept
 
 

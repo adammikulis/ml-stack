@@ -515,7 +515,7 @@ def test_conflicts_and_suspects_read_their_passages_through_the_pointers_the_cal
     assert plain.decide_suspect(with_provenance[4], "a number")["read"] == ["m2"]
 
 
-def test_rejudge_asks_every_held_verdict_again_and_rewrites_the_document(tmp_path):
+def test_rejudge_asks_every_remembered_verdict_again_and_rewrites_the_document(tmp_path):
     path = _store(tmp_path, [
         _node("concept:glimmer-node", "glimmer node", mentions=4),
         _node("concept:glimer-node", "glimer node", mentions=1),
@@ -537,7 +537,7 @@ def test_rejudge_asks_every_held_verdict_again_and_rewrites_the_document(tmp_pat
                       suspects={("'42'",): {"verdict": "drop"}})
     report = tidy(path, judge=ModelJudge(second), rejudge=True)
     assert len(second.calls) == 3 and report.rejudged == 3
-    assert "asked the judge again about 3 held verdict(s)" in report.said()
+    assert "asked the judge again about 3 remembered verdict(s)" in report.said()
     nodes, edges = _ids(path)
     assert "concept:glimer-node" not in nodes and "concept:number" not in nodes
     assert ("concept:vault-current", "causes", "concept:thrum-coil") not in edges
@@ -570,7 +570,7 @@ def test_a_recorded_suspect_verdict_is_applied_again_with_no_judge(tmp_path):
     assert len(client.calls) == asked, "no model was asked anything"
     assert report.suspects_dropped == 1 and report.replayed == 1
     assert "concept:number" not in _ids(path)[0], "the verdict the store bought still holds"
-    assert "replayed 1 verdict(s) the store already held" in report.said()
+    assert "replayed 1 verdict(s) the store remembered" in report.said()
 
 
 def test_a_recorded_conflict_verdict_is_applied_again_with_no_judge(tmp_path):
@@ -619,7 +619,7 @@ def test_a_verdict_naming_a_node_the_store_no_longer_has_is_counted_and_kept(tmp
     report = tidy(path, dry_run=False)
 
     assert report.stale == 1 and report.replayed == 0
-    assert "1 held verdict(s) name a node the store no longer has" in report.said()
+    assert "1 remembered verdict(s) name a node the store no longer has" in report.said()
     with GraphStore(path, read_only=True) as store:
         held = store.get_doc(DECISIONS)["suspects"]
     assert held["concept:number"]["verdict"] == "drop", "the verdict is kept, not dropped"

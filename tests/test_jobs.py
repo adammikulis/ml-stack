@@ -30,10 +30,10 @@ def test_record_and_alive_track_a_real_child(tmp_path):
         job = jobs.record("bench", pid=child.pid, argv=["sweep", "--serve", "tiny"],
                           log="bench.log", home=tmp_path)
         assert job.kind == "bench" and job.pid == child.pid and job.home == tmp_path
-        held = json.loads((tmp_path / "bench.json").read_text())
-        assert held["pid"] == child.pid
-        assert held["argv"] == ["sweep", "--serve", "tiny"]
-        assert held["log"] == "bench.log" and held["started"]
+        record = json.loads((tmp_path / "bench.json").read_text())
+        assert record["pid"] == child.pid
+        assert record["argv"] == ["sweep", "--serve", "tiny"]
+        assert record["log"] == "bench.log" and record["started"]
 
         assert jobs.alive("bench", home=tmp_path) == child.pid
         assert jobs.alive("ingest", home=tmp_path) == 0, "a kind never recorded is never alive"
@@ -49,8 +49,8 @@ def test_a_second_record_is_refused_while_the_first_is_alive(tmp_path):
         jobs.record("bench", pid=child.pid, argv=["sweep"], log="a.log", home=tmp_path)
         with pytest.raises(Busy, match=str(child.pid)):
             jobs.record("bench", pid=os.getpid(), argv=["sweep"], log="b.log", home=tmp_path)
-        held = json.loads((tmp_path / "bench.json").read_text())
-        assert held["pid"] == child.pid, "the refused record never overwrote the first"
+        record = json.loads((tmp_path / "bench.json").read_text())
+        assert record["pid"] == child.pid, "the refused record never overwrote the first"
 
         # a caller whose own concurrency is handled elsewhere opts out
         job = jobs.record("bench", pid=os.getpid(), argv=["sweep", "2"], log="b.log",
