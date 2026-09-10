@@ -306,7 +306,8 @@
       remember(n ? { kind: 'node', name: shown(n), id: n.id }
                  : { kind: 'home', name: COPY.heading, id: '' });
       if (!n) {
-        el.innerHTML = `<div class="placeholder"><h3>${esc(COPY.heading)}</h3>${groundHtml()}${closeHtml()}${COPY.note ? `<p class="aside-note">${esc(COPY.note)}</p>` : ''}</div>`;
+        // a heading left empty is a heading the caller does not want, not an empty one
+        el.innerHTML = `<div class="placeholder">${COPY.heading ? `<h3>${esc(COPY.heading)}</h3>` : ''}${groundHtml()}${closeHtml()}${COPY.note ? `<p class="aside-note">${esc(COPY.note)}</p>` : ''}</div>`;
         wireRefs(el);
         return;
       }

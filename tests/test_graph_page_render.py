@@ -195,3 +195,11 @@ def test_a_clicked_node_is_never_dimmed_by_a_search():
 
     page = render({"nodes": [], "edges": []})
     assert "if (M.selected === n.id || picked.has(n.id)) return true;" in page
+
+
+def test_an_empty_heading_draws_no_heading():
+    """A heading left empty is one the caller does not want, not an empty one."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []}, copy={"heading": ""})
+    assert "COPY.heading ? `<h3>" in page
