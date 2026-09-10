@@ -187,3 +187,11 @@ def test_the_detail_panel_does_not_list_what_the_caller_told_the_page():
                               "attrs": {"start": "remove", "title": "kept"}}], "edges": []})
     assert "TOLD_THE_PAGE = new Set(['member', 'type', 'handle', 'start'])" in page
     assert "!TOLD_THE_PAGE.has(k)" in page
+
+
+def test_a_clicked_node_is_never_dimmed_by_a_search():
+    """A search dimmed everything it did not match, so clicking one of those did nothing."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []})
+    assert "if (M.selected === n.id || picked.has(n.id)) return true;" in page

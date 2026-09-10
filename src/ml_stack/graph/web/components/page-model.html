@@ -220,6 +220,9 @@
   const nothingFound = () => !!M.found && !M.found.direct.size && !M.found.near.size;
   function matches(n) {
     if (gone(n)) return false;
+    // something the reader clicked is something they asked to see: a search that dimmed it
+    // left a click doing nothing at all
+    if (M.selected === n.id || picked.has(n.id)) return true;
     if (M.answer) return M.answer.has(n.id);
     // fading every node to nothing looks like a broken page; a search with no hits leaves
     // the graph as it was and says so
