@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-import os
 import statistics
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import TracebackType
+
+from ml_stack.lock import Busy, only_one
 
 
 class RunLockError(RuntimeError):
@@ -23,7 +25,7 @@ class RunLock:
 
     def __init__(self, directory: Path | str, *, name: str = "run.lock") -> None:
         self.path = Path(directory) / name
-        self._handle = None
+        self._held: ExitStack | None = None
 
     def __enter__(self) -> "RunLock":
         self.acquire()
@@ -33,32 +35,24 @@ class RunLock:
         self.release()
 
     def acquire(self) -> None:
-        import fcntl
-
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        handle = self.path.open("w")
+        held = ExitStack()
         try:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError as exc:
-            handle.close()
+            held.enter_context(only_one(self.path, wait=False))
+        except Busy as exc:
+            held.close()
             raise RunLockError(
                 f"another process is already training into {self.path.parent}. "
                 "Two runs sharing an output directory overwrite each other's checkpoints."
             ) from exc
-        handle.write(f"{os.getpid()}\n")
-        handle.flush()
-        self._handle = handle
+        self._held = held
 
     def release(self) -> None:
-        if self._handle is None:
+        if self._held is None:
             return
-        import fcntl
-
         try:
-            fcntl.flock(self._handle, fcntl.LOCK_UN)
+            self._held.close()
         finally:
-            self._handle.close()
-            self._handle = None
+            self._held = None
             self.path.unlink(missing_ok=True)
 
 

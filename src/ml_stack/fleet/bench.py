@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ml_stack.lock import held_by
 from ml_stack.log import say
 from ml_stack.units import human_bytes
 
@@ -519,30 +520,8 @@ class BenchHost:
 
     # -- what this machine says about itself --
     def lock_held(self) -> str:
-        """Who holds the measuring lock -- ``pid N`` -- or "" when nobody does.
-
-        A plain non-blocking ``flock`` on the same file `only_one` takes, and nothing
-        else: asking through `only_one(wait=False)` would run its ``finally`` on the
-        refused attempt, which truncates the holder's pid record, so the next person to
-        ask would be told "somebody".
-        """
-        import fcntl
-
-        path = self.home / LOCK
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            handle = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-        except OSError:
-            return ""
-        try:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                return os.pread(handle, 32, 0).decode("utf-8", "replace").strip() or "somebody"
-            fcntl.flock(handle, fcntl.LOCK_UN)
-            return ""
-        finally:
-            os.close(handle)
+        """Who holds the measuring lock -- ``pid N`` -- or "" when nobody does."""
+        return held_by(self.home / LOCK)
 
     def measuring(self) -> bool:
         """Whether something is measuring here: a job this host started that has not

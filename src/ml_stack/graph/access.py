@@ -37,16 +37,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.lock import release, take
+
 logger = logging.getLogger(__name__)
-
-if os.name == "nt":  # pragma: no cover - windows
-    import msvcrt
-
-    fcntl = None
-else:
-    import fcntl
-
-    msvcrt = None
 
 # A cached reader keeps the file locked against writers in other processes, so an idle handle
 # is closed rather than parked forever. Reopening is cheap.
@@ -130,27 +123,6 @@ def recover_stale(path: str | Path) -> bool:
     return True
 
 
-def _take(handle) -> bool:
-    try:
-        if msvcrt is not None:  # pragma: no cover - windows
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return True
-    except (BlockingIOError, OSError):
-        return False
-
-
-def _give_back(handle) -> None:
-    try:
-        if msvcrt is not None:  # pragma: no cover - windows
-            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-        else:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-    except OSError:
-        pass
-
-
 _state = threading.local()
 
 
@@ -187,7 +159,7 @@ def write_lock(path: str | Path, *, timeout_s: float = WRITE_LEASE_TIMEOUT_S) ->
     # "a+" and not "w": opening for write would truncate the owner record before the lock is
     # held, erasing a live holder's pid
     with lock_path(key).open("a+", encoding="utf-8") as handle:
-        while not _take(handle):
+        while not take(handle):
             if time.monotonic() >= deadline:
                 who = holder(key)
                 raise LockError(f"timed out after {timeout_s:.1f}s waiting for the write lock "
@@ -209,7 +181,7 @@ def write_lock(path: str | Path, *, timeout_s: float = WRITE_LEASE_TIMEOUT_S) ->
                 handle.flush()
             except OSError:
                 pass
-            _give_back(handle)
+            release(handle)
 
 
 @dataclass
