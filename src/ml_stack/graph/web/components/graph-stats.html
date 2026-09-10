@@ -1,4 +1,4 @@
-<!-- <graph-stats>: how many messages, members, nodes and links are in the picture -->
+<!-- <graph-stats>: how much is in the picture, counted in the words the caller uses -->
 <style>
 .stats { display: flex; gap: 14px; font-variant-numeric: tabular-nums; color: var(--ink-2); font-size: 12px; }
 .stats b { color: var(--ink); font-weight: 600; font-family: var(--font-mono); }
@@ -9,13 +9,25 @@
 <script>
 (function () {
   const M = window.graphModel;
-  const { DATA, counted, stats } = M;
+  const { DATA, COPY, counted, stats } = M;
   function wire() {
     Object.assign(M, { paintCounts });
     function paintCounts() {
       const c = counted();
-      document.getElementById('stats').innerHTML =
-        `<span><b>${stats.messages ?? 0}</b> messages${DATA.messagesLeftOut ? ` <span class="n">(${DATA.messagesLeftOut} not on this page)</span>` : ''}</span><span><b>${c.members}</b> members</span><span><b>${c.nodes}</b> nodes</span><span><b>${c.edges}</b> links</span>`;
+      const left = DATA.messagesLeftOut
+        ? ` <span class="n">(${DATA.messagesLeftOut} not on this page)</span>` : '';
+      // A count is shown only where the caller has a word for it: a graph of clauses has
+      // no members, and `countMembers: ''` takes the count away rather than printing 0.
+      const shown = [
+        [stats.messages ?? 0, COPY.countMessages, left],
+        [c.members, COPY.countMembers, ''],
+        [c.nodes, COPY.countNodes, ''],
+        [c.edges, COPY.countLinks, ''],
+      ];
+      document.getElementById('stats').innerHTML = shown
+        .filter(([, word]) => word)
+        .map(([n, word, tail]) => `<span><b>${n}</b> ${word}${tail}</span>`)
+        .join('');
     }
     paintCounts();
   }

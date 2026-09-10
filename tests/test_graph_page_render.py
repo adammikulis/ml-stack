@@ -91,3 +91,27 @@ def test_without_a_limit_every_message_stays_and_nothing_was_left_out():
     got = payload_of(graph_page.render(graph))
     assert len(got["graph"]["messages"]) == 5
     assert got["messagesLeftOut"] == 0
+
+
+class TestTheCountsUnderTheGraph:
+    """A page of clauses has no members and no messages; the caller's words decide."""
+
+    def test_the_shipped_words_are_there_to_be_replaced(self):
+        from ml_stack.graph.page import render
+
+        page = render({"nodes": [], "edges": []})
+        assert "countMessages: 'messages'" in page
+        assert "countMembers: 'members'" in page
+
+    def test_a_word_left_empty_takes_its_count_away(self):
+        import json
+
+        from ml_stack.graph.page import render
+
+        page = render({"nodes": [], "edges": []},
+                      copy={"countMessages": "", "countMembers": ""})
+        said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1]
+                          .split("</script>", 1)[0])
+        assert said["copy"]["countMessages"] == ""
+        assert said["copy"]["countMembers"] == ""
+        assert "filter(([, word]) => word)" in page
