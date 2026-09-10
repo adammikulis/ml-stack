@@ -234,3 +234,15 @@ def test_escape_puts_the_selection_down():
 
     page = render({"nodes": [], "edges": []})
     assert "if (e.key !== 'Escape' || !M.selected) return;" in page
+
+
+def test_the_banner_title_can_be_left_off():
+    """A page whose bar already names the graph does not want it twice."""
+    import json
+
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []}, copy={"bannerTitle": ""})
+    said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
+    assert said["copy"]["bannerTitle"] == ""
+    assert "if (COPY.bannerTitle === '') document.getElementById('title').hidden = true;" in page

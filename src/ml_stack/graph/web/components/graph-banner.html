@@ -23,8 +23,11 @@
 <script>
 (function () {
   const M = window.graphModel;
+  const COPY = M.COPY;
   const { DATA, G, modelName } = M;
   function wire() {
+    // a page whose bar already names the graph says `bannerTitle: ''` and draws no second one
+    if (COPY.bannerTitle === '') document.getElementById('title').hidden = true;
     const msgs = Object.values(G.messages || {});
     if (msgs.length) {
       const ts = msgs.map(m => +m.ts).sort((a, b) => a - b);
