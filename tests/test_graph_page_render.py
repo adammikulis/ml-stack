@@ -154,3 +154,15 @@ def test_a_kind_can_say_what_state_it_opens_in():
     assert starts["concept"] == "hide"
     assert starts["clause"] is None
     assert "STATES.includes(k.start)" in page
+
+
+def test_a_node_can_say_what_state_it_opens_in():
+    """A corpus read into the same kinds a caller authored cannot be told apart by kind."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [
+        {"id": "a", "label": "Authored", "kind": "clause", "attrs": {}},
+        {"id": "b", "label": "Read in", "kind": "clause", "attrs": {"start": "remove"}},
+    ], "edges": []}, kinds=[{"k": "clause", "label": "Clauses", "shape": "square"}])
+    assert "startsAt[n.id] = said" in page
+    assert "const stateOf = d => startsAt[d.id] || display.node[d.kind]" in page

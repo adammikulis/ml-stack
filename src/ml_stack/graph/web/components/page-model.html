@@ -56,6 +56,13 @@
   // a kind may say what state it starts in: a graph whose bulk is detail reads better,
   // and draws faster, opened on its structure with the detail a click away
   KINDS.forEach(k => { display.node[k.k] = STATES.includes(k.start) ? k.start : 'show'; });
+  // a node may say it for itself, where a kind is too coarse: a corpus read into the same
+  // kinds a caller authored cannot be told apart by kind alone
+  const startsAt = {};
+  G.nodes.forEach(n => {
+    const said = n.attrs && n.attrs.start;
+    if (STATES.includes(said)) startsAt[n.id] = said;
+  });
   // Working sessions are the making of this graph, not the community in it. They start out of the
   // picture so the layout settles around what people actually said; the Display panel puts them back.
   display.source.session = 'remove';
@@ -80,8 +87,9 @@
   const linkP2PDropped = l => display.between === 'remove' && bothPeople(l);
   const srcGone = d => d.session && display.source.session !== 'show';
   const srcDropped = d => d.session && display.source.session === 'remove';
-  const gone = d => display.node[d.kind] !== 'show' || srcGone(d);
-  const dropped = d => display.node[d.kind] === 'remove' || srcDropped(d);
+  const stateOf = d => startsAt[d.id] || display.node[d.kind];
+  const gone = d => stateOf(d) !== 'show' || srcGone(d);
+  const dropped = d => stateOf(d) === 'remove' || srcDropped(d);
   const linkGone = l => display.link[l.rel] !== 'show' || srcGone(l) || linkP2PGone(l)
     || gone(l.source) || gone(l.target);
   const linkDropped = l => display.link[l.rel] === 'remove' || srcDropped(l) || linkP2PDropped(l)
