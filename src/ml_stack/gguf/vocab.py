@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from typing import Any
+
+from ml_stack.files import promote
 
 ADD_SPACE_PREFIX = "tokenizer.ggml.add_space_prefix"
 
@@ -42,6 +43,7 @@ def set_metadata(
     """Copy ``src`` to ``dst``, overriding the metadata keys in ``values``."""
     try:
         import numpy as np
+
         from gguf import GGUFReader, GGUFValueType, GGUFWriter
     except ImportError as exc:  # pragma: no cover
         raise VocabPatchError("the `gguf` and `numpy` packages are required") from exc
@@ -108,7 +110,7 @@ def set_metadata(
             + ". Refusing to write a GGUF that is missing metadata the source had."
         )
 
-    shutil.move(str(tmp), str(dst))
+    promote(tmp, dst)
     return dst
 
 
@@ -124,5 +126,5 @@ def fix_space_prefix(
 
     staging = target.with_suffix(target.suffix + ".fixed")
     set_metadata(src, staging, {ADD_SPACE_PREFIX: add_space_prefix})
-    shutil.move(str(staging), str(target))
+    promote(staging, target)
     return target

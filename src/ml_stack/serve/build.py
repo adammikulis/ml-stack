@@ -35,6 +35,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ml_stack import home
+from ml_stack.files import promote
 from ml_stack.http import ServerError, request_json
 from ml_stack.log import say, warn
 from ml_stack.serve.binary import (
@@ -524,7 +525,7 @@ def _release_install(dest: Path, archive: Path, *, extra: Path | None = None) ->
                     shutil.rmtree(target)
                 else:
                     target.unlink()
-            shutil.move(str(item), str(target))
+            promote(item, target)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 

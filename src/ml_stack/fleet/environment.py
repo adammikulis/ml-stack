@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import re
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ml_stack.files import promote
 from ml_stack.http import ServerError, open_stream, request_json
 
 __all__ = ["Environment", "Library", "CATALOG", "catalog_for"]
@@ -190,7 +191,7 @@ class Environment:
             if not unpacked.is_dir():
                 raise EnvironmentError("the download did not contain a python directory")
             shutil.rmtree(base, ignore_errors=True)
-            shutil.move(str(unpacked), str(base))
+            promote(unpacked, base)
 
         got = self.standalone_python()
         if got is None:

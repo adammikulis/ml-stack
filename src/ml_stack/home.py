@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ml_stack.files import promote
+
 __all__ = ["CACHE_ENV", "OVERRIDES", "ROOT_ENV", "cache", "expand", "home", "moved",
            "state", "user_home"]
 
@@ -76,7 +78,7 @@ def moved(*parts: str) -> Path:
         return current
     try:
         current.parent.mkdir(parents=True, exist_ok=True)
-        older.replace(current)
+        promote(older, current)
     except OSError:
         return older
     return current
