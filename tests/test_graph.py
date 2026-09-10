@@ -9,19 +9,16 @@ from ml_stack.graph import (
     Graph,
     NotADAG,
     batch_graphs,
-    build_topology,
     clear_cache,
     decompose_to_dags,
     degree,
-    knn_edges,
-    morton_codes,
-    mst_edges,
     normalize_by_degree,
     propagate,
     require_topological_order,
     resolvent_sweep,
     topological_order,
 )
+from ml_stack.graph.topology import build_topology, knn_edges, morton_codes, mst_edges
 from ml_stack.testing import assert_forward_parity, needs_a_backend, needs_both
 
 BACKENDS = available()

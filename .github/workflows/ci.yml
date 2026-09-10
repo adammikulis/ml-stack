@@ -45,7 +45,7 @@ jobs:
           python -m pip install -e ".[store,hub,web,plot]"
           # CPU torch: 28 tests across backend, graph and recipes need a framework,
           # and without one they fail rather than skip. The CPU index carries no macOS
-          # arm64 wheel; there torch comes from PyPI, which is CPU-only on that platform.
+          # arm64 wheel; there torch comes from the default index, CPU-only anyway.
           if [ "${{ runner.os }}" = Linux ]; then
             python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           else
