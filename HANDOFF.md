@@ -17,6 +17,35 @@ Settled: Flash-Next answers (80% F1 at 27 s/q, 100 questions) and extracts (96% 
 relation F1); draft length 4 for both; one slot for extraction; `single` +8 pts on E4B at
 ten questions, unconfirmed.
 
+## The vocabulary
+
+Words this library coined that a reader has to learn before the code means anything. Adam,
+2026-09-09, on `measured shape`: "it tells you nothing"; "look at the other jargon and see
+if it's AI-ese". `lease` stays -- it says what it does for server talk. Counts are uses
+across `src/`.
+
+- [ ] **`seat`, `seats` -> `slot`, `slots` (394).** llama.cpp calls these slots and its API
+  field is `slot`; the synonym makes a reader learn a second word for the thing they
+  already know, and `--parallel` sets it. `ml_stack/serve/shape.py:seat()`,
+  `Shape.seats`, `AskRoutes.seated()`, `Profile.shape(seats=)` and every caller.
+- [ ] **`Shape` -> what it is (65), and `measured shape` deleted (49).** `Shape` is the
+  settings a server is started with. `Profile` already holds "the settings that scored
+  best", so the concept carries two names and neither says settings. Pick one plain name,
+  and say "the settings that scored best" wherever the prose says "measured shape" --
+  including `ml-stack-serve profile`'s output and `serve/profile.py`'s module docstring.
+- [ ] **`ways`, `the way` as a noun for configuration (276).** "every way of asking, in one
+  record" names nothing. Mostly `graph/ask.py`, `graph/asking.py`, `serve/shape.py`.
+- [ ] **`Run` (208).** Not an execution -- a model plus how to serve, ask and talk to it.
+  The name points at the wrong thing.
+- [ ] **`held` as a variable name (989).** Says only that something was assigned. Rename to
+  what it holds, file by file; a sweep that renames all 989 to one other word is the same
+  problem again.
+
+Do it as its own branch with the full suite green, not alongside anything else: it touches
+about 1,500 sites and every one is mechanical, so a conflict with real work is expensive
+and hard to read. `tests/test_cli_reference.py` and the docs under `docs/` mention several
+of these by name.
+
 ## The store (each needs the GPU; Adam's call)
 
 - [ ] **The store holds APBiology and Biology2e chapter 2, sound; nine textbook PDFs are
