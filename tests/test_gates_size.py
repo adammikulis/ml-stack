@@ -1,9 +1,10 @@
-"""The two size gates: which files are over the limit, and where the limit is refused."""
+"""The two size gates: a file over the limit fails, and there is no allowance to record."""
 
 from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "scripts"))
 
+import gates  # noqa: E402
 from gates import deep_components, deep_files  # noqa: E402
 
 
@@ -57,6 +59,14 @@ def test_a_file_that_grows_past_the_limit_becomes_a_finding(checker, suffix, tmp
     grown = tmp_path / "grown"
     plant(grown, f"growing{suffix}", checker.LIMIT + 1)
     assert len(checker.find(grown)) == 1
+
+
+@pytest.mark.parametrize("checker", [deep_files, deep_components], ids=lambda c: c.NAME)
+def test_the_size_gates_allow_nothing(checker) -> None:
+    """A budget is an allowance; these two grant none, so they carry no number."""
+    assert checker.NAME in gates.hard()
+    recorded = json.loads((REPO / "budgets.json").read_text(encoding="utf-8"))
+    assert checker.NAME not in recorded
 
 
 @pytest.mark.parametrize("checker", [deep_files, deep_components], ids=lambda c: c.NAME)

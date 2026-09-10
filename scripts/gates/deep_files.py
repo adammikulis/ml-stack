@@ -11,10 +11,12 @@ NAME = "deep-files"
 OWNER = ""
 ROOTS = ("src/ml_stack",)
 LIMIT = 900
+HARD = True
 
 
 def describe() -> str:
-    return f"A file over {LIMIT} lines; it holds more than one job."
+    return (f"A file over {LIMIT} lines; it holds more than one job. "
+            "Split it into a module per job. There is no allowance: the limit is the limit.")
 
 
 def find(root: Path) -> list[Finding]:

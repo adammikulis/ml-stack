@@ -3,8 +3,6 @@
   "argument-parsers": 28,
   "atomic-writes": 0,
   "broad-excepts": 214,
-  "deep-components": 0,
-  "deep-files": 0,
   "duplicate-bodies": 0,
   "entry-points": 30,
   "file-locks": 0,

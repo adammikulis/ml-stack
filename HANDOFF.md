@@ -228,47 +228,6 @@ across `src/`.
   communities, 85% of each node's edges inside its own, settled into one blob under every
   setting tried, and a citation or hierarchy graph may not.
 
-### Files that hold more than one job
-
-`deep-files` refuses a Python file over 900 lines and `deep-components` an HTML, JavaScript
-or CSS file over 500. No component is over any more; eight Python files are.
-`claude-edit-guard` refuses a write that lengthens one of them, so each can only get
-shorter from here, but nothing shortens them except somebody splitting them.
-`scripts/budgets --show deep-files` lists them.
-
-Each is a file to read before it is a file to split: the answer is a module per job with a
-name, not a line count met by moving code sideways.
-
-- [ ] **`serve/fit.py` (1,390)** -- parsing the llama.cpp load log (`Segment`, `Measured`,
-  `parse_load_log`), the `Fit` record and its file, the rendering (`render`, `_block`,
-  `_block_md`), the GGUF tensor table (`Tensor`, `tensors_of`, `render_tensors`) and the
-  matplotlib plot.
-- [ ] **`bench/measure.py` (1,279)** -- the questions (`read_questions`, `sample`), one
-  question through the client with its bill (`Counting`, `_ask_once`) and its trace, a set
-  of them (`measure`, `concurrent`), and what the server costs (`footprint`, `busy`,
-  `slot_count`).
-- [ ] **`hub.py` (1,215)** -- `Found` and the search, `Head` and the draft head, `Chosen`
-  and the pick, plus a `ctypes` memory probe that belongs nowhere near any of them.
-- [ ] **`bench/extract.py` (1,095)** -- `MessageRow` and the truth behind a message, the
-  resolution of a name to a node, and `_Extracting`, which runs the model.
-- [ ] **`bench/report.py` (1,081)** -- the gathering of kept runs, and `Doc` with the
-  sections it renders.
-- [ ] **`serve/cli.py` (1,062)** -- twenty subcommands, each parsing its own arguments; the
-  work is already in `serve/ops.py`, so this is parsers and printing. The one a newcomer
-  meets first, and the file in the commands entry below.
-- [ ] **`serve/build.py` (1,000)** -- finding a toolchain, the cmake invocation, the cache of
-  what was built, and choosing the binary to run.
-- [ ] **`train/tools.py` (953)** -- reading the worked examples out of tool schemas,
-  inventing arguments and paraphrases, the synthesiser, turning kept bench traces into
-  rows, and the command. Its own section banners name the seams.
-- [ ] **`bench/extract.py` and `bench/measure.py` are both read by the extraction
-  bench**, so splitting them is one reader's job rather than two.
-
-`fleet/models.py` (930) went that way, into `fleet/models.py` (the machine's model files),
-`fleet/catalogue.py` (what the hub offers and what fits here) and `fleet/weights.py` (which
-file in a repository is the model); the five helpers that crossed a module boundary lost
-their leading underscore and every importer moved rather than being re-exported.
-
 ### The commands
 
 - [ ] **Nineteen commands still build their own parser and keep their work in the handler.**

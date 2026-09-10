@@ -122,10 +122,12 @@ the other does not import it back. `KNOWN` lists what still crosses; it only shr
 script, or be named in `STANDALONE` with a reason. Code nothing calls is a gap to close,
 never a reason to delete.
 
-The size gates cover both halves of the tree: `deep-files` for Python at 900 lines,
-`deep-components` for the HTML, JavaScript and CSS a page is assembled from at 500. A file
-already over its limit may only get shorter -- `claude-edit-guard` refuses the write that
-lengthens it, at the moment it is written.
+The size gates carry no number. `deep-files` (900 lines of Python) and `deep-components`
+(500 lines of the HTML, JavaScript and CSS a page is assembled from) set `HARD = True`,
+take no line in `budgets.json`, and fail on a single finding. A file over the limit is a
+file to split, never an allowance to record. `claude-edit-guard` refuses the write that
+takes a file over its limit or lengthens one that is already over, at the moment it is
+written.
 
 `scripts/gates/duplicates.py` hashes normalised function bodies and reports the pairs.
 `tests/test_gates_duplicates.py` names pairs that must still be found, so a normalisation
