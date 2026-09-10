@@ -12,6 +12,7 @@ from typing import Any
 
 from ml_stack.ingest.extract import WITH_IMAGES, instructions, schema
 from ml_stack.ingest.progress import Progress
+from ml_stack.sources.html import Marks
 
 __all__ = ["located", "origin", "quote", "run_record", "sources_for", "write_run"]
 
@@ -134,9 +135,10 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
     """``unit id -> the text it was read from``, for the judge's second look.
 
     ``texts`` are units already in memory (the run has them); anything else is found by
-    reading the document again from the path the progress file recorded -- once per
-    source, and kept for the rest of the pass. Adam: "allow it to go back over the source
-    material if needed".
+    reading the document again from the path the progress file recorded, with the marks it
+    recorded beside it -- once per source, and kept for the rest of the pass. Read with any
+    other marks, a source splits into units under other ids and every lookup here answers
+    with silence. Adam: "allow it to go back over the source material if needed".
     """
     from ml_stack.home import expand
     from ml_stack.ingest.run import _read_local
@@ -156,7 +158,9 @@ def sources_for(out: str | Path, *, texts: Mapping[str, str] | None = None
         where = str((held.get(slug) or {}).get("path") or "")
         if not where or not expand(where).is_file():
             return ""
-        document = _read_local(where, images=False, chapter=None)
+        held_marks = (held.get(slug) or {}).get("marks") or {}
+        document = _read_local(where, images=False, chapter=None,
+                               marks=Marks(**held_marks) if held_marks else None)
         for unit in source_units.units(document, keep_questions=True):
             known.setdefault(unit.id, unit.text)
         return known.get(unit_id, "")

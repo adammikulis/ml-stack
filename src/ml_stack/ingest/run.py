@@ -100,10 +100,12 @@ def reader_for(where: str, *, images: bool = False, chapter: str | int | None = 
     return lambda: _read_local(text, images=images, chapter=chapter, marks=how)
 
 
-def _read_local(where: str, *, images: bool, chapter: str | int | None, marks: Any) -> Any:
+def _read_local(where: str, *, images: bool, chapter: str | int | None,
+               marks: Any = None) -> Any:
     """A PDF, HTML or XML file, read by its suffix."""
     from ml_stack.sources import html, pdf
 
+    marks = marks if marks is not None else Marks()
     suffix = Path(where).suffix.casefold()
     if suffix in (".html", ".htm"):
         return html.read(where, sections=marks.rule())
@@ -113,13 +115,14 @@ def _read_local(where: str, *, images: bool, chapter: str | int | None, marks: A
 
 
 def _read_url(url: str, *, images: bool, chapter: str | int | None,
-             cache_dir: str | Path | None, marks: Any) -> Any:
+             cache_dir: str | Path | None, marks: Any = None) -> Any:
     """A document fetched from the web, then dispatched by what came down."""
     from ml_stack.home import state
     from ml_stack.http import check
     from ml_stack.media.download import fetch
     from ml_stack.sources import html, pdf
 
+    marks = marks if marks is not None else Marks()
     safe = check(url)
     root = expand(cache_dir) if cache_dir else state("ingest", "downloads")
     local = fetch(safe, root / _cache_name(safe))
@@ -216,9 +219,9 @@ def _read_run(args: Any) -> int:
                 text = str(path)
                 began = time.time()
                 try:
+                    marks = Marks.from_args(args)
                     document = _opened(text, images=args.images,
-                                      chapter=args.chapter or None,
-                                      marks=Marks.from_args(args))
+                                      chapter=args.chapter or None, marks=marks)
                 except (FileNotFoundError, Refused, DownloadError, ValueError) as why:
                     warn(f"error: {why}")
                     code = 2
@@ -229,7 +232,7 @@ def _read_run(args: Any) -> int:
                     wanted = wanted[:args.sample]
                 slug = document.slug
                 progress.source(slug, title=document.title, path=document.path,
-                                sections=len(wanted))
+                                sections=len(wanted), marks=asdict(marks))
                 banks = source_units.question_banks(document, **({"max_tokens": args.max_tokens}
                                                                  if args.max_tokens else {}))
                 say(f"{document.title}: {len(document.chapters)} chapter(s), "

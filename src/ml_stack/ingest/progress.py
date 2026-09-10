@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -33,11 +34,12 @@ class Progress:
         """Where a store's progress file goes."""
         return Path(str(Path(out).expanduser()) + ".ingest.json")
 
-    def source(self, slug: str, *, title: str = "", path: str = "", sections: int = 0
-               ) -> dict[str, Any]:
+    def source(self, slug: str, *, title: str = "", path: str = "", sections: int = 0,
+               marks: Mapping[str, Any] | None = None) -> dict[str, Any]:
         held = self.state["sources"].setdefault(slug, {"title": title, "path": path,
                                                        "sections": sections, "done": {}})
-        for key, value in (("title", title), ("path", path), ("sections", sections)):
+        for key, value in (("title", title), ("path", path), ("sections", sections),
+                           ("marks", dict(marks) if marks else None)):
             if value:
                 held[key] = value
         return held

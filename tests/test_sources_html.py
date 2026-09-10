@@ -247,3 +247,45 @@ def test_a_number_child_wins_over_the_id_attribute():
 
     without = html.read_xml(STATUTE, marks=html.Marks(section_tag="Section"))
     assert [s.number for s in without.sections] == ["99001", "99002"]
+
+
+def test_a_source_is_re_read_with_the_marks_it_was_read_with(tmp_path):
+    """`sources_for` re-reads a document; other marks would mint other unit ids."""
+    from dataclasses import asdict
+
+    from ml_stack.ingest.judge import sources_for
+    from ml_stack.ingest.progress import Progress
+    from ml_stack.sources import units as source_units
+
+    statute = tmp_path / "act.xml"
+    statute.write_text(STATUTE)
+    marks = html.Marks(section_tag="Section", number_tag="Label", title_tag="MarginalNote")
+    document = ingest.reader_for(str(statute), marks=marks)()
+    wanted = source_units.units(document)
+
+    out = tmp_path / "store.ladybug"
+    record = Progress(Progress.beside(out))
+    record.source(document.slug, title=document.title, path=str(statute),
+                  sections=len(wanted), marks=asdict(marks))
+    record.save()
+
+    text_of = sources_for(out)
+    assert text_of(wanted[0].id) == wanted[0].text
+
+
+def test_a_source_recorded_without_marks_is_still_re_read(tmp_path):
+    from ml_stack.ingest.judge import sources_for
+    from ml_stack.ingest.progress import Progress
+    from ml_stack.sources import units as source_units
+
+    page = tmp_path / "plain.xml"
+    page.write_text(XML)
+    document = ingest.reader_for(str(page))()
+    wanted = source_units.units(document)
+
+    out = tmp_path / "store.ladybug"
+    record = Progress(Progress.beside(out))
+    record.source(document.slug, title=document.title, path=str(page), sections=len(wanted))
+    record.save()
+
+    assert sources_for(out)(wanted[0].id) == wanted[0].text
