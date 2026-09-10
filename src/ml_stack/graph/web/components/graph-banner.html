@@ -33,10 +33,12 @@
     }
     (() => {
       const meta = G.meta || {};
-      document.getElementById('built').textContent =
-        (DATA.author ? DATA.author + ' · ' : '')
-        + 'built ' + (meta.built_at ? meta.built_at.replace('T', ' ').slice(0, 16) : '—')
-        + (meta.model ? ' · ' + modelName(meta.model) : '');
+      // nothing to say is said by saying nothing: the line read "built —" on a graph that
+      // records neither who built it nor when
+      const said = [DATA.author, meta.built_at
+        ? 'built ' + meta.built_at.replace('T', ' ').slice(0, 16) : '',
+        meta.model ? modelName(meta.model) : ''].filter(Boolean);
+      document.getElementById('built').textContent = said.join(' · ');
     })();
   }
   class GraphBanner extends HTMLElement {

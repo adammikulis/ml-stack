@@ -115,3 +115,12 @@ class TestTheCountsUnderTheGraph:
         assert said["copy"]["countMessages"] == ""
         assert said["copy"]["countMembers"] == ""
         assert "filter(([, word]) => word)" in page
+
+
+def test_a_graph_that_records_nothing_about_its_making_says_nothing():
+    """The line under the graph read `built —` on a graph with no metadata."""
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []})
+    assert "'built —'" not in page
+    assert "filter(Boolean)" in page
