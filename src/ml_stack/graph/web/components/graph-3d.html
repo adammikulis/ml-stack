@@ -1,7 +1,7 @@
 <!-- <graph-3d>: the same graph in three dimensions, with the 2D/3D switch -->
 <style>
 #spin { display: none; }
-.graph-wrap.is3d #spin { display: inline-flex; }
+:root.is3d #spin { display: inline-flex; }
 #graph3d { position: absolute; inset: 0; display: none; }
 .graph-wrap.is3d #graph3d { display: block; }
 #labels3d { position: absolute; inset: 0; overflow: hidden; pointer-events: none; display: none; }
@@ -319,6 +319,7 @@
       M.stopHistory();
       M.is3d = three;
       wrap.classList.toggle('is3d', M.is3d);
+      document.documentElement.classList.toggle('is3d', M.is3d);
       document.getElementById('v2d').setAttribute('aria-pressed', !M.is3d);
       document.getElementById('v3d').setAttribute('aria-pressed', M.is3d);
       document.getElementById('hint-text').textContent =

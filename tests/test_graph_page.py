@@ -249,6 +249,7 @@ def test_arrange_and_recenter_still_respond(open_page):
     page.mouse.wheel(0, -240)
     page.wait_for_function(f"v => {root} !== v", arg=before)
     zoomed = page.evaluate(root)
+    page.click("#display-btn")
     page.click("#recenter")
     page.wait_for_function(f"v => {root} !== v", arg=zoomed)
     placed = "document.querySelector('#graph g.node').getAttribute('transform')"
@@ -725,6 +726,7 @@ def test_find_paths_joins_what_was_gathered_in_3d(open_page):
             if picked.count() == want:
                 break
     assert picked.count() == 2, "a second shift-click gathered nothing"
+    page.click("#display-btn")
     page.click("#findpath")
     page.wait_for_timeout(300)
     assert "joined" in page.text_content("#qcount") or page.text_content("#qcount").isdigit()
@@ -791,6 +793,8 @@ def test_join_like_with_like_narrows_what_a_route_passes_through(open_page):
 
     gather(page, "person:ada", "person:grace")
     assert page.locator("#picked button").count() == 2
+    # gathering closes the panel again -- a click outside it, same as any other
+    page.click("#display-btn")
     page.click("#findpath")
     page.wait_for_timeout(400)
     # through anything: the subject they share is what joins them, and it lights
@@ -807,6 +811,7 @@ def test_join_like_with_like_narrows_what_a_route_passes_through(open_page):
     page.click("#qclear")
     gather(page, "person:grace")           # drop Grace, keep Ada
     gather(page, "person:alan")
+    page.click("#display-btn")
     page.click("#findpath")
     page.wait_for_timeout(400)
     assert lit_kinds(page) == ["person", "person"]

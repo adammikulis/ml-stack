@@ -17,6 +17,7 @@
 .panel h4 { font: 600 11px var(--font-body); letter-spacing: .06em; text-transform: uppercase;
             color: var(--ink-3); margin: 14px 0 6px; }
 .panel h4:first-child { margin-top: 0; }
+.tools-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
 .panel .row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 2px 0; }
 .panel .name { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
 .panel .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -39,7 +40,19 @@
 <template>
         <div class="menu">
           <button id="display-btn" class="chip" aria-expanded="false" aria-controls="panel">Legend &amp; filters</button>
-          <div class="panel" id="panel" role="group" aria-label="Legend and filters"></div>
+          <div class="panel" id="panel" role="group" aria-label="Legend, filters and tools">
+            <h4>Tools</h4>
+            <div class="tools-row">
+              <!--mount:tools-->
+              <button id="arrange" class="chip" title="Lay out what is shown from scratch">⇲ arrange</button>
+              <button id="recenter" class="chip" title="Frame everything that is shown">⊹ recenter graph</button>
+              <button id="findpath" class="chip" title="Join up everything currently highlighted">⤳ find paths</button>
+              <button id="likewise" class="chip" aria-pressed="false"
+                      title="Route only through entries of the kinds being joined — people through people, rather than through whatever topic they happen to share">⇢ join like with like</button>
+              <button id="snap" class="chip" aria-pressed="true"
+                      title="Move the view to a node when you click it">⊙ snap to node</button>
+            </div>
+          </div>
         </div>
 </template>
 <script>
