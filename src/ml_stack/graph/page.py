@@ -149,15 +149,12 @@ def render(graph: Mapping[str, Any], *, title: str = "Graph", brand: str = "",
            parts: Sequence[str | Component] = COMPONENTS) -> str:
     """The whole page, as one string.
 
-    ``brand`` names whatever made the page, on the bar above it; ``title`` names the graph,
-    over the graph itself. ``points`` are ``{id, label, place, lat, lon}`` for anything to
-    show on the map, and default to every node whose attributes carry ``lat`` and ``lon``
-    (`graph.geocode` writes them); ``points=()`` leaves the map empty. ``extra`` is merged into the payload
-    the page reads, for whatever a caller's own panels need. A kind entry may carry
-    ``colour`` (a hex string); one without gets a colour of its own, so no kind paints black.
-    ``most_messages`` keeps only that many of the newest messages, and the payload's
-    ``messagesLeftOut`` says how many did not fit. ``parts`` is the page's components,
-    `COMPONENTS` unless a caller leaves some out or adds its own.
+    ``brand`` names whatever made the page; ``title`` names the graph. ``points`` are
+    ``{id, label, place, lat, lon}`` to show on the map, and default to every node carrying
+    ``lat`` and ``lon``; ``points=()`` leaves it empty. ``extra`` is merged into the
+    payload. A kind entry may carry ``colour``, and ``start`` -- show, hide or remove --
+    for the state it opens in. ``most_messages`` keeps that many of the newest, and
+    ``messagesLeftOut`` says how many did not fit. ``parts`` is the page's components.
     """
     from ml_stack.graph.places import points as placed
 

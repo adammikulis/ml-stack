@@ -53,7 +53,9 @@
   // everything else re-settles without it.
   const STATES = ['show', 'hide', 'remove'];
   const display = { node: {}, link: {}, source: {}, edgeLabels: 'show' };
-  KINDS.forEach(k => { display.node[k.k] = 'show'; });
+  // a kind may say what state it starts in: a graph whose bulk is detail reads better,
+  // and draws faster, opened on its structure with the detail a click away
+  KINDS.forEach(k => { display.node[k.k] = STATES.includes(k.start) ? k.start : 'show'; });
   // Working sessions are the making of this graph, not the community in it. They start out of the
   // picture so the layout settles around what people actually said; the Display panel puts them back.
   display.source.session = 'remove';

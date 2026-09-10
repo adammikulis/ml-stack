@@ -137,3 +137,20 @@ def test_a_verb_can_be_given_the_caller_s_words():
     said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
     assert said["relWords"]["incorporates_by_reference"] == "makes binding"
     assert "(DATA.relWords || {})[r]" in page
+
+
+def test_a_kind_can_say_what_state_it_opens_in():
+    """A graph whose bulk is detail opens on its structure and draws faster for it."""
+    import json
+
+    from ml_stack.graph.page import render
+
+    page = render({"nodes": [], "edges": []},
+                  kinds=[{"k": "clause", "label": "Clauses", "shape": "square"},
+                         {"k": "concept", "label": "Concepts", "shape": "circle",
+                          "start": "hide"}])
+    said = json.loads(page.split('id="data"', 1)[1].split(">", 1)[1].split("</script>", 1)[0])
+    starts = {one["k"]: one.get("start") for one in said["kinds"]}
+    assert starts["concept"] == "hide"
+    assert starts["clause"] is None
+    assert "STATES.includes(k.start)" in page
