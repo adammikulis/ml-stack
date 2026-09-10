@@ -540,7 +540,7 @@ def test_a_streamed_answer_fills_the_thinking_then_the_bubble(open_page):
     assert page.locator("#qturns .t .said").inner_text() == "Ada Lovelace works on iron."
     # the trace folds away once the answer has landed
     assert page.get_attribute("#qturns .t .think", "open") is None
-    assert "2 lit up" in page.text_content("#qnote")
+    assert "2 lit up" in page.text_content("#qturns .t .how summary")  # folded into the answer
     assert errors == []
 
 
